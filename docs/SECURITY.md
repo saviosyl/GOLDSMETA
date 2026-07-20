@@ -6,13 +6,14 @@ GoldMeta handles trading analysis data, webhook URLs, device tokens, and user jo
 
 ## Security principles
 
-1. No broker credentials in GoldMeta MVP.
-2. No automatic trade execution.
+1. Broker credentials are accepted only by the backend and stored as encrypted secrets. They must never appear in the iOS app, logs, source code, or GitHub.
+2. Automatic execution is gated by trading mode (Manual / Confirm / Demo Auto / Live Auto). Trading 212 is manual-only for XAUUSD CFD until an official CFD API exists.
 3. No TradingView passwords or session scraping.
-4. Secrets stay on the backend.
+4. Secrets stay on the backend (Secret Manager / encrypted fields).
 5. Webhooks are validated, deduplicated, and rate-limited.
 6. Users can access only their own data.
-7. Logs must not contain secrets or private payload tokens.
+7. Logs must not contain secrets, private payload tokens, or broker API keys.
+8. No guaranteed profits. Martingale, grid recovery, and averaging down are forbidden.
 
 ## Webhook protection
 
@@ -38,6 +39,7 @@ Store secrets in Firebase/Google Secret Manager or equivalent secure configurati
 - OpenAI API keys
 - Webhook signing secrets
 - Backend service credentials
+- Encrypted broker API credentials (`BROKER_SECRETS_ENCRYPTION_KEY`)
 - Apple private keys
 - Operational tokens
 

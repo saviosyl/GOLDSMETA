@@ -49,6 +49,9 @@ final class OnboardingViewModel: ObservableObject {
     func completeOnboarding() {
         settings.hasCompletedOnboarding = true
         settings.paperTradingMode = true
+        settings.tradingMode = .manual
+        settings.autoTradingEnabled = false
+        settings.selectedBrokerId = "trading212_manual"
         settings.lastDisclaimerAcceptedAt = Date()
         environment.saveSettings(settings)
         hasCompletedOnboarding = true

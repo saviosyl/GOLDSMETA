@@ -25,15 +25,46 @@ struct DashboardView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("GoldMeta")
                 .font(GoldMetaFont.display(28, weight: .bold))
                 .foregroundStyle(GoldMetaColor.gold)
             Text("XAUUSD decision support")
                 .font(GoldMetaFont.rounded(.subheadline, weight: .medium))
                 .foregroundStyle(GoldMetaColor.textSecondary)
+            tradingModeBar
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var tradingModeBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(viewModel.tradingModeTitle)
+                    .font(GoldMetaFont.rounded(.caption, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(GoldMetaColor.gold.opacity(0.2)))
+                if viewModel.emergencyStopActive {
+                    Text("STOPPED")
+                        .font(GoldMetaFont.rounded(.caption, weight: .bold))
+                        .foregroundStyle(GoldMetaColor.sell)
+                }
+                Spacer()
+            }
+            Button(role: .destructive) {
+                Task { await viewModel.emergencyStopTrading() }
+            } label: {
+                Label("STOP AUTO TRADING", systemImage: "hand.raised.fill")
+                    .font(GoldMetaFont.rounded(.subheadline, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(GoldMetaColor.sell.opacity(0.9)))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Emergency stop auto trading")
+        }
     }
 
     private var scenarioPicker: some View {

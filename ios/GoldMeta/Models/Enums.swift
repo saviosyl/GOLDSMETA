@@ -82,6 +82,68 @@ enum HigherTimeframeBias: String, Codable, CaseIterable {
     case neutral = "NEUTRAL"
 }
 
+enum TradingMode: String, Codable, CaseIterable, Identifiable {
+    case manual = "MANUAL"
+    case confirm = "CONFIRM"
+    case demoAuto = "DEMO_AUTO"
+    case liveAuto = "LIVE_AUTO"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manual: return "Manual"
+        case .confirm: return "Confirm"
+        case .demoAuto: return "Demo Auto"
+        case .liveAuto: return "Live Auto"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .manual:
+            return "Analysis and trade instructions only. No order submission."
+        case .confirm:
+            return "Builds a full proposed order. Requires Face ID or explicit confirmation before any submission."
+        case .demoAuto:
+            return "Runs the full strategy on simulated funds and records every decision, order, result, drawdown, and metric."
+        case .liveAuto:
+            return "Locked until demo testing is complete. Executes only actions the selected broker API officially supports."
+        }
+    }
+
+    var allowsOrderSubmission: Bool {
+        switch self {
+        case .manual: return false
+        case .confirm, .demoAuto, .liveAuto: return true
+        }
+    }
+}
+
+struct TradingRiskControls: Codable, Equatable {
+    var maxRiskPerTradePercent: Double
+    var maxDailyLossPercent: Double
+    var maxTradesPerDay: Int
+    var minConfidence: Double
+    var maxSpread: Double
+    var slippageTolerance: Double
+    var blockStaleData: Bool
+    var blockDuplicateSignals: Bool
+    var blockHighImpactNews: Bool
+
+    static let `default` = TradingRiskControls(
+        maxRiskPerTradePercent: 0.5,
+        maxDailyLossPercent: 2,
+        maxTradesPerDay: 5,
+        minConfidence: 70,
+        maxSpread: 0.8,
+        slippageTolerance: 0.35,
+        blockStaleData: true,
+        blockDuplicateSignals: true,
+        blockHighImpactNews: true
+    )
+}
+
 enum TradeAction: String, Codable, CaseIterable, Identifiable {
     case taken
     case skipped

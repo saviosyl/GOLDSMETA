@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import LocalAuthentication
 
 @MainActor
 final class SettingsViewModel: ObservableObject {
@@ -12,6 +13,9 @@ final class SettingsViewModel: ObservableObject {
     @Published private(set) var tradingViewConnections: [TradingViewConnection] = []
     @Published private(set) var connectionStatusText: String = "No backend connection loaded yet."
     @Published private(set) var testAlertStatusText: String?
+    @Published private(set) var tradingStatusText: String = "Manual mode — analysis only."
+    @Published private(set) var brokerPolicyText: String =
+        "Trading 212 Public API does not support XAUUSD CFD automation. Use it for manual execution only."
 
     private let environment: AppEnvironment
     private var pushStatusCancellable: AnyCancellable?
@@ -33,6 +37,7 @@ final class SettingsViewModel: ObservableObject {
                 self?.authStatusText = Self.authStatusText(for: user, mode: environment.config.authModeDescription)
             }
         }
+        refreshTradingStatusText()
     }
 
     var notificationExplanationText: String {
@@ -40,13 +45,119 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func setRiskPercent(_ value: Double) {
-        settings.riskPercent = min(value, 1.0)
+        settings.riskPercent = min(value, settings.riskControls.maxRiskPerTradePercent)
+        settings.riskControls.maxRiskPerTradePercent = min(settings.riskControls.maxRiskPerTradePercent, 1)
         save()
     }
 
     func togglePaperMode(_ enabled: Bool) {
         settings.paperTradingMode = enabled
+        settings.tradingMode = enabled ? .demoAuto : .manual
+        settings.autoTradingEnabled = enabled
         save()
+        refreshTradingStatusText()
+        Task { await syncTradingControls() }
+    }
+
+    func setTradingMode(_ mode: TradingMode) async {
+        if mode == .liveAuto && !settings.liveAutoUnlocked {
+            tradingStatusText = settings.liveAutoLockReason ?? "Live Auto is locked."
+            return
+        }
+        if mode == .liveAuto && settings.selectedBrokerId == "trading212_manual" {
+            tradingStatusText = "Live Auto cannot use Trading 212 for XAUUSD CFD. Keep Manual/Confirm for Trading 212, or add a compatible CFD broker later."
+            return
+        }
+        settings.tradingMode = mode
+        settings.paperTradingMode = mode == .demoAuto || mode == .manual
+        settings.autoTradingEnabled = mode == .demoAuto
+        if mode == .demoAuto, settings.demoStartedAt == nil {
+            settings.demoStartedAt = Date()
+            settings.selectedBrokerId = "demo_simulated"
+        }
+        if mode == .manual || mode == .confirm {
+            settings.selectedBrokerId = "trading212_manual"
+            settings.liveAutoEnabledByUser = false
+            settings.autoTradingEnabled = false
+        }
+        save()
+        refreshTradingStatusText()
+        await syncTradingControls()
+    }
+
+    func setAutoTradingEnabled(_ enabled: Bool) async {
+        if settings.tradingMode == .liveAuto {
+            guard settings.liveAutoUnlocked else {
+                tradingStatusText = "Live Auto is still locked."
+                return
+            }
+            guard settings.tradingDisclaimerAcknowledged else {
+                tradingStatusText = "Acknowledge the no-guaranteed-profits disclaimer first."
+                return
+            }
+            settings.liveAutoEnabledByUser = enabled
+        }
+        settings.autoTradingEnabled = enabled
+        save()
+        refreshTradingStatusText()
+        await syncTradingControls()
+    }
+
+    func acknowledgeTradingDisclaimer(_ acknowledged: Bool) {
+        settings.tradingDisclaimerAcknowledged = acknowledged
+        if acknowledged {
+            settings.lastDisclaimerAcceptedAt = Date()
+        }
+        save()
+    }
+
+    func updateRiskControls(_ mutate: (inout TradingRiskControls) -> Void) {
+        mutate(&settings.riskControls)
+        settings.riskControls.maxRiskPerTradePercent = min(settings.riskControls.maxRiskPerTradePercent, 1)
+        settings.riskPercent = min(settings.riskPercent, settings.riskControls.maxRiskPerTradePercent)
+        save()
+        Task { await syncTradingControls() }
+    }
+
+    func emergencyStop() async {
+        settings.emergencyStopActive = true
+        settings.autoTradingEnabled = false
+        settings.liveAutoEnabledByUser = false
+        save()
+        refreshTradingStatusText()
+        do {
+            let response = try await environment.apiClient.emergencyStopTrading()
+            tradingStatusText = response.message ?? "Emergency stop active. New automated orders are blocked."
+            if let controls = response.controls {
+                applyRemoteControls(controls)
+            }
+        } catch {
+            tradingStatusText = "Local emergency stop on. Backend sync failed: \(error.localizedDescription)"
+        }
+    }
+
+    func clearEmergencyStop() async {
+        settings.emergencyStopActive = false
+        save()
+        refreshTradingStatusText()
+        await syncTradingControls(emergencyStopActive: false)
+    }
+
+    /// Face ID / device auth for Confirm-mode submission. Never stores broker secrets.
+    func confirmWithBiometrics(reason: String = "Confirm GoldMeta proposed order") async -> String? {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            tradingStatusText = "Device authentication unavailable. Use explicit confirmation."
+            return UUID().uuidString
+        }
+        do {
+            let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            return success ? "confirmed-\(UUID().uuidString)" : nil
+        } catch {
+            tradingStatusText = "Confirmation cancelled."
+            return nil
+        }
     }
 
     func resetOnboarding() {
@@ -57,6 +168,7 @@ final class SettingsViewModel: ObservableObject {
     func refreshRemoteConfiguration() async {
         await loadTradingViewConnections()
         await syncBackendSettings()
+        await refreshTradingControlsFromBackend()
     }
 
     func requestPushRegistration() async {
@@ -170,6 +282,7 @@ final class SettingsViewModel: ObservableObject {
 
     private func save() {
         environment.saveSettings(settings)
+        refreshTradingStatusText()
     }
 
     private func loadTradingViewConnections() async {
@@ -196,6 +309,64 @@ final class SettingsViewModel: ObservableObject {
         } catch {
             lastDeveloperAction = "Backend settings sync failed: \(error.localizedDescription)"
         }
+    }
+
+    private func refreshTradingControlsFromBackend() async {
+        do {
+            let envelope = try await environment.apiClient.getTradingControls()
+            applyRemoteControls(envelope.controls)
+            if envelope.policy?.trading212XauusdCfdApiSupported == false {
+                brokerPolicyText = "Trading 212 Public API does not support XAUUSD CFD automation. Manual execution only."
+            }
+        } catch {
+            tradingStatusText = "Using local trading controls. Backend sync pending: \(error.localizedDescription)"
+        }
+    }
+
+    private func syncTradingControls(emergencyStopActive: Bool? = nil) async {
+        do {
+            let controls = try await environment.apiClient.updateTradingControls(
+                TradingControlsPatch(
+                    mode: settings.tradingMode,
+                    autoTradingEnabled: settings.autoTradingEnabled,
+                    liveAutoEnabledByUser: settings.liveAutoEnabledByUser,
+                    selectedBrokerId: settings.selectedBrokerId,
+                    riskControls: settings.riskControls,
+                    disclaimerAcknowledged: settings.tradingDisclaimerAcknowledged,
+                    emergencyStopActive: emergencyStopActive ?? settings.emergencyStopActive
+                )
+            )
+            applyRemoteControls(controls)
+        } catch {
+            tradingStatusText = "Saved locally. Backend sync failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyRemoteControls(_ controls: TradingControlsDTO) {
+        settings.tradingMode = controls.mode
+        settings.autoTradingEnabled = controls.autoTradingEnabled
+        settings.emergencyStopActive = controls.emergencyStopActive
+        settings.liveAutoUnlocked = controls.liveAutoUnlocked
+        settings.liveAutoEnabledByUser = controls.liveAutoEnabledByUser
+        settings.selectedBrokerId = controls.selectedBrokerId
+        settings.riskControls = controls.riskControls
+        settings.tradingDisclaimerAcknowledged = controls.disclaimerAcknowledged ?? settings.tradingDisclaimerAcknowledged
+        if let demo = controls.demoTesting {
+            settings.demoClosedTrades = demo.closedTrades ?? settings.demoClosedTrades
+            settings.demoRequiredClosedTrades = demo.requiredClosedTrades ?? settings.demoRequiredClosedTrades
+            settings.demoRequiredDays = demo.requiredDays ?? settings.demoRequiredDays
+            settings.demoStartedAt = demo.startedAt ?? settings.demoStartedAt
+        }
+        environment.saveSettings(settings)
+        refreshTradingStatusText()
+    }
+
+    private func refreshTradingStatusText() {
+        if settings.emergencyStopActive {
+            tradingStatusText = "EMERGENCY STOP ACTIVE — new automated orders blocked."
+            return
+        }
+        tradingStatusText = "\(settings.tradingMode.title): \(settings.tradingMode.summary)"
     }
 
     private static func authStatusText(for user: AuthUser?, mode: String) -> String {

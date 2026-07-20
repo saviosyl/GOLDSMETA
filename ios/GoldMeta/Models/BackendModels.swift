@@ -115,6 +115,90 @@ struct BackendSettingsUpdate: Encodable, Equatable {
     let riskProfile: String?
 }
 
+struct TradingControlsDTO: Codable, Equatable {
+    let mode: TradingMode
+    let autoTradingEnabled: Bool
+    let emergencyStopActive: Bool
+    let liveAutoUnlocked: Bool
+    let liveAutoEnabledByUser: Bool
+    let selectedBrokerId: String
+    let riskControls: TradingRiskControls
+    let disclaimerAcknowledged: Bool?
+    let demoTesting: DemoTestingDTO?
+}
+
+struct DemoTestingDTO: Codable, Equatable {
+    let requiredClosedTrades: Int?
+    let closedTrades: Int?
+    let requiredDays: Int?
+    let startedAt: Date?
+    let completedAt: Date?
+}
+
+struct TradingControlsEnvelope: Codable, Equatable {
+    let controls: TradingControlsDTO
+    let policy: TradingPolicyDTO?
+}
+
+struct TradingPolicyDTO: Codable, Equatable {
+    let noGuaranteedProfits: Bool?
+    let forbidMartingale: Bool?
+    let forbidGridRecovery: Bool?
+    let forbidAveragingDown: Bool?
+    let trading212XauusdCfdApiSupported: Bool?
+}
+
+struct TradingControlsPatch: Encodable, Equatable {
+    var mode: TradingMode?
+    var autoTradingEnabled: Bool?
+    var liveAutoEnabledByUser: Bool?
+    var selectedBrokerId: String?
+    var riskControls: TradingRiskControls?
+    var disclaimerAcknowledged: Bool?
+    var emergencyStopActive: Bool?
+}
+
+struct TradingProposeRequest: Encodable, Equatable {
+    let decisionId: String
+    let side: String
+    let orderType: String
+    let quantity: Double
+    let entryPrice: Double?
+    let stopLoss: Double?
+    let takeProfits: [TradingTakeProfitDTO]
+    let riskPercent: Double
+    let confidence: Double
+    let spread: Double?
+    let dataQuality: String?
+    let signalKey: String?
+    let highImpactNewsActive: Bool?
+    let confirmationToken: String?
+}
+
+struct TradingTakeProfitDTO: Codable, Equatable {
+    let label: String
+    let price: Double
+    let closeFraction: Double
+}
+
+struct TradingProposalDTO: Codable, Equatable {
+    let proposalId: String
+    let status: String
+    let instructions: [String]
+    let blockedReasons: [String]?
+    let mode: TradingMode?
+}
+
+struct TradingProposeResponse: Codable, Equatable {
+    let proposal: TradingProposalDTO
+}
+
+struct EmergencyStopResponse: Codable, Equatable {
+    let ok: Bool?
+    let message: String?
+    let controls: TradingControlsDTO?
+}
+
 struct APIErrorPayload: Decodable, Equatable {
     let code: String
     let message: String

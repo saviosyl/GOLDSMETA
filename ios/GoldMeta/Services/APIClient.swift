@@ -102,6 +102,31 @@ final class APIClient: DecisionServiceProtocol {
         ).settings
     }
 
+    func getTradingControls() async throws -> TradingControlsEnvelope {
+        try await request(path: "v1/trading/controls", method: "GET", response: TradingControlsEnvelope.self)
+    }
+
+    func updateTradingControls(_ patch: TradingControlsPatch) async throws -> TradingControlsDTO {
+        try await request(
+            path: "v1/trading/controls",
+            method: "PATCH",
+            body: patch,
+            response: TradingControlsEnvelope.self
+        ).controls
+    }
+
+    func emergencyStopTrading() async throws -> EmergencyStopResponse {
+        try await request(path: "v1/trading/emergency-stop", method: "POST", response: EmergencyStopResponse.self)
+    }
+
+    func proposeTrade(_ body: TradingProposeRequest) async throws -> TradingProposeResponse {
+        try await request(path: "v1/trading/propose", method: "POST", body: body, response: TradingProposeResponse.self)
+    }
+
+    func confirmTrade(_ body: TradingProposeRequest) async throws -> TradingProposeResponse {
+        try await request(path: "v1/trading/confirm", method: "POST", body: body, response: TradingProposeResponse.self)
+    }
+
     private func request<Response: Decodable>(
         path: String,
         method: String,
