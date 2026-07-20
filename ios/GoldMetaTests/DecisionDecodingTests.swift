@@ -17,13 +17,18 @@ final class DecisionDecodingTests: XCTestCase {
         XCTAssertEqual(decision.decision, .buy)
         XCTAssertEqual(decision.dataSourceLabel, .mock)
         XCTAssertEqual(decision.scenarioName, "Bullish BUY setup")
+        XCTAssertEqual(decision.setupGrade, "A")
+        XCTAssertEqual(decision.tradeScore, 81)
+        XCTAssertEqual(decision.analysisOnly, true)
+        XCTAssertEqual(decision.recommendedManagementAction, "ENTER")
         XCTAssertNotNil(decision.entry.price)
         XCTAssertGreaterThanOrEqual(decision.takeProfits.count, 3)
         XCTAssertGreaterThan(decision.riskReward.tp1 ?? 0, 1)
-        XCTAssertEqual(decision.marketStructure?.poc, 2409.40)
-        XCTAssertEqual(decision.marketStructure?.vah, 2418.60)
-        XCTAssertEqual(decision.marketStructure?.val, 2404.90)
+        XCTAssertEqual(decision.marketStructure?.poc, 2409)
+        XCTAssertEqual(decision.marketStructure?.vah, 2418)
+        XCTAssertEqual(decision.marketStructure?.val, 2404)
         XCTAssertEqual(decision.recommendedActions?.first, .enterTrade)
+        XCTAssertFalse(decision.scoreBreakdown?.isEmpty ?? true)
     }
 
     func testStrongSellFixtureParsesBearishStructure() throws {
@@ -31,16 +36,21 @@ final class DecisionDecodingTests: XCTestCase {
         XCTAssertEqual(decision.decision, .sell)
         XCTAssertEqual(decision.scenarioName, "Bearish SELL setup")
         XCTAssertEqual(decision.marketStructure?.trend, "BEARISH")
+        XCTAssertEqual(decision.setupGrade, "A")
         XCTAssertEqual(decision.takeProfits.map(\.label), ["TP1", "TP2", "TP3"])
+        XCTAssertEqual(decision.analysisOnly, true)
     }
 
     func testWaitNearResistanceFixtureParses() throws {
         let decision = try loadFixture("conflicted_wait")
         XCTAssertEqual(decision.decision, .wait)
         XCTAssertEqual(decision.scenarioName, "WAIT near resistance")
-        XCTAssertEqual(decision.marketStructure?.vah, 2418.50)
+        XCTAssertEqual(decision.setupGrade, "No Trade")
+        XCTAssertEqual(decision.marketStructure?.vah, 2418)
         XCTAssertEqual(decision.recommendedActions, [.waitForCandleClose, .hold])
         XCTAssertTrue(decision.takeProfits.isEmpty)
+        XCTAssertEqual(decision.recommendedManagementAction, "WAIT_FOR_CLOSE")
+        XCTAssertFalse(decision.safetyFlags?.isEmpty ?? true)
     }
 
     func testDecisionDisplayFormatsBuyScenario() throws {
@@ -48,20 +58,24 @@ final class DecisionDecodingTests: XCTestCase {
         let display = DecisionDisplay(decision: decision)
 
         XCTAssertEqual(display.decisionLabel, "BUY")
-        XCTAssertEqual(display.confidenceText, "88%")
-        XCTAssertEqual(display.currentPriceText, "2412.35")
+        XCTAssertEqual(display.confidenceText, "80%")
+        XCTAssertEqual(display.currentPriceText, "2421.00")
         XCTAssertEqual(display.trendText, "Bullish")
-        XCTAssertEqual(display.pocText, "2409.40")
-        XCTAssertEqual(display.vahText, "2418.60")
-        XCTAssertEqual(display.valText, "2404.90")
-        XCTAssertEqual(display.entryText, "2412.35")
-        XCTAssertEqual(display.stopLossText, "2403.80")
-        XCTAssertEqual(display.tp1Text, "2423.20")
-        XCTAssertEqual(display.tp2Text, "2432.70")
-        XCTAssertEqual(display.tp3Text, "2446.00")
-        XCTAssertEqual(display.riskRewardText, "3.94R")
+        XCTAssertEqual(display.pocText, "2409.00")
+        XCTAssertEqual(display.vahText, "2418.00")
+        XCTAssertEqual(display.valText, "2404.00")
+        XCTAssertEqual(display.entryText, "2421.00")
+        XCTAssertEqual(display.stopLossText, "2416.75")
+        XCTAssertEqual(display.tp1Text, "2430.00")
+        XCTAssertEqual(display.tp2Text, "2440.00")
+        XCTAssertEqual(display.tp3Text, "2455.00")
+        XCTAssertEqual(display.riskRewardText, "8.00R")
+        XCTAssertEqual(display.setupGradeText, "A")
+        XCTAssertEqual(display.tradeScoreText, "81")
+        XCTAssertEqual(display.managementText, "ENTER")
+        XCTAssertTrue(display.analysisOnlyText.contains("Analysis only"))
         XCTAssertFalse(display.supportingReasons.isEmpty)
-        XCTAssertFalse(display.opposingReasons.isEmpty)
+        XCTAssertFalse(display.scoreBreakdownLines.isEmpty)
         XCTAssertTrue(display.actionTitles.contains("Enter trade"))
         XCTAssertTrue(display.actionTitles.contains("Wait for candle close"))
     }
@@ -69,16 +83,18 @@ final class DecisionDecodingTests: XCTestCase {
     func testDecisionDisplayFormatsSellAndWaitScenarios() throws {
         let sell = DecisionDisplay(decision: try loadFixture("strong_sell"))
         XCTAssertEqual(sell.decisionLabel, "SELL")
-        XCTAssertEqual(sell.confidenceText, "91%")
-        XCTAssertTrue(sell.supportingReasons.contains(where: { $0.contains("lower high") }))
+        XCTAssertEqual(sell.confidenceText, "80%")
+        XCTAssertTrue(sell.supportingReasons.contains(where: { $0.localizedCaseInsensitiveContains("bearish") }))
 
         let wait = DecisionDisplay(decision: try loadFixture("conflicted_wait"))
         XCTAssertEqual(wait.decisionLabel, "WAIT")
-        XCTAssertEqual(wait.entryText, "2414.00 - 2418.50")
+        XCTAssertEqual(wait.entryText, "Wait")
         XCTAssertEqual(wait.stopLossText, "—")
         XCTAssertEqual(wait.tp1Text, "—")
+        XCTAssertEqual(wait.setupGradeText, "No Trade")
         XCTAssertEqual(wait.actionTitles, ["Wait for candle close", "Hold"])
         XCTAssertEqual(wait.scenarioTitle, "WAIT near resistance")
+        XCTAssertFalse(wait.safetyFlagTexts.isEmpty)
     }
 
     private func loadFixture(_ name: String) throws -> Decision {

@@ -152,9 +152,13 @@ struct DashboardView: View {
         let display = decision.display
 
         return VStack(alignment: .leading, spacing: 16) {
+            if decision.isAnalysisOnly {
+                statusBanner("ANALYSIS ONLY", message: "This is decision-engine analysis, not an executed broker order.")
+            }
             heroCard(decision, display: display, sourceOverride: sourceOverride)
             levelsCard(display)
             tradePlanCard(decision, display: display)
+            scoreBreakdownCard(display)
             evidenceCard(display)
             actionsCard(decision)
             DisclaimerBanner(compact: true)
@@ -193,8 +197,19 @@ struct DashboardView: View {
 
                 HStack(spacing: 12) {
                     metricTile("Confidence", value: display.confidenceText, detail: display.confidenceDetail)
-                    metricTile("Trend", value: display.trendText, detail: decision.marketRegime.displayName)
-                    metricTile("Age", value: decision.generatedAt.relativeShort, detail: decision.currentSession ?? "Session")
+                    metricTile("Score", value: display.tradeScoreText, detail: "Grade \(display.setupGradeText)")
+                    metricTile("Manage", value: display.managementText, detail: display.analysisOnlyText)
+                }
+
+                Text(display.explanationText)
+                    .font(GoldMetaFont.rounded(.caption))
+                    .foregroundStyle(GoldMetaColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !display.safetyFlagTexts.isEmpty {
+                    Text(display.safetyFlagTexts.joined(separator: " · "))
+                        .font(GoldMetaFont.caption)
+                        .foregroundStyle(GoldMetaColor.wait)
                 }
             }
         }
@@ -228,6 +243,25 @@ struct DashboardView: View {
                     value: display.riskRewardText,
                     detail: "TP1 \(decision.riskReward.tp1?.ratioText ?? "—") · TP2 \(decision.riskReward.tp2?.ratioText ?? "—") · TP3 \(decision.riskReward.tp3?.ratioText ?? "—")"
                 )
+            }
+        }
+    }
+
+    private func scoreBreakdownCard(_ display: DecisionDisplay) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("Score breakdown", subtitle: "Decision engine factors")
+                if display.scoreBreakdownLines.isEmpty {
+                    Text("Breakdown unavailable for this fixture")
+                        .font(GoldMetaFont.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                } else {
+                    ForEach(display.scoreBreakdownLines, id: \.self) { line in
+                        Text(line)
+                            .font(GoldMetaFont.rounded(.caption))
+                            .foregroundStyle(GoldMetaColor.textSecondary)
+                    }
+                }
             }
         }
     }

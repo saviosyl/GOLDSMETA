@@ -1,110 +1,220 @@
 {
   "schemaVersion": "1.0",
-  "decisionId": "gm-003-strong-sell",
+  "decisionId": "gm-engine-sell-breakdown",
   "symbol": "XAUUSD",
-  "generatedAt": "2026-07-20T07:39:00Z",
-  "marketDataTime": "2026-07-20T07:38:00Z",
-  "validUntil": "2026-07-20T09:51:00Z",
+  "generatedAt": "2026-07-20T10:01:00Z",
+  "marketDataTime": "2026-07-20T10:00:00Z",
+  "validUntil": "2026-07-20T12:01:00Z",
   "decision": "SELL",
-  "confidence": 91,
-  "confidenceLabel": "VERY_HIGH",
+  "confidence": 80,
+  "confidenceLabel": "HIGH",
   "marketRegime": "TRENDING_DOWN",
   "dataQuality": "GOOD",
   "isProvisional": false,
-  "setupScore": -86,
+  "isTestDecision": true,
+  "environment": "TEST",
+  "setupScore": 82,
+  "tradeScore": 82,
+  "setupGrade": "A",
+  "analysisOnly": true,
+  "recommendedManagementAction": "ENTER",
+  "explanation": "SELL graded A (score 82, confidence 80%). Entry breakout; SL 2403.25; RR TP2 4.38. Analysis only — not an executed broker order. No martingale or loss-chasing.",
+  "scoreBreakdown": [
+    {
+      "factor": "trendMeter",
+      "weight": 18,
+      "awarded": 15.48,
+      "side": "BEARISH",
+      "note": "Trend Meter bearish 86"
+    },
+    {
+      "factor": "marketStructure",
+      "weight": 12,
+      "awarded": 10.8,
+      "side": "BEARISH",
+      "note": "Price accepted below nearby support"
+    },
+    {
+      "factor": "pocPosition",
+      "weight": 8,
+      "awarded": 6.8,
+      "side": "BEARISH",
+      "note": "Price trading below POC"
+    },
+    {
+      "factor": "valueArea",
+      "weight": 8,
+      "awarded": 7.2,
+      "side": "BEARISH",
+      "note": "Price accepted below VAL"
+    },
+    {
+      "factor": "vwapAlignment",
+      "weight": 7,
+      "awarded": 5.6,
+      "side": "BEARISH",
+      "note": "Price below VWAP with non-bullish bias"
+    },
+    {
+      "factor": "emaAlignment",
+      "weight": 10,
+      "awarded": 10,
+      "side": "BEARISH",
+      "note": "Bearish EMA stack with price below EMA21"
+    },
+    {
+      "factor": "confirmationCandle",
+      "weight": 12,
+      "awarded": 12,
+      "side": "BEARISH",
+      "note": "Confirmed BEARISH_BREAKOUT"
+    },
+    {
+      "factor": "volumeConfirmation",
+      "weight": 8,
+      "awarded": 7.2,
+      "side": "BEARISH",
+      "note": "Relative volume 1.70 confirms bearish candle"
+    },
+    {
+      "factor": "rsiCondition",
+      "weight": 5,
+      "awarded": 2,
+      "side": "BEARISH",
+      "note": "RSI constructive for shorts (38)"
+    },
+    {
+      "factor": "supportResistance",
+      "weight": 6,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Clear of immediate S/R walls"
+    },
+    {
+      "factor": "atrVolatility",
+      "weight": 3,
+      "awarded": 2.1,
+      "side": "NEUTRAL",
+      "note": "ATR volatility usable for structure stops"
+    },
+    {
+      "factor": "spread",
+      "weight": 3,
+      "awarded": 3,
+      "side": "NEUTRAL",
+      "note": "Spread tight (0.25)"
+    },
+    {
+      "factor": "newsRisk",
+      "weight": 0,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No high-impact news block"
+    },
+    {
+      "factor": "dataCompleteness",
+      "weight": 5,
+      "awarded": 5,
+      "side": "NEUTRAL",
+      "note": "Data completeness 100%"
+    }
+  ],
+  "safetyFlags": [],
   "entry": {
-    "type": "LIMIT",
-    "price": 2418.6,
-    "zoneLow": null,
-    "zoneHigh": null,
-    "condition": "Sell retest of failed support if rejection candle forms."
+    "type": "MARKET",
+    "price": 2398,
+    "zoneLow": 2398,
+    "zoneHigh": 2398,
+    "condition": "SELL graded A (score 82, confidence 80%). Entry breakout; SL 2403.25; RR TP2 4.38. Analysis only — not an executed broker order. No martingale or loss-chasing."
   },
   "stopLoss": {
-    "price": 2426.4,
-    "reason": "Above failed support reclaim and session high."
+    "price": 2403.25,
+    "reason": "Structure + ATR buffer from decision engine"
   },
   "takeProfits": [
     {
       "label": "TP1",
-      "price": 2408.1,
-      "reason": "VWAP extension."
+      "price": 2388,
+      "reason": "Engine TP1 from structure/ATR"
     },
     {
       "label": "TP2",
-      "price": 2398.5,
-      "reason": "Asian low sweep."
+      "price": 2375,
+      "reason": "Engine TP2 from structure/ATR"
     },
     {
       "label": "TP3",
-      "price": 2386.0,
-      "reason": "Daily demand zone."
+      "price": 2360,
+      "reason": "Engine TP3 from structure/ATR"
     }
   ],
   "riskReward": {
-    "tp1": 1.35,
-    "tp2": 2.58,
-    "tp3": 4.18
+    "tp1": 1.9,
+    "tp2": 4.38,
+    "tp3": 7.24
   },
   "breakeven": {
     "state": "HOLD_ORIGINAL_STOP",
-    "trigger": "After TP1 close below entry",
-    "newStop": 2418.6,
-    "reason": "Reduce downside after first target confirms follow-through."
+    "trigger": "After ~0.8R favorable move",
+    "newStop": 2398,
+    "reason": "Management evaluator may move SL to breakeven after configured R"
   },
   "earlyExit": {
     "exitNow": false,
     "conditions": [
-      "M15 close against setup",
-      "Spread widens beyond normal London range",
-      "Data quality drops to STALE"
+      "Adverse R beyond management threshold",
+      "Trend deterioration",
+      "High-impact news"
     ]
   },
-  "bullishEvidence": [
-    "None material; buyers failed to reclaim support"
-  ],
+  "bullishEvidence": [],
   "bearishEvidence": [
-    "M30 lower high confirmed",
-    "HTF bias bearish",
-    "Rejection from value area high with heavy offer"
+    "Trend Meter bearish 86",
+    "Price accepted below nearby support",
+    "Price trading below POC",
+    "Price accepted below VAL",
+    "Price below VWAP with non-bullish bias",
+    "Bearish EMA stack with price below EMA21",
+    "Confirmed BEARISH_BREAKOUT",
+    "Relative volume 1.70 confirms bearish candle"
   ],
   "reasonCodes": [
-    "STRONG-SELL",
-    "GOOD",
-    "MOCK"
+    "SELL",
+    "A",
+    "DECISION_ENGINE"
   ],
   "reasonSummary": [
-    "SELL has strong alignment across trend, structure, and momentum.",
-    "Plan waits for retest instead of selling into stretched price."
+    "SELL graded A (score 82, confidence 80%). Entry breakout; SL 2403.25; RR TP2 4.38. Analysis only — not an executed broker order. No martingale or loss-chasing."
   ],
   "warnings": [
-    "Avoid entering if price reclaims 2426.40 on a closing basis."
+    "Analysis only — not an executed broker order."
   ],
   "missingInputs": [],
-  "invalidation": "M15 close above 2426.40 invalidates the short setup.",
+  "invalidation": "Invalidation near 2403.88",
   "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
   "lifecycleState": "ACTIVE",
-  "snapshotId": "snap-003",
-  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "snapshotId": "gm-engine-sell-breakdown",
+  "ruleConfigVersion": "decision-engine-1.0.0",
   "pineScriptVersion": "goldmeta-bridge-v0.1",
-  "backendVersion": "mock-ios-phase1",
+  "backendVersion": "decision-engine-1.0.0",
   "aiModelId": null,
   "aiPromptVersion": null,
   "aiSafetyDowngraded": false,
   "notificationSent": false,
-  "currentSession": "New York",
+  "currentSession": "London",
   "higherTimeframeBias": "BEARISH",
-  "lastKnownPrice": 2416.2,
+  "lastKnownPrice": 2398,
   "dataSourceLabel": "MOCK",
   "scenarioName": "Bearish SELL setup",
   "marketStructure": {
     "trend": "BEARISH",
-    "poc": 2412.80,
-    "vah": 2421.50,
-    "val": 2405.20
+    "poc": 2408,
+    "vah": 2415,
+    "val": 2402
   },
   "recommendedActions": [
-    "WAIT_FOR_CANDLE_CLOSE",
     "ENTER_TRADE",
+    "WAIT_FOR_CANDLE_CLOSE",
     "HOLD",
     "EXIT_EARLY"
   ]

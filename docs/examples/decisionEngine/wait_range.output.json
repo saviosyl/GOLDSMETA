@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "1.0",
+  "configVersion": "decision-engine-1.0.0",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "evaluatedAt": "2026-07-20T10:01:00.000Z",
+  "primaryAction": "WAIT",
+  "confidence": 42,
+  "tradeScore": 27,
+  "setupGrade": "No Trade",
+  "trend": "NEUTRAL",
+  "entryType": "none",
+  "entryRange": {
+    "low": null,
+    "high": null,
+    "reference": 2410
+  },
+  "stopLoss": null,
+  "takeProfits": {
+    "tp1": null,
+    "tp2": null,
+    "tp3": null
+  },
+  "riskReward": {
+    "tp1": null,
+    "tp2": null,
+    "tp3": null
+  },
+  "invalidationLevel": null,
+  "supportingReasons": [
+    "Price trading above POC",
+    "Price above VWAP with non-bearish bias",
+    "Bullish EMA stack with price above EMA21"
+  ],
+  "opposingReasons": [
+    "Price trading above POC",
+    "Price above VWAP with non-bearish bias"
+  ],
+  "missingDataWarnings": [],
+  "recommendedManagementAction": "WAIT_FOR_CLOSE",
+  "explanation": "WAIT — blocked by LOW_CONFIDENCE. Analysis only — not an executed trade.",
+  "scoreBreakdown": [
+    {
+      "factor": "trendMeter",
+      "weight": 18,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Trend Meter neutral/unknown"
+    },
+    {
+      "factor": "marketStructure",
+      "weight": 12,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No decisive structure break"
+    },
+    {
+      "factor": "pocPosition",
+      "weight": 8,
+      "awarded": 6.8,
+      "side": "BULLISH",
+      "note": "Price trading above POC"
+    },
+    {
+      "factor": "valueArea",
+      "weight": 8,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Price inside value area"
+    },
+    {
+      "factor": "vwapAlignment",
+      "weight": 7,
+      "awarded": 5.6,
+      "side": "BULLISH",
+      "note": "Price above VWAP with non-bearish bias"
+    },
+    {
+      "factor": "emaAlignment",
+      "weight": 10,
+      "awarded": 10,
+      "side": "BULLISH",
+      "note": "Bullish EMA stack with price above EMA21"
+    },
+    {
+      "factor": "confirmationCandle",
+      "weight": 12,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Confirmation candle not closed/confirmed"
+    },
+    {
+      "factor": "volumeConfirmation",
+      "weight": 8,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Volume does not confirm direction"
+    },
+    {
+      "factor": "rsiCondition",
+      "weight": 5,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "RSI 50 not aligned"
+    },
+    {
+      "factor": "supportResistance",
+      "weight": 6,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Clear of immediate S/R walls"
+    },
+    {
+      "factor": "atrVolatility",
+      "weight": 3,
+      "awarded": 2.1,
+      "side": "NEUTRAL",
+      "note": "ATR volatility usable for structure stops"
+    },
+    {
+      "factor": "spread",
+      "weight": 3,
+      "awarded": 3,
+      "side": "NEUTRAL",
+      "note": "Spread tight (0.25)"
+    },
+    {
+      "factor": "newsRisk",
+      "weight": 0,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No high-impact news block"
+    },
+    {
+      "factor": "dataCompleteness",
+      "weight": 5,
+      "awarded": 5,
+      "side": "NEUTRAL",
+      "note": "Data completeness 100%"
+    }
+  ],
+  "bullishScore": 27.45,
+  "bearishScore": 5.05,
+  "safetyFlags": [
+    "LOW_CONFIDENCE"
+  ],
+  "analysisOnly": true
+}

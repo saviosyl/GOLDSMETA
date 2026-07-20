@@ -1,27 +1,138 @@
 {
   "schemaVersion": "1.0",
-  "decisionId": "gm-004-wait-near-resistance",
+  "decisionId": "gm-engine-wait-resistance",
   "symbol": "XAUUSD",
-  "generatedAt": "2026-07-20T07:32:00Z",
-  "marketDataTime": "2026-07-20T07:31:00Z",
-  "validUntil": "2026-07-20T09:48:00Z",
+  "generatedAt": "2026-07-20T10:01:00Z",
+  "marketDataTime": "2026-07-20T10:00:00Z",
+  "validUntil": "2026-07-20T12:01:00Z",
   "decision": "WAIT",
-  "confidence": 46,
+  "confidence": 20,
   "confidenceLabel": "LOW",
   "marketRegime": "RANGING",
-  "dataQuality": "PARTIAL",
+  "dataQuality": "GOOD",
   "isProvisional": false,
-  "setupScore": 12,
+  "isTestDecision": true,
+  "environment": "TEST",
+  "setupScore": 27,
+  "tradeScore": 27,
+  "setupGrade": "No Trade",
+  "analysisOnly": true,
+  "recommendedManagementAction": "WAIT_FOR_CLOSE",
+  "explanation": "WAIT — blocked by INDICATOR_DISAGREEMENT, LOW_CONFIDENCE. Analysis only — not an executed trade.",
+  "scoreBreakdown": [
+    {
+      "factor": "trendMeter",
+      "weight": 18,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Trend Meter neutral/unknown"
+    },
+    {
+      "factor": "marketStructure",
+      "weight": 12,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No decisive structure break"
+    },
+    {
+      "factor": "pocPosition",
+      "weight": 8,
+      "awarded": 6.8,
+      "side": "BULLISH",
+      "note": "Price trading above POC"
+    },
+    {
+      "factor": "valueArea",
+      "weight": 8,
+      "awarded": 2.8,
+      "side": "BEARISH",
+      "note": "Price pressed into VAH from below"
+    },
+    {
+      "factor": "vwapAlignment",
+      "weight": 7,
+      "awarded": 5.6,
+      "side": "BULLISH",
+      "note": "Price above VWAP with non-bearish bias"
+    },
+    {
+      "factor": "emaAlignment",
+      "weight": 10,
+      "awarded": 10,
+      "side": "BULLISH",
+      "note": "Bullish EMA stack with price above EMA21"
+    },
+    {
+      "factor": "confirmationCandle",
+      "weight": 12,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Confirmation candle not closed/confirmed"
+    },
+    {
+      "factor": "volumeConfirmation",
+      "weight": 8,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Volume does not confirm direction"
+    },
+    {
+      "factor": "rsiCondition",
+      "weight": 5,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "RSI 58 not aligned"
+    },
+    {
+      "factor": "supportResistance",
+      "weight": 6,
+      "awarded": 3.3,
+      "side": "BEARISH",
+      "note": "Price directly under resistance"
+    },
+    {
+      "factor": "atrVolatility",
+      "weight": 3,
+      "awarded": 2.1,
+      "side": "NEUTRAL",
+      "note": "ATR volatility usable for structure stops"
+    },
+    {
+      "factor": "spread",
+      "weight": 3,
+      "awarded": 3,
+      "side": "NEUTRAL",
+      "note": "Spread tight (0.25)"
+    },
+    {
+      "factor": "newsRisk",
+      "weight": 0,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No high-impact news block"
+    },
+    {
+      "factor": "dataCompleteness",
+      "weight": 5,
+      "awarded": 5,
+      "side": "NEUTRAL",
+      "note": "Data completeness 100%"
+    }
+  ],
+  "safetyFlags": [
+    "INDICATOR_DISAGREEMENT",
+    "LOW_CONFIDENCE"
+  ],
   "entry": {
     "type": "WAIT_FOR_CONFIRMATION",
     "price": null,
-    "zoneLow": 2414.0,
-    "zoneHigh": 2418.5,
-    "condition": "Wait for a decisive close away from resistance before planning entry."
+    "zoneLow": null,
+    "zoneHigh": null,
+    "condition": "WAIT — blocked by INDICATOR_DISAGREEMENT, LOW_CONFIDENCE. Analysis only — not an executed trade."
   },
   "stopLoss": {
     "price": null,
-    "reason": "No stop until confirmation and entry are defined."
+    "reason": "No trade plan while WAIT"
   },
   "takeProfits": [],
   "riskReward": {
@@ -32,58 +143,67 @@
   "breakeven": {
     "state": "NOT_APPLICABLE",
     "trigger": null,
-    "newStop": null,
-    "reason": "No active trade plan."
+    "newStop": 2417.6,
+    "reason": "Management evaluator may move SL to breakeven after configured R"
   },
   "earlyExit": {
     "exitNow": false,
     "conditions": [
-      "WAIT remains valid until resistance is accepted or rejected cleanly"
+      "Adverse R beyond management threshold",
+      "Trend deterioration",
+      "High-impact news"
     ]
   },
   "bullishEvidence": [
-    "Price is still holding above POC",
-    "Dollar softness supports gold bids"
+    "Price trading above POC",
+    "Price above VWAP with non-bearish bias",
+    "Bullish EMA stack with price above EMA21",
+    "Price pressed into VAH from below",
+    "Price directly under resistance"
   ],
   "bearishEvidence": [
-    "Trading directly under VAH / session resistance",
-    "M15 momentum flattening into the level",
-    "HTF bias is neutral into overhead supply"
+    "Price pressed into VAH from below",
+    "Price directly under resistance",
+    "Price trading above POC",
+    "Price above VWAP with non-bearish bias"
   ],
   "reasonCodes": [
-    "WAIT-NEAR-RESISTANCE",
-    "PARTIAL",
-    "MOCK"
+    "WAIT",
+    "NO_TRADE",
+    "DECISION_ENGINE",
+    "INDICATOR_DISAGREEMENT",
+    "LOW_CONFIDENCE"
   ],
   "reasonSummary": [
-    "WAIT because price is pressed into resistance without a clean break or rejection.",
-    "Let the candle close before choosing BUY or SELL."
+    "WAIT — blocked by INDICATOR_DISAGREEMENT, LOW_CONFIDENCE. Analysis only — not an executed trade."
   ],
   "warnings": [
-    "Do not enter mid-candle at resistance."
+    "Analysis only — not an executed broker order.",
+    "Safety: INDICATOR_DISAGREEMENT",
+    "Safety: LOW_CONFIDENCE"
   ],
   "missingInputs": [],
-  "invalidation": "A firm M15 close above 2418.50 or below 2408.00 can replace this WAIT.",
+  "invalidation": "No active trade plan to invalidate while WAIT",
   "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
-  "lifecycleState": "ANALYSING",
-  "snapshotId": "snap-004",
-  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "gm-engine-wait-resistance",
+  "ruleConfigVersion": "decision-engine-1.0.0",
   "pineScriptVersion": "goldmeta-bridge-v0.1",
-  "backendVersion": "mock-ios-phase1",
+  "backendVersion": "decision-engine-1.0.0",
   "aiModelId": null,
   "aiPromptVersion": null,
   "aiSafetyDowngraded": false,
-  "notificationSent": true,
-  "currentSession": "London / New York overlap",
+  "notificationSent": false,
+  "currentSession": "London",
   "higherTimeframeBias": "NEUTRAL",
-  "lastKnownPrice": 2417.4,
+  "lastKnownPrice": 2417.6,
   "dataSourceLabel": "MOCK",
   "scenarioName": "WAIT near resistance",
   "marketStructure": {
     "trend": "NEUTRAL",
-    "poc": 2411.20,
-    "vah": 2418.50,
-    "val": 2406.80
+    "poc": 2409,
+    "vah": 2418,
+    "val": 2404
   },
   "recommendedActions": [
     "WAIT_FOR_CANDLE_CLOSE",
