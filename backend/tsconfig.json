@@ -15,6 +15,6 @@
     "noUncheckedIndexedAccess": true,
     "types": ["node", "vitest"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.json"],
   "exclude": ["node_modules", "dist"]
 }
