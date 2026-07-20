@@ -6,6 +6,7 @@ import { buildDecisionsRouter } from "./routes/decisions";
 import { buildDevicesRouter } from "./routes/devices";
 import { buildHealthRouter } from "./routes/health";
 import { buildJournalRouter } from "./routes/journal";
+import { buildPushRouter } from "./routes/push";
 import { buildSettingsRouter } from "./routes/settings";
 import { buildSystemRouter } from "./routes/system";
 import { buildTradingRouter } from "./routes/trading";
@@ -75,6 +76,7 @@ export const createApp = (
   app.use(buildWebhooksRouter(dependencies.store, dependencies.aiExplainer));
   app.use(buildTradingViewRouter(dependencies.store, dependencies.aiExplainer));
   app.use(buildDevicesRouter(dependencies.store));
+  app.use(buildPushRouter(dependencies.store));
   app.use(buildDecisionsRouter(dependencies.store));
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));

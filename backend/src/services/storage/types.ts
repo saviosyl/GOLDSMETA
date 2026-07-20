@@ -6,7 +6,8 @@ import type {
   JournalPatch,
   MarketSnapshot,
   TradingViewPayload,
-  UserSettings
+  UserSettings,
+  WebPushSubscriptionRecord
 } from "../../models/types";
 
 export type Awaitable<T> = T | Promise<T>;
@@ -112,6 +113,10 @@ export interface GoldMetaStore {
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;
   deleteDevice(userId: string, deviceId: string): Awaitable<boolean>;
   listDevices(userId: string): Awaitable<DeviceRecord[]>;
+
+  upsertWebPushSubscription(subscription: WebPushSubscriptionRecord): Awaitable<WebPushSubscriptionRecord>;
+  deleteWebPushSubscription(userId: string, endpoint: string): Awaitable<boolean>;
+  listWebPushSubscriptions(userId: string): Awaitable<WebPushSubscriptionRecord[]>;
 
   getSettings(userId: string): Awaitable<UserSettings>;
   updateSettings(

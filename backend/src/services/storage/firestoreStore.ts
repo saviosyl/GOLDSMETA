@@ -9,7 +9,8 @@ import type {
   JournalPatch,
   MarketSnapshot,
   TradingViewPayload,
-  UserSettings
+  UserSettings,
+  WebPushSubscriptionRecord
 } from "../../models/types";
 import { nowIso } from "../../utils/time";
 import type {
@@ -223,6 +224,42 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
   async listDevices(userId: string): Promise<DeviceRecord[]> {
     const snap = await this.db.collection("users").doc(userId).collection("devices").get();
     return snap.docs.map((doc) => doc.data() as DeviceRecord);
+  }
+
+  async upsertWebPushSubscription(
+    subscription: WebPushSubscriptionRecord
+  ): Promise<WebPushSubscriptionRecord> {
+    await this.db
+      .collection("users")
+      .doc(subscription.userId)
+      .collection("webPushSubscriptions")
+      .doc(subscription.subscriptionId)
+      .set(toFirestoreData(subscription), { merge: true });
+    return subscription;
+  }
+
+  async deleteWebPushSubscription(userId: string, endpoint: string): Promise<boolean> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("webPushSubscriptions")
+      .where("endpoint", "==", endpoint)
+      .limit(5)
+      .get();
+    if (snap.empty) {
+      return false;
+    }
+    await Promise.all(snap.docs.map((doc) => doc.ref.delete()));
+    return true;
+  }
+
+  async listWebPushSubscriptions(userId: string): Promise<WebPushSubscriptionRecord[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("webPushSubscriptions")
+      .get();
+    return snap.docs.map((doc) => doc.data() as WebPushSubscriptionRecord);
   }
 
   async getSettings(userId: string): Promise<UserSettings> {

@@ -19,12 +19,14 @@
     "firebase-admin": "latest",
     "firebase-functions": "latest",
     "openai": "latest",
+    "web-push": "^3.6.7",
     "zod": "latest"
   },
   "devDependencies": {
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/supertest": "latest",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "latest",
     "@typescript-eslint/parser": "latest",
     "eslint": "latest",

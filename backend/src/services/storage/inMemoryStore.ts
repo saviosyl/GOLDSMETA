@@ -7,7 +7,8 @@ import type {
   JournalPatch,
   MarketSnapshot,
   TradingViewPayload,
-  UserSettings
+  UserSettings,
+  WebPushSubscriptionRecord
 } from "../../models/types";
 import { nowIso } from "../../utils/time";
 import type {
@@ -27,6 +28,7 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private snapshots = new Map<string, MarketSnapshot>();
   private decisions = new Map<string, DecisionRecord>();
   private devices = new Map<string, DeviceRecord>();
+  private webPushSubscriptions = new Map<string, WebPushSubscriptionRecord>();
   private journalEntries = new Map<string, JournalEntry>();
   private settings = new Map<string, UserSettings>();
   private notifications = new Set<string>();
@@ -120,6 +122,24 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
 
   listDevices(userId: string): DeviceRecord[] {
     return [...this.devices.values()].filter((device) => device.userId === userId);
+  }
+
+  upsertWebPushSubscription(subscription: WebPushSubscriptionRecord): WebPushSubscriptionRecord {
+    this.webPushSubscriptions.set(subscription.subscriptionId, subscription);
+    return subscription;
+  }
+
+  deleteWebPushSubscription(userId: string, endpoint: string): boolean {
+    for (const [id, sub] of this.webPushSubscriptions.entries()) {
+      if (sub.userId === userId && sub.endpoint === endpoint) {
+        return this.webPushSubscriptions.delete(id);
+      }
+    }
+    return false;
+  }
+
+  listWebPushSubscriptions(userId: string): WebPushSubscriptionRecord[] {
+    return [...this.webPushSubscriptions.values()].filter((sub) => sub.userId === userId);
   }
 
   getSettings(userId: string): UserSettings {

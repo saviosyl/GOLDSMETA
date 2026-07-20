@@ -271,7 +271,7 @@ export const deviceRegistrationSchema = z
   .object({
     deviceId: z.string().min(3),
     fcmToken: z.string().min(10),
-    platform: z.literal("ios"),
+    platform: z.enum(["ios", "web"]),
     appVersion: z.string().min(1).optional()
   })
   .strict();
@@ -281,6 +281,29 @@ export type DeviceRegistration = z.infer<typeof deviceRegistrationSchema>;
 export interface DeviceRecord extends DeviceRegistration {
   userId: string;
   registeredAt: string;
+}
+
+export const webPushSubscriptionSchema = z
+  .object({
+    endpoint: z.string().url(),
+    expirationTime: z.number().nullable().optional(),
+    keys: z
+      .object({
+        p256dh: z.string().min(8),
+        auth: z.string().min(8)
+      })
+      .strict(),
+    userAgent: z.string().max(500).optional()
+  })
+  .strict();
+
+export type WebPushSubscriptionInput = z.infer<typeof webPushSubscriptionSchema>;
+
+export interface WebPushSubscriptionRecord extends WebPushSubscriptionInput {
+  userId: string;
+  subscriptionId: string;
+  registeredAt: string;
+  updatedAt: string;
 }
 
 export const journalCreateSchema = z
