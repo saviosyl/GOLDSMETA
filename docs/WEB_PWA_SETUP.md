@@ -68,28 +68,33 @@ npm run build
 
 Output is written to `web/dist/`.
 
-## 6. Deploy to Firebase Hosting
+## 6. Deploy to Cloudflare Pages (not Firebase Hosting)
 
-From the repository root (after filling real project IDs — do not invent them):
+Production frontend: **https://goldmeta.metamechsolutions.com**
 
-```bash
-# requires Firebase CLI logged in to the correct project
-firebase deploy --only hosting
-```
+Follow [CLOUDFLARE_PAGES_DEPLOY.md](CLOUDFLARE_PAGES_DEPLOY.md).
 
-Hosting config lives in root `firebase.json` (SPA rewrite to `/index.html`, public dir `web/dist`).
+Summary:
 
-Do not deploy until the Firebase project ID and Hosting site are confirmed.
+- Project root: `web`
+- Build: `npm run build`
+- Output: `dist`
+- SPA: `public/_redirects` → `/* /index.html 200`
+- Env vars: set `VITE_*` in Cloudflare Pages (never commit `.env.local`)
+- Firebase Hosting is **not** used for the PWA
+
+Backend Auth / Firestore / Functions stay on Firebase.
 
 For the ordered first-live checklist (Console steps, env templates, phased
-web → API → Web Push), use [FIREBASE_FIRST_DEPLOY.md](FIREBASE_FIRST_DEPLOY.md).
+web → API → Web Push), use [FIREBASE_FIRST_DEPLOY.md](FIREBASE_FIRST_DEPLOY.md)
+and [CLOUDFLARE_PAGES_DEPLOY.md](CLOUDFLARE_PAGES_DEPLOY.md).
 
 ## Phased deployment mode
 
 You can ship in three stages without architecture changes:
 
-1. **Web first** — fill `web/.env.local` Firebase values, `npm run build`, deploy Hosting from repo root.
-2. **Backend separately** — deploy Functions from `backend/` with the same project ID; set `VITE_API_BASE_URL` and `WEBHOOK_PUBLIC_BASE_URL` to `…/api`.
+1. **Web first** — fill Cloudflare Pages `VITE_*` values, build `web/`, deploy Pages + custom domain.
+2. **Backend separately** — deploy Functions from `backend/` with the same Firebase project ID; set `VITE_API_BASE_URL` and `WEBHOOK_PUBLIC_BASE_URL` to `…/api`.
 3. **Web Push later** — set backend `VAPID_*` only; leave web env without VAPID. Until then, Enable Web Push shows that the server key is missing.
 
 ## 7. Open on iPhone

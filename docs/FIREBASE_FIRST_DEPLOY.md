@@ -19,7 +19,7 @@ Web Push is optional. The app runs without VAPID keys; Settings → Enable Web P
 | --- | --- | --- |
 | **API key** (`apiKey`) | Project settings → Your apps → Web app → SDK setup | Web Auth SDK |
 | **Auth domain** (`authDomain`) | Same Web app config (usually `YOUR_PROJECT_ID.firebaseapp.com`) | Web Auth |
-| **Project ID** (`projectId`) | Project settings → General | Web, Hosting, Functions, `.firebaserc` |
+| **Project ID** (`projectId`) | Project settings → General | Web, Functions, `.firebaserc` |
 | **Storage bucket** (`storageBucket`) | Web app config (often `YOUR_PROJECT_ID.appspot.com`) | Web SDK (optional but recommended) |
 | **Messaging sender ID** (`messagingSenderId`) | Web app config | Web SDK (optional for Auth-only; keep for later FCM/web) |
 | **Firebase App ID** (`appId`) | Web app config (`1:…:web:…`) | Web Auth SDK |
@@ -33,10 +33,10 @@ Also configure in Console (no env var, but required for a test user):
 | Console action | Why |
 | --- | --- |
 | Authentication → Sign-in method → **Email/Password** → Enable | Web sign-in / sign-up |
-| Authentication → Settings → **Authorized domains** | Add your Hosting domain (and `localhost` for local) |
+| Authentication → Settings → **Authorized domains** | Add `localhost` and `goldmeta.metamechsolutions.com` |
 | Authentication → Users → Add user **or** use in-app Sign up | First test account |
-| Hosting → Get started (if not already) | Web deploy target |
 | Firestore → Create database (production or test mode with locked rules later) | Backend storage when `STORAGE_BACKEND=firestore` |
+| Cloudflare Pages (not Firebase Hosting) | Frontend at https://goldmeta.metamechsolutions.com — see CLOUDFLARE_PAGES_DEPLOY.md |
 
 ---
 
@@ -101,9 +101,16 @@ VAPID_SUBJECT=mailto:you@example.com
 
 Local Functions also need Application Default Credentials (ADC), e.g. `gcloud auth application-default login`, or `GOOGLE_APPLICATION_CREDENTIALS` pointing at a service account JSON **outside the repo**.
 
+### Cloudflare Pages (frontend) vs Firebase (backend)
+
+- **Frontend:** Cloudflare Pages project `goldmeta-web` → https://goldmeta.metamechsolutions.com  
+  See [CLOUDFLARE_PAGES_DEPLOY.md](CLOUDFLARE_PAGES_DEPLOY.md). Set `VITE_*` in the Pages dashboard.
+- **Backend:** Firebase Auth / Firestore / Functions only. Deploy from `backend/`.  
+  Root Firebase Hosting is not used.
+
 ### `.firebaserc` (repo root)
 
-Replace the placeholder with your **real** project ID (from Console only):
+Still binds the Firebase **CLI project** for Functions/Firestore (not for the PWA):
 
 ```json
 {
@@ -113,8 +120,6 @@ Replace the placeholder with your **real** project ID (from Console only):
 }
 ```
 
-Do not invent this string. Hosting deploys use the **root** `firebase.json` (Hosting → `web/dist`). Functions/Firestore use **`backend/firebase.json`** when you deploy from `backend/`.
-
 ### GitHub Actions secrets
 
 **None required** for current CI:
@@ -122,15 +127,15 @@ Do not invent this string. Hosting deploys use the **root** `firebase.json` (Hos
 - Web workflow uses safe dummy `VITE_*` values for lint/test/build only  
 - Backend workflow uses `APP_ENV=test` + memory storage  
 
-Do **not** put VAPID private keys, Firebase Admin JSON, or OpenAI keys in GitHub until you deliberately add a deploy workflow that needs them.
+Do **not** put VAPID private keys, Firebase Admin JSON, or OpenAI keys in GitHub until you deliberately add a deploy workflow that needs them. Production `VITE_*` for the live site belong in **Cloudflare Pages** env vars.
 
-### Firebase Hosting / Functions configuration
+### Frontend vs Functions configuration
 
 | Piece | File / location |
 | --- | --- |
-| Hosting public dir + SPA rewrite | Root `firebase.json` → `web/dist` |
+| PWA hosting | Cloudflare Pages (`web/` → `dist`) — not Firebase Hosting |
 | Functions + Firestore | `backend/firebase.json` |
-| Project binding | Root `.firebaserc` (and `--project` if deploying from `backend/`) |
+| Project binding | Root `.firebaserc` when using Firebase CLI for backend |
 
 ---
 
@@ -141,9 +146,9 @@ Do **not** put VAPID private keys, Firebase Admin JSON, or OpenAI keys in GitHub
 3. Copy the Firebase web config fields listed above into `web/.env.local`.  
 4. **Authentication** → Sign-in method → enable **Email/Password**.  
 5. **Authentication** → Users → **Add user** (email + password) **or** plan to use the app’s Sign up screen once.  
-6. **Authentication** → Settings → Authorized domains → ensure `localhost` exists; after Hosting deploy, add your Hosting domain.  
+6. **Authentication** → Settings → Authorized domains → ensure `localhost` exists; add `goldmeta.metamechsolutions.com` for production.  
 7. **Firestore Database** → Create database (choose a region; lock rules for production as you go live).  
-8. **Hosting** → Get started (skip until you have `web/dist`).  
+8. Deploy the PWA with **Cloudflare Pages** (see CLOUDFLARE_PAGES_DEPLOY.md) — do not use Firebase Hosting.  
 9. Leave Web Push / VAPID until phase 3.
 
 ---
@@ -173,7 +178,7 @@ VITE_API_BASE_URL=https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/api
 
 (Use your real region if not `us-central1`.)
 
-Rebuild the web app after changing env vars (`npm run build`) before Hosting deploy.
+Rebuild the web app after changing env vars (`npm run build`) before a Cloudflare Pages deploy.
 
 ---
 
@@ -240,20 +245,17 @@ npm run dev
 
 ## 7. Exact deployment commands (phased)
 
-### Phase A — Web Hosting only
+### Phase A — Cloudflare Pages (web only)
 
 ```bash
 cd web
-# ensure .env.local has production VITE_* including the API URL you will use
-# (API can still be a temporary URL; dashboard will error until backend is up)
-npm run build
-
-cd ..
-# set .firebaserc default to YOUR real project ID first
-firebase login
-firebase use   # confirm project
-firebase deploy --only hosting --config firebase.json
+npm ci
+npm run lint && npm run typecheck && npm test && npm run build
+# confirm dist/_redirects exists (SPA)
 ```
+
+Then create/connect the Cloudflare Pages project (`goldmeta-web`) with root `web`, build `npm run build`, output `dist`, set Production `VITE_*` env vars, attach custom domain `goldmeta.metamechsolutions.com`.  
+Details: [CLOUDFLARE_PAGES_DEPLOY.md](CLOUDFLARE_PAGES_DEPLOY.md).
 
 ### Phase B — Backend Functions separately
 
@@ -264,8 +266,8 @@ npm run build
 firebase deploy --only functions,firestore --project YOUR_REAL_FIREBASE_PROJECT_ID
 ```
 
-Then set `WEBHOOK_PUBLIC_BASE_URL` and `VITE_API_BASE_URL` to  
-`https://REGION-PROJECT_ID.cloudfunctions.net/api`, rebuild web, redeploy Hosting if the API URL changed.
+Then set `WEBHOOK_PUBLIC_BASE_URL` and Cloudflare Pages `VITE_API_BASE_URL` to  
+`https://REGION-PROJECT_ID.cloudfunctions.net/api`, and trigger a new Pages build.
 
 ### Phase C — Web Push later
 
@@ -281,10 +283,10 @@ npx web-push generate-vapid-keys
 
 ## 8. Exact first browser test
 
-1. Open the Hosting URL (or `npm run dev` locally) in a desktop browser.  
+1. Open https://goldmeta.metamechsolutions.com (or `npm run dev` locally) in a desktop browser.  
 2. Confirm Sign in / Sign up form appears (not “Firebase not configured”).  
 3. Sign in with your first test user (or Sign up once).  
-4. Confirm session sticks after refresh.  
+4. Confirm session sticks after refresh (SPA routes must not 404).  
 5. Dashboard loads (may show “No decision yet” or an API error until backend has data — that is OK).  
 6. Open Settings → Sign out → Sign in again.  
 7. Settings → Enable Web Push **without** VAPID → expect message that server VAPID is not configured (safe).
@@ -293,8 +295,8 @@ npx web-push generate-vapid-keys
 
 ## 9. Exact first iPhone Home Screen test
 
-1. Deploy Hosting over **HTTPS** (required on device).  
-2. iPhone Safari → open Hosting URL → Sign in.  
+1. Open **https://goldmeta.metamechsolutions.com** in Safari (HTTPS required).  
+2. Sign in.  
 3. Share → **Add to Home Screen** → open the icon.  
 4. Confirm standalone UI (minimal browser chrome) and still signed in.  
 5. Load dashboard once online → enable Airplane Mode → reopen → expect **stale/offline** cached decision banner if a decision was cached.  
@@ -310,15 +312,16 @@ npx web-push generate-vapid-keys
 | Web Push unset | `GET /v1/push/vapid-public-key` returns `{ publicKey: null }`; client shows missing_vapid; no crash |
 | Auth | Email/password sign-in + sign-up; Bearer ID token; no bypass |
 | CI secrets | None required for current workflows |
+| SPA on Pages | `web/public/_redirects` → `/* /index.html 200` |
 
 ---
 
-## 11. Blockers (must resolve with your Firebase project)
+## 11. Blockers (must resolve with your accounts)
 
-1. **Real Project ID** must replace `.firebaserc` placeholder before Hosting deploy.  
-2. **Email/Password** must be enabled or sign-in fails.  
-3. **Authorized domains** must include Hosting domain after first deploy.  
-4. **Split Firebase configs**: Hosting from repo root; Functions from `backend/` — use the same project ID.  
-5. **Backend API URL** must be set in `VITE_API_BASE_URL` before the web app can load live decisions.  
-6. **ADC / service account** required for Functions to verify ID tokens against your project.  
-7. **VAPID** not a blocker for first Auth + Hosting + API test — enable later.
+1. **Cloudflare authentication** required to create/deploy the Pages project from this agent environment.  
+2. **DNS** for `goldmeta` CNAME under `metamechsolutions.com` (do not touch apex site).  
+3. **Firebase Authorized domain** `goldmeta.metamechsolutions.com`.  
+4. **Email/Password** enabled + test user.  
+5. **`VITE_API_BASE_URL`** must hit live `/api` for decisions.  
+6. **ADC/service account** for Functions token verify.  
+7. **VAPID** is **not** a first-deploy blocker.

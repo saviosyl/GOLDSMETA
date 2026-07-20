@@ -33,8 +33,9 @@ npm ci
 npm run dev
 ```
 
-Full setup (Home Screen, push, Hosting): [docs/WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md).  
-First live Firebase values and phased deploy: [docs/FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md).
+Full setup (Home Screen, push): [docs/WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md).  
+Cloudflare Pages production deploy: [docs/CLOUDFLARE_PAGES_DEPLOY.md](docs/CLOUDFLARE_PAGES_DEPLOY.md).  
+Firebase Auth/API checklist: [docs/FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md).
 
 ## Quick start — iOS (Phase 1 mock mode)
 
@@ -84,8 +85,9 @@ See [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
 
 | Doc | Purpose |
 |-----|---------|
-| [WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md) | Browser PWA install, Firebase Hosting, Web Push |
-| [FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md) | Exact env checklist and phased first deploy |
+| [WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md) | Browser PWA install and Web Push |
+| [CLOUDFLARE_PAGES_DEPLOY.md](docs/CLOUDFLARE_PAGES_DEPLOY.md) | Cloudflare Pages + goldmeta.metamechsolutions.com |
+| [FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md) | Exact Firebase env checklist (Auth/API) |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
 | [DECISION_ENGINE.md](docs/DECISION_ENGINE.md) | Scoring, guards, confidence |
 | [MAC_FIRST_RUN_CHECKLIST.md](docs/MAC_FIRST_RUN_CHECKLIST.md) | Exact first-run Mac checklist |
