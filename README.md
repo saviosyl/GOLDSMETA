@@ -33,7 +33,8 @@ npm ci
 npm run dev
 ```
 
-Full setup (Home Screen, push, Hosting): [docs/WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md).
+Full setup (Home Screen, push, Hosting): [docs/WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md).  
+First live Firebase values and phased deploy: [docs/FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md).
 
 ## Quick start — iOS (Phase 1 mock mode)
 
@@ -84,6 +85,7 @@ See [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
 | Doc | Purpose |
 |-----|---------|
 | [WEB_PWA_SETUP.md](docs/WEB_PWA_SETUP.md) | Browser PWA install, Firebase Hosting, Web Push |
+| [FIREBASE_FIRST_DEPLOY.md](docs/FIREBASE_FIRST_DEPLOY.md) | Exact env checklist and phased first deploy |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
 | [DECISION_ENGINE.md](docs/DECISION_ENGINE.md) | Scoring, guards, confidence |
 | [MAC_FIRST_RUN_CHECKLIST.md](docs/MAC_FIRST_RUN_CHECKLIST.md) | Exact first-run Mac checklist |

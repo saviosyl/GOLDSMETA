@@ -28,8 +28,9 @@ export function SignInPage() {
       <div className="card">
         <h2>Firebase not configured</h2>
         <p className="muted">
-          Set <code>VITE_FIREBASE_*</code> and <code>VITE_API_BASE_URL</code> in <code>web/.env</code>.
-          See <code>docs/WEB_PWA_SETUP.md</code>. There is no auth bypass.
+          Set <code>VITE_FIREBASE_*</code> and <code>VITE_API_BASE_URL</code> in{" "}
+          <code>web/.env.local</code>. See <code>docs/WEB_PWA_SETUP.md</code> and{" "}
+          <code>docs/FIREBASE_FIRST_DEPLOY.md</code>. There is no auth bypass.
         </p>
         <p className="muted">Current API base: {apiBaseUrl}</p>
       </div>
