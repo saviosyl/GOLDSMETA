@@ -2,7 +2,7 @@ import type { Message } from "firebase-admin/messaging";
 import type { DecisionRecord } from "../../models/types";
 import { sendFirebaseMessages } from "../firebaseAdmin";
 import { logger } from "../logging/logger";
-import type { InMemoryStore } from "../storage/inMemoryStore";
+import type { GoldMetaStore } from "../storage/types";
 
 const notificationReason = (decision: DecisionRecord, previous: DecisionRecord | undefined): string | null => {
   if (!previous && decision.decision !== "WAIT") {
@@ -35,7 +35,7 @@ const buildBody = (decision: DecisionRecord): string => {
 };
 
 export const sendDecisionPushIfMeaningful = async (
-  store: InMemoryStore,
+  store: GoldMetaStore,
   decision: DecisionRecord,
   previous: DecisionRecord | undefined
 ): Promise<boolean> => {
@@ -45,11 +45,11 @@ export const sendDecisionPushIfMeaningful = async (
   }
 
   const dedupeKey = `${decision.decisionId}:${reason}`;
-  if (!store.markNotification(dedupeKey)) {
+  if (!(await store.markNotification(decision.userId, dedupeKey))) {
     return false;
   }
 
-  const devices = store.listDevices(decision.userId);
+  const devices = await store.listDevices(decision.userId);
   if (devices.length === 0) {
     logger.info("No registered devices for meaningful decision", {
       decisionId: decision.decisionId,

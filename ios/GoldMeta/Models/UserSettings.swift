@@ -10,7 +10,9 @@ struct UserSettings: Codable, Equatable {
     var lastDisclaimerAcceptedAt: Date?
 
     var webhookURL: String {
-        "https://api.goldmeta.app/webhooks/tradingview/\(webhookId)"
+        let base = AppConfig.current.apiBaseURL?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            ?? "https://YOUR_CLOUD_FUNCTIONS_URL"
+        return "\(base)/webhooks/tradingview/\(webhookId)"
     }
 
     static let defaultRiskOptions: [Double] = [0.25, 0.5, 1.0]

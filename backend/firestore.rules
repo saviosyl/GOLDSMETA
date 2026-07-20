@@ -39,10 +39,29 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /eventDedupes/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      match /notificationEvents/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
       match /marketSnapshots/{document=**} {
         allow read: if false;
         allow write: if false;
       }
+    }
+
+    match /webhookConnections/{webhookId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /processingJobs/{jobId} {
+      allow read, write: if false;
     }
 
     match /system/{document=**} {

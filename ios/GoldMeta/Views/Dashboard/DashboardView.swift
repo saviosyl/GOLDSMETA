@@ -44,7 +44,7 @@ struct DashboardView: View {
         case .offline(let cached):
             if let cached {
                 statusBanner("OFFLINE", message: "Showing cached decision. Treat as decision support only and verify live price.")
-                decisionCard(cached)
+                decisionCard(cached, sourceOverride: .offline)
             } else {
                 EmptyStateView(title: "Offline", message: "No cached decision is available yet.")
             }
@@ -69,14 +69,18 @@ struct DashboardView: View {
         }
     }
 
-    private func decisionCard(_ decision: Decision) -> some View {
+    private func decisionCard(_ decision: Decision, sourceOverride: DataSourceLabel? = nil) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             GoldCard {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .center) {
-                        DecisionBadge(decision: decision.decision, isProvisional: decision.isProvisional)
+                        DecisionBadge(
+                            decision: decision.decision,
+                            isProvisional: decision.isProvisional,
+                            isTestDecision: decision.shouldShowTestBadge
+                        )
                         Spacer()
-                        DataQualityBadge(dataQuality: decision.dataQuality, source: decision.dataSourceLabel)
+                        DataQualityBadge(dataQuality: decision.dataQuality, source: sourceOverride ?? decision.dataSourceLabel)
                     }
                     Text(decision.lastKnownPrice?.xauPrice ?? "No price")
                         .font(GoldMetaFont.price)
@@ -118,7 +122,7 @@ struct DashboardView: View {
 
             HStack(spacing: 12) {
                 NavigationLink {
-                    FullAnalysisView(viewModel: AnalysisViewModel(environment: AppEnvironment.preview), suppliedDecision: decision)
+                    FullAnalysisView(viewModel: AnalysisViewModel(environment: viewModel.environment), suppliedDecision: decision)
                 } label: {
                     Label("Open Full Analysis", systemImage: "doc.text.magnifyingglass")
                 }

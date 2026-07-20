@@ -30,17 +30,68 @@ struct SettingsView: View {
                         Text("Paper mode is recommended until live alerts and journaling are proven.")
                             .font(.caption)
                     }
-                    Section("Webhook") {
-                        Text(viewModel.settings.webhookURL)
+                    Section("API and account") {
+                        LabeledContent("API mode", value: viewModel.apiModeText)
+                        Text(viewModel.authStatusText)
+                            .font(.caption)
+                        Button(role: .destructive) {
+                            Task { await viewModel.signOut() }
+                        } label: {
+                            Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
+                    Section("Notifications") {
+                        LabeledContent("Push registration", value: viewModel.pushStatusText)
+                        Text(viewModel.notificationExplanationText)
+                            .font(.caption)
+                        Button {
+                            Task { await viewModel.requestPushRegistration() }
+                        } label: {
+                            Label("Register for push notifications", systemImage: "bell.badge")
+                        }
+                    }
+                    Section("TradingView connection") {
+                        Text(viewModel.copyLatestWebhookURL())
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
                         Button {
-                            UIPasteboard.general.string = viewModel.settings.webhookURL
+                            Task { await viewModel.createTradingViewConnection() }
+                        } label: {
+                            Label("Create backend connection", systemImage: "link.badge.plus")
+                        }
+                        Button {
+                            UIPasteboard.general.string = viewModel.copyLatestWebhookURL()
                         } label: {
                             Label("Copy webhook URL", systemImage: "doc.on.doc")
                         }
-                        ShareLink(item: viewModel.settings.webhookURL) {
-                            Label("Share webhook URL", systemImage: "square.and.arrow.up")
+                        if !viewModel.copyLatestPayloadSecret().isEmpty {
+                            Button {
+                                UIPasteboard.general.string = viewModel.copyLatestPayloadSecret()
+                            } label: {
+                                Label("Copy payload secret", systemImage: "lock.doc")
+                            }
+                        }
+                        Button {
+                            UIPasteboard.general.string = viewModel.exampleJSON()
+                        } label: {
+                            Label("Copy example JSON", systemImage: "curlybraces")
+                        }
+                        Button {
+                            Task { await viewModel.sendTestAlert() }
+                        } label: {
+                            Label("Send test alert", systemImage: "paperplane")
+                        }
+                        Text(viewModel.connectionStatusText)
+                            .font(.caption)
+                        if let testAlertStatusText = viewModel.testAlertStatusText {
+                            Text(testAlertStatusText)
+                                .font(.caption)
+                        }
+                        ForEach(viewModel.tradingViewConnections) { connection in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(connection.id).font(.caption.monospaced())
+                                Text(connection.status ?? "ACTIVE").font(.caption2)
+                            }
                         }
                     }
                     Section("Disclaimer") {
@@ -84,6 +135,7 @@ struct SettingsView: View {
                 .background(Color.clear)
             }
             .navigationTitle("Settings")
+            .task { await viewModel.refreshRemoteConfiguration() }
         }
     }
 }

@@ -27,6 +27,8 @@ GoldMeta/
 
 No Firebase or TradingView credentials are required for mock mode.
 
+For real Firebase/Auth/Push/API setup on a Mac, start with [docs/MAC_FIRST_RUN_CHECKLIST.md](docs/MAC_FIRST_RUN_CHECKLIST.md) and [docs/IOS_CONFIGURATION.md](docs/IOS_CONFIGURATION.md).
+
 ### Unit tests
 
 ```bash
@@ -65,6 +67,12 @@ See [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
 |-----|---------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
 | [DECISION_ENGINE.md](docs/DECISION_ENGINE.md) | Scoring, guards, confidence |
+| [MAC_FIRST_RUN_CHECKLIST.md](docs/MAC_FIRST_RUN_CHECKLIST.md) | Exact first-run Mac checklist |
+| [IOS_CONFIGURATION.md](docs/IOS_CONFIGURATION.md) | iOS plist, xcconfig, Firebase package setup |
+| [PRODUCTION_CONNECTION.md](docs/PRODUCTION_CONNECTION.md) | Connect iOS, Firebase, backend, TradingView, push |
+| [END_TO_END_TEST.md](docs/END_TO_END_TEST.md) | Owner validation flow |
+| [FIRESTORE_DATA_MODEL.md](docs/FIRESTORE_DATA_MODEL.md) | Firestore collections and fields |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Backend deploy and release checks |
 | [TRADINGVIEW_SETUP.md](docs/TRADINGVIEW_SETUP.md) | Pine + alerts |
 | [FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) | Auth, Firestore, Functions |
 | [PUSH_NOTIFICATIONS.md](docs/PUSH_NOTIFICATIONS.md) | FCM |
@@ -84,6 +92,17 @@ Core MVP paths are implemented as source in this tree:
 - Journal API + basic iOS journal UI
 
 **Requires your credentials for live operation:** Firebase project, OpenAI API key, Apple push capability, TradingView alert URL.
+
+## Secret scanning before every push
+
+Never commit real secrets. Before pushing, inspect staged files:
+
+```bash
+git status --short
+git diff --cached
+```
+
+Confirm the diff does not contain `GoogleService-Info.plist`, `Secrets.xcconfig`, Firebase Admin JSON, OpenAI keys, APNs keys, FCM tokens, or webhook payload secrets. Commit only `.example` templates.
 
 ## License / ownership
 

@@ -1,4 +1,5 @@
 import express, { type ErrorRequestHandler } from "express";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { env } from "./config/env";
 import { buildDecisionsRouter } from "./routes/decisions";
@@ -7,16 +8,19 @@ import { buildHealthRouter } from "./routes/health";
 import { buildJournalRouter } from "./routes/journal";
 import { buildSettingsRouter } from "./routes/settings";
 import { buildSystemRouter } from "./routes/system";
+import { buildTradingViewRouter } from "./routes/tradingview";
 import { buildWebhooksRouter } from "./routes/webhooks";
 import { AiExplainer } from "./services/ai/explainer";
-import { globalStore, InMemoryStore } from "./services/storage/inMemoryStore";
-import { DedupeStore } from "./services/webhook/dedupe";
+import { processJob } from "./services/jobs/processJob";
+import { createStore } from "./services/storage/createStore";
+import type { GoldMetaStore } from "./services/storage/types";
 
 export interface AppDependencies {
-  store: InMemoryStore;
-  dedupe: DedupeStore;
+  store: GoldMetaStore;
   aiExplainer: AiExplainer;
 }
+
+const defaultStore = createStore();
 
 const isPayloadTooLarge = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) {
@@ -51,8 +55,7 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 
 export const createApp = (
   dependencies: AppDependencies = {
-    store: globalStore,
-    dedupe: new DedupeStore(env.WEBHOOK_MAX_SKEW_MS * 2),
+    store: defaultStore,
     aiExplainer: new AiExplainer()
   }
 ): express.Express => {
@@ -61,7 +64,8 @@ export const createApp = (
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT }));
 
   app.use(buildHealthRouter());
-  app.use(buildWebhooksRouter(dependencies.store, dependencies.dedupe, dependencies.aiExplainer));
+  app.use(buildWebhooksRouter(dependencies.store, dependencies.aiExplainer));
+  app.use(buildTradingViewRouter(dependencies.store, dependencies.aiExplainer));
   app.use(buildDevicesRouter(dependencies.store));
   app.use(buildDecisionsRouter(dependencies.store));
   app.use(buildJournalRouter(dependencies.store));
@@ -73,7 +77,13 @@ export const createApp = (
 };
 
 export const app = createApp();
-export const api = onRequest(app);
+export const api = onRequest({ region: env.FIREBASE_REGION }, app);
+export const processProcessingJob = onDocumentCreated(
+  { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
+  async (event) => {
+    await processJob(event.params.jobId);
+  }
+);
 
 if (require.main === module) {
   app.listen(env.PORT, () => {

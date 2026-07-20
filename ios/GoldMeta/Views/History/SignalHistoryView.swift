@@ -60,7 +60,11 @@ struct SignalHistoryView: View {
     private func historyRow(_ decision: Decision) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                DecisionBadge(decision: decision.decision, isProvisional: decision.isProvisional)
+                DecisionBadge(
+                    decision: decision.decision,
+                    isProvisional: decision.isProvisional,
+                    isTestDecision: decision.shouldShowTestBadge
+                )
                 Spacer()
                 Text(decision.generatedAt.shortDateTime)
                     .font(.caption)

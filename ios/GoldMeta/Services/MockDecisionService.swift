@@ -32,6 +32,13 @@ final class MockDecisionService: DecisionServiceProtocol {
         try loadDecisions().sorted { $0.generatedAt > $1.generatedAt }
     }
 
+    func decision(id: String) async throws -> Decision {
+        guard let decision = try loadDecisions().first(where: { $0.decisionId == id }) else {
+            throw DecisionServiceError.notFound
+        }
+        return decision
+    }
+
     func cycleMockFixture() async throws -> Decision {
         let decisions = try loadDecisions()
         var settings = localStore.loadSettings()

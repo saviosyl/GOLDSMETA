@@ -13,6 +13,8 @@ struct Decision: Codable, Identifiable, Equatable {
     let marketRegime: MarketRegime
     let dataQuality: DataQuality
     let isProvisional: Bool
+    let isTestDecision: Bool?
+    let environment: String?
     let setupScore: Double
     let entry: EntryPlan
     let stopLoss: StopLossPlan
@@ -46,6 +48,7 @@ struct Decision: Codable, Identifiable, Equatable {
 
     var isExpired: Bool { validUntil < Date() }
     var isStale: Bool { dataQuality == .stale || dataSourceLabel == .stale || dataSourceLabel == .offline }
+    var shouldShowTestBadge: Bool { isTestDecision == true || environment == "TEST" }
 
     static let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()

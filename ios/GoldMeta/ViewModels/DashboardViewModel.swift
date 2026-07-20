@@ -14,7 +14,7 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var decision: Decision?
     @Published var showAnalysis = false
 
-    private let environment: AppEnvironment
+    let environment: AppEnvironment
 
     init(environment: AppEnvironment) {
         self.environment = environment

@@ -15,7 +15,7 @@ export const requireAuth: RequestHandler = async (
   res: Response,
   next: NextFunction
 ) => {
-  if (env.NODE_ENV === "test") {
+  if (env.ALLOW_TEST_AUTH_HEADER) {
     const testUserId = req.header("x-test-user-id");
     if (testUserId) {
       req.userId = testUserId;

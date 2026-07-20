@@ -13,7 +13,7 @@ import { buildFallbackExplanation } from "../ai/fallback";
 import { sendDecisionPushIfMeaningful } from "../notifications/push";
 import { evaluateDataQuality } from "../snapshot/dataQuality";
 import { mergeSnapshot } from "../snapshot/mergeSnapshot";
-import type { InMemoryStore } from "../storage/inMemoryStore";
+import type { DecisionEnvironment, GoldMetaStore } from "../storage/types";
 import { calculateConfidence } from "./confidence";
 import { evaluateHardGuards } from "./hardGuards";
 import { scoreSnapshot, directionFromScore } from "./scoringEngine";
@@ -62,15 +62,29 @@ const reasonSummaryFor = (ai: AiExplanation, finalDecision: DecisionDirection): 
 };
 
 export const processDecisionPipeline = async (
+  userId: string,
   payload: TradingViewPayload,
   stableEventId: string,
-  store: InMemoryStore,
-  aiExplainer = new AiExplainer()
+  store: GoldMetaStore,
+  aiExplainer = new AiExplainer(),
+  options: {
+    environment?: DecisionEnvironment;
+    isTestDecision?: boolean;
+    webhookId?: string;
+  } = {}
 ): Promise<DecisionRecord> => {
-  store.saveRawEvent(payload, stableEventId);
+  const environment = options.environment ?? "LIVE";
+  const isTestDecision = options.isTestDecision ?? false;
 
-  const previousMeaningfulDecision = store.latestMeaningfulDecision();
+  await store.saveRawEvent(userId, payload, stableEventId, {
+    webhookId: options.webhookId,
+    environment,
+    isTestEvent: isTestDecision
+  });
+
+  const previousMeaningfulDecision = await store.latestMeaningfulDecision(userId);
   const snapshot = mergeSnapshot(payload, stableEventId);
+  await store.saveSnapshot(userId, snapshot);
   const dataQuality = evaluateDataQuality(snapshot);
   const score = scoreSnapshot(snapshot);
   const initialDecision = directionFromScore(score.score);
@@ -116,7 +130,7 @@ export const processDecisionPipeline = async (
   const decision: DecisionRecord = {
     schemaVersion: "1.0",
     decisionId: decisionIdFor(stableEventId, generatedAt),
-    userId: metadataString(payload, "userId") ?? "default-user",
+    userId,
     symbol: "XAUUSD",
     generatedAt,
     marketDataTime: snapshot.marketDataTime,
@@ -164,7 +178,9 @@ export const processDecisionPipeline = async (
     currentSession: snapshot.sessionVolumeProfile?.session ?? null,
     higherTimeframeBias: htfBias,
     lastKnownPrice: snapshot.price,
-    dataSourceLabel: dataQuality.quality === "STALE" ? "STALE" : "LIVE"
+    dataSourceLabel: environment === "TEST" || isTestDecision ? "TEST" : dataQuality.quality === "STALE" ? "STALE" : "LIVE",
+    environment,
+    isTestDecision
   };
 
   decision.notificationSent = await sendDecisionPushIfMeaningful(
@@ -173,6 +189,6 @@ export const processDecisionPipeline = async (
     previousMeaningfulDecision
   );
 
-  store.saveDecision(decision);
+  await store.saveDecision(decision);
   return decision;
 };

@@ -262,7 +262,9 @@ export interface DecisionRecord {
   currentSession: string | null;
   higherTimeframeBias: TrendDirection | null;
   lastKnownPrice: number | null;
-  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE";
+  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE" | "TEST";
+  environment: "LIVE" | "TEST";
+  isTestDecision: boolean;
 }
 
 export const deviceRegistrationSchema = z

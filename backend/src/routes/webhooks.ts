@@ -1,18 +1,16 @@
 import { Router } from "express";
 import { createRateLimit } from "../middleware/rateLimit";
 import { AiExplainer } from "../services/ai/explainer";
-import { processDecisionPipeline } from "../services/decision/decisionPipeline";
 import { logger } from "../services/logging/logger";
-import type { InMemoryStore } from "../services/storage/inMemoryStore";
-import { DedupeStore } from "../services/webhook/dedupe";
+import type { GoldMetaStore } from "../services/storage/types";
+import { enqueueWebhookEvent } from "../services/webhook/enqueueWebhookEvent";
 import { validateWebhookPayload, WebhookValidationError } from "../services/webhook/validatePayload";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
 
 export const buildWebhooksRouter = (
-  store: InMemoryStore,
-  dedupe: DedupeStore,
+  store: GoldMetaStore,
   aiExplainer = new AiExplainer()
 ): Router => {
   const router = Router();
@@ -20,42 +18,22 @@ export const buildWebhooksRouter = (
   router.post(
     "/webhooks/tradingview/:webhookId",
     createRateLimit("tradingview-webhook"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const webhookId = firstParam(req.params.webhookId) ?? "";
-        const validated = validateWebhookPayload(webhookId, req.body);
-
-        if (!dedupe.checkAndStore(validated.stableEventId)) {
-          res.status(202).json({
-            accepted: true,
-            duplicate: true,
-            eventId: validated.stableEventId
-          });
-          return;
-        }
-
-        // Acknowledge immediately. Decision + AI run asynchronously so TradingView
-        // is never blocked waiting on OpenAI or the full scoring pipeline.
-        store.enqueueAcceptedEvent(validated.payload, validated.stableEventId);
-
-        void processDecisionPipeline(
-          validated.payload,
-          validated.stableEventId,
+        const validated = await validateWebhookPayload(store, webhookId, req.body);
+        const result = await enqueueWebhookEvent({
           store,
+          userId: validated.userId,
+          webhookId: validated.webhookId,
+          payload: validated.payload,
+          stableEventId: validated.stableEventId,
+          environment: "LIVE",
+          isTestDecision: false,
           aiExplainer
-        ).catch((error: unknown) => {
-          logger.error("Background webhook processing failed", {
-            eventId: validated.stableEventId,
-            error: error instanceof Error ? error.message : "unknown"
-          });
         });
 
-        res.status(202).json({
-          accepted: true,
-          duplicate: false,
-          eventId: validated.stableEventId,
-          status: "QUEUED"
-        });
+        res.status(202).json(result);
       } catch (error: unknown) {
         if (error instanceof WebhookValidationError) {
           res.status(error.statusCode).json({
