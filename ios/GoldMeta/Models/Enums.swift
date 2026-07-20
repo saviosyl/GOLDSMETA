@@ -90,6 +90,65 @@ enum TradeAction: String, Codable, CaseIterable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
+/// Dashboard workflow actions shown on the XAUUSD decision screen.
+enum RecommendedTradeAction: String, Codable, CaseIterable, Identifiable {
+    case waitForCandleClose = "WAIT_FOR_CANDLE_CLOSE"
+    case enterTrade = "ENTER_TRADE"
+    case hold = "HOLD"
+    case takePartialProfit = "TAKE_PARTIAL_PROFIT"
+    case moveStopToBreakeven = "MOVE_STOP_TO_BREAKEVEN"
+    case exitEarly = "EXIT_EARLY"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .waitForCandleClose: return "Wait for candle close"
+        case .enterTrade: return "Enter trade"
+        case .hold: return "Hold"
+        case .takePartialProfit: return "Take partial profit"
+        case .moveStopToBreakeven: return "Move stop to breakeven"
+        case .exitEarly: return "Exit early"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .waitForCandleClose: return "clock.badge.checkmark"
+        case .enterTrade: return "arrow.right.circle.fill"
+        case .hold: return "hand.raised.fill"
+        case .takePartialProfit: return "chart.line.downtrend.xyaxis"
+        case .moveStopToBreakeven: return "arrow.left.arrow.right.circle"
+        case .exitEarly: return "xmark.octagon.fill"
+        }
+    }
+
+    var isPrimary: Bool {
+        switch self {
+        case .enterTrade, .waitForCandleClose, .exitEarly:
+            return true
+        case .hold, .takePartialProfit, .moveStopToBreakeven:
+            return false
+        }
+    }
+
+    static func defaults(for decision: DecisionType, breakeven: BreakevenState, earlyExit: Bool) -> [RecommendedTradeAction] {
+        if earlyExit { return [.exitEarly, .hold, .moveStopToBreakeven] }
+        switch decision {
+        case .wait:
+            return [.waitForCandleClose, .hold]
+        case .buy, .sell:
+            var actions: [RecommendedTradeAction] = [.enterTrade, .waitForCandleClose, .hold]
+            if breakeven == .moveToBreakeven || breakeven == .lockPartialProfit {
+                actions.append(.moveStopToBreakeven)
+                actions.append(.takePartialProfit)
+            }
+            actions.append(.exitEarly)
+            return actions
+        }
+    }
+}
+
 enum TradeOutcome: String, Codable, CaseIterable, Identifiable {
     case open
     case win

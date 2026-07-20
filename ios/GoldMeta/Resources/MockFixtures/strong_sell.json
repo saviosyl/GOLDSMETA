@@ -47,7 +47,7 @@
   },
   "breakeven": {
     "state": "HOLD_ORIGINAL_STOP",
-    "trigger": "After TP1 close above entry",
+    "trigger": "After TP1 close below entry",
     "newStop": 2418.6,
     "reason": "Reduce downside after first target confirms follow-through."
   },
@@ -65,7 +65,7 @@
   "bearishEvidence": [
     "M30 lower high confirmed",
     "HTF bias bearish",
-    "RSI rejection below neutral line"
+    "Rejection from value area high with heavy offer"
   ],
   "reasonCodes": [
     "STRONG-SELL",
@@ -94,5 +94,18 @@
   "currentSession": "New York",
   "higherTimeframeBias": "BEARISH",
   "lastKnownPrice": 2416.2,
-  "dataSourceLabel": "MOCK"
+  "dataSourceLabel": "MOCK",
+  "scenarioName": "Bearish SELL setup",
+  "marketStructure": {
+    "trend": "BEARISH",
+    "poc": 2412.80,
+    "vah": 2421.50,
+    "val": 2405.20
+  },
+  "recommendedActions": [
+    "WAIT_FOR_CANDLE_CLOSE",
+    "ENTER_TRADE",
+    "HOLD",
+    "EXIT_EARLY"
+  ]
 }

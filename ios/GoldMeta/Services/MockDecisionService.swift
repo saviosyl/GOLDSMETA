@@ -3,15 +3,22 @@ import Foundation
 final class MockDecisionService: DecisionServiceProtocol {
     static let fixtureNames = [
         "strong_buy",
-        "weak_buy_wait_rr",
         "strong_sell",
         "conflicted_wait",
+        "weak_buy_wait_rr",
         "stale_wait",
         "missing_confirmation",
         "provisional_buy",
         "active_trade_tp1",
         "invalidation_wait",
         "offline_recovery"
+    ]
+
+    /// Primary MVP mock scenarios for dashboard workflow testing.
+    static let mvpFixtureNames = [
+        "strong_buy",
+        "strong_sell",
+        "conflicted_wait"
     ]
 
     private let localStore: LocalStore

@@ -43,12 +43,31 @@ struct Decision: Codable, Identifiable, Equatable {
     let higherTimeframeBias: HigherTimeframeBias?
     let lastKnownPrice: Double?
     let dataSourceLabel: DataSourceLabel
+    /// Optional volume-profile / structure levels for the dashboard.
+    let marketStructure: MarketStructure?
+    /// Optional explicit workflow actions; falls back to defaults when absent.
+    let recommendedActions: [RecommendedTradeAction]?
+    /// Optional short label for mock scenario pickers.
+    let scenarioName: String?
 
     var id: String { decisionId }
 
     var isExpired: Bool { validUntil < Date() }
     var isStale: Bool { dataQuality == .stale || dataSourceLabel == .stale || dataSourceLabel == .offline }
     var shouldShowTestBadge: Bool { isTestDecision == true || environment == "TEST" }
+
+    var display: DecisionDisplay { DecisionDisplay(decision: self) }
+
+    var actionsForDisplay: [RecommendedTradeAction] {
+        if let recommendedActions, !recommendedActions.isEmpty {
+            return recommendedActions
+        }
+        return RecommendedTradeAction.defaults(
+            for: decision,
+            breakeven: breakeven.state,
+            earlyExit: earlyExit.exitNow
+        )
+    }
 
     static let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -109,6 +128,64 @@ struct BreakevenPlan: Codable, Equatable {
 struct EarlyExitPlan: Codable, Equatable {
     let exitNow: Bool
     let conditions: [String]
+}
+
+struct MarketStructure: Codable, Equatable {
+    let trend: String
+    let poc: Double?
+    let vah: Double?
+    let val: Double?
+
+    var trendDisplay: String {
+        trend.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+/// Formatted values for the XAUUSD dashboard and unit tests.
+struct DecisionDisplay: Equatable {
+    let decisionLabel: String
+    let confidenceText: String
+    let confidenceDetail: String
+    let currentPriceText: String
+    let trendText: String
+    let pocText: String
+    let vahText: String
+    let valText: String
+    let entryText: String
+    let stopLossText: String
+    let tp1Text: String
+    let tp2Text: String
+    let tp3Text: String
+    let riskRewardText: String
+    let supportingReasons: [String]
+    let opposingReasons: [String]
+    let actionTitles: [String]
+    let scenarioTitle: String
+
+    init(decision: Decision) {
+        decisionLabel = decision.decision.rawValue
+        confidenceText = decision.confidence.percentText
+        confidenceDetail = decision.confidenceLabel.displayName
+        currentPriceText = decision.lastKnownPrice?.xauPrice ?? "—"
+        trendText = decision.marketStructure?.trendDisplay
+            ?? decision.higherTimeframeBias?.rawValue.capitalized
+            ?? decision.marketRegime.displayName
+        pocText = decision.marketStructure?.poc?.xauPrice ?? "—"
+        vahText = decision.marketStructure?.vah?.xauPrice ?? "—"
+        valText = decision.marketStructure?.val?.xauPrice ?? "—"
+        entryText = decision.entry.displayPrice
+        stopLossText = decision.stopLoss.price?.xauPrice ?? "—"
+        let tpMap = Dictionary(uniqueKeysWithValues: decision.takeProfits.map { ($0.label.uppercased(), $0.price.xauPrice) })
+        tp1Text = tpMap["TP1"] ?? "—"
+        tp2Text = tpMap["TP2"] ?? "—"
+        tp3Text = tpMap["TP3"] ?? "—"
+        riskRewardText = decision.riskReward.bestAvailable?.ratioText ?? "—"
+        supportingReasons = decision.decision == .sell ? decision.bearishEvidence : decision.bullishEvidence
+        opposingReasons = decision.decision == .sell ? decision.bullishEvidence : decision.bearishEvidence
+        actionTitles = decision.actionsForDisplay.map(\.title)
+        scenarioTitle = decision.scenarioName
+            ?? "\(decision.decision.rawValue) · \(decision.confidenceLabel.displayName)"
+    }
 }
 
 extension Double {

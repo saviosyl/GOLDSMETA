@@ -62,10 +62,10 @@
   "bullishEvidence": [
     "M15 trend aligned above fast and slow EMA",
     "Higher timeframe bias bullish",
-    "Pullback held above support with rising volume"
+    "Pullback held above value area low with rising volume"
   ],
   "bearishEvidence": [
-    "Price is near prior resistance"
+    "Price is approaching prior resistance near VAH"
   ],
   "reasonCodes": [
     "STRONG-BUY",
@@ -94,5 +94,18 @@
   "currentSession": "London / New York overlap",
   "higherTimeframeBias": "BULLISH",
   "lastKnownPrice": 2412.35,
-  "dataSourceLabel": "MOCK"
+  "dataSourceLabel": "MOCK",
+  "scenarioName": "Bullish BUY setup",
+  "marketStructure": {
+    "trend": "BULLISH",
+    "poc": 2409.40,
+    "vah": 2418.60,
+    "val": 2404.90
+  },
+  "recommendedActions": [
+    "ENTER_TRADE",
+    "WAIT_FOR_CANDLE_CLOSE",
+    "HOLD",
+    "EXIT_EARLY"
+  ]
 }
