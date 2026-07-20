@@ -18,7 +18,7 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .dashboard
     @State private var routedDecision: Decision?
 
-    init(environment: AppEnvironment = .preview) {
+    init(environment: AppEnvironment) {
         _dashboardViewModel = StateObject(wrappedValue: DashboardViewModel(environment: environment))
         _historyViewModel = StateObject(wrappedValue: HistoryViewModel(environment: environment))
         _journalViewModel = StateObject(wrappedValue: JournalViewModel(environment: environment))
