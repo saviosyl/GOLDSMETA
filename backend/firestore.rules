@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+
+      match /settings/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /devices/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /journalEntries/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /decisions/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /rawEvents/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      match /marketSnapshots/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+    }
+
+    match /system/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

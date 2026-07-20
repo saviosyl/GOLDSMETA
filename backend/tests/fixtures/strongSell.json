@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-strong-sell",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T08:00:00.000Z",
+  "sentAt": "2026-07-20T08:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2395,
+    "high": 2398,
+    "low": 2378,
+    "close": 2382,
+    "volume": 1000
+  },
+  "levels": {
+    "pocAll": 2395,
+    "vahAll": 2410,
+    "valAll": 2390,
+    "pocNonBroken": [{ "price": 2395, "relation": "BELOW" }],
+    "vahNonBroken": [{ "price": 2410, "relation": "BELOW" }],
+    "valNonBroken": [{ "price": 2390, "relation": "INTERACTING" }]
+  },
+  "sessionVolumeProfile": {
+    "session": "NEWYORK",
+    "poc": 2395,
+    "vah": 2410,
+    "val": 2390,
+    "hvn": [],
+    "lvn": [],
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "marketProfile": {
+    "tpoPoc": 2395,
+    "initialBalanceHigh": 2409,
+    "initialBalanceLow": 2385,
+    "singlePrints": [],
+    "valueMigration": "DOWN",
+    "profileState": "IMBALANCED",
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "trend": {
+    "direction": "BEARISH",
+    "strength": 90,
+    "components": [
+      { "name": "M15 trend", "direction": "BEARISH", "strength": 90, "sourceTimeframe": "15" },
+      { "name": "H1 trend", "direction": "BEARISH", "strength": 75, "sourceTimeframe": "60" }
+    ]
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BEARISH",
+    "classification": "BREAKOUT",
+    "open": 2395,
+    "high": 2398,
+    "low": 2378,
+    "close": 2382,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "pine-1.0.0",
+    "userId": "default-user"
+  }
+}

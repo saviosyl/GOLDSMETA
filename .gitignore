@@ -1,0 +1,54 @@
+# GoldMeta
+.DS_Store
+*.swp
+*~
+
+# Secrets
+.env
+.env.local
+*.pem
+GoogleService-Info.plist
+**/serviceAccount*.json
+**/firebase-adminsdk*.json
+Secrets.xcconfig
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Xcode / Swift
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+.swiftpm/
+Packages/
+Package.resolved
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# OS
+Thumbs.db
+
+# Test / temp
+*.log
+tmp/
+.temp/
+
+.env
+.env.local

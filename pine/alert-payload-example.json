@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "OANDA:XAUUSD-5-1794902700000",
+  "webhookSecret": null,
+  "symbol": "XAUUSD",
+  "exchange": "OANDA",
+  "timeframe": "5",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-11-17T14:45:00Z",
+  "sentAt": "2026-11-17T14:45:02Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2417.32,
+    "high": 2421.86,
+    "low": 2415.74,
+    "close": 2420.48,
+    "volume": 18472
+  },
+  "levels": {
+    "pocAll": null,
+    "vahAll": null,
+    "valAll": null,
+    "pocNonBroken": [],
+    "vahNonBroken": [],
+    "valNonBroken": []
+  },
+  "sessionVolumeProfile": {
+    "session": "OVERLAP",
+    "sessionStart": null,
+    "sessionEnd": null,
+    "poc": null,
+    "vah": null,
+    "val": null,
+    "hvn": [],
+    "lvn": [],
+    "acceptanceState": "UNKNOWN"
+  },
+  "marketProfile": {
+    "tpoPoc": null,
+    "initialBalanceHigh": null,
+    "initialBalanceLow": null,
+    "poorHigh": null,
+    "poorLow": null,
+    "singlePrints": [],
+    "valueMigration": "UNKNOWN",
+    "profileState": "UNKNOWN",
+    "acceptanceState": "UNKNOWN"
+  },
+  "trend": null,
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "candleType": null,
+    "classification": "NONE",
+    "open": 2417.32,
+    "high": 2421.86,
+    "low": 2415.74,
+    "close": 2420.48,
+    "bodyPercent": 51.63,
+    "upperWickPercent": 22.55,
+    "lowerWickPercent": 25.82,
+    "volume": 18472,
+    "isClosed": true,
+    "relatedLevel": null
+  },
+  "optionalIndicators": {
+    "session": {
+      "heuristic": "UTC_HOUR",
+      "name": "OVERLAP",
+      "high": 2428.41,
+      "low": 2409.92
+    },
+    "structure": {
+      "placeholder": true,
+      "swingLength": 5,
+      "lastSwingHigh": 2432.15,
+      "lastSwingLow": 2398.66
+    },
+    "atr": {
+      "length": 14,
+      "value": 5.84,
+      "upperBand": 2426.32,
+      "lowerBand": 2414.64
+    },
+    "higherTimeframe": {
+      "timeframe": "60",
+      "close": 2420.48,
+      "sma20": 2412.73,
+      "bias": "BULLISH"
+    },
+    "proprietaryAdapters": {
+      "volumeProfile": "unavailable_null_stub",
+      "marketProfileTpo": "unavailable_null_stub",
+      "trendMeter": "unavailable_null_stub"
+    }
+  },
+  "metadata": {
+    "scriptVersion": "1.0.0",
+    "confirmedBarMode": true,
+    "diagnosticMode": false,
+    "symbolOk": true
+  }
+}

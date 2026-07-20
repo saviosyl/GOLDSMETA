@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-005-stale-wait",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:25:00Z",
+  "marketDataTime": "2026-07-20T07:24:00Z",
+  "validUntil": "2026-07-20T09:45:00Z",
+  "decision": "WAIT",
+  "confidence": 20,
+  "confidenceLabel": "LOW",
+  "marketRegime": "UNKNOWN",
+  "dataQuality": "STALE",
+  "isProvisional": false,
+  "setupScore": 0,
+  "entry": {
+    "type": "NONE",
+    "price": null,
+    "zoneLow": null,
+    "zoneHigh": null,
+    "condition": "Market data is stale."
+  },
+  "stopLoss": {
+    "price": null,
+    "reason": null
+  },
+  "takeProfits": [],
+  "riskReward": {
+    "tp1": null,
+    "tp2": null,
+    "tp3": null
+  },
+  "breakeven": {
+    "state": "HOLD_ORIGINAL_STOP",
+    "trigger": null,
+    "newStop": null,
+    "reason": "No active trade plan."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "Wait decision remains valid until confirmation improves"
+    ]
+  },
+  "bullishEvidence": [],
+  "bearishEvidence": [
+    "Latest indicator packet is older than the allowed freshness window"
+  ],
+  "reasonCodes": [
+    "STALE-WAIT",
+    "STALE",
+    "STALE"
+  ],
+  "reasonSummary": [
+    "WAIT because data is stale.",
+    "Refresh live data before considering any setup."
+  ],
+  "warnings": [
+    "STALE label means prices may no longer reflect current market."
+  ],
+  "missingInputs": [
+    "Fresh M15 candle",
+    "Latest proprietary confirmation"
+  ],
+  "invalidation": "Stale decision is invalid once live data resumes.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "EXPIRED",
+  "snapshotId": "snap-005",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": false,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "NEUTRAL",
+  "lastKnownPrice": 2407.7,
+  "dataSourceLabel": "STALE"
+}

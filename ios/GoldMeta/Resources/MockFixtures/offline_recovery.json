@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-010-offline-recovery",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T06:50:00Z",
+  "marketDataTime": "2026-07-20T06:49:00Z",
+  "validUntil": "2026-07-20T09:30:00Z",
+  "decision": "WAIT",
+  "confidence": 10,
+  "confidenceLabel": "LOW",
+  "marketRegime": "UNKNOWN",
+  "dataQuality": "STALE",
+  "isProvisional": false,
+  "setupScore": 0,
+  "entry": {
+    "type": "NONE",
+    "price": null,
+    "zoneLow": null,
+    "zoneHigh": null,
+    "condition": "Device is offline; cached state only."
+  },
+  "stopLoss": {
+    "price": null,
+    "reason": null
+  },
+  "takeProfits": [],
+  "riskReward": {
+    "tp1": null,
+    "tp2": null,
+    "tp3": null
+  },
+  "breakeven": {
+    "state": "HOLD_ORIGINAL_STOP",
+    "trigger": null,
+    "newStop": null,
+    "reason": "No active trade plan."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "Wait decision remains valid until confirmation improves"
+    ]
+  },
+  "bullishEvidence": [],
+  "bearishEvidence": [
+    "Network unavailable",
+    "Decision may be outdated"
+  ],
+  "reasonCodes": [
+    "OFFLINE-RECOVERY",
+    "STALE",
+    "OFFLINE"
+  ],
+  "reasonSummary": [
+    "OFFLINE: use this only as cached context.",
+    "Reconnect to refresh before acting."
+  ],
+  "warnings": [
+    "Offline decisions are not live trading inputs."
+  ],
+  "missingInputs": [
+    "Network connection",
+    "Fresh backend sync"
+  ],
+  "invalidation": "Offline cached decision expires when connectivity returns.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "EXPIRED",
+  "snapshotId": "snap-010",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": true,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "NEUTRAL",
+  "lastKnownPrice": 2402.0,
+  "dataSourceLabel": "OFFLINE"
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-strong-buy",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T08:00:00.000Z",
+  "sentAt": "2026-07-20T08:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2412,
+    "high": 2425,
+    "low": 2408,
+    "close": 2422,
+    "volume": 1000
+  },
+  "levels": {
+    "pocAll": 2410,
+    "vahAll": 2418,
+    "valAll": 2395,
+    "pocNonBroken": [{ "price": 2410, "relation": "ABOVE" }],
+    "vahNonBroken": [{ "price": 2418, "relation": "INTERACTING" }],
+    "valNonBroken": [{ "price": 2395, "relation": "BELOW" }]
+  },
+  "sessionVolumeProfile": {
+    "session": "LONDON",
+    "poc": 2410,
+    "vah": 2418,
+    "val": 2395,
+    "hvn": [],
+    "lvn": [],
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "marketProfile": {
+    "tpoPoc": 2410,
+    "initialBalanceHigh": 2415,
+    "initialBalanceLow": 2391,
+    "singlePrints": [],
+    "valueMigration": "UP",
+    "profileState": "IMBALANCED",
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 90,
+    "components": [
+      { "name": "M15 trend", "direction": "BULLISH", "strength": 90, "sourceTimeframe": "15" },
+      { "name": "H1 trend", "direction": "BULLISH", "strength": 75, "sourceTimeframe": "60" }
+    ]
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "classification": "BREAKOUT",
+    "open": 2412,
+    "high": 2425,
+    "low": 2408,
+    "close": 2422,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "pine-1.0.0",
+    "userId": "default-user"
+  }
+}

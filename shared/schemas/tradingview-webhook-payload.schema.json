@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://goldmeta.app/schemas/tradingview-webhook-payload.schema.json",
+  "title": "TradingViewWebhookPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "source",
+    "eventId",
+    "symbol",
+    "timeframe",
+    "eventType",
+    "barTime",
+    "sentAt",
+    "isConfirmedBar"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "source": { "type": "string", "enum": ["tradingview", "proprietary_alert", "manual"] },
+    "eventId": { "type": "string", "minLength": 8 },
+    "webhookSecret": { "type": ["string", "null"] },
+    "symbol": { "type": "string", "enum": ["XAUUSD"] },
+    "exchange": { "type": ["string", "null"] },
+    "timeframe": { "type": "string", "enum": ["1", "5", "15", "60", "240"] },
+    "eventType": {
+      "type": "string",
+      "enum": ["BAR_CLOSE", "BAR_UPDATE", "INDICATOR_UPDATE", "TEST"]
+    },
+    "barTime": { "type": "string", "format": "date-time" },
+    "sentAt": { "type": "string", "format": "date-time" },
+    "isConfirmedBar": { "type": "boolean" },
+    "indicatorName": { "type": ["string", "null"] },
+    "ohlcv": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "open": { "type": ["number", "null"] },
+        "high": { "type": ["number", "null"] },
+        "low": { "type": ["number", "null"] },
+        "close": { "type": ["number", "null"] },
+        "volume": { "type": ["number", "null"] }
+      }
+    },
+    "levels": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pocAll": { "type": ["number", "null"] },
+        "vahAll": { "type": ["number", "null"] },
+        "valAll": { "type": ["number", "null"] },
+        "pocNonBroken": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileLevel" }
+        },
+        "vahNonBroken": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileLevel" }
+        },
+        "valNonBroken": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileLevel" }
+        }
+      }
+    },
+    "sessionVolumeProfile": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "type": "string",
+          "enum": ["ASIA", "LONDON", "NEWYORK", "OVERLAP", "UNKNOWN"]
+        },
+        "sessionStart": { "type": ["string", "null"], "format": "date-time" },
+        "sessionEnd": { "type": ["string", "null"], "format": "date-time" },
+        "poc": { "type": ["number", "null"] },
+        "vah": { "type": ["number", "null"] },
+        "val": { "type": ["number", "null"] },
+        "hvn": { "type": "array", "items": { "type": "number" } },
+        "lvn": { "type": "array", "items": { "type": "number" } },
+        "acceptanceState": {
+          "type": "string",
+          "enum": ["ACCEPTANCE", "REJECTION", "UNKNOWN"]
+        }
+      }
+    },
+    "marketProfile": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "tpoPoc": { "type": ["number", "null"] },
+        "initialBalanceHigh": { "type": ["number", "null"] },
+        "initialBalanceLow": { "type": ["number", "null"] },
+        "poorHigh": { "type": ["number", "null"] },
+        "poorLow": { "type": ["number", "null"] },
+        "singlePrints": { "type": "array", "items": { "type": "number" } },
+        "valueMigration": {
+          "type": "string",
+          "enum": ["UP", "DOWN", "BALANCED", "UNKNOWN"]
+        },
+        "profileState": {
+          "type": "string",
+          "enum": ["BALANCED", "IMBALANCED", "UNKNOWN"]
+        },
+        "acceptanceState": {
+          "type": "string",
+          "enum": ["ACCEPTANCE", "REJECTION", "UNKNOWN"]
+        }
+      }
+    },
+    "trend": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "direction", "strength", "sourceTimeframe"],
+            "properties": {
+              "name": { "type": "string" },
+              "direction": {
+                "type": "string",
+                "enum": ["BULLISH", "BEARISH", "NEUTRAL"]
+              },
+              "strength": { "type": "number", "minimum": 0, "maximum": 100 },
+              "sourceTimeframe": { "type": "string" }
+            }
+          }
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["BULLISH", "BEARISH", "NEUTRAL"]
+        },
+        "strength": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "confirmationCandle": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "confirmed": { "type": "boolean" },
+        "direction": {
+          "type": "string",
+          "enum": ["BULLISH", "BEARISH", "NEUTRAL"]
+        },
+        "candleType": { "type": ["string", "null"] },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "REJECTION",
+            "BREAKOUT",
+            "RETEST",
+            "CONTINUATION",
+            "NONE"
+          ]
+        },
+        "open": { "type": ["number", "null"] },
+        "high": { "type": ["number", "null"] },
+        "low": { "type": ["number", "null"] },
+        "close": { "type": ["number", "null"] },
+        "bodyPercent": { "type": ["number", "null"] },
+        "upperWickPercent": { "type": ["number", "null"] },
+        "lowerWickPercent": { "type": ["number", "null"] },
+        "volume": { "type": ["number", "null"] },
+        "isClosed": { "type": ["boolean", "null"] },
+        "relatedLevel": { "type": ["string", "null"] }
+      }
+    },
+    "optionalIndicators": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Nullable future indicators (VWAP, EMAs, FVG, OB, ATR, etc.)"
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "scriptVersion": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "profileLevel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["price"],
+      "properties": {
+        "price": { "type": "number" },
+        "broken": { "type": ["boolean", "null"] },
+        "ageBars": { "type": ["integer", "null"] },
+        "tests": { "type": ["integer", "null"] },
+        "distance": { "type": ["number", "null"] },
+        "relation": {
+          "type": ["string", "null"],
+          "enum": ["ABOVE", "BELOW", "INTERACTING", null]
+        }
+      }
+    }
+  }
+}

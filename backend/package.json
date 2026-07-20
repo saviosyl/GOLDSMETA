@@ -1,0 +1,38 @@
+{
+  "name": "goldmeta-backend",
+  "version": "1.0.0-mvp",
+  "private": true,
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "test": "vitest run",
+    "lint": "eslint src --ext .ts",
+    "dev": "tsx watch src/index.ts",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore"
+  },
+  "dependencies": {
+    "dotenv": "latest",
+    "express": "latest",
+    "firebase-admin": "latest",
+    "firebase-functions": "latest",
+    "openai": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/supertest": "latest",
+    "@typescript-eslint/eslint-plugin": "latest",
+    "@typescript-eslint/parser": "latest",
+    "eslint": "latest",
+    "eslint-config-prettier": "latest",
+    "prettier": "latest",
+    "supertest": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

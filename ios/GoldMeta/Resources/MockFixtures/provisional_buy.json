@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-007-provisional-buy",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:11:00Z",
+  "marketDataTime": "2026-07-20T07:10:00Z",
+  "validUntil": "2026-07-20T09:39:00Z",
+  "decision": "BUY",
+  "confidence": 72,
+  "confidenceLabel": "HIGH",
+  "marketRegime": "TRENDING_UP",
+  "dataQuality": "PARTIAL",
+  "isProvisional": true,
+  "setupScore": 73,
+  "entry": {
+    "type": "ENTRY_ZONE",
+    "price": null,
+    "zoneLow": 2406.5,
+    "zoneHigh": 2409.0,
+    "condition": "Only consider after zone retest holds."
+  },
+  "stopLoss": {
+    "price": 2401.2,
+    "reason": "Below demand shelf."
+  },
+  "takeProfits": [
+    {
+      "label": "TP1",
+      "price": 2418.5,
+      "reason": "Session high."
+    },
+    {
+      "label": "TP2",
+      "price": 2427.0,
+      "reason": "Liquidity pocket."
+    }
+  ],
+  "riskReward": {
+    "tp1": 1.74,
+    "tp2": 3.04,
+    "tp3": null
+  },
+  "breakeven": {
+    "state": "NOT_APPLICABLE",
+    "trigger": "After TP1 close above entry",
+    "newStop": null,
+    "reason": "Reduce downside after first target confirms follow-through."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "M15 close against setup",
+      "Spread widens beyond normal London range",
+      "Data quality drops to STALE"
+    ]
+  },
+  "bullishEvidence": [
+    "HTF bullish",
+    "Demand zone defended twice",
+    "Momentum improving"
+  ],
+  "bearishEvidence": [
+    "Confirmation packet is partial"
+  ],
+  "reasonCodes": [
+    "PROVISIONAL-BUY",
+    "PARTIAL",
+    "MOCK"
+  ],
+  "reasonSummary": [
+    "Provisional BUY: setup quality is good but data is not complete.",
+    "Use smaller confidence until confirmation finishes."
+  ],
+  "warnings": [
+    "Provisional signals can change quickly."
+  ],
+  "missingInputs": [
+    "Final confirmation candle"
+  ],
+  "invalidation": "Close below 2401.20 invalidates provisional long.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "snap-007",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": false,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "BULLISH",
+  "lastKnownPrice": 2408.1,
+  "dataSourceLabel": "MOCK"
+}

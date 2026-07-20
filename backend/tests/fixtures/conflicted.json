@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-conflicted",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T08:00:00.000Z",
+  "sentAt": "2026-07-20T08:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2395,
+    "high": 2402,
+    "low": 2392,
+    "close": 2400,
+    "volume": 1000
+  },
+  "levels": {
+    "pocAll": 2410,
+    "vahAll": 2420,
+    "valAll": 2390
+  },
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 90
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BEARISH",
+    "classification": "REJECTION",
+    "low": 2392,
+    "high": 2402,
+    "close": 2400,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "pine-1.0.0",
+    "userId": "default-user"
+  }
+}

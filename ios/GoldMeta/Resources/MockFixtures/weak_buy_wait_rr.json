@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-002-weak-buy-wait-rr",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:46:00Z",
+  "marketDataTime": "2026-07-20T07:45:00Z",
+  "validUntil": "2026-07-20T09:54:00Z",
+  "decision": "WAIT",
+  "confidence": 54,
+  "confidenceLabel": "MODERATE",
+  "marketRegime": "TRENDING_UP",
+  "dataQuality": "GOOD",
+  "isProvisional": false,
+  "setupScore": 58,
+  "entry": {
+    "type": "WAIT_FOR_CONFIRMATION",
+    "price": null,
+    "zoneLow": 2408.0,
+    "zoneHigh": 2410.5,
+    "condition": "Need a cleaner pullback or wider upside target."
+  },
+  "stopLoss": {
+    "price": 2405.9,
+    "reason": "Nearest swing low leaves insufficient reward."
+  },
+  "takeProfits": [
+    {
+      "label": "TP1",
+      "price": 2413.2,
+      "reason": "Micro range high."
+    }
+  ],
+  "riskReward": {
+    "tp1": 0.72,
+    "tp2": null,
+    "tp3": null
+  },
+  "breakeven": {
+    "state": "HOLD_ORIGINAL_STOP",
+    "trigger": null,
+    "newStop": null,
+    "reason": "No active trade plan."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "Wait decision remains valid until confirmation improves"
+    ]
+  },
+  "bullishEvidence": [
+    "Short-term momentum leans up",
+    "HTF bias remains constructive"
+  ],
+  "bearishEvidence": [
+    "Reward to first target is below threshold",
+    "Entry is too close to resistance"
+  ],
+  "reasonCodes": [
+    "WEAK-BUY-WAIT-RR",
+    "GOOD",
+    "MOCK"
+  ],
+  "reasonSummary": [
+    "Initial BUY idea is downgraded to WAIT because RR is weak.",
+    "Wait for either a deeper pullback or a breakout with retest."
+  ],
+  "warnings": [
+    "No trade plan until RR improves above minimum threshold."
+  ],
+  "missingInputs": [],
+  "invalidation": "A break below 2405.90 removes the bullish premise.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "snap-002",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": true,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "BULLISH",
+  "lastKnownPrice": 2409.4,
+  "dataSourceLabel": "MOCK"
+}

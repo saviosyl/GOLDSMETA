@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-003-strong-sell",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:39:00Z",
+  "marketDataTime": "2026-07-20T07:38:00Z",
+  "validUntil": "2026-07-20T09:51:00Z",
+  "decision": "SELL",
+  "confidence": 91,
+  "confidenceLabel": "VERY_HIGH",
+  "marketRegime": "TRENDING_DOWN",
+  "dataQuality": "GOOD",
+  "isProvisional": false,
+  "setupScore": -86,
+  "entry": {
+    "type": "LIMIT",
+    "price": 2418.6,
+    "zoneLow": null,
+    "zoneHigh": null,
+    "condition": "Sell retest of failed support if rejection candle forms."
+  },
+  "stopLoss": {
+    "price": 2426.4,
+    "reason": "Above failed support reclaim and session high."
+  },
+  "takeProfits": [
+    {
+      "label": "TP1",
+      "price": 2408.1,
+      "reason": "VWAP extension."
+    },
+    {
+      "label": "TP2",
+      "price": 2398.5,
+      "reason": "Asian low sweep."
+    },
+    {
+      "label": "TP3",
+      "price": 2386.0,
+      "reason": "Daily demand zone."
+    }
+  ],
+  "riskReward": {
+    "tp1": 1.35,
+    "tp2": 2.58,
+    "tp3": 4.18
+  },
+  "breakeven": {
+    "state": "HOLD_ORIGINAL_STOP",
+    "trigger": "After TP1 close above entry",
+    "newStop": 2418.6,
+    "reason": "Reduce downside after first target confirms follow-through."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "M15 close against setup",
+      "Spread widens beyond normal London range",
+      "Data quality drops to STALE"
+    ]
+  },
+  "bullishEvidence": [
+    "None material; buyers failed to reclaim support"
+  ],
+  "bearishEvidence": [
+    "M30 lower high confirmed",
+    "HTF bias bearish",
+    "RSI rejection below neutral line"
+  ],
+  "reasonCodes": [
+    "STRONG-SELL",
+    "GOOD",
+    "MOCK"
+  ],
+  "reasonSummary": [
+    "SELL has strong alignment across trend, structure, and momentum.",
+    "Plan waits for retest instead of selling into stretched price."
+  ],
+  "warnings": [
+    "Avoid entering if price reclaims 2426.40 on a closing basis."
+  ],
+  "missingInputs": [],
+  "invalidation": "M15 close above 2426.40 invalidates the short setup.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "snap-003",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": false,
+  "currentSession": "New York",
+  "higherTimeframeBias": "BEARISH",
+  "lastKnownPrice": 2416.2,
+  "dataSourceLabel": "MOCK"
+}

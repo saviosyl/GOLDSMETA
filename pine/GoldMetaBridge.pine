@@ -1,0 +1,235 @@
+//@version=6
+indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50)
+
+// GoldMeta Pine Script bridge.
+//
+// TradingView alert setup:
+// 1. Add this script to an XAUUSD chart.
+// 2. Open Alerts, choose this indicator, and select "Any alert() function call".
+// 3. Set your GoldMeta backend webhook URL, for example:
+//    https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
+// 4. If TradingView asks for a Message, use {{alert_message}} so the alert() payload below is forwarded unchanged.
+//
+// Proprietary volume profile, TPO/market profile, and paid Trend Meter values are not calculated here.
+// They must arrive from separate proprietary TradingView alerts or another licensed adapter. This script
+// sends null/empty adapter fields instead of inventing unavailable values.
+//
+// GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals
+// are not guaranteed, and you remain responsible for every trading decision.
+
+const string SCRIPT_VERSION = "1.0.0"
+
+groupSymbol = "Symbol"
+expectedSymbol = input.string("XAUUSD", "Expected symbol", group=groupSymbol)
+
+groupTimeframes = "Timeframes"
+higherTimeframe = input.timeframe("60", "Diagnostic HTF", group=groupTimeframes)
+
+groupAlerts = "Alerts"
+enableAlertCalls = input.bool(true, "Call alert() from script", group=groupAlerts)
+confirmedBarMode = input.bool(true, "Confirmed-bar mode", group=groupAlerts)
+testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
+payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret. Do not commit or publish secrets.")
+
+groupLevels = "Levels (diagnostic)"
+showDiagnosticLevels = input.bool(true, "Plot diagnostic levels", group=groupLevels)
+swingLength = input.int(5, "Swing pivot length", minval=1, maxval=50, group=groupLevels)
+atrLength = input.int(14, "ATR length", minval=1, maxval=200, group=groupLevels)
+atrBandMultiplier = input.float(1.0, "ATR band multiplier", minval=0.1, step=0.1, group=groupLevels)
+showAtrBands = input.bool(false, "Plot ATR bands", group=groupLevels)
+
+groupStatus = "Status"
+showStatusTable = input.bool(true, "Show status table", group=groupStatus)
+showWarnings = input.bool(true, "Show symbol warning", group=groupStatus)
+diagnosticMode = input.bool(false, "Diagnostic mode", group=groupStatus)
+
+f_json_string(string value) =>
+    string escaped = str.replace_all(value, "\\", "\\\\")
+    escaped := str.replace_all(escaped, "\"", "\\\"")
+    escaped := str.replace_all(escaped, "\n", "\\n")
+    "\"" + escaped + "\""
+
+f_json_string_or_null(string value) =>
+    str.length(value) == 0 ? "null" : f_json_string(value)
+
+f_json_number(float value) =>
+    na(value) ? "null" : str.tostring(value, format.mintick)
+
+f_json_bool(bool value) =>
+    value ? "true" : "false"
+
+f_json_time(int timestamp) =>
+    f_json_string(str.format_time(timestamp, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC"))
+
+f_session_name(int utcHour) =>
+    utcHour >= 0 and utcHour < 7 ? "ASIA" :
+      utcHour >= 7 and utcHour < 13 ? "LONDON" :
+      utcHour >= 13 and utcHour < 17 ? "OVERLAP" :
+      utcHour >= 17 and utcHour < 22 ? "NEWYORK" : "UNKNOWN"
+
+f_candle_direction(float candleOpen, float candleClose) =>
+    candleClose > candleOpen ? "BULLISH" : candleClose < candleOpen ? "BEARISH" : "NEUTRAL"
+
+f_percent(float numerator, float denominator) =>
+    denominator == 0.0 or na(denominator) ? na : numerator / denominator * 100.0
+
+symbolUpper = str.upper(syminfo.ticker)
+expectedUpper = str.upper(expectedSymbol)
+symbolOk = str.contains(symbolUpper, expectedUpper)
+payloadSymbol = symbolOk ? expectedUpper : syminfo.ticker
+
+confirmedNow = barstate.isconfirmed
+canEmitBar = confirmedBarMode ? confirmedNow : true
+eventType = testAlertMode ? "TEST" : confirmedNow ? "BAR_CLOSE" : "BAR_UPDATE"
+
+utcHour = hour(time, "UTC")
+sessionName = f_session_name(utcHour)
+sessionChanged = bar_index == 0 ? true : sessionName != sessionName[1]
+
+var float sessionHigh = na
+var float sessionLow = na
+if sessionChanged or na(sessionHigh) or na(sessionLow)
+    sessionHigh := high
+    sessionLow := low
+else
+    sessionHigh := math.max(sessionHigh, high)
+    sessionLow := math.min(sessionLow, low)
+
+// Pivots are structural placeholders only. They become known after swingLength bars and are not a
+// substitute for proprietary market-structure or volume-profile tooling.
+pivotHigh = ta.pivothigh(high, swingLength, swingLength)
+pivotLow = ta.pivotlow(low, swingLength, swingLength)
+lastSwingHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
+lastSwingLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
+
+atrValue = ta.atr(atrLength)
+atrUpper = close + atrValue * atrBandMultiplier
+atrLower = close - atrValue * atrBandMultiplier
+
+htfClose = request.security(syminfo.tickerid, higherTimeframe, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfSma = request.security(syminfo.tickerid, higherTimeframe, ta.sma(close, 20), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfBias = na(htfClose) or na(htfSma) ? "NEUTRAL" : htfClose > htfSma ? "BULLISH" : htfClose < htfSma ? "BEARISH" : "NEUTRAL"
+
+barRange = high - low
+bodyPercent = f_percent(math.abs(close - open), barRange)
+upperWickPercent = f_percent(high - math.max(open, close), barRange)
+lowerWickPercent = f_percent(math.min(open, close) - low, barRange)
+candleDirection = f_candle_direction(open, close)
+
+eventId = syminfo.tickerid + "-" + timeframe.period + "-" + str.tostring(time_close)
+
+ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
+  ",\"high\":" + f_json_number(high) +
+  ",\"low\":" + f_json_number(low) +
+  ",\"close\":" + f_json_number(close) +
+  ",\"volume\":" + f_json_number(volume) + "}"
+
+// Proprietary adapter stubs: values are intentionally null/empty unless supplied by separate licensed alerts.
+levelsJson = "\"levels\":{\"pocAll\":null,\"vahAll\":null,\"valAll\":null,\"pocNonBroken\":[],\"vahNonBroken\":[],\"valNonBroken\":[]}"
+sessionVolumeProfileJson = "\"sessionVolumeProfile\":{\"session\":" + f_json_string(sessionName) +
+  ",\"sessionStart\":null,\"sessionEnd\":null,\"poc\":null,\"vah\":null,\"val\":null,\"hvn\":[],\"lvn\":[],\"acceptanceState\":\"UNKNOWN\"}"
+marketProfileJson = "\"marketProfile\":{\"tpoPoc\":null,\"initialBalanceHigh\":null,\"initialBalanceLow\":null,\"poorHigh\":null,\"poorLow\":null,\"singlePrints\":[],\"valueMigration\":\"UNKNOWN\",\"profileState\":\"UNKNOWN\",\"acceptanceState\":\"UNKNOWN\"}"
+
+confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(confirmedNow) +
+  ",\"direction\":" + f_json_string(candleDirection) +
+  ",\"candleType\":null,\"classification\":\"NONE\"" +
+  ",\"open\":" + f_json_number(open) +
+  ",\"high\":" + f_json_number(high) +
+  ",\"low\":" + f_json_number(low) +
+  ",\"close\":" + f_json_number(close) +
+  ",\"bodyPercent\":" + f_json_number(bodyPercent) +
+  ",\"upperWickPercent\":" + f_json_number(upperWickPercent) +
+  ",\"lowerWickPercent\":" + f_json_number(lowerWickPercent) +
+  ",\"volume\":" + f_json_number(volume) +
+  ",\"isClosed\":" + f_json_bool(confirmedNow) +
+  ",\"relatedLevel\":null}"
+
+optionalIndicatorsJson = "\"optionalIndicators\":{\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
+  ",\"high\":" + f_json_number(sessionHigh) +
+  ",\"low\":" + f_json_number(sessionLow) + "}" +
+  ",\"structure\":{\"placeholder\":true,\"swingLength\":" + str.tostring(swingLength) +
+  ",\"lastSwingHigh\":" + f_json_number(lastSwingHigh) +
+  ",\"lastSwingLow\":" + f_json_number(lastSwingLow) + "}" +
+  ",\"atr\":{\"length\":" + str.tostring(atrLength) +
+  ",\"value\":" + f_json_number(atrValue) +
+  ",\"upperBand\":" + f_json_number(atrUpper) +
+  ",\"lowerBand\":" + f_json_number(atrLower) + "}" +
+  ",\"higherTimeframe\":{\"timeframe\":" + f_json_string(higherTimeframe) +
+  ",\"close\":" + f_json_number(htfClose) +
+  ",\"sma20\":" + f_json_number(htfSma) +
+  ",\"bias\":" + f_json_string(htfBias) + "}" +
+  ",\"proprietaryAdapters\":{\"volumeProfile\":\"unavailable_null_stub\",\"marketProfileTpo\":\"unavailable_null_stub\",\"trendMeter\":\"unavailable_null_stub\"}}"
+
+metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
+  ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
+  ",\"symbolOk\":" + f_json_bool(symbolOk) + "}"
+
+alertMessage = "{" +
+  "\"schemaVersion\":\"1.0\"," +
+  "\"source\":\"tradingview\"," +
+  "\"eventId\":" + f_json_string(eventId) + "," +
+  "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
+  "\"symbol\":" + f_json_string(payloadSymbol) + "," +
+  "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
+  "\"timeframe\":" + f_json_string(timeframe.period) + "," +
+  "\"eventType\":" + f_json_string(eventType) + "," +
+  "\"barTime\":" + f_json_time(time_close) + "," +
+  "\"sentAt\":" + f_json_time(timenow) + "," +
+  "\"isConfirmedBar\":" + f_json_bool(confirmedNow) + "," +
+  "\"indicatorName\":\"GoldMetaBridge\"," +
+  ohlcvJson + "," +
+  levelsJson + "," +
+  sessionVolumeProfileJson + "," +
+  marketProfileJson + "," +
+  "\"trend\":null," +
+  confirmationCandleJson + "," +
+  optionalIndicatorsJson + "," +
+  metadataJson +
+  "}"
+
+var bool testAlertSent = false
+if enableAlertCalls and barstate.isrealtime and canEmitBar
+    if testAlertMode
+        if not testAlertSent
+            alert(alertMessage, alert.freq_once_per_bar)
+            testAlertSent := true
+    else
+        alert(alertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+        testAlertSent := false
+
+plot(showDiagnosticLevels ? sessionHigh : na, title="GoldMeta Session High", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
+plot(showDiagnosticLevels ? sessionLow : na, title="GoldMeta Session Low", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
+plot(showDiagnosticLevels ? lastSwingHigh : na, title="GoldMeta Last Swing High", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
+plot(showDiagnosticLevels ? lastSwingLow : na, title="GoldMeta Last Swing Low", color=color.new(color.green, 20), linewidth=1, style=plot.style_linebr)
+plot(showAtrBands and showDiagnosticLevels ? atrUpper : na, title="GoldMeta ATR Upper", color=color.new(color.orange, 35), linewidth=1)
+plot(showAtrBands and showDiagnosticLevels ? atrLower : na, title="GoldMeta ATR Lower", color=color.new(color.orange, 35), linewidth=1)
+
+plotshape(diagnosticMode and not na(pivotHigh), title="GoldMeta Pivot High", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, offset=-swingLength)
+plotshape(diagnosticMode and not na(pivotLow), title="GoldMeta Pivot Low", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, offset=-swingLength)
+
+var label warningLabel = na
+if showWarnings and barstate.islast
+    if not symbolOk
+        warningText = "GoldMeta expects XAUUSD. Current chart: " + syminfo.ticker
+        if na(warningLabel)
+            warningLabel := label.new(bar_index, high, warningText, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white)
+        else
+            label.set_xy(warningLabel, bar_index, high)
+            label.set_text(warningLabel, warningText)
+    else if not na(warningLabel)
+        label.delete(warningLabel)
+        warningLabel := na
+
+var table statusTable = table.new(position.top_right, 2, 5, border_width=1)
+if showStatusTable and barstate.islast
+    table.cell(statusTable, 0, 0, "GoldMeta", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(statusTable, 0, 1, "Symbol OK", text_color=color.white)
+    table.cell(statusTable, 1, 1, symbolOk ? "YES" : "NO", text_color=color.white, bgcolor=symbolOk ? color.new(color.green, 35) : color.new(color.red, 20))
+    table.cell(statusTable, 0, 2, "Confirmed", text_color=color.white)
+    table.cell(statusTable, 1, 2, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
+    table.cell(statusTable, 0, 3, "Last close", text_color=color.white)
+    table.cell(statusTable, 1, 3, f_json_number(close), text_color=color.white)
+    table.cell(statusTable, 0, 4, "Session", text_color=color.white)
+    table.cell(statusTable, 1, 4, sessionName, text_color=color.white)

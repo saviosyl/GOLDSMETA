@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-006-missing-confirmation",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:18:00Z",
+  "marketDataTime": "2026-07-20T07:17:00Z",
+  "validUntil": "2026-07-20T09:42:00Z",
+  "decision": "WAIT",
+  "confidence": 48,
+  "confidenceLabel": "MODERATE",
+  "marketRegime": "TRENDING_UP",
+  "dataQuality": "PARTIAL",
+  "isProvisional": false,
+  "setupScore": 45,
+  "entry": {
+    "type": "WAIT_FOR_CONFIRMATION",
+    "price": null,
+    "zoneLow": 2414.0,
+    "zoneHigh": 2417.0,
+    "condition": "Need proprietary confirmation alert and M15 close."
+  },
+  "stopLoss": {
+    "price": 2410.2,
+    "reason": "Below setup zone."
+  },
+  "takeProfits": [
+    {
+      "label": "TP1",
+      "price": 2424.0,
+      "reason": "Range high."
+    }
+  ],
+  "riskReward": {
+    "tp1": 1.18,
+    "tp2": null,
+    "tp3": null
+  },
+  "breakeven": {
+    "state": "HOLD_ORIGINAL_STOP",
+    "trigger": null,
+    "newStop": null,
+    "reason": "No active trade plan."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "Wait decision remains valid until confirmation improves"
+    ]
+  },
+  "bullishEvidence": [
+    "Structure supports a long continuation",
+    "Session liquidity is improving"
+  ],
+  "bearishEvidence": [
+    "Confirmation indicator has not reported",
+    "Volume participation is incomplete"
+  ],
+  "reasonCodes": [
+    "MISSING-CONFIRMATION",
+    "PARTIAL",
+    "MOCK"
+  ],
+  "reasonSummary": [
+    "WAIT until missing confirmation arrives.",
+    "Partial data prevents a confident BUY."
+  ],
+  "warnings": [
+    "Missing inputs block an actionable decision."
+  ],
+  "missingInputs": [
+    "Proprietary confirmation",
+    "Final M15 close"
+  ],
+  "invalidation": "Failure below 2410.20 invalidates the pending long idea.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "snap-006",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": true,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "BULLISH",
+  "lastKnownPrice": 2415.2,
+  "dataSourceLabel": "MOCK"
+}

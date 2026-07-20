@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "gm-008-active-trade-tp1",
+  "symbol": "XAUUSD",
+  "generatedAt": "2026-07-20T07:04:00Z",
+  "marketDataTime": "2026-07-20T07:03:00Z",
+  "validUntil": "2026-07-20T09:36:00Z",
+  "decision": "BUY",
+  "confidence": 84,
+  "confidenceLabel": "HIGH",
+  "marketRegime": "TRENDING_UP",
+  "dataQuality": "GOOD",
+  "isProvisional": false,
+  "setupScore": 79,
+  "entry": {
+    "type": "MARKET",
+    "price": 2396.8,
+    "zoneLow": null,
+    "zoneHigh": null,
+    "condition": "Trade already active from prior signal."
+  },
+  "stopLoss": {
+    "price": 2396.8,
+    "reason": "Moved to breakeven after TP1."
+  },
+  "takeProfits": [
+    {
+      "label": "TP1",
+      "price": 2408.0,
+      "reason": "Reached; partial profit area."
+    },
+    {
+      "label": "TP2",
+      "price": 2419.8,
+      "reason": "Next resistance."
+    },
+    {
+      "label": "TP3",
+      "price": 2430.0,
+      "reason": "Daily liquidity."
+    }
+  ],
+  "riskReward": {
+    "tp1": 1.25,
+    "tp2": 2.55,
+    "tp3": 3.68
+  },
+  "breakeven": {
+    "state": "MOVE_TO_BREAKEVEN",
+    "trigger": "After TP1 close above entry",
+    "newStop": 2396.8,
+    "reason": "Reduce downside after first target confirms follow-through."
+  },
+  "earlyExit": {
+    "exitNow": false,
+    "conditions": [
+      "M15 close against setup",
+      "Spread widens beyond normal London range",
+      "Data quality drops to STALE"
+    ]
+  },
+  "bullishEvidence": [
+    "TP1 reached with constructive pullback",
+    "Trend remains intact"
+  ],
+  "bearishEvidence": [
+    "Momentum is less extended after first target"
+  ],
+  "reasonCodes": [
+    "ACTIVE-TRADE-TP1",
+    "GOOD",
+    "MOCK"
+  ],
+  "reasonSummary": [
+    "Active trade has reached TP1; manage risk rather than add size.",
+    "Breakeven move is active."
+  ],
+  "warnings": [
+    "Do not increase risk after TP1."
+  ],
+  "missingInputs": [],
+  "invalidation": "Close below breakeven 2396.80 exits remainder.",
+  "disclaimer": "GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.",
+  "lifecycleState": "ACTIVE",
+  "snapshotId": "snap-008",
+  "ruleConfigVersion": "rules-ios-phase1-1.0.0",
+  "pineScriptVersion": "goldmeta-bridge-v0.1",
+  "backendVersion": "mock-ios-phase1",
+  "aiModelId": null,
+  "aiPromptVersion": null,
+  "aiSafetyDowngraded": false,
+  "notificationSent": true,
+  "currentSession": "London / New York overlap",
+  "higherTimeframeBias": "BULLISH",
+  "lastKnownPrice": 2410.6,
+  "dataSourceLabel": "MOCK"
+}

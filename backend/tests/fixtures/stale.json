@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-stale",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2020-01-01T00:00:00.000Z",
+  "sentAt": "2020-01-01T00:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2395,
+    "high": 2402,
+    "low": 2392,
+    "close": 2400,
+    "volume": 1000
+  },
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 90
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "classification": "BREAKOUT",
+    "low": 2392,
+    "high": 2402,
+    "close": 2400,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "pine-1.0.0",
+    "userId": "default-user"
+  }
+}
