@@ -20,6 +20,11 @@ export const buildJournalRouter = (store: GoldMetaStore): Router => {
     res.status(201).json({ entry });
   });
 
+  router.get("/v1/journal", requireAuth, async (req, res) => {
+    const entries = await store.listJournalEntries(getAuthenticatedUserId(req));
+    res.json({ entries });
+  });
+
   router.patch("/v1/journal/:journalId", requireAuth, async (req, res) => {
     const journalId = firstParam(req.params.journalId);
     const parsed = journalPatchSchema.safeParse(req.body);

@@ -94,6 +94,11 @@ struct TradingViewTestResponse: Decodable, Equatable {
     let ok: Bool
     let message: String
     let connection: TradingViewConnection?
+    let accepted: Bool?
+    let duplicate: Bool?
+    let eventId: String?
+    let status: String?
+    let jobId: String?
 }
 
 struct BackendSettings: Codable, Equatable {

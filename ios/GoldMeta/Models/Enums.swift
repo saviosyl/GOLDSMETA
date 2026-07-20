@@ -73,6 +73,7 @@ enum DataSourceLabel: String, Codable, CaseIterable {
     case stale = "STALE"
     case mock = "MOCK"
     case offline = "OFFLINE"
+    case test = "TEST"
 }
 
 enum HigherTimeframeBias: String, Codable, CaseIterable {

@@ -34,7 +34,7 @@ export const processJob = async (
     options.lockMs ?? 5 * 60 * 1000
   );
   if (!claimed) {
-    return store.getProcessingJob(jobId);
+    return await store.getProcessingJob(jobId);
   }
 
   try {
@@ -56,7 +56,7 @@ export const processJob = async (
       }
     );
 
-    return store.completeProcessingJob(jobId, decision.decisionId);
+    return await store.completeProcessingJob(jobId, decision.decisionId);
   } catch (error: unknown) {
     const failed = await store.failProcessingJob(
       jobId,

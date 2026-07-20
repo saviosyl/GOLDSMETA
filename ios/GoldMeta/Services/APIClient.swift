@@ -175,7 +175,10 @@ final class APIClient: DecisionServiceProtocol {
             }
 
             if data.isEmpty, response == EmptyEnvelope.self {
-                return EmptyEnvelope() as! Response
+                guard let emptyResponse = EmptyEnvelope() as? Response else {
+                    throw DecisionServiceError.decodingFailed("Empty response type mismatch")
+                }
+                return emptyResponse
             }
             return try Decision.jsonDecoder.decode(response, from: data)
         } catch let error as DecisionServiceError {
