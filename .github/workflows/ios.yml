@@ -39,6 +39,13 @@ jobs:
             cp ios/GoldMeta/App/GoogleService-Info.plist.example ios/GoldMeta/App/GoogleService-Info.plist
           fi
 
+      - name: Lint Xcode project file
+        run: |
+          plutil -lint ios/GoldMeta.xcodeproj/project.pbxproj
+          test -f ios/GoldMeta.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+          test -f ios/GoldMeta.xcodeproj/xcshareddata/xcschemes/GoldMeta.xcscheme
+          xcodebuild -list -project ios/GoldMeta.xcodeproj
+
       - name: Resolve Swift packages
         run: |
           xcodebuild \

@@ -105,16 +105,16 @@
 		A5D9D040299EB7CBED9DB27D /* MarketSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketSnapshot.swift; sourceTree = "<group>"; };
 		1A9C4A9DBD2D66F389BD702C /* UserSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSettings.swift; sourceTree = "<group>"; };
 		A245366460A0442BA5ACBBAE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		DCE721BDE48EF31CCE833EE7 /* active_trade_tp1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = active_trade_tp1.json; sourceTree = "<group>"; };
-		7F5A3F71B062D9E3E9155AF4 /* conflicted_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = conflicted_wait.json; sourceTree = "<group>"; };
-		D1D84F012DC7109CEF5D6898 /* invalidation_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = invalidation_wait.json; sourceTree = "<group>"; };
-		BC8B6778463C1D7047B5D351 /* missing_confirmation.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = missing_confirmation.json; sourceTree = "<group>"; };
-		1ACF4CF99ECB4FC1A43FF43D /* offline_recovery.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offline_recovery.json; sourceTree = "<group>"; };
-		CC82FB343697D25D48710E08 /* provisional_buy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = provisional_buy.json; sourceTree = "<group>"; };
-		53DB4B2D199744D723FE9E32 /* stale_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stale_wait.json; sourceTree = "<group>"; };
-		17E9874CE0CF3467BC73ECA1 /* strong_buy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = strong_buy.json; sourceTree = "<group>"; };
-		172533B901D9C317868C46F1 /* strong_sell.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = strong_sell.json; sourceTree = "<group>"; };
-		18B2A69F82AA291EF2BF97C5 /* weak_buy_wait_rr.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = weak_buy_wait_rr.json; sourceTree = "<group>"; };
+		DCE721BDE48EF31CCE833EE7 /* active_trade_tp1.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = active_trade_tp1.json; sourceTree = "<group>"; };
+		7F5A3F71B062D9E3E9155AF4 /* conflicted_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = conflicted_wait.json; sourceTree = "<group>"; };
+		D1D84F012DC7109CEF5D6898 /* invalidation_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = invalidation_wait.json; sourceTree = "<group>"; };
+		BC8B6778463C1D7047B5D351 /* missing_confirmation.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = missing_confirmation.json; sourceTree = "<group>"; };
+		1ACF4CF99ECB4FC1A43FF43D /* offline_recovery.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = offline_recovery.json; sourceTree = "<group>"; };
+		CC82FB343697D25D48710E08 /* provisional_buy.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = provisional_buy.json; sourceTree = "<group>"; };
+		53DB4B2D199744D723FE9E32 /* stale_wait.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = stale_wait.json; sourceTree = "<group>"; };
+		17E9874CE0CF3467BC73ECA1 /* strong_buy.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = strong_buy.json; sourceTree = "<group>"; };
+		172533B901D9C317868C46F1 /* strong_sell.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = strong_sell.json; sourceTree = "<group>"; };
+		18B2A69F82AA291EF2BF97C5 /* weak_buy_wait_rr.json */ = {isa = PBXFileReference; lastKnownFileType = text; path = weak_buy_wait_rr.json; sourceTree = "<group>"; };
 		B37568ADBC2C0BD07B301718 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		10F0A0010000000000000014 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		634577F6416E324B48CA5561 /* DecisionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionServiceProtocol.swift; sourceTree = "<group>"; };
@@ -155,7 +155,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		5928955287B8089ED2177128 = {isa = PBXGroup; children = (
+		5928955287B8089ED2177128 /* Root */ = {isa = PBXGroup; children = (
 			095FEE2E633C50D24407F2D6 /* GoldMeta */,
 			516831D832DDC7318520265A /* GoldMetaTests */,
 			32B7A3E592646169E81CA3AD /* GoldMetaUITests */,
@@ -380,7 +380,7 @@
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 12.0.0;
+				minimumVersion = 11.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
