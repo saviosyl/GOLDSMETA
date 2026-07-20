@@ -68,7 +68,7 @@ final class OnboardingViewModel: ObservableObject {
 
     var exampleJSON: String {
         let now = ISO8601DateFormatter().string(from: Date())
-        """
+        return """
         {
           "schemaVersion": "1.0",
           "source": "tradingview",
