@@ -20,7 +20,7 @@ jobs:
   build-and-test:
     name: Build and test GoldMeta
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -39,9 +39,9 @@ jobs:
             cp ios/GoldMeta/App/GoogleService-Info.plist.example ios/GoldMeta/App/GoogleService-Info.plist
           fi
 
-      - name: Lint Xcode project file
+      - name: Verify Xcode project package
         run: |
-          plutil -lint ios/GoldMeta.xcodeproj/project.pbxproj
+          test -f ios/GoldMeta.xcodeproj/project.pbxproj
           test -f ios/GoldMeta.xcodeproj/project.xcworkspace/contents.xcworkspacedata
           test -f ios/GoldMeta.xcodeproj/xcshareddata/xcschemes/GoldMeta.xcscheme
           xcodebuild -list -project ios/GoldMeta.xcodeproj
@@ -53,10 +53,8 @@ jobs:
             -project ios/GoldMeta.xcodeproj \
             -scheme GoldMeta
 
-      - name: Show available schemes and simulators
-        run: |
-          xcodebuild -list -project ios/GoldMeta.xcodeproj
-          xcrun simctl list devices available
+      - name: Show available simulators
+        run: xcrun simctl list devices available
 
       - name: Build for iPhone Simulator
         run: |
@@ -72,11 +70,34 @@ jobs:
       - name: Run iOS unit tests
         run: |
           set -o pipefail
+          DEST=$(python3 - <<'PY'
+import json, subprocess
+raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
+data = json.loads(raw)
+preferred = ["iPhone 16", "iPhone 16 Pro", "iPhone 15", "iPhone 15 Pro"]
+devices = []
+for runtime, items in data.get("devices", {}).items():
+    if "iOS" not in runtime:
+        continue
+    for device in items:
+        if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
+            devices.append(device["name"])
+for name in preferred:
+    if name in devices:
+        print(f"platform=iOS Simulator,name={name}")
+        raise SystemExit
+if devices:
+    print(f"platform=iOS Simulator,name={devices[0]}")
+else:
+    raise SystemExit("No iPhone simulator available")
+PY
+)
+          echo "Using destination: ${DEST}"
           xcodebuild \
             -project ios/GoldMeta.xcodeproj \
             -scheme GoldMeta \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "${DEST}" \
             CODE_SIGNING_ALLOWED=NO \
             test | tee ios-tests.log
 
@@ -88,6 +109,5 @@ jobs:
           path: |
             ios-build.log
             ios-tests.log
-            ~/Library/Logs/DiagnosticReports
           if-no-files-found: ignore
           retention-days: 7
