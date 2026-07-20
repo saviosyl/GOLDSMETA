@@ -1,0 +1,86 @@
+name: iOS
+
+on:
+  push:
+    branches:
+      - cursor/production-connection
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test GoldMeta
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Prepare non-secret CI configuration
+        run: |
+          cp ios/GoldMeta/Config/Secrets.xcconfig.example ios/GoldMeta/Config/Secrets.xcconfig
+          if [ ! -f ios/GoldMeta/App/GoogleService-Info.plist ]; then
+            cp ios/GoldMeta/App/GoogleService-Info.plist.example ios/GoldMeta/App/GoogleService-Info.plist
+          fi
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta
+
+      - name: Show available schemes and simulators
+        run: |
+          xcodebuild -list -project ios/GoldMeta.xcodeproj
+          xcrun simctl list devices available
+
+      - name: Build for iPhone Simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build | tee ios-build.log
+
+      - name: Run iOS unit tests
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO \
+            test | tee ios-tests.log
+
+      - name: Upload Xcode logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ci-logs
+          path: |
+            ios-build.log
+            ios-tests.log
+            ~/Library/Logs/DiagnosticReports
+          if-no-files-found: ignore
+          retention-days: 7
