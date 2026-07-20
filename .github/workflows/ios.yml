@@ -70,28 +70,18 @@ jobs:
       - name: Run iOS unit tests
         run: |
           set -o pipefail
-          DEST=$(python3 - <<'PY'
-import json, subprocess
-raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
-data = json.loads(raw)
-preferred = ["iPhone 16", "iPhone 16 Pro", "iPhone 15", "iPhone 15 Pro"]
-devices = []
-for runtime, items in data.get("devices", {}).items():
-    if "iOS" not in runtime:
-        continue
-    for device in items:
-        if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
-            devices.append(device["name"])
-for name in preferred:
-    if name in devices:
-        print(f"platform=iOS Simulator,name={name}")
-        raise SystemExit
-if devices:
-    print(f"platform=iOS Simulator,name={devices[0]}")
-else:
-    raise SystemExit("No iPhone simulator available")
-PY
-)
+          DEST=""
+          for name in "iPhone 16" "iPhone 16 Pro" "iPhone 15" "iPhone 15 Pro" "iPhone 14"; do
+            if xcrun simctl list devices available | grep -F "$name (" >/dev/null; then
+              DEST="platform=iOS Simulator,name=${name}"
+              break
+            fi
+          done
+          if [ -z "$DEST" ]; then
+            echo "No preferred iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
           echo "Using destination: ${DEST}"
           xcodebuild \
             -project ios/GoldMeta.xcodeproj \
