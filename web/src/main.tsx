@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "v5.4-official-github-png-2026-07-21";
+export const GOLD_META_BUILD_STAMP = "v5.4-production-2026-07-21";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
