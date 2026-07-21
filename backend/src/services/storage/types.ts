@@ -123,7 +123,11 @@ export interface GoldMetaStore {
   saveSetup(setup: SetupRecord): Awaitable<SetupRecord>;
   getSetup(userId: string, setupId: string): Awaitable<SetupRecord | undefined>;
   getSetupByDecisionId(userId: string, decisionId: string): Awaitable<SetupRecord | undefined>;
-  listSetups(userId: string, limit?: number): Awaitable<SetupRecord[]>;
+  listSetups(
+    userId: string,
+    limit?: number,
+    environment?: DecisionEnvironment
+  ): Awaitable<SetupRecord[]>;
   listActiveSetups(userId: string, environment?: DecisionEnvironment): Awaitable<SetupRecord[]>;
 
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;

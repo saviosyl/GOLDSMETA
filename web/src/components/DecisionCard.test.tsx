@@ -60,7 +60,7 @@ describe("DecisionCard", () => {
     );
     expect(screen.getByText("BUY")).toBeInTheDocument();
     expect(screen.getAllByTestId("test-badge")).toHaveLength(1);
-    expect(screen.getByTestId("quality-badge")).toHaveTextContent("LIVE");
+    expect(screen.getByTestId("quality-badge")).toHaveTextContent("FRESH");
     expect(screen.getByTestId("quality-badge")).not.toHaveTextContent("TEST");
     expect(screen.getByText("2421.00")).toBeInTheDocument();
     expect(screen.getByText("Trend Meter bullish 80")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("DecisionCard", () => {
     );
     expect(screen.queryByTestId("test-badge")).not.toBeInTheDocument();
     expect(screen.getByTestId("live-badge")).toBeInTheDocument();
-    expect(screen.getByTestId("quality-badge")).toHaveTextContent("LIVE");
+    expect(screen.getByTestId("quality-badge")).toHaveTextContent("FRESH");
   });
 
   it("renders active setup status and expiry countdown", () => {

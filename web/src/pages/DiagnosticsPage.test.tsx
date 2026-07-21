@@ -17,14 +17,19 @@ describe("DiagnosticsPage", () => {
     adminDiagnostics.mockReset();
   });
 
-  it("renders diagnostics when authenticated", async () => {
+  it("renders server feature flags without hard-coding environments", async () => {
     adminDiagnostics.mockResolvedValue({
       apiHealth: "ok",
       backendVersion: "1.2.0-phase3",
       ruleConfigVersion: "rules-1.1.0",
       setupRuleConfigVersion: "setup-rules-1.0.0",
       pineVersionLastReceived: "2.0.4",
-      flags: {},
+      flags: {
+        setupTrackingEnabled: true,
+        setupTrackingEnvironments: ["TEST"],
+        brokerMode: "DISABLED",
+        aiEnabled: false
+      },
       webhookConnections: [],
       latestDecision: null,
       latestSetupTransition: null,
@@ -39,10 +44,24 @@ describe("DiagnosticsPage", () => {
     );
     expect(await screen.findByTestId("diagnostics-page")).toBeInTheDocument();
     expect(screen.getByText("1.2.0-phase3")).toBeInTheDocument();
-    expect(screen.queryByText(/secret/i)).not.toHaveTextContent(/whsec|sk_/);
+    expect(screen.getByTestId("flag-setup-tracking-environments")).toHaveTextContent('["TEST"]');
+    expect(screen.getByTestId("flag-broker-mode")).toHaveTextContent("DISABLED");
+    expect(screen.getByTestId("flag-ai-enabled")).toHaveTextContent("disabled");
+    expect(screen.getByTestId("flag-setup-tracking-enabled")).toHaveTextContent("enabled");
   });
 
-  it("shows access error when API rejects", async () => {
+  it("shows access-denied state on 403", async () => {
+    adminDiagnostics.mockRejectedValue(new ApiError(403, "FORBIDDEN", "Admin access required"));
+    render(
+      <MemoryRouter>
+        <DiagnosticsPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByTestId("diagnostics-forbidden")).toBeInTheDocument();
+    expect(screen.getByText(/Admin access required/i)).toBeInTheDocument();
+  });
+
+  it("shows access error when API rejects unauthenticated", async () => {
     adminDiagnostics.mockRejectedValue(new ApiError(401, "UNAUTHENTICATED", "Sign in required"));
     render(
       <MemoryRouter>

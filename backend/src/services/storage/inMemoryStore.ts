@@ -128,19 +128,16 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     return [...this.setups.values()].find((s) => s.userId === userId && s.decisionId === decisionId);
   }
 
-  listSetups(userId: string, limit = 50): SetupRecord[] {
+  listSetups(userId: string, limit = 50, environment?: DecisionEnvironment): SetupRecord[] {
     return [...this.setups.values()]
-      .filter((s) => s.userId === userId)
+      .filter((s) => s.userId === userId && (environment ? s.environment === environment : true))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, limit);
   }
 
   listActiveSetups(userId: string, environment?: DecisionEnvironment): SetupRecord[] {
-    return this.listSetups(userId, 200).filter(
-      (s) =>
-        isActiveSetupStatus(s.status) &&
-        s.resolution === "OPEN" &&
-        (environment ? s.environment === environment : true)
+    return this.listSetups(userId, 200, environment).filter(
+      (s) => isActiveSetupStatus(s.status) && s.resolution === "OPEN"
     );
   }
 

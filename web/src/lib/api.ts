@@ -155,10 +155,10 @@ export class ApiClient {
     return body.entry;
   }
 
-  async listSetups(limit = 50): Promise<SetupRecord[]> {
-    const body = await this.request<{ setups: SetupRecord[] }>(
-      `/v1/setups?limit=${encodeURIComponent(String(limit))}`
-    );
+  async listSetups(limit = 50, environment?: "LIVE" | "TEST"): Promise<SetupRecord[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (environment) params.set("environment", environment);
+    const body = await this.request<{ setups: SetupRecord[] }>(`/v1/setups?${params.toString()}`);
     return body.setups;
   }
 

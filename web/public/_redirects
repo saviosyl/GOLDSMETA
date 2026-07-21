@@ -1,3 +1,5 @@
-# SPA fallback for client routes.
-# Existing static files under /assets, /icons, etc. are served by Pages before redirects.
+# Never SPA-fallback missing hashed assets (prevents HTML-as-JS/CSS MIME poison).
+/assets/*    /404.html   404
+
+# SPA fallback for client routes. Static files that exist are still served first.
 /*    /index.html   200

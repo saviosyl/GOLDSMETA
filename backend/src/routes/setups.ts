@@ -1,28 +1,54 @@
 import { Router } from "express";
-import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { getAuthenticatedUserId, requireAuth, requireAdmin } from "../middleware/auth";
 import { computeSetupAnalytics } from "../services/setup/analytics";
-import type { GoldMetaStore } from "../services/storage/types";
+import type { DecisionEnvironment, GoldMetaStore } from "../services/storage/types";
 import { setupLifecycleConfig, BACKEND_VERSION_PHASE3 } from "../config/setupLifecycleConfig";
 import { BACKEND_VERSION, RULE_CONFIG_VERSION } from "../config/decisionConfig";
+import { env } from "../config/env";
 import { IG_DEMO_ADAPTER_PLAN, MockBrokerAdapter } from "../services/brokers/mockBrokerAdapter";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
+
+const parseEnvironmentQuery = (
+  raw: unknown
+): { ok: true; environment?: DecisionEnvironment } | { ok: false; message: string } => {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, environment: undefined };
+  }
+  if (typeof raw !== "string") {
+    return { ok: false, message: "environment must be TEST or LIVE" };
+  }
+  const value = raw.trim().toUpperCase();
+  if (value === "TEST" || value === "LIVE") {
+    return { ok: true, environment: value };
+  }
+  return { ok: false, message: "environment must be TEST or LIVE" };
+};
 
 export const buildSetupsRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
   router.get("/v1/setups", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
+    const parsedEnv = parseEnvironmentQuery(req.query.environment);
+    if (!parsedEnv.ok) {
+      res.status(400).json({ error: { code: "INVALID_ENVIRONMENT", message: parsedEnv.message } });
+      return;
+    }
     const rawLimit = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
     const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 50;
-    res.json({ setups: await store.listSetups(userId, limit) });
+    res.json({ setups: await store.listSetups(userId, limit, parsedEnv.environment) });
   });
 
   router.get("/v1/setups/active", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const env = req.query.environment === "TEST" ? "TEST" : req.query.environment === "LIVE" ? "LIVE" : undefined;
-    res.json({ setups: await store.listActiveSetups(userId, env) });
+    const parsedEnv = parseEnvironmentQuery(req.query.environment);
+    if (!parsedEnv.ok) {
+      res.status(400).json({ error: { code: "INVALID_ENVIRONMENT", message: parsedEnv.message } });
+      return;
+    }
+    res.json({ setups: await store.listActiveSetups(userId, parsedEnv.environment) });
   });
 
   router.get("/v1/setups/:setupId", requireAuth, async (req, res) => {
@@ -38,8 +64,13 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/analytics/setups", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const environment = req.query.environment === "TEST" ? "TEST" : "LIVE";
-    const setups = await store.listSetups(userId, 200);
+    const parsedEnv = parseEnvironmentQuery(req.query.environment);
+    if (!parsedEnv.ok) {
+      res.status(400).json({ error: { code: "INVALID_ENVIRONMENT", message: parsedEnv.message } });
+      return;
+    }
+    const environment: DecisionEnvironment = parsedEnv.environment ?? "LIVE";
+    const setups = await store.listSetups(userId, 200, environment);
     res.json({ analytics: computeSetupAnalytics(setups, environment) });
   });
 
@@ -57,7 +88,10 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
         decisionBackendVersion: BACKEND_VERSION,
         ruleConfigVersion: RULE_CONFIG_VERSION,
         setupRuleConfigVersion: setupLifecycleConfig.version,
-        flags: setupLifecycleConfig.flags,
+        flags: {
+          ...setupLifecycleConfig.flags,
+          aiEnabled: env.AI_ENABLED
+        },
         tradingView: {
           connectionStatus: activeConnection?.status ?? "NONE",
           webhookId: activeConnection?.webhookId ?? null,
@@ -86,9 +120,7 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.get("/v1/admin/diagnostics", requireAuth, async (req, res) => {
-    // Phase 3: any authenticated user can read their own diagnostics (no secrets).
-    // Future: restrict via admin claim.
+  router.get("/v1/admin/diagnostics", requireAuth, requireAdmin, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const [latest, setups, connections, rejects] = await Promise.all([
       store.latestDecision(userId),
@@ -104,7 +136,16 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
         ruleConfigVersion: RULE_CONFIG_VERSION,
         setupRuleConfigVersion: setupLifecycleConfig.version,
         pineVersionLastReceived: latest?.pineScriptVersion ?? null,
-        flags: setupLifecycleConfig.flags,
+        flags: {
+          setupTrackingEnabled: setupLifecycleConfig.flags.setupTrackingEnabled,
+          setupTrackingEnvironments: setupLifecycleConfig.flags.setupTrackingEnvironments,
+          brokerMode: setupLifecycleConfig.flags.brokerMode,
+          brokerExecutionEnabled: setupLifecycleConfig.flags.brokerExecutionEnabled,
+          brokerLiveExecutionEnabled: setupLifecycleConfig.flags.brokerLiveExecutionEnabled,
+          aiEnabled: env.AI_ENABLED,
+          analysisGenerationEnabled: setupLifecycleConfig.flags.analysisGenerationEnabled,
+          newSetupCreationEnabled: setupLifecycleConfig.flags.newSetupCreationEnabled
+        },
         webhookConnections: active.map((c) => ({
           webhookId: c.webhookId,
           status: c.status,

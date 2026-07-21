@@ -73,4 +73,38 @@ describe("HistoryPage", () => {
     await user.click(screen.getByTestId("history-item-gm-web-wait"));
     expect(navigate).toHaveBeenCalledWith("/history/gm-web-wait");
   });
+
+  it("TEST filter excludes LIVE decisions and LIVE filter excludes TEST", async () => {
+    const user = userEvent.setup();
+    decisionHistory.mockResolvedValue([
+      { ...(buy as Decision), decisionId: "d-test", environment: "TEST", isTestDecision: true },
+      {
+        ...(buy as Decision),
+        decisionId: "d-live",
+        environment: "LIVE",
+        isTestDecision: false,
+        dataQuality: "GOOD",
+        dataSourceLabel: "LIVE"
+      },
+      { ...(wait as Decision), decisionId: "w-live", environment: "LIVE", isTestDecision: false }
+    ]);
+    render(
+      <MemoryRouter>
+        <HistoryPage />
+      </MemoryRouter>
+    );
+    await screen.findByTestId("history-item-d-test");
+    expect(screen.getByTestId("env-badge-d-test")).toHaveTextContent("TEST");
+    expect(screen.getByTestId("env-badge-d-live")).toHaveTextContent("LIVE");
+
+    await user.click(screen.getByRole("tab", { name: "TEST" }));
+    expect(screen.getByTestId("history-item-d-test")).toBeInTheDocument();
+    expect(screen.queryByTestId("history-item-d-live")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("history-item-w-live")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "LIVE" }));
+    expect(screen.queryByTestId("history-item-d-test")).not.toBeInTheDocument();
+    expect(screen.getByTestId("history-item-d-live")).toBeInTheDocument();
+    expect(screen.getByTestId("history-item-w-live")).toBeInTheDocument();
+  });
 });

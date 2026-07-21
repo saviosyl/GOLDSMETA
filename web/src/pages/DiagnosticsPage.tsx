@@ -1,27 +1,59 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import type { AdminDiagnostics } from "../types/models";
+import { ApiError } from "../types/models";
 import { formatWhen } from "../lib/format";
 
+function flagBool(flags: Record<string, unknown>, key: string): boolean | null {
+  const value = flags[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function flagString(flags: Record<string, unknown>, key: string): string | null {
+  const value = flags[key];
+  return typeof value === "string" ? value : null;
+}
+
+function flagEnvironments(flags: Record<string, unknown>): string[] | null {
+  const value = flags.setupTrackingEnvironments;
+  if (!Array.isArray(value)) return null;
+  return value.filter((item): item is string => typeof item === "string");
+}
+
 /**
- * Authenticated diagnostics — no webhook secrets shown.
- * Phase 3: any signed-in user can view their own pipeline health.
+ * Admin-only diagnostics — secrets never shown.
+ * Backend enforces Firebase custom claim admin=true (403 for non-admin).
  */
 export function DiagnosticsPage() {
   const { api } = useAuth();
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     void api
       .adminDiagnostics()
-      .then(setDiagnostics)
-      .catch((err) => setError(err instanceof Error ? err.message : "Access failed"));
+      .then((data) => {
+        setDiagnostics(data);
+        setForbidden(false);
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          setForbidden(true);
+          setError("Admin access required. Diagnostics are restricted to operators with the admin claim.");
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Access failed");
+      });
   }, [api]);
 
-  if (error) {
+  if (forbidden || error) {
     return (
-      <div className="banner error" role="alert" data-testid="diagnostics-error">
+      <div
+        className={`banner ${forbidden ? "stale" : "error"}`}
+        role="alert"
+        data-testid={forbidden ? "diagnostics-forbidden" : "diagnostics-error"}
+      >
         {error}
       </div>
     );
@@ -35,6 +67,12 @@ export function DiagnosticsPage() {
     );
   }
 
+  const flags = diagnostics.flags ?? {};
+  const trackingEnvs = flagEnvironments(flags);
+  const setupTrackingEnabled = flagBool(flags, "setupTrackingEnabled");
+  const brokerMode = flagString(flags, "brokerMode");
+  const aiEnabled = flagBool(flags, "aiEnabled");
+
   return (
     <div className="diagnostics-page" data-testid="diagnostics-page">
       <h1 className="brand" style={{ fontSize: "1.4rem" }}>
@@ -42,12 +80,8 @@ export function DiagnosticsPage() {
       </h1>
       <p className="subtitle">Pipeline health — secrets never shown</p>
 
-      <section className="card">
-        <h2 className="section-title">API</h2>
-        <div className="price-row">
-          <span>Health</span>
-          <strong>{diagnostics.apiHealth}</strong>
-        </div>
+      <section className="card" data-testid="diagnostics-flags">
+        <h2 className="section-title">Feature flags</h2>
         <div className="price-row">
           <span>Backend</span>
           <strong>{diagnostics.backendVersion}</strong>
@@ -59,6 +93,36 @@ export function DiagnosticsPage() {
         <div className="price-row">
           <span>Setup rules</span>
           <strong>{diagnostics.setupRuleConfigVersion}</strong>
+        </div>
+        <div className="price-row">
+          <span>Setup tracking</span>
+          <strong data-testid="flag-setup-tracking-enabled">
+            {setupTrackingEnabled === null ? "—" : setupTrackingEnabled ? "enabled" : "disabled"}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Tracking environments</span>
+          <strong data-testid="flag-setup-tracking-environments">
+            {trackingEnvs ? JSON.stringify(trackingEnvs) : "—"}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Broker mode</span>
+          <strong data-testid="flag-broker-mode">{brokerMode ?? "—"}</strong>
+        </div>
+        <div className="price-row">
+          <span>AI</span>
+          <strong data-testid="flag-ai-enabled">
+            {aiEnabled === null ? "—" : aiEnabled ? "enabled" : "disabled"}
+          </strong>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">API</h2>
+        <div className="price-row">
+          <span>Health</span>
+          <strong>{diagnostics.apiHealth}</strong>
         </div>
         <div className="price-row">
           <span>Pine last seen</span>

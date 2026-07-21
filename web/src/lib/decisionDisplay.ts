@@ -22,7 +22,7 @@ export const humanizeToken = (value: string): string =>
 export const displayQualityLabel = (
   decision: Decision,
   source: "live" | "cached" | "offline" = "live"
-): "LIVE" | "STALE" | "PARTIAL" | "OFFLINE" | "DELAYED" => {
+): "FRESH" | "STALE" | "PARTIAL" | "OFFLINE" | "DELAYED" => {
   if (source === "offline" || decision.dataSourceLabel === "OFFLINE") {
     return "OFFLINE";
   }
@@ -38,7 +38,8 @@ export const displayQualityLabel = (
   if (decision.dataSourceLabel === "DELAYED") {
     return "DELAYED";
   }
-  return "LIVE";
+  // Fresh market data — intentionally not labelled "LIVE" to avoid clashing with environment.
+  return "FRESH";
 };
 
 export const recommendedActionLabel = (decision: Decision): string => {
@@ -221,10 +222,11 @@ export const filterHistory = (
     return items.filter((item) => item.decision === filter);
   }
   if (filter === "LIVE") {
-    return items.filter((item) => !isTestDecision(item) && item.environment !== "TEST");
+    // Authoritative decision.environment only — never infer from setups or quality labels.
+    return items.filter((item) => item.environment === "LIVE");
   }
   if (filter === "TEST") {
-    return items.filter((item) => isTestDecision(item) || item.environment === "TEST");
+    return items.filter((item) => item.environment === "TEST");
   }
   return items.filter((item) => {
     const setup = setupsByDecisionId.get(item.decisionId);

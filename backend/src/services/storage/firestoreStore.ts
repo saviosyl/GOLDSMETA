@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { Firestore, Transaction } from "firebase-admin/firestore";
+import type { Firestore, Query, Transaction } from "firebase-admin/firestore";
 import { z } from "zod";
 import type { SetupRecord } from "../../models/setup";
 import { isActiveSetupStatus } from "../../models/setup";
@@ -239,14 +239,19 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return doc ? (doc.data() as SetupRecord) : undefined;
   }
 
-  async listSetups(userId: string, limit = 50): Promise<SetupRecord[]> {
-    const snap = await this.db
+  async listSetups(
+    userId: string,
+    limit = 50,
+    environment?: DecisionEnvironment
+  ): Promise<SetupRecord[]> {
+    let query: Query = this.db
       .collection("users")
       .doc(userId)
-      .collection("setups")
-      .orderBy("createdAt", "desc")
-      .limit(limit)
-      .get();
+      .collection("setups");
+    if (environment) {
+      query = query.where("environment", "==", environment);
+    }
+    const snap = await query.orderBy("createdAt", "desc").limit(limit).get();
     return snap.docs.map((doc) => doc.data() as SetupRecord);
   }
 
@@ -254,13 +259,8 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     userId: string,
     environment?: DecisionEnvironment
   ): Promise<SetupRecord[]> {
-    const setups = await this.listSetups(userId, 200);
-    return setups.filter(
-      (s) =>
-        isActiveSetupStatus(s.status) &&
-        s.resolution === "OPEN" &&
-        (environment ? s.environment === environment : true)
-    );
+    const setups = await this.listSetups(userId, 200, environment);
+    return setups.filter((s) => isActiveSetupStatus(s.status) && s.resolution === "OPEN");
   }
 
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {

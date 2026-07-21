@@ -118,6 +118,12 @@ export function HistoryPage() {
                     <div className="history-item-top">
                       <strong className={`history-decision ${item.decision}`}>{item.decision}</strong>
                       <span className="history-confidence">{formatPercent(item.confidence)}</span>
+                      <span
+                        className={`badge history-env ${item.environment === "TEST" ? "test" : ""}`}
+                        data-testid={`env-badge-${item.decisionId}`}
+                      >
+                        {item.environment === "TEST" ? "TEST" : "LIVE"}
+                      </span>
                       <span className={`badge history-quality ${quality.toLowerCase()}`}>{quality}</span>
                       {setup && (
                         <span className="badge" data-testid={`setup-badge-${item.decisionId}`}>
