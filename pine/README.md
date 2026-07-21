@@ -1,6 +1,6 @@
 # GoldMeta Pine Script Bridge
 
-`GoldMetaBridge.pine` (script version **2.0.2+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
+`GoldMetaBridge.pine` (script version **2.0.3+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
 
 > GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.
 
@@ -45,25 +45,25 @@ If a required value cannot be calculated reliably (e.g. `UNKNOWN` session or pro
 4. Click **Save**, then **Add to chart**.
 5. Confirm the status table shows `Symbol OK = YES` and `VP ready` during known sessions.
 
-## Create the TradingView alert
+## Create the TradingView alert (desktop Supercharts)
 
-1. Click **Alerts**.
-2. Choose the GoldMeta Bridge indicator.
-3. Select **Any alert() function call**.
-4. Set the webhook URL:
+Use **desktop** TradingView Supercharts (mobile alert UI often lists only plot series).
 
-   ```text
-   https://<region>-<firebase-project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-   ```
-
-5. Message box:
+1. Add **GoldMeta Bridge** v2.0.3+ to an XAUUSD **15m** chart and confirm the status table version.
+2. Click **Alerts** → **Create alert** (clock / + Alert) — do **not** create the alert from a plot legend item.
+3. **Condition** first field: select **GoldMeta Bridge** (the indicator), not “GoldMeta Session High / POC / …”.
+4. **Condition** second field: select **Any alert() function call** (must be the first option when `alert()` is present).
+5. Enable **Webhook URL** and paste your GoldMeta webhook URL.
+6. Message:
 
    ```text
    {{alert_message}}
    ```
 
-6. Frequency: once per bar close (matches confirmed-bar mode).
-7. Save the alert.
+7. Frequency is controlled by the script (`alert.freq_once_per_bar_close` when Confirmed-bar mode is ON).
+8. Create the alert.
+
+If you only see plot names (Session High, POC, VAH, …), you selected a **plot** as the condition source, or an older script without a reachable `alert()` call is on the chart. Remove the old instance, paste v2.0.3+, Add to chart, then create the alert from the indicator again.
 
 ## Settings
 
@@ -83,6 +83,7 @@ See `pine/alert-payload-example.json`.
 
 ## Changelog
 
+- **2.0.3** — Expose Create Alert “Any alert() function call”: remove `barstate.isrealtime` gate around `alert()`; clarify desktop alert setup (select indicator, not plots).
 - **2.0.2** — Fix RE10045 array bounds: recompute start/end indices after left expansion; hard bounds checks; overflow instead of out-of-range writes.
 - **2.0.1** — Fix Pine v6 compile errors: volume-profile helpers no longer reassign global scalars; they return tuples / mutate arrays by reference.
 - **2.0.0** — Initial gm_svp_v1 / gm_trend_v1 / gm_candle_v1 production bridge.

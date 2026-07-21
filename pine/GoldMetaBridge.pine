@@ -19,7 +19,7 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.2"
+const string SCRIPT_VERSION = "2.0.3"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -477,15 +477,24 @@ alertMessage = "{" +
   metadataJson +
   "}"
 
+// ---------------------------------------------------------------------------
+// Script alerts (webhook JSON).
+// TradingView Create Alert → Condition: "GoldMeta Bridge" → "Any alert() function call".
+// Do NOT gate on barstate.isrealtime: alert() already only fires in realtime, and
+ // realtime-only gating has caused some clients to hide "Any alert() function call"
+ // and list only plot series instead. alert() is a no-op on historical bars.
+// Frequency for production: alert.freq_once_per_bar_close (confirmed-bar mode).
+// ---------------------------------------------------------------------------
 var bool testAlertSent = false
-if enableAlertCalls and barstate.isrealtime and canEmitBar
-    if testAlertMode
-        if not testAlertSent
-            alert(alertMessage, alert.freq_once_per_bar)
-            testAlertSent := true
-    else
-        alert(alertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
-        testAlertSent := false
+bool emitAlert = enableAlertCalls and canEmitBar
+if emitAlert and testAlertMode and not testAlertSent
+    alert(alertMessage, alert.freq_once_per_bar)
+    testAlertSent := true
+else if emitAlert and not testAlertMode
+    alert(alertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+    testAlertSent := false
+else if not testAlertMode
+    testAlertSent := false
 
 plot(showDiagnosticLevels ? sessionHigh : na, title="GoldMeta Session High", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
 plot(showDiagnosticLevels ? sessionLow : na, title="GoldMeta Session Low", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
