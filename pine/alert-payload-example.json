@@ -104,7 +104,7 @@
     }
   },
   "metadata": {
-    "scriptVersion": "2.0.0",
+    "scriptVersion": "2.0.1",
     "confirmedBarMode": true,
     "diagnosticMode": false,
     "symbolOk": true,

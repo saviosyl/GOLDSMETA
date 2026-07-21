@@ -73,6 +73,6 @@ Added: `INCOMPLETE_DATA`, `MISSING_VOLUME_PROFILE`, `MISSING_TREND`, `MISSING_CO
 
 1. Merge this PR into the production branch after review.
 2. Deploy **backend** first (schema/guard changes).
-3. Update TradingView with `pine/GoldMetaBridge.pine` v2.0.0 on XAUUSD **15m**; recreate alert.
+3. Update TradingView with `pine/GoldMetaBridge.pine` v2.0.1 on XAUUSD **15m**; recreate alert.
 4. Run one controlled LIVE alert; confirm History shows `15m` and POC/VAH/VAL.
 5. Only then treat BUY/SELL as production-ready for operator review (still analysis-only; no broker execution).

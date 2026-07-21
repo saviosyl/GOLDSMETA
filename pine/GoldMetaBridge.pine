@@ -15,9 +15,11 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // TPO market-profile fields remain unavailable (null) unless supplied by a separate licensed alert.
 //
 // Non-repainting rules: closed bars only for alerts; request.security(..., lookahead_off); no future data.
+// Pine v6 note: user functions must not reassign global scalars; VP helpers return tuples and/or
+// mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.0"
+const string SCRIPT_VERSION = "2.0.1"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -49,6 +51,7 @@ showStatusTable = input.bool(true, "Show status table", group=groupStatus)
 showWarnings = input.bool(true, "Show symbol warning", group=groupStatus)
 diagnosticMode = input.bool(false, "Diagnostic mode", group=groupStatus)
 
+// --- Pure helpers (no global scalar mutation) ---
 f_json_string(string value) =>
     string escaped = str.replace_all(value, "\\", "\\\\")
     escaped := str.replace_all(escaped, "\"", "\\\"")
@@ -96,6 +99,112 @@ f_trend_strength(float c, float eFast, float eSlow, float atrv, string dir) =>
     float stretch = na(c) or na(eFast) ? 0.0 : f_clamp100(math.abs(c - eFast) / atrSafe * 25.0)
     f_clamp100(base + align + stretch * 0.4)
 
+f_signed(string dir, float strength) =>
+    dir == "BULLISH" ? strength : dir == "BEARISH" ? -strength : 0.0
+
+f_bin_size(float atrv) =>
+    math.max(syminfo.mintick * 10.0, nz(atrv, syminfo.mintick * 10.0) / 20.0)
+
+// Returns a fresh session histogram. Caller assigns returned scalars/array at global scope.
+f_init_profile(float barLow, float atrv) =>
+    float bSize = f_bin_size(atrv)
+    float anchor = math.floor(barLow / bSize) * bSize
+    float[] vols = array.new_float()
+    array.push(vols, 0.0)
+    [vols, anchor, bSize]
+
+// Mutates vols in place; returns updated [anchor, overflow, ok].
+f_ensure_index(float[] vols, float anchor, float bSize, bool overflow, int idx) =>
+    float a = anchor
+    bool ov = overflow
+    bool ok = true
+    int sz = array.size(vols)
+    if idx < 0
+        int need = -idx
+        if sz + need > MAX_BINS
+            ov := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.unshift(vols, 0.0)
+            a := a - need * bSize
+    else if idx >= sz
+        int need = idx - sz + 1
+        if sz + need > MAX_BINS
+            ov := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.push(vols, 0.0)
+    [a, ov, ok]
+
+// Mutates vols in place; returns [anchor, overflow, added].
+f_add_bar_to_profile(float[] vols, float anchor, float bSize, bool overflow, float barLow, float barHigh, float barVol) =>
+    float a = anchor
+    bool ov = overflow
+    bool added = false
+    if not na(bSize) and bSize > 0.0 and not na(barVol) and barVol > 0.0 and not na(a)
+        int startIdx = int(math.floor((barLow - a) / bSize))
+        int endIdx = int(math.floor((barHigh - a) / bSize))
+        if endIdx < startIdx
+            int tmp = startIdx
+            startIdx := endIdx
+            endIdx := tmp
+        [a1, ov1, ok1] = f_ensure_index(vols, a, bSize, ov, startIdx)
+        [a2, ov2, ok2] = f_ensure_index(vols, a1, bSize, ov1, endIdx)
+        a := a2
+        ov := ov2
+        if ok1 and ok2 and not ov
+            startIdx := int(math.floor((barLow - a) / bSize))
+            endIdx := int(math.floor((barHigh - a) / bSize))
+            if endIdx < startIdx
+                int tmp2 = startIdx
+                startIdx := endIdx
+                endIdx := tmp2
+            int bins = endIdx - startIdx + 1
+            float share = barVol / bins
+            for i = startIdx to endIdx
+                array.set(vols, i, array.get(vols, i) + share)
+            added := true
+    [a, ov, added]
+
+// Pure computation from histogram state; returns [poc, vah, val, total].
+f_compute_value_area(float[] vols, float anchor, float bSize, bool overflow) =>
+    float poc = na
+    float vah = na
+    float val = na
+    float total = na
+    int size = array.size(vols)
+    if size > 0 and not overflow and not na(anchor) and not na(bSize) and bSize > 0.0
+        float sum = 0.0
+        int pocIdx = 0
+        float pocVol = array.get(vols, 0)
+        for i = 0 to size - 1
+            float v = array.get(vols, i)
+            sum += v
+            if v > pocVol
+                pocVol := v
+                pocIdx := i
+        total := sum
+        if sum > 0.0
+            float target = sum * (VA_PCT / 100.0)
+            int lo = pocIdx
+            int hi = pocIdx
+            float covered = pocVol
+            while covered < target and (lo > 0 or hi < size - 1)
+                float below = lo > 0 ? array.get(vols, lo - 1) : -1.0
+                float above = hi < size - 1 ? array.get(vols, hi + 1) : -1.0
+                if above >= below
+                    hi += 1
+                    covered += array.get(vols, hi)
+                else
+                    lo -= 1
+                    covered += array.get(vols, lo)
+            poc := anchor + (pocIdx + 0.5) * bSize
+            val := anchor + lo * bSize
+            vah := anchor + (hi + 1) * bSize
+    [poc, vah, val, total]
+
 symbolUpper = str.upper(syminfo.ticker)
 expectedUpper = str.upper(expectedSymbol)
 symbolOk = str.contains(symbolUpper, expectedUpper)
@@ -135,112 +244,17 @@ var float vahPrice = na
 var float valPrice = na
 var float profileTotalVolume = na
 
-f_bin_size() =>
-    math.max(syminfo.mintick * 10.0, nz(atrValue, syminfo.mintick * 10.0) / 20.0)
-
-f_reset_profile() =>
-    array.clear(binVolumes)
-    binSizeUsed := f_bin_size()
-    profileAnchor := math.floor(low / binSizeUsed) * binSizeUsed
-    array.push(binVolumes, 0.0)
-    profileOverflow := false
-    pocPrice := na
-    vahPrice := na
-    valPrice := na
-    profileTotalVolume := na
-
-f_ensure_index(int idx) =>
-    bool ok = true
-    if idx < 0
-        int need = -idx
-        if array.size(binVolumes) + need > MAX_BINS
-            profileOverflow := true
-            ok := false
-        else
-            for i = 0 to need - 1
-                array.unshift(binVolumes, 0.0)
-            profileAnchor := profileAnchor - need * binSizeUsed
-    else if idx >= array.size(binVolumes)
-        int need = idx - array.size(binVolumes) + 1
-        if array.size(binVolumes) + need > MAX_BINS
-            profileOverflow := true
-            ok := false
-        else
-            for i = 0 to need - 1
-                array.push(binVolumes, 0.0)
-    ok
-
-f_add_bar_to_profile(float barLow, float barHigh, float barVol) =>
-    if na(binSizeUsed) or binSizeUsed <= 0 or barVol <= 0 or na(barVol)
-        false
-    else
-        int startIdx = int(math.floor((barLow - profileAnchor) / binSizeUsed))
-        int endIdx = int(math.floor((barHigh - profileAnchor) / binSizeUsed))
-        if endIdx < startIdx
-            int tmp = startIdx
-            startIdx := endIdx
-            endIdx := tmp
-        bool expanded = f_ensure_index(startIdx)
-        expanded := expanded and f_ensure_index(endIdx)
-        if expanded and not profileOverflow
-            // Recompute indices after possible left expansion
-            startIdx := int(math.floor((barLow - profileAnchor) / binSizeUsed))
-            endIdx := int(math.floor((barHigh - profileAnchor) / binSizeUsed))
-            if endIdx < startIdx
-                int tmp2 = startIdx
-                startIdx := endIdx
-                endIdx := tmp2
-            int bins = endIdx - startIdx + 1
-            float share = barVol / bins
-            for i = startIdx to endIdx
-                array.set(binVolumes, i, array.get(binVolumes, i) + share)
-            true
-        else
-            false
-
-f_compute_value_area() =>
-    int size = array.size(binVolumes)
-    if size <= 0 or profileOverflow
+if sessionChanged
+    if sessionKnown
+        [initVols, initAnchor, initSize] = f_init_profile(low, atrValue)
+        binVolumes := initVols
+        profileAnchor := initAnchor
+        binSizeUsed := initSize
+        profileOverflow := false
         pocPrice := na
         vahPrice := na
         valPrice := na
         profileTotalVolume := na
-    else
-        float total = 0.0
-        int pocIdx = 0
-        float pocVol = array.get(binVolumes, 0)
-        for i = 0 to size - 1
-            float v = array.get(binVolumes, i)
-            total += v
-            if v > pocVol
-                pocVol := v
-                pocIdx := i
-        profileTotalVolume := total
-        if total <= 0
-            pocPrice := na
-            vahPrice := na
-            valPrice := na
-        else
-            float target = total * (VA_PCT / 100.0)
-            int lo = pocIdx
-            int hi = pocIdx
-            float covered = pocVol
-            while covered < target and (lo > 0 or hi < size - 1)
-                float below = lo > 0 ? array.get(binVolumes, lo - 1) : -1.0
-                float above = hi < size - 1 ? array.get(binVolumes, hi + 1) : -1.0
-                if above >= below
-                    hi += 1
-                    covered += array.get(binVolumes, hi)
-                else
-                    lo -= 1
-                    covered += array.get(binVolumes, lo)
-            pocPrice := profileAnchor + (pocIdx + 0.5) * binSizeUsed
-            valPrice := profileAnchor + lo * binSizeUsed
-            vahPrice := profileAnchor + (hi + 1) * binSizeUsed
-
-if sessionChanged
-    if sessionKnown
-        f_reset_profile()
     else
         array.clear(binVolumes)
         profileAnchor := na
@@ -252,10 +266,17 @@ if sessionChanged
         profileTotalVolume := na
 
 // Accumulate only on confirmed bars (historical bars are confirmed; live bar waits for close).
-profileReady = false
+bool profileReady = false
 if sessionKnown and confirmedNow and not na(binSizeUsed)
-    f_add_bar_to_profile(low, high, volume)
-    f_compute_value_area()
+    [nextAnchor, nextOverflow, added] = f_add_bar_to_profile(binVolumes, profileAnchor, binSizeUsed, profileOverflow, low, high, volume)
+    profileAnchor := nextAnchor
+    profileOverflow := nextOverflow
+    if added
+        [nextPoc, nextVah, nextVal, nextTotal] = f_compute_value_area(binVolumes, profileAnchor, binSizeUsed, profileOverflow)
+        pocPrice := nextPoc
+        vahPrice := nextVah
+        valPrice := nextVal
+        profileTotalVolume := nextTotal
     profileReady := not profileOverflow and not na(pocPrice) and not na(vahPrice) and not na(valPrice)
 else if sessionKnown and not na(pocPrice) and not profileOverflow
     profileReady := true
@@ -273,9 +294,6 @@ htf1Dir = f_trend_dir(htf1Close, htf1EmaFast, htf1EmaSlow)
 htf1Strength = f_trend_strength(htf1Close, htf1EmaFast, htf1EmaSlow, htf1Atr, htf1Dir)
 htf2Dir = f_trend_dir(htf2Close, htf2EmaFast, htf2EmaSlow)
 htf2Strength = f_trend_strength(htf2Close, htf2EmaFast, htf2EmaSlow, htf2Atr, htf2Dir)
-
-f_signed(string dir, float strength) =>
-    dir == "BULLISH" ? strength : dir == "BEARISH" ? -strength : 0.0
 
 aggSigned = (f_signed(chartDir, chartStrength) + f_signed(htf1Dir, htf1Strength) + f_signed(htf2Dir, htf2Strength)) / 3.0
 trendDirection = aggSigned >= 15.0 ? "BULLISH" : aggSigned <= -15.0 ? "BEARISH" : "NEUTRAL"

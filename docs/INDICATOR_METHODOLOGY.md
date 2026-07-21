@@ -1,6 +1,6 @@
 # GoldMeta Indicator Methodology (Phase 2)
 
-This document defines the deterministic methods used by `pine/GoldMetaBridge.pine` (script version `2.0.0+`).
+This document defines the deterministic methods used by `pine/GoldMetaBridge.pine` (script version `2.0.1+`).
 
 **Important distinction**
 
