@@ -138,6 +138,10 @@ export interface GoldMetaStore {
   recordSetupSkip(record: Omit<SetupSkipRecord, "id">): Awaitable<SetupSkipRecord>;
   listRecentSetupSkips(userId: string, limit?: number): Awaitable<SetupSkipRecord[]>;
 
+  /** V4 shadow results — never overwrite V3 decisions/setups. */
+  saveV4ShadowResult?(userId: string, result: Record<string, unknown>): Awaitable<void>;
+  listV4ShadowResults?(userId: string, limit?: number): Awaitable<Record<string, unknown>[]>;
+
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;
   deleteDevice(userId: string, deviceId: string): Awaitable<boolean>;
   listDevices(userId: string): Awaitable<DeviceRecord[]>;

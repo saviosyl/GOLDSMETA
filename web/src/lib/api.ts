@@ -303,4 +303,32 @@ export class ApiClient {
     );
     return body.publicKey;
   }
+
+  async v4Status(): Promise<{
+    strategyVersion: string;
+    engineVersion?: string;
+    deploymentStage?: string;
+    actionableLiveEnabled?: boolean;
+    shadowComputeEnabled?: boolean;
+    brokerExecution?: string;
+    note?: string;
+  }> {
+    const body = await this.request<{ v4: Record<string, unknown> }>("/v1/v4/status");
+    return body.v4 as {
+      strategyVersion: string;
+      engineVersion?: string;
+      deploymentStage?: string;
+      actionableLiveEnabled?: boolean;
+      shadowComputeEnabled?: boolean;
+      brokerExecution?: string;
+      note?: string;
+    };
+  }
+
+  async v4Shadows(limit = 20): Promise<unknown[]> {
+    const body = await this.request<{ shadows: unknown[] }>(
+      `/v1/v4/shadows?limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.shadows;
+  }
 }

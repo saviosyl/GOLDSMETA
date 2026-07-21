@@ -23,6 +23,7 @@ import { scoreSnapshot, directionFromScore } from "./scoringEngine";
 import { buildTradePlan } from "./tradePlanEngine";
 import { createSetupFromDecision } from "../setup/createSetup";
 import { logger } from "../logging/logger";
+import { runV4ShadowSafe } from "../v4/shadowRunner";
 
 const disclaimer =
   "GoldMeta provides market analysis and decision support only. Trading involves substantial risk.";
@@ -241,6 +242,16 @@ export const processDecisionPipeline = async (
       error: error instanceof Error ? error.message : "unknown"
     });
   }
+
+  // GoldMeta V4 shadow — parallel research engine; never mutates V3 decision/setup/push.
+  void runV4ShadowSafe({
+    store,
+    userId: decision.userId,
+    payload,
+    snapshot,
+    environment,
+    parentDecisionId: decision.decisionId
+  });
 
   return decision;
 };

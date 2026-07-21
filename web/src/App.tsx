@@ -11,6 +11,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SetupDetailPage } from "./pages/SetupDetailPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
+import { V4ResearchPage } from "./pages/V4ResearchPage";
 
 function ProtectedApp() {
   const { user, loading } = useAuth();
@@ -45,6 +46,7 @@ function ProtectedApp() {
         <Route path="/setups/:setupId" element={<SetupDetailPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/diagnostics" element={<DiagnosticsPage />} />
+        <Route path="/v4" element={<V4ResearchPage />} />
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
