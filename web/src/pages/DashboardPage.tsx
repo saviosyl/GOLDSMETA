@@ -20,7 +20,10 @@ export function DashboardPage() {
       setDecision(latest);
       setSource("live");
       setCachedAt(null);
-      saveCache(cacheKeys.decision, latest);
+      if (latest) {
+        saveCache(cacheKeys.decision, latest);
+      }
+      // 404 NOT_FOUND is mapped to null by the API client — show empty state, not an error.
     } catch (err) {
       const cached = loadCache<Decision>(cacheKeys.decision);
       if (cached) {

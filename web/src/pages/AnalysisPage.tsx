@@ -14,7 +14,10 @@ export function AnalysisPage() {
       try {
         const latest = await api.latestDecision();
         setDecision(latest);
-        saveCache(cacheKeys.decision, latest);
+        setError(null);
+        if (latest) {
+          saveCache(cacheKeys.decision, latest);
+        }
       } catch (err) {
         const cached = loadCache<Decision>(cacheKeys.decision);
         setDecision(cached?.value ?? null);

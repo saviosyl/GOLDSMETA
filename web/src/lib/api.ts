@@ -82,9 +82,17 @@ export class ApiClient {
     return this.request<HealthResponse>("/health", {}, false);
   }
 
-  async latestDecision(): Promise<Decision> {
-    const body = await this.request<{ decision: Decision }>("/v1/decisions/latest");
-    return body.decision;
+  async latestDecision(): Promise<Decision | null> {
+    try {
+      const body = await this.request<{ decision: Decision }>("/v1/decisions/latest");
+      return body.decision;
+    } catch (err) {
+      // Expected empty state when the user has no published decision yet.
+      if (err instanceof ApiError && err.status === 404 && err.code === "NOT_FOUND") {
+        return null;
+      }
+      throw err;
+    }
   }
 
   async decisionHistory(limit = 50): Promise<Decision[]> {

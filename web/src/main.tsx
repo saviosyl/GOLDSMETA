@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "api-connect-2026-07-21-0819";
+export const GOLD_META_BUILD_STAMP = "empty-decision-404-2026-07-21";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
