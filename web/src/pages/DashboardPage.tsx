@@ -214,6 +214,7 @@ export function DashboardPage() {
           )}
           <div className="dashboard-links">
             <Link to="/analytics">Analytics</Link>
+            <Link to="/v4">V4 Research</Link>
             <Link to="/diagnostics">Diagnostics</Link>
           </div>
         </section>

@@ -6,6 +6,7 @@ on:
       - main
       - cursor/production-connection
       - cursor/webhook-delivery-400-c2c2
+      - cursor/phase3-stage3-live-forward-c2c2
   push:
     branches:
       - main

@@ -379,6 +379,14 @@ export interface AdminDiagnostics {
   }>;
   igDemoPlan: Record<string, unknown>;
   mockBrokerReady: string;
+  v4?: {
+    strategyVersion?: string;
+    engineVersion?: string;
+    deploymentStage?: string;
+    mode?: string;
+    actionable?: boolean;
+    flags?: Record<string, unknown>;
+  };
 }
 
 export interface TradingViewConnection {

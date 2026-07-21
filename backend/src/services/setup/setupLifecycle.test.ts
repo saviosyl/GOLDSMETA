@@ -62,7 +62,7 @@ function baseDecision(over: Partial<DecisionRecord> = {}): DecisionRecord {
     snapshotId: "snap-1",
     ruleConfigVersion: "rules-1.1.0",
     pineScriptVersion: "2.0.4",
-    backendVersion: "1.3.0-phase3-stage3",
+    backendVersion: "1.3.1-v4-stage-b",
     aiModelId: null,
     aiPromptVersion: null,
     aiSafetyDowngraded: false,

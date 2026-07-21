@@ -307,6 +307,144 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return snap.docs.map((d) => d.data() as SetupSkipRecord);
   }
 
+  async saveV4ShadowResult(userId: string, result: Record<string, unknown>): Promise<void> {
+    const shadowId =
+      typeof result.shadowId === "string" ? result.shadowId : `v4_${Date.now()}`;
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Shadows")
+      .doc(shadowId)
+      .set(toFirestoreData({ ...result, userId, shadowId }), { merge: true });
+  }
+
+  async listV4ShadowResults(userId: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Shadows")
+      .orderBy("generatedAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as Record<string, unknown>);
+  }
+
+  async saveV4ShadowAnalysis(
+    userId: string,
+    analysis: import("../v4/shadowTypes").V4ShadowAnalysisRecord
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Analyses")
+      .doc(analysis.analysisId)
+      .set(toFirestoreData(analysis), { merge: true });
+  }
+
+  async listV4ShadowAnalyses(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4ShadowAnalysisRecord[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Analyses")
+      .orderBy("generatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4ShadowAnalysisRecord
+    );
+    return rows.filter((a) => !environment || a.environment === environment).slice(0, limit);
+  }
+
+  async saveV4ShadowCandidate(
+    userId: string,
+    candidate: import("../v4/shadowTypes").V4ShadowCandidateRecord
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Candidates")
+      .doc(candidate.candidateId)
+      .set(toFirestoreData(candidate), { merge: true });
+  }
+
+  async listV4ShadowCandidates(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4ShadowCandidateRecord[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Candidates")
+      .orderBy("updatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4ShadowCandidateRecord
+    );
+    return rows.filter((c) => !environment || c.environment === environment).slice(0, limit);
+  }
+
+  async saveV4ShadowPlan(
+    userId: string,
+    plan: import("../v4/shadowTypes").V4LockedShadowPlan
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4ShadowPlans")
+      .doc(plan.planId)
+      .set(toFirestoreData(plan), { merge: true });
+  }
+
+  async listV4ShadowPlans(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4LockedShadowPlan[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4ShadowPlans")
+      .orderBy("updatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4LockedShadowPlan
+    );
+    return rows.filter((p) => !environment || p.environment === environment).slice(0, limit);
+  }
+
+  async recordV4PlanMutation(
+    userId: string,
+    audit: import("../v4/shadowTypes").V4PlanMutationAudit
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4PlanMutations")
+      .doc(audit.id)
+      .set(toFirestoreData(audit), { merge: true });
+  }
+
+  async listV4PlanMutations(
+    userId: string,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4PlanMutationAudit[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4PlanMutations")
+      .orderBy("at", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4PlanMutationAudit);
+  }
+
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {
     await this.db
       .collection("users")

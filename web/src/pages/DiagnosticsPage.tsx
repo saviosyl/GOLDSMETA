@@ -118,6 +118,45 @@ export function DiagnosticsPage() {
         </div>
       </section>
 
+      <section className="card" data-testid="diagnostics-v4-flags">
+        <h2 className="section-title">V4 shadow flags</h2>
+        <p className="muted">Fail-closed. Never actionable. Broker remains DISABLED.</p>
+        <div className="price-row">
+          <span>Stage / mode</span>
+          <strong data-testid="flag-v4-stage">
+            {String(diagnostics.v4?.deploymentStage ?? "—")} / {String(diagnostics.v4?.mode ?? "SHADOW")}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Compute</span>
+          <strong data-testid="flag-v4-compute">
+            {String((diagnostics.v4?.flags as Record<string, unknown> | undefined)?.V4_SHADOW_COMPUTE_ENABLED ?? "—")}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Lifecycle</span>
+          <strong data-testid="flag-v4-lifecycle">
+            {String((diagnostics.v4?.flags as Record<string, unknown> | undefined)?.V4_SHADOW_LIFECYCLE_ENABLED ?? "—")}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Actionable setup</span>
+          <strong data-testid="flag-v4-actionable">
+            {String((diagnostics.v4?.flags as Record<string, unknown> | undefined)?.V4_ACTIONABLE_SETUP_ENABLED ?? false)}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Notifications</span>
+          <strong data-testid="flag-v4-notifications">
+            {String((diagnostics.v4?.flags as Record<string, unknown> | undefined)?.V4_NOTIFICATIONS_ENABLED ?? false)}
+          </strong>
+        </div>
+        <div className="price-row">
+          <span>Engine</span>
+          <strong>{String(diagnostics.v4?.engineVersion ?? "—")}</strong>
+        </div>
+      </section>
+
       <section className="card">
         <h2 className="section-title">API</h2>
         <div className="price-row">

@@ -8,6 +8,7 @@ import { env } from "../config/env";
 import { IG_DEMO_ADAPTER_PLAN, MockBrokerAdapter } from "../services/brokers/mockBrokerAdapter";
 import { manualExecutionSchema } from "../models/manualRisk";
 import { nowIso } from "../utils/time";
+import { v4Config, v4FlagSnapshot } from "../services/v4/config";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -130,7 +131,16 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
         setupRuleConfigVersion: setupLifecycleConfig.version,
         flags: {
           ...setupLifecycleConfig.flags,
-          aiEnabled: env.AI_ENABLED
+          aiEnabled: env.AI_ENABLED,
+          v4: v4FlagSnapshot()
+        },
+        v4: {
+          strategyVersion: v4Config.strategyVersion,
+          engineVersion: v4Config.engineVersion,
+          deploymentStage: v4Config.deploymentStage,
+          mode: v4Config.mode,
+          actionable: false,
+          flags: v4FlagSnapshot()
         },
         tradingView: {
           connectionStatus: activeConnection?.status ?? "NONE",
@@ -188,7 +198,17 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
           brokerLiveExecutionEnabled: setupLifecycleConfig.flags.brokerLiveExecutionEnabled,
           aiEnabled: env.AI_ENABLED,
           analysisGenerationEnabled: setupLifecycleConfig.flags.analysisGenerationEnabled,
-          newSetupCreationEnabled: setupLifecycleConfig.flags.newSetupCreationEnabled
+          newSetupCreationEnabled: setupLifecycleConfig.flags.newSetupCreationEnabled,
+          v4: v4FlagSnapshot()
+        },
+        v4: {
+          strategyVersion: v4Config.strategyVersion,
+          engineVersion: v4Config.engineVersion,
+          configVersion: v4Config.configVersion,
+          deploymentStage: v4Config.deploymentStage,
+          mode: v4Config.mode,
+          actionable: false,
+          flags: v4FlagSnapshot()
         },
         webhookConnections: active.map((c) => ({
           webhookId: c.webhookId,

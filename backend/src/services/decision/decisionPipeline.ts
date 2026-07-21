@@ -23,6 +23,7 @@ import { scoreSnapshot, directionFromScore } from "./scoringEngine";
 import { buildTradePlan } from "./tradePlanEngine";
 import { createSetupFromDecision } from "../setup/createSetup";
 import { logger } from "../logging/logger";
+import { runV4ShadowLifecycle } from "../v4/shadowOrchestrator";
 
 const disclaimer =
   "GoldMeta provides market analysis and decision support only. Trading involves substantial risk.";
@@ -237,6 +238,25 @@ export const processDecisionPipeline = async (
     await createSetupFromDecision(store, decision);
   } catch (error: unknown) {
     logger.warn("Setup creation failed (non-fatal)", {
+      decisionId: decision.decisionId,
+      error: error instanceof Error ? error.message : "unknown"
+    });
+  }
+
+  // GoldMeta V4 LIVE SHADOW — after V3 is stored. Await so Cloud Functions
+  // do not freeze before persistence. Errors remain non-fatal inside the runner.
+  try {
+    await runV4ShadowLifecycle({
+      store,
+      userId: decision.userId,
+      payload,
+      snapshot,
+      environment,
+      parentDecisionId: decision.decisionId,
+      eventId: stableEventId
+    });
+  } catch (error: unknown) {
+    logger.warn("V4 shadow lifecycle outer catch (non-fatal)", {
       decisionId: decision.decisionId,
       error: error instanceof Error ? error.message : "unknown"
     });

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, cursor/production-connection]
   pull_request:
-    branches: [main, cursor/production-connection, cursor/webhook-delivery-400-c2c2]
+    branches: [main, cursor/production-connection, cursor/webhook-delivery-400-c2c2, cursor/phase3-stage3-live-forward-c2c2]
 
 jobs:
   backend:

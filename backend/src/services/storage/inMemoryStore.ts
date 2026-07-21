@@ -171,6 +171,96 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     return this.setupSkips.filter((s) => s.userId === userId).slice(0, limit);
   }
 
+  private v4Shadows: Array<Record<string, unknown> & { userId: string }> = [];
+  private v4Analyses = new Map<string, import("../v4/shadowTypes").V4ShadowAnalysisRecord[]>();
+  private v4Candidates = new Map<string, import("../v4/shadowTypes").V4ShadowCandidateRecord[]>();
+  private v4Plans = new Map<string, import("../v4/shadowTypes").V4LockedShadowPlan[]>();
+  private v4Mutations = new Map<string, import("../v4/shadowTypes").V4PlanMutationAudit[]>();
+
+  saveV4ShadowResult(userId: string, result: Record<string, unknown>): void {
+    this.v4Shadows.unshift({ ...result, userId });
+    this.v4Shadows = this.v4Shadows.slice(0, 200);
+  }
+
+  listV4ShadowResults(userId: string, limit = 50): Record<string, unknown>[] {
+    return this.v4Shadows.filter((s) => s.userId === userId).slice(0, limit);
+  }
+
+  saveV4ShadowAnalysis(
+    userId: string,
+    analysis: import("../v4/shadowTypes").V4ShadowAnalysisRecord
+  ): void {
+    const list = this.v4Analyses.get(userId) ?? [];
+    this.v4Analyses.set(
+      userId,
+      [analysis, ...list.filter((a) => a.analysisId !== analysis.analysisId)].slice(0, 500)
+    );
+  }
+
+  listV4ShadowAnalyses(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): import("../v4/shadowTypes").V4ShadowAnalysisRecord[] {
+    return (this.v4Analyses.get(userId) ?? [])
+      .filter((a) => !environment || a.environment === environment)
+      .slice(0, limit);
+  }
+
+  saveV4ShadowCandidate(
+    userId: string,
+    candidate: import("../v4/shadowTypes").V4ShadowCandidateRecord
+  ): void {
+    const list = this.v4Candidates.get(userId) ?? [];
+    this.v4Candidates.set(
+      userId,
+      [candidate, ...list.filter((c) => c.candidateId !== candidate.candidateId)].slice(0, 500)
+    );
+  }
+
+  listV4ShadowCandidates(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): import("../v4/shadowTypes").V4ShadowCandidateRecord[] {
+    return (this.v4Candidates.get(userId) ?? [])
+      .filter((c) => !environment || c.environment === environment)
+      .slice(0, limit);
+  }
+
+  saveV4ShadowPlan(userId: string, plan: import("../v4/shadowTypes").V4LockedShadowPlan): void {
+    const list = this.v4Plans.get(userId) ?? [];
+    this.v4Plans.set(
+      userId,
+      [plan, ...list.filter((p) => p.planId !== plan.planId)].slice(0, 500)
+    );
+  }
+
+  listV4ShadowPlans(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): import("../v4/shadowTypes").V4LockedShadowPlan[] {
+    return (this.v4Plans.get(userId) ?? [])
+      .filter((p) => !environment || p.environment === environment)
+      .slice(0, limit);
+  }
+
+  recordV4PlanMutation(
+    userId: string,
+    audit: import("../v4/shadowTypes").V4PlanMutationAudit
+  ): void {
+    const list = this.v4Mutations.get(userId) ?? [];
+    this.v4Mutations.set(userId, [audit, ...list].slice(0, 200));
+  }
+
+  listV4PlanMutations(
+    userId: string,
+    limit = 50
+  ): import("../v4/shadowTypes").V4PlanMutationAudit[] {
+    return (this.v4Mutations.get(userId) ?? []).slice(0, limit);
+  }
+
   recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {
     this.webhookRejects.unshift({ ...log, id: randomUUID() });
     this.webhookRejects = this.webhookRejects.slice(0, 100);
@@ -472,6 +562,11 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     this.webhookConnections.clear();
     this.processingJobs.clear();
     this.eventDedupes.clear();
+    this.v4Shadows = [];
+    this.v4Analyses.clear();
+    this.v4Candidates.clear();
+    this.v4Plans.clear();
+    this.v4Mutations.clear();
   }
 }
 
