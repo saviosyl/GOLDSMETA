@@ -17,6 +17,8 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  /* UI polish pass marker for asset cache bust */
+  --ui-polish: 1;
   font-family: "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
   line-height: 1.45;
   font-weight: 450;
