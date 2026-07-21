@@ -57,12 +57,41 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/** Resolve project id without requiring reserved FIREBASE_* / GCLOUD_PROJECT .env keys. */
+const resolveFirebaseProjectId = (source: NodeJS.ProcessEnv): string | undefined => {
+  if (source.FIREBASE_PROJECT_ID?.trim()) {
+    return source.FIREBASE_PROJECT_ID.trim();
+  }
+  if (source.GOLDMETA_PROJECT_ID?.trim()) {
+    return source.GOLDMETA_PROJECT_ID.trim();
+  }
+  if (source.GCLOUD_PROJECT?.trim()) {
+    return source.GCLOUD_PROJECT.trim();
+  }
+  if (source.GCP_PROJECT?.trim()) {
+    return source.GCP_PROJECT.trim();
+  }
+  const raw = source.FIREBASE_CONFIG?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { projectId?: unknown };
+    return typeof parsed.projectId === "string" && parsed.projectId.length > 0
+      ? parsed.projectId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const parseEnv = (source: NodeJS.ProcessEnv = process.env): Env => {
   const nodeEnv = source.NODE_ENV ?? "development";
   const appEnv = source.APP_ENV ?? nodeEnv;
+  const firebaseProjectId = resolveFirebaseProjectId(source);
   const storageBackend =
     source.STORAGE_BACKEND ??
-    (appEnv === "production" || source.FIREBASE_PROJECT_ID ? "firestore" : appEnv === "test" ? "memory" : undefined);
+    (appEnv === "production" || firebaseProjectId ? "firestore" : appEnv === "test" ? "memory" : undefined);
   const allowTestAuth =
     source.ALLOW_TEST_AUTH_HEADER ?? (appEnv === "test" && nodeEnv === "test" ? "true" : "false");
 
@@ -70,6 +99,8 @@ export const parseEnv = (source: NodeJS.ProcessEnv = process.env): Env => {
     ...source,
     NODE_ENV: nodeEnv,
     APP_ENV: appEnv,
+    FIREBASE_PROJECT_ID: firebaseProjectId,
+    FIREBASE_REGION: source.FIREBASE_REGION ?? source.FUNCTION_REGION ?? "us-central1",
     STORAGE_BACKEND: storageBackend,
     ALLOW_TEST_AUTH_HEADER: allowTestAuth,
     WEBHOOK_ID: source.WEBHOOK_ID ?? (appEnv === "test" ? "test-webhook-id" : undefined)

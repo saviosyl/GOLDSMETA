@@ -55,8 +55,9 @@ describe("ApiClient envelopes", () => {
 
     const client = new ApiClient({ baseUrl: "https://example.test/api", getIdToken });
     const decision = await client.latestDecision();
-    expect(decision.decision).toBe("BUY");
-    expect(decision.decisionId).toBe("gm-web-buy");
+    expect(decision).not.toBeNull();
+    expect(decision!.decision).toBe("BUY");
+    expect(decision!.decisionId).toBe("gm-web-buy");
   });
 
   it("refreshes token once on 401", async () => {
@@ -81,10 +82,23 @@ describe("ApiClient envelopes", () => {
     expect(getIdToken).toHaveBeenCalledWith(true);
   });
 
-  it("maps API errors", async () => {
+  it("treats latest-decision 404 NOT_FOUND as an empty state (null)", async () => {
     globalThis.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ error: { code: "NOT_FOUND", message: "missing" } }), {
+      new Response(JSON.stringify({ error: { code: "NOT_FOUND", message: "No decisions found" } }), {
         status: 404
+      })
+    ) as typeof fetch;
+    const client = new ApiClient({
+      baseUrl: "https://example.test/api",
+      getIdToken: async () => "tok"
+    });
+    await expect(client.latestDecision()).resolves.toBeNull();
+  });
+
+  it("still maps non-empty-state API errors", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: "INTERNAL", message: "boom" } }), {
+        status: 500
       })
     ) as typeof fetch;
     const client = new ApiClient({
@@ -93,9 +107,36 @@ describe("ApiClient envelopes", () => {
     });
     await expect(client.latestDecision()).rejects.toMatchObject({
       name: "ApiError",
-      code: "NOT_FOUND",
-      status: 404
+      code: "INTERNAL",
+      status: 500
     } satisfies Partial<ApiError>);
+  });
+
+  it("revokes a TradingView connection via DELETE", async () => {
+    const getIdToken: TokenProvider = vi.fn(async () => "test-token");
+    globalThis.fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(
+        "https://example.test/api/v1/tradingview/connections/wh_active"
+      );
+      expect(init?.method).toBe("DELETE");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer test-token");
+      return new Response(
+        JSON.stringify({
+          connection: {
+            id: "wh_active",
+            status: "REVOKED",
+            webhookURL: "https://example.test/api/webhooks/tradingview/wh_active"
+          }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const client = new ApiClient({ baseUrl: "https://example.test/api", getIdToken });
+    const result = await client.revokeTradingViewConnection("wh_active");
+    expect(result.connection.status).toBe("REVOKED");
+    expect(JSON.stringify(result)).not.toMatch(/secret/i);
   });
 });
 

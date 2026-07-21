@@ -47,4 +47,17 @@ describe("parseEnv", () => {
       }).STORAGE_BACKEND
     ).toBe("firestore");
   });
+
+  it("resolves production project id from GOLDMETA_PROJECT_ID when FIREBASE_* is unset", () => {
+    const parsed = parseEnv({
+      ...baseEnv,
+      NODE_ENV: "production",
+      APP_ENV: "production",
+      STORAGE_BACKEND: "firestore",
+      ALLOW_TEST_AUTH_HEADER: "false",
+      GOLDMETA_PROJECT_ID: "goldmeta-web"
+    });
+    expect(parsed.FIREBASE_PROJECT_ID).toBe("goldmeta-web");
+    expect(parsed.FIREBASE_REGION).toBe("us-central1");
+  });
 });

@@ -1,3 +1,4 @@
+export const GOLD_META_BUILD_STAMP = "cors-tv-create-2026-07-21";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -15,6 +16,7 @@ registerSW({
   }
 });
 
+void GOLD_META_BUILD_STAMP;
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
