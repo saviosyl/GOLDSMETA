@@ -149,6 +149,14 @@ export class ApiClient {
     return this.request("/v1/tradingview/connections", { method: "POST" });
   }
 
+  async revokeTradingViewConnection(webhookId: string): Promise<{
+    connection: TradingViewConnection;
+  }> {
+    return this.request(`/v1/tradingview/connections/${encodeURIComponent(webhookId)}`, {
+      method: "DELETE"
+    });
+  }
+
   async sendTestAlert(connectionId?: string): Promise<{
     ok: boolean;
     message: string;
