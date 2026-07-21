@@ -307,6 +307,28 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return snap.docs.map((d) => d.data() as SetupSkipRecord);
   }
 
+  async saveV4ShadowResult(userId: string, result: Record<string, unknown>): Promise<void> {
+    const shadowId =
+      typeof result.shadowId === "string" ? result.shadowId : `v4_${Date.now()}`;
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Shadows")
+      .doc(shadowId)
+      .set(toFirestoreData({ ...result, userId, shadowId }), { merge: true });
+  }
+
+  async listV4ShadowResults(userId: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Shadows")
+      .orderBy("generatedAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as Record<string, unknown>);
+  }
+
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {
     await this.db
       .collection("users")

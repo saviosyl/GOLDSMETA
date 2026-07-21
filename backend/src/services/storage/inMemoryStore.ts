@@ -171,6 +171,17 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     return this.setupSkips.filter((s) => s.userId === userId).slice(0, limit);
   }
 
+  private v4Shadows: Array<Record<string, unknown> & { userId: string }> = [];
+
+  saveV4ShadowResult(userId: string, result: Record<string, unknown>): void {
+    this.v4Shadows.unshift({ ...result, userId });
+    this.v4Shadows = this.v4Shadows.slice(0, 200);
+  }
+
+  listV4ShadowResults(userId: string, limit = 50): Record<string, unknown>[] {
+    return this.v4Shadows.filter((s) => s.userId === userId).slice(0, limit);
+  }
+
   recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {
     this.webhookRejects.unshift({ ...log, id: randomUUID() });
     this.webhookRejects = this.webhookRejects.slice(0, 100);
