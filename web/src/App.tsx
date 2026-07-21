@@ -67,16 +67,38 @@ function ProtectedApp() {
 
   if (!user) {
     return (
-      <div className="gm-shell" data-testid="signed-out-shell">
-        <div className="gm-main">
-          <div className="gm-main-inner" style={{ maxWidth: 480 }}>
-            <p className="gm-meta" style={{ marginBottom: 12 }}>
-              Sign in to load backend decisions
-            </p>
-            <SignInPage />
-          </div>
-        </div>
-      </div>
+      <Routes>
+        <Route
+          path="/brand"
+          element={
+            <div className="gm-shell" data-testid="public-brand-shell">
+              <div className="gm-main">
+                <div className="gm-main-inner">
+                  <BrandConceptsPage />
+                </div>
+              </div>
+            </div>
+          }
+        />
+        <Route
+          path="*"
+          element={
+            <div className="gm-shell" data-testid="signed-out-shell">
+              <div className="gm-main">
+                <div className="gm-main-inner" style={{ maxWidth: 480 }}>
+                  <p className="gm-meta" style={{ marginBottom: 12 }}>
+                    Sign in to load backend decisions ·{" "}
+                    <a className="gm-linkish" href="/brand">
+                      Brand preview
+                    </a>
+                  </p>
+                  <SignInPage />
+                </div>
+              </div>
+            </div>
+          }
+        />
+      </Routes>
     );
   }
 
