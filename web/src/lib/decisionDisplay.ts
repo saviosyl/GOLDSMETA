@@ -201,9 +201,42 @@ export {
   formatRatio
 };
 
-export type HistoryFilter = "ALL" | DecisionAction;
+export type HistoryFilter =
+  | "ALL"
+  | DecisionAction
+  | "ACTIVE"
+  | "WON"
+  | "LOST"
+  | "EXPIRED"
+  | "LIVE"
+  | "TEST";
 
-export const filterHistory = (items: Decision[], filter: HistoryFilter): Decision[] => {
+export const filterHistory = (
+  items: Decision[],
+  filter: HistoryFilter,
+  setupsByDecisionId: Map<string, { status: string; resolution: string; environment: string }> = new Map()
+): Decision[] => {
   if (filter === "ALL") return items;
-  return items.filter((item) => item.decision === filter);
+  if (filter === "BUY" || filter === "SELL" || filter === "WAIT") {
+    return items.filter((item) => item.decision === filter);
+  }
+  if (filter === "LIVE") {
+    return items.filter((item) => !isTestDecision(item) && item.environment !== "TEST");
+  }
+  if (filter === "TEST") {
+    return items.filter((item) => isTestDecision(item) || item.environment === "TEST");
+  }
+  return items.filter((item) => {
+    const setup = setupsByDecisionId.get(item.decisionId);
+    if (!setup) return false;
+    if (filter === "ACTIVE") return setup.resolution === "OPEN";
+    if (filter === "WON") return setup.resolution.startsWith("WIN_");
+    if (filter === "LOST") {
+      return setup.resolution === "LOSS_SL" || setup.resolution.startsWith("AMBIGUOUS");
+    }
+    if (filter === "EXPIRED") {
+      return setup.resolution === "EXPIRED" || setup.resolution === "INVALIDATED" || setup.resolution === "CANCELLED";
+    }
+    return true;
+  });
 };

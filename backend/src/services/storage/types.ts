@@ -9,6 +9,7 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import type { SetupRecord } from "../../models/setup";
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -86,6 +87,15 @@ export interface CreateProcessingJobInput {
   maxRetries?: number;
 }
 
+export interface WebhookRejectLog {
+  id: string;
+  webhookId: string | null;
+  at: string;
+  code: string;
+  message: string;
+  details?: string[];
+}
+
 export interface GoldMetaStore {
   saveRawEvent(
     userId: string,
@@ -109,6 +119,12 @@ export interface GoldMetaStore {
   listDecisions(userId: string, limit?: number): Awaitable<DecisionRecord[]>;
   latestDecision(userId: string): Awaitable<DecisionRecord | undefined>;
   latestMeaningfulDecision(userId: string): Awaitable<DecisionRecord | undefined>;
+
+  saveSetup(setup: SetupRecord): Awaitable<SetupRecord>;
+  getSetup(userId: string, setupId: string): Awaitable<SetupRecord | undefined>;
+  getSetupByDecisionId(userId: string, decisionId: string): Awaitable<SetupRecord | undefined>;
+  listSetups(userId: string, limit?: number): Awaitable<SetupRecord[]>;
+  listActiveSetups(userId: string, environment?: DecisionEnvironment): Awaitable<SetupRecord[]>;
 
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;
   deleteDevice(userId: string, deviceId: string): Awaitable<boolean>;
@@ -157,4 +173,7 @@ export interface GoldMetaStore {
   failProcessingJob(jobId: string, error: Error | string): Awaitable<ProcessingJob | undefined>;
 
   checkAndStoreEventDedupe(userId: string, stableEventId: string): Awaitable<boolean>;
+
+  recordWebhookReject?(log: Omit<WebhookRejectLog, "id">): Awaitable<void>;
+  listRecentWebhookRejects?(limit?: number): Awaitable<WebhookRejectLog[]>;
 }

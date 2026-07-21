@@ -333,12 +333,27 @@ export interface WebPushSubscriptionRecord extends WebPushSubscriptionInput {
 export const journalCreateSchema = z
   .object({
     decisionId: z.string().optional(),
+    setupId: z.string().optional(),
     symbol: z.literal("XAUUSD").default("XAUUSD"),
     direction: z.enum(["BUY", "SELL", "WAIT"]),
     outcome: z.enum(["WIN", "LOSS", "BREAKEVEN", "OPEN"]).default("OPEN"),
     riskReward: z.number().nullable().optional(),
     pnl: z.number().nullable().optional(),
-    notes: z.string().max(2000).optional()
+    notes: z.string().max(2000).optional(),
+    tags: z
+      .array(
+        z.enum([
+          "followed",
+          "ignored",
+          "entered_manually",
+          "avoided",
+          "news_risk",
+          "poor_spread",
+          "discretionary_override"
+        ])
+      )
+      .max(12)
+      .optional()
   })
   .strict();
 

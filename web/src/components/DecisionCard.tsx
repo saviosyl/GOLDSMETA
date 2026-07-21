@@ -1,4 +1,5 @@
-import type { Decision } from "../types/models";
+import { Link } from "react-router-dom";
+import type { Decision, SetupRecord } from "../types/models";
 import {
   displayQualityLabel,
   formatPercent,
@@ -17,6 +18,7 @@ import {
 
 interface Props {
   decision: Decision;
+  setup?: SetupRecord | null;
   source?: "live" | "cached" | "offline";
   cachedAt?: string | null;
   onRefresh?: () => void;
@@ -25,8 +27,11 @@ interface Props {
   compact?: boolean;
 }
 
+const SETUP_EXPIRY_BARS = 8;
+
 export function DecisionCard({
   decision,
+  setup = null,
   source = "live",
   cachedAt,
   onRefresh,
@@ -43,6 +48,11 @@ export function DecisionCard({
   const quality = displayQualityLabel(decision, source);
   const action = recommendedActionLabel(decision);
   const summary = primaryReason(decision);
+  const entryStillValid =
+    setup != null &&
+    (setup.status === "WAITING_FOR_ENTRY" || setup.status === "SIGNAL_CREATED");
+  const barsLeft =
+    setup && entryStillValid ? Math.max(0, SETUP_EXPIRY_BARS - setup.barsOpen) : null;
 
   return (
     <section className="card decision-card" aria-label={`Current decision ${decision.decision}`}>
@@ -70,15 +80,56 @@ export function DecisionCard({
               TEST
             </span>
           )}
+          {!test && decision.environment === "LIVE" && (
+            <span className="badge" aria-label="LIVE decision" data-testid="live-badge">
+              LIVE
+            </span>
+          )}
           <span className="badge" aria-label={`Data quality ${quality}`} data-testid="quality-badge">
             {quality}
           </span>
+          {decision.currentSession && (
+            <span className="badge" data-testid="session-badge">
+              {decision.currentSession}
+            </span>
+          )}
         </div>
       </div>
 
       <p className="muted decision-meta">
         {formatPrice(decision.lastKnownPrice)} · {formatWhen(decision.generatedAt)}
       </p>
+
+      {setup && (
+        <div className="setup-status-strip" data-testid="setup-status">
+          <div className="price-row">
+            <span>Setup</span>
+            <strong>{setup.status.replaceAll("_", " ")}</strong>
+          </div>
+          <div className="price-row">
+            <span>Entry valid</span>
+            <strong>{entryStillValid ? "Yes" : "No"}</strong>
+          </div>
+          {barsLeft != null && (
+            <div className="price-row">
+              <span>Expiry</span>
+              <strong>{barsLeft} bars left</strong>
+            </div>
+          )}
+          {setup.resolution !== "OPEN" && (
+            <div className="price-row">
+              <span>Outcome</span>
+              <strong data-testid="setup-outcome">
+                {setup.outcome.rawResolution}
+                {setup.outcome.rawRealisedR != null ? ` · ${setup.outcome.rawRealisedR}R` : ""}
+              </strong>
+            </div>
+          )}
+          <Link className="btn block" style={{ marginTop: 8 }} to={`/setups/${setup.setupId}`}>
+            Setup detail
+          </Link>
+        </div>
+      )}
 
       {!compact && (
         <p className="decision-summary" data-testid="decision-summary">

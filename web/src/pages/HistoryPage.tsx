@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import type { Decision } from "../types/models";
+import type { Decision, SetupRecord } from "../types/models";
 import {
   displayQualityLabel,
   filterHistory,
@@ -18,13 +18,20 @@ const FILTERS: Array<{ id: HistoryFilter; label: string }> = [
   { id: "ALL", label: "All" },
   { id: "BUY", label: "BUY" },
   { id: "SELL", label: "SELL" },
-  { id: "WAIT", label: "WAIT" }
+  { id: "WAIT", label: "WAIT" },
+  { id: "ACTIVE", label: "Active" },
+  { id: "WON", label: "Won" },
+  { id: "LOST", label: "Lost" },
+  { id: "EXPIRED", label: "Expired" },
+  { id: "LIVE", label: "LIVE" },
+  { id: "TEST", label: "TEST" }
 ];
 
 export function HistoryPage() {
   const { api } = useAuth();
   const navigate = useNavigate();
   const [items, setItems] = useState<Decision[]>([]);
+  const [setups, setSetups] = useState<SetupRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [filter, setFilter] = useState<HistoryFilter>("ALL");
@@ -32,8 +39,12 @@ export function HistoryPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const decisions = await api.decisionHistory(40);
+        const [decisions, setupList] = await Promise.all([
+          api.decisionHistory(40),
+          api.listSetups(100).catch(() => [] as SetupRecord[])
+        ]);
         setItems(decisions);
+        setSetups(setupList);
         saveCache(cacheKeys.history, decisions);
         setOffline(false);
       } catch (err) {
@@ -45,7 +56,22 @@ export function HistoryPage() {
     })();
   }, [api]);
 
-  const visible = useMemo(() => filterHistory(items, filter), [items, filter]);
+  const setupsByDecisionId = useMemo(() => {
+    const map = new Map<string, { status: string; resolution: string; environment: string }>();
+    for (const s of setups) {
+      map.set(s.decisionId, {
+        status: s.status,
+        resolution: s.resolution,
+        environment: s.environment
+      });
+    }
+    return map;
+  }, [setups]);
+
+  const visible = useMemo(
+    () => filterHistory(items, filter, setupsByDecisionId),
+    [items, filter, setupsByDecisionId]
+  );
 
   return (
     <div className="history-page">
@@ -80,6 +106,7 @@ export function HistoryPage() {
           <ul className="history-list">
             {visible.map((item) => {
               const quality = displayQualityLabel(item);
+              const setup = setupsByDecisionId.get(item.decisionId);
               return (
                 <li key={item.decisionId}>
                   <button
@@ -92,9 +119,15 @@ export function HistoryPage() {
                       <strong className={`history-decision ${item.decision}`}>{item.decision}</strong>
                       <span className="history-confidence">{formatPercent(item.confidence)}</span>
                       <span className={`badge history-quality ${quality.toLowerCase()}`}>{quality}</span>
+                      {setup && (
+                        <span className="badge" data-testid={`setup-badge-${item.decisionId}`}>
+                          {setup.resolution === "OPEN" ? setup.status : setup.resolution}
+                        </span>
+                      )}
                     </div>
                     <div className="history-item-meta muted">
                       {item.symbol} · {timeframeLabel(item)} · {formatWhen(item.generatedAt)}
+                      {item.currentSession ? ` · ${item.currentSession}` : ""}
                     </div>
                     <div className="history-item-meta muted">Trend {trendLabel(item)}</div>
                     <div className="history-item-reason">{primaryReason(item)}</div>
@@ -105,11 +138,6 @@ export function HistoryPage() {
           </ul>
         )}
       </div>
-
-      <p className="muted history-footnote">
-        Tap a signal for the full plan. Analysis only — not broker execution.{" "}
-        <Link to="/analysis">Open analysis</Link>
-      </p>
     </div>
   );
 }
