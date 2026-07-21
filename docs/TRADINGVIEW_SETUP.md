@@ -43,21 +43,27 @@ The script is non-repainting for its multi-timeframe diagnostics by using `reque
 
 ## Create the alert
 
-1. Click **Alert**.
-2. In **Condition**, choose `GoldMeta Bridge`.
-3. Select **Any alert() function call**.
-4. Enable **Webhook URL** and paste your GoldMeta webhook URL.
-5. If TradingView shows a message field, enter:
+> Full root-cause write-up: `docs/TRADINGVIEW_ALERT_INVESTIGATION.md` (verified against TradingView Web + official Help/Pine docs).
+
+Use **desktop Supercharts**. Do **not** create the alert from a legend series or by right-clicking a level.
+
+1. Confirm the status table shows script version **2.0.4+** and `Webhook = Any alert()`.
+2. Click the toolbar **Alert** clock → **Create alert**.
+3. In **Condition**, first field: choose **`GoldMeta Bridge`** (the indicator), not Session High / POC / VAH / VAL.
+4. Second field: choose **`Any alert() function call`** (first option when `alert()` is present).
+5. Enable **Webhook URL** and paste your GoldMeta webhook URL.
+6. Message field:
 
    ```text
    {{alert_message}}
    ```
 
-6. Choose a frequency compatible with bar-close alerts.
-7. Name the alert, for example `GoldMeta XAUUSD 5m`.
+7. Name the alert, for example `GoldMeta XAUUSD 15m`.
 8. Create the alert.
 
-The script builds the JSON itself. Do not replace it with a manual JSON template unless you also maintain every dynamic field.
+The script builds the JSON itself. Frequency is controlled by `alert()` in Pine (`alert.freq_once_per_bar_close` when Confirmed-bar mode is ON).
+
+**If you only see level / plot names:** you are on TradingView’s technical-alert path. Those cannot send webhook JSON. Go back and select the indicator, then **Any alert() function call**.
 
 ## Recommended chart setup
 
@@ -98,6 +104,8 @@ Recommended merge pattern:
 | Backend rejects payload | Confirm chart is XAUUSD, timeframe is supported, and JSON matches `shared/schemas/tradingview-webhook-payload.schema.json`. |
 | Duplicate events | Backend should deduplicate by `eventId` and bar time. |
 | Provisional/incomplete decisions | Confirm proprietary inputs are connected if your rule configuration requires them. |
-| Alert fires before close | Confirm `Confirmed-bar mode` is ON and alert condition uses the script's `alert()` call. |
+| Alert fires before close | Confirm `Confirmed-bar mode` is ON and alert condition uses **Any alert() function call**. |
+| Only see Session High / POC / VAH / VAL | Wrong alert path (technical/plot). Recreate from toolbar → indicator → **Any alert() function call**. See `docs/TRADINGVIEW_ALERT_INVESTIGATION.md`. |
+| “Any alert() function call” missing | Confirm v2.0.4+ on chart, `Call alert() from script` = ON, desktop Supercharts, Condition source = indicator not a series. |
 
 Confidence in a GoldMeta decision means setup quality and input completeness. Confidence is not a win probability.

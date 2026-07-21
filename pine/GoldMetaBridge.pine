@@ -3,12 +3,18 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 
 // GoldMeta Pine Script bridge — Phase 2 (gm_svp_v1 / gm_trend_v1 / gm_candle_v1)
 //
-// TradingView alert setup:
-// 1. Add this script to an XAUUSD 15-minute chart.
-// 2. Open Alerts → this indicator → "Any alert() function call".
-// 3. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-// 4. Message: {{alert_message}}
-// 5. Frequency: once per bar close (script uses alert.freq_once_per_bar_close when confirmed-bar mode is ON).
+// TradingView alert setup (desktop Supercharts — verified TV Web behavior):
+// 1. Add this script to an XAUUSD 15-minute chart. Confirm status table version.
+// 2. Toolbar clock → Create alert (do NOT use legend/plot "Add alert").
+// 3. Condition field 1: "GoldMeta Bridge" (the indicator), NOT Session High / POC / …
+// 4. Condition field 2: "Any alert() function call" (first option when alert() is present).
+// 5. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
+// 6. Message: {{alert_message}}
+// 7. Frequency is controlled by alert() in this script (once per bar close when confirmed-bar ON).
+//
+// Why plot names appear: every plot()/plotshape() is a technical-alert series. Those are a
+// different TradingView path and cannot send this script's dynamic JSON. GoldMeta webhooks
+// require "Any alert() function call" + {{alert_message}}. See docs/TRADINGVIEW_ALERT_INVESTIGATION.md.
 //
 // Values labeled gm_* are GoldMeta-derived equivalents calculated inside this script.
 // They are NOT claimed to be identical to proprietary Volume Profile / Trend Meter products.
@@ -19,7 +25,7 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.3"
+const string SCRIPT_VERSION = "2.0.4"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -40,7 +46,7 @@ testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
 payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret.")
 
 groupLevels = "Levels"
-showDiagnosticLevels = input.bool(true, "Plot POC / VAH / VAL / session", group=groupLevels)
+showDiagnosticLevels = input.bool(true, "Draw POC / VAH / VAL / session lines", group=groupLevels, tooltip="Drawn with line.new (not plot) so Create Alert is not filled with plot-series names. Webhooks still require Any alert() function call.")
 swingLength = input.int(5, "Swing pivot length (diagnostic)", minval=1, maxval=50, group=groupLevels)
 atrLength = input.int(14, "ATR length", minval=1, maxval=200, group=groupLevels)
 emaFastLen = input.int(21, "Trend EMA fast", minval=2, maxval=200, group=groupLevels)
@@ -78,6 +84,24 @@ f_session_name(int utcHour) =>
       utcHour >= 7 and utcHour < 13 ? "LONDON" :
       utcHour >= 13 and utcHour < 17 ? "OVERLAP" :
       utcHour >= 17 and utcHour < 22 ? "NEWYORK" : "UNKNOWN"
+
+// Horizontal level helpers use line.new (not plot) so Create Alert is not filled with plot series.
+f_upsert_level_line(line existing, float price, color col, int width) =>
+    line result = existing
+    if na(price)
+        if not na(result)
+            line.delete(result)
+            result := na
+    else
+        int x1 = math.max(0, bar_index - 80)
+        if na(result)
+            result := line.new(x1, price, bar_index, price, xloc=xloc.bar_index, extend=extend.right, color=col, width=width, style=line.style_solid)
+        else
+            line.set_xy1(result, x1, price)
+            line.set_xy2(result, bar_index, price)
+            line.set_color(result, col)
+            line.set_width(result, width)
+    result
 
 f_candle_direction(float candleOpen, float candleClose) =>
     candleClose > candleOpen ? "BULLISH" : candleClose < candleOpen ? "BEARISH" : "NEUTRAL"
@@ -478,11 +502,10 @@ alertMessage = "{" +
   "}"
 
 // ---------------------------------------------------------------------------
-// Script alerts (webhook JSON).
-// TradingView Create Alert → Condition: "GoldMeta Bridge" → "Any alert() function call".
-// Do NOT gate on barstate.isrealtime: alert() already only fires in realtime, and
-// realtime-only gating has caused some clients to hide "Any alert() function call"
-// and list only plot series instead. alert() is a no-op on historical bars.
+// Script alerts (webhook JSON) — requires Create Alert → Any alert() function call.
+// Official TV Help: select the script in Condition, then choose
+// "Any alert() function call" (first option). Message: {{alert_message}}.
+// alert() is a no-op on historical bars; do not gate on barstate.isrealtime.
 // Frequency for production: alert.freq_once_per_bar_close (confirmed-bar mode).
 // ---------------------------------------------------------------------------
 var bool testAlertSent = false
@@ -496,14 +519,44 @@ else if emitAlert and not testAlertMode
 else if not testAlertMode
     testAlertSent := false
 
-plot(showDiagnosticLevels ? sessionHigh : na, title="GoldMeta Session High", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? sessionLow : na, title="GoldMeta Session Low", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels and profileReady ? pocPrice : na, title="GoldMeta POC", color=color.new(color.orange, 0), linewidth=2, style=plot.style_linebr)
-plot(showDiagnosticLevels and profileReady ? vahPrice : na, title="GoldMeta VAH", color=color.new(color.teal, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels and profileReady ? valPrice : na, title="GoldMeta VAL", color=color.new(color.teal, 0), linewidth=1, style=plot.style_linebr)
+// Diagnostic levels use line.new (not plot/plotshape) so TradingView Create Alert
+// does not list "GoldMeta Session High / POC / …" as technical-alert series.
+// Those plot titles are what users were selecting instead of Any alert() function call.
+var line sessionHighLine = na
+var line sessionLowLine = na
+var line pocLine = na
+var line vahLine = na
+var line valLine = na
+if barstate.islast
+    if showDiagnosticLevels
+        sessionHighLine := f_upsert_level_line(sessionHighLine, sessionHigh, color.new(color.yellow, 0), 1)
+        sessionLowLine := f_upsert_level_line(sessionLowLine, sessionLow, color.new(color.yellow, 0), 1)
+        pocLine := f_upsert_level_line(pocLine, profileReady ? pocPrice : na, color.new(color.orange, 0), 2)
+        vahLine := f_upsert_level_line(vahLine, profileReady ? vahPrice : na, color.new(color.teal, 0), 1)
+        valLine := f_upsert_level_line(valLine, profileReady ? valPrice : na, color.new(color.teal, 0), 1)
+    else
+        if not na(sessionHighLine)
+            line.delete(sessionHighLine)
+            sessionHighLine := na
+        if not na(sessionLowLine)
+            line.delete(sessionLowLine)
+            sessionLowLine := na
+        if not na(pocLine)
+            line.delete(pocLine)
+            pocLine := na
+        if not na(vahLine)
+            line.delete(vahLine)
+            vahLine := na
+        if not na(valLine)
+            line.delete(valLine)
+            valLine := na
 
-plotshape(diagnosticMode and not na(pivotHigh), title="GoldMeta Pivot High", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, offset=-swingLength)
-plotshape(diagnosticMode and not na(pivotLow), title="GoldMeta Pivot Low", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, offset=-swingLength)
+// Diagnostic pivots as labels (not plotshape) to avoid extra Create Alert series.
+if diagnosticMode and barstate.isconfirmed
+    if not na(pivotHigh)
+        label.new(bar_index - swingLength, pivotHigh, "PH", style=label.style_label_down, color=color.new(color.red, 30), textcolor=color.white, size=size.tiny)
+    if not na(pivotLow)
+        label.new(bar_index - swingLength, pivotLow, "PL", style=label.style_label_up, color=color.new(color.green, 30), textcolor=color.white, size=size.tiny)
 
 var label warningLabel = na
 if showWarnings and barstate.islast
@@ -518,7 +571,7 @@ if showWarnings and barstate.islast
         label.delete(warningLabel)
         warningLabel := na
 
-var table statusTable = table.new(position.top_right, 2, 7, border_width=1)
+var table statusTable = table.new(position.top_right, 2, 8, border_width=1)
 if showStatusTable and barstate.islast
     table.cell(statusTable, 0, 0, "GoldMeta", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
@@ -534,3 +587,5 @@ if showStatusTable and barstate.islast
     table.cell(statusTable, 1, 5, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
     table.cell(statusTable, 0, 6, "Candle", text_color=color.white)
     table.cell(statusTable, 1, 6, classification, text_color=color.white)
+    table.cell(statusTable, 0, 7, "Webhook", text_color=color.white)
+    table.cell(statusTable, 1, 7, enableAlertCalls ? "Any alert()" : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))

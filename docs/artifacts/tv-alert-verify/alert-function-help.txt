@@ -1,0 +1,150 @@
+Skip to main content
+Search
+Products
+Community
+Markets
+Brokers
+More
+EN
+Get started
+Help Center
+/
+Knowledge base
+/
+Alerts
+/
+Alerts settings
+/
+Alerts on alert() function
+Alerts on alert() function
+
+Within the Pine Script® there's an additional function that lets you configure alerts — it's called the alert() function and you'll see it in the code when it's configurable. From Supercharts, you can create an alert using the "Create alert" dialog and select the indicator or strategy in the "Condition" field.
+
+Unlike other alert types, the triggering frequency and the message are determined by the script's alert() calls — not by the dialog settings.
+
+To create an alert()-based alert for an indicator:
+
+Select the script in the "Condition" field of the “Create Alert” dialog
+Choose "Any alert() function call" (the first option)
+
+Script alerts on strategies can include order fill events, "alert()" function call events, or both.
+
+"Order fills and alert() function calls": The created alerts trigger on both order fills and "alert()" events
+"Order fills only": The alert triggers only on order fills, like a standard strategy alert
+"alert() function calls only": The alert triggers only on "alert()" events, similar to a script alert on an indicator
+
+! Note: If a script alert triggers more than 15 times within three minutes, it automatically stops.
+
+More information about using the "alert()" function in scripts can be found in the Pine Reference Manual and the Pine User Manual.
+
+Also read:
+
+Introduction to TradingView alerts
+What is Pine Script
+The technical analysis essentials
+Introduction to fundamental analysis
+How to trade on TradingView
+Previous
+Why the {{close}} variable value in an alert description may not work
+Next
+I cannot create new alerts even though I have not exceeded the alert limit of my subscription
+Launch Supercharts
+MADE BY HUMANS
+English
+
+Select market data provided by ICE Data Services.
+Select reference data provided by FactSet. Copyright © 2026 FactSet Research Systems Inc.
+Copyright © 2026, American Bankers Association. CUSIP Database provided by FactSet Research Systems Inc. All rights reserved.
+SEC filings and other documents provided by Quartr.
+© 2026 TradingView, Inc.
+
+MORE THAN A PRODUCT
+Supercharts
+SCREENERS
+Stocks
+ETFs
+Bonds
+Crypto coins
+CEX pairs
+DEX pairs
+Pine
+HEATMAPS
+Stocks
+ETFs
+Crypto coins
+CALENDARS
+Economic
+Earnings
+Dividends
+IPOs
+MORE PRODUCTS
+News Flow
+Portfolios
+Fundamental Graphs
+Yield Curves
+Options
+Macro Maps
+Pine Script®
+APPS
+Mobile
+Desktop
+TOOLS & SUBSCRIPTIONS
+Features
+Pricing
+Market data
+Gift plans
+TRADING
+Overview
+Brokers
+Brokers comparison
+The Leap
+SPECIAL OFFERS
+CME Group futures
+Eurex futures
+US stocks bundle
+ABOUT COMPANY
+Who we are
+Space mission
+Blog
+Help Center
+Careers
+Media kit
+MERCH
+TradingView store
+Tarot cards for traders
+The C63 TradeTime
+POLICIES & SECURITY
+Terms of Use
+Disclaimer
+Privacy Policy
+Cookies Policy
+Accessibility Statement
+Security tips
+Bug Bounty program
+Status page
+COMMUNITY
+Social network
+Wall of Love
+Refer a friend
+House Rules
+Moderators
+IDEAS
+Trading
+Education
+Editors' picks
+PINE SCRIPT
+Indicators & strategies
+Wizards
+Freelancers
+Paid Spaces
+BUSINESS SOLUTIONS
+Widgets
+Charting libraries
+Lightweight Charts™
+Advanced Charts
+Trading Platform
+GROWTH OPPORTUNITIES
+Advertising
+Brokerage integration
+Partner program
+Education program

@@ -1,6 +1,6 @@
 # GoldMeta Pine Script Bridge
 
-`GoldMetaBridge.pine` (script version **2.0.3+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
+`GoldMetaBridge.pine` (script version **2.0.4+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
 
 > GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.
 
@@ -43,27 +43,20 @@ If a required value cannot be calculated reliably (e.g. `UNKNOWN` session or pro
 2. Open **Pine Editor**.
 3. Paste the contents of `pine/GoldMetaBridge.pine`.
 4. Click **Save**, then **Add to chart**.
-5. Confirm the status table shows `Symbol OK = YES` and `VP ready` during known sessions.
+5. Confirm the status table shows version **2.0.4+**, `Symbol OK = YES`, and `Webhook = Any alert()`.
 
 ## Create the TradingView alert (desktop Supercharts)
 
-Use **desktop** TradingView Supercharts (mobile alert UI often lists only plot series).
+**Verified fact:** TradingView always offers technical alerts on `plot()` series. Those look like “GoldMeta Session High / POC / …”. They are **not** webhook JSON alerts.
 
-1. Add **GoldMeta Bridge** v2.0.3+ to an XAUUSD **15m** chart and confirm the status table version.
-2. Click **Alerts** → **Create alert** (clock / + Alert) — do **not** create the alert from a plot legend item.
-3. **Condition** first field: select **GoldMeta Bridge** (the indicator), not “GoldMeta Session High / POC / …”.
-4. **Condition** second field: select **Any alert() function call** (must be the first option when `alert()` is present).
-5. Enable **Webhook URL** and paste your GoldMeta webhook URL.
-6. Message:
+GoldMeta webhooks require:
 
-   ```text
-   {{alert_message}}
-   ```
+1. Desktop Supercharts (not mobile-first setup).
+2. Toolbar **Alert** → **Create alert** (not legend / right-click on a level).
+3. Condition → **GoldMeta Bridge** → **Any alert() function call**.
+4. Webhook URL + Message `{{alert_message}}`.
 
-7. Frequency is controlled by the script (`alert.freq_once_per_bar_close` when Confirmed-bar mode is ON).
-8. Create the alert.
-
-If you only see plot names (Session High, POC, VAH, …), you selected a **plot** as the condition source, or an older script without a reachable `alert()` call is on the chart. Remove the old instance, paste v2.0.3+, Add to chart, then create the alert from the indicator again.
+Full investigation: `docs/TRADINGVIEW_ALERT_INVESTIGATION.md`.
 
 ## Settings
 
@@ -71,6 +64,7 @@ If you only see plot names (Session High, POC, VAH, …), you selected a **plot*
 - **Trend HTF 1 / 2** default to `60` / `240` with `lookahead_off`.
 - **Confirmed-bar mode** defaults ON.
 - **Test-alert mode** sends one `TEST` event while enabled.
+- Diagnostic levels are drawn with `line.new` (not `plot`) so Create Alert is not cluttered with plot series.
 - Optional payload secret only when the backend connection uses one.
 
 ## Confidence note
@@ -83,7 +77,8 @@ See `pine/alert-payload-example.json`.
 
 ## Changelog
 
-- **2.0.3** — Expose Create Alert “Any alert() function call”: remove `barstate.isrealtime` gate around `alert()`; clarify desktop alert setup (select indicator, not plots).
+- **2.0.4** — Investigation: missing “Any alert() function call” was TradingView’s plot/technical alert path, not a missing `alert()`. Draw levels with `line.new` / labels instead of `plot` / `plotshape` so Condition is not filled with Session High / POC / …; status table shows Webhook row; docs updated.
+- **2.0.3** — Remove `barstate.isrealtime` gate around `alert()`; clarify desktop alert setup.
 - **2.0.2** — Fix RE10045 array bounds: recompute start/end indices after left expansion; hard bounds checks; overflow instead of out-of-range writes.
 - **2.0.1** — Fix Pine v6 compile errors: volume-profile helpers no longer reassign global scalars; they return tuples / mutate arrays by reference.
 - **2.0.0** — Initial gm_svp_v1 / gm_trend_v1 / gm_candle_v1 production bridge.
