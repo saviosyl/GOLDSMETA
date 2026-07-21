@@ -31,15 +31,32 @@ const MOBILE_MORE = [
   { to: "/brand", label: "Brand preview" }
 ];
 
-export function AppShell({ children }: { children?: ReactNode }) {
+export function AppShell({
+  children,
+  linkPrefix = ""
+}: {
+  children?: ReactNode;
+  linkPrefix?: string;
+}) {
   const { user } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const email = user?.email ?? "Account";
+  const prefix = linkPrefix.replace(/\/$/, "");
+
+  const withPrefix = (to: string) => {
+    if (!prefix) return to;
+    if (to === "/") return prefix || "/";
+    return `${prefix}${to}`;
+  };
 
   const moreActive = useMemo(
-    () => MOBILE_MORE.some((l) => location.pathname.startsWith(l.to)),
-    [location.pathname]
+    () =>
+      MOBILE_MORE.some((l) => {
+        const target = withPrefix(l.to);
+        return location.pathname === target || location.pathname.startsWith(`${target}/`);
+      }),
+    [location.pathname, prefix]
   );
 
   return (
@@ -56,7 +73,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           {DESKTOP_LINKS.map((link) => (
             <NavLink
               key={link.to}
-              to={link.to}
+              to={withPrefix(link.to)}
               end={link.end}
               className={({ isActive }) => (isActive ? "active" : undefined)}
             >
@@ -78,7 +95,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {MOBILE_PRIMARY.map((link) => (
           <NavLink
             key={link.to}
-            to={link.to}
+            to={withPrefix(link.to)}
             end={link.end}
             className={({ isActive }) => (isActive ? "active" : undefined)}
             onClick={() => setMoreOpen(false)}
@@ -108,7 +125,11 @@ export function AppShell({ children }: { children?: ReactNode }) {
             </div>
             <div className="gm-more-links">
               {MOBILE_MORE.map((link) => (
-                <NavLink key={link.to} to={link.to} onClick={() => setMoreOpen(false)}>
+                <NavLink
+                  key={link.to}
+                  to={withPrefix(link.to)}
+                  onClick={() => setMoreOpen(false)}
+                >
                   {link.label}
                 </NavLink>
               ))}

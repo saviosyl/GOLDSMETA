@@ -43,6 +43,11 @@ export function IntelligencePage() {
 
   useEffect(() => {
     const sync = () => setOnline(navigator.onLine);
+    const reviewOffline = document.documentElement.dataset.uiReviewOffline === "1";
+    if (reviewOffline) {
+      setOnline(false);
+      return;
+    }
     window.addEventListener("online", sync);
     window.addEventListener("offline", sync);
     return () => {

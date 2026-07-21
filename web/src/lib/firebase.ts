@@ -4,6 +4,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   type Auth,
   type User
@@ -79,6 +80,10 @@ export const signUp = async (email: string, password: string): Promise<User> => 
 export const signOut = async (): Promise<void> => {
   if (!isFirebaseConfigured()) return;
   await firebaseSignOut(getFirebaseAuth());
+};
+
+export const sendPasswordReset = async (email: string): Promise<void> => {
+  await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
 };
 
 export const getIdToken = async (forceRefresh = false): Promise<string | null> => {

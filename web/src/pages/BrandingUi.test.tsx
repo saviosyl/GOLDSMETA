@@ -28,11 +28,12 @@ describe("GoldMeta V5.2 branding UI", () => {
     expect(screen.getByText("GoldMeta")).toBeInTheDocument();
   });
 
-  it("renders horizontal logo on sign-in", () => {
+  it("renders GoldMeta mark on sign-in", () => {
     render(<SignInPage />);
     expect(screen.getByTestId("signin-logo")).toBeInTheDocument();
-    const logo = screen.getByAltText(/GoldMeta — Gold Market Intelligence/i);
-    expect(logo).toHaveAttribute("src", "/brand/logo-horizontal-dark.svg");
+    const logo = screen.getByAltText(/^GoldMeta$/i);
+    expect(logo).toHaveAttribute("src", "/brand/mark-dark.svg");
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
   });
 
   it("primary nav remains accessible", () => {

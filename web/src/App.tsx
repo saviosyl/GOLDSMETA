@@ -14,6 +14,7 @@ import { SetupDetailPage } from "./pages/SetupDetailPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { BrandConceptsPage } from "./pages/BrandConceptsPage";
 import { RiskPlannerPage } from "./pages/RiskPlannerPage";
+import { UiReviewGate } from "./pages/UiReviewApp";
 
 const IntelligencePage = lazy(() =>
   import("./pages/IntelligencePage").then((m) => ({ default: m.IntelligencePage }))
@@ -80,21 +81,12 @@ function ProtectedApp() {
             </div>
           }
         />
+        <Route path="/ui-review/*" element={<UiReviewGate />} />
         <Route
           path="*"
           element={
             <div className="gm-shell" data-testid="signed-out-shell">
-              <div className="gm-main">
-                <div className="gm-main-inner" style={{ maxWidth: 480 }}>
-                  <p className="gm-meta" style={{ marginBottom: 12 }}>
-                    Sign in to load backend decisions ·{" "}
-                    <a className="gm-linkish" href="/brand">
-                      Brand preview
-                    </a>
-                  </p>
-                  <SignInPage />
-                </div>
-              </div>
+              <SignInPage />
             </div>
           }
         />
@@ -105,6 +97,7 @@ function ProtectedApp() {
   return (
     <AppShell>
       <Routes>
+        <Route path="/ui-review/*" element={<UiReviewGate />} />
         <Route path="/" element={<OverviewPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />

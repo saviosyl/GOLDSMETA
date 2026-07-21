@@ -30,6 +30,8 @@ interface AuthContextValue {
   apiBaseUrl: string;
 }
 
+export type { AuthContextValue };
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const resolveApiBase = (): string => {
@@ -95,6 +97,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, loading, configured, api, signIn, signUp, signOut, apiBaseUrl]
   );
 
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/** Preview-only auth override for `/ui-review` — no Firebase credentials. */
+export function ReviewAuthProvider({
+  value,
+  children
+}: {
+  value: AuthContextValue;
+  children: ReactNode;
+}) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

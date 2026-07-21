@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "v5.3-ui-redesign-preview-2026-07-21";
+export const GOLD_META_BUILD_STAMP = "v5.3.1-ui-redesign-preview-2026-07-21";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
