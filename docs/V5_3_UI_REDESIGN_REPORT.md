@@ -30,10 +30,10 @@
 | Item | Value |
 |---|---|
 | Branch | `cursor/goldmeta-v5-3-ui-redesign-c2c2` |
-| Commit | `25973b3` (+ follow-up if brand public access) |
+| Commit | `4d7140f` |
 | Draft PR | https://github.com/saviosyl/GOLDSMETA/pull/14 |
 | Preview alias | https://preview-v5-3.goldmeta-web.pages.dev |
-| Preview deployment | https://b3fb4c7d.goldmeta-web.pages.dev |
+| Preview deployment | https://1703909c.goldmeta-web.pages.dev |
 | Base | Built atop scroll hotfix tip (`198825d`), which includes V5.2 `b33be6a` |
 
 ### Design tokens
