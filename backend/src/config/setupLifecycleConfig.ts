@@ -44,8 +44,8 @@ export const setupLifecycleConfig = {
     newSetupCreationEnabled: envBool("NEW_SETUP_CREATION_ENABLED", true),
     /** Apply bar follow-up to active setups. */
     setupTrackingEnabled: envBool("SETUP_TRACKING_ENABLED", true),
-    /** Stage 2 default: TEST only. Stage 3: SETUP_TRACKING_ENVIRONMENTS=TEST,LIVE */
-    setupTrackingEnvironments: envEnvs("SETUP_TRACKING_ENVIRONMENTS", ["TEST"]),
+    /** Stage 3 default: TEST + LIVE. Override via SETUP_TRACKING_ENVIRONMENTS. */
+    setupTrackingEnvironments: envEnvs("SETUP_TRACKING_ENVIRONMENTS", ["TEST", "LIVE"]),
     /**
      * LIVE money / broker execution — hard off for Phase 3.
      * BROKER_EXECUTION_ENABLED / BROKER_MODE fail closed: live never enables.

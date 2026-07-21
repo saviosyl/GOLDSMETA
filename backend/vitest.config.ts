@@ -7,7 +7,10 @@ export default defineConfig({
       APP_ENV: "test",
       NODE_ENV: "test",
       STORAGE_BACKEND: "memory",
-      ALLOW_TEST_AUTH_HEADER: "true"
+      ALLOW_TEST_AUTH_HEADER: "true",
+      SETUP_TRACKING_ENVIRONMENTS: "TEST,LIVE",
+      BROKER_MODE: "DISABLED",
+      AI_ENABLED: "false"
     },
     globals: true,
     restoreMocks: true,
