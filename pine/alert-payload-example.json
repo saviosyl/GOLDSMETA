@@ -1,14 +1,14 @@
 {
   "schemaVersion": "1.0",
   "source": "tradingview",
-  "eventId": "OANDA:XAUUSD-5-1794902700000",
+  "eventId": "OANDA:XAUUSD-15-1794902700000",
   "webhookSecret": null,
   "symbol": "XAUUSD",
   "exchange": "OANDA",
-  "timeframe": "5",
+  "timeframe": "15",
   "eventType": "BAR_CLOSE",
-  "barTime": "2026-11-17T14:45:00Z",
-  "sentAt": "2026-11-17T14:45:02Z",
+  "barTime": "2026-07-20T14:45:00Z",
+  "sentAt": "2026-07-20T14:45:02Z",
   "isConfirmedBar": true,
   "indicatorName": "GoldMetaBridge",
   "ohlcv": {
@@ -19,23 +19,23 @@
     "volume": 18472
   },
   "levels": {
-    "pocAll": null,
-    "vahAll": null,
-    "valAll": null,
+    "pocAll": 2416.5,
+    "vahAll": 2420.0,
+    "valAll": 2412.0,
     "pocNonBroken": [],
     "vahNonBroken": [],
     "valNonBroken": []
   },
   "sessionVolumeProfile": {
     "session": "OVERLAP",
-    "sessionStart": null,
-    "sessionEnd": null,
-    "poc": null,
-    "vah": null,
-    "val": null,
+    "sessionStart": "2026-07-20T13:00:00Z",
+    "sessionEnd": "2026-07-20T14:45:00Z",
+    "poc": 2416.5,
+    "vah": 2420.0,
+    "val": 2412.0,
     "hvn": [],
     "lvn": [],
-    "acceptanceState": "UNKNOWN"
+    "acceptanceState": "ACCEPTANCE"
   },
   "marketProfile": {
     "tpoPoc": null,
@@ -48,12 +48,35 @@
     "profileState": "UNKNOWN",
     "acceptanceState": "UNKNOWN"
   },
-  "trend": null,
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 72,
+    "components": [
+      {
+        "name": "gm_chart_ema_stack",
+        "direction": "BULLISH",
+        "strength": 78,
+        "sourceTimeframe": "15"
+      },
+      {
+        "name": "gm_htf1_ema_stack",
+        "direction": "BULLISH",
+        "strength": 70,
+        "sourceTimeframe": "60"
+      },
+      {
+        "name": "gm_htf2_ema_stack",
+        "direction": "NEUTRAL",
+        "strength": 40,
+        "sourceTimeframe": "240"
+      }
+    ]
+  },
   "confirmationCandle": {
     "confirmed": true,
     "direction": "BULLISH",
     "candleType": null,
-    "classification": "NONE",
+    "classification": "CONTINUATION",
     "open": 2417.32,
     "high": 2421.86,
     "low": 2415.74,
@@ -66,40 +89,29 @@
     "relatedLevel": null
   },
   "optionalIndicators": {
-    "session": {
-      "heuristic": "UTC_HOUR",
-      "name": "OVERLAP",
-      "high": 2428.41,
-      "low": 2409.92
-    },
-    "structure": {
-      "placeholder": true,
-      "swingLength": 5,
-      "lastSwingHigh": 2432.15,
-      "lastSwingLow": 2398.66
-    },
     "atr": {
       "length": 14,
-      "value": 5.84,
-      "upperBand": 2426.32,
-      "lowerBand": 2414.64
+      "value": 5.84
     },
-    "higherTimeframe": {
-      "timeframe": "60",
-      "close": 2420.48,
-      "sma20": 2412.73,
-      "bias": "BULLISH"
-    },
-    "proprietaryAdapters": {
-      "volumeProfile": "unavailable_null_stub",
-      "marketProfileTpo": "unavailable_null_stub",
-      "trendMeter": "unavailable_null_stub"
+    "methodology": {
+      "volumeProfile": "gm_svp_v1",
+      "trend": "gm_trend_v1",
+      "candle": "gm_candle_v1",
+      "volumeProfileKind": "equivalent_internal",
+      "proprietaryTrendMeter": "unavailable",
+      "proprietaryVolumeProfile": "unavailable",
+      "proprietaryTpo": "unavailable"
     }
   },
   "metadata": {
-    "scriptVersion": "1.0.0",
+    "scriptVersion": "2.0.0",
     "confirmedBarMode": true,
     "diagnosticMode": false,
-    "symbolOk": true
+    "symbolOk": true,
+    "partial": false,
+    "dataQualityHint": "GOOD",
+    "volumeProfileMethod": "gm_svp_v1",
+    "trendMethod": "gm_trend_v1",
+    "candleMethod": "gm_candle_v1"
   }
 }

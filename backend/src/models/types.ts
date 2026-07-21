@@ -221,11 +221,33 @@ export interface AiExplanation {
   safetyDowngraded: boolean;
 }
 
+/** Display-oriented market structure stored on every new decision. */
+export interface DecisionMarketStructure {
+  trend: TrendDirection | null;
+  trendStrength: number | null;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  confirmationClassification:
+    | "REJECTION"
+    | "BREAKOUT"
+    | "RETEST"
+    | "CONTINUATION"
+    | "NONE"
+    | null;
+  confirmationDirection: TrendDirection | null;
+  confirmationCandleType: string | null;
+}
+
 export interface DecisionRecord {
   schemaVersion: "1.0";
   decisionId: string;
   userId: string;
   symbol: "XAUUSD";
+  /** Chart timeframe from the webhook payload. Null only on legacy records. */
+  timeframe: TradingViewPayload["timeframe"] | null;
+  /** Closed-bar time (ISO). Mirrors marketDataTime for explicit completeness. */
+  barTime: string;
   generatedAt: string;
   marketDataTime: string;
   validUntil: string;
@@ -262,6 +284,8 @@ export interface DecisionRecord {
   currentSession: string | null;
   higherTimeframeBias: TrendDirection | null;
   lastKnownPrice: number | null;
+  ohlcv: TradingViewPayload["ohlcv"];
+  marketStructure: DecisionMarketStructure | null;
   dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE" | "TEST";
   environment: "LIVE" | "TEST";
   isTestDecision: boolean;

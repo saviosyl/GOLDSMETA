@@ -1,5 +1,5 @@
-export const BACKEND_VERSION = "1.0.0-mvp";
-export const RULE_CONFIG_VERSION = "rules-1.0.0";
+export const BACKEND_VERSION = "1.1.0-phase2";
+export const RULE_CONFIG_VERSION = "rules-1.1.0";
 
 export const decisionConfig = {
   version: RULE_CONFIG_VERSION,
@@ -7,6 +7,7 @@ export const decisionConfig = {
     buy: 70,
     sell: -70,
     minRiskRewardToTp2: 1.5,
+    minConfidenceForTrade: 45,
     staleAfterMs: 5 * 60 * 1000
   },
   scoringWeights: {

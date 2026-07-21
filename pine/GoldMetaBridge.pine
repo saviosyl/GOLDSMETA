@@ -1,42 +1,48 @@
 //@version=6
-indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50)
+indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50, max_bars_back=5000)
 
-// GoldMeta Pine Script bridge.
+// GoldMeta Pine Script bridge — Phase 2 (gm_svp_v1 / gm_trend_v1 / gm_candle_v1)
 //
 // TradingView alert setup:
-// 1. Add this script to an XAUUSD chart.
-// 2. Open Alerts, choose this indicator, and select "Any alert() function call".
-// 3. Set your GoldMeta backend webhook URL, for example:
-//    https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-// 4. If TradingView asks for a Message, use {{alert_message}} so the alert() payload below is forwarded unchanged.
+// 1. Add this script to an XAUUSD 15-minute chart.
+// 2. Open Alerts → this indicator → "Any alert() function call".
+// 3. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
+// 4. Message: {{alert_message}}
+// 5. Frequency: once per bar close (script uses alert.freq_once_per_bar_close when confirmed-bar mode is ON).
 //
-// Proprietary volume profile, TPO/market profile, and paid Trend Meter values are not calculated here.
-// They must arrive from separate proprietary TradingView alerts or another licensed adapter. This script
-// sends null/empty adapter fields instead of inventing unavailable values.
+// Values labeled gm_* are GoldMeta-derived equivalents calculated inside this script.
+// They are NOT claimed to be identical to proprietary Volume Profile / Trend Meter products.
+// TPO market-profile fields remain unavailable (null) unless supplied by a separate licensed alert.
 //
-// GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals
-// are not guaranteed, and you remain responsible for every trading decision.
+// Non-repainting rules: closed bars only for alerts; request.security(..., lookahead_off); no future data.
+// GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "1.0.0"
+const string SCRIPT_VERSION = "2.0.0"
+const string METHOD_VP = "gm_svp_v1"
+const string METHOD_TREND = "gm_trend_v1"
+const string METHOD_CANDLE = "gm_candle_v1"
+const float VA_PCT = 70.0
+const int MAX_BINS = 300
 
 groupSymbol = "Symbol"
 expectedSymbol = input.string("XAUUSD", "Expected symbol", group=groupSymbol)
 
 groupTimeframes = "Timeframes"
-higherTimeframe = input.timeframe("60", "Diagnostic HTF", group=groupTimeframes)
+htf1Input = input.timeframe("60", "Trend HTF 1", group=groupTimeframes)
+htf2Input = input.timeframe("240", "Trend HTF 2", group=groupTimeframes)
 
 groupAlerts = "Alerts"
 enableAlertCalls = input.bool(true, "Call alert() from script", group=groupAlerts)
 confirmedBarMode = input.bool(true, "Confirmed-bar mode", group=groupAlerts)
 testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
-payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret. Do not commit or publish secrets.")
+payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret.")
 
-groupLevels = "Levels (diagnostic)"
-showDiagnosticLevels = input.bool(true, "Plot diagnostic levels", group=groupLevels)
-swingLength = input.int(5, "Swing pivot length", minval=1, maxval=50, group=groupLevels)
+groupLevels = "Levels"
+showDiagnosticLevels = input.bool(true, "Plot POC / VAH / VAL / session", group=groupLevels)
+swingLength = input.int(5, "Swing pivot length (diagnostic)", minval=1, maxval=50, group=groupLevels)
 atrLength = input.int(14, "ATR length", minval=1, maxval=200, group=groupLevels)
-atrBandMultiplier = input.float(1.0, "ATR band multiplier", minval=0.1, step=0.1, group=groupLevels)
-showAtrBands = input.bool(false, "Plot ATR bands", group=groupLevels)
+emaFastLen = input.int(21, "Trend EMA fast", minval=2, maxval=200, group=groupLevels)
+emaSlowLen = input.int(50, "Trend EMA slow", minval=3, maxval=400, group=groupLevels)
 
 groupStatus = "Status"
 showStatusTable = input.bool(true, "Show status table", group=groupStatus)
@@ -54,6 +60,9 @@ f_json_string_or_null(string value) =>
 
 f_json_number(float value) =>
     na(value) ? "null" : str.tostring(value, format.mintick)
+
+f_json_number_raw(float value) =>
+    na(value) ? "null" : str.tostring(value)
 
 f_json_bool(bool value) =>
     value ? "true" : "false"
@@ -73,6 +82,20 @@ f_candle_direction(float candleOpen, float candleClose) =>
 f_percent(float numerator, float denominator) =>
     denominator == 0.0 or na(denominator) ? na : numerator / denominator * 100.0
 
+f_clamp100(float value) =>
+    math.max(0.0, math.min(100.0, value))
+
+f_trend_dir(float c, float eFast, float eSlow) =>
+    not na(c) and not na(eFast) and not na(eSlow) ? c > eFast and eFast > eSlow ? "BULLISH" : c < eFast and eFast < eSlow ? "BEARISH" : "NEUTRAL" : "NEUTRAL"
+
+f_trend_strength(float c, float eFast, float eSlow, float atrv, string dir) =>
+    float sep = math.abs(nz(eFast) - nz(eSlow))
+    float atrSafe = na(atrv) or atrv <= 0 ? syminfo.mintick * 10.0 : atrv
+    float base = f_clamp100(sep / atrSafe * 40.0)
+    float align = dir == "NEUTRAL" ? 0.0 : 35.0
+    float stretch = na(c) or na(eFast) ? 0.0 : f_clamp100(math.abs(c - eFast) / atrSafe * 25.0)
+    f_clamp100(base + align + stretch * 0.4)
+
 symbolUpper = str.upper(syminfo.ticker)
 expectedUpper = str.upper(expectedSymbol)
 symbolOk = str.contains(symbolUpper, expectedUpper)
@@ -85,36 +108,211 @@ eventType = testAlertMode ? "TEST" : confirmedNow ? "BAR_CLOSE" : "BAR_UPDATE"
 utcHour = hour(time, "UTC")
 sessionName = f_session_name(utcHour)
 sessionChanged = bar_index == 0 ? true : sessionName != sessionName[1]
+sessionKnown = sessionName != "UNKNOWN"
 
 var float sessionHigh = na
 var float sessionLow = na
+var int sessionStartTs = na
 if sessionChanged or na(sessionHigh) or na(sessionLow)
     sessionHigh := high
     sessionLow := low
+    sessionStartTs := time
 else
     sessionHigh := math.max(sessionHigh, high)
     sessionLow := math.min(sessionLow, low)
 
-// Pivots are structural placeholders only. They become known after swingLength bars and are not a
-// substitute for proprietary market-structure or volume-profile tooling.
+atrValue = ta.atr(atrLength)
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+// --- gm_svp_v1: session volume profile (GoldMeta-derived, not proprietary VP) ---
+var float[] binVolumes = array.new_float()
+var float profileAnchor = na
+var float binSizeUsed = na
+var bool profileOverflow = false
+var float pocPrice = na
+var float vahPrice = na
+var float valPrice = na
+var float profileTotalVolume = na
+
+f_bin_size() =>
+    math.max(syminfo.mintick * 10.0, nz(atrValue, syminfo.mintick * 10.0) / 20.0)
+
+f_reset_profile() =>
+    array.clear(binVolumes)
+    binSizeUsed := f_bin_size()
+    profileAnchor := math.floor(low / binSizeUsed) * binSizeUsed
+    array.push(binVolumes, 0.0)
+    profileOverflow := false
+    pocPrice := na
+    vahPrice := na
+    valPrice := na
+    profileTotalVolume := na
+
+f_ensure_index(int idx) =>
+    bool ok = true
+    if idx < 0
+        int need = -idx
+        if array.size(binVolumes) + need > MAX_BINS
+            profileOverflow := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.unshift(binVolumes, 0.0)
+            profileAnchor := profileAnchor - need * binSizeUsed
+    else if idx >= array.size(binVolumes)
+        int need = idx - array.size(binVolumes) + 1
+        if array.size(binVolumes) + need > MAX_BINS
+            profileOverflow := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.push(binVolumes, 0.0)
+    ok
+
+f_add_bar_to_profile(float barLow, float barHigh, float barVol) =>
+    if na(binSizeUsed) or binSizeUsed <= 0 or barVol <= 0 or na(barVol)
+        false
+    else
+        int startIdx = int(math.floor((barLow - profileAnchor) / binSizeUsed))
+        int endIdx = int(math.floor((barHigh - profileAnchor) / binSizeUsed))
+        if endIdx < startIdx
+            int tmp = startIdx
+            startIdx := endIdx
+            endIdx := tmp
+        bool expanded = f_ensure_index(startIdx)
+        expanded := expanded and f_ensure_index(endIdx)
+        if expanded and not profileOverflow
+            // Recompute indices after possible left expansion
+            startIdx := int(math.floor((barLow - profileAnchor) / binSizeUsed))
+            endIdx := int(math.floor((barHigh - profileAnchor) / binSizeUsed))
+            if endIdx < startIdx
+                int tmp2 = startIdx
+                startIdx := endIdx
+                endIdx := tmp2
+            int bins = endIdx - startIdx + 1
+            float share = barVol / bins
+            for i = startIdx to endIdx
+                array.set(binVolumes, i, array.get(binVolumes, i) + share)
+            true
+        else
+            false
+
+f_compute_value_area() =>
+    int size = array.size(binVolumes)
+    if size <= 0 or profileOverflow
+        pocPrice := na
+        vahPrice := na
+        valPrice := na
+        profileTotalVolume := na
+    else
+        float total = 0.0
+        int pocIdx = 0
+        float pocVol = array.get(binVolumes, 0)
+        for i = 0 to size - 1
+            float v = array.get(binVolumes, i)
+            total += v
+            if v > pocVol
+                pocVol := v
+                pocIdx := i
+        profileTotalVolume := total
+        if total <= 0
+            pocPrice := na
+            vahPrice := na
+            valPrice := na
+        else
+            float target = total * (VA_PCT / 100.0)
+            int lo = pocIdx
+            int hi = pocIdx
+            float covered = pocVol
+            while covered < target and (lo > 0 or hi < size - 1)
+                float below = lo > 0 ? array.get(binVolumes, lo - 1) : -1.0
+                float above = hi < size - 1 ? array.get(binVolumes, hi + 1) : -1.0
+                if above >= below
+                    hi += 1
+                    covered += array.get(binVolumes, hi)
+                else
+                    lo -= 1
+                    covered += array.get(binVolumes, lo)
+            pocPrice := profileAnchor + (pocIdx + 0.5) * binSizeUsed
+            valPrice := profileAnchor + lo * binSizeUsed
+            vahPrice := profileAnchor + (hi + 1) * binSizeUsed
+
+if sessionChanged
+    if sessionKnown
+        f_reset_profile()
+    else
+        array.clear(binVolumes)
+        profileAnchor := na
+        binSizeUsed := na
+        profileOverflow := false
+        pocPrice := na
+        vahPrice := na
+        valPrice := na
+        profileTotalVolume := na
+
+// Accumulate only on confirmed bars (historical bars are confirmed; live bar waits for close).
+profileReady = false
+if sessionKnown and confirmedNow and not na(binSizeUsed)
+    f_add_bar_to_profile(low, high, volume)
+    f_compute_value_area()
+    profileReady := not profileOverflow and not na(pocPrice) and not na(vahPrice) and not na(valPrice)
+else if sessionKnown and not na(pocPrice) and not profileOverflow
+    profileReady := true
+
+acceptanceState = not profileReady ? "UNKNOWN" : close >= valPrice and close <= vahPrice ? "ACCEPTANCE" : close > vahPrice or close < valPrice ? "REJECTION" : "UNKNOWN"
+
+// --- gm_trend_v1 ---
+chartDir = f_trend_dir(close, emaFast, emaSlow)
+chartStrength = f_trend_strength(close, emaFast, emaSlow, atrValue, chartDir)
+
+[htf1Close, htf1EmaFast, htf1EmaSlow, htf1Atr] = request.security(syminfo.tickerid, htf1Input, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf2Close, htf2EmaFast, htf2EmaSlow, htf2Atr] = request.security(syminfo.tickerid, htf2Input, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+htf1Dir = f_trend_dir(htf1Close, htf1EmaFast, htf1EmaSlow)
+htf1Strength = f_trend_strength(htf1Close, htf1EmaFast, htf1EmaSlow, htf1Atr, htf1Dir)
+htf2Dir = f_trend_dir(htf2Close, htf2EmaFast, htf2EmaSlow)
+htf2Strength = f_trend_strength(htf2Close, htf2EmaFast, htf2EmaSlow, htf2Atr, htf2Dir)
+
+f_signed(string dir, float strength) =>
+    dir == "BULLISH" ? strength : dir == "BEARISH" ? -strength : 0.0
+
+aggSigned = (f_signed(chartDir, chartStrength) + f_signed(htf1Dir, htf1Strength) + f_signed(htf2Dir, htf2Strength)) / 3.0
+trendDirection = aggSigned >= 15.0 ? "BULLISH" : aggSigned <= -15.0 ? "BEARISH" : "NEUTRAL"
+trendStrength = f_clamp100(math.abs(aggSigned))
+
+// --- gm_candle_v1 ---
+barRange = high - low
+body = math.abs(close - open)
+bodyPercent = f_percent(body, barRange)
+upperWickPercent = f_percent(high - math.max(open, close), barRange)
+lowerWickPercent = f_percent(math.min(open, close) - low, barRange)
+candleDirection = f_candle_direction(open, close)
+
+bullEngulf = close > open and close[1] < open[1] and open <= close[1] and close >= open[1]
+bearEngulf = close < open and close[1] > open[1] and open >= close[1] and close <= open[1]
+candleType = bullEngulf or bearEngulf ? "ENGULFING" : ""
+
+prevClose = close[1]
+brokeAboveVah = profileReady and not na(vahPrice) and prevClose <= vahPrice and close > vahPrice
+brokeBelowVal = profileReady and not na(valPrice) and prevClose >= valPrice and close < valPrice
+retestVah = profileReady and not na(vahPrice) and close > open and low <= vahPrice and close >= vahPrice and prevClose > vahPrice
+retestVal = profileReady and not na(valPrice) and close < open and high >= valPrice and close <= valPrice and prevClose < valPrice
+rejectLong = profileReady and candleDirection == "BULLISH" and nz(lowerWickPercent) >= 55.0 and nz(bodyPercent) <= 35.0 and not na(valPrice) and low <= valPrice + nz(atrValue) * 0.25
+rejectShort = profileReady and candleDirection == "BEARISH" and nz(upperWickPercent) >= 55.0 and nz(bodyPercent) <= 35.0 and not na(vahPrice) and high >= vahPrice - nz(atrValue) * 0.25
+continuation = nz(bodyPercent) >= 60.0 and candleDirection != "NEUTRAL" and candleDirection == trendDirection
+
+classification = rejectLong or rejectShort ? "REJECTION" : brokeAboveVah or brokeBelowVal ? "BREAKOUT" : retestVah or retestVal ? "RETEST" : continuation or bullEngulf or bearEngulf ? "CONTINUATION" : "NONE"
+
+relatedLevel = brokeAboveVah or retestVah or rejectShort ? "VAH" : brokeBelowVal or retestVal or rejectLong ? "VAL" : profileReady and not na(pocPrice) and math.abs(close - pocPrice) <= nz(atrValue) * 0.25 ? "POC" : ""
+
 pivotHigh = ta.pivothigh(high, swingLength, swingLength)
 pivotLow = ta.pivotlow(low, swingLength, swingLength)
 lastSwingHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
 lastSwingLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
 
-atrValue = ta.atr(atrLength)
-atrUpper = close + atrValue * atrBandMultiplier
-atrLower = close - atrValue * atrBandMultiplier
-
-htfClose = request.security(syminfo.tickerid, higherTimeframe, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-htfSma = request.security(syminfo.tickerid, higherTimeframe, ta.sma(close, 20), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-htfBias = na(htfClose) or na(htfSma) ? "NEUTRAL" : htfClose > htfSma ? "BULLISH" : htfClose < htfSma ? "BEARISH" : "NEUTRAL"
-
-barRange = high - low
-bodyPercent = f_percent(math.abs(close - open), barRange)
-upperWickPercent = f_percent(high - math.max(open, close), barRange)
-lowerWickPercent = f_percent(math.min(open, close) - low, barRange)
-candleDirection = f_candle_direction(open, close)
+payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN"
+dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 
 eventId = syminfo.tickerid + "-" + timeframe.period + "-" + str.tostring(time_close)
 
@@ -124,15 +322,37 @@ ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
   ",\"close\":" + f_json_number(close) +
   ",\"volume\":" + f_json_number(volume) + "}"
 
-// Proprietary adapter stubs: values are intentionally null/empty unless supplied by separate licensed alerts.
-levelsJson = "\"levels\":{\"pocAll\":null,\"vahAll\":null,\"valAll\":null,\"pocNonBroken\":[],\"vahNonBroken\":[],\"valNonBroken\":[]}"
+levelsJson = "\"levels\":{\"pocAll\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vahAll\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"valAll\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"pocNonBroken\":[],\"vahNonBroken\":[],\"valNonBroken\":[]}"
+
+sessionStartJson = na(sessionStartTs) ? "null" : f_json_time(sessionStartTs)
+sessionEndJson = f_json_time(time_close)
+
 sessionVolumeProfileJson = "\"sessionVolumeProfile\":{\"session\":" + f_json_string(sessionName) +
-  ",\"sessionStart\":null,\"sessionEnd\":null,\"poc\":null,\"vah\":null,\"val\":null,\"hvn\":[],\"lvn\":[],\"acceptanceState\":\"UNKNOWN\"}"
+  ",\"sessionStart\":" + sessionStartJson +
+  ",\"sessionEnd\":" + sessionEndJson +
+  ",\"poc\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vah\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"val\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"hvn\":[],\"lvn\":[],\"acceptanceState\":" + f_json_string(acceptanceState) + "}"
+
+// TPO / market profile remains unavailable in this bridge (proprietary / not implemented).
 marketProfileJson = "\"marketProfile\":{\"tpoPoc\":null,\"initialBalanceHigh\":null,\"initialBalanceLow\":null,\"poorHigh\":null,\"poorLow\":null,\"singlePrints\":[],\"valueMigration\":\"UNKNOWN\",\"profileState\":\"UNKNOWN\",\"acceptanceState\":\"UNKNOWN\"}"
+
+trendJson = "\"trend\":{\"direction\":" + f_json_string(trendDirection) +
+  ",\"strength\":" + f_json_number_raw(trendStrength) +
+  ",\"components\":[" +
+  "{\"name\":\"gm_chart_ema_stack\",\"direction\":" + f_json_string(chartDir) + ",\"strength\":" + f_json_number_raw(chartStrength) + ",\"sourceTimeframe\":" + f_json_string(timeframe.period) + "}," +
+  "{\"name\":\"gm_htf1_ema_stack\",\"direction\":" + f_json_string(htf1Dir) + ",\"strength\":" + f_json_number_raw(htf1Strength) + ",\"sourceTimeframe\":" + f_json_string(htf1Input) + "}," +
+  "{\"name\":\"gm_htf2_ema_stack\",\"direction\":" + f_json_string(htf2Dir) + ",\"strength\":" + f_json_number_raw(htf2Strength) + ",\"sourceTimeframe\":" + f_json_string(htf2Input) + "}" +
+  "]}"
 
 confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(confirmedNow) +
   ",\"direction\":" + f_json_string(candleDirection) +
-  ",\"candleType\":null,\"classification\":\"NONE\"" +
+  ",\"candleType\":" + f_json_string_or_null(candleType) +
+  ",\"classification\":" + f_json_string(classification) +
   ",\"open\":" + f_json_number(open) +
   ",\"high\":" + f_json_number(high) +
   ",\"low\":" + f_json_number(low) +
@@ -142,28 +362,37 @@ confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(
   ",\"lowerWickPercent\":" + f_json_number(lowerWickPercent) +
   ",\"volume\":" + f_json_number(volume) +
   ",\"isClosed\":" + f_json_bool(confirmedNow) +
-  ",\"relatedLevel\":null}"
+  ",\"relatedLevel\":" + f_json_string_or_null(relatedLevel) + "}"
 
-optionalIndicatorsJson = "\"optionalIndicators\":{\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
+optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) +
+  ",\"value\":" + f_json_number(atrValue) + "}" +
+  ",\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
   ",\"high\":" + f_json_number(sessionHigh) +
   ",\"low\":" + f_json_number(sessionLow) + "}" +
   ",\"structure\":{\"placeholder\":true,\"swingLength\":" + str.tostring(swingLength) +
   ",\"lastSwingHigh\":" + f_json_number(lastSwingHigh) +
   ",\"lastSwingLow\":" + f_json_number(lastSwingLow) + "}" +
-  ",\"atr\":{\"length\":" + str.tostring(atrLength) +
-  ",\"value\":" + f_json_number(atrValue) +
-  ",\"upperBand\":" + f_json_number(atrUpper) +
-  ",\"lowerBand\":" + f_json_number(atrLower) + "}" +
-  ",\"higherTimeframe\":{\"timeframe\":" + f_json_string(higherTimeframe) +
-  ",\"close\":" + f_json_number(htfClose) +
-  ",\"sma20\":" + f_json_number(htfSma) +
-  ",\"bias\":" + f_json_string(htfBias) + "}" +
-  ",\"proprietaryAdapters\":{\"volumeProfile\":\"unavailable_null_stub\",\"marketProfileTpo\":\"unavailable_null_stub\",\"trendMeter\":\"unavailable_null_stub\"}}"
+  ",\"methodology\":{\"volumeProfile\":" + f_json_string(METHOD_VP) +
+  ",\"trend\":" + f_json_string(METHOD_TREND) +
+  ",\"candle\":" + f_json_string(METHOD_CANDLE) +
+  ",\"volumeProfileKind\":\"equivalent_internal\"" +
+  ",\"proprietaryTrendMeter\":\"unavailable\"" +
+  ",\"proprietaryVolumeProfile\":\"unavailable\"" +
+  ",\"proprietaryTpo\":\"unavailable\"}" +
+  ",\"profileDiagnostics\":{\"binSize\":" + f_json_number(binSizeUsed) +
+  ",\"valueAreaPct\":" + str.tostring(VA_PCT) +
+  ",\"overflow\":" + f_json_bool(profileOverflow) +
+  ",\"ready\":" + f_json_bool(profileReady) + "}}"
 
 metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
-  ",\"symbolOk\":" + f_json_bool(symbolOk) + "}"
+  ",\"symbolOk\":" + f_json_bool(symbolOk) +
+  ",\"partial\":" + f_json_bool(payloadPartial) +
+  ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
+  ",\"volumeProfileMethod\":" + f_json_string(METHOD_VP) +
+  ",\"trendMethod\":" + f_json_string(METHOD_TREND) +
+  ",\"candleMethod\":" + f_json_string(METHOD_CANDLE) + "}"
 
 alertMessage = "{" +
   "\"schemaVersion\":\"1.0\"," +
@@ -182,7 +411,7 @@ alertMessage = "{" +
   levelsJson + "," +
   sessionVolumeProfileJson + "," +
   marketProfileJson + "," +
-  "\"trend\":null," +
+  trendJson + "," +
   confirmationCandleJson + "," +
   optionalIndicatorsJson + "," +
   metadataJson +
@@ -200,10 +429,9 @@ if enableAlertCalls and barstate.isrealtime and canEmitBar
 
 plot(showDiagnosticLevels ? sessionHigh : na, title="GoldMeta Session High", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
 plot(showDiagnosticLevels ? sessionLow : na, title="GoldMeta Session Low", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? lastSwingHigh : na, title="GoldMeta Last Swing High", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? lastSwingLow : na, title="GoldMeta Last Swing Low", color=color.new(color.green, 20), linewidth=1, style=plot.style_linebr)
-plot(showAtrBands and showDiagnosticLevels ? atrUpper : na, title="GoldMeta ATR Upper", color=color.new(color.orange, 35), linewidth=1)
-plot(showAtrBands and showDiagnosticLevels ? atrLower : na, title="GoldMeta ATR Lower", color=color.new(color.orange, 35), linewidth=1)
+plot(showDiagnosticLevels and profileReady ? pocPrice : na, title="GoldMeta POC", color=color.new(color.orange, 0), linewidth=2, style=plot.style_linebr)
+plot(showDiagnosticLevels and profileReady ? vahPrice : na, title="GoldMeta VAH", color=color.new(color.teal, 0), linewidth=1, style=plot.style_linebr)
+plot(showDiagnosticLevels and profileReady ? valPrice : na, title="GoldMeta VAL", color=color.new(color.teal, 0), linewidth=1, style=plot.style_linebr)
 
 plotshape(diagnosticMode and not na(pivotHigh), title="GoldMeta Pivot High", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, offset=-swingLength)
 plotshape(diagnosticMode and not na(pivotLow), title="GoldMeta Pivot Low", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, offset=-swingLength)
@@ -221,7 +449,7 @@ if showWarnings and barstate.islast
         label.delete(warningLabel)
         warningLabel := na
 
-var table statusTable = table.new(position.top_right, 2, 5, border_width=1)
+var table statusTable = table.new(position.top_right, 2, 7, border_width=1)
 if showStatusTable and barstate.islast
     table.cell(statusTable, 0, 0, "GoldMeta", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
@@ -229,7 +457,11 @@ if showStatusTable and barstate.islast
     table.cell(statusTable, 1, 1, symbolOk ? "YES" : "NO", text_color=color.white, bgcolor=symbolOk ? color.new(color.green, 35) : color.new(color.red, 20))
     table.cell(statusTable, 0, 2, "Confirmed", text_color=color.white)
     table.cell(statusTable, 1, 2, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
-    table.cell(statusTable, 0, 3, "Last close", text_color=color.white)
-    table.cell(statusTable, 1, 3, f_json_number(close), text_color=color.white)
-    table.cell(statusTable, 0, 4, "Session", text_color=color.white)
-    table.cell(statusTable, 1, 4, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 3, "Session", text_color=color.white)
+    table.cell(statusTable, 1, 3, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 4, "Trend", text_color=color.white)
+    table.cell(statusTable, 1, 4, trendDirection + " " + str.tostring(trendStrength, "#"), text_color=color.white)
+    table.cell(statusTable, 0, 5, "VP ready", text_color=color.white)
+    table.cell(statusTable, 1, 5, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 6, "Candle", text_color=color.white)
+    table.cell(statusTable, 1, 6, classification, text_color=color.white)

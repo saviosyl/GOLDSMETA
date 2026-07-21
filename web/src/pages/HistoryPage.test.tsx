@@ -48,7 +48,7 @@ describe("HistoryPage", () => {
     expect(await screen.findByTestId("history-item-gm-web-buy")).toBeInTheDocument();
     expect(screen.getByTestId("history-item-gm-web-sell")).toBeInTheDocument();
     expect(screen.getByTestId("history-item-gm-web-wait")).toBeInTheDocument();
-    expect(screen.getByText(/XAUUSD · 15m/)).toBeInTheDocument();
+    expect(screen.getAllByText(/XAUUSD · 15m/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("gm-web-buy")).not.toBeInTheDocument();
     expect(screen.getByText("Wait for fresh market data")).toBeInTheDocument();
   });

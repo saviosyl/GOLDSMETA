@@ -3,7 +3,9 @@ import { BACKEND_VERSION, decisionConfig, RULE_CONFIG_VERSION } from "../../conf
 import type {
   AiExplanation,
   DecisionDirection,
+  DecisionMarketStructure,
   DecisionRecord,
+  MarketSnapshot,
   TradingViewPayload,
   TrendDirection
 } from "../../models/types";
@@ -14,6 +16,7 @@ import { sendDecisionPushIfMeaningful } from "../notifications/push";
 import { evaluateDataQuality } from "../snapshot/dataQuality";
 import { mergeSnapshot } from "../snapshot/mergeSnapshot";
 import type { DecisionEnvironment, GoldMetaStore } from "../storage/types";
+import { isPositivePrice } from "../../utils/money";
 import { calculateConfidence } from "./confidence";
 import { evaluateHardGuards } from "./hardGuards";
 import { scoreSnapshot, directionFromScore } from "./scoringEngine";
@@ -61,6 +64,33 @@ const reasonSummaryFor = (ai: AiExplanation, finalDecision: DecisionDirection): 
   return [`${finalDecision} setup passes deterministic thresholds and safety guards.`];
 };
 
+const resolveVolumeProfile = (
+  snapshot: MarketSnapshot
+): { poc: number | null; vah: number | null; val: number | null } => {
+  const poc = snapshot.levels?.pocAll ?? snapshot.sessionVolumeProfile?.poc ?? null;
+  const vah = snapshot.levels?.vahAll ?? snapshot.sessionVolumeProfile?.vah ?? null;
+  const val = snapshot.levels?.valAll ?? snapshot.sessionVolumeProfile?.val ?? null;
+  return {
+    poc: isPositivePrice(poc) ? poc : null,
+    vah: isPositivePrice(vah) ? vah : null,
+    val: isPositivePrice(val) ? val : null
+  };
+};
+
+const marketStructureFor = (snapshot: MarketSnapshot): DecisionMarketStructure => {
+  const profile = resolveVolumeProfile(snapshot);
+  return {
+    trend: snapshot.trend?.direction ?? null,
+    trendStrength: typeof snapshot.trend?.strength === "number" ? snapshot.trend.strength : null,
+    poc: profile.poc,
+    vah: profile.vah,
+    val: profile.val,
+    confirmationClassification: snapshot.confirmationCandle?.classification ?? null,
+    confirmationDirection: snapshot.confirmationCandle?.direction ?? null,
+    confirmationCandleType: snapshot.confirmationCandle?.candleType ?? null
+  };
+};
+
 export const processDecisionPipeline = async (
   userId: string,
   payload: TradingViewPayload,
@@ -89,10 +119,16 @@ export const processDecisionPipeline = async (
   const score = scoreSnapshot(snapshot);
   const initialDecision = directionFromScore(score.score);
   const initialPlan = buildTradePlan(snapshot, initialDecision);
-  const hardGuards = evaluateHardGuards(snapshot, initialDecision, initialPlan, dataQuality);
+  const confidence = calculateConfidence(dataQuality, score);
+  const hardGuards = evaluateHardGuards(
+    snapshot,
+    initialDecision,
+    initialPlan,
+    dataQuality,
+    confidence.confidence
+  );
   const guardedDecision: DecisionDirection = hardGuards.passed ? initialDecision : "WAIT";
   const guardedPlan = guardedDecision === initialDecision ? initialPlan : buildTradePlan(snapshot, "WAIT");
-  const confidence = calculateConfidence(dataQuality, score);
   const boundedConfidence = hardGuards.passed
     ? confidence.confidence
     : Math.min(confidence.confidence, 40);
@@ -132,6 +168,8 @@ export const processDecisionPipeline = async (
     decisionId: decisionIdFor(stableEventId, generatedAt),
     userId,
     symbol: "XAUUSD",
+    timeframe: snapshot.timeframe,
+    barTime: snapshot.marketDataTime,
     generatedAt,
     marketDataTime: snapshot.marketDataTime,
     validUntil: addMsIso(generatedAt, decisionConfig.decisionTtlMs),
@@ -178,6 +216,8 @@ export const processDecisionPipeline = async (
     currentSession: snapshot.sessionVolumeProfile?.session ?? null,
     higherTimeframeBias: htfBias,
     lastKnownPrice: snapshot.price,
+    ohlcv: snapshot.ohlcv ?? null,
+    marketStructure: marketStructureFor(snapshot),
     dataSourceLabel: environment === "TEST" || isTestDecision ? "TEST" : dataQuality.quality === "STALE" ? "STALE" : "LIVE",
     environment,
     isTestDecision

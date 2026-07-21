@@ -155,7 +155,15 @@ export const primaryReason = (decision: Decision): string => {
 export const explainReasonCode = (code: string): string => {
   const map: Record<string, string> = {
     STALE_DATA: "Market data is stale",
+    INCOMPLETE_DATA: "Market data is incomplete",
+    MISSING_VOLUME_PROFILE: "Volume profile (POC/VAH/VAL) is missing",
+    MISSING_TREND: "Trend direction is missing",
+    MISSING_CONFIRMATION: "Confirmation candle is missing",
+    CONFLICTING_TREND: "Trend conflicts with value-area structure",
     LOW_CONFIDENCE: "Confidence is too low for a trade",
+    POOR_RISK_REWARD: "Risk/reward is below the minimum threshold",
+    MIN_RR_TO_TP2_NOT_MET: "Risk/reward to TP2 is below the minimum",
+    INSUFFICIENT_EVIDENCE: "Need agreement from more than one indicator family",
     TREND_BULLISH: "Bullish trend alignment",
     TREND_BEARISH: "Bearish trend alignment",
     TREND_COMPONENTS: "Multi-timeframe trend components",
@@ -166,6 +174,7 @@ export const explainReasonCode = (code: string): string => {
     INSIDE_VALUE_AREA: "Price inside value area",
     LEVEL_INTERACTION: "Interacting with a key level",
     BREAKOUT_OR_RETEST: "Breakout or retest confirmation",
+    CONTINUATION_CONFIRMATION: "Continuation confirmation candle",
     CANDLE_BULLISH: "Bullish confirmation candle",
     CANDLE_BEARISH: "Bearish confirmation candle",
     VALUE_MIGRATION_UP: "Value migrating higher",

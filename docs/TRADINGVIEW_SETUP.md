@@ -62,22 +62,33 @@ The script builds the JSON itself. Do not replace it with a manual JSON template
 ## Recommended chart setup
 
 - Symbol: `XAUUSD`
-- Timeframes: start with `5`, then add `15`, `60`, and `240` only when the backend is configured to merge them.
-- Alerts: one alert per timeframe.
+- Primary timeframe for Phase 2: **`15`**
 - Confirmed-bar mode: ON for production.
 - Test-alert mode: use only to verify connectivity, then turn it OFF.
 
+## Indicator methods (Phase 2)
+
+GoldMetaBridge calculates deterministic **GoldMeta-derived** values:
+
+- `gm_svp_v1` — session POC / VAH / VAL (equivalent internal; not proprietary VP)
+- `gm_trend_v1` — EMA stack trend with HTF 60/240 (`lookahead_off`)
+- `gm_candle_v1` — confirmation candle classification
+
+Full formulas, session boundaries, bin size, and value-area rules: `docs/INDICATOR_METHODOLOGY.md`.
+
+TPO / proprietary Trend Meter values remain **unavailable** in the bridge and must not be invented. Missing required fields produce backend **WAIT**.
+
 ## Proprietary indicator alerts
 
-The bridge does not calculate proprietary volume profile, TPO, market profile, or paid Trend Meter values. Those values must come from separate licensed scripts or alert sources.
+Optional licensed alerts may still supply proprietary fields the bridge cannot compute (for example TPO). Missing proprietary values remain missing; they are not guessed.
 
 Recommended merge pattern:
 
-1. GoldMeta bridge alert sends OHLCV, session heuristic, ATR, and structural placeholders.
-2. Proprietary indicator alert sends only the fields it owns.
+1. GoldMeta bridge alert sends OHLCV, `gm_svp_v1` levels, `gm_trend_v1`, and confirmation.
+2. Optional proprietary alert sends only the fields it owns.
 3. Backend validates source, symbol, timeframe, and bar time.
 4. Backend merges compatible events into one market snapshot.
-5. Missing proprietary values remain missing; they are not guessed.
+5. Incomplete or stale snapshots default to WAIT.
 
 ## Troubleshooting
 

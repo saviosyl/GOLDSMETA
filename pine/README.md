@@ -1,6 +1,6 @@
 # GoldMeta Pine Script Bridge
 
-`GoldMetaBridge.pine` is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for XAUUSD bars and includes only data the script can calculate directly.
+`GoldMetaBridge.pine` (script version **2.0.0+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
 
 > GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.
 
@@ -8,26 +8,42 @@
 
 - `schemaVersion: "1.0"`
 - `source: "tradingview"`
-- Dynamic OHLCV from the chart bar
-- Confirmed-bar status
-- UTC-hour session heuristic: `ASIA`, `LONDON`, `OVERLAP`, `NEWYORK`, or `UNKNOWN`
-- Basic confirmed swing high/low placeholders
-- ATR and optional ATR bands
-- Higher-timeframe diagnostic close/SMA bias using `request.security(..., lookahead=barmerge.lookahead_off)`
-- `metadata.scriptVersion: "1.0.0"`
+- Dynamic OHLCV from the confirmed chart bar
+- `barTime` = `time_close`, `sentAt` = `timenow`
+- Confirmed-bar gating via `barstate.isconfirmed`
+- Alert frequency `alert.freq_once_per_bar_close` when confirmed-bar mode is ON
+- UTC session heuristic: `ASIA`, `LONDON`, `OVERLAP`, `NEWYORK`, or `UNKNOWN`
+- **gm_svp_v1** session volume profile → `POC` / `VAH` / `VAL` (GoldMeta-derived equivalent, not proprietary VP)
+- **gm_trend_v1** EMA-stack trend → direction, strength 0–100, MTF components (chart + HTF 60/240)
+- **gm_candle_v1** confirmation classification → `REJECTION` | `BREAKOUT` | `RETEST` | `CONTINUATION` | `NONE`
+- ATR diagnostics in `optionalIndicators.atr`
+- `metadata.scriptVersion`, methodology tags, and `partial` when VP cannot be computed
 
-The script does **not** calculate proprietary volume profile, TPO/market profile, or paid Trend Meter values. Those fields are emitted as `null` or empty arrays and must be populated by separate licensed alerts or backend adapters.
+See `docs/INDICATOR_METHODOLOGY.md` for exact formulas, session boundaries, bin size, and value-area rules.
+
+### Proprietary / unavailable
+
+| Field family | Status |
+| --- | --- |
+| Session POC/VAH/VAL (`gm_svp_v1`) | Equivalent internal calculation |
+| Trend Meter style meter | **Unavailable** — replaced by `gm_trend_v1` EMA stack |
+| TPO / market profile (`marketProfile.*`) | **Unavailable** (`null` / `UNKNOWN`) |
+| RSI / MACD as first-class decision inputs | **Not sent** — backend webhook schema / live pipeline does not score them |
+
+If a required value cannot be calculated reliably (e.g. `UNKNOWN` session or profile overflow), levels are `null` and `metadata.partial = true`. The backend treats that as incomplete and defaults to **WAIT**.
+
+## Recommended chart
+
+- Symbol: **XAUUSD** (broker prefixes such as `OANDA:XAUUSD` are accepted)
+- Timeframe: **15**
 
 ## Add the script to TradingView
 
-1. Open TradingView and select an XAUUSD chart.
+1. Open TradingView and select an XAUUSD **15m** chart.
 2. Open **Pine Editor**.
 3. Paste the contents of `pine/GoldMetaBridge.pine`.
-4. Click **Save**.
-5. Click **Add to chart**.
-6. Confirm the status table shows `Symbol OK = YES`.
-
-If you use a broker symbol such as `OANDA:XAUUSD`, the script should pass the XAUUSD check. If the current chart is not XAUUSD, the script shows a red warning label and sends the actual chart symbol so the backend can reject it safely.
+4. Click **Save**, then **Add to chart**.
+5. Confirm the status table shows `Symbol OK = YES` and `VP ready` during known sessions.
 
 ## Create the TradingView alert
 
@@ -40,59 +56,27 @@ If you use a broker symbol such as `OANDA:XAUUSD`, the script should pass the XA
    https://<region>-<firebase-project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
    ```
 
-5. If TradingView shows a message box, use:
+5. Message box:
 
    ```text
    {{alert_message}}
    ```
 
-6. Set alert frequency to match the script behavior. Confirmed-bar mode is ON by default, so once per bar close is expected.
+6. Frequency: once per bar close (matches confirmed-bar mode).
 7. Save the alert.
-
-The script calls `alert(alertMessage, ...)` directly. The webhook body should therefore be the generated JSON payload, not a manually typed JSON template.
 
 ## Settings
 
-### Symbol
-
 - **Expected symbol** defaults to `XAUUSD`.
-- GoldMeta MVP is XAUUSD-only.
+- **Trend HTF 1 / 2** default to `60` / `240` with `lookahead_off`.
+- **Confirmed-bar mode** defaults ON.
+- **Test-alert mode** sends one `TEST` event while enabled.
+- Optional payload secret only when the backend connection uses one.
 
-### Timeframes
+## Confidence note
 
-- **Diagnostic HTF** defaults to `60`.
-- HTF values use `lookahead_off` to avoid future leakage.
-
-### Alerts
-
-- **Call alert() from script** enables or disables live `alert()` calls.
-- **Confirmed-bar mode** defaults to ON and gates alerts with `barstate.isconfirmed`.
-- **Test-alert mode** sends one `TEST` event on a realtime bar while enabled.
-- **Optional payload secret** is only for deployments that validate a payload-level secret. Prefer a secure opaque webhook URL plus backend-side secret handling.
-
-### Levels (diagnostic)
-
-- Session high/low, swing placeholders, and optional ATR bands can be plotted.
-- These are diagnostics, not trade recommendations.
-
-### Status
-
-- The status table shows symbol status, confirmed mode, last close, and current heuristic session.
-- Diagnostic mode adds pivot markers.
-
-## Proprietary indicator merge notes
-
-GoldMeta is designed to merge multiple alert sources on the backend:
-
-1. This Pine bridge sends public chart-derived OHLCV and diagnostics.
-2. Proprietary volume profile/TPO/Trend Meter scripts send their own licensed alert payloads.
-3. The backend validates each source, deduplicates events, and merges compatible events by symbol/timeframe/bar time.
-4. If proprietary inputs are missing, the decision engine must treat them as missing data and lower data quality or return `WAIT` according to hard guards.
-
-Do not copy protected Pine code into this bridge unless your license allows it. Do not estimate proprietary values just to fill a field.
+Confidence shown later by the GoldMeta backend means setup quality and input completeness. Confidence is **not** a win probability.
 
 ## Example payload
 
 See `pine/alert-payload-example.json`.
-
-Confidence shown later by the GoldMeta backend means setup quality and input completeness. Confidence is **not** a win probability.

@@ -98,6 +98,11 @@ Important fields:
 - `userId`
 - `decisionId`
 - `symbol`
+- `timeframe` (Phase 2+; legacy records may omit)
+- `barTime` (Phase 2+; mirrors `marketDataTime`)
+- `generatedAt`
+- `ohlcv` (Phase 2+)
+- `marketStructure` (`poc` / `vah` / `val` / `trend` / confirmation fields)
 - `decision`
 - `confidence`
 - `dataQuality`
@@ -106,13 +111,14 @@ Important fields:
 - `stopLoss`
 - `takeProfits`
 - `riskReward`
-- `reasonSummary`
-- `warnings`
+- `reasonCodes` / `reasonSummary`
+- `warnings` / `missingInputs`
 - `environment`
 - `isTestDecision`
 - `notificationSent`
 
 The iOS app displays TEST when `isTestDecision == true` or `environment == "TEST"`.
+Do not rewrite legacy decision documents solely to backfill `timeframe`; the History UI shows `—` when absent.
 
 ## `users/{userId}/devices/{deviceId}`
 

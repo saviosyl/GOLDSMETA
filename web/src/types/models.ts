@@ -30,18 +30,23 @@ export interface RiskReward {
 }
 
 export interface MarketStructure {
-  trend: string;
+  trend: string | null;
+  trendStrength?: number | null;
   poc: number | null;
   vah: number | null;
   val: number | null;
+  confirmationClassification?: string | null;
+  confirmationDirection?: string | null;
+  confirmationCandleType?: string | null;
 }
 
 export interface Decision {
   schemaVersion: string;
   decisionId: string;
   symbol: string;
-  /** Present when backend includes it; otherwise UI shows "—". */
+  /** Present on Phase-2+ decisions; legacy records may omit → UI shows "—". */
   timeframe?: string | null;
+  barTime?: string | null;
   generatedAt: string;
   marketDataTime: string;
   validUntil: string;
@@ -78,6 +83,13 @@ export interface Decision {
   currentSession?: string | null;
   higherTimeframeBias?: string | null;
   lastKnownPrice?: number | null;
+  ohlcv?: {
+    open?: number | null;
+    high?: number | null;
+    low?: number | null;
+    close?: number | null;
+    volume?: number | null;
+  } | null;
   dataSourceLabel: DataSourceLabel;
   marketStructure?: MarketStructure | null;
   recommendedActions?: string[] | null;

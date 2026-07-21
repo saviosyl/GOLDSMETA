@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-neutral",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T08:00:00.000Z",
+  "sentAt": "2026-07-20T08:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2410,
+    "high": 2412,
+    "low": 2408,
+    "close": 2410.5,
+    "volume": 800
+  },
+  "levels": {
+    "pocAll": 2410,
+    "vahAll": 2415,
+    "valAll": 2405,
+    "pocNonBroken": [],
+    "vahNonBroken": [],
+    "valNonBroken": []
+  },
+  "sessionVolumeProfile": {
+    "session": "LONDON",
+    "poc": 2410,
+    "vah": 2415,
+    "val": 2405,
+    "hvn": [],
+    "lvn": [],
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "marketProfile": {
+    "valueMigration": "BALANCED",
+    "profileState": "BALANCED",
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "trend": {
+    "direction": "NEUTRAL",
+    "strength": 12,
+    "components": [
+      { "name": "gm_chart_ema_stack", "direction": "NEUTRAL", "strength": 20, "sourceTimeframe": "15" },
+      { "name": "gm_htf1_ema_stack", "direction": "BULLISH", "strength": 40, "sourceTimeframe": "60" },
+      { "name": "gm_htf2_ema_stack", "direction": "BEARISH", "strength": 35, "sourceTimeframe": "240" }
+    ]
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "NEUTRAL",
+    "classification": "NONE",
+    "open": 2410,
+    "high": 2412,
+    "low": 2408,
+    "close": 2410.5,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "2.0.0"
+  }
+}
