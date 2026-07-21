@@ -1,6 +1,7 @@
 # GoldMeta V5 — Trading Intelligence Platform
 
 **Date:** 2026-07-21  
+**Draft PR:** https://github.com/saviosyl/GOLDSMETA/pull/12  
 **Branch:** `cursor/goldmeta-v5-intelligence-c2c2`  
 **Base:** `cursor/goldmeta-v4-stage-b-c2c2` (V4 Stage B)  
 **Backend version:** `1.4.0-v5-intelligence`  
@@ -86,8 +87,10 @@ Optimised reads: bounded `limit` queries, in-memory filters (no new composite in
 
 | Suite | Result |
 | --- | --- |
-| Backend unit/integration (incl. V5) | run in CI / local |
-| Web lint / typecheck / tests / build | run in CI / local |
+| Backend | **142** tests · lint · build PASS |
+| Web | **47** tests · lint · typecheck · production build PASS |
+| Deployed backend | `1.4.0-v5-intelligence` |
+| CI | triggered on PR #12 |
 
 Covered: score, intelligence insufficient-data honesty, learning non-mutation, briefing non-actionable, screenshot `createsTrade=false`, replay educational, glossary offline, V5 routes auth envelopes.
 
