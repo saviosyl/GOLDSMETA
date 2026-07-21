@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "v5.1-production-harden-2026-07-21";
+export const GOLD_META_BUILD_STAMP = "v5.2-branding-deploy-2026-07-21";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

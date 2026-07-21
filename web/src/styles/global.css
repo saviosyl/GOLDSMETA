@@ -904,6 +904,31 @@ a {
   font-size: clamp(1.55rem, 6vw, 1.9rem);
 }
 
+.brand-logo-signin {
+  display: block;
+  width: min(240px, 100%);
+  height: auto;
+  margin: 0 auto 12px;
+}
+
+.signin-brand {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.brand-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.brand-loading p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .brand-badges {
   display: flex;
   flex-wrap: wrap;

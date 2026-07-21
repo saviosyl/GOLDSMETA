@@ -56,9 +56,16 @@ function ProtectedApp() {
 
   if (loading) {
     return (
-      <div className="app-shell auth-only">
-        <div className="card" role="status">
-          Checking session…
+      <div className="app-shell auth-only" data-testid="session-loading">
+        <div className="card brand-loading" role="status">
+          <img
+            src="/brand/mark-dark.svg"
+            alt=""
+            width={48}
+            height={48}
+            className="brand-mark"
+          />
+          <p>Checking GoldMeta session…</p>
         </div>
       </div>
     );
@@ -67,7 +74,6 @@ function ProtectedApp() {
   if (!user) {
     return (
       <div className="app-shell auth-only" data-testid="signed-out-shell">
-        <h1 className="brand">GoldMeta</h1>
         <p className="subtitle">Sign in to load backend decisions</p>
         <SignInPage />
       </div>

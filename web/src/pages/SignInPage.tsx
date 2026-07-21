@@ -25,7 +25,14 @@ export function SignInPage() {
 
   if (!configured) {
     return (
-      <div className="card">
+      <div className="card" data-testid="signin-unconfigured">
+        <img
+          src="/brand/logo-horizontal-dark.svg"
+          alt="GoldMeta"
+          className="brand-logo-signin"
+          width={240}
+          height={59}
+        />
         <h2>Firebase not configured</h2>
         <p className="muted">
           Set <code>VITE_FIREBASE_*</code> and <code>VITE_API_BASE_URL</code> in{" "}
@@ -38,7 +45,16 @@ export function SignInPage() {
   }
 
   return (
-    <div className="card">
+    <div className="card" data-testid="signin-card">
+      <div className="signin-brand" data-testid="signin-logo">
+        <img
+          src="/brand/logo-horizontal-dark.svg"
+          alt="GoldMeta — Gold Market Intelligence"
+          className="brand-logo-signin"
+          width={240}
+          height={59}
+        />
+      </div>
       <h2>{mode === "signin" ? "Sign in" : "Create account"}</h2>
       <p className="muted">Same Firebase project and users as the native iOS app.</p>
       {error && (
@@ -79,7 +95,6 @@ export function SignInPage() {
       <button
         type="button"
         className="btn block"
-        style={{ marginTop: 10 }}
         onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
       >
         {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
