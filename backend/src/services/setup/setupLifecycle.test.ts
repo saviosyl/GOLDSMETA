@@ -348,7 +348,7 @@ describe("setup lifecycle", () => {
     expect(testA.environment).toBe("TEST");
     expect(liveA.totalSetups).toBe(1);
     expect(testA.totalSetups).toBeGreaterThanOrEqual(1);
-    expect(testA.sampleSizeWarning).toMatch(/Small sample/);
+    expect(testA.sampleSizeWarning).toMatch(/Extremely small sample|Small sample/);
   });
 
   it("malformed OHLC is rejected by bar updater", async () => {

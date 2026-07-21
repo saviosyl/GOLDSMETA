@@ -6,10 +6,12 @@ import type { SetupRecord } from "../types/models";
 
 const getSetup = vi.fn();
 const getDecision = vi.fn();
+const getSettings = vi.fn();
+const saveManualExecution = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
-    api: { getSetup, getDecision }
+    api: { getSetup, getDecision, getSettings, saveManualExecution }
   })
 }));
 
@@ -78,8 +80,29 @@ describe("SetupDetailPage", () => {
   beforeEach(() => {
     getSetup.mockReset();
     getDecision.mockReset();
+    getSettings.mockReset();
+    saveManualExecution.mockReset();
     getSetup.mockResolvedValue(setup);
     getDecision.mockResolvedValue(null);
+    getSettings.mockResolvedValue({
+      aiEnabled: false,
+      notificationsEnabled: true,
+      provisionalSignalsEnabled: false,
+      riskProfile: "BALANCED",
+      liveForwardAckAt: "2026-07-21T12:00:00.000Z",
+      manualRisk: {
+        currency: "EUR",
+        maxCashRiskPerTrade: 20,
+        maxSimultaneousManualTrades: 1,
+        maxDailyRealisedLoss: 40,
+        stopAfterConsecutiveLosses: 2,
+        valuePerPoint: null,
+        estimatedSpreadPoints: null,
+        noAveragingDown: true,
+        noMartingale: true,
+        noAutomaticRecovery: true
+      }
+    });
   });
 
   it("renders lifecycle timeline and outcomes", async () => {

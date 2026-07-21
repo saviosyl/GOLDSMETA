@@ -5,6 +5,7 @@ import type {
   HealthResponse,
   JournalEntry,
   JournalTag,
+  ManualExecutionAction,
   SetupAnalyticsSummary,
   SetupRecord,
   SystemStatus,
@@ -13,6 +14,25 @@ import type {
   WebPushSubscriptionPayload
 } from "../types/models";
 import { ApiError } from "../types/models";
+
+export type ManualExecutionPatch = {
+  action: ManualExecutionAction;
+  skipReason?: string;
+  actualEntryPrice?: number;
+  positionSize?: number;
+  broker?: string;
+  tradedAt?: string;
+  cashRiskIntended?: number;
+  actualStop?: number;
+  actualTp1?: number;
+  actualTp2?: number;
+  actualTp3?: number;
+  actualExitPrice?: number;
+  actualPnl?: number;
+  feesSpreadSlippage?: number;
+  notes?: string;
+  screenshotRef?: string;
+};
 
 export type TokenProvider = (forceRefresh?: boolean) => Promise<string | null>;
 
@@ -126,7 +146,12 @@ export class ApiClient {
     return body.settings;
   }
 
-  async updateSettings(patch: Partial<BackendSettings>): Promise<BackendSettings> {
+  async updateSettings(
+    patch: Partial<Omit<BackendSettings, "manualRisk">> & {
+      manualRisk?: Partial<NonNullable<BackendSettings["manualRisk"]>>;
+      liveForwardAckAt?: string | null;
+    }
+  ): Promise<BackendSettings> {
     const body = await this.request<{ settings: BackendSettings }>("/v1/settings", {
       method: "PATCH",
       body: JSON.stringify(patch)
@@ -178,6 +203,20 @@ export class ApiClient {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  async saveManualExecution(
+    setupId: string,
+    patch: ManualExecutionPatch
+  ): Promise<SetupRecord> {
+    const body = await this.request<{ setup: SetupRecord }>(
+      `/v1/setups/${encodeURIComponent(setupId)}/manual-execution`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch)
+      }
+    );
+    return body.setup;
   }
 
   async setupAnalytics(environment: "LIVE" | "TEST" = "LIVE"): Promise<SetupAnalyticsSummary> {

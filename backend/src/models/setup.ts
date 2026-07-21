@@ -106,6 +106,10 @@ export interface SetupRecord {
   pineScriptVersion: string | null;
   backendVersion: string;
   updatedAt: string;
+  /**
+   * User manual trade journal — never mutates outcome / rawResolution / modelledResolution.
+   */
+  manualExecution?: import("./manualRisk").ManualExecutionRecord | null;
 }
 
 export const ACTIVE_SETUP_STATUSES: SetupStatus[] = [

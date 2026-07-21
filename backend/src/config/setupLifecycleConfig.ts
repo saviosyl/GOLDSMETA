@@ -5,7 +5,7 @@
 export const SETUP_RULE_CONFIG_VERSION = "setup-rules-1.0.0";
 /** Alias used by tests and reports. */
 export const SETUP_RULES_VERSION = SETUP_RULE_CONFIG_VERSION;
-export const BACKEND_VERSION_PHASE3 = "1.2.0-phase3";
+export const BACKEND_VERSION_PHASE3 = "1.3.0-phase3-stage3";
 
 export type UtcSessionName = "ASIA" | "LONDON" | "OVERLAP" | "NEWYORK" | "UNKNOWN";
 
@@ -44,7 +44,7 @@ export const setupLifecycleConfig = {
     newSetupCreationEnabled: envBool("NEW_SETUP_CREATION_ENABLED", true),
     /** Apply bar follow-up to active setups. */
     setupTrackingEnabled: envBool("SETUP_TRACKING_ENABLED", true),
-    /** Stage 2 default: TEST only. Stage 3 adds LIVE via env. */
+    /** Stage 2 default: TEST only. Stage 3: SETUP_TRACKING_ENVIRONMENTS=TEST,LIVE */
     setupTrackingEnvironments: envEnvs("SETUP_TRACKING_ENVIRONMENTS", ["TEST"]),
     /**
      * LIVE money / broker execution — hard off for Phase 3.

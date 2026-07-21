@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import type { SetupRecord } from "../../models/setup";
 import { isActiveSetupStatus } from "../../models/setup";
+import { DEFAULT_MANUAL_RISK } from "../../models/manualRisk";
+import type { ManualExecutionRecord, SetupSkipRecord } from "../../models/manualRisk";
 import type {
   DecisionRecord,
   DeviceRecord,
@@ -41,6 +43,7 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private processingJobs = new Map<string, ProcessingJob>();
   private eventDedupes = new Set<string>();
   private webhookRejects: WebhookRejectLog[] = [];
+  private setupSkips: SetupSkipRecord[] = [];
 
   saveRawEvent(
     userId: string,
@@ -141,6 +144,33 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     );
   }
 
+  saveManualExecution(
+    userId: string,
+    setupId: string,
+    record: ManualExecutionRecord
+  ): SetupRecord | undefined {
+    const existing = this.getSetup(userId, setupId);
+    if (!existing) return undefined;
+    const updated: SetupRecord = {
+      ...existing,
+      manualExecution: record,
+      updatedAt: nowIso()
+    };
+    this.setups.set(setupId, updated);
+    return updated;
+  }
+
+  recordSetupSkip(record: Omit<SetupSkipRecord, "id">): SetupSkipRecord {
+    const full: SetupSkipRecord = { ...record, id: randomUUID() };
+    this.setupSkips.unshift(full);
+    this.setupSkips = this.setupSkips.slice(0, 100);
+    return full;
+  }
+
+  listRecentSetupSkips(userId: string, limit = 20): SetupSkipRecord[] {
+    return this.setupSkips.filter((s) => s.userId === userId).slice(0, limit);
+  }
+
   recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {
     this.webhookRejects.unshift({ ...log, id: randomUUID() });
     this.webhookRejects = this.webhookRejects.slice(0, 100);
@@ -197,6 +227,9 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
       notificationsEnabled: true,
       provisionalSignalsEnabled: false,
       riskProfile: "BALANCED",
+      liveForwardAckAt: null,
+      manualRisk: { ...DEFAULT_MANUAL_RISK },
+      manualRiskLimitChangeLog: [],
       updatedAt: nowIso()
     };
     this.settings.set(userId, created);

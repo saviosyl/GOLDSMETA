@@ -6,6 +6,8 @@ import { setupLifecycleConfig, BACKEND_VERSION_PHASE3 } from "../config/setupLif
 import { BACKEND_VERSION, RULE_CONFIG_VERSION } from "../config/decisionConfig";
 import { env } from "../config/env";
 import { IG_DEMO_ADAPTER_PLAN, MockBrokerAdapter } from "../services/brokers/mockBrokerAdapter";
+import { manualExecutionSchema } from "../models/manualRisk";
+import { nowIso } from "../utils/time";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -62,6 +64,42 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
     res.json({ setup });
   });
 
+  /** Manual trade journal — never mutates system outcome fields. */
+  router.patch("/v1/setups/:setupId/manual-execution", requireAuth, async (req, res) => {
+    const userId = getAuthenticatedUserId(req);
+    const setupId = firstParam(req.params.setupId);
+    if (!setupId) {
+      res.status(400).json({ error: { code: "INVALID_SETUP", message: "setupId required" } });
+      return;
+    }
+    const parsed = manualExecutionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "INVALID_MANUAL_EXECUTION", message: "Invalid payload" } });
+      return;
+    }
+    const settings = await store.getSettings(userId);
+    if (!settings.liveForwardAckAt && (parsed.data.action === "ENTERED" || parsed.data.action === "ENTERED_LATE")) {
+      res.status(403).json({
+        error: {
+          code: "LIVE_ACK_REQUIRED",
+          message: "Acknowledge LIVE forward-testing before journaling entered trades"
+        }
+      });
+      return;
+    }
+    const record = {
+      ...parsed.data,
+      updatedAt: nowIso(),
+      systemOutcomeUntouched: true as const
+    };
+    const setup = await store.saveManualExecution(userId, setupId, record);
+    if (!setup) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Setup not found" } });
+      return;
+    }
+    res.json({ setup });
+  });
+
   router.get("/v1/analytics/setups", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const parsedEnv = parseEnvironmentQuery(req.query.environment);
@@ -76,10 +114,12 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/system/status", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const [latest, active, connections] = await Promise.all([
+    const [latest, active, connections, skips, settings] = await Promise.all([
       store.latestDecision(userId),
       store.listActiveSetups(userId),
-      store.listWebhookConnections(userId)
+      store.listWebhookConnections(userId),
+      store.listRecentSetupSkips(userId, 5),
+      store.getSettings(userId)
     ]);
     const activeConnection = connections.find((c) => c.status === "ACTIVE");
     res.json({
@@ -113,6 +153,9 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
           direction: s.direction,
           environment: s.environment
         })),
+        latestSetupSkip: skips[0] ?? null,
+        liveForwardAckAt: settings.liveForwardAckAt ?? null,
+        manualRisk: settings.manualRisk ?? null,
         brokerLiveExecutionEnabled: setupLifecycleConfig.flags.brokerLiveExecutionEnabled,
         brokerExecutionEnabled: setupLifecycleConfig.flags.brokerExecutionEnabled,
         brokerMode: setupLifecycleConfig.flags.brokerMode
@@ -122,11 +165,12 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/admin/diagnostics", requireAuth, requireAdmin, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const [latest, setups, connections, rejects] = await Promise.all([
+    const [latest, setups, connections, rejects, skips] = await Promise.all([
       store.latestDecision(userId),
       store.listSetups(userId, 20),
       store.listWebhookConnections(userId),
-      store.listRecentWebhookRejects?.(20) ?? Promise.resolve([])
+      store.listRecentWebhookRejects?.(20) ?? Promise.resolve([]),
+      store.listRecentSetupSkips(userId, 10)
     ]);
     const active = connections.filter((c) => c.status === "ACTIVE");
     res.json({
@@ -161,6 +205,13 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
             }
           : null,
         latestSetupTransition: setups[0]?.statusHistory.slice(-1)[0] ?? null,
+        recentSetupSkips: skips.map((s) => ({
+          id: s.id,
+          decisionId: s.decisionId,
+          environment: s.environment,
+          reason: s.reason,
+          at: s.at
+        })),
         recentRejects: rejects,
         igDemoPlan: IG_DEMO_ADAPTER_PLAN,
         mockBrokerReady: new MockBrokerAdapter().name

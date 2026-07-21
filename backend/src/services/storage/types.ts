@@ -9,6 +9,7 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import type { ManualExecutionRecord, SetupSkipRecord } from "../../models/manualRisk";
 import type { SetupRecord } from "../../models/setup";
 
 export type Awaitable<T> = T | Promise<T>;
@@ -129,6 +130,13 @@ export interface GoldMetaStore {
     environment?: DecisionEnvironment
   ): Awaitable<SetupRecord[]>;
   listActiveSetups(userId: string, environment?: DecisionEnvironment): Awaitable<SetupRecord[]>;
+  saveManualExecution(
+    userId: string,
+    setupId: string,
+    record: ManualExecutionRecord
+  ): Awaitable<SetupRecord | undefined>;
+  recordSetupSkip(record: Omit<SetupSkipRecord, "id">): Awaitable<SetupSkipRecord>;
+  listRecentSetupSkips(userId: string, limit?: number): Awaitable<SetupSkipRecord[]>;
 
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;
   deleteDevice(userId: string, deviceId: string): Awaitable<boolean>;

@@ -8,7 +8,17 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "prompt",
-      includeAssets: ["icons/icon-192.png", "icons/icon-512.png", "favicon.svg"],
+      includeAssets: [
+        "favicon.svg",
+        "favicon.ico",
+        "icons/icon-192.png",
+        "icons/icon-512.png",
+        "icons/apple-touch-icon.png",
+        "icons/maskable-icon-192.png",
+        "icons/maskable-icon-512.png",
+        "brand/mark-dark.svg",
+        "brand/logo-horizontal-dark.svg"
+      ],
       manifest: {
         name: "GoldMeta",
         short_name: "GoldMeta",
@@ -31,7 +41,19 @@ export default defineConfig({
             src: "icons/icon-512.png",
             sizes: "512x512",
             type: "image/png",
-            purpose: "any maskable"
+            purpose: "any"
+          },
+          {
+            src: "icons/maskable-icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable"
+          },
+          {
+            src: "icons/maskable-icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
           }
         ]
       },

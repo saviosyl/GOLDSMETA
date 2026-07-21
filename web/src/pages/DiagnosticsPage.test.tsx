@@ -20,13 +20,13 @@ describe("DiagnosticsPage", () => {
   it("renders server feature flags without hard-coding environments", async () => {
     adminDiagnostics.mockResolvedValue({
       apiHealth: "ok",
-      backendVersion: "1.2.0-phase3",
+      backendVersion: "1.3.0-phase3-stage3",
       ruleConfigVersion: "rules-1.1.0",
       setupRuleConfigVersion: "setup-rules-1.0.0",
       pineVersionLastReceived: "2.0.4",
       flags: {
         setupTrackingEnabled: true,
-        setupTrackingEnvironments: ["TEST"],
+        setupTrackingEnvironments: ["TEST", "LIVE"],
         brokerMode: "DISABLED",
         aiEnabled: false
       },
@@ -43,8 +43,10 @@ describe("DiagnosticsPage", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("diagnostics-page")).toBeInTheDocument();
-    expect(screen.getByText("1.2.0-phase3")).toBeInTheDocument();
-    expect(screen.getByTestId("flag-setup-tracking-environments")).toHaveTextContent('["TEST"]');
+    expect(screen.getByText("1.3.0-phase3-stage3")).toBeInTheDocument();
+    expect(screen.getByTestId("flag-setup-tracking-environments")).toHaveTextContent(
+      '["TEST","LIVE"]'
+    );
     expect(screen.getByTestId("flag-broker-mode")).toHaveTextContent("DISABLED");
     expect(screen.getByTestId("flag-ai-enabled")).toHaveTextContent("disabled");
     expect(screen.getByTestId("flag-setup-tracking-enabled")).toHaveTextContent("enabled");

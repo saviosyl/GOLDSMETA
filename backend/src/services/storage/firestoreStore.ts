@@ -3,6 +3,8 @@ import type { Firestore, Query, Transaction } from "firebase-admin/firestore";
 import { z } from "zod";
 import type { SetupRecord } from "../../models/setup";
 import { isActiveSetupStatus } from "../../models/setup";
+import { DEFAULT_MANUAL_RISK } from "../../models/manualRisk";
+import type { ManualExecutionRecord, SetupSkipRecord } from "../../models/manualRisk";
 import type {
   DecisionRecord,
   DeviceRecord,
@@ -94,6 +96,9 @@ const defaultSettings = (userId: string): UserSettings => ({
   notificationsEnabled: true,
   provisionalSignalsEnabled: false,
   riskProfile: "BALANCED",
+  liveForwardAckAt: null,
+  manualRisk: { ...DEFAULT_MANUAL_RISK },
+  manualRiskLimitChangeLog: [],
   updatedAt: nowIso()
 });
 
@@ -261,6 +266,45 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
   ): Promise<SetupRecord[]> {
     const setups = await this.listSetups(userId, 200, environment);
     return setups.filter((s) => isActiveSetupStatus(s.status) && s.resolution === "OPEN");
+  }
+
+  async saveManualExecution(
+    userId: string,
+    setupId: string,
+    record: ManualExecutionRecord
+  ): Promise<SetupRecord | undefined> {
+    const existing = await this.getSetup(userId, setupId);
+    if (!existing) return undefined;
+    const updated: SetupRecord = {
+      ...existing,
+      manualExecution: record,
+      updatedAt: nowIso()
+    };
+    await this.saveSetup(updated);
+    return updated;
+  }
+
+  async recordSetupSkip(record: Omit<SetupSkipRecord, "id">): Promise<SetupSkipRecord> {
+    const id = randomUUID();
+    const full: SetupSkipRecord = { ...record, id };
+    await this.db
+      .collection("users")
+      .doc(record.userId)
+      .collection("setupSkips")
+      .doc(id)
+      .set(toFirestoreData(full));
+    return full;
+  }
+
+  async listRecentSetupSkips(userId: string, limit = 20): Promise<SetupSkipRecord[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("setupSkips")
+      .orderBy("at", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as SetupSkipRecord);
   }
 
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {

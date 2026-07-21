@@ -374,7 +374,20 @@ export const settingsPatchSchema = z
     aiEnabled: z.boolean().optional(),
     notificationsEnabled: z.boolean().optional(),
     provisionalSignalsEnabled: z.boolean().optional(),
-    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional()
+    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional(),
+    liveForwardAckAt: z.string().datetime().nullable().optional(),
+    manualRisk: z
+      .object({
+        currency: z.enum(["EUR", "USD", "GBP"]).optional(),
+        maxCashRiskPerTrade: z.number().positive().max(10_000).optional(),
+        maxSimultaneousManualTrades: z.number().int().min(1).max(5).optional(),
+        maxDailyRealisedLoss: z.number().positive().max(50_000).optional(),
+        stopAfterConsecutiveLosses: z.number().int().min(1).max(20).optional(),
+        valuePerPoint: z.number().positive().nullable().optional(),
+        estimatedSpreadPoints: z.number().nonnegative().nullable().optional()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 
@@ -384,5 +397,25 @@ export interface UserSettings {
   notificationsEnabled: boolean;
   provisionalSignalsEnabled: boolean;
   riskProfile: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE";
+  /** ISO timestamp when user acknowledged LIVE forward-testing banner; null = not yet. */
+  liveForwardAckAt: string | null;
+  manualRisk: {
+    currency: "EUR" | "USD" | "GBP";
+    maxCashRiskPerTrade: number;
+    maxSimultaneousManualTrades: number;
+    maxDailyRealisedLoss: number;
+    stopAfterConsecutiveLosses: number;
+    valuePerPoint: number | null;
+    estimatedSpreadPoints: number | null;
+    noAveragingDown: true;
+    noMartingale: true;
+    noAutomaticRecovery: true;
+  };
+  manualRiskLimitChangeLog: Array<{
+    at: string;
+    field: string;
+    from: string | number | boolean | null;
+    to: string | number | boolean | null;
+  }>;
   updatedAt: string;
 }

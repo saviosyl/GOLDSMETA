@@ -46,12 +46,26 @@ export const createSetupFromDecision = async (
     logger.info("Setup creation skipped — analysisGenerationEnabled=false", {
       decisionId: decision.decisionId
     });
+    await store.recordSetupSkip?.({
+      userId: decision.userId,
+      decisionId: decision.decisionId,
+      environment: decision.environment,
+      reason: "analysisGenerationEnabled=false",
+      at: nowIso()
+    });
     return null;
   }
   if (!isSetupTrackingAllowed(decision.environment)) {
     logger.info("Setup creation skipped — tracking not allowed for environment", {
       decisionId: decision.decisionId,
       environment: decision.environment
+    });
+    await store.recordSetupSkip?.({
+      userId: decision.userId,
+      decisionId: decision.decisionId,
+      environment: decision.environment,
+      reason: `Tracking not enabled for ${decision.environment}`,
+      at: nowIso()
     });
     return null;
   }
@@ -81,6 +95,13 @@ export const createSetupFromDecision = async (
     logger.info("Setup creation skipped — max active setups", {
       decisionId: decision.decisionId,
       active: active.length
+    });
+    await store.recordSetupSkip?.({
+      userId: decision.userId,
+      decisionId: decision.decisionId,
+      environment: decision.environment,
+      reason: `Blocked: one-active-setup rule (${active[0]?.setupId ?? "active"} still open)`,
+      at: nowIso()
     });
     return null;
   }

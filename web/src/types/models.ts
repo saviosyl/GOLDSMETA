@@ -97,11 +97,77 @@ export interface Decision {
   safetyFlags?: string[] | null;
 }
 
+export type ManualRiskCurrency = "EUR" | "USD" | "GBP";
+
+export interface ManualRiskSettings {
+  currency: ManualRiskCurrency;
+  maxCashRiskPerTrade: number;
+  maxSimultaneousManualTrades: number;
+  maxDailyRealisedLoss: number;
+  stopAfterConsecutiveLosses: number;
+  valuePerPoint: number | null;
+  estimatedSpreadPoints: number | null;
+  noAveragingDown: true;
+  noMartingale: true;
+  noAutomaticRecovery: true;
+}
+
+export type ManualExecutionAction =
+  | "ENTERED"
+  | "SKIPPED"
+  | "ENTERED_LATE"
+  | "INCORRECT_SIZE"
+  | "SPREAD_TOO_HIGH"
+  | "NEWS_RISK"
+  | "SETUP_NOT_CLEAR"
+  | "OTHER";
+
+export interface ManualExecutionRecord {
+  action: ManualExecutionAction;
+  skipReason?: string;
+  actualEntryPrice?: number;
+  positionSize?: number;
+  broker?: string;
+  tradedAt?: string;
+  cashRiskIntended?: number;
+  actualStop?: number;
+  actualTp1?: number;
+  actualTp2?: number;
+  actualTp3?: number;
+  actualExitPrice?: number;
+  actualPnl?: number;
+  feesSpreadSlippage?: number;
+  notes?: string;
+  screenshotRef?: string;
+  updatedAt: string;
+  systemOutcomeUntouched: true;
+}
+
+export interface ManualRiskLimitChange {
+  at: string;
+  field: string;
+  from: string | number | boolean | null;
+  to: string | number | boolean | null;
+}
+
 export interface BackendSettings {
   aiEnabled: boolean;
   notificationsEnabled: boolean;
   provisionalSignalsEnabled: boolean;
   riskProfile: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE";
+  liveForwardAckAt?: string | null;
+  manualRisk?: ManualRiskSettings;
+  manualRiskLimitChangeLog?: ManualRiskLimitChange[];
+  updatedAt?: string;
+}
+
+export interface SetupSkipRecord {
+  id: string;
+  userId: string;
+  decisionId: string;
+  environment: "LIVE" | "TEST";
+  reason: string;
+  at: string;
 }
 
 export interface JournalEntry {
@@ -199,21 +265,30 @@ export interface SetupRecord {
   pineScriptVersion: string | null;
   backendVersion: string;
   updatedAt: string;
+  /** Journal only — never mutates system outcome. */
+  manualExecution?: ManualExecutionRecord | null;
 }
 
 export interface SetupAnalyticsSummary {
   environment: "LIVE" | "TEST";
   sampleSize: number;
   sampleSizeWarning: string | null;
+  sampleSizeBand?: "extremely_small" | "small" | "preliminary" | "meaningful";
   totalSetups: number;
   activeSetups: number;
   completedSetups: number;
+  entriesTriggered?: number;
+  expiredBeforeEntry?: number;
   wins: number;
   losses: number;
   breakeven: number;
   expired: number;
   cancelled: number;
   ambiguous: number;
+  tp1Hits?: number;
+  tp2Hits?: number;
+  tp3Hits?: number;
+  stopped?: number;
   winRate: number | null;
   lossRate: number | null;
   averageR: number | null;
@@ -229,8 +304,18 @@ export interface SetupAnalyticsSummary {
   averageMfe: number | null;
   averageMae: number | null;
   expectancyR: number | null;
+  maxLosingStreak?: number;
+  maxDrawdownR?: number;
   byDirection: { BUY: number; SELL: number };
   bySession: Record<string, number>;
+  byDayOfWeek?: Record<string, number>;
+  byConfidenceBand?: Record<string, number>;
+  manual?: {
+    entered: number;
+    skipped: number;
+    withPnl: number;
+    totalManualPnl: number | null;
+  };
 }
 
 export interface SystemStatus {
@@ -259,6 +344,11 @@ export interface SystemStatus {
     environment: string;
   }>;
   brokerLiveExecutionEnabled: boolean;
+  brokerExecutionEnabled?: boolean;
+  brokerMode?: string;
+  latestSetupSkip?: SetupSkipRecord | null;
+  liveForwardAckAt?: string | null;
+  manualRisk?: ManualRiskSettings | null;
 }
 
 export interface AdminDiagnostics {

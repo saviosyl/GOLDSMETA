@@ -1,8 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import type { Decision, SetupRecord } from "../types/models";
+import type { Decision, ManualRiskSettings, SetupRecord } from "../types/models";
 import { formatPrice, formatWhen } from "../lib/format";
+import { SetupTimeline } from "../components/SetupTimeline";
+import { ManualTradeActions } from "../components/ManualTradeActions";
+
+const DEFAULT_RISK: ManualRiskSettings = {
+  currency: "EUR",
+  maxCashRiskPerTrade: 20,
+  maxSimultaneousManualTrades: 1,
+  maxDailyRealisedLoss: 40,
+  stopAfterConsecutiveLosses: 2,
+  valuePerPoint: null,
+  estimatedSpreadPoints: null,
+  noAveragingDown: true,
+  noMartingale: true,
+  noAutomaticRecovery: true
+};
 
 export function SetupDetailPage() {
   const { setupId = "" } = useParams();
@@ -10,12 +25,19 @@ export function SetupDetailPage() {
   const [setup, setSetup] = useState<SetupRecord | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [risk, setRisk] = useState<ManualRiskSettings>(DEFAULT_RISK);
+  const [liveAcked, setLiveAcked] = useState(false);
 
   useEffect(() => {
     void (async () => {
       try {
-        const s = await api.getSetup(setupId);
+        const [s, settings] = await Promise.all([
+          api.getSetup(setupId),
+          api.getSettings().catch(() => null)
+        ]);
         setSetup(s);
+        if (settings?.manualRisk) setRisk(settings.manualRisk);
+        setLiveAcked(Boolean(settings?.liveForwardAckAt));
         if (s) {
           try {
             const d = await api.getDecision(s.decisionId);
@@ -83,8 +105,10 @@ export function SetupDetailPage() {
         </div>
       </section>
 
+      <SetupTimeline setup={setup} />
+
       <section className="card" data-testid="setup-timeline">
-        <h2 className="section-title">Status timeline</h2>
+        <h2 className="section-title">Status history</h2>
         <ul className="list timeline">
           {setup.statusHistory.map((t, i) => (
             <li key={`${t.at}-${t.to}-${i}`}>
@@ -99,6 +123,14 @@ export function SetupDetailPage() {
           ))}
         </ul>
       </section>
+
+      <ManualTradeActions
+        setup={setup}
+        risk={risk}
+        ackRequired={!liveAcked}
+        save={(id, patch) => api.saveManualExecution(id, patch)}
+        onSaved={setSetup}
+      />
 
       <section className="card">
         <h2 className="section-title">Excursion</h2>

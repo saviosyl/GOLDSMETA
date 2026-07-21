@@ -861,3 +861,295 @@ a {
   }
 }
 
+/* —— Stage 3: brand, timeline, risk planner, PWA polish —— */
+:root {
+  --phase3-deploy-stamp: 20260721T1600Z-stage3;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-body: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: var(--font-body);
+}
+
+.brand {
+  font-family: var(--font-display);
+}
+
+.brand-header {
+  margin-bottom: 8px;
+}
+
+.brand-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.brand-wordmark {
+  margin: 0;
+  font-size: clamp(1.55rem, 6vw, 1.9rem);
+}
+
+.brand-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--gold);
+}
+
+.env-badge.test {
+  color: var(--wait);
+}
+
+.env-badge.tracking {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.market-status-line {
+  margin: 0 0 6px;
+  font-weight: 650;
+}
+
+.confirm-banner {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  background: rgba(201, 162, 39, 0.1);
+  color: var(--text);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.form-grid .field {
+  margin-bottom: 0;
+}
+
+.form-grid .field.full,
+.form-grid .btn-stack.full {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.field input,
+.field select,
+.field textarea,
+input,
+select,
+textarea {
+  font-size: 16px; /* prevent iOS Safari auto-zoom */
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.estimate-note {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+.timeline-track {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.timeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  min-width: 0;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--elevated);
+  border: 2px solid var(--border);
+}
+
+.timeline-step.done .timeline-dot {
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+.timeline-step.current .timeline-dot {
+  background: var(--buy);
+  border-color: var(--buy);
+  box-shadow: 0 0 0 3px rgba(48, 204, 116, 0.2);
+}
+
+.timeline-step.fail .timeline-dot {
+  background: var(--sell);
+  border-color: var(--sell);
+}
+
+.timeline-label {
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.timeline-step.current .timeline-label,
+.timeline-step.done .timeline-label {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.timeline-meta {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.daily-risk-status.stop {
+  border-color: rgba(245, 71, 82, 0.45);
+}
+
+.stop-trading-banner {
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(245, 71, 82, 0.14);
+  color: var(--sell);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.safety-rules {
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.disclaimer-footer {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin: 8px 0 24px;
+}
+
+.skeleton-card .skeleton-line {
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--elevated), #24262c, var(--elevated));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+  margin-bottom: 10px;
+}
+
+.skeleton-card .skeleton-line.short {
+  width: 55%;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.live-forward-ack {
+  border-color: rgba(201, 162, 39, 0.4);
+}
+
+.manual-risk-planner.suppressed {
+  opacity: 0.85;
+}
+
+.recent-list a {
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.change-log {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 374px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-track {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 10px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .brand-wordmark {
+    font-size: 1.35rem;
+  }
+
+  .decision-hero {
+    font-size: 2.2rem;
+  }
+}
+
+/* Keyboard / scroll polish */
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+.app-shell {
+  overscroll-behavior-y: contain;
+}
+
+@supports (padding: max(0px)) {
+  .app-shell {
+    padding-bottom: max(76px, calc(76px + var(--safe-bottom)));
+  }
+}
+
+

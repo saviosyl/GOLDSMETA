@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="GoldMeta">
+  <rect width="96" height="96" rx="22" fill="#0B0D12"/>
+  <path d="M48 18c-16.5 0-30 13.5-30 30s13.5 30 30 30c10.2 0 19.1-4.4 25-11.3l-8.4-7.2c-3.8 4.5-9.5 7.3-16.6 7.3-11 0-20-9-20-20s9-20 20-20c7.1 0 12.8 2.8 16.6 7.3l8.4-7.2C67.1 22.4 58.2 18 48 18z" fill="#C9A227"/>
+  <path d="M52 43h18v10H61v9H52V43z" fill="#E8D48A"/>
+  <rect x="58" y="34" width="4" height="28" rx="1" fill="#C9A227"/>
+  <rect x="65" y="28" width="4" height="34" rx="1" fill="#E8D48A"/>
+  <rect x="72" y="40" width="4" height="22" rx="1" fill="#F54752" opacity="0.85"/>
+</svg>

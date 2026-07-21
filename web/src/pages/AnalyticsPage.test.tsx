@@ -16,10 +16,13 @@ vi.mock("../lib/auth", () => ({
 const empty: SetupAnalyticsSummary = {
   environment: "LIVE",
   sampleSize: 0,
-  sampleSizeWarning: "Small sample (n=0). Do not treat rates as statistically significant.",
+  sampleSizeWarning: "Extremely small sample (n=0). Do not treat rates as meaningful.",
+  sampleSizeBand: "extremely_small",
   totalSetups: 0,
   activeSetups: 0,
   completedSetups: 0,
+  entriesTriggered: 0,
+  expiredBeforeEntry: 0,
   wins: 0,
   losses: 0,
   breakeven: 0,
@@ -41,8 +44,13 @@ const empty: SetupAnalyticsSummary = {
   averageMfe: null,
   averageMae: null,
   expectancyR: null,
+  maxLosingStreak: 0,
+  maxDrawdownR: 0,
   byDirection: { BUY: 0, SELL: 0 },
-  bySession: {}
+  bySession: {},
+  byDayOfWeek: {},
+  byConfidenceBand: {},
+  manual: { entered: 0, skipped: 0, withPnl: 0, totalManualPnl: null }
 };
 
 describe("AnalyticsPage", () => {
@@ -50,7 +58,7 @@ describe("AnalyticsPage", () => {
     setupAnalytics.mockReset();
   });
 
-  it("shows empty state and small-sample warning", async () => {
+  it("shows empty state and sample-size warning", async () => {
     setupAnalytics.mockResolvedValue(empty);
     render(
       <MemoryRouter>
@@ -58,7 +66,8 @@ describe("AnalyticsPage", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("analytics-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("sample-warning")).toHaveTextContent(/Small sample/);
+    expect(screen.getByTestId("sample-warning")).toHaveTextContent(/Extremely small sample/);
+    expect(screen.getByTestId("manual-analytics")).toBeInTheDocument();
   });
 
   it("switches LIVE/TEST without mixing", async () => {
@@ -80,7 +89,7 @@ describe("AnalyticsPage", () => {
         <AnalyticsPage />
       </MemoryRouter>
     );
-    await screen.findByText("LIVE summary");
+    await screen.findByText("LIVE system performance");
     await user.click(screen.getByRole("tab", { name: "TEST" }));
     expect(setupAnalytics).toHaveBeenCalledWith("TEST");
   });

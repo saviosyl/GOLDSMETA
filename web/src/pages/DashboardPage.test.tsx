@@ -11,6 +11,9 @@ const latestDecision = vi.fn();
 const systemStatus = vi.fn();
 const listActiveSetups = vi.fn();
 const listSetups = vi.fn();
+const getSettings = vi.fn();
+const updateSettings = vi.fn();
+const saveManualExecution = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
@@ -18,31 +21,67 @@ vi.mock("../lib/auth", () => ({
       latestDecision,
       systemStatus,
       listActiveSetups,
-      listSetups
+      listSetups,
+      getSettings,
+      updateSettings,
+      saveManualExecution
     }
   })
 }));
 
-describe("DashboardPage empty decision state", () => {
+const defaultStatus = {
+  backendVersion: "1.3.0-phase3-stage3",
+  decisionBackendVersion: "1.3.0-phase3-stage3",
+  ruleConfigVersion: "rules-1.1.0",
+  setupRuleConfigVersion: "setup-rules-1.0.0",
+  flags: {
+    brokerLiveExecutionEnabled: false,
+    setupTrackingEnvironments: ["TEST", "LIVE"],
+    brokerMode: "DISABLED"
+  },
+  tradingView: { connectionStatus: "ACTIVE", webhookId: "wh1", lastAlertAt: null },
+  latestDecision: null,
+  activeSetups: [],
+  brokerLiveExecutionEnabled: false,
+  brokerMode: "DISABLED",
+  liveForwardAckAt: "2026-07-21T12:00:00.000Z",
+  manualRisk: {
+    currency: "EUR",
+    maxCashRiskPerTrade: 20,
+    maxSimultaneousManualTrades: 1,
+    maxDailyRealisedLoss: 40,
+    stopAfterConsecutiveLosses: 2,
+    valuePerPoint: null,
+    estimatedSpreadPoints: null,
+    noAveragingDown: true,
+    noMartingale: true,
+    noAutomaticRecovery: true
+  },
+  latestSetupSkip: null
+};
+
+describe("DashboardPage Stage 3", () => {
   beforeEach(() => {
     clearUserCaches();
     latestDecision.mockReset();
     systemStatus.mockReset();
     listActiveSetups.mockReset();
     listSetups.mockReset();
-    systemStatus.mockResolvedValue({
-      backendVersion: "1.2.0-phase3",
-      decisionBackendVersion: "1.2.0-phase3",
-      ruleConfigVersion: "rules-1.1.0",
-      setupRuleConfigVersion: "setup-rules-1.0.0",
-      flags: { brokerLiveExecutionEnabled: false },
-      tradingView: { connectionStatus: "ACTIVE", webhookId: "wh1", lastAlertAt: null },
-      latestDecision: null,
-      activeSetups: [],
-      brokerLiveExecutionEnabled: false
-    });
+    getSettings.mockReset();
+    updateSettings.mockReset();
+    saveManualExecution.mockReset();
+    systemStatus.mockResolvedValue(defaultStatus);
     listActiveSetups.mockResolvedValue([]);
     listSetups.mockResolvedValue([]);
+    getSettings.mockResolvedValue({
+      aiEnabled: false,
+      notificationsEnabled: true,
+      provisionalSignalsEnabled: false,
+      riskProfile: "BALANCED",
+      liveForwardAckAt: "2026-07-21T12:00:00.000Z",
+      manualRisk: defaultStatus.manualRisk,
+      manualRiskLimitChangeLog: []
+    });
   });
 
   afterEach(() => {
@@ -63,6 +102,10 @@ describe("DashboardPage empty decision state", () => {
     expect(screen.queryByText(/Unable to load decision/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/NOT_FOUND/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("system-status")).toBeInTheDocument();
+    expect(screen.getByTestId("manual-risk-planner")).toBeInTheDocument();
+    expect(screen.getByTestId("broker-confirm-banner")).toHaveTextContent(
+      /GoldMeta does not place this trade/
+    );
   });
 
   it("keeps the error banner for real load failures", async () => {
@@ -92,5 +135,7 @@ describe("DashboardPage empty decision state", () => {
     });
     expect(screen.queryByRole("heading", { name: "No decision yet" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("brand-header")).toBeInTheDocument();
+    expect(screen.getByTestId("daily-risk-status")).toBeInTheDocument();
   });
 });

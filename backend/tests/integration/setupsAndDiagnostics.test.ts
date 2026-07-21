@@ -161,9 +161,12 @@ describe("setups environment filter + admin diagnostics", () => {
 
   it("allows authenticated admin diagnostics without secrets", async () => {
     const response = await request(app).get("/v1/admin/diagnostics").set(adminAuth).expect(200);
-    expect(response.body.diagnostics.backendVersion).toBe("1.2.0-phase3");
-    expect(response.body.diagnostics.flags.setupTrackingEnvironments).toEqual(["TEST"]);
+    expect(response.body.diagnostics.backendVersion).toBe("1.3.0-phase3-stage3");
+    expect(response.body.diagnostics.flags.setupTrackingEnvironments).toEqual(
+      expect.arrayContaining(["TEST", "LIVE"])
+    );
     expect(response.body.diagnostics.flags.brokerMode).toBe("DISABLED");
+    expect(response.body.diagnostics.flags.brokerLiveExecutionEnabled).toBe(false);
     expect(response.body.diagnostics.flags.aiEnabled).toBe(false);
     expect(JSON.stringify(response.body)).not.toMatch(/whsec_|apiKey|private_key|webhookSecret":\s*"/i);
   });

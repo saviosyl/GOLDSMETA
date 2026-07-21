@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../lib/auth";
-import type { BackendSettings, TradingViewConnection } from "../types/models";
+import type { BackendSettings, ManualRiskSettings, TradingViewConnection } from "../types/models";
 import {
   getNotificationPermission,
   isProbablyInstalledPwa,
@@ -262,6 +262,21 @@ export function SettingsPage() {
 
   const activeCount = connections.filter(isActiveConnection).length;
 
+  const saveManualRisk = async (patch: Partial<ManualRiskSettings>) => {
+    if (!settings || !online) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateSettings({ manualRisk: patch });
+      setSettings(updated);
+      setMessage("Manual risk limits updated (change logged).");
+    } catch (err) {
+      setError(formatClientError(err, "Failed to update risk limits"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="settings-page">
       <h1 className="brand" style={{ fontSize: "1.4rem" }}>
@@ -429,6 +444,128 @@ export function SettingsPage() {
             Send TEST alert
           </button>
         </div>
+      </div>
+
+      <div className="card settings-card" data-testid="manual-risk-settings">
+        <h2>Manual risk limits</h2>
+        <p className="muted settings-help">
+          Editable safety limits for €20-style manual trading. Changes are logged. GoldMeta never
+          places broker orders. No averaging down, martingale, or automatic recovery.
+        </p>
+        {settings?.manualRisk && (
+          <div className="form-grid">
+            <label className="field">
+              <span>Currency</span>
+              <select
+                value={settings.manualRisk.currency}
+                disabled={busy || !online}
+                onChange={(e) =>
+                  void saveManualRisk({
+                    currency: e.target.value as "EUR" | "USD" | "GBP"
+                  })
+                }
+              >
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Max risk / trade</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={1}
+                defaultValue={settings.manualRisk.maxCashRiskPerTrade}
+                disabled={busy || !online}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v > 0 && v !== settings.manualRisk?.maxCashRiskPerTrade) {
+                    void saveManualRisk({ maxCashRiskPerTrade: v });
+                  }
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Max daily loss</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={1}
+                defaultValue={settings.manualRisk.maxDailyRealisedLoss}
+                disabled={busy || !online}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v > 0 && v !== settings.manualRisk?.maxDailyRealisedLoss) {
+                    void saveManualRisk({ maxDailyRealisedLoss: v });
+                  }
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Stop after losses</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                defaultValue={settings.manualRisk.stopAfterConsecutiveLosses}
+                disabled={busy || !online}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v > 0 && v !== settings.manualRisk?.stopAfterConsecutiveLosses) {
+                    void saveManualRisk({ stopAfterConsecutiveLosses: v });
+                  }
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Max simultaneous</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={5}
+                defaultValue={settings.manualRisk.maxSimultaneousManualTrades}
+                disabled={busy || !online}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v > 0 && v !== settings.manualRisk?.maxSimultaneousManualTrades) {
+                    void saveManualRisk({ maxSimultaneousManualTrades: v });
+                  }
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Value per point</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                defaultValue={settings.manualRisk.valuePerPoint ?? ""}
+                placeholder="from broker"
+                disabled={busy || !online}
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  const v = raw === "" ? null : Number(raw);
+                  if (v !== settings.manualRisk?.valuePerPoint) {
+                    void saveManualRisk({ valuePerPoint: v });
+                  }
+                }}
+              />
+            </label>
+          </div>
+        )}
+        {(settings?.manualRiskLimitChangeLog?.length ?? 0) > 0 && (
+          <details className="change-log">
+            <summary>Limit change log</summary>
+            <ul className="list">
+              {settings!.manualRiskLimitChangeLog!.slice(0, 10).map((c) => (
+                <li key={`${c.at}-${c.field}`}>
+                  {c.field}: {String(c.from)} → {String(c.to)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
 
       <div className="card settings-card">
