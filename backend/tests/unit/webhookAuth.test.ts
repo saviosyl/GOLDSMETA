@@ -26,12 +26,29 @@ describe("webhook authentication", () => {
     expect(validated.userId).toBe("default-user");
   });
 
-  it("requires the connection secret when configured", async () => {
+  it("rejects a wrong non-null body secret when configured", async () => {
     await createTestWebhookConnection(store, "default-user", "secret-webhook-id", "expected-secret");
     const payload = freshPayload(strongBuyFixture, { webhookSecret: "wrong-secret" });
 
     await expect(validateWebhookPayload(store, "secret-webhook-id", payload)).rejects.toThrow(
       WebhookValidationError
     );
+  });
+
+  it("accepts null body secret when path webhook id is valid (TradingView / Pine default)", async () => {
+    await createTestWebhookConnection(store, "default-user", "secret-webhook-id", "expected-secret");
+    const payload = freshPayload(strongBuyFixture, { webhookSecret: null });
+    const validated = await validateWebhookPayload(store, "secret-webhook-id", payload);
+    expect(validated.userId).toBe("default-user");
+  });
+
+  it("parses a JSON string body (text/plain delivery)", async () => {
+    const payload = freshPayload(strongBuyFixture);
+    const validated = await validateWebhookPayload(
+      store,
+      "test-webhook-id",
+      JSON.stringify(payload)
+    );
+    expect(validated.webhookId).toBe("test-webhook-id");
   });
 });

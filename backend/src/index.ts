@@ -72,7 +72,9 @@ export const createApp = (
   // Cloud Functions / load balancers terminate TLS; needed for correct webhook HTTPS URLs.
   app.set("trust proxy", 1);
   app.use(buildCorsMiddleware());
-  app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT }));
+  // TradingView sends application/json when the alert message is valid JSON, otherwise
+  // text/plain. Accept both so webhook delivery is not dropped before validation.
+  app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
 
   const tradingService = dependencies.tradingService ?? defaultTradingService;
 
