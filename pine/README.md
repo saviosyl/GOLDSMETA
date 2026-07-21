@@ -1,6 +1,6 @@
 # GoldMeta Pine Script Bridge
 
-`GoldMetaBridge.pine` (script version **2.0.1+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
+`GoldMetaBridge.pine` (script version **2.0.2+**) is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for **XAUUSD** bars using closed-candle-only processing.
 
 > GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.
 
@@ -83,5 +83,6 @@ See `pine/alert-payload-example.json`.
 
 ## Changelog
 
+- **2.0.2** — Fix RE10045 array bounds: recompute start/end indices after left expansion; hard bounds checks; overflow instead of out-of-range writes.
 - **2.0.1** — Fix Pine v6 compile errors: volume-profile helpers no longer reassign global scalars; they return tuples / mutate arrays by reference.
 - **2.0.0** — Initial gm_svp_v1 / gm_trend_v1 / gm_candle_v1 production bridge.

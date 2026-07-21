@@ -19,7 +19,7 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.1"
+const string SCRIPT_VERSION = "2.0.2"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -114,14 +114,19 @@ f_init_profile(float barLow, float atrv) =>
     [vols, anchor, bSize]
 
 // Mutates vols in place; returns updated [anchor, overflow, ok].
+// After success, idx is guaranteed to satisfy 0 <= idx < array.size(vols) for the
+// index that was requested *before* any left expansion of other indices.
 f_ensure_index(float[] vols, float anchor, float bSize, bool overflow, int idx) =>
     float a = anchor
     bool ov = overflow
     bool ok = true
     int sz = array.size(vols)
-    if idx < 0
+    if na(bSize) or bSize <= 0.0 or na(a)
+        ov := true
+        ok := false
+    else if idx < 0
         int need = -idx
-        if sz + need > MAX_BINS
+        if need <= 0 or sz + need > MAX_BINS
             ov := true
             ok := false
         else
@@ -130,7 +135,7 @@ f_ensure_index(float[] vols, float anchor, float bSize, bool overflow, int idx) 
             a := a - need * bSize
     else if idx >= sz
         int need = idx - sz + 1
-        if sz + need > MAX_BINS
+        if need <= 0 or sz + need > MAX_BINS
             ov := true
             ok := false
         else
@@ -138,36 +143,73 @@ f_ensure_index(float[] vols, float anchor, float bSize, bool overflow, int idx) 
                 array.push(vols, 0.0)
     [a, ov, ok]
 
+// Floor price into a bin index relative to anchor/binSize.
+f_bin_index(float price, float anchor, float bSize) =>
+    int(math.floor((price - anchor) / bSize))
+
+// True when [startIdx, endIdx] is fully inside vols (no silent clamp).
+f_range_in_bounds(float[] vols, int startIdx, int endIdx) =>
+    int sz = array.size(vols)
+    sz > 0 and startIdx >= 0 and endIdx >= 0 and startIdx <= endIdx and endIdx < sz
+
 // Mutates vols in place; returns [anchor, overflow, added].
+// Critical: after any left-side expansion, BOTH startIdx and endIdx are recomputed
+// before expanding the high side. Never write outside [0, size).
+// If the range cannot be accommodated safely: overflow=true, added=false (no silent clamp).
 f_add_bar_to_profile(float[] vols, float anchor, float bSize, bool overflow, float barLow, float barHigh, float barVol) =>
     float a = anchor
     bool ov = overflow
     bool added = false
-    if not na(bSize) and bSize > 0.0 and not na(barVol) and barVol > 0.0 and not na(a)
-        int startIdx = int(math.floor((barLow - a) / bSize))
-        int endIdx = int(math.floor((barHigh - a) / bSize))
-        if endIdx < startIdx
-            int tmp = startIdx
-            startIdx := endIdx
-            endIdx := tmp
-        [a1, ov1, ok1] = f_ensure_index(vols, a, bSize, ov, startIdx)
-        [a2, ov2, ok2] = f_ensure_index(vols, a1, bSize, ov1, endIdx)
-        a := a2
-        ov := ov2
-        if ok1 and ok2 and not ov
-            startIdx := int(math.floor((barLow - a) / bSize))
-            endIdx := int(math.floor((barHigh - a) / bSize))
-            if endIdx < startIdx
-                int tmp2 = startIdx
-                startIdx := endIdx
-                endIdx := tmp2
-            int bins = endIdx - startIdx + 1
-            float share = barVol / bins
-            for i = startIdx to endIdx
-                array.set(vols, i, array.get(vols, i) + share)
-            added := true
-    [a, ov, added]
+    bool skip = ov or na(bSize) or bSize <= 0.0 or na(barVol) or barVol <= 0.0 or na(a) or array.size(vols) <= 0
+    if skip
+        ov := true
+    else
+        float loPrice = math.min(barLow, barHigh)
+        float hiPrice = math.max(barLow, barHigh)
+        int startIdx = f_bin_index(loPrice, a, bSize)
+        int endIdx = f_bin_index(hiPrice, a, bSize)
 
+        // 1) Expand for the low side (may unshift and move the anchor left).
+        [a1, ov1, ok1] = f_ensure_index(vols, a, bSize, ov, startIdx)
+        a := a1
+        ov := ov1
+        if not ok1 or ov
+            ov := true
+        else
+            // 2) Recompute BOTH indices after a possible left expansion.
+            startIdx := f_bin_index(loPrice, a, bSize)
+            endIdx := f_bin_index(hiPrice, a, bSize)
+
+            // 3) Expand for the high side using the recomputed endIdx.
+            [a2, ov2, ok2] = f_ensure_index(vols, a, bSize, ov, endIdx)
+            a := a2
+            ov := ov2
+            if not ok2 or ov
+                ov := true
+            else
+                // 4) Final recompute after high-side expansion.
+                startIdx := f_bin_index(loPrice, a, bSize)
+                endIdx := f_bin_index(hiPrice, a, bSize)
+
+                // 5) Hard bounds check — overflow instead of clamping/distorting VP.
+                if not f_range_in_bounds(vols, startIdx, endIdx)
+                    ov := true
+                else
+                    int bins = endIdx - startIdx + 1
+                    float share = barVol / bins
+                    bool writeOk = true
+                    for i = startIdx to endIdx
+                        // Runtime-safe guard on every get/set (no silent clamp).
+                        if writeOk
+                            if i < 0 or i >= array.size(vols)
+                                writeOk := false
+                            else
+                                array.set(vols, i, array.get(vols, i) + share)
+                    if writeOk
+                        added := true
+                    else
+                        ov := true
+    [a, ov, added]
 // Pure computation from histogram state; returns [poc, vah, val, total].
 f_compute_value_area(float[] vols, float anchor, float bSize, bool overflow) =>
     float poc = na
