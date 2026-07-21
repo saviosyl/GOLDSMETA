@@ -33,6 +33,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const resolveApiBase = (): string => {
+  // production API base resolved from VITE_API_BASE_URL at build time
+
   const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (fromEnv && fromEnv.length > 0) return fromEnv.replace(/\/$/, "");
   // Local dev convenience only — never bake localhost into production builds.
