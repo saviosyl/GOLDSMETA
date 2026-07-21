@@ -5,7 +5,7 @@
 export const SETUP_RULE_CONFIG_VERSION = "setup-rules-1.0.0";
 /** Alias used by tests and reports. */
 export const SETUP_RULES_VERSION = SETUP_RULE_CONFIG_VERSION;
-export const BACKEND_VERSION_PHASE3 = "1.3.1-v4-stage-b";
+export const BACKEND_VERSION_PHASE3 = "1.4.0-v5-intelligence";
 
 export type UtcSessionName = "ASIA" | "LONDON" | "OVERLAP" | "NEWYORK" | "UNKNOWN";
 

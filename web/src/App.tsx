@@ -12,6 +12,9 @@ import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SetupDetailPage } from "./pages/SetupDetailPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { V4ResearchPage } from "./pages/V4ResearchPage";
+import { IntelligencePage } from "./pages/IntelligencePage";
+import { ReplayPage } from "./pages/ReplayPage";
+import { PremiumAnalyticsPage } from "./pages/PremiumAnalyticsPage";
 
 function ProtectedApp() {
   const { user, loading } = useAuth();
@@ -37,14 +40,17 @@ function ProtectedApp() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell v5-shell">
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
         <Route path="/setups/:setupId" element={<SetupDetailPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/analytics" element={<PremiumAnalyticsPage />} />
+        <Route path="/analytics/v3" element={<AnalyticsPage />} />
+        <Route path="/intelligence" element={<IntelligencePage />} />
+        <Route path="/replay" element={<ReplayPage />} />
         <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/v4" element={<V4ResearchPage />} />
         <Route path="/journal" element={<JournalPage />} />

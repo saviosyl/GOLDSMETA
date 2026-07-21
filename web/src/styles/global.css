@@ -1152,4 +1152,139 @@ html {
   }
 }
 
+/* ——— V5 premium intelligence UI ——— */
+.v5-shell {
+  max-width: 880px;
+}
+
+.v5-glass {
+  background: linear-gradient(
+    160deg,
+    rgba(201, 162, 39, 0.08) 0%,
+    rgba(27, 29, 34, 0.92) 42%,
+    rgba(19, 21, 24, 0.96) 100%
+  );
+  border: 1px solid rgba(201, 162, 39, 0.28);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  animation: v5-fade-up 420ms ease-out;
+}
+
+@keyframes v5-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.v5-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.v5-score-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.list.compact li {
+  padding: 6px 0;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.chip:hover,
+.chip:focus-visible {
+  color: var(--text);
+  border-color: var(--gold);
+  outline: none;
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.glossary-term-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.glossary-term {
+  background: none;
+  border: none;
+  color: var(--gold);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.glossary-panel {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(320px, 78vw);
+  padding: 12px;
+  font-size: 0.88rem;
+  animation: v5-fade-up 200ms ease-out;
+}
+
+.v5-answer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.v5-page .brand {
+  letter-spacing: 0.02em;
+}
+
+@media (min-width: 900px) {
+  .v5-shell {
+    max-width: 980px;
+  }
+
+  .nav {
+    max-width: 980px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    border-radius: 16px 16px 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v5-glass,
+  .glossary-panel {
+    animation: none;
+  }
+}
+
 

@@ -7,6 +7,7 @@ import { ManualRiskPlanner } from "../components/ManualRiskPlanner";
 import { LiveForwardAck } from "../components/LiveForwardAck";
 import { ManualTradeActions } from "../components/ManualTradeActions";
 import { DailyRiskStatus } from "../components/DailyRiskStatus";
+import { DailyBriefingCard } from "../components/v5/DailyBriefingCard";
 import { useAuth } from "../lib/auth";
 import type {
   BackendSettings,
@@ -158,6 +159,8 @@ export function DashboardPage() {
     <>
       <BrandHeader environment={envLabel} trackingEnvs={trackingEnvs} />
 
+      <DailyBriefingCard />
+
       <section className="card market-status" aria-label="Market status" data-testid="market-status">
         <h2 className="section-title">Market status</h2>
         <p className="market-status-line">{marketLabel}</p>
@@ -213,8 +216,12 @@ export function DashboardPage() {
             </div>
           )}
           <div className="dashboard-links">
-            <Link to="/analytics">Analytics</Link>
+            <Link to="/intelligence">Intelligence</Link>
+            <Link to="/analytics">Premium analytics</Link>
+            <Link to="/replay">Replay</Link>
             <Link to="/v4">V4 Research</Link>
+            <Link to="/history">History</Link>
+            <Link to="/journal">Journal</Link>
             <Link to="/diagnostics">Diagnostics</Link>
           </div>
         </section>

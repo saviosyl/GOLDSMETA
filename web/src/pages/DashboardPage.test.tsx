@@ -14,6 +14,8 @@ const listSetups = vi.fn();
 const getSettings = vi.fn();
 const updateSettings = vi.fn();
 const saveManualExecution = vi.fn();
+const v5Briefing = vi.fn();
+const v5Score = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
@@ -24,14 +26,16 @@ vi.mock("../lib/auth", () => ({
       listSetups,
       getSettings,
       updateSettings,
-      saveManualExecution
+      saveManualExecution,
+      v5Briefing,
+      v5Score
     }
   })
 }));
 
 const defaultStatus = {
-  backendVersion: "1.3.1-v4-stage-b",
-  decisionBackendVersion: "1.3.1-v4-stage-b",
+  backendVersion: "1.4.0-v5-intelligence",
+  decisionBackendVersion: "1.4.0-v5-intelligence",
   ruleConfigVersion: "rules-1.1.0",
   setupRuleConfigVersion: "setup-rules-1.0.0",
   flags: {
@@ -70,9 +74,25 @@ describe("DashboardPage Stage 3", () => {
     getSettings.mockReset();
     updateSettings.mockReset();
     saveManualExecution.mockReset();
+    v5Briefing.mockReset();
+    v5Score.mockReset();
     systemStatus.mockResolvedValue(defaultStatus);
     listActiveSetups.mockResolvedValue([]);
     listSetups.mockResolvedValue([]);
+    v5Briefing.mockResolvedValue({
+      session: "LONDON",
+      marketRegime: "UPTREND",
+      currentState: "WAIT",
+      levels: { poc: 2650, vah: 2658, val: 2642 },
+      actionable: false,
+      insufficientData: false,
+      disclaimer: "Briefing only"
+    });
+    v5Score.mockResolvedValue({
+      total: 72,
+      components: [{ label: "Trend", score: 10, max: 12, reason: "ok" }],
+      disclaimer: "Not probability"
+    });
     getSettings.mockResolvedValue({
       aiEnabled: false,
       notificationsEnabled: true,
