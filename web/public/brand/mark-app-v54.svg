@@ -1,13 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="GoldMeta">
-  <rect width="128" height="128" rx="28" fill="#11284A"/>
-  <path
-    d="M64 22c-23.2 0-42 18.8-42 42s18.8 42 42 42c13 0 24.6-5.9 32.2-15.1l-8.6-7.2C82.2 90.6 73.6 95 64 95c-17.1 0-31-13.9-31-31s13.9-31 31-31c10.4 0 19.5 5.1 25.2 13l8.5-7.6C90.2 28 78 22 64 22z"
-    fill="#FFFFFF"
-    opacity="0.92"
-  />
-  <path d="M42 84V48h11l9 22.5L71 48h11v26l11-15.5V84H82.5V66.5L72 84h-8.5L53.5 66.2V84H42z" fill="#D8A33D"/>
-  <path d="M82 54l11-12 4 4-5.5 5.5H102v5.5H82V54z" fill="#D8A33D"/>
-  <rect x="48" y="36" width="4" height="9" rx="1.2" fill="#D8A33D"/>
-  <rect x="54.5" y="31" width="4" height="14" rx="1.2" fill="#D8A33D"/>
-  <rect x="61" y="26" width="4" height="19" rx="1.2" fill="#D8A33D"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GoldMeta">
+  <!-- App icon: navy rounded square + official mark -->
+  <rect width="256" height="256" rx="56" fill="#11284A"/>
+  <g transform="translate(28,20) scale(0.78)">
+    <path
+      d="M128 28c-55.2 0-100 44.8-100 100s44.8 100 100 100c28.8 0 54.9-12.2 73.4-31.8l-18.6-16.8C169.2 192.8 149.6 202 128 202c-40.9 0-74-33.1-74-74s33.1-74 74-74c24.8 0 46.7 12.2 60 30.8l18.2-17.2C189.2 42.4 160.4 28 128 28z"
+      fill="#FFFFFF"
+      opacity="0.95"
+    />
+    <path
+      d="M78 176V92h26.5l19.5 52 19.5-52H170v58l26-36v54h-24.5v-40L151 176h-20L110.5 136V176H78z"
+      fill="#D8A33D"
+    />
+    <path d="M170 108l28-34 10 10-14 14H220v14H170v-4z" fill="#D8A33D"/>
+    <rect x="96" y="68" width="10" height="22" rx="2.5" fill="#D8A33D"/>
+    <rect x="112" y="54" width="10" height="36" rx="2.5" fill="#D8A33D"/>
+    <rect x="128" y="40" width="10" height="50" rx="2.5" fill="#D8A33D"/>
+    <path d="M112 176v22M128 176v28M144 176v22" fill="none" stroke="#D8A33D" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="112" cy="204" r="5.5" fill="none" stroke="#D8A33D" stroke-width="4"/>
+    <circle cx="128" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="4"/>
+    <circle cx="144" cy="204" r="5.5" fill="none" stroke="#D8A33D" stroke-width="4"/>
+  </g>
 </svg>

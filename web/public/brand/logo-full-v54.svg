@@ -1,27 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" role="img" aria-label="GoldMeta by MetaMech Solutions">
-  <!-- Mark -->
-  <g transform="translate(8,10) scale(0.78)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" role="img" aria-label="GoldMeta by MetaMech Solutions">
+  <!-- Official full logo -->
+  <g transform="translate(236,4) scale(0.78)">
     <path
-      d="M64 18c-25.4 0-46 20.6-46 46s20.6 46 46 46c14.2 0 26.9-6.4 35.2-16.5l-9.8-8.2C83.4 92.8 74.2 98 64 98c-18.8 0-34-15.2-34-34s15.2-34 34-34c11.4 0 21.4 5.6 27.6 14.2l9.6-8.6C93.2 24.4 79.6 18 64 18z"
+      d="M128 28c-55.2 0-100 44.8-100 100s44.8 100 100 100c28.8 0 54.9-12.2 73.4-31.8l-18.6-16.8C169.2 192.8 149.6 202 128 202c-40.9 0-74-33.1-74-74s33.1-74 74-74c24.8 0 46.7 12.2 60 30.8l18.2-17.2C189.2 42.4 160.4 28 128 28z"
       fill="#11284A"
     />
-    <path d="M98 54c2.4 3.8 3.8 8.2 3.8 13 0 4.2-1 8.2-2.8 11.7" fill="none" stroke="#11284A" stroke-width="10" stroke-linecap="round"/>
-    <path d="M42 86V46h12.2l9.8 24.6L73.8 46H86v28.5L98 58.2V86H86.2V66.4L74.6 86H65.2L53.8 66.2V86H42z" fill="#D8A33D"/>
-    <path d="M86 52l12-14 4.5 4.5-6.2 6.2H108v6.4H86V52z" fill="#D8A33D"/>
-    <rect x="48" y="34" width="4.5" height="10" rx="1.5" fill="#D8A33D"/>
-    <rect x="55" y="28" width="4.5" height="16" rx="1.5" fill="#D8A33D"/>
-    <rect x="62" y="22" width="4.5" height="22" rx="1.5" fill="#D8A33D"/>
-    <path d="M58 86v12M64 86v16M70 86v12" stroke="#D8A33D" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="58" cy="100" r="2.4" fill="#D8A33D"/>
-    <circle cx="64" cy="104" r="2.4" fill="#D8A33D"/>
-    <circle cx="70" cy="100" r="2.4" fill="#D8A33D"/>
+    <path
+      d="M78 176V92h26.5l19.5 52 19.5-52H170v58l26-36v54h-24.5v-40L151 176h-20L110.5 136V176H78z"
+      fill="#D8A33D"
+    />
+    <path d="M170 108l28-34 10 10-14 14H220v14H170v-4z" fill="#D8A33D"/>
+    <rect x="96" y="68" width="10" height="22" rx="2.5" fill="#D8A33D"/>
+    <rect x="112" y="54" width="10" height="36" rx="2.5" fill="#D8A33D"/>
+    <rect x="128" y="40" width="10" height="50" rx="2.5" fill="#D8A33D"/>
+    <path d="M112 176v28M128 176v36M144 176v28" fill="none" stroke="#D8A33D" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="112" cy="210" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
+    <circle cx="128" cy="218" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
+    <circle cx="144" cy="210" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
   </g>
-  <!-- Wordmark -->
-  <text x="128" y="62" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="42" font-weight="780" letter-spacing="0.04em">
-    <tspan fill="#D8A33D">GOLD</tspan><tspan fill="#11284A">META</tspan>
+
+  <text
+    x="320"
+    y="232"
+    text-anchor="middle"
+    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+    font-size="54"
+    font-weight="780"
+    letter-spacing="0.1em"
+  >
+    <tspan fill="#D8A33D">GOLD</tspan><tspan fill="#11284A">METΛ</tspan>
   </text>
-  <!-- Tagline -->
-  <line x1="128" y1="82" x2="168" y2="82" stroke="#D8A33D" stroke-width="1.5"/>
-  <text x="176" y="86" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="500" fill="#11284A">by MetaMech Solutions</text>
-  <line x1="330" y1="82" x2="390" y2="82" stroke="#D8A33D" stroke-width="1.5"/>
+
+  <line x1="168" y1="258" x2="230" y2="258" stroke="#D8A33D" stroke-width="2"/>
+  <text
+    x="320"
+    y="264"
+    text-anchor="middle"
+    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+    font-size="17"
+    font-weight="500"
+    fill="#11284A"
+  >by MetaMech Solutions</text>
+  <line x1="410" y1="258" x2="472" y2="258" stroke="#D8A33D" stroke-width="2"/>
 </svg>
