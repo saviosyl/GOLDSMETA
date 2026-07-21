@@ -34,8 +34,10 @@ export function analyseScreenshotAgainstVerified(input: {
       ],
       createsTrade: false,
       insufficientVerifiedData: true,
+      visionOcr: false,
+      beta: true,
       disclaimer:
-        "Screenshot analysis is educational. Not a trade recommendation. Broker DISABLED."
+        "Screenshot Comparison — Beta. Does not OCR prices from images. Does not treat screenshot values as verified market data. Compares user-provided context to verified GoldMeta data only. Cannot create or modify a setup. Broker DISABLED."
     };
   }
 
@@ -103,7 +105,9 @@ export function analyseScreenshotAgainstVerified(input: {
     explanations,
     createsTrade: false,
     insufficientVerifiedData: false,
+    visionOcr: false,
+    beta: true,
     disclaimer:
-      "Screenshot analysis is educational. Not a trade recommendation. Broker DISABLED."
+      "Screenshot Comparison — Beta. Does not OCR prices from images. Does not treat screenshot values as verified market data. Compares user-provided context to verified GoldMeta data only. Cannot create or modify a setup. Broker DISABLED."
   };
 }

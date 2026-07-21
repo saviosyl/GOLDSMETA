@@ -65,7 +65,18 @@ describe("V5 GoldMeta Score", () => {
     expect(score.total).toBeLessThanOrEqual(100);
     expect(score.actionable).toBe(false);
     expect(score.disclaimer).toContain("not the probability");
+    expect(score.disclaimer).toContain("rules-based setup-quality");
     expect(score.components.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("does not silently award full points for missing verified data", () => {
+    const score = computeGoldMetaScore({});
+    for (const c of score.components) {
+      expect(c.score).toBeLessThan(c.max);
+    }
+    expect(score.components.some((c) => /not fully verified|incomplete|unknown|partial/i.test(c.reason))).toBe(
+      true
+    );
   });
 });
 

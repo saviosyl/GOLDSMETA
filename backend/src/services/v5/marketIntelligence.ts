@@ -11,16 +11,50 @@ import { v4Config } from "../v4/config";
 const DISCLAIMER =
   "Answers distinguish Verified data from Explanation. Insufficient verified data is stated honestly. Not a trade recommendation. Broker execution DISABLED.";
 
-function insufficient(question: string, missing: string): IntelligenceAnswer {
+function withMeta(
+  answer: Omit<IntelligenceAnswer, "implementationType" | "symbol" | "timeframe" | "dataTimestamp" | "environment" | "strategyVersion" | "mode" | "freshness"> &
+    Partial<Pick<IntelligenceAnswer, "implementationType" | "symbol" | "timeframe" | "dataTimestamp" | "environment" | "strategyVersion" | "mode" | "freshness">>,
+  ctx: {
+    decision?: DecisionRecord | null;
+    analysis?: V4ShadowAnalysisRecord | null;
+  }
+): IntelligenceAnswer {
+  const a = ctx.analysis ?? null;
+  const d = ctx.decision ?? null;
   return {
-    question,
-    answer: `Insufficient verified data. ${missing}`,
-    verifiedFacts: [],
-    explanations: [missing],
-    citations: [{ kind: "EXPLANATION", source: "intelligence", detail: missing }],
-    insufficientData: true,
-    disclaimer: DISCLAIMER
+    ...answer,
+    implementationType: "deterministic_rules_templated",
+    symbol: "XAUUSD",
+    timeframe: a?.timeframe ?? d?.timeframe ?? null,
+    dataTimestamp: a?.barTime ?? d?.generatedAt ?? null,
+    environment: a?.environment ?? d?.environment ?? "LIVE",
+    strategyVersion: a?.strategyVersion ?? d?.backendVersion ?? null,
+    mode: "SHADOW",
+    freshness: answer.insufficientData
+      ? "PARTIAL"
+      : a || d
+        ? "VERIFIED"
+        : "UNAVAILABLE"
   };
+}
+
+function insufficient(
+  question: string,
+  missing: string,
+  ctx: { decision?: DecisionRecord | null; analysis?: V4ShadowAnalysisRecord | null } = {}
+): IntelligenceAnswer {
+  return withMeta(
+    {
+      question,
+      answer: `Insufficient verified data. ${missing}`,
+      verifiedFacts: [],
+      explanations: [missing],
+      citations: [{ kind: "EXPLANATION", source: "intelligence", detail: missing }],
+      insufficientData: true,
+      disclaimer: DISCLAIMER
+    },
+    ctx
+  );
 }
 
 /**
@@ -46,7 +80,7 @@ export function answerMarketIntelligence(input: {
   const decision = input.latestDecision ?? null;
 
   if (!q) {
-    return insufficient(input.question, "No question provided.");
+    return insufficient(input.question, "No question provided.", { decision, analysis });
   }
 
   // Why waiting?
@@ -70,7 +104,7 @@ export function answerMarketIntelligence(input: {
       }
     }
     if (!decision && !analysis) {
-      return insufficient(input.question, "No verified V3 decision or V4 analysis is available.");
+      return insufficient(input.question, "No verified V3 decision or V4 analysis is available.", { decision, analysis });
     }
     explanations.push(
       "WAIT means mandatory gates did not all pass for an actionable setup — or production remains on V3 WAIT while V4 is SHADOW only."
@@ -78,7 +112,7 @@ export function answerMarketIntelligence(input: {
     if (!input.openPlan) {
       explanations.push("No open immutable V4 shadow plan is currently locked.");
     }
-    return {
+    return withMeta({
       question: input.question,
       answer: facts.length
         ? `We are waiting because verified gates/rejections did not clear a locked plan. ${facts[0]}`
@@ -88,13 +122,13 @@ export function answerMarketIntelligence(input: {
       citations: facts.map((f) => ({ kind: "VERIFIED" as const, source: "v3/v4", detail: f })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // Why rejected?
   if (q.includes("reject") || q.includes("blocked") || q.includes("which rule")) {
     if (!analysis && !(input.candidates && input.candidates.length)) {
-      return insufficient(input.question, "No verified rejection reasons on file.");
+      return insufficient(input.question, "No verified rejection reasons on file.", { decision, analysis });
     }
     const reasons = [
       ...(analysis?.rejectionReasons ?? []),
@@ -102,9 +136,9 @@ export function answerMarketIntelligence(input: {
       ...((input.candidates ?? []).map((c) => c.cancelReason).filter(Boolean) as string[])
     ];
     if (!reasons.length) {
-      return insufficient(input.question, "Latest analysis has no recorded rejection reasons.");
+      return insufficient(input.question, "Latest analysis has no recorded rejection reasons.", { decision, analysis });
     }
-    return {
+    return withMeta({
       question: input.question,
       answer: `Verified blocking reasons: ${[...new Set(reasons)].join(" · ")}`,
       verifiedFacts: [...new Set(reasons)].map((r) => `Rule/reason: ${r}`),
@@ -115,7 +149,7 @@ export function answerMarketIntelligence(input: {
       citations: reasons.map((r) => ({ kind: "VERIFIED" as const, source: "v4Analyses", detail: r })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // Risk geometry
@@ -125,7 +159,7 @@ export function answerMarketIntelligence(input: {
       analysis?.rejectionReasons.some((r) => r.includes("RISK_GEOMETRY")) ||
       (input.candidates ?? []).some((c) => c.cancelReason === "NO_TRADE_INVALID_RISK_GEOMETRY");
     if (!hasCode && input.openPlan == null && analysis == null) {
-      return insufficient(input.question, "No verified risk-geometry evaluation available.");
+      return insufficient(input.question, "No verified risk-geometry evaluation available.", { decision, analysis });
     }
     const facts: string[] = [];
     if (hasCode) facts.push("Verified: NO_TRADE_INVALID_RISK_GEOMETRY recorded.");
@@ -137,7 +171,7 @@ export function answerMarketIntelligence(input: {
     facts.push(
       `Configured absolute XAUUSD minimum stop distance=${v4Config.stop.absoluteMinPoints}.`
     );
-    return {
+    return withMeta({
       question: input.question,
       answer: hasCode
         ? "Risk geometry failed a mandatory gate — no shadow plan was (or should be) created."
@@ -150,16 +184,15 @@ export function answerMarketIntelligence(input: {
       citations: facts.map((f) => ({ kind: "VERIFIED" as const, source: "v4", detail: f })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // What changed since previous candle?
   if (q.includes("changed") || q.includes("previous candle") || q.includes("since last")) {
     if (!analysis || !input.previousAnalysis) {
       return insufficient(
-        input.question,
-        "Need at least two verified V4 analyses to compare candles."
-      );
+        input.question, "Need at least two verified V4 analyses to compare candles."
+      , { decision, analysis });
     }
     const prev = input.previousAnalysis;
     const facts: string[] = [
@@ -171,7 +204,7 @@ export function answerMarketIntelligence(input: {
       facts.push(`Regime changed ${prev.regime} → ${analysis.regime}.`);
     if (prev.xauPoc !== analysis.xauPoc)
       facts.push(`POC ${prev.xauPoc ?? "null"} → ${analysis.xauPoc ?? "null"} (verified stored values).`);
-    return {
+    return withMeta({
       question: input.question,
       answer: facts.join(" "),
       verifiedFacts: facts,
@@ -179,7 +212,7 @@ export function answerMarketIntelligence(input: {
       citations: facts.map((f) => ({ kind: "VERIFIED" as const, source: "v4Analyses", detail: f })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // Strategy historical performance
@@ -187,9 +220,8 @@ export function answerMarketIntelligence(input: {
     const a = input.analyticsSummary;
     if (!a || a.sampleSize < 1) {
       return insufficient(
-        input.question,
-        "No resolved LIVE shadow sample is available yet for historical performance."
-      );
+        input.question, "No resolved LIVE shadow sample is available yet for historical performance."
+      , { decision, analysis });
     }
     const facts = [
       `Verified resolved sample size n=${a.sampleSize}.`,
@@ -201,7 +233,7 @@ export function answerMarketIntelligence(input: {
         facts.push(`Verified plan count for ${k}=${v}.`);
       }
     }
-    return {
+    return withMeta({
       question: input.question,
       answer:
         a.sampleSize < 20
@@ -215,24 +247,24 @@ export function answerMarketIntelligence(input: {
       citations: facts.map((f) => ({ kind: "VERIFIED" as const, source: "v4Analytics", detail: f })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // Why TP2 failed / lifecycle
   if (q.includes("tp2") || q.includes("lifecycle") || q.includes("why did")) {
     if (!input.openPlan && !(input.candidates && input.candidates.length)) {
-      return insufficient(input.question, "No verified shadow plan/candidate lifecycle to explain.");
+      return insufficient(input.question, "No verified shadow plan/candidate lifecycle to explain.", { decision, analysis });
     }
     const plan = input.openPlan;
     if (!plan) {
-      return insufficient(input.question, "No open or selected shadow plan in verified storage.");
+      return insufficient(input.question, "No open or selected shadow plan in verified storage.", { decision, analysis });
     }
     const facts = [
       `Verified plan status=${plan.status}.`,
       `Verified direction=${plan.direction}, entry=${plan.entry}, SL=${plan.stopLoss}, TP1=${plan.tp1}, TP2=${plan.tp2}, TP3=${plan.tp3}.`,
       `Verified grossR=${plan.grossR ?? "null"}, netR=${plan.netR ?? "null"}, mfe=${plan.mfe ?? "null"}, mae=${plan.mae ?? "null"}.`
     ];
-    return {
+    return withMeta({
       question: input.question,
       answer: `Lifecycle status is ${plan.status}. Levels are immutable.`,
       verifiedFacts: facts,
@@ -243,13 +275,13 @@ export function answerMarketIntelligence(input: {
       citations: facts.map((f) => ({ kind: "VERIFIED" as const, source: "v4ShadowPlans", detail: f })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // Score / weaker than yesterday
   if (q.includes("weaker") || q.includes("score") || q.includes("quality")) {
     if (!analysis) {
-      return insufficient(input.question, "No verified V4 analysis to score.");
+      return insufficient(input.question, "No verified V4 analysis to score.", { decision, analysis });
     }
     const score = computeGoldMetaScore(
       scoreInputFromV4Shadow({
@@ -267,7 +299,7 @@ export function answerMarketIntelligence(input: {
       `GoldMeta Score=${score.total}/100 (rules-based, not probability).`,
       ...score.components.map((c) => `${c.label}: ${c.score}/${c.max} — ${c.reason}`)
     ];
-    return {
+    return withMeta({
       question: input.question,
       answer: `Current GoldMeta Score is ${score.total}. See component breakdown in verifiedFacts.`,
       verifiedFacts: facts,
@@ -277,13 +309,13 @@ export function answerMarketIntelligence(input: {
       citations: [{ kind: "VERIFIED", source: "goldMetaScore", detail: `total=${score.total}` }],
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
   // What would improve
   if (q.includes("improve") || q.includes("what would")) {
     if (!analysis) {
-      return insufficient(input.question, "No verified analysis to suggest improvements against.");
+      return insufficient(input.question, "No verified analysis to suggest improvements against.", { decision, analysis });
     }
     const improvements: string[] = [];
     for (const r of [...analysis.rejectionReasons, ...analysis.gateFailures]) {
@@ -297,7 +329,7 @@ export function answerMarketIntelligence(input: {
     if (!improvements.length) {
       improvements.push("No specific rejection codes — continue collecting multi-bar confirmation evidence.");
     }
-    return {
+    return withMeta({
       question: input.question,
       answer: improvements.join(" "),
       verifiedFacts: analysis.rejectionReasons.map((r) => `Verified rejection: ${r}`),
@@ -309,24 +341,27 @@ export function answerMarketIntelligence(input: {
       })),
       insufficientData: false,
       disclaimer: DISCLAIMER
-    };
+    }, { decision, analysis });
   }
 
-  return {
-    question: input.question,
-    answer:
-      "I can explain WAIT, rejections, risk geometry, candle changes, strategy sample stats, lifecycle, and GoldMeta Score using verified GoldMeta data. Ask one of those, or provide more context.",
-    verifiedFacts: analysis
-      ? [
-          `Latest V4 analysis bar=${analysis.barTime}, bias=${analysis.bias}, session=${analysis.session}.`
-        ]
-      : [],
-    explanations: [
-      "This assistant is GoldMeta-specific and will not invent market data.",
-      "Broker execution remains DISABLED. V4 is SHADOW only."
-    ],
-    citations: [],
-    insufficientData: !analysis && !decision,
-    disclaimer: DISCLAIMER
-  };
+  return withMeta(
+    {
+      question: input.question,
+      answer:
+        "I can explain WAIT, rejections, risk geometry, candle changes, strategy sample stats, lifecycle, and GoldMeta Score using verified GoldMeta data. Ask one of those, or provide more context.",
+      verifiedFacts: analysis
+        ? [
+            `Latest V4 analysis bar=${analysis.barTime}, bias=${analysis.bias}, session=${analysis.session}.`
+          ]
+        : [],
+      explanations: [
+        "This assistant is GoldMeta-specific and will not invent market data.",
+        "Broker execution remains DISABLED. V4 is SHADOW only."
+      ],
+      citations: [],
+      insufficientData: !analysis && !decision,
+      disclaimer: DISCLAIMER
+    },
+    { decision, analysis }
+  );
 }

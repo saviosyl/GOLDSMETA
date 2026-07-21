@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { GlossaryTerm } from "./GlossaryTerm";
+import { GoldMetaScoreCard } from "./GoldMetaScoreCard";
+import { VerifiedDataMeta } from "./VerifiedDataMeta";
 
 type Briefing = {
   date?: string;
@@ -17,6 +19,13 @@ type Briefing = {
   verifiedFacts?: string[];
   insufficientData?: boolean;
   disclaimer?: string;
+  symbol?: string;
+  timeframe?: string;
+  dataTimestamp?: string;
+  environment?: string;
+  strategyVersion?: string;
+  mode?: string;
+  freshness?: string;
 };
 
 type Score = {
@@ -31,18 +40,41 @@ export function DailyBriefingCard() {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [score, setScore] = useState<Score | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
 
   useEffect(() => {
+    const sync = () => setOnline(navigator.onLine);
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
     void (async () => {
       try {
         const [b, s] = await Promise.all([api.v5Briefing("LIVE"), api.v5Score("LIVE")]);
-        setBriefing(b);
-        setScore(s);
+        if (ac.signal.aborted) return;
+        setBriefing(b as Briefing);
+        setScore(s as Score | null);
+        setLoadedAt(new Date().toISOString());
       } catch (err) {
+        if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Briefing unavailable");
       }
     })();
+    return () => ac.abort();
   }, [api]);
+
+  const freshness = !online
+    ? "OFFLINE"
+    : briefing?.insufficientData
+      ? "PARTIAL"
+      : ((briefing?.freshness as "VERIFIED") ?? "VERIFIED");
 
   return (
     <section className="card v5-glass" data-testid="daily-briefing">
@@ -52,6 +84,13 @@ export function DailyBriefingCard() {
           Ask why →
         </Link>
       </div>
+      {!online && (
+        <div className="banner stale" role="status" data-testid="briefing-offline">
+          Offline — LIVE verification unavailable. Last stored data
+          {loadedAt ? ` from ${loadedAt}` : ""} may be stale and must not be treated as current LIVE
+          information.
+        </div>
+      )}
       {error && (
         <div className="banner error" role="alert">
           {error}
@@ -61,62 +100,69 @@ export function DailyBriefingCard() {
         <p className="muted">Insufficient verified data for a full briefing.</p>
       )}
       {briefing && (
-        <div className="grid-2">
-          <div className="metric">
-            <span className="label">Session</span>
-            <span className="value">{briefing.session ?? "—"}</span>
+        <>
+          <VerifiedDataMeta
+            symbol={briefing.symbol ?? "XAUUSD"}
+            timeframe={briefing.timeframe}
+            dataTimestamp={briefing.dataTimestamp ?? loadedAt}
+            environment={briefing.environment ?? "LIVE"}
+            strategyVersion={briefing.strategyVersion}
+            mode={briefing.mode ?? "SHADOW"}
+            freshness={freshness}
+            sources={["V3 latest decision", "V4 shadow analysis"]}
+          />
+          <div className="grid-2">
+            <div className="metric">
+              <span className="label">Session</span>
+              <span className="value">{briefing.session ?? "—"}</span>
+            </div>
+            <div className="metric">
+              <span className="label">Regime</span>
+              <span className="value">{briefing.marketRegime ?? "—"}</span>
+            </div>
+            <div className="metric">
+              <span className="label">
+                vs <GlossaryTerm term="POC">POC</GlossaryTerm>
+              </span>
+              <span className="value">{briefing.positionVsPoc ?? "UNKNOWN"}</span>
+            </div>
+            <div className="metric">
+              <span className="label">
+                <GlossaryTerm term="ATR">ATR</GlossaryTerm>
+              </span>
+              <span className="value">
+                {briefing.atrLabel ?? "—"}
+                {briefing.atrValue != null ? ` (${briefing.atrValue})` : ""}
+              </span>
+            </div>
+            <div className="metric">
+              <span className="label">Levels</span>
+              <span className="value">
+                {briefing.levels?.poc ?? "—"} / {briefing.levels?.vah ?? "—"} /{" "}
+                {briefing.levels?.val ?? "—"}
+              </span>
+            </div>
+            <div className="metric">
+              <span className="label">State</span>
+              <span className="value">{briefing.currentState ?? "—"}</span>
+            </div>
           </div>
-          <div className="metric">
-            <span className="label">Regime</span>
-            <span className="value">{briefing.marketRegime ?? "—"}</span>
-          </div>
-          <div className="metric">
-            <span className="label">
-              vs <GlossaryTerm term="POC">POC</GlossaryTerm>
-            </span>
-            <span className="value">{briefing.positionVsPoc ?? "UNKNOWN"}</span>
-          </div>
-          <div className="metric">
-            <span className="label">
-              <GlossaryTerm term="ATR">ATR</GlossaryTerm>
-            </span>
-            <span className="value">
-              {briefing.atrLabel ?? "—"}
-              {briefing.atrValue != null ? ` (${briefing.atrValue})` : ""}
-            </span>
-          </div>
-          <div className="metric">
-            <span className="label">Levels</span>
-            <span className="value">
-              {briefing.levels?.poc ?? "—"} / {briefing.levels?.vah ?? "—"} /{" "}
-              {briefing.levels?.val ?? "—"}
-            </span>
-          </div>
-          <div className="metric">
-            <span className="label">State</span>
-            <span className="value">{briefing.currentState ?? "—"}</span>
-          </div>
-        </div>
+        </>
       )}
-      {score && (
-        <div className="v5-score-block" data-testid="goldmeta-score">
-          <div className="price-row">
-            <span>GoldMeta Score</span>
-            <strong>{score.total ?? "—"} / 100</strong>
-          </div>
-          <p className="muted">{score.disclaimer}</p>
-          <ul className="list compact">
-            {(score.components ?? []).slice(0, 6).map((c) => (
-              <li key={c.label}>
-                <strong>
-                  {c.label} {c.score}/{c.max}
-                </strong>
-                <div className="muted">{c.reason}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <GoldMetaScoreCard
+        total={score?.total}
+        components={score?.components}
+        disclaimer={
+          score?.disclaimer ??
+          "GoldMeta Score is a rules-based setup-quality measurement. It is not the probability of a profitable trade."
+        }
+        dataTimestamp={briefing?.dataTimestamp ?? loadedAt}
+        environment={briefing?.environment ?? "LIVE"}
+        strategyVersion={briefing?.strategyVersion}
+        mode="SHADOW"
+        freshness={!online ? "OFFLINE" : "SHADOW"}
+        insufficientData={!score || score.total == null}
+      />
       <p className="muted">{briefing?.disclaimer}</p>
     </section>
   );

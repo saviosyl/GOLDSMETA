@@ -21,6 +21,8 @@ describe("V5 intelligence routes", () => {
     const res = await request(app).get("/v1/v5/status").set(userAuth).expect(200);
     expect(res.body.v5.brokerExecution).toBe("DISABLED");
     expect(res.body.v5.overridesV4).toBe(false);
+    expect(res.body.v5.intelligenceImplementation).toBe("deterministic_rules_templated");
+    expect(res.body.v5.aiEnabled).toBe(false);
   });
 
   it("serves glossary offline", async () => {

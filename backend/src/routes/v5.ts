@@ -36,7 +36,12 @@ export const buildV5Router = (store: GoldMetaStore): Router => {
         brokerExecution: "DISABLED",
         overridesV4: false,
         productionDecisionSource: "V3 + V4 SHADOW only",
-        note: "V5 is a trading intelligence layer. It does not place orders or override V4."
+        intelligenceImplementation: "deterministic_rules_templated",
+        aiEnabled: false,
+        screenshotFeature: v5Config.flags.screenshotCompareEnabled
+          ? "beta_structured_compare_no_vision_ocr"
+          : "disabled",
+        note: "V5 is a trading intelligence layer. It does not place orders or override V4. Ask GoldMeta is not an LLM."
       }
     });
   });

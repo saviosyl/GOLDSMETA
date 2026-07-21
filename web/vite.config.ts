@@ -59,18 +59,15 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.includes("/v1/decisions"),
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "goldmeta-decisions",
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 }
-            }
-          }
-        ]
+        // Do not cache API responses — private user / auth / admin / LIVE data
+        // must not enter a public or shared SW cache. Offline shell uses
+        // precached static assets only; decision freshness uses localStorage
+        // envelopes with explicit timestamps (see offlineCache.ts).
+        runtimeCaching: [],
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: false,
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"]
       },
       devOptions: {
         enabled: false

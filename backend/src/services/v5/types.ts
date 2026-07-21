@@ -20,6 +20,18 @@ export interface IntelligenceAnswer {
   citations: IntelligenceCitation[];
   insufficientData: boolean;
   disclaimer: string;
+  /** Honest capability label — never claim an LLM unless one is used. */
+  implementationType:
+    | "deterministic_rules_templated"
+    | "hybrid_optional_ai_narration"
+    | "external_ai_model";
+  symbol?: string;
+  timeframe?: string | null;
+  dataTimestamp?: string | null;
+  environment?: "LIVE" | "TEST";
+  strategyVersion?: string | null;
+  mode?: "LIVE" | "TEST" | "SHADOW";
+  freshness?: "VERIFIED" | "STALE" | "PARTIAL" | "UNAVAILABLE" | "SHADOW" | "TEST";
 }
 
 export interface GlossaryEntry {
@@ -44,7 +56,7 @@ export interface GoldMetaScoreResult {
   total: number; // 0–100
   max: 100;
   components: GoldMetaScoreComponent[];
-  disclaimer: "GoldMeta Score is a rules-based quality score, not the probability of profit.";
+  disclaimer: string;
   actionable: false;
 }
 
@@ -70,6 +82,13 @@ export interface DailyBriefing {
   insufficientData: boolean;
   disclaimer: string;
   actionable: false;
+  symbol: string;
+  timeframe: string | null;
+  dataTimestamp: string | null;
+  environment: "LIVE" | "TEST";
+  strategyVersion: string | null;
+  mode: "SHADOW" | "LIVE" | "TEST";
+  freshness: "VERIFIED" | "STALE" | "PARTIAL" | "UNAVAILABLE" | "SHADOW" | "TEST";
 }
 
 export interface LearningBucketStat {
@@ -210,6 +229,8 @@ export interface ScreenshotAnalysisResult {
   explanations: string[];
   createsTrade: false;
   insufficientVerifiedData: boolean;
+  visionOcr: false;
+  beta: true;
   disclaimer: string;
 }
 

@@ -199,7 +199,8 @@ export function computeGoldMetaScore(input: GoldMetaScoreInput): GoldMetaScoreRe
     total,
     max: 100,
     components: comps,
-    disclaimer: "GoldMeta Score is a rules-based quality score, not the probability of profit.",
+    disclaimer:
+      "GoldMeta Score is a rules-based setup-quality measurement. It is not the probability of a profitable trade.",
     actionable: false
   };
 }

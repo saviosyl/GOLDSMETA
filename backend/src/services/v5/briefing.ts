@@ -78,6 +78,13 @@ export function buildDailyBriefing(input: {
     insufficientData: !d && !a,
     disclaimer:
       "Daily briefing is informational only. Not a trade recommendation. Broker DISABLED.",
-    actionable: false
+    actionable: false,
+    symbol: "XAUUSD",
+    timeframe: a?.timeframe ?? d?.timeframe ?? null,
+    dataTimestamp: a?.barTime ?? d?.generatedAt ?? null,
+    environment: a?.environment ?? d?.environment ?? "LIVE",
+    strategyVersion: a?.strategyVersion ?? d?.backendVersion ?? null,
+    mode: "SHADOW",
+    freshness: !d && !a ? "UNAVAILABLE" : a && !d ? "PARTIAL" : "VERIFIED"
   };
 }
