@@ -1,2 +1,10 @@
-# Cloudflare Pages SPA fallback — never 404 on client routes
+# Static assets must not fall through to the SPA shell.
+/assets/*  /assets/:splat  200
+/icons/*   /icons/:splat   200
+/*.js      /:splat         200
+/*.css     /:splat         200
+/*.svg     /:splat         200
+/*.png     /:splat         200
+/*.webmanifest  /:splat    200
+# SPA fallback for client routes only
 /*    /index.html   200
