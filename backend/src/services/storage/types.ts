@@ -115,7 +115,7 @@ export interface GoldMetaStore {
   getSnapshot(userId: string, snapshotId: string): Awaitable<MarketSnapshot | undefined>;
 
   saveDecision(decision: DecisionRecord): Awaitable<DecisionRecord>;
-  getDecision(decisionId: string): Awaitable<DecisionRecord | undefined>;
+  getDecision(userId: string, decisionId: string): Awaitable<DecisionRecord | undefined>;
   listDecisions(userId: string, limit?: number): Awaitable<DecisionRecord[]>;
   latestDecision(userId: string): Awaitable<DecisionRecord | undefined>;
   latestMeaningfulDecision(userId: string): Awaitable<DecisionRecord | undefined>;

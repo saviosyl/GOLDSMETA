@@ -93,8 +93,9 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     return decision;
   }
 
-  getDecision(decisionId: string): DecisionRecord | undefined {
-    return this.decisions.get(decisionId);
+  getDecision(userId: string, decisionId: string): DecisionRecord | undefined {
+    const decision = this.decisions.get(decisionId);
+    return decision && decision.userId === userId ? decision : undefined;
   }
 
   listDecisions(userId = "default-user", limit = 50): DecisionRecord[] {

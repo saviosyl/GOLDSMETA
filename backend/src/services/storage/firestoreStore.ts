@@ -175,14 +175,16 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return decision;
   }
 
-  async getDecision(decisionId: string): Promise<DecisionRecord | undefined> {
+  async getDecision(userId: string, decisionId: string): Promise<DecisionRecord | undefined> {
+    // Prefer the user-scoped document path. Collection-group queries on
+    // decisionId require an extra index and currently fail in production.
     const snap = await this.db
-      .collectionGroup("decisions")
-      .where("decisionId", "==", decisionId)
-      .limit(1)
+      .collection("users")
+      .doc(userId)
+      .collection("decisions")
+      .doc(decisionId)
       .get();
-    const doc = snap.docs[0];
-    return doc ? doc.data() as DecisionRecord : undefined;
+    return snap.exists ? (snap.data() as DecisionRecord) : undefined;
   }
 
   async listDecisions(userId: string, limit = 50): Promise<DecisionRecord[]> {

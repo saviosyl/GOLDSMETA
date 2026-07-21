@@ -17,8 +17,13 @@ export function SetupDetailPage() {
         const s = await api.getSetup(setupId);
         setSetup(s);
         if (s) {
-          const d = await api.getDecision(s.decisionId);
-          setDecision(d);
+          try {
+            const d = await api.getDecision(s.decisionId);
+            setDecision(d);
+          } catch {
+            // Setup outcomes are self-contained; decision link is optional.
+            setDecision(null);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load setup");

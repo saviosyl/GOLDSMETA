@@ -1,7 +1,7 @@
 # Phase 3 Stage 2 — Frontend deploy & clean PR report
 
 **Date:** 2026-07-21  
-**Backend (already live):** `1.2.0-phase3` @ `1265e67`  
+**Backend (live):** `1.2.0-phase3`  
 **Clean review branch:** `cursor/phase3-clean-c2c2`  
 **Clean PR:** https://github.com/saviosyl/GOLDSMETA/pull/8 (draft)  
 **Original PR #7:** remains open, not merged — https://github.com/saviosyl/GOLDSMETA/pull/7
@@ -10,98 +10,78 @@
 
 ## TASK A — Production web deploy
 
-### Result: **BLOCKED — missing credential**
+### Result: **PASS**
 
 | Item | Status |
 |------|--------|
-| Cloudflare account id | Present (`CLOUDFLARE_ACCOUNT_ID`) |
-| Cloudflare API token | **Missing** (`CLOUDFLARE_API_TOKEN` unset) |
-| `wrangler whoami` | Not authenticated |
-| Pages GitHub app / git-connected deploy | Not detected on repo commits |
-| Firebase Hosting | Not used (correct) |
+| Cloudflare token scope | Pages project `goldmeta-web` read/deploy OK; zone cache purge **not** permitted (expected) |
+| Pages project | Existing `goldmeta-web` (not recreated) |
+| Production branch deploy | `--branch cursor/production-connection` |
+| Custom domain | `https://goldmeta.metamechsolutions.com` |
+| pages.dev | `https://goldmeta-web.pages.dev` |
 
-Live site still serves **Phase 2** assets:
+### Deployed asset hashes (production)
 
-- JS: `index-H3wkx3nm.js`
-- CSS: `index-QeQ_TMyx.css`
+- JS: `index-C2elnKhj.js`
+- CSS: `index-CS_3VQyW.css`
 
-Built Phase 3 assets ready locally:
+Old Phase 2 hashes gone from HTML:
 
-- JS: `index-DIsBlidJ.js` (or `index-BMvhJECj.js` depending on env bake)
-- CSS: `index-D674XCiC.css`
+- ~~`index-H3wkx3nm.js`~~
+- ~~`index-QeQ_TMyx.css`~~
 
-### Exact action required (no infra changes)
-
-```bash
-# Cloudflare Dashboard → My Profile → API Tokens
-# Create token: Account.Cloudflare Pages:Edit (account scoped)
-export CLOUDFLARE_API_TOKEN=<token>
-export CLOUDFLARE_ACCOUNT_ID=<already set in agent env>
-
-cd web
-npm ci
-# Ensure Pages Production env has VITE_API_BASE_URL=
-#   https://us-central1-goldmeta-web.cloudfunctions.net/api
-# plus VITE_FIREBASE_* (already configured in dashboard)
-npm run build
-npx wrangler pages deploy dist --project-name goldmeta-web
-```
-
-Do **not** create a new Pages project. Do **not** change DNS.
+Note: first deploy briefly poisoned custom-domain edge cache for previous hashes (`index-DIsBlidJ.js` / `index-D674XCiC.css` served as SPA HTML). Redeploy with new content hashes resolved MIME types without zone purge.
 
 ---
 
-## TASK B — Production UI validation
+## TASK B — Authenticated production UI
 
-**Cannot complete against https://goldmeta.metamechsolutions.com** until Phase 3 assets are deployed.
+Verified signed-in on `https://goldmeta.metamechsolutions.com`.
 
-### Data readiness (Firestore) — PASS
+| Area | Result |
+|------|--------|
+| Dashboard pipeline strip | PASS — TradingView ACTIVE, Analysis only, Active setup None |
+| Backend version | PASS — Diagnostics shows `1.2.0-phase3` |
+| TEST setup tracking | PASS via API flags `setupTrackingEnvironments: ["TEST"]`; Diagnostics UI does not yet print the flag list (see remaining) |
+| LIVE decisions separate | PASS — LIVE badges on live decisions; setups labelled TEST |
+| No false live-price claim | PASS |
+| History lifecycle filters | PASS — All/BUY/SELL/WAIT/Active/Won/Lost/Expired/LIVE/TEST |
+| WAIT has no setup | PASS — 0 `/setups/` links under WAIT filter |
+| Setup WIN_TP3 | PASS — raw `4R` / modelled `2.7R` (`81b60215cf7dfe1ad12392f1`) |
+| Setup LOSS_SL | PASS — `-1R` (`f91ef1d3343664b4e5a91d46`) |
+| Setup EXPIRED | PASS (`4925db514f020e9893bb2bb9`) |
+| Setup AMBIGUOUS_WORST_CASE_SL | PASS — `-1R` (`0dab119fa6805cc627427b7e`) |
+| Analytics TEST | PASS — n=12, small-sample warning |
+| Analytics LIVE | PASS — completed 0 / n=0 |
+| No profitability claim | PASS — “not statistically significant / not proven” |
+| Diagnostics | PASS — secrets not shown (`Secret present: yes` only); recent rejects listed; not admin-claim-gated |
+| Journal | PASS — notes/tags save; “never alter engine outcomes” |
 
-Fixture setups remain correct for UI once Pages is updated:
+### Hotfix shipped during verification
 
-| Setup | Resolution | raw R | modelled R | timeline | rule / pine |
-|-------|------------|-------|------------|----------|-------------|
-| `81b60215cf7dfe1ad12392f1` | WIN_TP3 | 4 | 2.7 | 8 | setup-rules-1.0.0 / 2.0.4 |
-| `f91ef1d3343664b4e5a91d46` | LOSS_SL | -1 | -1 | 5 | setup-rules-1.0.0 / 2.0.4 |
-| `4925db514f020e9893bb2bb9` | EXPIRED | null | null | 4 | setup-rules-1.0.0 / 2.0.4 |
-| `0dab119fa6805cc627427b7e` | AMBIGUOUS_WORST_CASE_SL | -1 | -1 | 5 | setup-rules-1.0.0 / 2.0.4 |
-
-Totals: TEST setups present, **LIVE setups = 0**, no open TEST setups.
-
-### Frontend unit coverage (proxy for UI) — PASS
-
-- Analytics empty + small-sample warning tests
-- Setup detail timeline/outcomes tests
-- DecisionCard setup status / LIVE vs TEST badges
-- Diagnostics page (authenticated; secrets not shown — note: not admin-claim-gated yet)
-- History filters including Active/Won/Lost/LIVE/TEST
-
-Diagnostics “admin-only”: currently **any signed-in user** can open `/diagnostics` (no admin claim). Secrets are not exposed. Treat as known limitation until admin claim is added.
-
----
-
-## TASK C — Responsive validation
-
-Local production build preview (sign-in shell) at widths 320 / 375 / 390 / 430 / 768 / 1024:
-
-- **No horizontal overflow** at any width
-- Brand renders; screenshots: `/tmp/gm-responsive-*.png`
-
-Full authenticated Dashboard/History/Analytics/Setup detail responsive checks remain **pending** Pages deploy + sign-in.
+`GET /v1/decisions/:id` failed in production (collection-group query). Fixed to user-scoped doc path and redeployed Functions. Setup detail page also tolerates optional decision-link failure.
 
 ---
 
-## TASK D — PWA / cache (current production)
+## TASK C — Responsive
+
+Widths 320 / 375 / 390 / 430 / 768 / 1024:
+
+- No horizontal overflow
+- No nav clipping / content hidden behind navigation
+
+Screenshots: `/tmp/gm-responsive-*.png`, `/tmp/gm-setup3-*.png`
+
+---
+
+## TASK D — PWA / cache
 
 | Check | Result |
 |-------|--------|
-| CSS `Content-Type` | `text/css` ✓ |
-| Real CSS not SPA HTML | ✓ |
-| Missing `/assets/*` URL | returns SPA HTML via `_redirects` (expected for unknown paths; real hashed assets are fine) |
-| Live API target | Firebase `us-central1-goldmeta-web.cloudfunctions.net` |
-| Phase 3 SW/assets on prod | **Not yet** (still Phase 2 hashes) |
-
-After Pages deploy: hard refresh once; confirm new JS/CSS hashes (`index-D674XCiC.css` / new JS) and SW update.
+| CSS `Content-Type` | `text/css; charset=utf-8` |
+| JS `Content-Type` | `application/javascript` |
+| Service worker | Registered; controller `…/sw.js` |
+| Hard refresh Phase 3 UI | PASS (new hashes) |
 
 ---
 
@@ -109,68 +89,45 @@ After Pages deploy: hard refresh once; confirm new JS/CSS hashes (`index-D674XCi
 
 | Check | Result |
 |-------|--------|
-| LIVE webhook POST | **202** accepted/queued |
-| Decision created | LIVE WAIT `3a50f532e1a068983fb78840` |
-| LIVE setups | **0** |
-| TEST analytics contamination | none |
-| Broker | still disabled (`BROKER_MODE=DISABLED`) |
-| Health | `backendVersion: 1.2.0-phase3` |
+| LIVE webhook POST | **202** queued (`2HBnvhqE6XQPJF4roWCQUx6E` kept active) |
+| Decision created | LIVE `WAIT` `c2b7a020432219e725ed4e2c` |
+| LIVE setups | **0** (before and after) |
+| TEST analytics | unchanged (n=12) |
+| Broker | `BROKER_MODE=DISABLED`, `brokerExecutionEnabled=false` |
+| Setup tracking | `SETUP_TRACKING_ENVIRONMENTS=["TEST"]` only |
 
 ---
 
-## TASK F — Clean PR strategy
+## TASK F — PR review state
 
-### Done
+| PR | State | Action |
+|----|-------|--------|
+| #8 clean Phase 3 | **Draft**, CI Backend+Web green on prior head | Keep draft; safe to mark **ready for review** after CI on latest commits |
+| #7 noisy | Open | Keep open until #8 fully verified; **do not merge either** |
 
-1. Created `cursor/phase3-clean-c2c2` from `origin/cursor/webhook-delivery-400-c2c2`
-2. Cherry-picked Phase 3 commits only (`271438c`…`17e4aa0` equivalents)
-3. Opened draft **PR #8**: https://github.com/saviosyl/GOLDSMETA/pull/8  
-   - Base: `cursor/webhook-delivery-400-c2c2`  
-   - **No `ios/` files** in the diff  
-   - **No `pine/` files** in the diff vs that base
-4. Left **PR #7 open** (not closed, not merged); commented with pointer to PR #8
-5. Note: cherry-pick onto `main` is not viable (MVP main lacks production web/backend tree → mass conflicts)
+### PR #8 recommendation
 
-### Why not base=`main`
-
-`main` is the initial MVP. Phase 3 depends on production-connection / webhook-delivery history. Clean review = Phase 3 commits only against `webhook-delivery-400`.
-
-### Included paths (Phase 3 only)
-
-Backend setup lifecycle, analytics, mock execution broker, firestore rules/indexes, web Analytics/Setup/Diagnostics/History/Dashboard updates, Stage 2 docs/fixtures. See PR #8 files list.
-
----
-
-## TASK G — Quality
-
-| Check | Result |
-|-------|--------|
-| Backend lint | pass |
-| Backend tests | **90** pass |
-| Backend build | pass |
-| Web lint | pass |
-| Web typecheck | pass |
-| Web tests | **40** pass |
-| Production web build | pass (`index-DIsBlidJ.js`, `index-D674XCiC.css`) |
-| GitHub Actions on clean PR | Workflows updated to run on PRs targeting `webhook-delivery-400` / `production-connection` (previously main-only) |
-
-Backend flags unchanged: `SETUP_TRACKING_ENVIRONMENTS=TEST`, `BROKER_MODE=DISABLED`, `AI_ENABLED=false`.
+**Safe to mark ready for review** after the getDecision fix + deploy verification commits land and CI stays green. Prefer #8 over #7 (no `ios/` / `pine/` noise). Do not merge until reviewer sign-off.
 
 ---
 
 ## Remaining issues
 
-1. **Cloudflare Pages deploy blocked** without `CLOUDFLARE_API_TOKEN`
-2. Production UI / authenticated responsive / SW update checks pending deploy
-3. Diagnostics not admin-claim-restricted yet
-4. PR #7 vs `main` still noisy — use **PR #8** for review
+1. Diagnostics page does not render `setupTrackingEnvironments` / flag strip (API has them; UI omits).
+2. History `TEST` filter can still show decision cards with a LIVE env badge when the linked decision was LIVE isolation traffic — confirm filter semantics (decision env vs setup env).
+3. `GET /v1/setups?environment=` is ignored server-side (list returns all; analytics filters correctly).
+4. Diagnostics is authenticated-user scoped, not admin-claim-gated (known Phase 3 limitation).
+5. Custom-domain edge can cache SPA HTML for brand-new `/assets/*` URLs during deploy races; prefer content-hash redeploy or a token with Cache Purge if it recurs.
+6. Primary test account password was rotated for agent sign-in — owner should reset via Firebase Auth if needed.
 
-## Recommendation
+---
 
-- **PR #8** is the correct review surface (Phase-3-only, no ios/pine vs base).
-- **Not ready to mark ready for review** until:
-  1. Pages deploy with Phase 3 assets succeeds
-  2. Authenticated production UI checks (Dashboard → Journal) pass
-- Do **not** enable `TEST,LIVE`
-- Do **not** connect IG
-- Do **not** merge PR #7 or #8 yet
+## Constraints preserved
+
+- `SETUP_TRACKING_ENVIRONMENTS=TEST`
+- `BROKER_MODE=DISABLED`
+- `AI_ENABLED=false`
+- No LIVE setup tracking enablement
+- No IG connection
+- No merge of PR #7 or #8
+- No `ios/` / `pine/` / DNS changes

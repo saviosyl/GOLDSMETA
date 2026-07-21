@@ -30,7 +30,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
   router.get("/v1/decisions/:decisionId", requireAuth, async (req, res) => {
     const decisionId = firstParam(req.params.decisionId);
     const userId = getAuthenticatedUserId(req);
-    const decision = decisionId ? await store.getDecision(decisionId) : undefined;
+    const decision = decisionId ? await store.getDecision(userId, decisionId) : undefined;
     if (!decision || decision.userId !== userId) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: "Decision not found" } });
       return;
