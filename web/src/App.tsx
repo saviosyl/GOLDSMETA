@@ -8,6 +8,9 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
 import { JournalPage } from "./pages/JournalPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { SetupDetailPage } from "./pages/SetupDetailPage";
+import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 
 function ProtectedApp() {
   const { user, loading } = useAuth();
@@ -39,6 +42,9 @@ function ProtectedApp() {
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
+        <Route path="/setups/:setupId" element={<SetupDetailPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

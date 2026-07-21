@@ -13,6 +13,7 @@ import { buildSystemRouter } from "./routes/system";
 import { buildTradingRouter } from "./routes/trading";
 import { buildTradingViewRouter } from "./routes/tradingview";
 import { buildWebhooksRouter } from "./routes/webhooks";
+import { buildSetupsRouter } from "./routes/setups";
 import { AiExplainer } from "./services/ai/explainer";
 import { processJob } from "./services/jobs/processJob";
 import { createStore } from "./services/storage/createStore";
@@ -84,6 +85,7 @@ export const createApp = (
   app.use(buildDevicesRouter(dependencies.store));
   app.use(buildPushRouter(dependencies.store));
   app.use(buildDecisionsRouter(dependencies.store));
+  app.use(buildSetupsRouter(dependencies.store));
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));
   app.use(buildTradingRouter(tradingService));

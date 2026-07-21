@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import type { SetupRecord } from "../../models/setup";
+import { isActiveSetupStatus } from "../../models/setup";
 import type {
   DecisionRecord,
   DeviceRecord,
@@ -14,11 +16,13 @@ import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
   CreateWebhookConnectionInput,
+  DecisionEnvironment,
   GoldMetaStore,
   ProcessingJob,
   RawEventRecord,
   SaveRawEventOptions,
-  WebhookConnection
+  WebhookConnection,
+  WebhookRejectLog
 } from "./types";
 
 const userScopedKey = (userId: string, id: string): string => `${userId}:${id}`;
@@ -27,6 +31,7 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private rawEvents = new Map<string, RawEventRecord>();
   private snapshots = new Map<string, MarketSnapshot>();
   private decisions = new Map<string, DecisionRecord>();
+  private setups = new Map<string, SetupRecord>();
   private devices = new Map<string, DeviceRecord>();
   private webPushSubscriptions = new Map<string, WebPushSubscriptionRecord>();
   private journalEntries = new Map<string, JournalEntry>();
@@ -35,6 +40,7 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private webhookConnections = new Map<string, WebhookConnection>();
   private processingJobs = new Map<string, ProcessingJob>();
   private eventDedupes = new Set<string>();
+  private webhookRejects: WebhookRejectLog[] = [];
 
   saveRawEvent(
     userId: string,
@@ -87,8 +93,9 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     return decision;
   }
 
-  getDecision(decisionId: string): DecisionRecord | undefined {
-    return this.decisions.get(decisionId);
+  getDecision(userId: string, decisionId: string): DecisionRecord | undefined {
+    const decision = this.decisions.get(decisionId);
+    return decision && decision.userId === userId ? decision : undefined;
   }
 
   listDecisions(userId = "default-user", limit = 50): DecisionRecord[] {
@@ -105,6 +112,42 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
 
   latestMeaningfulDecision(userId = "default-user"): DecisionRecord | undefined {
     return this.listDecisions(userId).find((decision) => decision.decision !== "WAIT");
+  }
+
+  saveSetup(setup: SetupRecord): SetupRecord {
+    this.setups.set(setup.setupId, setup);
+    return setup;
+  }
+
+  getSetup(userId: string, setupId: string): SetupRecord | undefined {
+    const setup = this.setups.get(setupId);
+    return setup?.userId === userId ? setup : undefined;
+  }
+
+  getSetupByDecisionId(userId: string, decisionId: string): SetupRecord | undefined {
+    return [...this.setups.values()].find((s) => s.userId === userId && s.decisionId === decisionId);
+  }
+
+  listSetups(userId: string, limit = 50, environment?: DecisionEnvironment): SetupRecord[] {
+    return [...this.setups.values()]
+      .filter((s) => s.userId === userId && (environment ? s.environment === environment : true))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+  }
+
+  listActiveSetups(userId: string, environment?: DecisionEnvironment): SetupRecord[] {
+    return this.listSetups(userId, 200, environment).filter(
+      (s) => isActiveSetupStatus(s.status) && s.resolution === "OPEN"
+    );
+  }
+
+  recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {
+    this.webhookRejects.unshift({ ...log, id: randomUUID() });
+    this.webhookRejects = this.webhookRejects.slice(0, 100);
+  }
+
+  listRecentWebhookRejects(limit = 20): WebhookRejectLog[] {
+    return this.webhookRejects.slice(0, limit);
   }
 
   registerDevice(device: DeviceRecord): DeviceRecord {
@@ -388,6 +431,7 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     this.rawEvents.clear();
     this.snapshots.clear();
     this.decisions.clear();
+    this.setups.clear();
     this.devices.clear();
     this.journalEntries.clear();
     this.settings.clear();

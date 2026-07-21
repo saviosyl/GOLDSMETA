@@ -21,6 +21,8 @@ import { calculateConfidence } from "./confidence";
 import { evaluateHardGuards } from "./hardGuards";
 import { scoreSnapshot, directionFromScore } from "./scoringEngine";
 import { buildTradePlan } from "./tradePlanEngine";
+import { createSetupFromDecision } from "../setup/createSetup";
+import { logger } from "../logging/logger";
 
 const disclaimer =
   "GoldMeta provides market analysis and decision support only. Trading involves substantial risk.";
@@ -230,5 +232,15 @@ export const processDecisionPipeline = async (
   );
 
   await store.saveDecision(decision);
+
+  try {
+    await createSetupFromDecision(store, decision);
+  } catch (error: unknown) {
+    logger.warn("Setup creation failed (non-fatal)", {
+      decisionId: decision.decisionId,
+      error: error instanceof Error ? error.message : "unknown"
+    });
+  }
+
   return decision;
 };

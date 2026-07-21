@@ -32,6 +32,10 @@ export interface BrokerOrderResult {
   instructions?: string[];
 }
 
+/**
+ * Existing trading-mode broker interface (manual / demo-sim).
+ * Phase L IG demo uses ExecutionBrokerAdapter in executionBroker.ts.
+ */
 export interface BrokerAdapter {
   readonly id: string;
   readonly displayName: string;

@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
-import type { Firestore, Transaction } from "firebase-admin/firestore";
+import type { Firestore, Query, Transaction } from "firebase-admin/firestore";
 import { z } from "zod";
+import type { SetupRecord } from "../../models/setup";
+import { isActiveSetupStatus } from "../../models/setup";
 import type {
   DecisionRecord,
   DeviceRecord,
@@ -16,11 +18,13 @@ import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
   CreateWebhookConnectionInput,
+  DecisionEnvironment,
   GoldMetaStore,
   ProcessingJob,
   RawEventRecord,
   SaveRawEventOptions,
-  WebhookConnection
+  WebhookConnection,
+  WebhookRejectLog
 } from "./types";
 
 const webhookConnectionSchema = z.object({
@@ -171,14 +175,16 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return decision;
   }
 
-  async getDecision(decisionId: string): Promise<DecisionRecord | undefined> {
+  async getDecision(userId: string, decisionId: string): Promise<DecisionRecord | undefined> {
+    // Prefer the user-scoped document path. Collection-group queries on
+    // decisionId require an extra index and currently fail in production.
     const snap = await this.db
-      .collectionGroup("decisions")
-      .where("decisionId", "==", decisionId)
-      .limit(1)
+      .collection("users")
+      .doc(userId)
+      .collection("decisions")
+      .doc(decisionId)
       .get();
-    const doc = snap.docs[0];
-    return doc ? doc.data() as DecisionRecord : undefined;
+    return snap.exists ? (snap.data() as DecisionRecord) : undefined;
   }
 
   async listDecisions(userId: string, limit = 50): Promise<DecisionRecord[]> {
@@ -199,6 +205,62 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
 
   async latestMeaningfulDecision(userId: string): Promise<DecisionRecord | undefined> {
     return (await this.listDecisions(userId, 50)).find((decision) => decision.decision !== "WAIT");
+  }
+
+  async saveSetup(setup: SetupRecord): Promise<SetupRecord> {
+    await this.db
+      .collection("users")
+      .doc(setup.userId)
+      .collection("setups")
+      .doc(setup.setupId)
+      .set(toFirestoreData(setup), { merge: true });
+    return setup;
+  }
+
+  async getSetup(userId: string, setupId: string): Promise<SetupRecord | undefined> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("setups")
+      .doc(setupId)
+      .get();
+    return snap.exists ? (snap.data() as SetupRecord) : undefined;
+  }
+
+  async getSetupByDecisionId(userId: string, decisionId: string): Promise<SetupRecord | undefined> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("setups")
+      .where("decisionId", "==", decisionId)
+      .limit(1)
+      .get();
+    const doc = snap.docs[0];
+    return doc ? (doc.data() as SetupRecord) : undefined;
+  }
+
+  async listSetups(
+    userId: string,
+    limit = 50,
+    environment?: DecisionEnvironment
+  ): Promise<SetupRecord[]> {
+    let query: Query = this.db
+      .collection("users")
+      .doc(userId)
+      .collection("setups");
+    if (environment) {
+      query = query.where("environment", "==", environment);
+    }
+    const snap = await query.orderBy("createdAt", "desc").limit(limit).get();
+    return snap.docs.map((doc) => doc.data() as SetupRecord);
+  }
+
+  async listActiveSetups(
+    userId: string,
+    environment?: DecisionEnvironment
+  ): Promise<SetupRecord[]> {
+    const setups = await this.listSetups(userId, 200, environment);
+    return setups.filter((s) => isActiveSetupStatus(s.status) && s.resolution === "OPEN");
   }
 
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {
@@ -554,6 +616,27 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
       }
       throw error;
     }
+  }
+
+  async recordWebhookReject(log: Omit<WebhookRejectLog, "id">): Promise<void> {
+    const id = randomUUID();
+    await this.db
+      .collection("system")
+      .doc("webhookRejects")
+      .collection("items")
+      .doc(id)
+      .set(toFirestoreData({ ...log, id }));
+  }
+
+  async listRecentWebhookRejects(limit = 20): Promise<WebhookRejectLog[]> {
+    const snap = await this.db
+      .collection("system")
+      .doc("webhookRejects")
+      .collection("items")
+      .orderBy("at", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((doc) => doc.data() as WebhookRejectLog);
   }
 
   private rawEventRef(userId: string, eventId: string): FirebaseFirestore.DocumentReference {

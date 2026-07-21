@@ -22,7 +22,7 @@ export const humanizeToken = (value: string): string =>
 export const displayQualityLabel = (
   decision: Decision,
   source: "live" | "cached" | "offline" = "live"
-): "LIVE" | "STALE" | "PARTIAL" | "OFFLINE" | "DELAYED" => {
+): "FRESH" | "STALE" | "PARTIAL" | "OFFLINE" | "DELAYED" => {
   if (source === "offline" || decision.dataSourceLabel === "OFFLINE") {
     return "OFFLINE";
   }
@@ -38,7 +38,8 @@ export const displayQualityLabel = (
   if (decision.dataSourceLabel === "DELAYED") {
     return "DELAYED";
   }
-  return "LIVE";
+  // Fresh market data — intentionally not labelled "LIVE" to avoid clashing with environment.
+  return "FRESH";
 };
 
 export const recommendedActionLabel = (decision: Decision): string => {
@@ -201,9 +202,43 @@ export {
   formatRatio
 };
 
-export type HistoryFilter = "ALL" | DecisionAction;
+export type HistoryFilter =
+  | "ALL"
+  | DecisionAction
+  | "ACTIVE"
+  | "WON"
+  | "LOST"
+  | "EXPIRED"
+  | "LIVE"
+  | "TEST";
 
-export const filterHistory = (items: Decision[], filter: HistoryFilter): Decision[] => {
+export const filterHistory = (
+  items: Decision[],
+  filter: HistoryFilter,
+  setupsByDecisionId: Map<string, { status: string; resolution: string; environment: string }> = new Map()
+): Decision[] => {
   if (filter === "ALL") return items;
-  return items.filter((item) => item.decision === filter);
+  if (filter === "BUY" || filter === "SELL" || filter === "WAIT") {
+    return items.filter((item) => item.decision === filter);
+  }
+  if (filter === "LIVE") {
+    // Authoritative decision.environment only — never infer from setups or quality labels.
+    return items.filter((item) => item.environment === "LIVE");
+  }
+  if (filter === "TEST") {
+    return items.filter((item) => item.environment === "TEST");
+  }
+  return items.filter((item) => {
+    const setup = setupsByDecisionId.get(item.decisionId);
+    if (!setup) return false;
+    if (filter === "ACTIVE") return setup.resolution === "OPEN";
+    if (filter === "WON") return setup.resolution.startsWith("WIN_");
+    if (filter === "LOST") {
+      return setup.resolution === "LOSS_SL" || setup.resolution.startsWith("AMBIGUOUS");
+    }
+    if (filter === "EXPIRED") {
+      return setup.resolution === "EXPIRED" || setup.resolution === "INVALIDATED" || setup.resolution === "CANCELLED";
+    }
+    return true;
+  });
 };
