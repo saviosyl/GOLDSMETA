@@ -20,6 +20,7 @@
   --safe-right: env(safe-area-inset-right, 0px);
   /* UI polish pass marker for asset cache bust */
   --ui-polish: 1;
+  --scroll-hotfix: 1;
   font-family: "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
   line-height: 1.45;
   font-weight: 450;
@@ -35,12 +36,31 @@ html,
 body,
 #root {
   min-height: 100%;
+  height: auto;
   margin: 0;
+}
+
+html {
+  /* Document is the scroll container — do not trap wheel on nested shells. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  scroll-behavior: auto;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   min-height: 100dvh;
   background: var(--bg);
+  overflow-x: hidden;
+  overflow-y: visible;
+  overscroll-behavior-y: auto;
+  touch-action: pan-x pan-y;
+}
+
+#root {
+  overflow: visible;
+  min-height: 100dvh;
 }
 
 button,
@@ -62,11 +82,12 @@ a {
   padding-top: var(--safe-top);
   padding-left: max(16px, var(--safe-left));
   padding-right: max(16px, var(--safe-right));
-  padding-bottom: calc(76px + var(--safe-bottom));
+  padding-bottom: calc(88px + var(--safe-bottom));
   max-width: 720px;
   margin: 0 auto;
   min-width: 0;
-  overflow-x: hidden;
+  /* Never set overflow-x/y here — it creates a dead scrollport that swallows wheel events. */
+  overflow: visible;
 }
 
 .app-shell.auth-only {
@@ -1161,19 +1182,14 @@ textarea {
   }
 }
 
-/* Keyboard / scroll polish */
-html {
-  scroll-behavior: smooth;
-  -webkit-text-size-adjust: 100%;
-}
-
+/* Keyboard / scroll polish — document scrolls; fixed nav gets reserved space */
 .app-shell {
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: auto;
 }
 
 @supports (padding: max(0px)) {
   .app-shell {
-    padding-bottom: max(76px, calc(76px + var(--safe-bottom)));
+    padding-bottom: max(88px, calc(88px + var(--safe-bottom)));
   }
 }
 

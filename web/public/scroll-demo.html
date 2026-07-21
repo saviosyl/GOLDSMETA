@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>GoldMeta scroll fixture</title>
+    <link rel="stylesheet" href="/assets/index-PLACEHOLDER.css" id="css-link" />
+    <style>
+      /* Fallback tokens if hashed CSS path is rewritten by the e2e harness */
+      :root {
+        --bg: #0a0b0d;
+        --safe-top: 0px;
+        --safe-bottom: 0px;
+        --safe-left: 0px;
+        --safe-right: 0px;
+        --border: rgba(201, 162, 39, 0.18);
+        --muted: #aba89e;
+        --text: #f1ebd9;
+        --gold: #c9a227;
+        --gold-soft: rgba(201, 162, 39, 0.22);
+      }
+    </style>
+    <script>
+      // Resolve hashed CSS from the sibling index.html asset map when available.
+      fetch("/").then((r) => r.text()).then((html) => {
+        const m = html.match(/\/assets\/index-[^"]+\.css/);
+        if (m) document.getElementById("css-link").href = m[0];
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div class="app-shell v5-shell" data-testid="scroll-shell">
+        <h1 class="brand">Scroll fixture</h1>
+        <p class="subtitle">Tall content for wheel / keyboard scroll verification.</p>
+        <div id="top-marker" data-testid="top-marker">TOP</div>
+        <section class="card" style="height: 2400px">
+          <p>Spacer block to force document scroll.</p>
+        </section>
+        <div id="bottom-marker" data-testid="bottom-marker">BOTTOM</div>
+        <nav class="nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/intelligence">Intel</a>
+          <a href="/analytics">Analytics</a>
+          <a href="/replay">Replay</a>
+          <a href="/settings">Settings</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
