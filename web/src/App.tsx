@@ -57,7 +57,7 @@ function ProtectedApp() {
         <div className="gm-main">
           <div className="gm-main-inner">
             <div className="gm-section brand-loading" role="status">
-              <img src="/brand/mark-v54.svg" alt="" width={48} height={48} />
+              <img src="/brand/mark-official.png" alt="" width={48} height={48} />
               <p>Checking GoldMeta session…</p>
             </div>
           </div>

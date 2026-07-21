@@ -72,7 +72,7 @@ export function AppShell({
     <div className="gm-shell" data-testid="app-shell-redesign">
       <aside className="gm-sidebar" aria-label="Desktop navigation" data-testid="desktop-sidebar">
         <div className="gm-sidebar-brand">
-          <img src="/brand/mark-v54.svg" alt="" width={36} height={36} />
+          <img src="/brand/mark-official.png" alt="" width={36} height={36} />
           <div>
             <strong>GOLDMETA</strong>
             <span className="gm-meta">by MetaMech Solutions</span>
@@ -116,7 +116,7 @@ export function AppShell({
         <div className="gm-main-inner">
           <header className="gm-topbar" data-testid="topbar">
             <div className="gm-topbar-brand">
-              <img src="/brand/mark-v54.svg" alt="" width={28} height={28} className="gm-topbar-mark" />
+              <img src="/brand/mark-official.png" alt="" width={28} height={28} className="gm-topbar-mark" />
               <div>
                 <strong>GOLDMETA</strong>
                 <span>Gold market intelligence</span>

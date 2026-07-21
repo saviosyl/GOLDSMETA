@@ -32,7 +32,7 @@ describe("GoldMeta V5.2 branding UI", () => {
     render(<SignInPage />);
     expect(screen.getByTestId("signin-logo")).toBeInTheDocument();
     const logo = screen.getByAltText(/^GoldMeta$/i);
-    expect(logo.getAttribute("src")).toMatch(/logo-full-v54|mark-v54/);
+    expect(logo.getAttribute("src")).toMatch(/logo-full-official|logo-official|mark-official/);
     expect(screen.getByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
   });
 
