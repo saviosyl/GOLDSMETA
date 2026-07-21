@@ -6,7 +6,7 @@
 **Base:** `cursor/goldmeta-v4-stage-b-c2c2`  
 **Backend (deployed):** `1.4.0-v5-intelligence` (unchanged this pass — frontend/honesty/hardening focus)  
 **Pre-V5.1 tip (document before deploy):** `998cd7f`  
-**V5.1 production frontend candidate commit:** _(see latest commit on this branch after merge of this report)_
+**V5.1 production frontend candidate commit:** `1086fac`
 
 ---
 
