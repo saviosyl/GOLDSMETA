@@ -481,8 +481,8 @@ alertMessage = "{" +
 // Script alerts (webhook JSON).
 // TradingView Create Alert → Condition: "GoldMeta Bridge" → "Any alert() function call".
 // Do NOT gate on barstate.isrealtime: alert() already only fires in realtime, and
- // realtime-only gating has caused some clients to hide "Any alert() function call"
- // and list only plot series instead. alert() is a no-op on historical bars.
+// realtime-only gating has caused some clients to hide "Any alert() function call"
+// and list only plot series instead. alert() is a no-op on historical bars.
 // Frequency for production: alert.freq_once_per_bar_close (confirmed-bar mode).
 // ---------------------------------------------------------------------------
 var bool testAlertSent = false
