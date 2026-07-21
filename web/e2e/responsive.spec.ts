@@ -9,7 +9,7 @@ const VIEWPORTS = [
   { name: "1920x1080", width: 1920, height: 1080, expectMobileNav: false }
 ] as const;
 
-test.describe("V5.3.1 responsive viewport matrix", () => {
+test.describe("V5.4 responsive viewport matrix", () => {
   for (const vp of VIEWPORTS) {
     test(`sign-in metrics @ ${vp.name}`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
@@ -22,7 +22,6 @@ test.describe("V5.3.1 responsive viewport matrix", () => {
         const shell = document.querySelector('[data-testid="signed-out-shell"]') as HTMLElement | null;
         const layout = document.querySelector('[data-testid="signin-layout"]') as HTMLElement | null;
         const card = document.querySelector('[data-testid="signin-card"]') as HTMLElement | null;
-        const brandPanel = document.querySelector(".gm-auth-brand-panel") as HTMLElement | null;
         return {
           viewport: { w: window.innerWidth, h: window.innerHeight },
           documentWidth: doc.clientWidth,
@@ -30,7 +29,6 @@ test.describe("V5.3.1 responsive viewport matrix", () => {
           shellWidth: shell?.getBoundingClientRect().width ?? null,
           layoutWidth: layout?.getBoundingClientRect().width ?? null,
           cardWidth: card?.getBoundingClientRect().width ?? null,
-          brandPanelDisplay: brandPanel ? getComputedStyle(brandPanel).display : null,
           breakpoint:
             window.innerWidth >= 1100 ? "desktop" : window.innerWidth >= 768 ? "tablet" : "mobile"
         };
@@ -43,19 +41,26 @@ test.describe("V5.3.1 responsive viewport matrix", () => {
       expect(metrics.layoutWidth ?? 0).toBeGreaterThanOrEqual(vp.width - 1);
 
       if (vp.width >= 1280) {
+        // Centred premium card (~440px), not a 270px mobile column
         expect(metrics.cardWidth ?? 0).toBeGreaterThanOrEqual(400);
         expect(metrics.cardWidth ?? 0).toBeLessThanOrEqual(480);
-        expect(metrics.brandPanelDisplay).toBe("flex");
         expect(metrics.breakpoint).toBe("desktop");
       } else if (vp.width < 768) {
-        expect(metrics.cardWidth ?? 0).toBeGreaterThan(vp.width - 48);
-        expect(metrics.brandPanelDisplay).toBe("none");
+        expect(metrics.cardWidth ?? 0).toBeGreaterThan(vp.width - 56);
+        expect(metrics.cardWidth ?? 0).toBeLessThanOrEqual(vp.width);
       }
 
-      // No rejected customer-facing copy
       await expect(page.getByText(/backend decisions/i)).toHaveCount(0);
       await expect(page.getByText(/Firebase/i)).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+      if (vp.width >= 1280) {
+        const theme = await page.evaluate(() => ({
+          bg: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+          navy: getComputedStyle(document.documentElement).getPropertyValue("--navy").trim()
+        }));
+        expect(theme.bg.toLowerCase()).toBe("#f7f8fa");
+        expect(theme.navy.toLowerCase()).toBe("#11284a");
+      }
     });
   }
 
@@ -86,21 +91,11 @@ test.describe("V5.3.1 responsive viewport matrix", () => {
     await expect(page.getByTestId("mobile-more-sheet")).toBeVisible();
   });
 
-  test("brand page three columns on desktop and one on mobile", async ({ page }) => {
+  test("brand page shows approved branding assets", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/brand");
-    await expect(page.getByTestId("brand-concept-D")).toBeVisible();
-    await expect(page.getByTestId("brand-concept-E")).toBeVisible();
-    await expect(page.getByTestId("brand-concept-F")).toBeVisible();
-    const desktopCols = await page.getByTestId("brand-columns").evaluate((el) => {
-      return getComputedStyle(el).gridTemplateColumns.split(" ").length;
-    });
-    expect(desktopCols).toBeGreaterThanOrEqual(3);
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    const mobileCols = await page.getByTestId("brand-columns").evaluate((el) => {
-      return getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length;
-    });
-    expect(mobileCols).toBe(1);
+    await expect(page.getByTestId("brand-concepts-page")).toBeVisible();
+    await expect(page.getByTestId("brand-approved-note")).toBeVisible();
+    await expect(page.getByAltText("GoldMeta full logo")).toBeVisible();
   });
 });

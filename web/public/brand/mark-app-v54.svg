@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="GoldMeta">
+  <rect width="128" height="128" rx="28" fill="#11284A"/>
+  <path
+    d="M64 22c-23.2 0-42 18.8-42 42s18.8 42 42 42c13 0 24.6-5.9 32.2-15.1l-8.6-7.2C82.2 90.6 73.6 95 64 95c-17.1 0-31-13.9-31-31s13.9-31 31-31c10.4 0 19.5 5.1 25.2 13l8.5-7.6C90.2 28 78 22 64 22z"
+    fill="#FFFFFF"
+    opacity="0.92"
+  />
+  <path d="M42 84V48h11l9 22.5L71 48h11v26l11-15.5V84H82.5V66.5L72 84h-8.5L53.5 66.2V84H42z" fill="#D8A33D"/>
+  <path d="M82 54l11-12 4 4-5.5 5.5H102v5.5H82V54z" fill="#D8A33D"/>
+  <rect x="48" y="36" width="4" height="9" rx="1.2" fill="#D8A33D"/>
+  <rect x="54.5" y="31" width="4" height="14" rx="1.2" fill="#D8A33D"/>
+  <rect x="61" y="26" width="4" height="19" rx="1.2" fill="#D8A33D"/>
+</svg>

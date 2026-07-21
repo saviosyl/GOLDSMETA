@@ -32,8 +32,8 @@ export default defineConfig({
         short_name: "GoldMeta",
         description:
           "GoldMeta XAUUSD decision support — analysis only, not an executed trade. Broker execution disabled.",
-        theme_color: "#0A0B0D",
-        background_color: "#0A0B0D",
+        theme_color: "#F7F8FA",
+        background_color: "#F7F8FA",
         display: "standalone",
         orientation: "portrait-primary",
         start_url: "/",

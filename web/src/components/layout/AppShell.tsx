@@ -3,33 +3,42 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 
 const DESKTOP_LINKS = [
-  { to: "/", label: "Overview", end: true },
-  { to: "/intelligence", label: "Intelligence", end: false },
+  { to: "/", label: "Dashboard", end: true },
+  { to: "/intelligence", label: "Market Overview", end: false },
   { to: "/analytics", label: "Analytics", end: false },
   { to: "/replay", label: "Replay", end: false },
-  { to: "/history", label: "History", end: false },
   { to: "/journal", label: "Journal", end: false },
-  { to: "/planner", label: "Risk planner", end: false },
-  { to: "/v4", label: "V4 Research", end: false },
-  { to: "/settings", label: "Settings", end: false },
-  { to: "/brand", label: "Brand preview", end: false }
+  { to: "/settings", label: "Settings", end: false }
+];
+
+const DESKTOP_SECONDARY = [
+  { to: "/history", label: "History" },
+  { to: "/planner", label: "Risk planner" },
+  { to: "/v4", label: "V4 Research" }
 ];
 
 const MOBILE_PRIMARY = [
   { to: "/", label: "Home", end: true },
-  { to: "/intelligence", label: "Intel", end: false },
+  { to: "/intelligence", label: "Markets", end: false },
   { to: "/analytics", label: "Analytics", end: false },
   { to: "/replay", label: "Replay", end: false }
 ];
 
 const MOBILE_MORE = [
-  { to: "/history", label: "History" },
   { to: "/journal", label: "Journal" },
+  { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "V4 Research" },
-  { to: "/settings", label: "Settings" },
-  { to: "/brand", label: "Brand preview" }
+  { to: "/settings", label: "Settings" }
 ];
+
+function initials(email: string | null | undefined): string {
+  if (!email) return "GM";
+  const local = email.split("@")[0] ?? "gm";
+  const parts = local.split(/[._-]/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
+  return local.slice(0, 2).toUpperCase();
+}
 
 export function AppShell({
   children,
@@ -63,10 +72,10 @@ export function AppShell({
     <div className="gm-shell" data-testid="app-shell-redesign">
       <aside className="gm-sidebar" aria-label="Desktop navigation" data-testid="desktop-sidebar">
         <div className="gm-sidebar-brand">
-          <img src="/brand/mark-dark.svg" alt="" width={28} height={28} />
+          <img src="/brand/mark-v54.svg" alt="" width={36} height={36} />
           <div>
-            <strong>GoldMeta</strong>
-            <span className="gm-meta">Market intelligence</span>
+            <strong>GOLDMETA</strong>
+            <span className="gm-meta">by MetaMech Solutions</span>
           </div>
         </div>
         <nav className="gm-sidebar-nav">
@@ -80,15 +89,49 @@ export function AppShell({
               {link.label}
             </NavLink>
           ))}
+          <p className="gm-meta" style={{ margin: "16px 8px 6px" }}>
+            Advanced
+          </p>
+          {DESKTOP_SECONDARY.map((link) => (
+            <NavLink
+              key={link.to}
+              to={withPrefix(link.to)}
+              className={({ isActive }) => (isActive ? "active" : undefined)}
+            >
+              {link.label}
+            </NavLink>
+          ))}
         </nav>
         <div className="gm-sidebar-foot">
-          <span className="gm-meta">{email}</span>
-          <span className="gm-meta">Analysis only · broker off</span>
+          <div className="gm-sidebar-premium">
+            <p>Analysis only. Broker execution stays disabled.</p>
+            <span className="gm-meta" style={{ color: "rgba(255,255,255,0.75)" }}>
+              {email}
+            </span>
+          </div>
         </div>
       </aside>
 
       <div className="gm-main">
-        <div className="gm-main-inner">{children ?? <Outlet />}</div>
+        <div className="gm-main-inner">
+          <header className="gm-topbar" data-testid="topbar">
+            <div className="gm-topbar-brand">
+              <img src="/brand/mark-v54.svg" alt="" width={28} height={28} className="gm-topbar-mark" />
+              <div>
+                <strong>GOLDMETA</strong>
+                <span>Gold market intelligence</span>
+              </div>
+            </div>
+            <div className="gm-topbar-actions">
+              <span className="gm-badge gold">LIVE</span>
+              <div className="gm-avatar" aria-hidden>
+                {initials(email)}
+              </div>
+              <span className="gm-meta">{email}</span>
+            </div>
+          </header>
+          {children ?? <Outlet />}
+        </div>
       </div>
 
       <nav className="gm-mobile-nav" aria-label="Mobile primary" data-testid="mobile-bottom-nav">
@@ -125,11 +168,7 @@ export function AppShell({
             </div>
             <div className="gm-more-links">
               {MOBILE_MORE.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={withPrefix(link.to)}
-                  onClick={() => setMoreOpen(false)}
-                >
+                <NavLink key={link.to} to={withPrefix(link.to)} onClick={() => setMoreOpen(false)}>
                   {link.label}
                 </NavLink>
               ))}

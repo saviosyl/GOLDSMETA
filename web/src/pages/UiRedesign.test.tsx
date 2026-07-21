@@ -69,7 +69,7 @@ describe("AppShell navigation", () => {
     );
     expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
-    expect(screen.getByText("Overview")).toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Home")).toBeInTheDocument();
     expect(screen.getByText("More")).toBeInTheDocument();
   });

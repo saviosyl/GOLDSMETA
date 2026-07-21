@@ -41,11 +41,10 @@ describe("V5.3.1 SignIn redesign", () => {
       </MemoryRouter>
     );
     expect(screen.getByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
-    expect(screen.getByText("Sign in to continue to GoldMeta.")).toBeInTheDocument();
+    expect(screen.getByText(/Sign in to your/i)).toBeInTheDocument();
     expect(screen.queryByText(/backend decisions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Firebase/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/iOS/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Brand preview/i)).not.toBeInTheDocument();
   });
 
   it("shows sign-up as a secondary text link, not a large secondary button", () => {
@@ -89,22 +88,16 @@ describe("V5.3.1 SignIn redesign", () => {
 });
 
 describe("V5.3.1 Brand concepts D/E/F", () => {
-  it("shows D E F and does not include withdrawn A B C or PI/globe concepts", () => {
+  it("shows approved branding and withdraws A–F concept cards", () => {
     render(
       <MemoryRouter>
         <BrandConceptsPage />
       </MemoryRouter>
     );
-    expect(screen.getByTestId("brand-concept-D")).toBeInTheDocument();
-    expect(screen.getByTestId("brand-concept-E")).toBeInTheDocument();
-    expect(screen.getByTestId("brand-concept-F")).toBeInTheDocument();
+    expect(screen.getByTestId("brand-concepts-page")).toBeInTheDocument();
+    expect(screen.getByTestId("brand-approved-note")).toBeInTheDocument();
     expect(screen.queryByTestId("brand-concept-A")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("brand-concept-B")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("brand-concept-C")).not.toBeInTheDocument();
-    expect(screen.getByTestId("brand-columns")).toBeInTheDocument();
-    const svgText = document.body.innerHTML;
-    expect(svgText).not.toMatch(/aria-label="Concept A/);
-    expect(svgText).not.toMatch(/globe or crosshair/i);
+    expect(screen.queryByTestId("brand-concept-D")).not.toBeInTheDocument();
   });
 });
 
