@@ -47,7 +47,7 @@ describe("GoldMeta V5.2 branding UI", () => {
   it("safe-area CSS variables are defined", () => {
     expect(cssText).toMatch(/--safe-top/);
     expect(cssText).toMatch(/--safe-bottom/);
-    expect(cssText).toMatch(/padding-bottom: calc\(76px \+ var\(--safe-bottom\)\)/);
+    expect(cssText).toMatch(/padding-bottom: calc\(88px \+ var\(--safe-bottom\)\)/);
   });
 
   it("no broker execution controls in CSS/UI chrome copy", () => {
