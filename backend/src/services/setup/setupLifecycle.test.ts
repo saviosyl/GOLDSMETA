@@ -386,14 +386,15 @@ describe("mock broker safety", () => {
     expect(IG_DEMO_ADAPTER_PLAN.safety.some((s) => s.includes("brokerLiveExecutionEnabled"))).toBe(
       true
     );
-    const liveBlocked = await broker.placeDemoOrder({
+    // Stage 2: BROKER_MODE=DISABLED → placeDemoOrder must fail closed
+    const blocked = await broker.placeDemoOrder({
       symbol: "XAUUSD",
       direction: "BUY",
       size: 1,
       idempotencyKey: "k1"
     });
-    // Mock may accept demo fills — live hard-disable is config.brokerLiveExecutionEnabled === false
-    // Ensure preview never places:
+    expect(blocked.accepted).toBe(false);
+    expect(blocked.reason).toMatch(/DEMO_BROKER_DISABLED|LIVE_EXECUTION/);
     const preview = await broker.previewOrder({
       symbol: "XAUUSD",
       direction: "BUY",
@@ -402,15 +403,5 @@ describe("mock broker safety", () => {
     });
     expect(preview.accepted).toBe(true);
     expect(preview.reason).toMatch(/Preview only|no order/i);
-    expect(liveBlocked.accepted).toBe(true); // mock demo fill allowed
-    // Second place with same key rejects
-    const dup = await broker.placeDemoOrder({
-      symbol: "XAUUSD",
-      direction: "BUY",
-      size: 1,
-      idempotencyKey: "k1"
-    });
-    expect(dup.accepted).toBe(false);
-    expect(dup.reason).toBe("DUPLICATE_IDEMPOTENCY_KEY");
   });
 });

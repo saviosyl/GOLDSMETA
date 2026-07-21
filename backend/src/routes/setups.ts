@@ -79,7 +79,9 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
           direction: s.direction,
           environment: s.environment
         })),
-        brokerLiveExecutionEnabled: setupLifecycleConfig.flags.brokerLiveExecutionEnabled
+        brokerLiveExecutionEnabled: setupLifecycleConfig.flags.brokerLiveExecutionEnabled,
+        brokerExecutionEnabled: setupLifecycleConfig.flags.brokerExecutionEnabled,
+        brokerMode: setupLifecycleConfig.flags.brokerMode
       }
     });
   });
