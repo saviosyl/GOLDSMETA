@@ -6,7 +6,8 @@ export default defineConfig({
     env: {
       APP_ENV: "test",
       NODE_ENV: "test",
-      STORAGE_BACKEND: "memory"
+      STORAGE_BACKEND: "memory",
+      ALLOW_TEST_AUTH_HEADER: "true"
     },
     globals: true,
     restoreMocks: true,

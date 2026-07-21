@@ -57,10 +57,13 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
-/** Firebase Functions reserves FIREBASE_* in .env — resolve project from runtime defaults. */
+/** Resolve project id without requiring reserved FIREBASE_* / GCLOUD_PROJECT .env keys. */
 const resolveFirebaseProjectId = (source: NodeJS.ProcessEnv): string | undefined => {
   if (source.FIREBASE_PROJECT_ID?.trim()) {
     return source.FIREBASE_PROJECT_ID.trim();
+  }
+  if (source.GOLDMETA_PROJECT_ID?.trim()) {
+    return source.GOLDMETA_PROJECT_ID.trim();
   }
   if (source.GCLOUD_PROJECT?.trim()) {
     return source.GCLOUD_PROJECT.trim();
