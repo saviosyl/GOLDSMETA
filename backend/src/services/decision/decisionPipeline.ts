@@ -243,16 +243,24 @@ export const processDecisionPipeline = async (
     });
   }
 
-  // GoldMeta V4 LIVE SHADOW — parallel research; never mutates V3 decision/setup/push/broker.
-  void runV4ShadowLifecycle({
-    store,
-    userId: decision.userId,
-    payload,
-    snapshot,
-    environment,
-    parentDecisionId: decision.decisionId,
-    eventId: stableEventId
-  });
+  // GoldMeta V4 LIVE SHADOW — after V3 is stored. Await so Cloud Functions
+  // do not freeze before persistence. Errors remain non-fatal inside the runner.
+  try {
+    await runV4ShadowLifecycle({
+      store,
+      userId: decision.userId,
+      payload,
+      snapshot,
+      environment,
+      parentDecisionId: decision.decisionId,
+      eventId: stableEventId
+    });
+  } catch (error: unknown) {
+    logger.warn("V4 shadow lifecycle outer catch (non-fatal)", {
+      decisionId: decision.decisionId,
+      error: error instanceof Error ? error.message : "unknown"
+    });
+  }
 
   return decision;
 };
