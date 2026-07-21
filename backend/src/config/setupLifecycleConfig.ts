@@ -46,10 +46,22 @@ export const setupLifecycleConfig = {
     setupTrackingEnabled: envBool("SETUP_TRACKING_ENABLED", true),
     /** Stage 2 default: TEST only. Stage 3 adds LIVE via env. */
     setupTrackingEnvironments: envEnvs("SETUP_TRACKING_ENVIRONMENTS", ["TEST"]),
-    /** LIVE money / broker execution — hard off for Phase 3. */
+    /**
+     * LIVE money / broker execution — hard off for Phase 3.
+     * BROKER_EXECUTION_ENABLED / BROKER_MODE fail closed: live never enables.
+     */
     brokerLiveExecutionEnabled: false,
-    /** IG / broker demo adapter may be constructed but placeDemoOrder is gated. */
-    brokerDemoOnlyEnabled: true
+    /** Explicit mirror of BROKER_EXECUTION_ENABLED — always false in Phase 3. */
+    brokerExecutionEnabled: false,
+    /** DISABLED | DEMO | LIVE — LIVE never grants execution. */
+    brokerMode: ((): "DISABLED" | "DEMO" | "LIVE" => {
+      const mode = (process.env.BROKER_MODE ?? "DISABLED").toUpperCase();
+      if (mode === "DEMO") return "DEMO";
+      if (mode === "LIVE") return "LIVE";
+      return "DISABLED";
+    })(),
+    /** placeDemoOrder only when BROKER_MODE=DEMO (Stage 2: DISABLED). */
+    brokerDemoOnlyEnabled: (process.env.BROKER_MODE ?? "DISABLED").toUpperCase() === "DEMO"
   },
 
   limits: {

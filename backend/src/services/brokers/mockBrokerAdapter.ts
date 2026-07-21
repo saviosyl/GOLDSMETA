@@ -68,10 +68,14 @@ export class MockBrokerAdapter implements ExecutionBrokerAdapter {
   }
 
   placeDemoOrder(request: ExecutionOrderRequest): Promise<ExecutionOrderResult> {
-    if (setupLifecycleConfig.flags.brokerLiveExecutionEnabled) {
+    if (
+      setupLifecycleConfig.flags.brokerLiveExecutionEnabled ||
+      setupLifecycleConfig.flags.brokerExecutionEnabled ||
+      setupLifecycleConfig.flags.brokerMode === "LIVE"
+    ) {
       return Promise.resolve(this.reject("LIVE_EXECUTION_HARD_DISABLED"));
     }
-    if (!setupLifecycleConfig.flags.brokerDemoOnlyEnabled) {
+    if (!setupLifecycleConfig.flags.brokerDemoOnlyEnabled || setupLifecycleConfig.flags.brokerMode !== "DEMO") {
       return Promise.resolve(this.reject("DEMO_BROKER_DISABLED"));
     }
     if (this.usedKeys.has(request.idempotencyKey)) {
