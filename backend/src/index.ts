@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler } from "express";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { env } from "./config/env";
+import { buildCorsMiddleware } from "./middleware/cors";
 import { buildDecisionsRouter } from "./routes/decisions";
 import { buildDevicesRouter } from "./routes/devices";
 import { buildHealthRouter } from "./routes/health";
@@ -68,6 +69,9 @@ export const createApp = (
 ): express.Express => {
   const app = express();
   app.disable("x-powered-by");
+  // Cloud Functions / load balancers terminate TLS; needed for correct webhook HTTPS URLs.
+  app.set("trust proxy", 1);
+  app.use(buildCorsMiddleware());
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT }));
 
   const tradingService = dependencies.tradingService ?? defaultTradingService;
@@ -88,7 +92,19 @@ export const createApp = (
 };
 
 export const app = createApp();
-export const api = onRequest({ region: env.FIREBASE_REGION }, app);
+export const api = onRequest(
+  {
+    region: env.FIREBASE_REGION,
+    // Mirror Express CORS allowlist for Cloud Functions OPTIONS handling.
+    cors: [
+      "https://goldmeta.metamechsolutions.com",
+      "https://goldmeta-web.pages.dev",
+      "http://127.0.0.1:5173",
+      "http://localhost:5173"
+    ]
+  },
+  app
+);
 export const processProcessingJob = onDocumentCreated(
   { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
   async (event) => {

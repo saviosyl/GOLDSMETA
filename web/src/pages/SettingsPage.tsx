@@ -10,6 +10,7 @@ import {
 } from "../lib/push";
 import { cacheKeys, saveCache } from "../lib/offlineCache";
 import { formatWhen } from "../lib/format";
+import { formatClientError } from "../lib/errors";
 
 export function SettingsPage() {
   const { api, signOut, apiBaseUrl, user } = useAuth();
@@ -19,6 +20,8 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState(getNotificationPermission());
   const [busy, setBusy] = useState(false);
+  const [createdWebhookUrl, setCreatedWebhookUrl] = useState<string | null>(null);
+  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
 
   const reload = async () => {
     const [nextSettings, nextConnections] = await Promise.all([
@@ -31,9 +34,7 @@ export function SettingsPage() {
   };
 
   useEffect(() => {
-    void reload().catch((err) =>
-      setError(err instanceof Error ? err.message : "Failed to load settings")
-    );
+    void reload().catch((err) => setError(formatClientError(err, "Failed to load settings")));
   }, [api]);
 
   const toggleNotifications = async () => {
@@ -46,7 +47,7 @@ export function SettingsPage() {
       setSettings(updated);
       setMessage("Settings saved.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update settings");
+      setError(formatClientError(err, "Failed to update settings"));
     } finally {
       setBusy(false);
     }
@@ -56,14 +57,21 @@ export function SettingsPage() {
     if (!navigator.onLine) return;
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
       const result = await api.createTradingViewConnection();
+      const webhook =
+        result.webhookUrl ?? result.connection.webhookURL ?? result.connection.webhookUrl ?? null;
+      setCreatedWebhookUrl(webhook);
+      setCreatedSecret(result.secret ?? null);
       setMessage(
-        `TradingView connection created. Webhook URL ready${result.secret ? " (secret shown once in API response — store securely)." : "."}`
+        webhook
+          ? "TradingView connection created. Copy the webhook URL below into TradingView."
+          : "TradingView connection created."
       );
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create connection");
+      setError(formatClientError(err, "Failed to create TradingView connection"));
     } finally {
       setBusy(false);
     }
@@ -72,11 +80,12 @@ export function SettingsPage() {
   const sendTest = async () => {
     if (!navigator.onLine) return;
     setBusy(true);
+    setError(null);
     try {
       const result = await api.sendTestAlert(connections[0]?.id);
       setMessage(result.message || "Test alert queued.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Test alert failed");
+      setError(formatClientError(err, "Test alert failed"));
     } finally {
       setBusy(false);
     }
@@ -94,7 +103,7 @@ export function SettingsPage() {
         setSettings(updated);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Push registration failed");
+      setError(formatClientError(err, "Push registration failed"));
     } finally {
       setBusy(false);
     }
@@ -107,7 +116,7 @@ export function SettingsPage() {
       setPushStatus(getNotificationPermission());
       setMessage("Unsubscribed from Web Push for this browser.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unsubscribe failed");
+      setError(formatClientError(err, "Unsubscribe failed"));
     } finally {
       setBusy(false);
     }
@@ -159,13 +168,23 @@ export function SettingsPage() {
           <strong>{settings?.notificationsEnabled ? "on" : "off"}</strong>
         </p>
         <div className="row" style={{ marginTop: 10 }}>
-          <button type="button" className="btn primary" disabled={busy || !navigator.onLine} onClick={() => void enablePush()}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !navigator.onLine}
+            onClick={() => void enablePush()}
+          >
             Enable Web Push
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => void disablePush()}>
             Unsubscribe
           </button>
-          <button type="button" className="btn" disabled={busy || !settings} onClick={() => void toggleNotifications()}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || !settings}
+            onClick={() => void toggleNotifications()}
+          >
             Toggle server flag
           </button>
         </div>
@@ -188,11 +207,33 @@ export function SettingsPage() {
             ))}
           </ul>
         )}
+        {createdWebhookUrl && (
+          <div style={{ marginTop: 10 }}>
+            <p className="muted">Webhook URL (copy into TradingView):</p>
+            <code style={{ display: "block", wordBreak: "break-all" }}>{createdWebhookUrl}</code>
+            {createdSecret && (
+              <>
+                <p className="muted">Secret (shown once):</p>
+                <code style={{ display: "block", wordBreak: "break-all" }}>{createdSecret}</code>
+              </>
+            )}
+          </div>
+        )}
         <div className="row" style={{ marginTop: 10 }}>
-          <button type="button" className="btn primary" disabled={busy || !navigator.onLine} onClick={() => void createConnection()}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !navigator.onLine}
+            onClick={() => void createConnection()}
+          >
             Create connection
           </button>
-          <button type="button" className="btn" disabled={busy || !navigator.onLine} onClick={() => void sendTest()}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || !navigator.onLine}
+            onClick={() => void sendTest()}
+          >
             Send TEST alert
           </button>
         </div>

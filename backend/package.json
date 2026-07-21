@@ -14,6 +14,7 @@
     "serve": "npm run build && firebase emulators:start --only functions,firestore"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "latest",
     "express": "latest",
     "firebase-admin": "latest",
@@ -23,6 +24,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/supertest": "latest",

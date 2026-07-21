@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { DecisionCard } from "../components/DecisionCard";
 import { useAuth } from "../lib/auth";
-import { ApiError, type Decision } from "../types/models";
+import type { Decision } from "../types/models";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
+import { formatClientError } from "../lib/errors";
 
 export function DashboardPage() {
   const { api } = useAuth();
@@ -33,9 +34,7 @@ export function DashboardPage() {
       } else {
         setDecision(null);
       }
-      const message =
-        err instanceof ApiError ? `${err.code}: ${err.message}` : "Unable to load decision";
-      setError(message);
+      setError(formatClientError(err, "Unable to load decision"));
     } finally {
       setLoading(false);
       setRefreshing(false);
