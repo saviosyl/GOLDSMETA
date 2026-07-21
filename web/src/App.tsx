@@ -5,6 +5,7 @@ import { SignInPage } from "./pages/SignInPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { HistoryDetailPage } from "./pages/HistoryDetailPage";
 import { JournalPage } from "./pages/JournalPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -37,6 +38,7 @@ function ProtectedApp() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

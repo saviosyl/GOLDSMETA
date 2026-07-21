@@ -1,14 +1,19 @@
 import type { Decision } from "../types/models";
 import {
-  entryDisplay,
+  displayQualityLabel,
   formatPercent,
   formatPrice,
-  formatRatio,
   formatWhen,
   isStaleDecision,
   isTestDecision,
-  tpPrice
-} from "../lib/format";
+  primaryReason,
+  recommendedActionLabel,
+  tradePlanEntryLabel,
+  tradePlanRrLabel,
+  tradePlanStopLabel,
+  tradePlanTpLabel,
+  trendLabel
+} from "../lib/decisionDisplay";
 
 interface Props {
   decision: Decision;
@@ -17,6 +22,7 @@ interface Props {
   onRefresh?: () => void;
   refreshing?: boolean;
   actionsDisabled?: boolean;
+  compact?: boolean;
 }
 
 export function DecisionCard({
@@ -25,7 +31,8 @@ export function DecisionCard({
   cachedAt,
   onRefresh,
   refreshing,
-  actionsDisabled
+  actionsDisabled,
+  compact = false
 }: Props) {
   const supporting =
     decision.decision === "SELL" ? decision.bearishEvidence : decision.bullishEvidence;
@@ -33,53 +40,60 @@ export function DecisionCard({
     decision.decision === "SELL" ? decision.bullishEvidence : decision.bearishEvidence;
   const stale = source !== "live" || isStaleDecision(decision);
   const test = isTestDecision(decision);
-  const action = decision.recommendedManagementAction ?? decision.recommendedActions?.[0] ?? "—";
+  const quality = displayQualityLabel(decision, source);
+  const action = recommendedActionLabel(decision);
+  const summary = primaryReason(decision);
 
   return (
-    <section className="card" aria-label={`Current decision ${decision.decision}`}>
-      {(stale || source !== "live") && (
-        <div className="banner stale" role="status">
-          Showing {source === "offline" ? "offline" : "cached"} data
-          {cachedAt ? ` from ${formatWhen(cachedAt)}` : ""}. Marked stale — verify live price before
-          acting.
+    <section className="card decision-card" aria-label={`Current decision ${decision.decision}`}>
+      {stale && (
+        <div className="banner stale" role="status" data-testid="stale-banner">
+          {source === "offline"
+            ? "Offline — showing cached decision."
+            : source === "cached"
+              ? `Cached decision${cachedAt ? ` from ${formatWhen(cachedAt)}` : ""}.`
+              : "Market data is stale."}{" "}
+          Verify the live price before acting.
         </div>
       )}
 
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <div>
-          <p className="muted" style={{ margin: 0 }}>
-            {decision.scenarioName ?? decision.symbol}
-          </p>
+      <div className="decision-card-header">
+        <div className="decision-card-title min-zero">
+          <p className="muted decision-symbol">{decision.scenarioName ?? decision.symbol}</p>
           <div className={`decision-hero ${decision.decision}`} aria-live="polite">
             {decision.decision}
           </div>
         </div>
-        <div className="row">
+        <div className="decision-badges">
           {test && (
-            <span className="badge test" aria-label="TEST decision">
+            <span className="badge test" aria-label="TEST decision" data-testid="test-badge">
               TEST
             </span>
           )}
-          <span className="badge" aria-label={`Data source ${decision.dataSourceLabel}`}>
-            {source === "live" ? decision.dataSourceLabel : "OFFLINE"}
+          <span className="badge" aria-label={`Data quality ${quality}`} data-testid="quality-badge">
+            {quality}
           </span>
         </div>
       </div>
 
-      <p className="muted" style={{ marginTop: 0 }}>
+      <p className="muted decision-meta">
         {formatPrice(decision.lastKnownPrice)} · {formatWhen(decision.generatedAt)}
       </p>
 
-      <div className="grid-2" style={{ marginBottom: 12 }}>
+      {!compact && (
+        <p className="decision-summary" data-testid="decision-summary">
+          {summary}
+        </p>
+      )}
+
+      <div className="grid-2 decision-metrics">
         <div className="metric">
           <span className="label">Confidence</span>
           <span className="value">{formatPercent(decision.confidence)}</span>
         </div>
         <div className="metric">
           <span className="label">Trend</span>
-          <span className="value">
-            {decision.marketStructure?.trend ?? decision.higherTimeframeBias ?? decision.marketRegime}
-          </span>
+          <span className="value">{trendLabel(decision)}</span>
         </div>
         <div className="metric">
           <span className="label">POC</span>
@@ -95,36 +109,36 @@ export function DecisionCard({
         </div>
         <div className="metric">
           <span className="label">Action</span>
-          <span className="value">{action.replaceAll("_", " ")}</span>
+          <span className="value action-value" data-testid="action-label">
+            {action}
+          </span>
         </div>
       </div>
 
       <h3>Trade plan</h3>
       <div className="price-row">
         <span>Entry</span>
-        <strong>{entryDisplay(decision.entry)}</strong>
+        <strong data-testid="plan-entry">{tradePlanEntryLabel(decision)}</strong>
       </div>
       <div className="price-row">
         <span>Stop loss</span>
-        <strong>{formatPrice(decision.stopLoss.price)}</strong>
+        <strong data-testid="plan-stop">{tradePlanStopLabel(decision)}</strong>
       </div>
       <div className="price-row">
         <span>TP1</span>
-        <strong>{tpPrice(decision.takeProfits, "TP1")}</strong>
+        <strong data-testid="plan-tp1">{tradePlanTpLabel(decision, "TP1")}</strong>
       </div>
       <div className="price-row">
         <span>TP2</span>
-        <strong>{tpPrice(decision.takeProfits, "TP2")}</strong>
+        <strong data-testid="plan-tp2">{tradePlanTpLabel(decision, "TP2")}</strong>
       </div>
       <div className="price-row">
         <span>TP3</span>
-        <strong>{tpPrice(decision.takeProfits, "TP3")}</strong>
+        <strong data-testid="plan-tp3">{tradePlanTpLabel(decision, "TP3")}</strong>
       </div>
       <div className="price-row">
         <span>Risk / reward</span>
-        <strong>
-          {formatRatio(decision.riskReward.tp2 ?? decision.riskReward.tp1 ?? decision.riskReward.tp3)}
-        </strong>
+        <strong data-testid="plan-rr">{tradePlanRrLabel(decision)}</strong>
       </div>
 
       <h3 style={{ marginTop: 16 }}>Reasons</h3>

@@ -102,6 +102,20 @@ export class ApiClient {
     return body.decisions;
   }
 
+  async getDecision(decisionId: string): Promise<Decision | null> {
+    try {
+      const body = await this.request<{ decision: Decision }>(
+        `/v1/decisions/${encodeURIComponent(decisionId)}`
+      );
+      return body.decision;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404 && err.code === "NOT_FOUND") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
   async getSettings(): Promise<BackendSettings> {
     const body = await this.request<{ settings: BackendSettings }>("/v1/settings");
     return body.settings;
