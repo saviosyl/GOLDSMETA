@@ -46,8 +46,15 @@ export async function runV4ShadowLifecycle(input: {
     });
 
     const v3Active = await Promise.resolve(input.store.listActiveSetups(input.userId));
-    const existingPlans =
-      (await input.store.listV4ShadowPlans?.(input.userId, input.environment, 20)) ?? [];
+    let existingPlans: V4LockedShadowPlan[] = [];
+    try {
+      existingPlans =
+        (await input.store.listV4ShadowPlans?.(input.userId, input.environment, 20)) ?? [];
+    } catch (err) {
+      logger.warn("V4 list shadow plans failed (continuing)", {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
     const openPlan = existingPlans.find(
       (p) =>
         p.status === "WAITING_FOR_ENTRY" ||

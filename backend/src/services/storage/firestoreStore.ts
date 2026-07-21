@@ -346,12 +346,17 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     environment?: DecisionEnvironment,
     limit = 50
   ): Promise<import("../v4/shadowTypes").V4ShadowAnalysisRecord[]> {
-    let query: Query = this.db.collection("users").doc(userId).collection("v4Analyses");
-    if (environment) {
-      query = query.where("environment", "==", environment);
-    }
-    const snap = await query.orderBy("generatedAt", "desc").limit(limit).get();
-    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4ShadowAnalysisRecord);
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Analyses")
+      .orderBy("generatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4ShadowAnalysisRecord
+    );
+    return rows.filter((a) => !environment || a.environment === environment).slice(0, limit);
   }
 
   async saveV4ShadowCandidate(
@@ -371,12 +376,17 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     environment?: DecisionEnvironment,
     limit = 50
   ): Promise<import("../v4/shadowTypes").V4ShadowCandidateRecord[]> {
-    let query: Query = this.db.collection("users").doc(userId).collection("v4Candidates");
-    if (environment) {
-      query = query.where("environment", "==", environment);
-    }
-    const snap = await query.orderBy("updatedAt", "desc").limit(limit).get();
-    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4ShadowCandidateRecord);
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Candidates")
+      .orderBy("updatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4ShadowCandidateRecord
+    );
+    return rows.filter((c) => !environment || c.environment === environment).slice(0, limit);
   }
 
   async saveV4ShadowPlan(
@@ -396,12 +406,17 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     environment?: DecisionEnvironment,
     limit = 50
   ): Promise<import("../v4/shadowTypes").V4LockedShadowPlan[]> {
-    let query: Query = this.db.collection("users").doc(userId).collection("v4ShadowPlans");
-    if (environment) {
-      query = query.where("environment", "==", environment);
-    }
-    const snap = await query.orderBy("updatedAt", "desc").limit(limit).get();
-    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4LockedShadowPlan);
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4ShadowPlans")
+      .orderBy("updatedAt", "desc")
+      .limit(Math.max(limit * 3, 50))
+      .get();
+    const rows = snap.docs.map(
+      (d) => d.data() as import("../v4/shadowTypes").V4LockedShadowPlan
+    );
+    return rows.filter((p) => !environment || p.environment === environment).slice(0, limit);
   }
 
   async recordV4PlanMutation(
