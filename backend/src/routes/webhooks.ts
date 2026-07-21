@@ -22,14 +22,15 @@ export const buildWebhooksRouter = (
       try {
         const webhookId = firstParam(req.params.webhookId) ?? "";
         const validated = await validateWebhookPayload(store, webhookId, req.body);
+        const isTestDecision = validated.payload.eventType === "TEST";
         const result = await enqueueWebhookEvent({
           store,
           userId: validated.userId,
           webhookId: validated.webhookId,
           payload: validated.payload,
           stableEventId: validated.stableEventId,
-          environment: "LIVE",
-          isTestDecision: false,
+          environment: isTestDecision ? "TEST" : "LIVE",
+          isTestDecision,
           aiExplainer
         });
 
