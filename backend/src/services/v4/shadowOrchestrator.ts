@@ -45,7 +45,6 @@ export async function runV4ShadowLifecycle(input: {
       session: input.snapshot.sessionVolumeProfile?.session ?? "UNKNOWN"
     });
 
-    const v3Active = await Promise.resolve(input.store.listActiveSetups(input.userId));
     let existingPlans: V4LockedShadowPlan[] = [];
     try {
       existingPlans =
@@ -68,7 +67,8 @@ export async function runV4ShadowLifecycle(input: {
       snapshot: input.snapshot,
       environment: input.environment,
       parentDecisionId: input.parentDecisionId,
-      hasActiveLockedPlan: Boolean(openPlan) || v3Active.length > 0
+      // Only V4 open shadow plans block new V4 candidates — never couple to V3 setups.
+      hasActiveLockedPlan: Boolean(openPlan)
     });
     // Honest GC: null until an authorised feed is wired (do not fabricate).
     engineInput.gcProfile = null;

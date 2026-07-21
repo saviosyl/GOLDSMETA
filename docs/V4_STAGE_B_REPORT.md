@@ -86,18 +86,22 @@ Covered: V3 isolation, separate storage, non-actionable shadow, tiny-stop reject
 
 ## LIVE evidence (post-deploy)
 
-Populate after deployment + real webhook traffic:
+Observed after Firestore list hardening (2026-07-21 ~19:45Z UTC):
 
 | Metric | Value |
 | --- | --- |
-| Genuine LIVE V4 analyses | _pending live traffic_ |
-| Candidates created | _pending_ |
-| Candidates rejected (by reason) | _pending_ |
-| Validated shadow plans | _pending_ |
-| Resolved shadow plans | _pending_ |
-| Unsafe-plan count | **expected 0** |
-| Plan-mutation count | **expected 0** |
-| V3 regressions | **none expected** |
+| Genuine LIVE V4 analyses | **≥2 webhook-driven** (+ probe/replay during verification) — total analyses across users: **4** |
+| Candidates created | **0** (no Strategy A/B pattern + confirmation yet) |
+| Candidates rejected (by reason) | Analyses reject with `No approved strategy pattern`, `Multi-bar confirmation incomplete` (and earlier `One active locked plan maximum` when V3 setups were incorrectly coupled — fixed) |
+| Validated shadow plans | **0** |
+| Resolved shadow plans | **0** |
+| Unsafe-plan count | **0** |
+| Plan-mutation count | **0** |
+| V3 regressions | **None observed** (LIVE V3 decisions continue; webhook path healthy; backend `1.3.1-v4-stage-b`) |
+
+**CI:** Backend + Web workflows on PR #11 — **pass**.
+
+**Web Pages:** Stage B UI not redeployed (no `CLOUDFLARE_API_TOKEN`). Backend `/v4` APIs are live; UI update pending Pages token.
 
 ## Manual €20 testing
 
