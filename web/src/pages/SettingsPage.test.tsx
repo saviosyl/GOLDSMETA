@@ -80,6 +80,7 @@ describe("SettingsPage TradingView create connection", () => {
 
     const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     expect(await screen.findByText("No connections yet.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Create connection" }));
@@ -98,6 +99,7 @@ describe("SettingsPage TradingView create connection", () => {
 
     const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     await screen.findByText("No connections yet.");
     await user.click(screen.getByRole("button", { name: "Create connection" }));
 
@@ -114,6 +116,7 @@ describe("SettingsPage TradingView create connection", () => {
 
     const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     await screen.findByText("No connections yet.");
     await user.click(screen.getByRole("button", { name: "Create connection" }));
 
@@ -156,6 +159,11 @@ describe("SettingsPage TradingView revoke and copy", () => {
     vi.unstubAllGlobals();
   });
 
+  async function openTradingView(user: ReturnType<typeof userEvent.setup>) {
+    render(<SettingsPage />);
+    await user.click(await screen.findByRole("tab", { name: "TradingView" }));
+  }
+
   it("requires confirmation before revoking and refreshes the list", async () => {
     const confirm = vi.fn().mockReturnValue(true);
     vi.stubGlobal("confirm", confirm);
@@ -170,7 +178,7 @@ describe("SettingsPage TradingView revoke and copy", () => {
     });
 
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    await openTradingView(user);
 
     expect(await screen.findByTestId("connection-status-wh_active")).toHaveTextContent("ACTIVE");
     expect(screen.getByTestId("connection-status-wh_old")).toHaveTextContent("REVOKED");
@@ -195,7 +203,7 @@ describe("SettingsPage TradingView revoke and copy", () => {
     vi.stubGlobal("confirm", confirm);
 
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    await openTradingView(user);
     await screen.findByRole("button", { name: "Revoke" });
     await user.click(screen.getByRole("button", { name: "Revoke" }));
 
@@ -203,12 +211,16 @@ describe("SettingsPage TradingView revoke and copy", () => {
     expect(revokeTradingViewConnection).not.toHaveBeenCalled();
   });
 
-  it("keeps long webhook URLs wrappable and offers Copy webhook", async () => {
-    render(<SettingsPage />);
+  it("hides webhook URLs until revealed and still offers Copy webhook", async () => {
+    const user = userEvent.setup();
+    await openTradingView(user);
     const url = await screen.findByTestId("connection-url-wh_active");
     expect(url).toHaveClass("url-break");
-    expect(url).toHaveTextContent(longWebhook);
+    expect(url).toHaveTextContent(/hidden/i);
+    expect(url).not.toHaveTextContent(longWebhook);
     expect(screen.getAllByRole("button", { name: "Copy webhook" }).length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: "Reveal webhook" })[0]!);
+    expect(screen.getByTestId("connection-url-wh_active")).toHaveTextContent(longWebhook);
   });
 });
 
@@ -225,7 +237,9 @@ describe("SettingsPage notifications UX", () => {
   });
 
   it("disables Enable Web Push when unsupported and explains why", async () => {
+    const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.click(await screen.findByRole("tab", { name: "Notifications" }));
     expect(await screen.findByTestId("notif-headline")).toHaveTextContent(/Unavailable/i);
     expect(screen.getByRole("button", { name: "Enable Web Push" })).toBeDisabled();
     expect(screen.getByTestId("notif-enable-hint")).toHaveTextContent(/unavailable/i);

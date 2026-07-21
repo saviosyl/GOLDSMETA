@@ -1,10 +1,10 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
-import { BottomNav } from "./components/BottomNav";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { AppShell } from "./components/layout/AppShell";
 import { SignInPage } from "./pages/SignInPage";
-import { DashboardPage } from "./pages/DashboardPage";
+import { OverviewPage } from "./pages/OverviewPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
@@ -12,6 +12,8 @@ import { JournalPage } from "./pages/JournalPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SetupDetailPage } from "./pages/SetupDetailPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
+import { BrandConceptsPage } from "./pages/BrandConceptsPage";
+import { RiskPlannerPage } from "./pages/RiskPlannerPage";
 
 const IntelligencePage = lazy(() =>
   import("./pages/IntelligencePage").then((m) => ({ default: m.IntelligencePage }))
@@ -31,19 +33,13 @@ const SettingsPage = lazy(() =>
 
 function RouteFallback({ label }: { label: string }) {
   return (
-    <div className="card" role="status" data-testid="route-loading">
+    <div className="gm-section" role="status" data-testid="route-loading">
       Loading {label}…
     </div>
   );
 }
 
-function LazyRoute({
-  label,
-  children
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function LazyRoute({ label, children }: { label: string; children: ReactNode }) {
   return (
     <RouteErrorBoundary label={label}>
       <Suspense fallback={<RouteFallback label={label} />}>{children}</Suspense>
@@ -56,16 +52,14 @@ function ProtectedApp() {
 
   if (loading) {
     return (
-      <div className="app-shell auth-only" data-testid="session-loading">
-        <div className="card brand-loading" role="status">
-          <img
-            src="/brand/mark-dark.svg"
-            alt=""
-            width={48}
-            height={48}
-            className="brand-mark"
-          />
-          <p>Checking GoldMeta session…</p>
+      <div className="gm-shell" data-testid="session-loading">
+        <div className="gm-main">
+          <div className="gm-main-inner">
+            <div className="gm-section brand-loading" role="status">
+              <img src="/brand/mark-dark.svg" alt="" width={48} height={48} />
+              <p>Checking GoldMeta session…</p>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -73,17 +67,23 @@ function ProtectedApp() {
 
   if (!user) {
     return (
-      <div className="app-shell auth-only" data-testid="signed-out-shell">
-        <p className="subtitle">Sign in to load backend decisions</p>
-        <SignInPage />
+      <div className="gm-shell" data-testid="signed-out-shell">
+        <div className="gm-main">
+          <div className="gm-main-inner" style={{ maxWidth: 480 }}>
+            <p className="gm-meta" style={{ marginBottom: 12 }}>
+              Sign in to load backend decisions
+            </p>
+            <SignInPage />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="app-shell v5-shell">
+    <AppShell>
       <Routes>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={<OverviewPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
@@ -123,6 +123,8 @@ function ProtectedApp() {
           }
         />
         <Route path="/journal" element={<JournalPage />} />
+        <Route path="/brand" element={<BrandConceptsPage />} />
+        <Route path="/planner" element={<RiskPlannerPage />} />
         <Route
           path="/settings"
           element={
@@ -134,16 +136,15 @@ function ProtectedApp() {
         <Route
           path="*"
           element={
-            <div className="card" data-testid="not-found">
-              <h2 className="section-title">Page not found</h2>
-              <p className="muted">That route is not part of GoldMeta.</p>
+            <div className="gm-section" data-testid="not-found">
+              <h2 className="gm-section-title">Page not found</h2>
+              <p className="gm-meta">That route is not part of GoldMeta.</p>
               <Navigate to="/" replace />
             </div>
           }
         />
       </Routes>
-      <BottomNav />
-    </div>
+    </AppShell>
   );
 }
 

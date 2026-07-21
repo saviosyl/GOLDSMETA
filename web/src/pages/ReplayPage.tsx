@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
+import { formatUserTimestamp } from "../lib/plainLanguage";
+import {
+  EmptyState,
+  PageHeader,
+  SectionCard
+} from "../components/ui/primitives";
 
 const PAGE_SIZE = 12;
 const MAX_FRAMES = 60;
@@ -51,6 +57,22 @@ export function ReplayPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setIndex((i) => Math.max(0, i - 1));
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setIndex((i) => Math.min(frames.length - 1, i + 1));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [frames.length]);
+
   const pageCount = Math.max(1, Math.ceil(frames.length / PAGE_SIZE));
   const windowFrames = useMemo(() => {
     const start = page * PAGE_SIZE;
@@ -63,11 +85,11 @@ export function ReplayPage() {
   const frame = frames[index];
 
   return (
-    <div className="v5-page" data-testid="replay-page">
-      <h1 className="brand" style={{ fontSize: "1.45rem" }}>
-        Replay mode
-      </h1>
-      <p className="subtitle">Educational only — step through verified shadow history.</p>
+    <div data-testid="replay-page">
+      <PageHeader title="Replay" environment="LIVE" freshness="SHADOW" />
+      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
+        Educational only — step through verified shadow history. Shortcuts: ← →
+      </p>
       <VerifiedDataMeta
         symbol="XAUUSD"
         environment="LIVE"
@@ -81,9 +103,11 @@ export function ReplayPage() {
         }
       />
       {loading && (
-        <div className="card" role="status" data-testid="replay-loading">
-          Loading replay…
-        </div>
+        <SectionCard>
+          <p className="gm-meta" role="status" data-testid="replay-loading">
+            Loading replay…
+          </p>
+        </SectionCard>
       )}
       {error && (
         <div className="banner error" role="alert">
@@ -91,110 +115,126 @@ export function ReplayPage() {
         </div>
       )}
       {!frames.length && !error && !loading && (
-        <p className="muted" data-testid="replay-empty">
-          Insufficient verified data for replay.
-        </p>
+        <SectionCard>
+          <EmptyState
+            title="Insufficient verified data for replay."
+            body="Replay appears when enough shadow history exists."
+          />
+          <p className="gm-meta" data-testid="replay-empty">
+            Insufficient verified data for replay.
+          </p>
+        </SectionCard>
       )}
+
       {frame && (
-        <section className="card v5-glass" data-testid="replay-frame">
-          <div className="price-row">
-            <span>Bar</span>
-            <strong>
-              {index + 1} / {frames.length}
-            </strong>
-          </div>
-          <div className="metric">
-            <span className="label">Time</span>
-            <span className="value">{frame.barTime}</span>
-          </div>
-          <p>
-            <strong>Analysis</strong>
-            <br />
-            {frame.analysisSummary ?? "—"}
-          </p>
-          <p>
-            <strong>Candidate</strong>
-            <br />
-            {frame.candidateStatus ?? "—"}
-          </p>
-          <p>
-            <strong>Shadow plan</strong>
-            <br />
-            {frame.planStatus ?? "—"}
-          </p>
-          <p>
-            <strong>Lifecycle</strong>
-            <br />
-            {frame.lifecycleNote ?? "—"}
-          </p>
-          <p>
-            <strong>Result</strong>
-            <br />
-            {frame.result ?? "—"}
-          </p>
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn"
-              disabled={index <= 0}
-              aria-label="Previous candle"
-              onClick={() => setIndex((i) => Math.max(0, i - 1))}
-            >
-              Prev
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={index >= frames.length - 1}
-              aria-label="Next candle"
-              onClick={() => setIndex((i) => Math.min(frames.length - 1, i + 1))}
-            >
-              Next candle
-            </button>
-          </div>
-        </section>
+        <div className="gm-two-col gm-replay-layout" data-testid="replay-frame">
+          <SectionCard title="Candle navigation">
+            <div className="price-row">
+              <span>Bar</span>
+              <strong>
+                {index + 1} / {frames.length}
+              </strong>
+            </div>
+            <div className="gm-metric" style={{ marginTop: 12 }}>
+              <span className="gm-label">Time</span>
+              <span className="gm-metric-value">{formatUserTimestamp(frame.barTime)}</span>
+            </div>
+            <div className="btn-row" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={index <= 0}
+                aria-label="Previous candle"
+                onClick={() => setIndex((i) => Math.max(0, i - 1))}
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={index >= frames.length - 1}
+                aria-label="Next candle"
+                onClick={() => setIndex((i) => Math.min(frames.length - 1, i + 1))}
+              >
+                Next candle
+              </button>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Analysis">
+            <p>
+              <strong>Summary</strong>
+              <br />
+              {frame.analysisSummary ?? "—"}
+            </p>
+            <p>
+              <strong>Candidate</strong>
+              <br />
+              {frame.candidateStatus ?? "—"}
+            </p>
+            <p>
+              <strong>Shadow plan</strong>
+              <br />
+              {frame.planStatus ?? "—"}
+            </p>
+          </SectionCard>
+
+          <SectionCard title="Lifecycle">
+            <p>
+              <strong>Note</strong>
+              <br />
+              {frame.lifecycleNote ?? "—"}
+            </p>
+            <p>
+              <strong>Result</strong>
+              <br />
+              {frame.result ?? "—"}
+            </p>
+          </SectionCard>
+        </div>
       )}
 
       {frames.length > 0 && (
-        <section className="card" data-testid="replay-window">
-          <h2 className="section-title">Timeline window</h2>
-          <p className="muted">
-            Showing {PAGE_SIZE} of {frames.length} bars (page {page + 1}/{pageCount}) to cap memory.
-          </p>
-          <ul className="list compact replay-window-list" data-testid="replay-window-list">
-            {windowFrames.map((f) => (
-              <li key={`${f.absoluteIndex}-${f.barTime}`}>
-                <button
-                  type="button"
-                  className={`chip ${f.absoluteIndex === index ? "active" : ""}`}
-                  onClick={() => setIndex(f.absoluteIndex)}
-                >
-                  #{f.absoluteIndex + 1} {f.barTime.slice(0, 16)}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn"
-              disabled={page <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              Earlier
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={page >= pageCount - 1}
-              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-            >
-              Later
-            </button>
-          </div>
-        </section>
+        <div data-testid="replay-window">
+          <SectionCard title="Timeline">
+            <p className="gm-meta">
+              Showing {PAGE_SIZE} of {frames.length} bars (page {page + 1}/{pageCount}) to cap memory.
+            </p>
+            <ul className="list compact replay-window-list" data-testid="replay-window-list">
+              {windowFrames.map((f) => (
+                <li key={`${f.absoluteIndex}-${f.barTime}`}>
+                  <button
+                    type="button"
+                    className={`chip ${f.absoluteIndex === index ? "active" : ""}`}
+                    onClick={() => setIndex(f.absoluteIndex)}
+                  >
+                    #{f.absoluteIndex + 1} {formatUserTimestamp(f.barTime)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn"
+                disabled={page <= 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Earlier
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={page >= pageCount - 1}
+                onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              >
+                Later
+              </button>
+            </div>
+          </SectionCard>
+        </div>
       )}
-      <p className="muted">{disclaimer}</p>
+      <p className="gm-meta">{disclaimer}</p>
     </div>
   );
 }

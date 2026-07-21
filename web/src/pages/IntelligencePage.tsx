@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { GlossaryTerm } from "../components/v5/GlossaryTerm";
 import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
+import {
+  DisclosurePanel,
+  PageHeader,
+  SectionCard,
+  StatusBadge
+} from "../components/ui/primitives";
 
 type Answer = {
   question?: string;
@@ -11,7 +17,6 @@ type Answer = {
   explanations?: string[];
   insufficientData?: boolean;
   disclaimer?: string;
-  implementationType?: string;
   symbol?: string;
   timeframe?: string;
   dataTimestamp?: string;
@@ -77,13 +82,10 @@ export function IntelligencePage() {
 
   return (
     <div className="v5-page" data-testid="intelligence-page">
-      <h1 className="brand" style={{ fontSize: "1.45rem" }}>
-        Market Intelligence
-      </h1>
-      <p className="subtitle">
-        Deterministic GoldMeta explanations — rules-based retrieval and templated answers. Distinguishes{" "}
-        <em>Verified data</em> from <em>Explanation</em>. Never invents prices. Not an AI chatbot (
-        <code>AI_ENABLED=false</code>).
+      <PageHeader title="Intelligence" environment="LIVE" freshness={online ? "Online" : "Offline"} />
+      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }} data-testid="intelligence-impl-type">
+        Implementation: deterministic / rules-based / templated (no external AI model). This is not an
+        AI chatbot. <code>AI_ENABLED=false</code>
       </p>
       {!online && (
         <div className="banner stale" role="status" data-testid="offline-status">
@@ -91,156 +93,139 @@ export function IntelligencePage() {
         </div>
       )}
 
-      <section className="card v5-glass">
-        <h2 className="section-title">Ask GoldMeta</h2>
-        <p className="muted" data-testid="intelligence-impl-type">
-          Implementation: deterministic / rules-based / templated (no external AI model).
-        </p>
-        <form onSubmit={onAsk} className="form-grid">
-          <label className="field">
-            <span>Question</span>
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              rows={3}
-              aria-label="Intelligence question"
-            />
-          </label>
-          <button className="btn primary" type="submit" disabled={busy || !online}>
-            {busy ? "Working…" : "Ask"}
-          </button>
-        </form>
-        <div className="chip-row">
-          {[
-            "Why are we waiting?",
-            "Why was this rejected?",
-            "Why is risk geometry invalid?",
-            "What changed since the previous candle?",
-            "How has Strategy A historically performed?"
-          ].map((q) => (
-            <button key={q} type="button" className="chip" onClick={() => setQuestion(q)}>
-              {q}
+      <div className="gm-two-col">
+        <SectionCard title="Ask GoldMeta">
+          <form onSubmit={onAsk} className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
+            <label className="field">
+              <span>Question</span>
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                rows={3}
+                aria-label="Intelligence question"
+              />
+            </label>
+            <button className="btn primary" type="submit" disabled={busy || !online}>
+              {busy ? "Working…" : "Ask"}
             </button>
-          ))}
-        </div>
-        {error && (
-          <div className="banner error" role="alert">
-            {error}
+          </form>
+          <div className="chip-row">
+            {[
+              "Why are we waiting?",
+              "Why was this rejected?",
+              "Why is risk geometry invalid?",
+              "What changed since the previous candle?",
+              "How has Strategy A historically performed?"
+            ].map((q) => (
+              <button key={q} type="button" className="chip" onClick={() => setQuestion(q)}>
+                {q}
+              </button>
+            ))}
           </div>
-        )}
-        {answer && (
-          <div className="v5-answer" data-testid="intelligence-answer">
-            <VerifiedDataMeta
-              symbol={answer.symbol ?? "XAUUSD"}
-              timeframe={answer.timeframe}
-              dataTimestamp={answer.dataTimestamp}
-              environment={answer.environment ?? "LIVE"}
-              strategyVersion={answer.strategyVersion}
-              mode={answer.mode ?? "SHADOW"}
-              freshness={
-                !online
-                  ? "OFFLINE"
-                  : answer.insufficientData
-                    ? "PARTIAL"
-                    : ((answer.freshness as "VERIFIED") ?? "VERIFIED")
-              }
-              sources={["V3 decision", "V4 shadow analysis"]}
-              missingWarning={
-                answer.insufficientData ? "Insufficient verified data." : null
-              }
-            />
-            {answer.insufficientData && (
-              <div className="banner stale">Insufficient verified data</div>
-            )}
-            <p>{answer.answer}</p>
-            <h3 className="section-title">Verified data</h3>
-            <ul className="list">
-              {(answer.verifiedFacts ?? []).map((f) => (
-                <li key={f}>{f}</li>
-              ))}
-              {(answer.verifiedFacts ?? []).length === 0 && <li className="muted">None</li>}
-            </ul>
-            <h3 className="section-title">Explanation</h3>
-            <ul className="list">
-              {(answer.explanations ?? []).map((f) => (
-                <li key={f}>{f}</li>
-              ))}
-            </ul>
-            <p className="muted">{answer.disclaimer}</p>
-          </div>
-        )}
-      </section>
+          {error && (
+            <div className="banner error" role="alert">
+              {error}
+            </div>
+          )}
+          {answer && (
+            <div className="v5-answer" data-testid="intelligence-answer">
+              {answer.insufficientData && (
+                <div className="banner stale">Insufficient verified data</div>
+              )}
+              <p>{answer.answer}</p>
+              <h3 className="gm-section-title">Explanation</h3>
+              <ul className="list">
+                {(answer.explanations ?? []).map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+              <p className="gm-meta">{answer.disclaimer}</p>
+            </div>
+          )}
+        </SectionCard>
 
-      {SCREENSHOT_ENABLED ? (
-        <section className="card" data-testid="screenshot-section">
-          <h2 className="section-title">Screenshot Comparison — Beta</h2>
-          <p className="muted" data-testid="screenshot-beta-copy">
-            This does <strong>not</strong> automatically read exact prices from the image. It does{" "}
-            <strong>not</strong> use screenshot values as verified market data. It compares
-            user-provided context against verified GoldMeta data. It cannot create or modify a
-            setup. Vision OCR / automatic TradingView chart analysis remains future work.
+        <SectionCard title="Verified context">
+          {answer ? (
+            <>
+              <VerifiedDataMeta
+                symbol={answer.symbol ?? "XAUUSD"}
+                timeframe={answer.timeframe}
+                dataTimestamp={answer.dataTimestamp}
+                environment={answer.environment ?? "LIVE"}
+                strategyVersion={answer.strategyVersion}
+                mode={answer.mode ?? "SHADOW"}
+                freshness={
+                  !online
+                    ? "OFFLINE"
+                    : answer.insufficientData
+                      ? "PARTIAL"
+                      : ((answer.freshness as "VERIFIED") ?? "VERIFIED")
+                }
+                sources={["V3 decision", "V4 shadow analysis"]}
+                missingWarning={answer.insufficientData ? "Insufficient verified data." : null}
+              />
+              <h3 className="gm-section-title">Verified data</h3>
+              <ul className="list">
+                {(answer.verifiedFacts ?? []).map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+                {(answer.verifiedFacts ?? []).length === 0 && <li className="gm-meta">None</li>}
+              </ul>
+            </>
+          ) : (
+            <p className="gm-meta">Ask a question to load verified context for this session.</p>
+          )}
+          <p className="gm-meta" style={{ marginTop: 12 }}>
+            Glossary: <GlossaryTerm term="POC">POC</GlossaryTerm>,{" "}
+            <GlossaryTerm term="ATR">ATR</GlossaryTerm>, <GlossaryTerm term="VAH">VAH</GlossaryTerm>
           </p>
-          <ScreenshotCompare />
-        </section>
-      ) : (
-        <section className="card" data-testid="screenshot-disabled">
-          <h2 className="section-title">Screenshot Comparison</h2>
-          <p className="muted">Disabled (`VITE_V5_SCREENSHOT_COMPARISON_ENABLED=false`).</p>
-        </section>
-      )}
+        </SectionCard>
+      </div>
 
-      <section className="card v5-glass">
-        <h2 className="section-title">Weekly coach</h2>
+      <SectionCard title="Weekly coach & personal stats">
         {!coach ? (
-          <p className="muted">Loading…</p>
+          <p className="gm-meta">Loading coach…</p>
         ) : (
           <>
             <p>{String(coach.summary ?? "")}</p>
             {Boolean(coach.insufficientData) && (
-              <div className="banner stale">Insufficient verified data</div>
+              <StatusBadge tone="warning">Insufficient verified data</StatusBadge>
             )}
-            <p className="muted">{String(coach.disclaimer ?? "")}</p>
           </>
         )}
-      </section>
-
-      <section className="card">
-        <h2 className="section-title">Personal performance (private)</h2>
-        {!personal ? (
-          <p className="muted">Loading…</p>
-        ) : (
-          <div className="grid-2">
-            <div className="metric">
-              <span className="label">Ignored WAIT tags</span>
-              <span className="value">{String(personal.ignoredWait ?? 0)}</span>
+        {personal && (
+          <div className="gm-metrics-grid" style={{ marginTop: 12 }}>
+            <div className="gm-metric">
+              <span className="gm-label">Ignored WAIT tags</span>
+              <span className="gm-metric-value">{String(personal.ignoredWait ?? 0)}</span>
             </div>
-            <div className="metric">
-              <span className="label">Avg R</span>
-              <span className="value">{String(personal.averageR ?? "—")}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Win streak</span>
-              <span className="value">{String(personal.largestWinningStreak ?? 0)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Lose streak</span>
-              <span className="value">{String(personal.largestLosingStreak ?? 0)}</span>
+            <div className="gm-metric">
+              <span className="gm-label">Avg R</span>
+              <span className="gm-metric-value">{String(personal.averageR ?? "—")}</span>
             </div>
           </div>
         )}
-        <p className="muted">{String(personal?.sampleWarning ?? "")}</p>
-      </section>
+      </SectionCard>
 
-      <section className="card">
-        <h2 className="section-title">Glossary</h2>
-        <p className="muted">
-          Tap{" "}
-          <GlossaryTerm term="POC">POC</GlossaryTerm>,{" "}
-          <GlossaryTerm term="ATR">ATR</GlossaryTerm>,{" "}
-          <GlossaryTerm term="VAH">VAH</GlossaryTerm>,{" "}
-          <GlossaryTerm term="Failed Auction">Failed Auction</GlossaryTerm>.
-        </p>
-      </section>
+      {SCREENSHOT_ENABLED ? (
+        <div data-testid="screenshot-section">
+          <SectionCard title="Screenshot Comparison — Beta">
+            <DisclosurePanel summary="Open screenshot comparison (Beta)">
+              <p className="gm-meta" data-testid="screenshot-beta-copy">
+                This does <strong>not</strong> automatically read exact prices from the image. It does{" "}
+                <strong>not</strong> use screenshot values as verified market data. It compares
+                user-provided context against verified GoldMeta data. It cannot create or modify a
+                setup. Vision OCR remains future work.
+              </p>
+              <ScreenshotCompare />
+            </DisclosurePanel>
+          </SectionCard>
+        </div>
+      ) : (
+        <section className="gm-section" data-testid="screenshot-disabled">
+          <p className="gm-meta">Screenshot comparison disabled.</p>
+        </section>
+      )}
     </div>
   );
 }
@@ -279,10 +264,14 @@ function ScreenshotCompare() {
       </label>
       <label className="field">
         <span>Observed session (user-provided)</span>
-        <input value={session} onChange={(e) => setSession(e.target.value)} aria-label="Observed session" />
+        <input
+          value={session}
+          onChange={(e) => setSession(e.target.value)}
+          aria-label="Observed session"
+        />
       </label>
       <label className="field">
-        <span>Visible POC (optional, user-provided)</span>
+        <span>Visible POC (optional)</span>
         <input
           value={poc}
           onChange={(e) => setPoc(e.target.value)}
@@ -295,18 +284,10 @@ function ScreenshotCompare() {
       </button>
       {result && (
         <div data-testid="screenshot-result">
-          <p className="muted">Creates trade: {String(result.createsTrade)}</p>
-          <p className="muted" data-testid="screenshot-no-vision">
+          <p className="gm-meta">Creates trade: {String(result.createsTrade)}</p>
+          <p className="gm-meta" data-testid="screenshot-no-vision">
             No automatic vision OCR was performed.
           </p>
-          <ul className="list">
-            {((result.agreements as string[]) ?? []).map((a) => (
-              <li key={a}>Agree: {a}</li>
-            ))}
-            {((result.disagreements as string[]) ?? []).map((a) => (
-              <li key={a}>Disagree: {a}</li>
-            ))}
-          </ul>
         </div>
       )}
     </div>

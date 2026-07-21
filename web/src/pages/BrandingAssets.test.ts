@@ -53,7 +53,7 @@ describe("GoldMeta V5.2 branding assets", () => {
     expect(indexHtml).toContain('name="apple-mobile-web-app-status-bar-style"');
     expect(indexHtml).toContain('href="/icons/apple-touch-icon.png"');
     expect(indexHtml).toContain("<title>GoldMeta — Gold Market Intelligence</title>");
-    expect(indexHtml).toContain('name="theme-color" content="#0A0B0D"');
+    expect(indexHtml).toContain('name="theme-color" content="#0B0D10"');
     expect(indexHtml).toContain("viewport-fit=cover");
     expect(indexHtml).toContain('property="og:title"');
   });

@@ -98,6 +98,8 @@ export function SettingsPage() {
   const [pushStatus, setPushStatus] = useState(getNotificationPermission());
   const [busy, setBusy] = useState(false);
   const [createdWebhookUrl, setCreatedWebhookUrl] = useState<string | null>(null);
+  const [revealedWebhooks, setRevealedWebhooks] = useState<Record<string, boolean>>({});
+  const [settingsTab, setSettingsTab] = useState("account");
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
   );
@@ -277,11 +279,22 @@ export function SettingsPage() {
     }
   };
 
+  const SETTINGS_TABS = [
+    { id: "account", label: "Account" },
+    { id: "notifications", label: "Notifications" },
+    { id: "tradingview", label: "TradingView" },
+    { id: "risk", label: "Risk preferences" },
+    { id: "appearance", label: "Appearance" },
+    { id: "installation", label: "Installation" },
+    { id: "advanced", label: "Advanced" }
+  ];
+
   return (
-    <div className="settings-page">
-      <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-        Settings
-      </h1>
+    <div className="settings-page" data-testid="settings-page">
+      <h1 className="gm-page-title">Settings</h1>
+      <p className="gm-meta" style={{ marginBottom: 16 }}>
+        Grouped preferences. Webhook URLs stay hidden until you reveal them.
+      </p>
       {message && (
         <div className="banner" role="status">
           {message}
@@ -293,291 +306,368 @@ export function SettingsPage() {
         </div>
       )}
 
-      <div className="card settings-card">
-        <h2>Account</h2>
-        <p className="settings-email" data-testid="account-email">
-          {user?.email ?? "Signed in"}
-        </p>
-        <p className="settings-meta" data-testid="connection-status">
-          <span className={`status-dot ${online ? "online" : "offline"}`} aria-hidden />
-          {online ? "Connected" : "Offline"}
-          {settings ? " · session ready" : ""}
-        </p>
-        <button type="button" className="btn danger block" onClick={() => void signOut()}>
-          Sign out
-        </button>
+      <div className="gm-tabs" role="tablist" aria-label="Settings sections" data-testid="settings-tabs">
+        {SETTINGS_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={settingsTab === t.id}
+            className={settingsTab === t.id ? "active" : undefined}
+            onClick={() => setSettingsTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div className="card settings-card">
-        <h2>Notifications</h2>
-        <p className="settings-status-headline" data-testid="notif-headline">
-          {notif.headline}
-        </p>
-        <p className="muted settings-help">{notif.detail}</p>
-        <p className="settings-meta">
-          Server alerts:{" "}
-          <strong>{settings?.notificationsEnabled ? "on" : "off"}</strong>
-        </p>
-        <div className="btn-stack">
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !notif.canEnable}
-            title={notif.enableReason}
-            onClick={() => void enablePush()}
-          >
-            Enable Web Push
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !notif.canUnsubscribe}
-            onClick={() => void disablePush()}
-          >
-            Unsubscribe
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !settings || !online}
-            onClick={() => void toggleNotifications()}
-          >
-            {settings?.notificationsEnabled ? "Turn server alerts off" : "Turn server alerts on"}
+      {settingsTab === "account" && (
+        <div className="card settings-card">
+          <h2>Account</h2>
+          <p className="settings-email" data-testid="account-email">
+            {user?.email ?? "Signed in"}
+          </p>
+          <p className="settings-meta" data-testid="connection-status">
+            <span className={`status-dot ${online ? "online" : "offline"}`} aria-hidden />
+            {online ? "Connected" : "Offline"}
+            {settings ? " · session ready" : ""}
+          </p>
+          <button type="button" className="btn danger block" onClick={() => void signOut()}>
+            Sign out
           </button>
         </div>
-        {!notif.canEnable && notif.enableReason && (
-          <p className="muted settings-help" data-testid="notif-enable-hint">
-            Enable Web Push: {notif.enableReason}
-          </p>
-        )}
-      </div>
+      )}
 
-      <div className="card settings-card">
-        <h2>TradingView connection</h2>
-        <p className="muted settings-help">
-          {activeCount === 0
-            ? "No active webhook yet. Create one connection and paste its URL into TradingView."
-            : activeCount === 1
-              ? "One active webhook. Keep only one URL in your TradingView alert."
-              : `${activeCount} active webhooks. Revoke unused ones so only one is live.`}
-        </p>
-        {connections.length === 0 ? (
-          <p className="muted">No connections yet.</p>
-        ) : (
-          <ul className="connection-list">
-            {connections.map((conn) => {
-              const active = isActiveConnection(conn);
-              const url = connectionUrl(conn);
-              const webhookId = conn.webhookId ?? conn.id;
-              return (
-                <li key={conn.id} className="connection-item" data-testid={`connection-${conn.id}`}>
-                  <div className="connection-item-header">
-                    <span
-                      className={`connection-status ${active ? "active" : "revoked"}`}
-                      data-testid={`connection-status-${conn.id}`}
-                    >
-                      {String(conn.status).toUpperCase()}
-                    </span>
-                    <span className="connection-id url-break">ID ···{webhookId.slice(-6)}</span>
-                  </div>
-                  <div className="connection-url url-break" data-testid={`connection-url-${conn.id}`}>
-                    {url || "URL hidden"}
-                  </div>
-                  <div className="muted connection-meta">Last alert {formatWhen(conn.lastAlertAt)}</div>
-                  <div className="connection-actions">
-                    {url && (
-                      <button
-                        type="button"
-                        className="btn connection-copy"
-                        disabled={busy}
-                        onClick={() => void copyWebhook(url)}
-                      >
-                        Copy webhook
-                      </button>
-                    )}
-                    {active && (
-                      <button
-                        type="button"
-                        className="btn danger connection-revoke"
-                        disabled={busy || !online}
-                        onClick={() => void revokeConnection(conn)}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {createdWebhookUrl && (
-          <div className="created-webhook">
-            <p className="muted">New webhook URL</p>
-            <code className="url-break" data-testid="created-webhook-url">
-              {createdWebhookUrl}
-            </code>
+      {settingsTab === "notifications" && (
+        <div className="card settings-card">
+          <h2>Notifications</h2>
+          <p className="settings-status-headline" data-testid="notif-headline">
+            {notif.headline}
+          </p>
+          <p className="muted settings-help">{notif.detail}</p>
+          <p className="settings-meta">
+            Server alerts:{" "}
+            <strong>{settings?.notificationsEnabled ? "on" : "off"}</strong>
+          </p>
+          <div className="btn-stack">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !notif.canEnable}
+              title={notif.enableReason}
+              onClick={() => void enablePush()}
+            >
+              Enable Web Push
+            </button>
             <button
               type="button"
               className="btn"
-              onClick={() => void copyWebhook(createdWebhookUrl)}
+              disabled={busy || !notif.canUnsubscribe}
+              onClick={() => void disablePush()}
             >
-              Copy webhook
+              Unsubscribe
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !settings || !online}
+              onClick={() => void toggleNotifications()}
+            >
+              {settings?.notificationsEnabled ? "Turn server alerts off" : "Turn server alerts on"}
             </button>
           </div>
-        )}
-        <div className="btn-stack">
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !online}
-            onClick={() => void createConnection()}
-          >
-            Create connection
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !online || activeCount === 0}
-            onClick={() => void sendTest()}
-          >
-            Send TEST alert
-          </button>
+          {!notif.canEnable && notif.enableReason && (
+            <p className="muted settings-help" data-testid="notif-enable-hint">
+              Enable Web Push: {notif.enableReason}
+            </p>
+          )}
         </div>
-      </div>
+      )}
 
-      <div className="card settings-card" data-testid="manual-risk-settings">
-        <h2>Manual risk limits</h2>
-        <p className="muted settings-help">
-          Editable safety limits for €20-style manual trading. Changes are logged. GoldMeta never
-          places broker orders. No averaging down, martingale, or automatic recovery.
-        </p>
-        {settings?.manualRisk && (
-          <div className="form-grid">
-            <label className="field">
-              <span>Currency</span>
-              <select
-                value={settings.manualRisk.currency}
-                disabled={busy || !online}
-                onChange={(e) =>
-                  void saveManualRisk({
-                    currency: e.target.value as "EUR" | "USD" | "GBP"
-                  })
-                }
-              >
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
-                <option value="GBP">GBP</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Max risk / trade</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={1}
-                defaultValue={settings.manualRisk.maxCashRiskPerTrade}
-                disabled={busy || !online}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v > 0 && v !== settings.manualRisk?.maxCashRiskPerTrade) {
-                    void saveManualRisk({ maxCashRiskPerTrade: v });
-                  }
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>Max daily loss</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={1}
-                defaultValue={settings.manualRisk.maxDailyRealisedLoss}
-                disabled={busy || !online}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v > 0 && v !== settings.manualRisk?.maxDailyRealisedLoss) {
-                    void saveManualRisk({ maxDailyRealisedLoss: v });
-                  }
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>Stop after losses</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                defaultValue={settings.manualRisk.stopAfterConsecutiveLosses}
-                disabled={busy || !online}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v > 0 && v !== settings.manualRisk?.stopAfterConsecutiveLosses) {
-                    void saveManualRisk({ stopAfterConsecutiveLosses: v });
-                  }
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>Max simultaneous</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={5}
-                defaultValue={settings.manualRisk.maxSimultaneousManualTrades}
-                disabled={busy || !online}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v > 0 && v !== settings.manualRisk?.maxSimultaneousManualTrades) {
-                    void saveManualRisk({ maxSimultaneousManualTrades: v });
-                  }
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>Value per point</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                defaultValue={settings.manualRisk.valuePerPoint ?? ""}
-                placeholder="from broker"
-                disabled={busy || !online}
-                onBlur={(e) => {
-                  const raw = e.target.value.trim();
-                  const v = raw === "" ? null : Number(raw);
-                  if (v !== settings.manualRisk?.valuePerPoint) {
-                    void saveManualRisk({ valuePerPoint: v });
-                  }
-                }}
-              />
-            </label>
-          </div>
-        )}
-        {(settings?.manualRiskLimitChangeLog?.length ?? 0) > 0 && (
-          <details className="change-log">
-            <summary>Limit change log</summary>
-            <ul className="list">
-              {settings!.manualRiskLimitChangeLog!.slice(0, 10).map((c) => (
-                <li key={`${c.at}-${c.field}`}>
-                  {c.field}: {String(c.from)} → {String(c.to)}
-                </li>
-              ))}
+      {settingsTab === "tradingview" && (
+        <div className="card settings-card">
+          <h2>TradingView connection</h2>
+          <p className="muted settings-help">
+            {activeCount === 0
+              ? "No active webhook yet. Create one connection and paste its URL into TradingView."
+              : activeCount === 1
+                ? "One active webhook. Keep only one URL in your TradingView alert."
+                : `${activeCount} active webhooks. Revoke unused ones so only one is live.`}
+          </p>
+          {connections.length === 0 ? (
+            <p className="muted">No connections yet.</p>
+          ) : (
+            <ul className="connection-list">
+              {connections.map((conn) => {
+                const active = isActiveConnection(conn);
+                const url = connectionUrl(conn);
+                const webhookId = conn.webhookId ?? conn.id;
+                const revealed = Boolean(revealedWebhooks[conn.id]);
+                return (
+                  <li key={conn.id} className="connection-item" data-testid={`connection-${conn.id}`}>
+                    <div className="connection-item-header">
+                      <span
+                        className={`connection-status ${active ? "active" : "revoked"}`}
+                        data-testid={`connection-status-${conn.id}`}
+                      >
+                        {String(conn.status).toUpperCase()}
+                      </span>
+                      <span className="connection-id url-break">ID ···{webhookId.slice(-6)}</span>
+                    </div>
+                    <div
+                      className="connection-url url-break"
+                      data-testid={`connection-url-${conn.id}`}
+                    >
+                      {url
+                        ? revealed
+                          ? url
+                          : `${url.slice(0, 28)}… (hidden)`
+                        : "URL hidden"}
+                    </div>
+                    <div className="muted connection-meta">Last alert {formatWhen(conn.lastAlertAt)}</div>
+                    <div className="connection-actions">
+                      {url && (
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() =>
+                            setRevealedWebhooks((prev) => ({
+                              ...prev,
+                              [conn.id]: !prev[conn.id]
+                            }))
+                          }
+                        >
+                          {revealed ? "Hide webhook" : "Reveal webhook"}
+                        </button>
+                      )}
+                      {url && (
+                        <button
+                          type="button"
+                          className="btn connection-copy"
+                          disabled={busy}
+                          onClick={() => void copyWebhook(url)}
+                        >
+                          Copy webhook
+                        </button>
+                      )}
+                      {active && (
+                        <button
+                          type="button"
+                          className="btn danger connection-revoke"
+                          disabled={busy || !online}
+                          onClick={() => void revokeConnection(conn)}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
-          </details>
-        )}
-      </div>
+          )}
+          {createdWebhookUrl && (
+            <div className="created-webhook">
+              <p className="muted">New webhook URL (copy now)</p>
+              <code className="url-break" data-testid="created-webhook-url">
+                {createdWebhookUrl}
+              </code>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void copyWebhook(createdWebhookUrl)}
+              >
+                Copy webhook
+              </button>
+            </div>
+          )}
+          <div className="btn-stack">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !online}
+              onClick={() => void createConnection()}
+            >
+              Create connection
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !online || activeCount === 0}
+              onClick={() => void sendTest()}
+            >
+              Send TEST alert
+            </button>
+          </div>
+        </div>
+      )}
 
-      <div className="card settings-card">
-        <h2>Install / offline</h2>
-        <p className="muted settings-help">
-          On iPhone: open in Safari → Share → Add to Home Screen. GoldMeta does not install
-          automatically. Cached decisions are marked stale when you are offline.
-        </p>
-        <p className="settings-meta">
-          Home Screen app: <strong>{installed ? "yes" : "not detected"}</strong>
-        </p>
-      </div>
+      {settingsTab === "risk" && (
+        <div className="card settings-card" data-testid="manual-risk-settings">
+          <h2>Risk preferences</h2>
+          <p className="muted settings-help">
+            Editable safety limits for manual trading. Changes are logged. GoldMeta never places
+            broker orders. Use the{" "}
+            <a href="/planner">Risk planner</a> for progressive sizing calculations.
+          </p>
+          {settings?.manualRisk && (
+            <div className="form-grid">
+              <label className="field">
+                <span>Currency</span>
+                <select
+                  value={settings.manualRisk.currency}
+                  disabled={busy || !online}
+                  onChange={(e) =>
+                    void saveManualRisk({
+                      currency: e.target.value as "EUR" | "USD" | "GBP"
+                    })
+                  }
+                >
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Max risk / trade</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={1}
+                  defaultValue={settings.manualRisk.maxCashRiskPerTrade}
+                  disabled={busy || !online}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== settings.manualRisk?.maxCashRiskPerTrade) {
+                      void saveManualRisk({ maxCashRiskPerTrade: v });
+                    }
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Max daily loss</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={1}
+                  defaultValue={settings.manualRisk.maxDailyRealisedLoss}
+                  disabled={busy || !online}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== settings.manualRisk?.maxDailyRealisedLoss) {
+                      void saveManualRisk({ maxDailyRealisedLoss: v });
+                    }
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Stop after losses</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  defaultValue={settings.manualRisk.stopAfterConsecutiveLosses}
+                  disabled={busy || !online}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== settings.manualRisk?.stopAfterConsecutiveLosses) {
+                      void saveManualRisk({ stopAfterConsecutiveLosses: v });
+                    }
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Max simultaneous</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={5}
+                  defaultValue={settings.manualRisk.maxSimultaneousManualTrades}
+                  disabled={busy || !online}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== settings.manualRisk?.maxSimultaneousManualTrades) {
+                      void saveManualRisk({ maxSimultaneousManualTrades: v });
+                    }
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Value per point</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  defaultValue={settings.manualRisk.valuePerPoint ?? ""}
+                  placeholder="from broker"
+                  disabled={busy || !online}
+                  onBlur={(e) => {
+                    const raw = e.target.value.trim();
+                    const v = raw === "" ? null : Number(raw);
+                    if (v !== settings.manualRisk?.valuePerPoint) {
+                      void saveManualRisk({ valuePerPoint: v });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          )}
+          {(settings?.manualRiskLimitChangeLog?.length ?? 0) > 0 && (
+            <details className="change-log">
+              <summary>Limit change log</summary>
+              <ul className="list">
+                {settings!.manualRiskLimitChangeLog!.slice(0, 10).map((c) => (
+                  <li key={`${c.at}-${c.field}`}>
+                    {c.field}: {String(c.from)} → {String(c.to)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {settingsTab === "appearance" && (
+        <div className="card settings-card">
+          <h2>Appearance</h2>
+          <p className="muted settings-help">
+            GoldMeta uses a restrained dark institutional theme. Brand concept selection is available
+            on the Brand preview page and does not change production assets until approved.
+          </p>
+          <a className="gm-linkish" href="/brand">
+            Open brand concepts
+          </a>
+        </div>
+      )}
+
+      {settingsTab === "installation" && (
+        <div className="card settings-card">
+          <h2>Install / offline</h2>
+          <p className="muted settings-help">
+            On iPhone: open in Safari → Share → Add to Home Screen. GoldMeta does not install
+            automatically. Cached decisions are marked stale when you are offline.
+          </p>
+          <p className="settings-meta">
+            Home Screen app: <strong>{installed ? "yes" : "not detected"}</strong>
+          </p>
+        </div>
+      )}
+
+      {settingsTab === "advanced" && (
+        <div className="card settings-card">
+          <h2>Advanced</h2>
+          <p className="muted settings-help">
+            Diagnostics are available only to operators with the admin claim. Broker mode remains
+            disabled. V4 remains SHADOW only.
+          </p>
+          <a className="gm-linkish" href="/diagnostics">
+            Open diagnostics
+          </a>
+          <p className="settings-meta" style={{ marginTop: 12 }}>
+            BROKER_MODE: DISABLED · V4: SHADOW · AI_ENABLED: false
+          </p>
+        </div>
+      )}
     </div>
   );
 }

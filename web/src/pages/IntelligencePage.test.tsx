@@ -60,8 +60,11 @@ describe("IntelligencePage honesty", () => {
     );
     expect(await screen.findByTestId("intelligence-page")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
-    expect(await screen.findByTestId("intelligence-answer")).toHaveTextContent("Verified data");
+    expect(await screen.findByTestId("intelligence-answer")).toHaveTextContent(
+      /Waiting because gates failed/i
+    );
     expect(screen.getByText(/confirmation incomplete/)).toBeInTheDocument();
+    expect(screen.getByText("Verified data")).toBeInTheDocument();
   });
 
   it("labels Ask GoldMeta as deterministic, not AI", async () => {

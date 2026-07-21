@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "v5.3-scroll-hotfix-2026-07-21";
+export const GOLD_META_BUILD_STAMP = "v5.3-ui-redesign-preview-2026-07-21";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -7,6 +7,7 @@ import App from "./App";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ScrollToTop } from "./components/ScrollToTop";
 import "./styles/global.css";
+import "./styles/redesign.css";
 
 const UPDATE_EVENT = "goldmeta:sw-update";
 
@@ -61,3 +62,6 @@ createRoot(document.getElementById("root")!).render(
     <Root />
   </StrictMode>
 );
+document.documentElement.dataset.build = GOLD_META_BUILD_STAMP;
+document.documentElement.dataset.scrollHotfix = "1";
+document.documentElement.dataset.uiRedesign = "1";
