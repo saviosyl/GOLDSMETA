@@ -74,10 +74,23 @@ Webhook regression:
 
 ## 5. Analytics (TEST vs LIVE)
 
-After fixtures (approximate):
+After controlled fixtures (including a second local runner pass):
 
-- TEST: completed setups present; small-sample warning shown (`n<30`)
+- TEST setups: 12 total, 0 LIVE setups
+- Example completed outcomes: WIN_TP3×2, LOSS_SL×2, EXPIRED×2, AMBIGUOUS×2, CANCELLED×4 (guard/reset)
+- Small-sample warning required (`n=12 < 30`)
 - LIVE setups: **0** — TEST cannot contaminate LIVE statistics
+
+Primary first-pass setup IDs:
+
+| Scenario | Setup ID | Final |
+|----------|----------|-------|
+| A | `81b60215cf7dfe1ad12392f1` | WIN_TP3 (raw 4R / modelled 2.7R) |
+| B | `f91ef1d3343664b4e5a91d46` | LOSS_SL (−1R) |
+| D | `4925db514f020e9893bb2bb9` | EXPIRED |
+| E | `0dab119fa6805cc627427b7e` | AMBIGUOUS_WORST_CASE_SL (−1R) |
+| F | `10b6d4e74ae44c24748361ac` | ENTRY then cancelled in cleanup |
+| G | `e6a58d79ae7279d88b2ce175` | active guard held; later cancelled |
 
 ## 6. Frontend deployment
 
