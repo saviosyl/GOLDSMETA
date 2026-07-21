@@ -40,6 +40,8 @@ export interface Decision {
   schemaVersion: string;
   decisionId: string;
   symbol: string;
+  /** Present when backend includes it; otherwise UI shows "—". */
+  timeframe?: string | null;
   generatedAt: string;
   marketDataTime: string;
   validUntil: string;

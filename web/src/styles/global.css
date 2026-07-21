@@ -459,9 +459,21 @@ a {
   line-height: 1.35;
 }
 
-.connection-revoke {
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   width: 100%;
+  min-width: 0;
   margin-top: 2px;
+}
+
+.connection-copy,
+.connection-revoke {
+  flex: 1 1 120px;
+  min-width: 0;
+  width: auto;
+  margin-top: 0;
 }
 
 .created-webhook {
@@ -481,6 +493,187 @@ a {
   line-height: 1.35;
 }
 
+.settings-email {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.status-dot.online {
+  background: var(--buy);
+}
+
+.status-dot.offline {
+  background: var(--stale);
+}
+
+.settings-status-headline {
+  margin: 0;
+  font-weight: 650;
+}
+
+.min-zero {
+  min-width: 0;
+}
+
+.decision-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.decision-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 46%;
+}
+
+.decision-symbol {
+  margin: 0;
+}
+
+.decision-meta {
+  margin-top: 0;
+}
+
+.decision-summary {
+  margin: 0 0 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.decision-metrics {
+  margin-bottom: 12px;
+}
+
+.action-value {
+  font-size: 0.95rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.history-page,
+.history-detail-page,
+.analysis-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.history-filter {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--muted);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 8px 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.history-filter.active {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-color: transparent;
+}
+
+.history-list-card {
+  padding: 8px 12px;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-item {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 14px 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.history-item:last-child {
+  border-bottom: 0;
+}
+
+.history-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.history-decision {
+  font-size: 1.05rem;
+}
+
+.history-decision.BUY {
+  color: var(--buy);
+}
+.history-decision.SELL {
+  color: var(--sell);
+}
+.history-decision.WAIT {
+  color: var(--wait);
+}
+
+.history-confidence {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.history-quality {
+  margin-left: auto;
+}
+
+.history-item-meta {
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+
+.history-item-reason {
+  margin-top: 6px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.history-footnote {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 374px) {
   .settings-status-row {
     grid-template-columns: 1fr;
@@ -490,7 +683,9 @@ a {
     text-align: left;
   }
 
-  .btn-stack .btn {
+  .btn-stack .btn,
+  .connection-copy,
+  .connection-revoke {
     flex-basis: 100%;
   }
 
@@ -498,45 +693,35 @@ a {
     font-size: 0.58rem;
     padding: 8px 1px;
   }
+
+  .decision-badges {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+
+  .decision-card-header {
+    flex-direction: column;
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 390px) {
   .connection-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "header header"
-      "url revoke"
-      "meta revoke";
-    column-gap: 12px;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 768px) {
+  .grid-2 {
+    grid-template-columns: 1fr 1fr;
   }
 
-  .connection-item-header {
-    grid-area: header;
-  }
-
-  .connection-url {
-    grid-area: url;
-  }
-
-  .connection-meta {
-    grid-area: meta;
-  }
-
-  .connection-revoke {
-    grid-area: revoke;
-    width: auto;
-    align-self: center;
-    min-width: 96px;
-  }
-
-  .connection-item:not(:has(.connection-revoke)) {
-    grid-template-areas:
-      "header"
-      "url"
-      "meta";
-    grid-template-columns: minmax(0, 1fr);
+  .history-filters {
+    gap: 10px;
   }
 }
 

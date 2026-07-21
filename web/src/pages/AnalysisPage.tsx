@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import type { Decision } from "../types/models";
-import { formatWhen } from "../lib/format";
+import { explainReasonCode, formatWhen, primaryReason } from "../lib/decisionDisplay";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 
 export function AnalysisPage() {
@@ -36,7 +36,7 @@ export function AnalysisPage() {
   }
 
   return (
-    <>
+    <div className="analysis-page">
       <h1 className="brand" style={{ fontSize: "1.4rem" }}>
         Full analysis
       </h1>
@@ -50,11 +50,11 @@ export function AnalysisPage() {
           {decision.decision} · {decision.setupGrade ?? "—"}
         </h2>
         <p className="muted">{formatWhen(decision.generatedAt)}</p>
-        <p>{decision.explanation ?? decision.reasonSummary.join(" ")}</p>
-        <h3>Reason codes</h3>
+        <p>{decision.explanation ?? primaryReason(decision)}</p>
+        <h3>Why this decision</h3>
         <ul className="list">
           {decision.reasonCodes.map((code) => (
-            <li key={code}>{code}</li>
+            <li key={code}>{explainReasonCode(code)}</li>
           ))}
         </ul>
         <h3>Warnings</h3>
@@ -68,6 +68,6 @@ export function AnalysisPage() {
         <h3>Disclaimer</h3>
         <p className="muted">{decision.disclaimer}</p>
       </div>
-    </>
+    </div>
   );
 }

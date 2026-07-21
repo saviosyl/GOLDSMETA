@@ -56,6 +56,13 @@ describe("SettingsPage TradingView create connection", () => {
     sendTestAlert.mockReset();
   });
 
+  it("hides the backend API URL and shows account email", async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByTestId("account-email")).toHaveTextContent("tester@example.com");
+    expect(screen.queryByText(/cloudfunctions\.net\/api/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("connection-status")).toHaveTextContent(/Connected|Offline/);
+  });
+
   it("shows the created webhook URL after a successful create without exposing a secret", async () => {
     const connection = {
       id: "wh_1",
@@ -116,7 +123,7 @@ describe("SettingsPage TradingView create connection", () => {
   });
 });
 
-describe("SettingsPage TradingView revoke connection", () => {
+describe("SettingsPage TradingView revoke and copy", () => {
   const active = {
     id: "wh_active",
     webhookId: "wh_active",
@@ -195,59 +202,32 @@ describe("SettingsPage TradingView revoke connection", () => {
     expect(confirm).toHaveBeenCalled();
     expect(revokeTradingViewConnection).not.toHaveBeenCalled();
   });
+
+  it("keeps long webhook URLs wrappable and offers Copy webhook", async () => {
+    render(<SettingsPage />);
+    const url = await screen.findByTestId("connection-url-wh_active");
+    expect(url).toHaveClass("url-break");
+    expect(url).toHaveTextContent(longWebhook);
+    expect(screen.getAllByRole("button", { name: "Copy webhook" }).length).toBeGreaterThan(0);
+  });
 });
 
-describe("SettingsPage mobile layout classes", () => {
+describe("SettingsPage notifications UX", () => {
   beforeEach(() => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     getSettings.mockResolvedValue({
-      notificationsEnabled: true,
+      notificationsEnabled: false,
       aiEnabled: false,
       provisionalSignalsEnabled: false,
       riskProfile: "BALANCED"
     });
-    listTradingViewConnections.mockResolvedValue([
-      {
-        id: "wh_layout",
-        status: "ACTIVE",
-        webhookURL: longWebhook
-      }
-    ]);
+    listTradingViewConnections.mockResolvedValue([]);
   });
 
-  it("marks long API and webhook URLs with wrapping classes", async () => {
+  it("disables Enable Web Push when unsupported and explains why", async () => {
     render(<SettingsPage />);
-
-    const apiUrl = await screen.findByTestId("api-base-url");
-    expect(apiUrl).toHaveClass("url-break");
-    expect(apiUrl).toHaveTextContent(
-      "https://us-central1-goldmeta-web.cloudfunctions.net/api"
-    );
-
-    const webhookUrl = await screen.findByTestId("connection-url-wh_layout");
-    expect(webhookUrl).toHaveClass("url-break");
-    expect(webhookUrl).toHaveTextContent(longWebhook);
-
-    expect(document.querySelector(".settings-page")).toBeTruthy();
-    expect(document.querySelector(".btn-stack")).toBeTruthy();
-    expect(document.querySelector(".connection-item")).toBeTruthy();
+    expect(await screen.findByTestId("notif-headline")).toHaveTextContent(/Unavailable/i);
+    expect(screen.getByRole("button", { name: "Enable Web Push" })).toBeDisabled();
+    expect(screen.getByTestId("notif-enable-hint")).toHaveTextContent(/unavailable/i);
   });
-
-  it.each([320, 375, 390, 430])(
-    "keeps settings shell within %spx viewport width without horizontal overflow classes",
-    async (width) => {
-      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
-      render(<SettingsPage />);
-      await screen.findByTestId("api-base-url");
-
-      const page = document.querySelector(".settings-page");
-      expect(page).toBeTruthy();
-      const cards = document.querySelectorAll(".settings-card");
-      expect(cards.length).toBeGreaterThanOrEqual(4);
-      cards.forEach((card) => {
-        expect(card.classList.contains("card")).toBe(true);
-      });
-      expect(screen.getByTestId("connection-url-wh_layout").className).toContain("url-break");
-    }
-  );
 });

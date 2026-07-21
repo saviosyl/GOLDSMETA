@@ -1,14 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision } from "../types/models";
-import { formatPercent, formatWhen } from "../lib/format";
+import {
+  displayQualityLabel,
+  filterHistory,
+  formatPercent,
+  formatWhen,
+  primaryReason,
+  timeframeLabel,
+  trendLabel,
+  type HistoryFilter
+} from "../lib/decisionDisplay";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
+
+const FILTERS: Array<{ id: HistoryFilter; label: string }> = [
+  { id: "ALL", label: "All" },
+  { id: "BUY", label: "BUY" },
+  { id: "SELL", label: "SELL" },
+  { id: "WAIT", label: "WAIT" }
+];
 
 export function HistoryPage() {
   const { api } = useAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState<Decision[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  const [filter, setFilter] = useState<HistoryFilter>("ALL");
 
   useEffect(() => {
     void (async () => {
@@ -26,8 +45,10 @@ export function HistoryPage() {
     })();
   }, [api]);
 
+  const visible = useMemo(() => filterHistory(items, filter), [items, filter]);
+
   return (
-    <>
+    <div className="history-page">
       <h1 className="brand" style={{ fontSize: "1.4rem" }}>
         Signal history
       </h1>
@@ -36,21 +57,59 @@ export function HistoryPage() {
           {error ?? "Offline"} — showing cached history when available.
         </div>
       )}
-      <div className="card">
-        {items.length === 0 ? (
+
+      <div className="history-filters" role="tablist" aria-label="Filter decisions">
+        {FILTERS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={filter === item.id}
+            className={`history-filter ${filter === item.id ? "active" : ""}`}
+            onClick={() => setFilter(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="card history-list-card">
+        {visible.length === 0 ? (
           <p className="muted">No signals yet.</p>
         ) : (
-          <ul className="list">
-            {items.map((item) => (
-              <li key={item.decisionId}>
-                <strong className={item.decision}>{item.decision}</strong> ·{" "}
-                {formatPercent(item.confidence)} · {formatWhen(item.generatedAt)}
-                <div className="muted">{item.decisionId}</div>
-              </li>
-            ))}
+          <ul className="history-list">
+            {visible.map((item) => {
+              const quality = displayQualityLabel(item);
+              return (
+                <li key={item.decisionId}>
+                  <button
+                    type="button"
+                    className="history-item"
+                    onClick={() => navigate(`/history/${encodeURIComponent(item.decisionId)}`)}
+                    data-testid={`history-item-${item.decisionId}`}
+                  >
+                    <div className="history-item-top">
+                      <strong className={`history-decision ${item.decision}`}>{item.decision}</strong>
+                      <span className="history-confidence">{formatPercent(item.confidence)}</span>
+                      <span className={`badge history-quality ${quality.toLowerCase()}`}>{quality}</span>
+                    </div>
+                    <div className="history-item-meta muted">
+                      {item.symbol} · {timeframeLabel(item)} · {formatWhen(item.generatedAt)}
+                    </div>
+                    <div className="history-item-meta muted">Trend {trendLabel(item)}</div>
+                    <div className="history-item-reason">{primaryReason(item)}</div>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
-    </>
+
+      <p className="muted history-footnote">
+        Tap a signal for the full plan. Analysis only — not broker execution.{" "}
+        <Link to="/analysis">Open analysis</Link>
+      </p>
+    </div>
   );
 }

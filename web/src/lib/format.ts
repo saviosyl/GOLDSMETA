@@ -47,14 +47,17 @@ export const tpPrice = (
   return formatPrice(match?.price);
 };
 
+/**
+ * Genuine test-mode decisions only.
+ * dataSourceLabel "TEST" alone is not enough if environment/isTestDecision disagree —
+ * still treat explicit TEST environment or flag as test.
+ */
 export const isTestDecision = (decision: {
   isTestDecision?: boolean | null;
   environment?: string | null;
   dataSourceLabel?: string;
 }): boolean =>
-  decision.isTestDecision === true ||
-  decision.environment === "TEST" ||
-  decision.dataSourceLabel === "TEST";
+  decision.isTestDecision === true || decision.environment === "TEST";
 
 export const isStaleDecision = (decision: {
   dataQuality?: string;
