@@ -1,25 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GoldMeta">
-  <!-- Official GoldMeta mark: navy G + gold M with chart, growth arrow, circuit nodes -->
+  <!-- Official GoldMeta mark: navy G (open top-right) + gold M, bars, growth arrow, circuit nodes -->
   <rect width="256" height="256" fill="none"/>
-  <!-- Outer G ring (navy) with opening on the right -->
+
+  <!-- G ring via thick stroke arc — gap at ~2 o'clock -->
   <path
-    d="M128 28c-55.2 0-100 44.8-100 100s44.8 100 100 100c28.8 0 54.9-12.2 73.4-31.8l-18.6-16.8C169.2 192.8 149.6 202 128 202c-40.9 0-74-33.1-74-74s33.1-74 74-74c24.8 0 46.7 12.2 60 30.8l18.2-17.2C189.2 42.4 160.4 28 128 28z"
-    fill="#11284A"
+    d="M158.90 32.89 A86 86 0 1 0 223.11 97.10"
+    fill="none"
+    stroke="#11284A"
+    stroke-width="28"
+    stroke-linecap="butt"
   />
+
   <!-- Gold M -->
   <path
-    d="M78 176V92h26.5l19.5 52 19.5-52H170v58l26-36v54h-24.5v-40L151 176h-20L110.5 136V176H78z"
+    d="M76 178 V88 h23 l19 54 19-54 h23 v52 l26-40 v66 h-21 v-38 L142 178 h-16 L104 132 v46 H76 Z"
     fill="#D8A33D"
   />
-  <!-- Growth arrow (continuation of M right) -->
-  <path d="M170 108l28-34 10 10-14 14H220v14H170v-4z" fill="#D8A33D"/>
-  <!-- Volume bars -->
-  <rect x="96" y="68" width="10" height="22" rx="2.5" fill="#D8A33D"/>
-  <rect x="112" y="54" width="10" height="36" rx="2.5" fill="#D8A33D"/>
-  <rect x="128" y="40" width="10" height="50" rx="2.5" fill="#D8A33D"/>
-  <!-- Circuit traces with hollow nodes -->
-  <path d="M112 176v28M128 176v36M144 176v28" fill="none" stroke="#D8A33D" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="112" cy="210" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
-  <circle cx="128" cy="218" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
-  <circle cx="144" cy="210" r="6" fill="none" stroke="#D8A33D" stroke-width="4"/>
+
+  <!-- Growth arrow through G opening -->
+  <path d="M168 114 L214 52 L230 66 L192 108 H234 V124 H168 Z" fill="#D8A33D"/>
+
+  <!-- Ascending volume bars -->
+  <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+  <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+  <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+
+  <!-- Circuit traces + hollow nodes -->
+  <path d="M108 178 v26 M128 178 v34 M148 178 v26" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="108" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="128" cy="218" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="148" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
 </svg>

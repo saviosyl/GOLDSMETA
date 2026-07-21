@@ -6,9 +6,9 @@ export function BrandConceptsPage() {
     <div data-testid="brand-concepts-page" className="gm-brand-page">
       <PageHeader title="Approved branding" />
       <p className="gm-brand-intro">
-        GoldMeta V5.4 uses the approved navy + gold mark and wordmark. Previous concept previews
-        (A–F) are withdrawn. Production icons update with this preview until Savio promotes the
-        theme.
+        GoldMeta V5.4 uses the official GoldMeta logo (navy G + gold M mark, stacked GOLDMETΛ
+        wordmark, MetaMech tagline). Previous concept previews (A–F) are withdrawn. Production
+        icons update with this preview until Savio promotes the theme.
       </p>
 
       <div className="gm-brand-columns" data-testid="brand-columns" style={{ gridTemplateColumns: "1fr" }}>

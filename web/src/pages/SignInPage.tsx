@@ -55,7 +55,7 @@ export function SignInPage() {
     return (
       <div className="gm-auth-layout" data-testid="signin-unconfigured">
         <div className="gm-auth-card">
-          <img src="/brand/logo-full-v54.svg" alt="GoldMeta" className="logo-full" width={240} />
+          <img src="/brand/logo-full-v54.svg" alt="GoldMeta" className="logo-full" width={200} />
           <h1 className="gm-auth-title">Configuration needed</h1>
           <p className="gm-auth-support">GoldMeta is not configured for this environment.</p>
         </div>
@@ -77,8 +77,7 @@ export function SignInPage() {
               src="/brand/logo-full-v54.svg"
               alt="GoldMeta"
               className="logo-full"
-              width={260}
-              height={74}
+              width={200}
             />
           </div>
 

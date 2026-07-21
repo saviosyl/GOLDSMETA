@@ -603,7 +603,7 @@ a {
 }
 
 .gm-auth-card-brand img.logo-full {
-  width: min(100%, 260px);
+  width: min(100%, 200px);
   height: auto;
 }
 
