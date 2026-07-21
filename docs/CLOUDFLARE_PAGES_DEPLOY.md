@@ -1,131 +1,80 @@
-# Cloudflare Pages deploy (GoldMeta PWA)
+# Cloudflare Pages — GoldMeta V5.1 deployment audit
 
-Production URL: **https://goldmeta.metamechsolutions.com**
+**Production URL:** https://goldmeta.metamechsolutions.com  
+**Pages project:** `goldmeta-web` (existing — do **not** create a second project)  
+**Also:** `goldmeta-web.pages.dev`  
+**Repo root for Pages:** `web`  
+**Build:** `npm ci && npm run build` → output `dist`  
+**SPA:** `web/public/_redirects` → `/* /index.html 200`
 
-The PWA frontend (`web/`) is hosted on **Cloudflare Pages**.  
-Firebase remains Auth + Firestore + backend API only.  
-Do **not** deploy the PWA with Firebase Hosting.  
-Do **not** change https://metamechsolutions.com — GoldMeta is isolated on the subdomain.
+## Deployment method (existing)
 
-`ios/` stays the future App Store app and is untouched.
+GoldMeta uses **Cloudflare Pages** with either:
 
----
+1. **Git-connected Pages** (preferred when linked in the Cloudflare dashboard), or  
+2. **Wrangler CLI direct upload** (`npx wrangler pages deploy dist --project-name goldmeta-web`)
 
-## Cloudflare Pages settings
+Do **not** modify DNS, unrelated Workers, MetaMech marketing sites, or custom domains outside `goldmeta.metamechsolutions.com`.
 
-| Setting | Value |
-| --- | --- |
-| Project name | `goldmeta-web` (recommended) |
-| Root directory | `web` |
-| Build command | `npm run build` |
-| Output directory | `dist` |
-| Node version | `20` |
-| Production branch | `cursor/production-connection` or `main` (your choice) |
-| Custom domain | `goldmeta.metamechsolutions.com` |
+## Secrets required (values never committed / logged)
 
-SPA routing is handled by `web/public/_redirects`:
+| Secret name | Where | Purpose |
+| --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | GitHub Actions secret **and/or** agent/CI env | Authenticate Pages deploy via Wrangler/API |
+| `CLOUDFLARE_ACCOUNT_ID` | Already available in this environment | Target Cloudflare account |
 
-```text
-/*    /index.html   200
-```
+### Minimum Cloudflare API token permissions
 
-HTTPS uses Cloudflare’s managed SSL once the custom domain is attached and active.
+Create a token at Cloudflare → My Profile → API Tokens → Create Token:
 
----
+- **Account → Cloudflare Pages → Edit**
+- **Account → Account Settings → Read** (optional, for account listing)
+- Include only the GoldMeta account resource
 
-## Environment variables (Cloudflare Pages → Settings → Environment variables)
+Do **not** grant Zone DNS edit, Workers Scripts edit for unrelated projects, or User API Credentials.
 
-Set these for **Production** (and Preview if you want preview Auth against the same Firebase project).  
-Do **not** commit `web/.env.local`.
+### Manual steps for Savio (secure)
 
-| Variable | Example / notes |
-| --- | --- |
-| `VITE_API_BASE_URL` | Your Firebase Functions URL ending in `/api` (or leave local-only until API is live) |
-| `VITE_FIREBASE_API_KEY` | From Firebase Web config |
-| `VITE_FIREBASE_AUTH_DOMAIN` | e.g. `goldmeta-web.firebaseapp.com` |
-| `VITE_FIREBASE_PROJECT_ID` | e.g. `goldmeta-web` |
-| `VITE_FIREBASE_APP_ID` | Firebase Web `appId` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web sender ID |
-| `VITE_FIREBASE_STORAGE_BUCKET` | Firebase storage bucket |
+1. Cloudflare Dashboard → My Profile → API Tokens → Create Token with Pages Edit (above).  
+2. Copy the token **once** — do not paste into chat, source, PR comments, or local `.env` committed files.  
+3. GitHub → `saviosyl/GOLDSMETA` → Settings → Secrets and variables → Actions → New repository secret:  
+   - Name: **`CLOUDFLARE_API_TOKEN`**  
+   - Value: paste token  
+4. Optionally add the same secret to the Cursor cloud environment (encrypted env), never into the repo.  
+5. Re-run the V5.1 agent / workflow so preview then production Pages deploy can proceed.  
+6. Prefer **preview deployment of PR #12 first**; promote only after smoke checks pass.
 
-No VAPID keys in Pages. Web Push uses backend `VAPID_*` only.
+## Preview vs production
 
-After changing env vars, trigger a new Pages deployment (env is baked in at Vite build time).
+If Git-connected Pages is already wired to this repo:
 
----
+- Open Cloudflare → Pages → `goldmeta-web` → deployments for branch `cursor/goldmeta-v5-intelligence-c2c2`  
+- Use the preview URL for verification before promoting production  
 
-## Firebase Authorized Domains
-
-In Firebase Console → Authentication → Settings → **Authorized domains**, add:
-
-```text
-goldmeta.metamechsolutions.com
-```
-
-Keep `localhost` for local dev. Do not remove other required domains.
-
----
-
-## DNS (subdomain only)
-
-In the Cloudflare DNS zone for `metamechsolutions.com` (or your DNS host if the zone is elsewhere):
-
-1. Add a **CNAME** (or Cloudflare Pages “Custom domain” which creates it):
-   - Name: `goldmeta`
-   - Target: your Pages project hostname (e.g. `goldmeta-web.pages.dev`)
-2. Proxy status: **Proxied** (orange cloud) so Cloudflare SSL applies
-3. Leave `metamechsolutions.com` / `www` records for the existing site unchanged
-
-SSL: Cloudflare Full (strict) once the certificate is issued for `goldmeta.metamechsolutions.com`.
-
----
-
-## Deploy options
-
-### A) Git-connected Pages (recommended)
-
-1. Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git  
-2. Select `saviosyl/GOLDSMETA`  
-3. Configure root `web`, build `npm run build`, output `dist`  
-4. Add Production env vars above  
-5. Deploy  
-6. Custom domains → Add `goldmeta.metamechsolutions.com`
-
-### B) Direct upload / Wrangler (after `wrangler login`)
+If only Wrangler is available and `CLOUDFLARE_API_TOKEN` is set:
 
 ```bash
 cd web
 npm ci
 npm run build
-npx wrangler pages project create goldmeta-web --production-branch cursor/production-connection
-npx wrangler pages deploy dist --project-name goldmeta-web
-npx wrangler pages domain add goldmeta.metamechsolutions.com --project-name goldmeta-web
+npx wrangler pages deploy dist --project-name goldmeta-web --branch preview-v5
+# After verification:
+npx wrangler pages deploy dist --project-name goldmeta-web --branch production
 ```
 
-Requires Cloudflare account authentication in this environment (`wrangler login` or `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`).
+## Current blocker (V5.1 agent environment)
 
----
+- `CLOUDFLARE_ACCOUNT_ID` — **present**  
+- `CLOUDFLARE_API_TOKEN` — **missing**  
 
-## Local verify before deploy
+**Stop before deployment** until the secret is added securely. Do not invent a second Pages project or change DNS as a workaround.
 
-```bash
-cd web
-npm ci
-npm run lint
-npm run typecheck
-npm test
-npm run build
-# confirm dist/_redirects and dist/index.html exist
+## Production frontend configuration (verified in build)
+
+`web/.env.production.local` must point only at:
+
+```text
+VITE_API_BASE_URL=https://us-central1-goldmeta-web.cloudfunctions.net/api
 ```
 
----
-
-## What stays on Firebase
-
-- Authentication (same users as iOS)  
-- Firestore  
-- Cloud Functions API (`/api`)  
-- Device / Web Push backend  
-- TradingView webhooks  
-
-Nothing backend moves to Cloudflare.
+Firebase **web** config keys are client-side by design. Never bundle Firebase Admin, Cloudflare tokens, or backend secrets.

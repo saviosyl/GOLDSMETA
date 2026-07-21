@@ -61,7 +61,7 @@ export function JournalPage() {
   };
 
   return (
-    <>
+    <div data-testid="journal-page">
       <h1 className="brand" style={{ fontSize: "1.4rem" }}>
         Journal
       </h1>
@@ -138,6 +138,6 @@ export function JournalPage() {
           ))}
         </ul>
       </div>
-    </>
+    </div>
   );
 }

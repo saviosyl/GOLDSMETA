@@ -161,7 +161,7 @@ describe("setups environment filter + admin diagnostics", () => {
 
   it("allows authenticated admin diagnostics without secrets", async () => {
     const response = await request(app).get("/v1/admin/diagnostics").set(adminAuth).expect(200);
-    expect(response.body.diagnostics.backendVersion).toBe("1.3.1-v4-stage-b");
+    expect(response.body.diagnostics.backendVersion).toBe("1.4.0-v5-intelligence");
     expect(response.body.diagnostics.flags.setupTrackingEnvironments).toEqual(
       expect.arrayContaining(["TEST", "LIVE"])
     );

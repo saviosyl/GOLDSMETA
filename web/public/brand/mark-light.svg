@@ -1,8 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="GoldMeta">
-  <rect width="96" height="96" rx="22" fill="#F4F1EA"/>
-  <path d="M48 18c-16.5 0-30 13.5-30 30s13.5 30 30 30c10.2 0 19.1-4.4 25-11.3l-8.4-7.2c-3.8 4.5-9.5 7.3-16.6 7.3-11 0-20-9-20-20s9-20 20-20c7.1 0 12.8 2.8 16.6 7.3l8.4-7.2C67.1 22.4 58.2 18 48 18z" fill="#8A6A12"/>
-  <path d="M52 43h18v10H61v9H52V43z" fill="#C9A227"/>
-  <rect x="58" y="34" width="4" height="28" rx="1" fill="#8A6A12"/>
-  <rect x="65" y="28" width="4" height="34" rx="1" fill="#C9A227"/>
-  <rect x="72" y="40" width="4" height="22" rx="1" fill="#B4232E" opacity="0.9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="GoldMeta">
+  <defs>
+    <linearGradient id="g" x1="20" y1="20" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8D48A"/>
+      <stop offset="1" stop-color="#C9A227"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="16" y1="16" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2A2414"/>
+      <stop offset="1" stop-color="#0A0B0D"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#F7F4EA"/>
+  <rect x="6" y="6" width="116" height="116" rx="24" fill="#FFFDF6" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="1.5"/>
+  <!-- subtle ascending geometry -->
+  <polyline points="28,86 46,74 58,78 78,52 94,58 104,42" fill="none" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="104" cy="42" r="3.5" fill="#8A6B12"/>
+  <!-- GM monogram -->
+  <text x="64" y="78" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700" fill="#8A6B12">GM</text>
 </svg>

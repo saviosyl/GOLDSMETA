@@ -20,7 +20,7 @@ describe("DiagnosticsPage", () => {
   it("renders server feature flags without hard-coding environments", async () => {
     adminDiagnostics.mockResolvedValue({
       apiHealth: "ok",
-      backendVersion: "1.3.1-v4-stage-b",
+      backendVersion: "1.4.0-v5-intelligence",
       ruleConfigVersion: "rules-1.1.0",
       setupRuleConfigVersion: "setup-rules-1.0.0",
       pineVersionLastReceived: "2.0.4",
@@ -62,7 +62,7 @@ describe("DiagnosticsPage", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("diagnostics-page")).toBeInTheDocument();
-    expect(screen.getByText("1.3.1-v4-stage-b")).toBeInTheDocument();
+    expect(screen.getByText("1.4.0-v5-intelligence")).toBeInTheDocument();
     expect(screen.getByTestId("flag-setup-tracking-environments")).toHaveTextContent(
       '["TEST","LIVE"]'
     );

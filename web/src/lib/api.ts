@@ -382,4 +382,138 @@ export class ApiClient {
   }> {
     return this.request(`/v1/v4/gc/status`);
   }
+
+  async v5Status(): Promise<Record<string, unknown>> {
+    const body = await this.request<{ v5: Record<string, unknown> }>("/v1/v5/status");
+    return body.v5;
+  }
+
+  async v5Briefing(environment: "LIVE" | "TEST" = "LIVE"): Promise<Record<string, unknown>> {
+    const body = await this.request<{ briefing: Record<string, unknown> }>(
+      `/v1/v5/briefing?environment=${environment}`
+    );
+    return body.briefing;
+  }
+
+  async v5Ask(
+    question: string,
+    environment: "LIVE" | "TEST" = "LIVE"
+  ): Promise<Record<string, unknown>> {
+    const body = await this.request<{ answer: Record<string, unknown> }>(
+      "/v1/v5/intelligence/ask",
+      { method: "POST", body: JSON.stringify({ question, environment }) }
+    );
+    return body.answer;
+  }
+
+  async v5Score(environment: "LIVE" | "TEST" = "LIVE"): Promise<Record<string, unknown> | null> {
+    const body = await this.request<{ score: Record<string, unknown> | null }>(
+      `/v1/v5/score?environment=${environment}`
+    );
+    return body.score;
+  }
+
+  async v5Learning(environment: "LIVE" | "TEST" = "LIVE"): Promise<Record<string, unknown>> {
+    const body = await this.request<{ insights: Record<string, unknown> }>(
+      `/v1/v5/learning?environment=${environment}`
+    );
+    return body.insights;
+  }
+
+  async v5PremiumAnalytics(filters: {
+    environment?: "LIVE" | "TEST";
+    session?: string;
+    direction?: "BUY" | "SELL";
+    strategy?: string;
+    regime?: string;
+  }): Promise<Record<string, unknown>> {
+    const q = new URLSearchParams();
+    q.set("environment", filters.environment ?? "LIVE");
+    if (filters.session) q.set("session", filters.session);
+    if (filters.direction) q.set("direction", filters.direction);
+    if (filters.strategy) q.set("strategy", filters.strategy);
+    if (filters.regime) q.set("regime", filters.regime);
+    const body = await this.request<{ analytics: Record<string, unknown> }>(
+      `/v1/v5/analytics/premium?${q.toString()}`
+    );
+    return body.analytics;
+  }
+
+  async v5Personal(): Promise<Record<string, unknown>> {
+    const body = await this.request<{ stats: Record<string, unknown> }>("/v1/v5/personal");
+    return body.stats;
+  }
+
+  async v5WeeklyCoach(environment: "LIVE" | "TEST" = "LIVE"): Promise<Record<string, unknown>> {
+    const body = await this.request<{ report: Record<string, unknown> }>(
+      `/v1/v5/coach/weekly?environment=${environment}`
+    );
+    return body.report;
+  }
+
+  async v5ScreenshotAnalyse(input: {
+    observations: Record<string, unknown>;
+    environment?: "LIVE" | "TEST";
+  }): Promise<Record<string, unknown>> {
+    const body = await this.request<{ result: Record<string, unknown> }>(
+      "/v1/v5/screenshot/analyse",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          observations: input.observations,
+          environment: input.environment ?? "LIVE"
+        })
+      }
+    );
+    return body.result;
+  }
+
+  async v5Replay(
+    environment: "LIVE" | "TEST" = "LIVE",
+    limit = 40
+  ): Promise<{
+    frames: Array<{
+      barTime: string;
+      analysisSummary: string | null;
+      candidateStatus: string | null;
+      planStatus: string | null;
+      lifecycleNote: string | null;
+      result: string | null;
+    }>;
+    disclaimer?: string;
+    insufficientData?: boolean;
+  }> {
+    const body = await this.request<{ session: Record<string, unknown> }>(
+      `/v1/v5/replay?environment=${environment}&limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.session as {
+      frames: Array<{
+        barTime: string;
+        analysisSummary: string | null;
+        candidateStatus: string | null;
+        planStatus: string | null;
+        lifecycleNote: string | null;
+        result: string | null;
+      }>;
+      disclaimer?: string;
+      insufficientData?: boolean;
+    };
+  }
+
+  async v5GlossaryTerm(slug: string): Promise<{
+    term: string;
+    whatItIs: string;
+    whyItMatters: string;
+    howGoldMetaUsesIt: string;
+  }> {
+    const body = await this.request<{ entry: Record<string, string> }>(
+      `/v1/v5/glossary/${encodeURIComponent(slug)}`
+    );
+    return body.entry as {
+      term: string;
+      whatItIs: string;
+      whyItMatters: string;
+      howGoldMetaUsesIt: string;
+    };
+  }
 }

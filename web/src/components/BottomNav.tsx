@@ -2,9 +2,9 @@ import { NavLink } from "react-router-dom";
 
 const links = [
   { to: "/", label: "Home", end: true },
+  { to: "/intelligence", label: "Intel", end: false },
   { to: "/analytics", label: "Analytics", end: false },
-  { to: "/history", label: "History", end: false },
-  { to: "/journal", label: "Journal", end: false },
+  { to: "/replay", label: "Replay", end: false },
   { to: "/settings", label: "Settings", end: false }
 ];
 
