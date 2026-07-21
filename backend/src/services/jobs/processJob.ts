@@ -56,6 +56,40 @@ export const processJob = async (
       }
     );
 
+    // Confirmed bar follow-up for active setups (idempotent). Non-fatal.
+    try {
+      const ohlcv = rawEvent.payload.ohlcv;
+      if (
+        rawEvent.payload.isConfirmedBar &&
+        ohlcv &&
+        typeof ohlcv.open === "number" &&
+        typeof ohlcv.high === "number" &&
+        typeof ohlcv.low === "number" &&
+        typeof ohlcv.close === "number"
+      ) {
+        const { updateSetupsFromBar } = await import("../setup/updateSetupsFromBar.js");
+        await updateSetupsFromBar(
+          store,
+          claimed.userId,
+          {
+            eventId: claimed.eventId,
+            barTime: rawEvent.payload.barTime,
+            open: ohlcv.open,
+            high: ohlcv.high,
+            low: ohlcv.low,
+            close: ohlcv.close,
+            isConfirmedBar: true
+          },
+          claimed.environment
+        );
+      }
+    } catch (error: unknown) {
+      logger.warn("Setup bar follow-up failed (non-fatal)", {
+        jobId,
+        error: error instanceof Error ? error.message : "unknown"
+      });
+    }
+
     return await store.completeProcessingJob(jobId, decision.decisionId);
   } catch (error: unknown) {
     const failed = await store.failProcessingJob(

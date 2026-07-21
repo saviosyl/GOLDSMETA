@@ -9,12 +9,14 @@ import sell from "../fixtures/sell.json";
 import wait from "../fixtures/wait.json";
 
 const decisionHistory = vi.fn();
+const listSetups = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     api: {
-      decisionHistory
+      decisionHistory,
+      listSetups
     }
   })
 }));
@@ -30,12 +32,14 @@ vi.mock("react-router-dom", async () => {
 describe("HistoryPage", () => {
   beforeEach(() => {
     decisionHistory.mockReset();
+    listSetups.mockReset();
     navigate.mockReset();
     decisionHistory.mockResolvedValue([
       { ...(buy as Decision), timeframe: "15" },
       sell as Decision,
       wait as Decision
     ]);
+    listSetups.mockResolvedValue([]);
   });
 
   it("formats history rows without raw decision IDs", async () => {

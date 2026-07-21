@@ -4,6 +4,11 @@ import type {
   Decision,
   HealthResponse,
   JournalEntry,
+  JournalTag,
+  SetupAnalyticsSummary,
+  SetupRecord,
+  SystemStatus,
+  AdminDiagnostics,
   TradingViewConnection,
   WebPushSubscriptionPayload
 } from "../types/models";
@@ -136,9 +141,11 @@ export class ApiClient {
 
   async createJournal(entry: {
     decisionId?: string;
+    setupId?: string;
     direction: Decision["decision"];
     outcome?: string;
     notes?: string;
+    tags?: JournalTag[];
     riskReward?: number | null;
   }): Promise<JournalEntry> {
     const body = await this.request<{ entry: JournalEntry }>("/v1/journal", {
@@ -146,6 +153,48 @@ export class ApiClient {
       body: JSON.stringify({ symbol: "XAUUSD", outcome: "OPEN", ...entry })
     });
     return body.entry;
+  }
+
+  async listSetups(limit = 50): Promise<SetupRecord[]> {
+    const body = await this.request<{ setups: SetupRecord[] }>(
+      `/v1/setups?limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.setups;
+  }
+
+  async listActiveSetups(environment?: "LIVE" | "TEST"): Promise<SetupRecord[]> {
+    const q = environment ? `?environment=${environment}` : "";
+    const body = await this.request<{ setups: SetupRecord[] }>(`/v1/setups/active${q}`);
+    return body.setups;
+  }
+
+  async getSetup(setupId: string): Promise<SetupRecord | null> {
+    try {
+      const body = await this.request<{ setup: SetupRecord }>(
+        `/v1/setups/${encodeURIComponent(setupId)}`
+      );
+      return body.setup;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async setupAnalytics(environment: "LIVE" | "TEST" = "LIVE"): Promise<SetupAnalyticsSummary> {
+    const body = await this.request<{ analytics: SetupAnalyticsSummary }>(
+      `/v1/analytics/setups?environment=${environment}`
+    );
+    return body.analytics;
+  }
+
+  async systemStatus(): Promise<SystemStatus> {
+    const body = await this.request<{ status: SystemStatus }>("/v1/system/status");
+    return body.status;
+  }
+
+  async adminDiagnostics(): Promise<AdminDiagnostics> {
+    const body = await this.request<{ diagnostics: AdminDiagnostics }>("/v1/admin/diagnostics");
+    return body.diagnostics;
   }
 
   async listTradingViewConnections(): Promise<TradingViewConnection[]> {
