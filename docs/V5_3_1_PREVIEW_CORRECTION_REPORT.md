@@ -17,7 +17,7 @@ Both are fixed. Signed-out / public shells force `grid-template-columns: 1fr`.
 |---|---|
 | Branch | `cursor/goldmeta-v5-3-ui-redesign-c2c2` |
 | Draft PR | https://github.com/saviosyl/GOLDSMETA/pull/14 |
-| Preview alias | https://preview-v5-3.goldmeta-web.pages.dev (redeploy after this patch) |
+| Preview alias | https://preview-v5-3.goldmeta-web.pages.dev (https://426c446f.goldmeta-web.pages.dev) |
 | UI review shell (no passwords) | `/ui-review/` on `*.pages.dev` / localhost |
 | Empty / offline review | `/ui-review/?empty=1` · `/ui-review/intelligence?offline=1` |
 
