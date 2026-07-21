@@ -35,7 +35,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const resolveApiBase = (): string => {
   const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (fromEnv && fromEnv.length > 0) return fromEnv.replace(/\/$/, "");
-  return "http://127.0.0.1:8080";
+  // Local dev convenience only — never bake localhost into production builds.
+  if (import.meta.env.DEV) return "http://127.0.0.1:8080";
+  return "";
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
