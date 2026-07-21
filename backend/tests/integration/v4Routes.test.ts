@@ -110,11 +110,10 @@ describe("V4 shadow isolation from V3", () => {
   it("V4 failure remains non-fatal and does not invent V3 mutations", async () => {
     const store = new InMemoryStore();
     const badStore = {
-      listActiveSetups: () => {
-        throw new Error("forced V4 failure");
-      },
       listV4ShadowPlans: async () => [],
-      saveV4ShadowAnalysis: vi.fn(),
+      saveV4ShadowAnalysis: () => {
+        throw new Error("forced V4 persistence failure");
+      },
       saveV4ShadowCandidate: vi.fn(),
       saveV4ShadowPlan: vi.fn(),
       saveV4ShadowResult: vi.fn()
@@ -139,7 +138,6 @@ describe("V4 shadow isolation from V3", () => {
     });
 
     expect(result).toBeNull();
-    expect(badStore.saveV4ShadowAnalysis).not.toHaveBeenCalled();
     expect(store.listDecisions("u1")).toHaveLength(0);
   });
 
