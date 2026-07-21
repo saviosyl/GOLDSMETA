@@ -8,9 +8,18 @@
 
 ## Clean replacement PR
 
-- **Keep PR #10 open** (Stage A ancestry on `main` is broad).
+- **Replacement draft PR:** https://github.com/saviosyl/GOLDSMETA/pull/11
+- **Keep PR #10 open** (Stage A ancestry on `main` is broad): https://github.com/saviosyl/GOLDSMETA/pull/10
 - This Stage B branch is cut from production Stage 3 tip `95775dc`, then Stage A V4 + Stage B shadow work only.
-- Draft replacement PR targets Stage 3-compatible base (not polluted `main` ancestry with `ios/` / `pine/`).
+- Clean delta vs `95775dc`: **48 files**, **no `ios/` / `pine/`**.
+
+## Deployed backend
+
+- **Version:** `1.3.1-v4-stage-b`
+- **API:** `https://us-central1-goldmeta-web.cloudfunctions.net/api`
+- **Health:** `{"ok":true,"backendVersion":"1.3.1-v4-stage-b",...}`
+- **Auth:** `/v1/v4/*` and system diagnostics return 401 without auth (expected)
+- **Web Pages:** not redeployed (no `CLOUDFLARE_API_TOKEN` in this environment)
 
 ## Diff scope (included)
 
