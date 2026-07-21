@@ -215,11 +215,11 @@ export function runV4Backtest(series: BacktestSeries, options: BacktestOptions):
     seenPlanKeys.add(key);
 
     const path = bars15.slice(i + 1, i + 1 + 16);
+    const pathStart = path[0]?.time;
+    const pathEnd = path[path.length - 1]?.time;
     const resolveBars =
-      series.bars1 && series.bars1.length
-        ? series.bars1.filter(
-            (b) => b.time >= path[0]?.time! && b.time <= path[path.length - 1]?.time!
-          )
+      series.bars1 && series.bars1.length && pathStart && pathEnd
+        ? series.bars1.filter((b) => b.time >= pathStart && b.time <= pathEnd)
         : path;
 
     trades.push(

@@ -54,7 +54,7 @@ const liveSetup = (): SetupRecord =>
       managementNotes: []
     },
     ruleConfigVersion: "setup-rules-1.0.0",
-    backendVersion: "1.3.0-phase3-stage3",
+    backendVersion: "1.3.1-v4-stage-b",
     pineScriptVersion: "2.0.4",
     barsOpen: 0,
     barsToEntry: null,
@@ -121,7 +121,7 @@ describe("Stage 3 manual execution + settings", () => {
 
   it("exposes Stage 3 fields on system status with broker disabled", async () => {
     const response = await request(app).get("/v1/system/status").set(userAuth).expect(200);
-    expect(response.body.status.backendVersion).toBe("1.3.0-phase3-stage3");
+    expect(response.body.status.backendVersion).toBe("1.3.1-v4-stage-b");
     expect(response.body.status.flags.setupTrackingEnvironments).toEqual(
       expect.arrayContaining(["TEST", "LIVE"])
     );

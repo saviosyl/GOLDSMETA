@@ -1,4 +1,4 @@
-export const BACKEND_VERSION = "1.3.0-phase3-stage3";
+export const BACKEND_VERSION = "1.3.1-v4-stage-b";
 export const RULE_CONFIG_VERSION = "rules-1.1.0";
 
 export const decisionConfig = {

@@ -307,20 +307,32 @@ export class ApiClient {
   async v4Status(): Promise<{
     strategyVersion: string;
     engineVersion?: string;
+    configVersion?: string;
     deploymentStage?: string;
+    mode?: string;
     actionableLiveEnabled?: boolean;
     shadowComputeEnabled?: boolean;
+    shadowLifecycleEnabled?: boolean;
+    flags?: Record<string, unknown>;
     brokerExecution?: string;
+    banner?: string;
+    disclaimer?: string;
     note?: string;
   }> {
     const body = await this.request<{ v4: Record<string, unknown> }>("/v1/v4/status");
     return body.v4 as {
       strategyVersion: string;
       engineVersion?: string;
+      configVersion?: string;
       deploymentStage?: string;
+      mode?: string;
       actionableLiveEnabled?: boolean;
       shadowComputeEnabled?: boolean;
+      shadowLifecycleEnabled?: boolean;
+      flags?: Record<string, unknown>;
       brokerExecution?: string;
+      banner?: string;
+      disclaimer?: string;
       note?: string;
     };
   }
@@ -330,5 +342,44 @@ export class ApiClient {
       `/v1/v4/shadows?limit=${encodeURIComponent(String(limit))}`
     );
     return body.shadows;
+  }
+
+  async v4Analyses(environment: "LIVE" | "TEST" = "LIVE", limit = 20): Promise<unknown[]> {
+    const body = await this.request<{ analyses: unknown[] }>(
+      `/v1/v4/analyses?environment=${environment}&limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.analyses;
+  }
+
+  async v4Candidates(environment: "LIVE" | "TEST" = "LIVE", limit = 20): Promise<unknown[]> {
+    const body = await this.request<{ candidates: unknown[] }>(
+      `/v1/v4/candidates?environment=${environment}&limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.candidates;
+  }
+
+  async v4Plans(environment: "LIVE" | "TEST" = "LIVE", limit = 20): Promise<{
+    plans: unknown[];
+    openPlan: unknown | null;
+  }> {
+    const body = await this.request<{ plans: unknown[]; openPlan: unknown | null }>(
+      `/v1/v4/plans?environment=${environment}&limit=${encodeURIComponent(String(limit))}`
+    );
+    return { plans: body.plans, openPlan: body.openPlan };
+  }
+
+  async v4Analytics(environment: "LIVE" | "TEST" = "LIVE"): Promise<Record<string, unknown>> {
+    const body = await this.request<{ analytics: Record<string, unknown> }>(
+      `/v1/v4/analytics?environment=${environment}`
+    );
+    return body.analytics;
+  }
+
+  async v4GcStatus(): Promise<{
+    gc: Record<string, unknown>;
+    banner?: string;
+    dataSourceOptions?: unknown[];
+  }> {
+    return this.request(`/v1/v4/gc/status`);
   }
 }

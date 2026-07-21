@@ -30,8 +30,8 @@ vi.mock("../lib/auth", () => ({
 }));
 
 const defaultStatus = {
-  backendVersion: "1.3.0-phase3-stage3",
-  decisionBackendVersion: "1.3.0-phase3-stage3",
+  backendVersion: "1.3.1-v4-stage-b",
+  decisionBackendVersion: "1.3.1-v4-stage-b",
   ruleConfigVersion: "rules-1.1.0",
   setupRuleConfigVersion: "setup-rules-1.0.0",
   flags: {

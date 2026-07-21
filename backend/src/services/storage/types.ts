@@ -141,6 +141,29 @@ export interface GoldMetaStore {
   /** V4 shadow results — never overwrite V3 decisions/setups. */
   saveV4ShadowResult?(userId: string, result: Record<string, unknown>): Awaitable<void>;
   listV4ShadowResults?(userId: string, limit?: number): Awaitable<Record<string, unknown>[]>;
+  saveV4ShadowAnalysis?(userId: string, analysis: import("../v4/shadowTypes").V4ShadowAnalysisRecord): Awaitable<void>;
+  listV4ShadowAnalyses?(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit?: number
+  ): Awaitable<import("../v4/shadowTypes").V4ShadowAnalysisRecord[]>;
+  saveV4ShadowCandidate?(userId: string, candidate: import("../v4/shadowTypes").V4ShadowCandidateRecord): Awaitable<void>;
+  listV4ShadowCandidates?(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit?: number
+  ): Awaitable<import("../v4/shadowTypes").V4ShadowCandidateRecord[]>;
+  saveV4ShadowPlan?(userId: string, plan: import("../v4/shadowTypes").V4LockedShadowPlan): Awaitable<void>;
+  listV4ShadowPlans?(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit?: number
+  ): Awaitable<import("../v4/shadowTypes").V4LockedShadowPlan[]>;
+  recordV4PlanMutation?(userId: string, audit: import("../v4/shadowTypes").V4PlanMutationAudit): Awaitable<void>;
+  listV4PlanMutations?(
+    userId: string,
+    limit?: number
+  ): Awaitable<import("../v4/shadowTypes").V4PlanMutationAudit[]>;
 
   registerDevice(device: DeviceRecord): Awaitable<DeviceRecord>;
   deleteDevice(userId: string, deviceId: string): Awaitable<boolean>;

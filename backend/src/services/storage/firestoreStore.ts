@@ -329,6 +329,107 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return snap.docs.map((d) => d.data() as Record<string, unknown>);
   }
 
+  async saveV4ShadowAnalysis(
+    userId: string,
+    analysis: import("../v4/shadowTypes").V4ShadowAnalysisRecord
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Analyses")
+      .doc(analysis.analysisId)
+      .set(toFirestoreData(analysis), { merge: true });
+  }
+
+  async listV4ShadowAnalyses(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4ShadowAnalysisRecord[]> {
+    let query: Query = this.db.collection("users").doc(userId).collection("v4Analyses");
+    if (environment) {
+      query = query.where("environment", "==", environment);
+    }
+    const snap = await query.orderBy("generatedAt", "desc").limit(limit).get();
+    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4ShadowAnalysisRecord);
+  }
+
+  async saveV4ShadowCandidate(
+    userId: string,
+    candidate: import("../v4/shadowTypes").V4ShadowCandidateRecord
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4Candidates")
+      .doc(candidate.candidateId)
+      .set(toFirestoreData(candidate), { merge: true });
+  }
+
+  async listV4ShadowCandidates(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4ShadowCandidateRecord[]> {
+    let query: Query = this.db.collection("users").doc(userId).collection("v4Candidates");
+    if (environment) {
+      query = query.where("environment", "==", environment);
+    }
+    const snap = await query.orderBy("updatedAt", "desc").limit(limit).get();
+    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4ShadowCandidateRecord);
+  }
+
+  async saveV4ShadowPlan(
+    userId: string,
+    plan: import("../v4/shadowTypes").V4LockedShadowPlan
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4ShadowPlans")
+      .doc(plan.planId)
+      .set(toFirestoreData(plan), { merge: true });
+  }
+
+  async listV4ShadowPlans(
+    userId: string,
+    environment?: DecisionEnvironment,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4LockedShadowPlan[]> {
+    let query: Query = this.db.collection("users").doc(userId).collection("v4ShadowPlans");
+    if (environment) {
+      query = query.where("environment", "==", environment);
+    }
+    const snap = await query.orderBy("updatedAt", "desc").limit(limit).get();
+    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4LockedShadowPlan);
+  }
+
+  async recordV4PlanMutation(
+    userId: string,
+    audit: import("../v4/shadowTypes").V4PlanMutationAudit
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4PlanMutations")
+      .doc(audit.id)
+      .set(toFirestoreData(audit), { merge: true });
+  }
+
+  async listV4PlanMutations(
+    userId: string,
+    limit = 50
+  ): Promise<import("../v4/shadowTypes").V4PlanMutationAudit[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("v4PlanMutations")
+      .orderBy("at", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4PlanMutationAudit);
+  }
+
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {
     await this.db
       .collection("users")

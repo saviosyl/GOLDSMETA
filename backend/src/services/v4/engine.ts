@@ -257,7 +257,7 @@ export function evaluateV4(input: V4EngineInput): V4EngineResult {
       netRrTp2: costs.netRrTp2
     });
 
-    if (quality.total >= v4Config.quality.minActionableQuality) {
+    if (quality.total >= v4Config.quality.minShadowPlanQuality) {
       const planId = idFor([
         "v4plan",
         pattern.family,
@@ -293,7 +293,7 @@ export function evaluateV4(input: V4EngineInput): V4EngineResult {
       };
     } else {
       gates.failures.push("NO_STRATEGY_PATTERN");
-      gates.reasons.push(`Quality ${quality.total}/100 below minimum ${v4Config.quality.minActionableQuality}`);
+      gates.reasons.push(`Quality ${quality.total}/100 below minimum ${v4Config.quality.minShadowPlanQuality}`);
     }
   }
 
