@@ -1,6 +1,6 @@
 /**
- * Firestore Emulator concurrency tests for atomic signal-outcome bar application.
- * Requires FIRESTORE_EMULATOR_HOST (default 127.0.0.1:8081).
+ * Firestore Emulator concurrency + query-contract tests for signal outcomes.
+ * Requires FIRESTORE_EMULATOR_HOST (set by firebase emulators:exec).
  * Never contacts brokers.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import { initializeApp, deleteApp, getApps, type App } from "firebase-admin/app"
 import { getFirestore } from "firebase-admin/firestore";
 import { createSignalOutcomeFromDecision } from "../../src/services/signalOutcome/engine";
 import { FirestoreSignalOutcomeStore } from "../../src/services/signalOutcome/store";
+import { FirestoreOutcomeMonitorJobStore } from "../../src/services/signalOutcome/monitorJobs";
 import type { DecisionRecord } from "../../src/models/types";
 import type { SignalBarInput } from "../../src/services/signalOutcome/types";
 
@@ -101,67 +102,122 @@ async function emulatorReachable(): Promise<boolean> {
 describe("Firestore emulator — atomic signal outcome apply", () => {
   let app: App;
   let store: FirestoreSignalOutcomeStore;
+  let jobStore: FirestoreOutcomeMonitorJobStore;
   let ready = false;
 
   beforeAll(async () => {
     process.env.FIRESTORE_EMULATOR_HOST = EMULATOR;
+    process.env.GCLOUD_PROJECT = PROJECT;
+    process.env.GOOGLE_CLOUD_PROJECT = PROJECT;
     ready = await emulatorReachable();
     if (!ready) return;
     for (const existing of getApps()) {
       await deleteApp(existing);
     }
     app = initializeApp({ projectId: PROJECT });
-    store = new FirestoreSignalOutcomeStore(getFirestore(app));
-  }, 30_000);
+    const db = getFirestore(app);
+    store = new FirestoreSignalOutcomeStore(db);
+    jobStore = new FirestoreOutcomeMonitorJobStore(db);
+  }, 60_000);
 
   afterAll(async () => {
     if (app) await deleteApp(app);
   });
 
-  it("runs concurrent applyBarAtomic without double-applying the same event", async () => {
-    if (!ready) {
-      console.warn("Skipping — Firestore emulator not reachable at", EMULATOR);
-      return;
-    }
-    const record = createSignalOutcomeFromDecision(decision(`emu-${Date.now()}`));
-    await store.save(record);
+  it(
+    "runs concurrent applyBarAtomic without double-applying the same event",
+    async () => {
+      if (!ready) {
+        throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
+      }
+      const record = createSignalOutcomeFromDecision(decision(`emu-${Date.now()}`));
+      await store.save(record);
 
-    const b = bar({ eventId: `shared-${Date.now()}`, barTime: T1, low: 4130, high: 4132, close: 4131 });
-    const results = await Promise.all([
-      store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-a"),
-      store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-b"),
-      store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-c")
-    ]);
+      const b = bar({
+        eventId: `shared-${Date.now()}`,
+        barTime: T1,
+        low: 4130,
+        high: 4132,
+        close: 4131
+      });
+      const results = await Promise.all([
+        store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-a"),
+        store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-b"),
+        store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-c")
+      ]);
 
-    const acquired = results.filter((r) => r != null);
-    expect(acquired.length).toBeGreaterThanOrEqual(1);
-    const final = await store.get("emu-user", record.snapshot.signalId);
-    expect(final?.appliedBarEventIds.filter((id) => id === b.eventId)).toHaveLength(1);
-    expect(final?.entry.entryReached).toBe(true);
-    expect(final?.leaseOwnerId).toBeNull();
-  });
+      const acquired = results.filter((r) => r != null);
+      expect(acquired.length).toBeGreaterThanOrEqual(1);
+      const final = await store.get("emu-user", record.snapshot.signalId);
+      expect(final?.appliedBarEventIds.filter((id) => id === b.eventId)).toHaveLength(1);
+      expect(final?.entry.entryReached).toBe(true);
+      expect(final?.leaseOwnerId).toBeNull();
+    },
+    30_000
+  );
 
-  it("second chronological bar applies after first inside separate transactions", async () => {
-    if (!ready) {
-      console.warn("Skipping — Firestore emulator not reachable at", EMULATOR);
-      return;
-    }
-    const record = createSignalOutcomeFromDecision(decision(`emu2-${Date.now()}`));
-    await store.save(record);
-    await store.applyBarAtomic(
-      "emu-user",
-      record.snapshot.signalId,
-      bar({ eventId: `e1-${Date.now()}`, barTime: T1, low: 4130, high: 4132, close: 4131 }),
-      "w1"
-    );
-    await store.applyBarAtomic(
-      "emu-user",
-      record.snapshot.signalId,
-      bar({ eventId: `e2-${Date.now()}`, barTime: T2, low: 4126, high: 4130, close: 4126.5 }),
-      "w2"
-    );
-    const final = await store.get("emu-user", record.snapshot.signalId);
-    expect(final?.finalResult?.outcome).toBe("LOSS");
-    expect(final?.lastAppliedBarTime).toBe(T2);
-  });
+  it(
+    "second chronological bar applies after first inside separate transactions",
+    async () => {
+      if (!ready) {
+        throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
+      }
+      const record = createSignalOutcomeFromDecision(decision(`emu2-${Date.now()}`));
+      await store.save(record);
+      await store.applyBarAtomic(
+        "emu-user",
+        record.snapshot.signalId,
+        bar({ eventId: `e1-${Date.now()}`, barTime: T1, low: 4130, high: 4132, close: 4131 }),
+        "w1"
+      );
+      await store.applyBarAtomic(
+        "emu-user",
+        record.snapshot.signalId,
+        bar({ eventId: `e2-${Date.now()}`, barTime: T2, low: 4126, high: 4130, close: 4126.5 }),
+        "w2"
+      );
+      const final = await store.get("emu-user", record.snapshot.signalId);
+      expect(final?.finalResult?.outcome).toBe("LOSS");
+      expect(final?.lastAppliedBarTime).toBe(T2);
+    },
+    30_000
+  );
+
+  it(
+    "production listActiveMatching query executes with timeframe in index path",
+    async () => {
+      if (!ready) throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
+      const a = createSignalOutcomeFromDecision(decision(`match-a-${Date.now()}`));
+      const b = createSignalOutcomeFromDecision({
+        ...decision(`match-b-${Date.now()}`),
+        timeframe: "60"
+      });
+      await store.save(a);
+      await store.save(b);
+      const matched = await store.listActiveMatching("emu-user", {
+        symbol: "XAUUSD",
+        timeframe: "15",
+        environment: "TEST"
+      });
+      expect(matched.some((r) => r.snapshot.signalId === a.snapshot.signalId)).toBe(true);
+      expect(matched.every((r) => String(r.snapshot.timeframe ?? "") === "15")).toBe(true);
+    },
+    30_000
+  );
+
+  it(
+    "production outcomeMonitorJobs due query executes (state + nextAttemptAt)",
+    async () => {
+      if (!ready) throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
+      const eventId = `due-${Date.now()}`;
+      await jobStore.enqueue({
+        userId: "emu-user",
+        eventId,
+        bar: bar({ eventId, barTime: T1, low: 4130, high: 4132, close: 4131 })
+      });
+      const due = await jobStore.listDue(20);
+      expect(due.some((j) => j.eventId === eventId)).toBe(true);
+    },
+    30_000
+  );
 });

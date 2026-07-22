@@ -21,6 +21,11 @@ import {
   InMemorySignalOutcomeStore,
   type SignalOutcomeStore
 } from "./store";
+import { FailClosedSignalOutcomeStore } from "./failClosedStore";
+import {
+  allowInMemorySignalOutcomeStore,
+  SignalOutcomeStorageUnavailableError
+} from "./storagePolicy";
 import {
   getOutcomeMonitorJobStore,
   type OutcomeMonitorJobStore
@@ -31,8 +36,18 @@ let singleton: SignalOutcomeStore | null = null;
 export function getSignalOutcomeStore(): SignalOutcomeStore {
   if (singleton) return singleton;
   const db = getFirestoreDb();
-  singleton =
-    db != null ? new FirestoreSignalOutcomeStore(db) : new InMemorySignalOutcomeStore();
+  if (db != null) {
+    singleton = new FirestoreSignalOutcomeStore(db);
+    return singleton;
+  }
+  if (allowInMemorySignalOutcomeStore()) {
+    singleton = new InMemorySignalOutcomeStore();
+    return singleton;
+  }
+  logger.error("Signal outcome storage unavailable — fail closed", {
+    code: "SIGNAL_OUTCOME_STORAGE_UNAVAILABLE"
+  });
+  singleton = new FailClosedSignalOutcomeStore();
   return singleton;
 }
 
@@ -45,10 +60,20 @@ export async function ensureSignalOutcomeFromDecision(
   decision: DecisionRecord,
   store: SignalOutcomeStore = getSignalOutcomeStore()
 ): Promise<SignalOutcomeRecord> {
-  const existing = await store.getByDecisionId(decision.userId, decision.decisionId);
-  if (existing) return existing;
-  const created = createSignalOutcomeFromDecision(decision);
-  return store.save(created);
+  try {
+    const existing = await store.getByDecisionId(decision.userId, decision.decisionId);
+    if (existing) return existing;
+    const created = createSignalOutcomeFromDecision(decision);
+    return store.save(created);
+  } catch (error: unknown) {
+    if (error instanceof SignalOutcomeStorageUnavailableError) {
+      logger.warn("Signal outcome create skipped — storage unavailable", {
+        code: error.code,
+        decisionId: decision.decisionId
+      });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -153,4 +178,4 @@ export async function processOutcomeMonitorJob(
   }
 }
 
-export { signalIdForDecision };
+export { signalIdForDecision, SignalOutcomeStorageUnavailableError };

@@ -33,7 +33,7 @@ export function freezeSignalSnapshot(decision: DecisionRecord): SignalSnapshot {
     userId: decision.userId,
     symbol: "XAUUSD",
     market: "XAUUSD",
-    timeframe: decision.timeframe,
+    timeframe: decision.timeframe ?? "",
     direction: decision.decision,
     createdAt: decision.generatedAt,
     marketDataTimestamp: decision.marketDataTime ?? decision.barTime,
@@ -409,6 +409,110 @@ function targetsReachedList(record: SignalOutcomeRecord): Array<"TP1" | "TP2" | 
   return out;
 }
 
+function levelInBarRange(level: number, bar: SignalBarInput): boolean {
+  return bar.low <= level && bar.high >= level;
+}
+
+/** Stop or any pending TP also traded in this bar's OHLC range. */
+function conflictingExitInBar(snapshot: SignalSnapshot, bar: SignalBarInput): {
+  stopInRange: boolean;
+  targetInRange: boolean;
+} {
+  const stopInRange = snapshot.stopLoss != null && levelInBarRange(snapshot.stopLoss, bar);
+  const targetInRange =
+    (snapshot.tp1 != null && levelInBarRange(snapshot.tp1, bar)) ||
+    (snapshot.tp2 != null && levelInBarRange(snapshot.tp2, bar)) ||
+    (snapshot.tp3 != null && levelInBarRange(snapshot.tp3, bar));
+  return { stopInRange, targetInRange };
+}
+
+/**
+ * Walk ordered ticks to decide whether entry occurs, and whether stop/target
+ * occur before or after entry. Returns null when ticks cannot resolve.
+ */
+function resolveEntrySequenceFromTicks(
+  snapshot: SignalSnapshot,
+  bar: SignalBarInput
+): {
+  entryIndex: number;
+  stopBeforeEntry: boolean;
+  targetBeforeEntry: boolean;
+  stopAfterEntry: boolean;
+  targetAfterEntry: boolean;
+} | null {
+  const ticks = bar.orderedTicks;
+  if (!ticks || ticks.length === 0) return null;
+  const sorted = [...ticks].sort((a, b) => a.t - b.t);
+  const fill = fillPrice(snapshot);
+  if (fill == null || (snapshot.direction !== "BUY" && snapshot.direction !== "SELL")) return null;
+  const dir = snapshot.direction;
+  const low = snapshot.entryZoneLow ?? fill;
+  const high = snapshot.entryZoneHigh ?? fill;
+  const stop = snapshot.stopLoss;
+  const targets = [snapshot.tp1, snapshot.tp2, snapshot.tp3].filter((x): x is number => x != null);
+
+  let entryIndex = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i]!.price;
+    if (p >= low && p <= high) {
+      entryIndex = i;
+      break;
+    }
+  }
+  if (entryIndex < 0) return null;
+
+  const before = sorted.slice(0, entryIndex);
+  const after = sorted.slice(entryIndex);
+  const hitStop = (xs: typeof sorted): boolean =>
+    stop != null &&
+    xs.some((tick) => (dir === "BUY" ? tick.price <= stop : tick.price >= stop));
+  const hitTarget = (xs: typeof sorted): boolean =>
+    targets.some((t) =>
+      xs.some((tick) => (dir === "BUY" ? tick.price >= t : tick.price <= t))
+    );
+
+  return {
+    entryIndex,
+    stopBeforeEntry: hitStop(before),
+    targetBeforeEntry: hitTarget(before),
+    stopAfterEntry: hitStop(after),
+    targetAfterEntry: hitTarget(after)
+  };
+}
+
+function applyEntryFill(
+  record: SignalOutcomeRecord,
+  bar: SignalBarInput,
+  fill: number,
+  reason: string
+): void {
+  record.entry = {
+    entryReached: true,
+    entryTimestamp: bar.barTime,
+    entryPrice: fill,
+    entrySpreadEstimate: 0.1,
+    entrySlippageEstimate: 0,
+    entryMarketDataSource: bar.source ?? "tradingview-ohlcv",
+    entryBlockedByStaleData: false,
+    expiredWithoutEntry: false
+  };
+  record.monitoring.lifecycle = "OPEN";
+  record.monitoring.currentPrice = bar.close;
+  record.monitoring.latestMarketDataTimestamp = bar.barTime;
+  record.monitoring.lastMonitoringAt = nowIso();
+  pushEvent(record, {
+    type: "ENTRY",
+    barTime: bar.barTime,
+    price: fill,
+    oldStop: null,
+    newStop: record.monitoring.workingStop,
+    targetReached: null,
+    quantityPctClosed: null,
+    reason,
+    priceSource: bar.source ?? "tradingview-ohlcv"
+  });
+}
+
 /**
  * Apply one confirmed bar. Idempotent on eventId.
  * Rejects wrong identity, duplicates, and barTime <= lastApplied/creation candle.
@@ -458,6 +562,7 @@ export function applyBarToSignalOutcome(
     record.monitoring.lifecycle === "EXPIRED" ||
     record.monitoring.lifecycle === "CANCELLED" ||
     record.monitoring.lifecycle === "AMBIGUOUS_INTRABAR" ||
+    record.monitoring.lifecycle === "ENTRY_SEQUENCE_AMBIGUOUS" ||
     record.monitoring.lifecycle === "DATA_UNAVAILABLE" ||
     record.monitoring.lifecycle === "STOP_HIT" ||
     record.monitoring.lifecycle === "TP3_HIT"
@@ -526,7 +631,7 @@ export function applyBarToSignalOutcome(
   }
   const direction = snap.direction;
 
-  // PENDING_ENTRY
+  // PENDING_ENTRY — entry-candle ordering safety (rule B with A for full conflict)
   if (record.monitoring.lifecycle === "PENDING_ENTRY") {
     const maxBars = opts.maxPendingBars ?? 48;
     const seen = (opts.pendingBarsSeen ?? record.appliedBarEventIds.length) + 1;
@@ -536,32 +641,171 @@ export function applyBarToSignalOutcome(
         markBarApplied(record, bar);
         return record;
       }
-      record.entry = {
-        entryReached: true,
-        entryTimestamp: bar.barTime,
-        entryPrice: fill,
-        entrySpreadEstimate: 0.1,
-        entrySlippageEstimate: 0,
-        entryMarketDataSource: bar.source ?? "tradingview-ohlcv",
-        entryBlockedByStaleData: false,
-        expiredWithoutEntry: false
-      };
-      record.monitoring.lifecycle = "OPEN";
-      record.monitoring.currentPrice = bar.close;
-      record.monitoring.latestMarketDataTimestamp = bar.barTime;
-      record.monitoring.lastMonitoringAt = nowIso();
-      pushEvent(record, {
-        type: "ENTRY",
-        barTime: bar.barTime,
-        price: fill,
-        oldStop: null,
-        newStop: record.monitoring.workingStop,
-        targetReached: null,
-        quantityPctClosed: null,
-        reason: "Hypothetical entry — frozen plan fill at proposed entry (not best-of-candle)",
-        priceSource: bar.source ?? "tradingview-ohlcv"
-      });
-      // Continue into open path on same (post-creation) bar — allowed after entry.
+
+      const conflict = conflictingExitInBar(snap, bar);
+      const tickResolution = resolveEntrySequenceFromTicks(snap, bar);
+
+      if (tickResolution) {
+        if (tickResolution.stopBeforeEntry || tickResolution.targetBeforeEntry) {
+          // Stop/target traded before entry — do not invent an entry fill.
+          record.monitoring.lifecycle = "ENTRY_SEQUENCE_AMBIGUOUS";
+          record.ambiguity = {
+            candleTimestamp: bar.barTime,
+            candleHigh: bar.high,
+            candleLow: bar.low,
+            stop: snap.stopLoss ?? fill,
+            target: snap.tp1 ?? snap.tp2 ?? snap.tp3 ?? fill,
+            missingDataRequired: "none — ordered ticks show stop/target before entry"
+          };
+          pushEvent(record, {
+            type: "ENTRY_SEQUENCE_AMBIGUOUS",
+            barTime: bar.barTime,
+            price: bar.close,
+            oldStop: record.monitoring.workingStop,
+            newStop: record.monitoring.workingStop,
+            targetReached: null,
+            quantityPctClosed: null,
+            reason:
+              "Ordered ticks: stop/target before entry — ENTRY_SEQUENCE_AMBIGUOUS (no win bias)",
+            priceSource: bar.source ?? "tradingview-ohlcv"
+          });
+          record.finalResult = {
+            outcome: "AMBIGUOUS",
+            exitReason: "Entry sequence ambiguous — stop/target before entry on ordered ticks",
+            exitTimestamp: bar.barTime,
+            exitPrice: null,
+            entryPrice: null,
+            holdingDurationMs: null,
+            grossPoints: null,
+            estimatedSpread: null,
+            estimatedSlippage: null,
+            estimatedFees: null,
+            netPoints: null,
+            percentageResult: null,
+            grossR: null,
+            netR: null,
+            mfe: null,
+            mae: null,
+            targetsReached: [],
+            dataQualityAtEntry: snap.dataQuality,
+            dataQualityAtExit: bar.dataQuality ?? "OK",
+            label: HYPOTHETICAL_LABEL,
+            disclaimer: HYPOTHETICAL_DISCLAIMER
+          };
+          markBarApplied(record, bar);
+          return record;
+        }
+        // Ticks prove entry first — fill entry; allow same-bar stop/TP only via open path
+        // after entry (ticks already ordered; OHLC open path remains conservative below).
+        applyEntryFill(
+          record,
+          bar,
+          fill,
+          "Hypothetical entry — ordered ticks prove entry before stop/target"
+        );
+        // Rule B still applies for OHLC open-path: defer stop/TP to next bar unless we
+        // continue only when ticks also show post-entry hits — handled by skipping open
+        // evaluation on this bar and letting a subsequent bar (or same-bar re-entry via
+        // ticks) apply. Defer always on entry bar even with ticks for stop/TP awards
+        // to keep one rule: stop/TP evaluation starts next confirmed candle after entry
+        // unless a dedicated tick-driven exit is applied here.
+        if (tickResolution.stopAfterEntry || tickResolution.targetAfterEntry) {
+          // Apply open-path exits on this bar only when ticks prove post-entry sequence.
+          // Fall through to OPEN handling below.
+        } else {
+          pushEvent(record, {
+            type: "ENTRY_SEQUENCE_DEFERRED",
+            barTime: bar.barTime,
+            price: fill,
+            oldStop: record.monitoring.workingStop,
+            newStop: record.monitoring.workingStop,
+            targetReached: null,
+            quantityPctClosed: null,
+            reason: "Entry recorded — stop/target evaluation begins on next confirmed candle",
+            priceSource: bar.source ?? "tradingview-ohlcv"
+          });
+          markBarApplied(record, bar);
+          return record;
+        }
+      } else if (conflict.stopInRange && conflict.targetInRange) {
+        // Rule A: entry + stop + TP in one OHLC candle without ordered data.
+        record.monitoring.lifecycle = "ENTRY_SEQUENCE_AMBIGUOUS";
+        record.ambiguity = {
+          candleTimestamp: bar.barTime,
+          candleHigh: bar.high,
+          candleLow: bar.low,
+          stop: snap.stopLoss!,
+          target: snap.tp1 ?? snap.tp2 ?? snap.tp3!,
+          missingDataRequired: "ordered intrabar/tick data to resolve entry vs stop vs target"
+        };
+        pushEvent(record, {
+          type: "ENTRY_SEQUENCE_AMBIGUOUS",
+          barTime: bar.barTime,
+          price: bar.close,
+          oldStop: record.monitoring.workingStop,
+          newStop: record.monitoring.workingStop,
+          targetReached: null,
+          quantityPctClosed: null,
+          reason:
+            "Entry+stop+target in same candle without ordered data — ENTRY_SEQUENCE_AMBIGUOUS",
+          priceSource: bar.source ?? "tradingview-ohlcv"
+        });
+        record.finalResult = {
+          outcome: "AMBIGUOUS",
+          exitReason: "Entry sequence ambiguous — no win/loss inferred from OHLC alone",
+          exitTimestamp: bar.barTime,
+          exitPrice: null,
+          entryPrice: null,
+          holdingDurationMs: null,
+          grossPoints: null,
+          estimatedSpread: null,
+          estimatedSlippage: null,
+          estimatedFees: null,
+          netPoints: null,
+          percentageResult: null,
+          grossR: null,
+          netR: null,
+          mfe: null,
+          mae: null,
+          targetsReached: [],
+          dataQualityAtEntry: snap.dataQuality,
+          dataQualityAtExit: bar.dataQuality ?? "OK",
+          label: HYPOTHETICAL_LABEL,
+          disclaimer: HYPOTHETICAL_DISCLAIMER
+        };
+        markBarApplied(record, bar);
+        return record;
+      } else if (conflict.stopInRange || conflict.targetInRange) {
+        // Rule B: record entry only; begin stop/target evaluation on the next candle.
+        applyEntryFill(
+          record,
+          bar,
+          fill,
+          "Hypothetical entry — exit levels also in range; stop/TP deferred to next candle"
+        );
+        pushEvent(record, {
+          type: "ENTRY_SEQUENCE_DEFERRED",
+          barTime: bar.barTime,
+          price: fill,
+          oldStop: record.monitoring.workingStop,
+          newStop: record.monitoring.workingStop,
+          targetReached: null,
+          quantityPctClosed: null,
+          reason:
+            "Entry recorded without same-candle stop/TP award — no win bias from OHLC sequence",
+          priceSource: bar.source ?? "tradingview-ohlcv"
+        });
+        markBarApplied(record, bar);
+        return record;
+      } else {
+        applyEntryFill(
+          record,
+          bar,
+          fill,
+          "Hypothetical entry — frozen plan fill at proposed entry (not best-of-candle)"
+        );
+        // No conflicting exits in range — safe to continue open path on same bar.
+      }
     } else if (seen >= maxBars) {
       record.entry.expiredWithoutEntry = true;
       record.monitoring.lifecycle = "EXPIRED";

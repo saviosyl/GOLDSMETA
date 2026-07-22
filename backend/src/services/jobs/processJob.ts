@@ -94,10 +94,25 @@ export const processJob = async (
     // Create signal + enqueue durable outcome-monitor job. Monitoring failures retry
     // independently — do not permanently complete the only processing path when
     // monitoring fails after a swallowed non-fatal error.
-    {
+    try {
       const { ensureSignalOutcomeFromDecision } = await import("../signalOutcome/monitor.js");
       const { getOutcomeMonitorJobStore } = await import("../signalOutcome/monitorJobs.js");
-      await ensureSignalOutcomeFromDecision(decision);
+      const { SignalOutcomeStorageUnavailableError } = await import(
+        "../signalOutcome/storagePolicy.js"
+      );
+      try {
+        await ensureSignalOutcomeFromDecision(decision);
+      } catch (error: unknown) {
+        if (error instanceof SignalOutcomeStorageUnavailableError) {
+          logger.warn("Signal outcome skipped — storage unavailable (fail closed)", {
+            jobId,
+            code: error.code
+          });
+          // Decision job continues; no hypothetical create/monitor without durable storage.
+          return await store.completeProcessingJob(jobId, decision.decisionId);
+        }
+        throw error;
+      }
 
       const ohlcv = rawEvent.payload.ohlcv;
       if (
@@ -128,6 +143,18 @@ export const processJob = async (
           eventId: claimed.eventId,
           bar
         });
+      }
+    } catch (error: unknown) {
+      const { SignalOutcomeStorageUnavailableError } = await import(
+        "../signalOutcome/storagePolicy.js"
+      );
+      if (error instanceof SignalOutcomeStorageUnavailableError) {
+        logger.warn("Signal outcome enqueue skipped — storage unavailable (fail closed)", {
+          jobId,
+          code: error.code
+        });
+      } else {
+        throw error;
       }
     }
 

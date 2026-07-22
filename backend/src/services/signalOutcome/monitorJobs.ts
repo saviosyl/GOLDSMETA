@@ -11,6 +11,10 @@ import { nowIso } from "../../utils/time";
 import { logger } from "../logging/logger";
 import { getFirestoreDb } from "../firebaseAdmin";
 import type { OutcomeMonitorJob, SignalBarInput } from "./types";
+import {
+  allowInMemorySignalOutcomeStore,
+  SignalOutcomeStorageUnavailableError
+} from "./storagePolicy";
 
 export function outcomeMonitorJobId(userId: string, eventId: string): string {
   return createHash("sha256")
@@ -161,6 +165,15 @@ export class InMemoryOutcomeMonitorJobStore implements OutcomeMonitorJobStore {
       )
       .slice(0, limit)
       .map((j) => structuredClone(j));
+  }
+
+  /** Test helper — advance a FAILED job to due without inventing a new create event. */
+  forceNextAttemptAt(jobId: string, iso: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    job.nextAttemptAt = iso;
+    job.updatedAt = nowIso();
+    this.jobs.set(jobId, job);
   }
 }
 
@@ -332,9 +345,20 @@ let jobStoreSingleton: OutcomeMonitorJobStore | null = null;
 export function getOutcomeMonitorJobStore(): OutcomeMonitorJobStore {
   if (jobStoreSingleton) return jobStoreSingleton;
   const db = getFirestoreDb();
-  jobStoreSingleton =
-    db != null ? new FirestoreOutcomeMonitorJobStore(db) : new InMemoryOutcomeMonitorJobStore();
-  return jobStoreSingleton;
+  if (db != null) {
+    jobStoreSingleton = new FirestoreOutcomeMonitorJobStore(db);
+    return jobStoreSingleton;
+  }
+  if (allowInMemorySignalOutcomeStore()) {
+    jobStoreSingleton = new InMemoryOutcomeMonitorJobStore();
+    return jobStoreSingleton;
+  }
+  logger.error("Outcome monitor job storage unavailable — fail closed", {
+    code: "SIGNAL_OUTCOME_STORAGE_UNAVAILABLE"
+  });
+  throw new SignalOutcomeStorageUnavailableError(
+    "Outcome monitor job store unavailable — refusing in-memory outside test/local"
+  );
 }
 
 export function setOutcomeMonitorJobStoreForTests(store: OutcomeMonitorJobStore): void {

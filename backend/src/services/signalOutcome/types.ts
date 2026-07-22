@@ -18,7 +18,8 @@ export type SignalLifecycle =
   | "EXPIRED"
   | "CANCELLED"
   | "DATA_UNAVAILABLE"
-  | "AMBIGUOUS_INTRABAR";
+  | "AMBIGUOUS_INTRABAR"
+  | "ENTRY_SEQUENCE_AMBIGUOUS";
 
 export type SignalFinalOutcome =
   | "WIN"
@@ -44,7 +45,9 @@ export type ManagementEventType =
   | "AMBIGUOUS"
   | "DATA_STALE"
   | "MONITOR"
-  | "BAR_SKIPPED";
+  | "BAR_SKIPPED"
+  | "ENTRY_SEQUENCE_DEFERRED"
+  | "ENTRY_SEQUENCE_AMBIGUOUS";
 
 /** Immutable freeze at signal creation — never rewritten. */
 export interface SignalSnapshot {
@@ -192,6 +195,13 @@ export interface SignalOutcomeRecord {
   updatedAt: string;
 }
 
+/** Ordered intrabar ticks — when present, resolve entry vs stop/target sequence. */
+export interface SignalOrderedTick {
+  /** Milliseconds from bar open (or absolute epoch ms). */
+  t: number;
+  price: number;
+}
+
 export interface SignalBarInput {
   eventId: string;
   barTime: string;
@@ -206,6 +216,8 @@ export interface SignalBarInput {
   dataQuality?: string;
   stale?: boolean;
   source?: string;
+  /** Optional ordered ticks/prices proving intrabar sequence. */
+  orderedTicks?: SignalOrderedTick[];
 }
 
 export type OutcomeMonitorJobState =
@@ -259,6 +271,7 @@ export const TERMINAL_LIFECYCLES: SignalLifecycle[] = [
   "CANCELLED",
   "DATA_UNAVAILABLE",
   "AMBIGUOUS_INTRABAR",
+  "ENTRY_SEQUENCE_AMBIGUOUS",
   "WAIT_ONLY"
 ];
 

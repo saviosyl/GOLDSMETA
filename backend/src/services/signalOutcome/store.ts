@@ -349,19 +349,15 @@ export class FirestoreSignalOutcomeStore implements SignalOutcomeStore {
     userId: string,
     match: ActiveMatchFilter
   ): Promise<SignalOutcomeRecord[]> {
-    // Match only related signals — filter by symbol/timeframe/environment.
-    try {
-      const q = await this.col(userId)
-        .where("monitoring.lifecycle", "in", ACTIVE_MONITOR_LIFECYCLES)
-        .where("snapshot.symbol", "==", match.symbol)
-        .where("snapshot.environment", "==", match.environment)
-        .get();
-      return q.docs
-        .map((d) => d.data() as SignalOutcomeRecord)
-        .filter((r) => String(r.snapshot.timeframe ?? "") === String(match.timeframe ?? ""));
-    } catch {
-      return (await this.listActive(userId)).filter((r) => matchesFilter(r, match));
-    }
+    // Include timeframe in the query (indexed) — do not fetch broader then filter.
+    const timeframeKey = match.timeframe ?? "";
+    const q = await this.col(userId)
+      .where("monitoring.lifecycle", "in", ACTIVE_MONITOR_LIFECYCLES)
+      .where("snapshot.symbol", "==", match.symbol)
+      .where("snapshot.environment", "==", match.environment)
+      .where("snapshot.timeframe", "==", timeframeKey)
+      .get();
+    return q.docs.map((d) => d.data() as SignalOutcomeRecord);
   }
 
   async tryAcquireLease(

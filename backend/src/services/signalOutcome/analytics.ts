@@ -186,7 +186,7 @@ export function computeSignalPerformance(
       expired += 1;
     } else if (outcome === "CANCELLED" || life === "CANCELLED") {
       cancelled += 1;
-    } else if (outcome === "AMBIGUOUS" || life === "AMBIGUOUS_INTRABAR") {
+    } else if (outcome === "AMBIGUOUS" || life === "AMBIGUOUS_INTRABAR" || life === "ENTRY_SEQUENCE_AMBIGUOUS") {
       ambiguousIntrabar += 1;
     } else if (outcome === "DATA_UNAVAILABLE" || life === "DATA_UNAVAILABLE") {
       dataUnavailable += 1;

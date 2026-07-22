@@ -45,10 +45,13 @@ jobs:
       - name: Firestore Emulator concurrency tests
         run: |
           npx --yes firebase-tools@13 emulators:exec --only firestore --project goldmeta-signal-outcome-test \
-            "FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts"
+            "npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts"
         env:
           NODE_ENV: test
           APP_ENV: test
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8081
+          GCLOUD_PROJECT: goldmeta-signal-outcome-test
+          GOOGLE_CLOUD_PROJECT: goldmeta-signal-outcome-test
 
       - name: Build
         run: npm run build

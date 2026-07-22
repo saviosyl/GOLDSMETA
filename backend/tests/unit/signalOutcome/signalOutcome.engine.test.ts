@@ -784,3 +784,232 @@ describe("Signal Outcome Tracking", () => {
     expect(JSON.stringify(updated)).not.toMatch(/positions\/otc|working-orders/);
   });
 });
+
+describe("Entry-candle ordering ambiguity", () => {
+  it("entry + TP only — records entry, defers TP (rule B, no same-candle win)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4130,
+        high: 4140,
+        close: 4138
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.tp1Status).toBe("PENDING");
+    expect(r.finalResult).toBeNull();
+    expect(r.managementEvents.some((e) => e.type === "ENTRY_SEQUENCE_DEFERRED")).toBe(true);
+  });
+
+  it("entry + stop only — records entry, defers stop (rule B, no same-candle loss fill)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4126,
+        high: 4132,
+        close: 4130
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.stopStatus).not.toBe("HIT");
+    expect(r.finalResult).toBeNull();
+    expect(r.managementEvents.some((e) => e.type === "ENTRY_SEQUENCE_DEFERRED")).toBe(true);
+  });
+
+  it("entry + stop + TP — ENTRY_SEQUENCE_AMBIGUOUS without ordered ticks (rule A)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4126,
+        high: 4140,
+        close: 4135
+      })
+    );
+    expect(r.entry.entryReached).toBe(false);
+    expect(r.monitoring.lifecycle).toBe("ENTRY_SEQUENCE_AMBIGUOUS");
+    expect(r.finalResult?.outcome).toBe("AMBIGUOUS");
+  });
+
+  it("target in range before possible entry (ticks) → no entry, AMBIGUOUS", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4130,
+        high: 4140,
+        close: 4135,
+        orderedTicks: [
+          { t: 1, price: 4139 },
+          { t: 2, price: 4131.3 },
+          { t: 3, price: 4132 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(false);
+    expect(r.monitoring.lifecycle).toBe("ENTRY_SEQUENCE_AMBIGUOUS");
+  });
+
+  it("stop in range before possible entry (ticks) → no entry, AMBIGUOUS", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4126,
+        high: 4132,
+        close: 4130,
+        orderedTicks: [
+          { t: 1, price: 4126.5 },
+          { t: 2, price: 4131.3 },
+          { t: 3, price: 4130 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(false);
+    expect(r.monitoring.lifecycle).toBe("ENTRY_SEQUENCE_AMBIGUOUS");
+  });
+
+  it("ordered ticks with entry first then TP resolve sequence (entry then TP allowed)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4130,
+        high: 4140,
+        close: 4138,
+        orderedTicks: [
+          { t: 1, price: 4131.3 },
+          { t: 2, price: 4138 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.tp1Status).toBe("HIT");
+    expect(r.finalResult?.outcome).not.toBe("WIN"); // partial only — no full win bias
+  });
+});
+
+describe("Automatic outcome-monitor retries", () => {
+  it("failed job retries automatically via retry pass without manual processOutcomeMonitorJob loop", async () => {
+    const localStore = new InMemorySignalOutcomeStore();
+    const localJobs = new InMemoryOutcomeMonitorJobStore();
+    setSignalOutcomeStoreForTests(localStore);
+    setOutcomeMonitorJobStoreForTests(localJobs);
+    await ensureSignalOutcomeFromDecision(baseDecision(), localStore);
+
+    const job = await localJobs.enqueue({
+      userId: "user-1",
+      eventId: "retry-evt",
+      bar: bar({ eventId: "retry-evt", barTime: T1, low: 4130, high: 4132, close: 4131 }),
+      maxRetries: 5
+    });
+
+    await localJobs.claim(job.jobId, "w-fail", 60_000);
+    await localJobs.fail(job.jobId, new Error("transient"), "MONITOR_APPLY_FAILED");
+    const failed = await localJobs.get(job.jobId);
+    expect(failed?.state).toBe("FAILED");
+    expect(failed?.retryCount).toBe(1);
+    expect(Date.parse(failed!.nextAttemptAt)).toBeGreaterThan(Date.now());
+
+    // Elapse backoff — do not manually call processOutcomeMonitorJob in a loop.
+    localJobs.forceNextAttemptAt(job.jobId, new Date(Date.now() - 1000).toISOString());
+
+    const { runOutcomeMonitorRetryPass } = await import(
+      "../../../src/services/signalOutcome/retryPass"
+    );
+    const heartbeat = await runOutcomeMonitorRetryPass({
+      jobStore: localJobs,
+      store: localStore,
+      workerId: "scheduler-1",
+      db: null
+    });
+    expect(heartbeat.claimed).toBeGreaterThanOrEqual(1);
+    expect((await localJobs.get(job.jobId))?.state).toBe("COMPLETED");
+    const all = await localStore.listAllPaginated("user-1");
+    expect(all.some((s) => s.entry.entryReached)).toBe(true);
+  });
+
+  it("does not immediately reprocess a job whose nextAttemptAt is in the future", async () => {
+    const localStore = new InMemorySignalOutcomeStore();
+    const localJobs = new InMemoryOutcomeMonitorJobStore();
+    setSignalOutcomeStoreForTests(localStore);
+    setOutcomeMonitorJobStoreForTests(localJobs);
+    const { runOutcomeMonitorRetryPass } = await import(
+      "../../../src/services/signalOutcome/retryPass"
+    );
+    const job = await localJobs.enqueue({
+      userId: "user-1",
+      eventId: "future-evt",
+      bar: bar({ eventId: "future-evt", barTime: T1, low: 4130, high: 4132, close: 4131 }),
+      maxRetries: 3
+    });
+    await localJobs.claim(job.jobId, "w", 60_000);
+    await localJobs.fail(job.jobId, new Error("boom"), "MONITOR_APPLY_FAILED");
+    const failed = await localJobs.get(job.jobId);
+    expect(Date.parse(failed!.nextAttemptAt)).toBeGreaterThan(Date.now());
+
+    const heartbeat = await runOutcomeMonitorRetryPass({
+      jobStore: localJobs,
+      store: localStore,
+      workerId: "scheduler-2",
+      db: null,
+      now: new Date()
+    });
+    expect(heartbeat.completed).toBe(0);
+    expect((await localJobs.get(job.jobId))?.state).toBe("FAILED");
+  });
+});
+
+describe("Fail-closed production storage", () => {
+  it("refuses in-memory outside test/local and exposes safe status code", async () => {
+    const { allowInMemorySignalOutcomeStore, SignalOutcomeStorageUnavailableError } =
+      await import("../../../src/services/signalOutcome/storagePolicy");
+    const { FailClosedSignalOutcomeStore } = await import(
+      "../../../src/services/signalOutcome/failClosedStore"
+    );
+    expect(allowInMemorySignalOutcomeStore({ NODE_ENV: "test" })).toBe(true);
+    expect(
+      allowInMemorySignalOutcomeStore({ NODE_ENV: "production", SIGNAL_OUTCOME_ALLOW_MEMORY: "true" })
+    ).toBe(true);
+    expect(allowInMemorySignalOutcomeStore({ NODE_ENV: "production" })).toBe(false);
+
+    const closed = new FailClosedSignalOutcomeStore();
+    await expect(closed.save(createSignalOutcomeFromDecision(baseDecision()))).rejects.toBeInstanceOf(
+      SignalOutcomeStorageUnavailableError
+    );
+    try {
+      await closed.list("user-1");
+    } catch (e: unknown) {
+      expect(e).toBeInstanceOf(SignalOutcomeStorageUnavailableError);
+      expect((e as SignalOutcomeStorageUnavailableError).code).toBe(
+        "SIGNAL_OUTCOME_STORAGE_UNAVAILABLE"
+      );
+    }
+  });
+
+  it("cold-start multi-instance uses shared store singleton only after explicit test set", async () => {
+    const a = new InMemorySignalOutcomeStore();
+    setSignalOutcomeStoreForTests(a);
+    const created = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "cold-1" }), a);
+    const again = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "cold-1" }), a);
+    expect(again.snapshot.signalId).toBe(created.snapshot.signalId);
+    const lease1 = await a.tryAcquireLease("user-1", created.snapshot.signalId, "instance-a", 60_000);
+    const lease2 = await a.tryAcquireLease("user-1", created.snapshot.signalId, "instance-b", 60_000);
+    expect(lease1).not.toBeNull();
+    expect(lease2).toBeNull();
+  });
+});

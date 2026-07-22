@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from "express";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onRequest } from "firebase-functions/v2/https";
 import { env } from "./config/env";
 import { buildCorsMiddleware } from "./middleware/cors";
@@ -20,6 +21,7 @@ import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { AiExplainer } from "./services/ai/explainer";
 import { processJob } from "./services/jobs/processJob";
 import { processOutcomeMonitorJob } from "./services/signalOutcome/monitor";
+import { runOutcomeMonitorRetryPass } from "./services/signalOutcome/retryPass";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
@@ -128,6 +130,22 @@ export const processOutcomeMonitorJobDoc = onDocumentCreated(
   { document: "outcomeMonitorJobs/{jobId}", region: env.FIREBASE_REGION },
   async (event) => {
     await processOutcomeMonitorJob(event.params.jobId);
+  }
+);
+
+/**
+ * Automatic retry for FAILED/QUEUED outcome-monitor jobs past nextAttemptAt.
+ * onDocumentCreated does not re-fire when a job is updated to FAILED — this
+ * scheduled pass claims due jobs transactionally with exponential backoff.
+ */
+export const retryOutcomeMonitorJobs = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: env.FIREBASE_REGION,
+    timeoutSeconds: 120
+  },
+  async () => {
+    await runOutcomeMonitorRetryPass();
   }
 );
 
