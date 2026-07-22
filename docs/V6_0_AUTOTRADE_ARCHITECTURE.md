@@ -149,3 +149,37 @@ Two service instances sharing one store cannot both claim the same deal referenc
 - LIVE adapter blocked
 - Missing secrets fail closed
 - Secret setup: `docs/V6_IG_DEMO_SECRETS_SETUP.md`
+
+## Hardening update (post-preview)
+
+### PR base correction
+- Base branch: `cursor/v5-4-3-approved-base-c2c2` @ `4621156`
+- PR #21 retargeted so GitHub compares only V6 commits ahead of 4621156
+
+### FirestoreAutoTradeStore
+Runtime default via `createAutoTradeStore()` when not test/memory.
+Persists connections, settings, risk, intents, executions, positions, events, audit, locks, activity.
+`InMemoryAutoTradeStore` retained for unit tests only.
+
+### Distributed locking
+`claimIntent` uses Firestore transactions (or serialized in-memory claims in tests).
+Lease owner + expiry + heartbeat + expired-lease reclaim.
+Two service instances sharing one store cannot both claim the same deal reference.
+
+### Trusted execution
+- Public `POST /v1/autotrade/evaluate` → **410 EVALUATE_REMOVED**
+- Admin/emulator `POST /v1/autotrade/internal/evaluate-decision` (decisionId only)
+- Firestore trigger `onGoldMetaDecisionCreated` loads immutable decision docs
+
+### IG Demo read-only
+- Runtime `AUTOTRADE_BROKER=ig_demo` uses `IgBrokerAdapter` (Demo host)
+- `DEMO_ORDER_SUBMISSION_ENABLED=false`
+- LIVE adapter blocked
+- Missing secrets fail closed
+- Secret setup: `docs/V6_IG_DEMO_SECRETS_SETUP.md`
+
+### Test totals after hardening (tip)
+- Backend Vitest: 192
+- Web Vitest: 127
+- Playwright AutoTrade: 6 (full suite 72)
+- AutoTrade backend unit+integration: 43
