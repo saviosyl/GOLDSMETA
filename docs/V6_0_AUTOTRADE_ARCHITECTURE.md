@@ -2,6 +2,10 @@
 
 **Branch:** `cursor/goldmeta-v6-ig-autotrade-c2c2`  
 **Base commit (approved V5.4.3 production tree):** `4621156c146d6857205ea2f9d3256b6348227d89`  
+**Tip commit:** `1d79c430306089a74a1ea6c4706fa3dc6d63f94f`  
+**Draft PR:** https://github.com/saviosyl/GOLDSMETA/pull/21  
+**Preview:** https://preview-v6-autotrade.goldmeta-web.pages.dev  
+**UI review AutoTrade:** https://preview-v6-autotrade.goldmeta-web.pages.dev/ui-review/autotrade  
 **Release posture:** preview only — do not merge, do not promote, do not enable real IG trading.
 
 ## Safety confirmations
@@ -107,6 +111,13 @@ Mode OFF; €5 / trade; €100 margin; €10 daily; €30 weekly; 1 open; 1 trad
 
 See `docs/v6-autotrade/` and `/opt/cursor/artifacts/v6-autotrade-screenshots/`.
 
-## Test counts (this tip)
+## Test counts (tip `1d79c43`)
 
-Recorded after implementation; see delivery summary for exact totals.
+| Suite | Total |
+|-------|-------|
+| Backend Vitest | 182 |
+| Web Vitest | 127 |
+| Playwright | 72 |
+| AutoTrade backend (unit+integration) | 33 |
+
+Secret scan: clean (no IG credentials in client or committed AutoTrade sources).
