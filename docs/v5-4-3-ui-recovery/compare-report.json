@@ -1,0 +1,98 @@
+{
+  "dashboard-desktop-1440": {
+    "baseline": [
+      1440,
+      900
+    ],
+    "repaired": [
+      1440,
+      900
+    ],
+    "sampled_diff_ratio": 0.1694,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-dashboard-desktop-1440.png"
+  },
+  "dashboard-mobile-390": {
+    "baseline": [
+      390,
+      844
+    ],
+    "repaired": [
+      390,
+      844
+    ],
+    "sampled_diff_ratio": 0.1702,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-dashboard-mobile-390.png"
+  },
+  "dashboard-mobile-430": {
+    "baseline": [
+      430,
+      932
+    ],
+    "repaired": [
+      430,
+      932
+    ],
+    "sampled_diff_ratio": 0.1737,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-dashboard-mobile-430.png"
+  },
+  "dashboard-tablet-768": {
+    "baseline": [
+      768,
+      1024
+    ],
+    "repaired": [
+      768,
+      1024
+    ],
+    "sampled_diff_ratio": 0.2977,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-dashboard-tablet-768.png"
+  },
+  "signin-mobile-390": {
+    "baseline": [
+      390,
+      844
+    ],
+    "repaired": [
+      390,
+      844
+    ],
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-signin-mobile-390.png"
+  },
+  "settings-mobile-390": {
+    "baseline": [
+      390,
+      844
+    ],
+    "repaired": [
+      390,
+      844
+    ],
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-settings-mobile-390.png"
+  },
+  "score-expanded-390": {
+    "baseline": [
+      390,
+      844
+    ],
+    "repaired": [
+      390,
+      844
+    ],
+    "sampled_diff_ratio": 0.0002,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-score-expanded-390.png"
+  },
+  "market-map-390": {
+    "baseline": [
+      390,
+      844
+    ],
+    "repaired": [
+      390,
+      844
+    ],
+    "sampled_diff_ratio": 0.0027,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-ui-recovery/compare-market-map-390.png"
+  }
+}

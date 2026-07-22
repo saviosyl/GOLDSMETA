@@ -6,15 +6,10 @@ body,
 #root {
   background: var(--bg);
   color: var(--text);
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+a {
+  color: var(--navy-2);
 }
 
 .gm-shell {
@@ -23,10 +18,6 @@ body,
   grid-template-columns: 1fr;
   background: var(--bg);
   color: var(--text);
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: clip;
 }
 
 .gm-sidebar {
@@ -36,36 +27,13 @@ body,
 .gm-main {
   min-width: 0;
   width: 100%;
-  max-width: 100%;
 }
 
 .gm-main-inner {
   width: min(100%, var(--content-max));
-  max-width: 100%;
-  min-width: 0;
   margin: 0 auto;
   padding: 20px max(16px, var(--safe-left)) calc(96px + var(--safe-bottom))
     max(16px, var(--safe-right));
-}
-
-a {
-  color: var(--navy-2);
-}
-
-/* Prevent iOS Safari focus-zoom on interactive controls (<16px triggers zoom). */
-@media (max-width: 767px) {
-  input,
-  select,
-  textarea,
-  .gm-field input,
-  .gm-field select,
-  .gm-field textarea,
-  .gm-snapshot-field select,
-  .field input,
-  .field select,
-  .field textarea {
-    font-size: 16px !important;
-  }
 }
 
 .gm-topbar {
@@ -1194,6 +1162,7 @@ a {
 
 .gm-ladder-labels {
   min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -1352,9 +1321,9 @@ a {
   min-height: 44px;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 640px) {
   .gm-ladder-row {
-    grid-template-columns: minmax(0, 72px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 76px) minmax(0, 1fr);
     grid-template-areas:
       "price labels"
       "bar bar";
@@ -1464,10 +1433,18 @@ a {
   margin-bottom: 8px;
   font-size: var(--text-meta);
   color: var(--text-secondary);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .gm-ladder-nearest strong {
   color: var(--navy);
+}
+
+.gm-ladder-nearest > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .gm-ladder-row.is-distant {
@@ -1714,7 +1691,7 @@ button.gm-linkish {
   }
 }
 
-/* ===== V5.4.3 Promo Market Snapshot ===== */
+/* ===== V5.4.3 Promo Market Snapshot (scoped) ===== */
 .gm-snapshot-actions-row {
   margin: -4px 0 4px;
 }
@@ -1762,28 +1739,6 @@ button.gm-linkish {
   background: var(--navy);
   color: #fff;
   font-size: 0.75rem;
-}
-
-.gm-section,
-.gm-dash-grid,
-.gm-dashboard--v542,
-.gm-ladder,
-.gm-ladder-list,
-.gm-ladder-nearest,
-.gm-primary-signal,
-.gm-market-story,
-.gm-score-breakdown,
-.gm-metrics-grid,
-.gm-primary-inline,
-.gm-readiness-row {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.gm-ladder-nearest > span {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
 }
 
 .gm-snapshot-overlay {
@@ -1852,6 +1807,8 @@ button.gm-linkish {
   color: var(--text);
   font: 500 0.875rem var(--font-sans);
   min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
 }
 
 .gm-snapshot-toggles {
@@ -1913,35 +1870,17 @@ button.gm-linkish {
   min-width: 0;
 }
 
-.gm-btn-primary {
-  border: none;
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--navy);
-  color: #fff;
-  font: 600 0.9rem var(--font-sans);
-  cursor: pointer;
-  transition: background 160ms ease, transform 140ms ease;
+.gm-snapshot-actions .gm-btn-primary,
+.gm-snapshot-actions .gm-btn-outline {
+  width: 100%;
+  min-width: 0;
 }
 
-.gm-btn-primary:hover {
-  background: var(--navy-2);
-}
-
-.gm-btn-primary:active {
-  transform: scale(0.98);
-}
-
-.gm-btn-primary:disabled,
-.gm-btn-outline:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.gm-btn-primary:focus-visible,
-.gm-btn-outline:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
+@media (max-width: 767px) {
+  /* iOS focus-zoom guard — mobile only; preserve control heights */
+  .gm-snapshot-field select {
+    font-size: 16px;
+  }
 }
 
 @media (min-width: 768px) {
@@ -1961,8 +1900,7 @@ button.gm-linkish {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gm-snapshot-trigger,
-  .gm-btn-primary {
+  .gm-snapshot-trigger {
     transition: none;
   }
 }
