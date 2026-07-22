@@ -10,9 +10,12 @@ import { RiskPlannerPage } from "./RiskPlannerPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
 import { HistoryPage } from "./HistoryPage";
 import { SignalPerformancePage } from "./SignalPerformancePage";
+import { AutoTradePage } from "./AutoTradePage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
+import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
+import { ApiError } from "../types/models";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
@@ -36,6 +39,8 @@ function buildReviewApi() {
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
   const signalOutcomes = params.get("scenario") === "signal-outcomes";
   const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
+
+  let autoTrade = buildReviewAutoTradeStatus();
 
   const decision = {
     schemaVersion: "3",
@@ -315,7 +320,184 @@ function buildReviewApi() {
             byConfidenceRange: {}
           },
     signalOutcomeByDecision: async (id: string) =>
-      soFixtures?.outcomes.find((o) => o.snapshot.decisionId === id) ?? null
+      soFixtures?.outcomes.find((o) => o.snapshot.decisionId === id) ?? null,
+    autoTradeStatus: async (): Promise<AutoTradeStatus> => ({ ...autoTrade, activity: [...autoTrade.activity] }),
+    autoTradeSetMode: async (mode: AutoTradeStatus["mode"], opts: {
+      liveConfirmationPhrase?: string;
+      riskAcknowledged?: boolean;
+      accountVerified?: boolean;
+    } = {}) => {
+      if (mode === "IG_LIVE_AUTO") {
+        if (!autoTrade.liveExecutionFeatureEnabled) {
+          throw new ApiError(400, "LIVE_FEATURE_DISABLED", "LIVE execution is disabled by server feature flag for this release.");
+        }
+        if (opts.liveConfirmationPhrase !== "ENABLE LIVE AUTOTRADE") {
+          throw new ApiError(400, "LIVE_CONFIRMATION_REQUIRED", "Type exactly: ENABLE LIVE AUTOTRADE");
+        }
+      }
+      autoTrade = {
+        ...autoTrade,
+        mode,
+        displayStatus:
+          mode === "OFF"
+            ? "OFF"
+            : mode === "SHADOW"
+              ? "SHADOW"
+              : mode === "IG_DEMO_AUTO"
+                ? "DEMO"
+                : "LIVE",
+        locked: false,
+        activity: [
+          {
+            id: `m-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: `Mode set to ${mode}.`,
+            level: "success"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeConnect: async (environment: "DEMO" | "LIVE") => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: true,
+          environment,
+          environmentLabel: "IG DEMO — READ ONLY",
+          connectionState: "Connected",
+          accountIdMasked: environment === "LIVE" ? "****9988" : "****1234",
+          accountName: environment === "LIVE" ? "Live CFD" : "Demo CFD",
+          balance: 10000,
+          available: 9500,
+          marginUsed: 120,
+          marketName: "Spot Gold",
+          marketEpic: "CS.D.USCGC.TODAY.IP",
+          marketStatus: "TRADEABLE",
+          bid: 2385.2,
+          ask: 2385.5,
+          spread: 0.3,
+          minDealSize: 0.1,
+          sizeIncrement: 0.1,
+          valuePerPoint: 1,
+          minNormalStopDistance: 0.3,
+          minGuaranteedStopDistance: 0.5,
+          guaranteedStopAvailable: true,
+          lastHeartbeatAt: new Date().toISOString()
+        },
+        proposedEpic: "CS.D.USCGC.TODAY.IP",
+        goldCandidates: [
+          {
+            epic: "CS.D.USCGC.TODAY.IP",
+            instrumentName: "Spot Gold",
+            instrumentType: "CURRENCIES",
+            expiry: "-",
+            marketStatus: "TRADEABLE",
+            currencyCode: "EUR",
+            bid: 2385.2,
+            offer: 2385.5,
+            proposedPrimary: true,
+            reason: "Review mock Spot Gold"
+          }
+        ],
+        activity: [
+          {
+            id: `c-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: `Connected to IG DEMO — READ ONLY (scaffold / review).`,
+            level: "success"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeDisconnect: async () => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: false,
+          connectionState: "Disconnected",
+          lastHeartbeatAt: null
+        }
+      };
+      return { ...autoTrade };
+    },
+    autoTradeEmergencyStop: async () => {
+      autoTrade = {
+        ...autoTrade,
+        mode: "OFF",
+        displayStatus: "LOCKED",
+        locked: true,
+        lockReason: "emergency_stop",
+        emergencyStopActive: true,
+        activity: [
+          {
+            id: `s-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: "EMERGENCY STOP — AutoTrade locked and set to OFF.",
+            level: "error"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeUnlock: async () => {
+      autoTrade = {
+        ...autoTrade,
+        mode: "OFF",
+        displayStatus: "OFF",
+        locked: false,
+        lockReason: null,
+        emergencyStopActive: false,
+        activity: [
+          {
+            id: `u-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: "AutoTrade unlocked. Mode remains OFF until you enable it.",
+            level: "info"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeUpdateLimits: async () => ({ ...autoTrade }),
+    autoTradeDemoDiagnostics: async () => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: true,
+          environment: "DEMO",
+          environmentLabel: "IG DEMO — READ ONLY",
+          connectionState: "Connected",
+          accountIdMasked: "****1234",
+          accountName: "Demo CFD",
+          balance: 10000,
+          available: 9500,
+          marginUsed: 120,
+          marketName: "Spot Gold",
+          marketEpic: "CS.D.USCGC.TODAY.IP",
+          marketStatus: "TRADEABLE",
+          bid: 2385.2,
+          ask: 2385.5,
+          spread: 0.3,
+          minDealSize: 0.1,
+          sizeIncrement: 0.1,
+          valuePerPoint: 1,
+          minNormalStopDistance: 0.3,
+          minGuaranteedStopDistance: 0.5,
+          guaranteedStopAvailable: true,
+          lastHeartbeatAt: new Date().toISOString()
+        }
+      };
+      return { ...autoTrade };
+    }
   };
 }
 
@@ -366,6 +548,7 @@ function UiReviewApp() {
             <Route path="replay" element={<ReplayPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
+            <Route path="autotrade" element={<AutoTradePage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="signal-performance" element={<SignalPerformancePage />} />
