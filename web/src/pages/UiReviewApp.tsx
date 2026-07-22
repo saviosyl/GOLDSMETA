@@ -8,8 +8,11 @@ import { ReplayPage } from "./ReplayPage";
 import { SettingsPage } from "./SettingsPage";
 import { RiskPlannerPage } from "./RiskPlannerPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
+import { AutoTradePage } from "./AutoTradePage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
+import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
+import { ApiError } from "../types/models";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
@@ -31,6 +34,8 @@ function buildReviewApi() {
   const decisionOverride = (params.get("decision") || "WAIT").toUpperCase();
   const decisionCode =
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
+
+  let autoTrade = buildReviewAutoTradeStatus();
 
   const decision = {
     schemaVersion: "3",
@@ -272,7 +277,119 @@ function buildReviewApi() {
     sendTestAlert: async () => ({ message: "queued" }),
     getVapidPublicKey: async () => "",
     registerWebPushSubscription: async () => ({}),
-    deleteWebPushSubscription: async () => ({})
+    deleteWebPushSubscription: async () => ({}),
+    autoTradeStatus: async (): Promise<AutoTradeStatus> => ({ ...autoTrade, activity: [...autoTrade.activity] }),
+    autoTradeSetMode: async (mode: AutoTradeStatus["mode"], opts: {
+      liveConfirmationPhrase?: string;
+      riskAcknowledged?: boolean;
+      accountVerified?: boolean;
+    } = {}) => {
+      if (mode === "IG_LIVE_AUTO") {
+        if (!autoTrade.liveExecutionFeatureEnabled) {
+          throw new ApiError(400, "LIVE_FEATURE_DISABLED", "LIVE execution is disabled by server feature flag for this release.");
+        }
+        if (opts.liveConfirmationPhrase !== "ENABLE LIVE AUTOTRADE") {
+          throw new ApiError(400, "LIVE_CONFIRMATION_REQUIRED", "Type exactly: ENABLE LIVE AUTOTRADE");
+        }
+      }
+      autoTrade = {
+        ...autoTrade,
+        mode,
+        displayStatus:
+          mode === "OFF"
+            ? "OFF"
+            : mode === "SHADOW"
+              ? "SHADOW"
+              : mode === "IG_DEMO_AUTO"
+                ? "DEMO"
+                : "LIVE",
+        locked: false,
+        activity: [
+          {
+            id: `m-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: `Mode set to ${mode}.`,
+            level: "success"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeConnect: async (environment: "DEMO" | "LIVE") => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: true,
+          environment,
+          accountIdMasked: environment === "LIVE" ? "****9988" : "****1234",
+          accountName: environment === "LIVE" ? "Live CFD" : "Demo CFD",
+          balance: 10000,
+          available: 9500,
+          marginUsed: 120,
+          marketName: "Spot Gold",
+          bid: 2385.2,
+          ask: 2385.5,
+          spread: 0.3,
+          minDealSize: 0.1,
+          sizeIncrement: 0.1,
+          valuePerPoint: 1,
+          lastHeartbeatAt: new Date().toISOString()
+        },
+        activity: [
+          {
+            id: `c-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: `Connected to IG ${environment} (scaffold / review).`,
+            level: "success"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeEmergencyStop: async () => {
+      autoTrade = {
+        ...autoTrade,
+        mode: "OFF",
+        displayStatus: "LOCKED",
+        locked: true,
+        lockReason: "emergency_stop",
+        emergencyStopActive: true,
+        activity: [
+          {
+            id: `s-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: "EMERGENCY STOP — AutoTrade locked and set to OFF.",
+            level: "error"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeUnlock: async () => {
+      autoTrade = {
+        ...autoTrade,
+        mode: "OFF",
+        displayStatus: "OFF",
+        locked: false,
+        lockReason: null,
+        emergencyStopActive: false,
+        activity: [
+          {
+            id: `u-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: "AutoTrade unlocked. Mode remains OFF until you enable it.",
+            level: "info"
+          },
+          ...autoTrade.activity
+        ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeUpdateLimits: async () => ({ ...autoTrade })
   };
 }
 
@@ -323,6 +440,7 @@ function UiReviewApp() {
             <Route path="replay" element={<ReplayPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
+            <Route path="autotrade" element={<AutoTradePage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<OverviewPage />} />
             <Route path="journal" element={<OverviewPage />} />

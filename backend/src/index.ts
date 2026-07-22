@@ -16,21 +16,30 @@ import { buildWebhooksRouter } from "./routes/webhooks";
 import { buildSetupsRouter } from "./routes/setups";
 import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
+import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { AiExplainer } from "./services/ai/explainer";
 import { processJob } from "./services/jobs/processJob";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
+import { AutoTradeService } from "./services/autoTrade/autoTradeService";
+import { InMemoryAutoTradeStore } from "./services/autoTrade/autoTradeStore";
+import { FakeIgBrokerAdapter } from "./services/autoTrade/fakeIgBrokerAdapter";
 
 export interface AppDependencies {
   store: GoldMetaStore;
   aiExplainer: AiExplainer;
   tradingService?: TradingModeService;
+  autoTradeService?: AutoTradeService;
 }
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
+const defaultAutoTradeService = new AutoTradeService(
+  new InMemoryAutoTradeStore(),
+  (environment) => new FakeIgBrokerAdapter({ environment })
+);
 
 const isPayloadTooLarge = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) {
@@ -67,7 +76,8 @@ export const createApp = (
   dependencies: AppDependencies = {
     store: defaultStore,
     aiExplainer: new AiExplainer(),
-    tradingService: defaultTradingService
+    tradingService: defaultTradingService,
+    autoTradeService: defaultAutoTradeService
   }
 ): express.Express => {
   const app = express();
@@ -80,6 +90,7 @@ export const createApp = (
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
 
   const tradingService = dependencies.tradingService ?? defaultTradingService;
+  const autoTradeService = dependencies.autoTradeService ?? defaultAutoTradeService;
 
   app.use(buildHealthRouter());
   app.use(buildWebhooksRouter(dependencies.store, dependencies.aiExplainer));
@@ -93,6 +104,7 @@ export const createApp = (
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));
   app.use(buildTradingRouter(tradingService));
+  app.use(buildAutoTradeRouter(autoTradeService));
   app.use(buildSystemRouter());
   app.use(errorHandler);
 

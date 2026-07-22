@@ -1552,3 +1552,289 @@ a {
     transition: none;
   }
 }
+
+/* ===== V6 AutoTrade Control Centre (scoped; does not alter Dashboard) ===== */
+.gm-autotrade {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.gm-autotrade-hero {
+  display: grid;
+  gap: 16px;
+  padding: 20px 18px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(216, 163, 61, 0.18), transparent 55%),
+    linear-gradient(145deg, #0f2340 0%, #1d3557 55%, #243b55 100%);
+  color: #f8fafc;
+  box-shadow: var(--shadow);
+  animation: gm-at-fade-in 480ms ease-out both;
+}
+
+.gm-autotrade-kicker {
+  margin: 0 0 6px;
+  font: 600 0.72rem/1.2 var(--font-sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.72);
+}
+
+.gm-autotrade-title {
+  color: #fff;
+  margin: 0;
+}
+
+.gm-autotrade-lead {
+  color: rgba(248, 250, 252, 0.82);
+  max-width: 42rem;
+}
+
+.gm-autotrade-status-block {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.gm-autotrade-status-block .gm-label {
+  color: rgba(248, 250, 252, 0.7);
+}
+
+.gm-at-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: 700 0.85rem/1 var(--font-sans);
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+
+.gm-at-pill--off {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.gm-at-pill--shadow {
+  background: #fff7e6;
+  color: #9a6700;
+}
+.gm-at-pill--demo {
+  background: #ecfdf3;
+  color: #166534;
+}
+.gm-at-pill--live {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.gm-at-pill--locked {
+  background: #111827;
+  color: #fbbf24;
+  border-color: #fbbf24;
+}
+
+.gm-autotrade-lock-reason {
+  margin: 0;
+  font: 500 0.85rem/1.35 var(--font-sans);
+  color: #fecaca;
+}
+
+.gm-autotrade-stop-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff5f5, #fff);
+  box-shadow: var(--shadow-sm);
+  animation: gm-at-slide-down 420ms ease-out both;
+}
+
+.gm-autotrade-stop-bar .gm-meta {
+  margin: 2px 0 0;
+}
+
+.gm-at-stop {
+  flex: 0 0 auto;
+  min-width: 96px;
+  background: var(--negative) !important;
+  color: #fff !important;
+  border-color: #b91c1c !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.gm-autotrade-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.gm-autotrade-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.gm-autotrade-metrics .gm-label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.gm-autotrade-metrics strong {
+  font: 650 0.95rem/1.25 var(--font-sans);
+  color: var(--navy);
+  word-break: break-word;
+}
+
+.gm-autotrade-actions,
+.gm-autotrade-mode-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.gm-at-mode.is-active {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+
+.gm-autotrade-limits-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font: 500 0.9rem/1.4 var(--font-sans);
+}
+
+.gm-autotrade-log,
+.gm-autotrade-positions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.gm-autotrade-log li,
+.gm-autotrade-positions li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.gm-autotrade-log time {
+  font: 600 0.72rem/1.2 var(--font-sans);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gm-autotrade-live-steps {
+  margin: 0 0 14px;
+  padding-left: 1.15rem;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 6px;
+}
+
+.gm-autotrade-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  font: 600 0.85rem/1.3 var(--font-sans);
+  color: var(--navy);
+}
+
+.gm-autotrade-field input {
+  min-height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0 12px;
+  font: 500 1rem/1.2 var(--font-sans);
+  background: var(--input-bg);
+  color: var(--text);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.gm-autotrade-live .gm-btn {
+  margin-top: 12px;
+}
+
+@keyframes gm-at-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gm-at-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .gm-autotrade-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    padding: 24px 22px;
+  }
+
+  .gm-autotrade-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .gm-autotrade {
+    padding-bottom: calc(88px + var(--safe-bottom));
+  }
+
+  .gm-autotrade-stop-bar {
+    position: fixed;
+    left: max(12px, var(--safe-left));
+    right: max(12px, var(--safe-right));
+    bottom: calc(72px + var(--safe-bottom));
+    top: auto;
+    z-index: 40;
+  }
+
+  .gm-autotrade-field input {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gm-autotrade-hero,
+  .gm-autotrade-stop-bar {
+    animation: none;
+  }
+}

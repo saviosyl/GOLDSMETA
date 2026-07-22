@@ -14,6 +14,7 @@ import type {
   WebPushSubscriptionPayload
 } from "../types/models";
 import { ApiError } from "../types/models";
+import type { AutoTradeMode, AutoTradeStatus } from "./autoTradeTypes";
 
 export type ManualExecutionPatch = {
   action: ManualExecutionAction;
@@ -515,5 +516,57 @@ export class ApiClient {
       whyItMatters: string;
       howGoldMetaUsesIt: string;
     };
+  }
+
+  async autoTradeStatus(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/status");
+    return body.status;
+  }
+
+  async autoTradeSetMode(
+    mode: AutoTradeMode,
+    opts: {
+      liveConfirmationPhrase?: string;
+      riskAcknowledged?: boolean;
+      accountVerified?: boolean;
+    } = {}
+  ): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/mode", {
+      method: "POST",
+      body: JSON.stringify({ mode, ...opts })
+    });
+    return body.status;
+  }
+
+  async autoTradeConnect(environment: "DEMO" | "LIVE"): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/connect", {
+      method: "POST",
+      body: JSON.stringify({ environment })
+    });
+    return body.status;
+  }
+
+  async autoTradeEmergencyStop(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/emergency-stop", {
+      method: "POST"
+    });
+    return body.status;
+  }
+
+  async autoTradeUnlock(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/unlock", {
+      method: "POST"
+    });
+    return body.status;
+  }
+
+  async autoTradeUpdateLimits(
+    patch: Partial<AutoTradeStatus["limits"]>
+  ): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/limits", {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    });
+    return body.status;
   }
 }

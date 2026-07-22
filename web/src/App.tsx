@@ -31,6 +31,9 @@ const V4ResearchPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage }))
 );
+const AutoTradePage = lazy(() =>
+  import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
+);
 
 function RouteFallback({ label }: { label: string }) {
   return (
@@ -140,6 +143,14 @@ function ProtectedApp() {
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/brand" element={<BrandConceptsPage />} />
         <Route path="/planner" element={<RiskPlannerPage />} />
+        <Route
+          path="/autotrade"
+          element={
+            <LazyRoute label="AutoTrade">
+              <AutoTradePage />
+            </LazyRoute>
+          }
+        />
         <Route
           path="/settings"
           element={
