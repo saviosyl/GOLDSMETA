@@ -1331,3 +1331,324 @@ a {
     max-height: none;
   }
 }
+
+/* ===== V5.4.2 final polish ===== */
+
+.gm-badge.research {
+  color: var(--research);
+  background: var(--research-soft);
+  border-color: transparent;
+}
+
+.gm-dashboard--v542 {
+  --dash-gap: 14px;
+}
+
+.gm-dashboard--v542 > .gm-section,
+.gm-dashboard--v542 > .gm-dash-grid,
+.gm-dashboard--v542 > .gm-skeleton-stack,
+.gm-dashboard--v542 > .gm-state-card {
+  margin-bottom: var(--dash-gap);
+}
+
+.gm-primary-signal--hero {
+  padding: 16px 16px 14px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.gm-primary-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.gm-freshness {
+  font-size: var(--text-meta);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.gm-decision-icon {
+  font-size: 1.4rem;
+  margin-right: 6px;
+}
+
+.gm-primary-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 10px 0 8px;
+}
+
+.gm-primary-inline .gm-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.gm-primary-inline strong {
+  color: var(--navy);
+  font-size: 1rem;
+}
+
+.gm-plan-status-inline {
+  font-size: 0.9rem !important;
+  font-weight: 650 !important;
+}
+
+.gm-story-body {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  max-width: 72ch;
+}
+
+.gm-story-evidence code {
+  font-size: 0.75rem;
+}
+
+.gm-dash-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--dash-gap, 14px);
+  margin-bottom: var(--dash-gap, 14px);
+}
+
+.gm-ladder-nearest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+  font-size: var(--text-meta);
+  color: var(--text-secondary);
+}
+
+.gm-ladder-nearest strong {
+  color: var(--navy);
+}
+
+.gm-ladder-row.is-distant {
+  opacity: 0.62;
+}
+
+.gm-ladder-row.is-nearest-res,
+.gm-ladder-row.is-nearest-sup {
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.gm-ladder-row.is-live {
+  position: relative;
+}
+
+.gm-ladder-row.is-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(216, 163, 61, 0.45);
+  animation: gm-live-pulse 2.4s ease-in-out infinite;
+}
+
+.gm-readiness-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.gm-readiness-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  font-size: var(--text-meta);
+  font-weight: 650;
+  color: var(--navy);
+}
+
+.gm-overnight-summary {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.gm-overnight-summary:hover {
+  background: var(--gold-soft);
+}
+
+.gm-empty--calm {
+  padding: 12px 0 4px;
+}
+
+.gm-plan-disclaimer {
+  color: var(--research);
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.gm-avatar-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.gm-account-menu {
+  position: relative;
+}
+
+.gm-account-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 40;
+}
+
+.gm-account-dropdown a,
+.gm-account-dropdown button {
+  text-align: left;
+}
+
+.gm-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.gm-skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gm-skeleton {
+  height: 64px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-alt), #eef1f5, var(--surface-alt));
+  background-size: 200% 100%;
+  animation: gm-shimmer 1.2s linear infinite;
+}
+
+.gm-skeleton--hero {
+  height: 160px;
+}
+
+.gm-section {
+  transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.gm-section:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-btn-outline,
+.btn,
+button.gm-linkish {
+  transition: transform 140ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.gm-btn-outline:active,
+.btn:active {
+  transform: translateY(1px);
+}
+
+.gm-anim-progress > div {
+  transition: width 400ms ease;
+}
+
+.gm-disclosure-body {
+  animation: gm-disclose 160ms ease;
+}
+
+@keyframes gm-live-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes gm-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@keyframes gm-disclose {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gm-ladder-row.is-live::after,
+  .gm-skeleton,
+  .gm-anim-progress > div,
+  .gm-disclosure-body,
+  .gm-section,
+  .gm-primary-signal--hero,
+  .gm-btn-outline,
+  .btn {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .gm-primary-inline {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .gm-dash-grid {
+    grid-template-columns: minmax(0, 7.5fr) minmax(0, 4.5fr);
+    align-items: start;
+  }
+
+  .gm-dashboard--v542 {
+    --dash-gap: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .gm-dashboard--v542 {
+    --dash-gap: 12px;
+  }
+
+  .gm-primary-signal--hero {
+    padding: 14px;
+  }
+
+  .gm-decision-label {
+    font-size: clamp(1.9rem, 9vw, 2.4rem);
+  }
+}

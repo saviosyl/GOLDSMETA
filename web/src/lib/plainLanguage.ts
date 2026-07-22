@@ -32,17 +32,17 @@ export function plainLanguageReason(codes: string[] | undefined, fallback?: stri
   if (joined.includes("ONE-ACTIVE") || joined.includes("ONE_ACTIVE") || joined.includes("STILL OPEN")) {
     return "A new setup was not created because another plan is still being tracked.";
   }
-  if (joined.includes("CONFLICTED_DATA") || joined.includes("CONFLICTED")) {
-    return "Verified signals currently disagree.";
-  }
-  if (joined.includes("NO APPROVED STRATEGY") || joined.includes("NO_APPROVED")) {
-    return "No approved setup pattern is present yet.";
-  }
   if (joined.includes("CONFIRMATION")) {
-    return "Multi-bar confirmation is still incomplete.";
+    return "Waiting for confirmation across additional candles.";
   }
   if (joined.includes("RISK_GEOMETRY") || joined.includes("INVALID_RISK")) {
     return "Risk geometry does not meet GoldMeta’s safety floors yet.";
+  }
+  if (joined.includes("NO APPROVED STRATEGY") || joined.includes("NO_APPROVED")) {
+    return "No validated setup pattern is present yet.";
+  }
+  if (joined.includes("CONFLICTED_DATA") || joined.includes("CONFLICTED")) {
+    return "Verified signals currently disagree.";
   }
   if (joined.includes("WAIT") || joined.includes("GATES")) {
     return "Mandatory gates have not all cleared for a setup.";
