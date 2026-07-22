@@ -1,20 +1,20 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 
 const DESKTOP_LINKS = [
   { to: "/", label: "Dashboard", end: true },
-  { to: "/intelligence", label: "Market Overview", end: false },
+  { to: "/intelligence", label: "Markets", end: false },
   { to: "/analytics", label: "Analytics", end: false },
   { to: "/replay", label: "Replay", end: false },
-  { to: "/journal", label: "Journal", end: false },
-  { to: "/settings", label: "Settings", end: false }
+  { to: "/journal", label: "Journal", end: false }
 ];
 
 const DESKTOP_SECONDARY = [
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "V4 Research" }
+  { to: "/v4", label: "Research" },
+  { to: "/settings", label: "Settings" }
 ];
 
 const MOBILE_PRIMARY = [
@@ -28,7 +28,7 @@ const MOBILE_MORE = [
   { to: "/journal", label: "Journal" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "V4 Research" },
+  { to: "/v4", label: "Research" },
   { to: "/settings", label: "Settings" }
 ];
 
@@ -47,9 +47,11 @@ export function AppShell({
   children?: ReactNode;
   linkPrefix?: string;
 }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
   const email = user?.email ?? "Account";
   const prefix = linkPrefix.replace(/\/$/, "");
 
@@ -67,6 +69,14 @@ export function AppShell({
       }),
     [location.pathname, prefix]
   );
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!accountRef.current?.contains(e.target as Node)) setAccountOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   return (
     <div className="gm-shell" data-testid="app-shell-redesign">
@@ -90,7 +100,7 @@ export function AppShell({
             </NavLink>
           ))}
           <p className="gm-meta" style={{ margin: "16px 8px 6px" }}>
-            Advanced
+            More
           </p>
           {DESKTOP_SECONDARY.map((link) => (
             <NavLink
@@ -105,9 +115,6 @@ export function AppShell({
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
             <p>Analysis only. Broker execution stays disabled.</p>
-            <span className="gm-meta" style={{ color: "rgba(255,255,255,0.75)" }}>
-              {email}
-            </span>
           </div>
         </div>
       </aside>
@@ -123,11 +130,47 @@ export function AppShell({
               </div>
             </div>
             <div className="gm-topbar-actions">
-              <span className="gm-badge gold">LIVE</span>
-              <div className="gm-avatar" aria-hidden>
-                {initials(email)}
+              <span className="gm-badge gold" title="Live market environment">
+                LIVE
+              </span>
+              <div className="gm-account-menu" ref={accountRef} data-testid="account-menu">
+                <button
+                  type="button"
+                  className="gm-avatar-btn"
+                  aria-haspopup="menu"
+                  aria-expanded={accountOpen}
+                  aria-label="Account menu"
+                  data-testid="account-menu-button"
+                  onClick={() => setAccountOpen((v) => !v)}
+                >
+                  <span className="gm-avatar" aria-hidden>
+                    {initials(email)}
+                  </span>
+                </button>
+                {accountOpen && (
+                  <div className="gm-account-dropdown" role="menu" data-testid="account-dropdown">
+                    <p className="gm-meta" data-testid="account-email">
+                      {email}
+                    </p>
+                    <Link role="menuitem" to={withPrefix("/settings")} onClick={() => setAccountOpen(false)}>
+                      Settings
+                    </Link>
+                    {signOut && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="gm-linkish"
+                        onClick={() => {
+                          setAccountOpen(false);
+                          void signOut();
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              <span className="gm-meta">{email}</span>
             </div>
           </header>
           {children ?? <Outlet />}

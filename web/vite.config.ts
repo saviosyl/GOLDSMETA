@@ -92,6 +92,7 @@ export default defineConfig({
         ]
       },
       workbox: {
+        cacheId: "goldmeta-v5-4-2",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses

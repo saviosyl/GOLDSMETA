@@ -15,6 +15,7 @@ import "../styles/redesign.css";
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     user: { email: "tester@example.com" },
+    signOut: vi.fn(),
     api: {
       latestDecision: vi.fn().mockResolvedValue({
         decisionId: "dec_hidden_id_abc123",
@@ -25,6 +26,8 @@ vi.mock("../lib/auth", () => ({
         generatedAt: "2026-07-21T21:45:00.000Z",
         barTime: "2026-07-21T21:30:00.000Z",
         lastKnownPrice: 2385.4,
+        ohlcv: { high: 2391, low: 2376, close: 2385.4 },
+        marketStructure: { poc: 2380, vah: 2390, val: 2370, trend: "RANGE" },
         environment: "LIVE",
         marketRegime: "RANGE"
       }),
@@ -43,8 +46,15 @@ vi.mock("../lib/auth", () => ({
       }),
       v5Score: vi.fn().mockResolvedValue({
         total: 42,
-        components: [{ label: "Structure", score: 8, max: 20, reason: "Incomplete" }],
-        disclaimer: "GoldMeta Score is a rules-based setup-quality measurement."
+        components: [
+          { label: "Market Structure", score: 8, max: 20, reason: "Incomplete" },
+          { label: "Confirmation", score: 4, max: 12, reason: "Incomplete" },
+          { label: "Trend", score: 10, max: 12, reason: "Aligned" },
+          { label: "Volume Profile", score: 8, max: 12, reason: "Near POC" },
+          { label: "ATR", score: 6, max: 10, reason: "Normal" },
+          { label: "News", score: 0, max: 5, reason: "No verified calendar available." }
+        ],
+        disclaimer: "GoldMeta Score is a rules-based quality score, not the probability of profit."
       })
     }
   })
@@ -53,7 +63,7 @@ vi.mock("../lib/auth", () => ({
 describe("plainLanguage helpers", () => {
   it("formats sessions and timestamps for users", () => {
     expect(formatSession("NEWYORK")).toBe("New York");
-    expect(formatUserTimestamp("2026-07-21T21:45:00.000Z")).toMatch(/21 Jul 2026/);
+    expect(formatUserTimestamp("2026-07-21T21:45:00.000Z")).toMatch(/21 Jul 2026|22 Jul 2026/);
     expect(plainLanguageReason(["ONE-ACTIVE-SETUP"])).toMatch(/another plan is still being tracked/i);
   });
 });
@@ -71,7 +81,8 @@ describe("AppShell navigation", () => {
     expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Home")).toBeInTheDocument();
-    expect(screen.getByText("More")).toBeInTheDocument();
+    expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("More").length).toBeGreaterThan(0);
   });
 
   it("opens More sheet with secondary destinations", async () => {
@@ -86,6 +97,20 @@ describe("AppShell navigation", () => {
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
+  });
+  it("hides email behind account menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId("account-email")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("account-menu-button"));
+    expect(screen.getByTestId("account-email")).toHaveTextContent("tester@example.com");
   });
 });
 
@@ -94,22 +119,26 @@ describe("OverviewPage redesign", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
-  it("shows simplified home content and hides technical IDs by default", async () => {
+  it("shows primary signal first without summary grid or email", async () => {
     render(
       <MemoryRouter>
         <OverviewPage />
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(screen.getByTestId("primary-decision")).toHaveTextContent(/Waiting/i);
-    expect(screen.getByText(/another plan is still being tracked/i)).toBeInTheDocument();
+    expect(screen.getByTestId("primary-decision")).toHaveTextContent(/WAIT/i);
+    expect(screen.getAllByText(/another plan is still being tracked/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/New York/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     expect(screen.getByText("No validated shadow plan yet.")).toBeInTheDocument();
-    expect(screen.getByText("View full score breakdown")).toBeInTheDocument();
+    expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
+    expect(screen.getByTestId("market-level-ladder")).toBeInTheDocument();
+    expect(screen.getByTestId("market-story")).toBeInTheDocument();
+    expect(screen.queryByTestId("dashboard-summary")).not.toBeInTheDocument();
+    expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
   });
 
-  it("reveals technical details on demand and keeps score collapsed", async () => {
+  it("reveals technical details on demand", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -117,12 +146,8 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("overview-page");
-    const scoreDetails = screen.getByText("View full score breakdown").closest("details");
-    expect(scoreDetails).not.toHaveAttribute("open");
     await user.click(screen.getByText("Technical details"));
     expect(screen.getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
-    await user.click(screen.getByText("View full score breakdown"));
-    expect(scoreDetails).toHaveAttribute("open");
-    expect(await screen.findByText(/42 \/ 100/)).toBeInTheDocument();
+    expect(screen.getAllByText(/42\s*\/\s*100/).length).toBeGreaterThan(0);
   });
 });
