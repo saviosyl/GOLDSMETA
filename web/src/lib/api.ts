@@ -642,4 +642,14 @@ export class ApiClient {
     );
     return body.status;
   }
+
+  async stockIntradayUpdateWatchlist(
+    symbols: string[]
+  ): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/watchlist",
+      { method: "PUT", body: JSON.stringify({ symbols }) }
+    );
+    return body.status;
+  }
 }

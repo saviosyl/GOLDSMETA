@@ -17,6 +17,25 @@ export function defaultShadowWatchlist(max = MAX_SHADOW_WATCHLIST): string[] {
   return [...DEFAULT_ALPACA_SHADOW_WATCHLIST].slice(0, Math.min(max, MAX_SHADOW_WATCHLIST));
 }
 
+/** Normalize casing, drop empties/duplicates, cap at max. */
+export function normalizeWatchlistSymbols(
+  symbols: string[],
+  max = MAX_SHADOW_WATCHLIST
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of symbols) {
+    const s = String(raw ?? "")
+      .trim()
+      .toUpperCase();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 export type WatchlistValidationResult = {
   symbol: string;
   accepted: boolean;

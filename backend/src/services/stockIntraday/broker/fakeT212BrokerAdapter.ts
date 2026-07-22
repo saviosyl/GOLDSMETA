@@ -55,7 +55,6 @@ export class FakeT212BrokerAdapter implements T212BrokerAdapter {
       name: string,
       type: T212Instrument["type"],
       exchange: string,
-      currentPrice: number,
       minTradeQuantity = 0.001
     ): T212Instrument => ({
       ticker,
@@ -67,19 +66,19 @@ export class FakeT212BrokerAdapter implements T212BrokerAdapter {
       maxOpenQuantity: null,
       extendedHoursAllowed: false,
       tradable: true,
-      suspended: false,
-      currentPrice
+      suspended: false
+      // Official instrument metadata has no currentPrice — do not invent one here.
     });
     this.instruments = [
-      mk("AAPL", "Apple Inc", "STOCK", "NASDAQ", 180),
-      mk("MSFT", "Microsoft", "STOCK", "NASDAQ", 180),
-      mk("NVDA", "NVIDIA", "STOCK", "NASDAQ", 180),
-      mk("AMZN", "Amazon", "STOCK", "NASDAQ", 180),
-      mk("META", "Meta Platforms", "STOCK", "NASDAQ", 180),
-      mk("GOOGL", "Alphabet", "STOCK", "NASDAQ", 180),
-      mk("SPY", "SPDR S&P 500 ETF", "ETF", "NYSE", 180),
-      mk("QQQ", "Invesco QQQ", "ETF", "NASDAQ", 180),
-      mk("XAUUSD.CFD", "Gold CFD", "OTHER", "CFD", 2300, 0.1)
+      mk("AAPL", "Apple Inc", "STOCK", "NASDAQ"),
+      mk("MSFT", "Microsoft", "STOCK", "NASDAQ"),
+      mk("NVDA", "NVIDIA", "STOCK", "NASDAQ"),
+      mk("AMZN", "Amazon", "STOCK", "NASDAQ"),
+      mk("META", "Meta Platforms", "STOCK", "NASDAQ"),
+      mk("GOOGL", "Alphabet", "STOCK", "NASDAQ"),
+      mk("SPY", "SPDR S&P 500 ETF", "ETF", "NYSE"),
+      mk("QQQ", "Invesco QQQ", "ETF", "NASDAQ"),
+      mk("XAUUSD.CFD", "Gold CFD", "OTHER", "CFD", 0.1)
     ];
   }
 

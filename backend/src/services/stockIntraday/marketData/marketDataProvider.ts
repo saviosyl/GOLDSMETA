@@ -43,11 +43,18 @@ export interface MarketIndicators {
   currentVolume: number | null;
   volatilityPct: number | null;
   relativeStrength: number | null;
+  /** Trend of the candidate symbol itself (EMA50/200). */
+  symbolTrend: "BULL" | "BEAR" | "NEUTRAL" | "UNKNOWN";
+  /** Independent benchmark trend (SPY) — never copied from symbolTrend. */
   broadMarketTrend: "BULL" | "BEAR" | "NEUTRAL" | "UNKNOWN";
+  /** Optional sector/tech benchmark (QQQ) when relevant. */
   sectorTrend: "BULL" | "BEAR" | "NEUTRAL" | "UNKNOWN";
   sessionStatus: "OPEN" | "CLOSED" | "PRE" | "POST" | "UNKNOWN";
   /** Minutes until regular-session close when known from exchange calendar/provider. */
   minutesToClose?: number | null;
+  marketDate?: string | null;
+  indicatorsAsOf?: string | null;
+  indicatorsFresh?: boolean;
   earningsOrNewsRisk: boolean | null;
   asOf: string;
   feed?: string;

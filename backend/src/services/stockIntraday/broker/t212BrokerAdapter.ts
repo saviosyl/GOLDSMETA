@@ -27,7 +27,7 @@ export interface T212Instrument {
   extendedHoursAllowed: boolean;
   tradable: boolean;
   suspended: boolean;
-  /** Latest readable price when the broker exposes it (Paper validation). */
+  /** Never populated from official instrument metadata (Public API has no price). */
   currentPrice?: number | null;
 }
 

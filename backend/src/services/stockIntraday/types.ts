@@ -145,6 +145,8 @@ export interface StockTradeIntent {
   /** Pending Paper / SHADOW capacity reservation state. */
   entryReservationState: EntryReservationState | null;
   confidenceAtEntry: number | null;
+  /** Links SHADOW decision → intent → position → exit. */
+  shadowDecisionId?: string | null;
 }
 
 export interface StockManagedPosition {
@@ -163,10 +165,17 @@ export interface StockManagedPosition {
   goldMetaManaged: true;
   /** High-water mark for trailing-stop evaluation. */
   highWaterMark?: number;
+  /** Low-water mark while position is open. */
+  lowWaterMark?: number;
+  /** Maximum favourable excursion (price units from entry). */
+  maxFavourableExcursion?: number;
+  /** Maximum adverse excursion (price units from entry, negative or absolute). */
+  maxAdverseExcursion?: number;
   /** Break-even stop has been armed. */
   breakEvenArmed?: boolean;
   confidenceAtEntry?: number | null;
   strategy?: StockStrategyProfile;
+  shadowDecisionId?: string | null;
 }
 
 export interface StockShadowTradeRecord {
@@ -270,8 +279,17 @@ export interface StockIntradayStatusPayload {
     dataLabel: string | null;
     ready: boolean;
   };
+  t212ExecutionPrice: {
+    available: boolean;
+    label: string;
+  };
+  watchlist: {
+    symbols: string[];
+    rejected: Array<{ symbol: string; reasons: string[] }>;
+    validatedAt: string | null;
+  };
   shadowPerformance: import("./shadowPerformance").ShadowPerformanceMetrics;
-  readinessGates: Array<{ id: string; ok: boolean; detail: string }>;
+  readinessGates: Array<{ id: string; ok: boolean; detail: string; checkedAt?: string }>;
   strategyVersion: string;
   safetyStatement: string;
 }

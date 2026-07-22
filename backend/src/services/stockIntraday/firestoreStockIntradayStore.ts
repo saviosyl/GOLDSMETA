@@ -646,6 +646,38 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
     );
   }
 
+  async getShadowDecision(
+    userId: string,
+    decisionId: string
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const doc = await this.col(userId, "shadowDecisions").doc(decisionId).get();
+    if (!doc.exists) return null;
+    return doc.data() as import("./shadowPerformance").ShadowDecisionRecord;
+  }
+
+  async completeShadowDecisionExitById(
+    userId: string,
+    decisionId: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const ref = this.col(userId, "shadowDecisions").doc(decisionId);
+    const doc = await ref.get();
+    if (!doc.exists) return null;
+    const current = doc.data() as import("./shadowPerformance").ShadowDecisionRecord;
+    const updated: import("./shadowPerformance").ShadowDecisionRecord = { ...current, ...exit };
+    await ref.set(stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
+    return updated;
+  }
+
   async completeShadowDecisionExit(
     userId: string,
     symbol: string,
@@ -660,9 +692,10 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       maximumAdverseMovement: number | null;
     }
   ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    // Legacy fallback only — prefer completeShadowDecisionExitById.
     const snap = await this.col(userId, "shadowDecisions")
       .orderBy("createdAt", "desc")
-      .limit(50)
+      .limit(200)
       .get();
     const doc = snap.docs.find((d) => {
       const data = d.data() as import("./shadowPerformance").ShadowDecisionRecord;
@@ -673,10 +706,62 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       );
     });
     if (!doc) return null;
-    const current = doc.data() as import("./shadowPerformance").ShadowDecisionRecord;
-    const updated: import("./shadowPerformance").ShadowDecisionRecord = { ...current, ...exit };
-    await doc.ref.set(stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
-    return updated;
+    return this.completeShadowDecisionExitById(userId, doc.id, exit);
+  }
+
+  async getReadinessSnapshot(userId: string) {
+    const doc = await this.col(userId, "meta").doc("readiness").get();
+    return doc.exists ? (doc.data() as import("./stockIntradayStore").StockReadinessSnapshot) : null;
+  }
+
+  async saveReadinessSnapshot(snapshot: import("./stockIntradayStore").StockReadinessSnapshot) {
+    await this.col(snapshot.userId, "meta")
+      .doc("readiness")
+      .set(stripUndefined(snapshot) as FirebaseFirestore.DocumentData);
+  }
+
+  async getWatchlistValidation(userId: string) {
+    const doc = await this.col(userId, "meta").doc("watchlistValidation").get();
+    return doc.exists
+      ? (doc.data() as import("./stockIntradayStore").StockWatchlistValidationState)
+      : null;
+  }
+
+  async saveWatchlistValidation(state: import("./stockIntradayStore").StockWatchlistValidationState) {
+    await this.col(state.userId, "meta")
+      .doc("watchlistValidation")
+      .set(stripUndefined(state) as FirebaseFirestore.DocumentData);
+  }
+
+  async touchSchedulerHeartbeat(userId: string, atIso?: string) {
+    const at = atIso ?? nowIso();
+    await this.col(userId, "meta").doc("schedulerHeartbeat").set({ at });
+    await this.db.collection("stockIntradaySchedulerUsers").doc(userId).set(
+      { userId, lastHeartbeatAt: at },
+      { merge: true }
+    );
+  }
+
+  async getSchedulerHeartbeat(userId: string) {
+    const doc = await this.col(userId, "meta").doc("schedulerHeartbeat").get();
+    if (!doc.exists) return null;
+    return String((doc.data() as { at?: string }).at ?? "") || null;
+  }
+
+  async getShadowPerformanceAggregate(userId: string) {
+    const doc = await this.col(userId, "meta").doc("shadowPerformance").get();
+    return doc.exists
+      ? (doc.data() as import("./shadowPerformance").ShadowPerformanceMetrics)
+      : null;
+  }
+
+  async saveShadowPerformanceAggregate(
+    userId: string,
+    metrics: import("./shadowPerformance").ShadowPerformanceMetrics
+  ) {
+    await this.col(userId, "meta")
+      .doc("shadowPerformance")
+      .set(stripUndefined(metrics) as FirebaseFirestore.DocumentData);
   }
 
   async getRestartGate(userId: string): Promise<StockRestartGate> {

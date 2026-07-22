@@ -103,7 +103,8 @@ export function emptyShadowPerformance(): ShadowPerformanceMetrics {
 }
 
 export function calculateShadowPerformance(
-  decisions: ShadowDecisionRecord[]
+  decisions: ShadowDecisionRecord[],
+  options?: { useMarketSessionDate?: boolean }
 ): ShadowPerformanceMetrics {
   const metrics = emptyShadowPerformance();
   metrics.opportunitiesEvaluated = decisions.length;
@@ -111,8 +112,25 @@ export function calculateShadowPerformance(
   metrics.waitOpportunities = decisions.filter((d) => d.outcome === "WAIT").length;
   metrics.tradesOpened = decisions.filter((d) => d.outcome === "BUY").length;
 
+  const sessionKey = (iso: string): string => {
+    if (!options?.useMarketSessionDate) return iso.slice(0, 10);
+    // America/New_York calendar date
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return iso.slice(0, 10);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    return y && m && day ? `${y}-${m}-${day}` : iso.slice(0, 10);
+  };
+
   const sessions = new Set(
-    decisions.map((d) => d.scanTimestamp.slice(0, 10)).filter((d) => d.length === 10)
+    decisions.map((d) => sessionKey(d.scanTimestamp)).filter((d) => d.length === 10)
   );
   metrics.marketSessionsObserved = sessions.size;
 
@@ -126,9 +144,10 @@ export function calculateShadowPerformance(
     d.blockReasons.some((r) => /DIVERGENCE/i.test(r))
   ).length;
 
-  const closed = decisions.filter(
-    (d) => d.hypotheticalExit != null && d.netPnl != null && d.outcome === "BUY"
-  );
+  const closed = decisions
+    .filter((d) => d.hypotheticalExit != null && d.netPnl != null && d.outcome === "BUY")
+    .slice()
+    .sort((a, b) => Date.parse(a.scanTimestamp) - Date.parse(b.scanTimestamp));
   metrics.tradesClosed = closed.length;
   metrics.grossPnl = closed.reduce((s, d) => s + (d.grossPnl ?? 0), 0);
   metrics.netPnl = closed.reduce((s, d) => s + (d.netPnl ?? 0), 0);
@@ -147,7 +166,6 @@ export function calculateShadowPerformance(
   }
   const grossWins = wins.reduce((s, d) => s + Math.abs(d.netPnl ?? 0), 0);
   const grossLosses = losses.reduce((s, d) => s + Math.abs(d.netPnl ?? 0), 0);
-  metrics.profitFactor = grossLosses > 0 ? grossWins / grossLosses : wins.length ? null : null;
   if (grossLosses > 0) metrics.profitFactor = grossWins / grossLosses;
   else if (grossWins > 0) metrics.profitFactor = null;
 

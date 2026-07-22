@@ -95,6 +95,15 @@ export interface StockIntradayStatus {
     dataLabel: string | null;
     ready: boolean;
   };
+  t212ExecutionPrice?: {
+    available: boolean;
+    label: string;
+  };
+  watchlist?: {
+    symbols: string[];
+    rejected: Array<{ symbol: string; reasons: string[] }>;
+    validatedAt: string | null;
+  };
   shadowPerformance?: {
     disclaimer: string;
     marketSessionsObserved: number;
@@ -195,6 +204,15 @@ export function buildReviewStockIntradayStatus(
       feedId: null,
       dataLabel: "ALPACA IEX — SHADOW VALIDATION ONLY",
       ready: false
+    },
+    t212ExecutionPrice: {
+      available: false,
+      label: "T212 EXECUTION PRICE — NOT AVAILABLE FROM CURRENT PUBLIC API"
+    },
+    watchlist: {
+      symbols: ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "SPY", "QQQ"],
+      rejected: [],
+      validatedAt: null
     },
     shadowPerformance: {
       disclaimer:

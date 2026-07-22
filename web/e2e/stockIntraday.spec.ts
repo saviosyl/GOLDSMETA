@@ -15,6 +15,9 @@ test.describe("Stocks Intraday AutoTrade", () => {
     await expect(page.getByTestId("stock-intraday-shadow-performance")).toContainText(
       "do not guarantee future performance"
     );
+    await expect(page.getByTestId("stock-intraday-t212-price-label")).toContainText(
+      "NOT AVAILABLE FROM CURRENT PUBLIC API"
+    );
   });
 
   test("stocks kill switch locks mode", async ({ page }) => {

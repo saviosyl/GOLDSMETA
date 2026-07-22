@@ -393,14 +393,15 @@ function mapInstrument(row: Record<string, unknown>): T212Instrument {
     maxOpenQuantity: row.maxOpenQuantity != null ? Number(row.maxOpenQuantity) : null,
     extendedHoursAllowed: Boolean(row.extendedHoursAllowed ?? false),
     tradable: row.workingScheduleId != null || row.addedOn != null ? true : Boolean(row.tradable ?? true),
-    suspended: Boolean(row.suspended ?? false),
-    currentPrice:
-      row.currentPrice != null && Number.isFinite(Number(row.currentPrice))
-        ? Number(row.currentPrice)
-        : row.lastPrice != null && Number.isFinite(Number(row.lastPrice))
-          ? Number(row.lastPrice)
-          : null
+    suspended: Boolean(row.suspended ?? false)
+    // Official Trading 212 instrument metadata has no currentPrice/lastPrice.
+    // Do not read undocumented price fields from this response.
   };
+}
+
+/** Test-only export for documented-schema contract tests. */
+export function mapInstrumentForTests(row: Record<string, unknown>): T212Instrument {
+  return mapInstrument(row);
 }
 
 function mapOrder(row: Record<string, unknown>): T212Order {

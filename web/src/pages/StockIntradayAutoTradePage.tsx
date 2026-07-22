@@ -17,11 +17,13 @@ export function StockIntradayAutoTradePage() {
   const [status, setStatus] = useState<StockIntradayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [watchlistDraft, setWatchlistDraft] = useState("");
 
   const reload = useCallback(async () => {
     try {
       const next = await api.stockIntradayStatus();
       setStatus(next);
+      setWatchlistDraft((next.watchlist?.symbols ?? []).join(", "));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Stocks Intraday status");
@@ -88,6 +90,14 @@ export function StockIntradayAutoTradePage() {
           provider={status.marketData.providerId}
         </div>
       ) : null}
+
+      <div
+        className="gm-autotrade-readonly-banner"
+        data-testid="stock-intraday-t212-price-label"
+      >
+        {status?.t212ExecutionPrice?.label ??
+          "T212 EXECUTION PRICE — NOT AVAILABLE FROM CURRENT PUBLIC API"}
+      </div>
 
       <div className="gm-autotrade-stop-bar" data-testid="stock-intraday-kill-switch-bar">
         <div>
@@ -246,6 +256,50 @@ export function StockIntradayAutoTradePage() {
             </strong>
           </div>
         </div>
+      </section>
+
+      <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-watchlist">
+        <div className="gm-section-head">
+          <h2 className="gm-section-title">SHADOW watchlist</h2>
+          <p className="gm-meta">Max 10 symbols. Saved list is preserved across SHADOW re-enable.</p>
+        </div>
+        <label className="gm-label" htmlFor="stock-watchlist-input">
+          Symbols (comma-separated)
+        </label>
+        <input
+          id="stock-watchlist-input"
+          className="gm-input"
+          data-testid="stock-intraday-watchlist-input"
+          value={watchlistDraft}
+          disabled={busy}
+          onChange={(e) => setWatchlistDraft(e.target.value)}
+        />
+        <div className="gm-autotrade-actions">
+          <button
+            type="button"
+            className="gm-btn gm-btn-primary"
+            disabled={busy}
+            data-testid="stock-intraday-watchlist-save"
+            onClick={() => {
+              const symbols = watchlistDraft
+                .split(/[,\s]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              void run(() => api.stockIntradayUpdateWatchlist(symbols));
+            }}
+          >
+            Save watchlist
+          </button>
+        </div>
+        {(status?.watchlist?.rejected?.length ?? 0) > 0 ? (
+          <ul className="gm-autotrade-limits-list" data-testid="stock-intraday-watchlist-rejected">
+            {status!.watchlist!.rejected.map((r) => (
+              <li key={r.symbol}>
+                <strong>{r.symbol}</strong> rejected: {r.reasons.join(", ")}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-ranked">

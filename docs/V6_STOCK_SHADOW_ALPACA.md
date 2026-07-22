@@ -194,6 +194,48 @@ Stay within Alpaca free/IEX plan limits; circuit breaker + cache reduce bursts.
 - Suitable for engineering + SHADOW validation only
 - Never market as production market coverage
 
+## Trading 212 execution price limitation
+
+Official Trading 212 **instrument metadata** does not include `currentPrice` or
+`lastPrice`. GoldMeta therefore:
+
+- Validates instrument eligibility from metadata (mandatory for SHADOW)
+- Marks execution-side price as **NOT AVAILABLE FROM CURRENT PUBLIC API**
+- Does **not** claim Alpaca/T212 divergence was validated when no T212 price exists
+- Does **not** invent prices in the production adapter
+
+For future Paper/Live: missing execution-side price validation remains a hard
+readiness blocker (both modes stay disabled in this delivery).
+
+## Session provider
+
+Production SHADOW uses `AlpacaMarketSessionProvider` (`/v2/clock` + `/v2/calendar`)
+for holidays, early closes, DST, minutes-to-close, and market date.
+Pure local weekday helpers remain for deterministic unit tests only.
+
+## Indicator methodology
+
+- **VWAP:** reset at regular-session open; RTH bars only for the current market date
+- **RVOL:** cumulative RTH volume so far ÷ average cumulative volume at the same
+  time of day across up to 20 prior sessions
+- **broadMarketTrend:** independent SPY EMA50/200 (never copied from symbolTrend)
+- **symbolTrend:** candidate symbol EMA50/200
+- Indicator freshness checked independently of quote freshness
+
+## Estimated API usage per US regular session (~6.5h) — post-snapshot plan
+
+Assumptions: 8 watchlist symbols, scan every 5 minutes, monitor every 1 minute
+for ≤3 open positions; snapshot endpoint collapses quote+trade.
+
+| Call type | Rough count / session |
+|---|---|
+| Stock snapshots (scan) | ~8 × 78 ≈ 624 |
+| Batch snapshots (optional) | ~78 |
+| Bars with pagination (warm-up) | ~8 × 78 × 1–2 pages ≈ 600–1,200 |
+| Clock + calendar (cached) | ~few dozen |
+| Monitor snapshots | ~3 × 390 ≈ 1,170 |
+| **Order of magnitude** | **~2.5k–5k REST calls / session** |
+
 ## Related code
 
 - `backend/src/services/stockIntraday/marketData/alpacaMarketDataProvider.ts`

@@ -155,14 +155,10 @@ describe("AlpacaMarketDataProvider quotes/bars", () => {
   it("parses quote, bid/ask, spread, and enforces IEX label", async () => {
     const fetchImpl = async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/quotes/latest") && !url.includes("symbols=")) {
+      if (url.includes("/snapshot")) {
         return jsonResponse({
-          quote: { bp: 179.9, ap: 180.1, t: "2026-07-22T14:00:00Z" }
-        });
-      }
-      if (url.includes("/trades/latest")) {
-        return jsonResponse({
-          trade: { p: 180, t: "2026-07-22T14:00:01Z" }
+          latestQuote: { bp: 179.9, ap: 180.1, t: "2026-07-22T14:00:00Z" },
+          latestTrade: { p: 180, t: "2026-07-22T14:00:01Z" }
         });
       }
       return jsonResponse({}, 404);
@@ -179,7 +175,7 @@ describe("AlpacaMarketDataProvider quotes/bars", () => {
   });
 
   it("rejects missing quote", async () => {
-    const fetchImpl = async () => jsonResponse({ quote: {}, trade: {} });
+    const fetchImpl = async () => jsonResponse({ latestQuote: {}, latestTrade: {} });
     const provider = new AlpacaMarketDataProvider(testConfig(), fetchImpl as typeof fetch);
     await expect(provider.getQuote("AAPL")).rejects.toThrow(/ALPACA_QUOTE_MISSING|MARKET_DATA/);
   });
@@ -187,8 +183,8 @@ describe("AlpacaMarketDataProvider quotes/bars", () => {
   it("rejects stale quotes via isFresh", async () => {
     const provider = new AlpacaMarketDataProvider(testConfig(), (async () =>
       jsonResponse({
-        quote: { bp: 1, ap: 2, t: "2020-01-01T00:00:00Z" },
-        trade: { p: 1.5, t: "2020-01-01T00:00:00Z" }
+        latestQuote: { bp: 1, ap: 2, t: "2020-01-01T00:00:00Z" },
+        latestTrade: { p: 1.5, t: "2020-01-01T00:00:00Z" }
       })) as typeof fetch);
     // Direct freshness check
     expect(provider.isFresh(new Date(Date.now() - 120_000).toISOString(), 60_000)).toBe(false);
@@ -215,9 +211,15 @@ describe("AlpacaMarketDataProvider quotes/bars", () => {
       expect(url).toContain("symbols=");
       expect(url.split("symbols=")[1]?.split("&")[0]?.split(",").length).toBeLessThanOrEqual(10);
       return jsonResponse({
-        quotes: {
-          AAPL: { bp: 179, ap: 181, t: "2026-07-22T14:00:00Z" },
-          MSFT: { bp: 419, ap: 421, t: "2026-07-22T14:00:00Z" }
+        snapshots: {
+          AAPL: {
+            latestQuote: { bp: 179, ap: 181, t: "2026-07-22T14:00:00Z" },
+            latestTrade: { p: 180, t: "2026-07-22T14:00:00Z" }
+          },
+          MSFT: {
+            latestQuote: { bp: 419, ap: 421, t: "2026-07-22T14:00:00Z" },
+            latestTrade: { p: 420, t: "2026-07-22T14:00:00Z" }
+          }
         }
       });
     };
@@ -283,6 +285,7 @@ describe("Cross-provider divergence + watchlist", () => {
   it("calculates divergence and blocks over threshold", () => {
     expect(calculatePriceDivergencePct(100, 101)).toBeCloseTo(1, 2);
     const blocked = evaluateProviderDivergence({
+      mode: "SHADOW",
       snapshot: {
         alpacaSymbol: "AAPL",
         alpacaLast: 100,
@@ -303,8 +306,9 @@ describe("Cross-provider divergence + watchlist", () => {
     if (!blocked.ok) expect(blocked.code).toBe("PROVIDER_PRICE_DIVERGENCE");
   });
 
-  it("blocks missing T212 price", () => {
+  it("skips divergence validation in SHADOW when T212 price missing", () => {
     const result = evaluateProviderDivergence({
+      mode: "SHADOW",
       snapshot: {
         alpacaSymbol: "AAPL",
         alpacaLast: 100,
@@ -320,7 +324,8 @@ describe("Cross-provider divergence + watchlist", () => {
         t212InstrumentStatus: "UNKNOWN"
       }
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.snapshot.divergenceValidated).toBe(false);
   });
 
   it("caps watchlist at 10 and dual-validates symbols", async () => {

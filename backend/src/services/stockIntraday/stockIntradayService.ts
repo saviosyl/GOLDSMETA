@@ -77,10 +77,13 @@ import {
 import { processStockIntradayJob } from "./processStockIntradayJob";
 import {
   DEFAULT_MAX_PROVIDER_PRICE_DIVERGENCE_PCT,
-  evaluateProviderDivergence
+  evaluateProviderDivergence,
+  T212_EXECUTION_PRICE_NOT_AVAILABLE_LABEL
 } from "./crossProvider";
 import {
   defaultShadowWatchlist,
+  MAX_SHADOW_WATCHLIST,
+  normalizeWatchlistSymbols,
   validateShadowWatchlist
 } from "./watchlist";
 import {
@@ -88,6 +91,7 @@ import {
 } from "./marketData/alpacaConfig";
 import type { ShadowDecisionRecord } from "./shadowPerformance";
 import { calculateShadowPerformance } from "./shadowPerformance";
+import type { MarketSessionSnapshot } from "./marketData/marketSessionProvider";
 
 export class StockIntradayService {
   /** Optional UI-session adapter cache — durable jobs never rely on this alone. */
@@ -252,11 +256,20 @@ export class StockIntradayService {
     }
 
     const limits = settings.limits;
-    const decisions = await this.store.listShadowDecisions(userId, 500);
-    const shadowPerformance = calculateShadowPerformance(decisions);
+    const aggregate = await this.store.getShadowPerformanceAggregate(userId);
+    const decisions = await this.store.listShadowDecisions(userId, 2_000);
+    const shadowPerformance =
+      aggregate ??
+      calculateShadowPerformance(decisions, { useMarketSessionDate: true });
     const readinessGates = await this.evaluateReadinessGates(userId);
+    const sessionSnap = await this.resolveMarketSession();
     const sessionFromIndicators =
-      (await this.safeSessionStatus()) ?? "UNKNOWN";
+      sessionSnap.source === "unavailable"
+        ? ((await this.safeSessionStatus()) ?? "UNKNOWN")
+        : sessionSnap.isOpen
+          ? "OPEN"
+          : "CLOSED";
+    const watchlistState = await this.store.getWatchlistValidation(userId);
 
     return {
       displayStatus: displayStatusForStockMode(risk.mode, risk.locked, risk.paused),
@@ -313,6 +326,15 @@ export class StockIntradayService {
         ready:
           this.marketData.capabilities.providerId !== "unconfigured"
       },
+      t212ExecutionPrice: {
+        available: false,
+        label: T212_EXECUTION_PRICE_NOT_AVAILABLE_LABEL
+      },
+      watchlist: {
+        symbols: settings.universe.allowlist,
+        rejected: watchlistState?.rejected ?? [],
+        validatedAt: watchlistState?.validatedAt ?? null
+      },
       shadowPerformance,
       readinessGates,
       strategyVersion: STOCK_INTRADAY_STRATEGY_VERSION,
@@ -330,44 +352,91 @@ export class StockIntradayService {
   }
 
   async evaluateReadinessGates(
-    userId: string
-  ): Promise<Array<{ id: string; ok: boolean; detail: string }>> {
+    userId: string,
+    options?: { force?: boolean }
+  ): Promise<Array<{ id: string; ok: boolean; detail: string; checkedAt?: string }>> {
+    const cached = await this.store.getReadinessSnapshot(userId);
+    const now = Date.now();
+    if (
+      !options?.force &&
+      cached &&
+      Date.parse(cached.checkedAt) + cached.ttlMs > now
+    ) {
+      return cached.gates.map((g) => ({ ...g, checkedAt: cached.checkedAt }));
+    }
+
     const gates: Array<{ id: string; ok: boolean; detail: string }> = [];
     const risk = await this.store.getRiskState(userId);
     const gate = await this.store.getRestartGate(userId);
+    const checkedAt = nowIso();
 
-    const alpacaOk =
-      this.marketData.capabilities.providerId === "alpaca" ||
-      this.marketData.capabilities.isMock;
-    gates.push({
-      id: "alpaca_credentials",
-      ok: alpacaOk,
-      detail: alpacaOk
-        ? `provider=${this.marketData.capabilities.providerId}`
-        : "Alpaca credentials / provider not ready"
-    });
-
-    let t212Ok = false;
+    // Alpaca: probe credentials, feed=IEX, fresh quote, bars, circuit closed
+    let alpacaOk = false;
+    let alpacaDetail = "Alpaca not ready";
     try {
-      const adapter = await this.resolveBrokerAdapter(userId);
-      t212Ok = adapter.isConnected();
-    } catch {
-      t212Ok = false;
+      if (this.marketData.capabilities.isMock) {
+        alpacaOk = true;
+        alpacaDetail = "mock provider (tests)";
+      } else if (this.marketData.capabilities.providerId !== "alpaca") {
+        alpacaOk = false;
+        alpacaDetail = `provider=${this.marketData.capabilities.providerId}`;
+      } else {
+        const feed = this.marketData.capabilities.feedId ?? this.marketData.getFeedId?.() ?? null;
+        if (feed !== "iex") {
+          alpacaOk = false;
+          alpacaDetail = `feed=${feed} (require iex)`;
+        } else {
+          const health = this.marketData.getHealth ? await this.marketData.getHealth() : null;
+          if (health?.circuitOpen) {
+            alpacaOk = false;
+            alpacaDetail = "circuit open";
+          } else {
+            const quote = await this.marketData.getQuote("SPY");
+            const bars = await this.marketData.getOhlcv("SPY", "5m", 5);
+            const fresh = this.marketData.isFresh(quote.asOf, 120_000);
+            alpacaOk = fresh && bars.length > 0;
+            alpacaDetail = alpacaOk
+              ? `iex quote fresh; bars=${bars.length}`
+              : `fresh=${fresh}; bars=${bars.length}`;
+            if (this.marketData.validateCredentials) {
+              await this.marketData.validateCredentials();
+            }
+          }
+        }
+      }
+    } catch (error) {
+      alpacaOk = false;
+      alpacaDetail = error instanceof Error ? error.message : "ALPACA_PROBE_FAILED";
     }
-    gates.push({
-      id: "t212_paper_readonly",
-      ok: t212Ok,
-      detail: t212Ok ? "Trading 212 Paper read-only connected" : "T212 Paper credentials not validated"
-    });
-
-    const feed = this.marketData.capabilities.feedId ?? this.marketData.getFeedId?.() ?? null;
-    const feedOk =
-      this.marketData.capabilities.isMock || feed === "iex" || feed === "mock" || feed == null;
+    gates.push({ id: "alpaca_credentials", ok: alpacaOk, detail: alpacaDetail });
     gates.push({
       id: "alpaca_feed_iex",
-      ok: feedOk,
-      detail: `feed=${feed ?? "n/a"}`
+      ok:
+        this.marketData.capabilities.isMock ||
+        (this.marketData.capabilities.feedId ?? this.marketData.getFeedId?.()) === "iex",
+      detail: `feed=${this.marketData.capabilities.feedId ?? this.marketData.getFeedId?.() ?? "n/a"}`
     });
+
+    // T212: auth + account summary + instrument metadata
+    let t212Ok = false;
+    let t212Detail = "T212 Paper credentials not validated";
+    try {
+      const adapter = await this.resolveBrokerAdapter(userId);
+      if (!adapter.isConnected()) throw new Error("not connected");
+      const summary = await adapter.getAccountSummary();
+      const instruments = await adapter.listInstruments("AAPL");
+      t212Ok =
+        summary.availableToTrade != null &&
+        Number.isFinite(summary.availableToTrade) &&
+        Array.isArray(instruments);
+      t212Detail = t212Ok
+        ? "auth + account summary + instrument metadata ok"
+        : "account/instrument probe incomplete";
+    } catch (error) {
+      t212Ok = false;
+      t212Detail = error instanceof Error ? error.message : "T212_PROBE_FAILED";
+    }
+    gates.push({ id: "t212_paper_readonly", ok: t212Ok, detail: t212Detail });
 
     gates.push({
       id: "execution_flags_false",
@@ -375,10 +444,16 @@ export class StockIntradayService {
       detail: "Paper and Live submission flags must remain false"
     });
 
+    // Emergency stop: persisted kill/emergency flags must be readable & coherent
+    const emergencyOk =
+      typeof risk.emergencyStopActive === "boolean" &&
+      typeof risk.killSwitchActive === "boolean";
     gates.push({
       id: "emergency_stop_operational",
-      ok: true,
-      detail: "Emergency stop endpoint available"
+      ok: emergencyOk,
+      detail: emergencyOk
+        ? `emergencyStopActive=${risk.emergencyStopActive}; killSwitchActive=${risk.killSwitchActive}`
+        : "Risk state missing emergency/kill fields"
     });
 
     gates.push({
@@ -389,43 +464,83 @@ export class StockIntradayService {
         : "Reconciliation pending"
     });
 
-    gates.push({
-      id: "firestore_storage",
-      ok: true,
-      detail: `store=${this.store.constructor.name}`
-    });
+    // Firestore: safe read/write in isolated SHADOW namespace
+    let storageOk = false;
+    let storageDetail = "storage unhealthy";
+    try {
+      const probeId = `health_${Date.now()}`;
+      await this.store.appendActivity(userId, {
+        at: nowIso(),
+        message: `readiness_probe:${probeId}`,
+        level: "info"
+      });
+      const activity = await this.store.listActivity(userId, 5);
+      storageOk = activity.some((a) => a.message.includes(probeId));
+      storageDetail = storageOk
+        ? `store=${this.store.constructor.name}`
+        : "read-after-write failed";
+    } catch (error) {
+      storageOk = false;
+      storageDetail = error instanceof Error ? error.message : "STORAGE_PROBE_FAILED";
+    }
+    gates.push({ id: "firestore_storage", ok: storageOk, detail: storageDetail });
 
     let sessionOk = false;
-    let sessionDetail = "session unresolved";
+    let sessionDetail = "SESSION_UNAVAILABLE";
     try {
-      const session = await this.safeSessionStatus();
-      sessionOk = session != null && session !== "UNKNOWN";
-      sessionDetail = `session=${session ?? "null"}`;
+      const session = await this.resolveMarketSession();
+      sessionOk = session.source !== "unavailable";
+      sessionDetail = sessionOk
+        ? `marketDate=${session.marketDate}; open=${session.isOpen}; minutesToClose=${session.minutesToClose}`
+        : "SESSION_UNAVAILABLE";
     } catch {
-      sessionOk = false;
+      sessionOk = this.marketData.capabilities.isMock;
+      sessionDetail = sessionOk ? "mock session" : "SESSION_UNAVAILABLE";
     }
     gates.push({
       id: "market_session_resolved",
-      ok: sessionOk || this.marketData.capabilities.isMock,
+      ok: sessionOk,
       detail: sessionDetail
     });
 
-    const settings = await this.store.getSettings(userId);
-    const watchlistOk = settings.universe.allowlist.length > 0 && settings.universe.allowlist.length <= 10;
+    const watchlistState = await this.store.getWatchlistValidation(userId);
+    const watchlistOk = Boolean(
+      watchlistState &&
+        watchlistState.accepted.length > 0 &&
+        watchlistState.accepted.length <= 10 &&
+        watchlistState.validatedAt
+    );
     gates.push({
       id: "watchlist_validated",
       ok: watchlistOk,
-      detail: `allowlist=${settings.universe.allowlist.length}`
+      detail: watchlistState
+        ? `accepted=${watchlistState.accepted.length}; validatedAt=${watchlistState.validatedAt}`
+        : "no persisted watchlist validation"
     });
 
+    const heartbeat = await this.store.getSchedulerHeartbeat(userId);
+    const hbAge = heartbeat ? now - Date.parse(heartbeat) : Number.POSITIVE_INFINITY;
+    // Allow first enable before any tick (heartbeat missing) only in mock/tests;
+    // otherwise require heartbeat within 15 minutes when engine running.
+    const schedulerOk =
+      this.marketData.capabilities.isMock ||
+      !heartbeat ||
+      (Number.isFinite(hbAge) && hbAge <= 15 * 60_000);
     gates.push({
       id: "scheduler_healthy",
-      ok: true,
-      detail: "Scheduled Cloud Functions ticks remain the SHADOW cadence driver"
+      ok: schedulerOk,
+      detail: heartbeat ? `lastHeartbeatAgeMs=${Math.round(hbAge)}` : "no heartbeat yet"
     });
 
-    return gates;
+    await this.store.saveReadinessSnapshot({
+      userId,
+      checkedAt,
+      gates,
+      ttlMs: 60_000
+    });
+    return gates.map((g) => ({ ...g, checkedAt }));
   }
+
 
   async updateLimits(
     userId: string,
@@ -531,36 +646,11 @@ export class StockIntradayService {
         );
       } else {
         await this.registerForScheduler(userId);
+        await this.store.touchSchedulerHeartbeat(userId);
         try {
-          const adapter = await this.resolveBrokerAdapter(userId);
-          const settingsNow = await this.store.getSettings(userId);
-          const validated = await validateShadowWatchlist({
-            symbols: defaultShadowWatchlist(),
-            marketData: this.marketData,
-            broker: adapter,
-            universe: settingsNow.universe
-          });
-          await this.store.saveSettings({
-            ...settingsNow,
-            universe: {
-              ...settingsNow.universe,
-              allowlist: validated.accepted.length
-                ? validated.accepted
-                : settingsNow.universe.allowlist.slice(0, 10)
-            },
-            updatedAt: nowIso()
-          });
-          const rejected = validated.results.filter((r) => !r.accepted);
-          if (rejected.length) {
-            await this.activity(
-              userId,
-              `Watchlist rejected: ${rejected
-                .map((r) => `${r.symbol}(${r.reasons.join("|")})`)
-                .join(", ")}`,
-              "warn"
-            );
-          }
-          if (!validated.accepted.length) {
+          await this.ensureAndValidateWatchlist(userId);
+          const wv = await this.store.getWatchlistValidation(userId);
+          if (!wv || !wv.accepted.length) {
             risk = {
               ...(await this.store.getRiskState(userId)),
               paused: true,
@@ -1026,15 +1116,17 @@ export class StockIntradayService {
       outcome: "BUY" | "WAIT" | "BLOCKED";
       blockReasons?: string[];
       supportReasons?: string[];
+      id?: string;
     }
-  ): Promise<void> {
+  ): Promise<ShadowDecisionRecord> {
     const feed =
       this.marketData.capabilities.feedId ?? this.marketData.getFeedId?.() ?? "unknown";
     const dataLabel =
       this.marketData.capabilities.dataLabel ??
       this.marketData.getDataLabel?.() ??
       ALPACA_IEX_DATA_LABEL;
-    await this.store.appendShadowDecision(userId, {
+    return this.store.appendShadowDecision(userId, {
+      id: partial.id,
       scanTimestamp: partial.scanTimestamp ?? nowIso(),
       symbol: partial.symbol,
       alpacaFeed: partial.alpacaFeed ?? feed,
@@ -1076,6 +1168,7 @@ export class StockIntradayService {
     const positions = await this.store.listPositions(userId);
     const gateState = await this.store.getRestartGate(userId);
 
+    let lastDecisionId: string | null = null;
     const finish = async (
       result: { outcome: "BUY" | "WAIT" | "BLOCKED"; message: string; intentId?: string },
       extra: Partial<ShadowDecisionRecord> = {}
@@ -1084,15 +1177,17 @@ export class StockIntradayService {
         result.outcome === "BUY"
           ? []
           : [...(extra.blockReasons ?? []), result.message].filter(Boolean);
-      await this.recordShadowDecision(userId, {
+      const decision = await this.recordShadowDecision(userId, {
         symbol: signal.symbol,
         outcome: result.outcome,
         blockReasons,
         supportReasons: extra.supportReasons ?? [],
         ...extra
       });
+      lastDecisionId = decision.id;
       return result;
     };
+    void lastDecisionId;
 
     if (risk.mode === "OFF") {
       return finish({ outcome: "BLOCKED", message: "BLOCKED — mode OFF" });
@@ -1120,6 +1215,25 @@ export class StockIntradayService {
         { outcome: "BLOCKED", message: `BLOCKED — ${message}` },
         { blockReasons: ["ALPACA_OUTAGE", message] }
       );
+    }
+
+    const session = await this.resolveMarketSession();
+    if (session.source === "unavailable" && !this.marketData.capabilities.isMock) {
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — SESSION_UNAVAILABLE");
+      return finish(
+        { outcome: "BLOCKED", message: "BLOCKED — SESSION_UNAVAILABLE" },
+        { blockReasons: ["SESSION_UNAVAILABLE"] }
+      );
+    }
+    if (indicators.indicatorsFresh === false) {
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — stale indicators");
+      return finish(
+        { outcome: "BLOCKED", message: "BLOCKED — stale indicators" },
+        { blockReasons: ["STALE_INDICATORS"] }
+      );
+    }
+    if (session.minutesToClose != null) {
+      indicators = { ...indicators, minutesToClose: session.minutesToClose };
     }
 
     const quoteFields = {
@@ -1228,6 +1342,25 @@ export class StockIntradayService {
     }
     const instrumentType = match.type;
 
+    // A) Instrument eligibility already validated above.
+    // B) Execution-side price: official instrument metadata has none — try portfolio only.
+    let t212ExecPrice: number | null = null;
+    let t212ExecAsOf: string | null = null;
+    try {
+      const positions = await adapter.getPositions();
+      const held = positions.find(
+        (p) =>
+          p.ticker.toUpperCase() === signal.symbol.toUpperCase() ||
+          p.ticker.toUpperCase().startsWith(`${signal.symbol.toUpperCase()}_`)
+      );
+      if (held?.currentPrice != null && held.currentPrice > 0) {
+        t212ExecPrice = held.currentPrice;
+        t212ExecAsOf = nowIso();
+      }
+    } catch {
+      // Portfolio unavailable — treat as no execution price.
+    }
+
     const divergence = evaluateProviderDivergence({
       snapshot: {
         alpacaSymbol: signal.symbol,
@@ -1237,13 +1370,23 @@ export class StockIntradayService {
         alpacaBid: quote.bid,
         alpacaAsk: quote.ask,
         t212Symbol: match.ticker,
-        t212Last: match.currentPrice ?? null,
-        t212AsOf: nowIso(),
+        t212Last: t212ExecPrice,
+        t212AsOf: t212ExecAsOf,
         t212Currency: match.currency,
         t212Exchange: match.exchange,
-        t212InstrumentStatus: match.tradable && !match.suspended ? "TRADABLE" : "BLOCKED"
+        t212InstrumentStatus: match.tradable && !match.suspended ? "TRADABLE" : "BLOCKED",
+        t212ExecutionPriceAvailability:
+          t212ExecPrice != null
+            ? {
+                available: true,
+                price: t212ExecPrice,
+                asOf: t212ExecAsOf,
+                source: "PORTFOLIO"
+              }
+            : { available: false, reason: "NOT_AVAILABLE_FROM_PUBLIC_API" }
       },
-      maxDivergencePct: this.maxProviderDivergencePct()
+      maxDivergencePct: this.maxProviderDivergencePct(),
+      mode: risk.mode === "T212_PAPER_AUTO" || risk.mode === "T212_LIVE_AUTO" ? risk.mode : "SHADOW"
     });
     if (!divergence.ok) {
       await this.pushRejected(userId, signal.symbol, `BLOCKED — ${divergence.code}`);
@@ -1251,12 +1394,12 @@ export class StockIntradayService {
         { outcome: "BLOCKED", message: `BLOCKED — ${divergence.code}` },
         {
           ...quoteFields,
-          blockReasons: [divergence.code, "PROVIDER_PRICE_DIVERGENCE"].filter(
-            (v, i, a) => a.indexOf(v) === i
-          )
+          blockReasons: [divergence.code]
         }
       );
     }
+    // SHADOW may proceed when divergence is skipped due to missing T212 execution price.
+    // Do not claim divergence was validated in that case (divergenceValidated=false).
 
     const strategy = mapStrategy(signal.strategyId);
     const ranked = rankIntradayOpportunity({
@@ -1406,6 +1549,10 @@ export class StockIntradayService {
       tradingDate: dayKeyUtc()
     });
 
+    // Pre-create SHADOW decision id so intent/position link exactly.
+    const pendingDecisionId = randomUUID();
+    intent.shadowDecisionId = pendingDecisionId;
+
     const position: StockManagedPosition = {
       positionId: randomUUID(),
       userId,
@@ -1421,9 +1568,13 @@ export class StockIntradayService {
       openedAt: nowIso(),
       goldMetaManaged: true,
       highWaterMark: opportunity.estimatedEntry,
+      lowWaterMark: opportunity.estimatedEntry,
+      maxFavourableExcursion: 0,
+      maxAdverseExcursion: 0,
       breakEvenArmed: false,
       confidenceAtEntry: opportunity.confidence,
-      strategy: opportunity.strategy
+      strategy: opportunity.strategy,
+      shadowDecisionId: pendingDecisionId
     };
 
     const buyFields = {
@@ -1471,14 +1622,20 @@ export class StockIntradayService {
         `SHADOW BUY ${sizing.quantity} ${signal.symbol} @ ~${opportunity.estimatedEntry} [${ALPACA_IEX_DATA_LABEL}]`,
         "success"
       );
-      return finish(
-        {
-          outcome: "BUY",
-          message: "SHADOW BUY recorded",
-          intentId: reserved.intent.intentId
-        },
-        buyFields
-      );
+      const decision = await this.recordShadowDecision(userId, {
+        ...buyFields,
+        symbol: signal.symbol,
+        outcome: "BUY",
+        blockReasons: [],
+        supportReasons: buyFields.supportReasons ?? [],
+        id: pendingDecisionId
+      });
+      void decision;
+      return {
+        outcome: "BUY" as const,
+        message: "SHADOW BUY recorded",
+        intentId: reserved.intent.intentId
+      };
     }
 
     // PAPER / LIVE — reserve pending capacity atomically before any broker fill
@@ -1704,18 +1861,30 @@ export class StockIntradayService {
         0,
         (Date.parse(exitAt) - Date.parse(position.openedAt)) / 60_000
       );
-      await this.store.completeShadowDecisionExit(userId, position.symbol, {
+      const exitFields = {
         hypotheticalExit: exitPrice,
         exitReason: accounting.exitReason,
         grossPnl: accounting.grossPnl,
         estimatedSlippage: accounting.estimatedSpreadSlippage,
         netPnl: accounting.netRealizedPnl,
         holdingDurationMinutes,
-        highestFavourableMovement: position.highWaterMark
-          ? position.highWaterMark - position.entryPrice
-          : null,
-        maximumAdverseMovement: null
-      });
+        highestFavourableMovement:
+          position.maxFavourableExcursion ??
+          (position.highWaterMark != null
+            ? position.highWaterMark - position.entryPrice
+            : null),
+        maximumAdverseMovement: position.maxAdverseExcursion ?? null
+      };
+      if (position.shadowDecisionId) {
+        await this.store.completeShadowDecisionExitById(
+          userId,
+          position.shadowDecisionId,
+          exitFields
+        );
+      } else {
+        await this.store.completeShadowDecisionExit(userId, position.symbol, exitFields);
+      }
+      await this.refreshShadowPerformanceAggregate(userId);
 
       const after = await this.store.getRiskState(userId);
       if (after.locked || after.paused) {
@@ -1950,13 +2119,28 @@ export class StockIntradayService {
           }
         });
 
+        const lowWater = Math.min(position.lowWaterMark ?? position.entryPrice, quote.last);
+        const mfe = Math.max(
+          position.maxFavourableExcursion ?? 0,
+          quote.last - position.entryPrice
+        );
+        const mae = Math.min(
+          position.maxAdverseExcursion ?? 0,
+          quote.last - position.entryPrice
+        );
         if (
           evaluation.highWaterMark !== position.highWaterMark ||
-          evaluation.breakEvenArmed !== Boolean(position.breakEvenArmed)
+          evaluation.breakEvenArmed !== Boolean(position.breakEvenArmed) ||
+          lowWater !== position.lowWaterMark ||
+          mfe !== position.maxFavourableExcursion ||
+          mae !== position.maxAdverseExcursion
         ) {
           await this.store.savePosition({
             ...position,
             highWaterMark: evaluation.highWaterMark,
+            lowWaterMark: lowWater,
+            maxFavourableExcursion: mfe,
+            maxAdverseExcursion: mae,
             breakEvenArmed: evaluation.breakEvenArmed,
             stop: evaluation.effectiveStop ?? position.stop
           });
@@ -2042,6 +2226,120 @@ export class StockIntradayService {
       top ? "success" : "info"
     );
     return this.getStatus(userId);
+  }
+
+  async updateWatchlist(
+    userId: string,
+    symbols: string[]
+  ): Promise<StockIntradayStatusPayload> {
+    const normalized = normalizeWatchlistSymbols(symbols, MAX_SHADOW_WATCHLIST);
+    const settings = await this.store.getSettings(userId);
+    await this.store.saveSettings({
+      ...settings,
+      universe: { ...settings.universe, allowlist: normalized },
+      updatedAt: nowIso()
+    });
+    await this.ensureAndValidateWatchlist(userId, { forceSymbols: normalized });
+    await this.store.saveReadinessSnapshot({
+      userId,
+      checkedAt: new Date(0).toISOString(),
+      gates: [],
+      ttlMs: 0
+    });
+    await this.activity(userId, `Watchlist updated: ${normalized.join(",") || "(empty)"}`, "info");
+    return this.getStatus(userId);
+  }
+
+  private async resolveMarketSession(): Promise<MarketSessionSnapshot> {
+    const provider = this.marketData as {
+      getMarketSession?: () => Promise<MarketSessionSnapshot>;
+    };
+    if (provider.getMarketSession) {
+      return provider.getMarketSession();
+    }
+    if (this.marketData.capabilities.isMock) {
+      const indicators = await this.marketData.getIndicators("SPY");
+      return {
+        isOpen: indicators.sessionStatus === "OPEN",
+        marketDate: indicators.marketDate ?? new Date().toISOString().slice(0, 10),
+        regularOpenAt: null,
+        regularCloseAt: null,
+        minutesToClose: indicators.minutesToClose ?? null,
+        nextOpenAt: null,
+        earlyClose: false,
+        source: "alpaca_clock_calendar",
+        asOf: nowIso()
+      };
+    }
+    return {
+      isOpen: false,
+      marketDate: new Date().toISOString().slice(0, 10),
+      regularOpenAt: null,
+      regularCloseAt: null,
+      minutesToClose: null,
+      nextOpenAt: null,
+      earlyClose: false,
+      source: "unavailable",
+      asOf: nowIso()
+    };
+  }
+
+  private async ensureAndValidateWatchlist(
+    userId: string,
+    options?: { forceSymbols?: string[] }
+  ): Promise<void> {
+    const settings = await this.store.getSettings(userId);
+    let symbols = options?.forceSymbols
+      ? normalizeWatchlistSymbols(options.forceSymbols)
+      : normalizeWatchlistSymbols(settings.universe.allowlist);
+    // Seed engineering defaults only when no user watchlist exists.
+    if (!symbols.length) {
+      symbols = defaultShadowWatchlist();
+      await this.store.saveSettings({
+        ...settings,
+        universe: { ...settings.universe, allowlist: symbols },
+        updatedAt: nowIso()
+      });
+    }
+    let adapter: T212BrokerAdapter | null = null;
+    try {
+      adapter = await this.resolveBrokerAdapter(userId);
+    } catch {
+      adapter = null;
+    }
+    const settingsNow = await this.store.getSettings(userId);
+    const validated = await validateShadowWatchlist({
+      symbols,
+      marketData: this.marketData,
+      broker: adapter,
+      universe: settingsNow.universe
+    });
+    // Preserve saved symbols list; do not overwrite with only accepted subset.
+    await this.store.saveWatchlistValidation({
+      userId,
+      symbols,
+      accepted: validated.accepted,
+      rejected: validated.results
+        .filter((r) => !r.accepted)
+        .map((r) => ({ symbol: r.symbol, reasons: r.reasons })),
+      validatedAt: nowIso()
+    });
+    const rejected = validated.results.filter((r) => !r.accepted);
+    if (rejected.length) {
+      await this.activity(
+        userId,
+        `Watchlist rejected: ${rejected
+          .map((r) => `${r.symbol}(${r.reasons.join("|")})`)
+          .join(", ")}`,
+        "warn"
+      );
+    }
+  }
+
+  private async refreshShadowPerformanceAggregate(userId: string): Promise<void> {
+    const decisions = await this.store.listShadowDecisions(userId, 5_000);
+    const metrics = calculateShadowPerformance(decisions, { useMarketSessionDate: true });
+    await this.store.saveShadowPerformanceAggregate(userId, metrics);
   }
 
   private buildIntent(

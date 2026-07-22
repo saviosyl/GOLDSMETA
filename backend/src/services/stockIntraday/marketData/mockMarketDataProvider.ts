@@ -149,10 +149,14 @@ export class MockMarketDataProvider implements MarketDataProvider {
       currentVolume: this.opts.averageDailyVolume * this.opts.relativeVolume,
       volatilityPct: this.opts.volatilityPct,
       relativeStrength: 1.05,
+      symbolTrend: this.opts.broadMarketTrend,
       broadMarketTrend: this.opts.broadMarketTrend,
       sectorTrend: "BULL",
       sessionStatus: this.opts.sessionStatus,
       minutesToClose: this.opts.minutesToClose,
+      marketDate: new Date().toISOString().slice(0, 10),
+      indicatorsAsOf: this.asOf(),
+      indicatorsFresh: !this.opts.stale,
       earningsOrNewsRisk: false,
       asOf: this.asOf()
     };

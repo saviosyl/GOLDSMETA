@@ -35,6 +35,30 @@ export interface AlpacaHttpClientState {
   lastErrorCode: string | null;
 }
 
+/** Parse Retry-After as numeric seconds or HTTP-date. */
+export function parseRetryAfterMs(header: string | null, nowMs = Date.now()): number | null {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    return Math.max(1_000, Number(trimmed) * 1000);
+  }
+  const when = Date.parse(trimmed);
+  if (Number.isFinite(when)) {
+    return Math.max(1_000, when - nowMs);
+  }
+  return null;
+}
+
+function backoffMs(attempt: number, baseMs = 250, capMs = 8_000): number {
+  const exp = Math.min(capMs, baseMs * 2 ** (attempt - 1));
+  const jitter = Math.floor(Math.random() * Math.min(250, exp * 0.2));
+  return exp + jitter;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class AlpacaHttpClient {
   private state: AlpacaHttpClientState = {
     consecutiveFailures: 0,
@@ -92,14 +116,27 @@ export class AlpacaHttpClient {
         });
         clearTimeout(timer);
 
+        if (response.status === 401 || response.status === 403) {
+          this.recordFailure(`HTTP_${response.status}`);
+          throw new AlpacaHttpError(`ALPACA_HTTP_${response.status}`, response.status);
+        }
+
         if (response.status === 429) {
-          const retryAfterHeader = response.headers.get("retry-after");
-          const retryAfterMs = retryAfterHeader
-            ? Math.max(1_000, Number(retryAfterHeader) * 1000)
-            : 5_000 * attempt;
+          const retryAfterMs =
+            parseRetryAfterMs(response.headers.get("retry-after"), this.nowFn()) ??
+            5_000 * attempt;
           this.state.rateLimitedUntil = this.nowFn() + retryAfterMs;
           this.recordFailure("HTTP_429");
           throw new AlpacaHttpError("ALPACA_RATE_LIMITED", 429, retryAfterMs);
+        }
+
+        if (response.status >= 500) {
+          this.recordFailure(`HTTP_${response.status}`);
+          const err = new AlpacaHttpError(`ALPACA_HTTP_${response.status}`, response.status);
+          if (attempt > this.config.maxRetries) throw err;
+          await sleep(backoffMs(attempt));
+          lastError = err;
+          continue;
         }
 
         if (!response.ok) {
@@ -113,24 +150,31 @@ export class AlpacaHttpClient {
       } catch (error) {
         clearTimeout(timer);
         lastError = error;
-        if (error instanceof AlpacaHttpError && error.status === 429) {
-          throw error;
+        if (error instanceof AlpacaHttpError) {
+          // Do not retry auth or rate-limit (caller respects rateLimitedUntil).
+          if (error.status === 401 || error.status === 403 || error.status === 429) {
+            throw error;
+          }
+          if (error.status >= 500 && attempt <= this.config.maxRetries) {
+            await sleep(backoffMs(attempt));
+            continue;
+          }
+          if (attempt > this.config.maxRetries) throw error;
+          continue;
         }
         if (error instanceof Error && error.name === "AbortError") {
           this.recordFailure("TIMEOUT");
           if (attempt > this.config.maxRetries) {
             throw new AlpacaHttpError("ALPACA_TIMEOUT", 408);
           }
-          continue;
-        }
-        if (error instanceof AlpacaHttpError) {
-          if (attempt > this.config.maxRetries) throw error;
+          await sleep(backoffMs(attempt));
           continue;
         }
         this.recordFailure("NETWORK");
         if (attempt > this.config.maxRetries) {
           throw new AlpacaHttpError("ALPACA_NETWORK_ERROR", 0);
         }
+        await sleep(backoffMs(attempt));
       }
     }
     void redactSecrets;

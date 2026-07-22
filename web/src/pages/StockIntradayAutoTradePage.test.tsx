@@ -21,7 +21,8 @@ vi.mock("../lib/auth", () => ({
         killSwitchActive: true
       })),
       stockIntradayUnlock: vi.fn(async () => status),
-      stockIntradayShadowScan: vi.fn(async () => status)
+      stockIntradayShadowScan: vi.fn(async () => status),
+      stockIntradayUpdateWatchlist: vi.fn(async () => status)
     }
   })
 }));

@@ -13,14 +13,20 @@ import { AlpacaCircuitOpenError, AlpacaHttpClient, AlpacaHttpError } from "./alp
 import {
   atr,
   ema,
-  minutesToUsRegularClose,
-  relativeVolume,
+  etMinutesOfDay,
+  filterRegularSessionBars,
+  isIndicatorBarsFresh,
+  relativeVolumeSameTimeOfDay,
   rsi,
+  sessionVwap,
   trendFromEmas,
-  usEquitySessionStatus,
-  volatilityPct,
-  vwap
+  volatilityPct
 } from "./indicators";
+import {
+  AlpacaMarketSessionProvider,
+  type MarketSessionProvider,
+  type MarketSessionSnapshot
+} from "./marketSessionProvider";
 import type {
   CandleInterval,
   MarketDataCapabilities,
@@ -39,20 +45,17 @@ const TIMEFRAME: Record<CandleInterval, string> = {
   "1d": "1Day"
 };
 
-type LatestQuoteResponse = {
-  quote?: {
-    bp?: number;
-    ap?: number;
-    t?: string;
-  };
+type SnapshotResponse = {
   symbol?: string;
+  latestTrade?: { p?: number; t?: string };
+  latestQuote?: { bp?: number; ap?: number; t?: string };
+  minuteBar?: { t?: string; o?: number; h?: number; l?: number; c?: number; v?: number };
+  dailyBar?: { t?: string; o?: number; h?: number; l?: number; c?: number; v?: number };
+  prevDailyBar?: { t?: string; o?: number; h?: number; l?: number; c?: number; v?: number };
 };
 
-type LatestTradeResponse = {
-  trade?: {
-    p?: number;
-    t?: string;
-  };
+type MultiSnapshotResponse = {
+  snapshots?: Record<string, SnapshotResponse>;
 };
 
 type BarsResponse = {
@@ -67,24 +70,44 @@ type BarsResponse = {
   next_page_token?: string | null;
 };
 
-type MultiLatestQuotes = {
-  quotes?: Record<string, { bp?: number; ap?: number; t?: string }>;
-};
+const TECH_SYMBOLS = new Set([
+  "AAPL",
+  "MSFT",
+  "NVDA",
+  "AMZN",
+  "META",
+  "GOOGL",
+  "GOOG",
+  "TSLA",
+  "AMD",
+  "AVGO",
+  "QQQ"
+]);
 
 export class AlpacaMarketDataProvider implements MarketDataProvider {
   readonly capabilities: MarketDataCapabilities;
   private readonly client: AlpacaHttpClient;
+  private readonly sessionProvider: MarketSessionProvider;
   private readonly quoteCache = new Map<string, { quote: MarketQuote; cachedAt: number }>();
   private readonly barCache = new Map<string, { bars: OhlcvBar[]; cachedAt: number }>();
+  private benchmarkCache: {
+    at: number;
+    spyTrend: MarketIndicators["broadMarketTrend"];
+    qqqTrend: MarketIndicators["sectorTrend"];
+  } | null = null;
   private readonly cacheTtlMs = 15_000;
+  private readonly benchmarkTtlMs = 60_000;
 
   constructor(
     private readonly config: AlpacaMarketDataConfig,
     fetchImpl?: typeof fetch,
-    nowFn?: () => number
+    nowFn?: () => number,
+    sessionProvider?: MarketSessionProvider
   ) {
     assertShadowFeedAllowed(config.feed);
     this.client = new AlpacaHttpClient(config, fetchImpl, nowFn);
+    this.sessionProvider =
+      sessionProvider ?? new AlpacaMarketSessionProvider(this.client, nowFn);
     this.capabilities = {
       providerId: "alpaca",
       supportsBidAsk: true,
@@ -115,6 +138,14 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
     return this.client;
   }
 
+  getSessionProvider(): MarketSessionProvider {
+    return this.sessionProvider;
+  }
+
+  async getMarketSession(now?: Date): Promise<MarketSessionSnapshot> {
+    return this.sessionProvider.getSession(now);
+  }
+
   async getHealth(): Promise<MarketDataProviderHealth> {
     const state = this.client.getState();
     return await Promise.resolve({
@@ -133,7 +164,6 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
   }
 
   async validateCredentials(): Promise<boolean> {
-    // Lightweight probe — latest SPY quote.
     await this.getQuote("SPY");
     return true;
   }
@@ -155,37 +185,11 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
     }
 
     try {
-      const [quoteRes, tradeRes] = await Promise.all([
-        this.client.getJson<LatestQuoteResponse>(`/v2/stocks/${encodeURIComponent(key)}/quotes/latest`, {
-          feed: this.config.feed
-        }),
-        this.client.getJson<LatestTradeResponse>(`/v2/stocks/${encodeURIComponent(key)}/trades/latest`, {
-          feed: this.config.feed
-        })
-      ]);
-
-      const bid = num(quoteRes.quote?.bp);
-      const ask = num(quoteRes.quote?.ap);
-      const last = num(tradeRes.trade?.p) ?? ((bid != null && ask != null ? (bid + ask) / 2 : null));
-      if (last == null || last <= 0) {
-        throw new MarketDataUnavailableError("ALPACA_QUOTE_MISSING");
-      }
-      const asOf = tradeRes.trade?.t ?? quoteRes.quote?.t ?? new Date().toISOString();
-      let spreadBps: number | null = null;
-      if (bid != null && ask != null && last > 0) {
-        spreadBps = Number((((ask - bid) / last) * 10_000).toFixed(2));
-      }
-      const quote: MarketQuote = {
-        symbol: key,
-        bid,
-        ask,
-        last,
-        spreadBps,
-        asOf,
-        feed: this.config.feed,
-        providerId: "alpaca",
-        dataLabel: ALPACA_IEX_DATA_LABEL
-      };
+      const snap = await this.client.getJson<SnapshotResponse>(
+        `/v2/stocks/${encodeURIComponent(key)}/snapshot`,
+        { feed: this.config.feed }
+      );
+      const quote = this.quoteFromSnapshot(key, snap);
       this.quoteCache.set(key, { quote, cachedAt: Date.now() });
       return quote;
     } catch (error) {
@@ -197,33 +201,19 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
     const capped = symbols.map((s) => s.toUpperCase()).slice(0, this.config.maxWatchlistSymbols);
     if (!capped.length) return [];
     try {
-      const res = await this.client.getJson<MultiLatestQuotes>("/v2/stocks/quotes/latest", {
+      const res = await this.client.getJson<MultiSnapshotResponse>("/v2/stocks/snapshots", {
         symbols: capped.join(","),
         feed: this.config.feed
       });
       const out: MarketQuote[] = [];
       for (const symbol of capped) {
-        const q = res.quotes?.[symbol];
-        if (!q) continue;
-        const bid = num(q.bp);
-        const ask = num(q.ap);
-        const last = bid != null && ask != null ? (bid + ask) / 2 : bid ?? ask;
-        if (last == null || last <= 0) continue;
-        let spreadBps: number | null = null;
-        if (bid != null && ask != null && last > 0) {
-          spreadBps = Number((((ask - bid) / last) * 10_000).toFixed(2));
+        const snap = res.snapshots?.[symbol];
+        if (!snap) continue;
+        try {
+          out.push(this.quoteFromSnapshot(symbol, snap));
+        } catch {
+          // skip missing
         }
-        out.push({
-          symbol,
-          bid,
-          ask,
-          last,
-          spreadBps,
-          asOf: q.t ?? new Date().toISOString(),
-          feed: this.config.feed,
-          providerId: "alpaca",
-          dataLabel: ALPACA_IEX_DATA_LABEL
-        });
       }
       return out;
     } catch (error) {
@@ -238,24 +228,7 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
       return cached.bars;
     }
     try {
-      const res = await this.client.getJson<BarsResponse>(
-        `/v2/stocks/${encodeURIComponent(symbol.toUpperCase())}/bars`,
-        {
-          timeframe: TIMEFRAME[interval],
-          limit: String(Math.min(1000, Math.max(1, limit))),
-          feed: this.config.feed,
-          adjustment: "raw",
-          sort: "asc"
-        }
-      );
-      const bars = (res.bars ?? []).map((b) => ({
-        time: b.t,
-        open: b.o,
-        high: b.h,
-        low: b.l,
-        close: b.c,
-        volume: b.v
-      }));
+      const bars = await this.fetchBarsPaginated(symbol.toUpperCase(), interval, limit);
       this.barCache.set(key, { bars, cachedAt: Date.now() });
       return bars;
     } catch (error) {
@@ -264,47 +237,111 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
   }
 
   async getIndicators(symbol: string): Promise<MarketIndicators> {
+    const upper = symbol.toUpperCase();
+    const session = await this.sessionProvider.getSession();
     const [bars5m, bars1d] = await Promise.all([
-      this.getOhlcv(symbol, "5m", 250),
-      this.getOhlcv(symbol, "1d", 60)
+      this.getOhlcv(upper, "5m", 2_000),
+      this.getOhlcv(upper, "1d", 60)
     ]);
     if (!bars5m.length) {
       throw new MarketDataUnavailableError("ALPACA_BARS_MISSING");
     }
+
+    const openMins = session.regularOpenAt
+      ? etMinutesOfDay(session.regularOpenAt) ?? 9 * 60 + 30
+      : 9 * 60 + 30;
+    const closeMins = session.regularCloseAt
+      ? etMinutesOfDay(session.regularCloseAt) ?? 16 * 60
+      : 16 * 60;
+
+    const sessionBars = session.marketDate
+      ? filterRegularSessionBars(bars5m, {
+          marketDate: session.marketDate,
+          sessionOpenMinutes: openMins,
+          sessionCloseMinutes: closeMins
+        })
+      : [];
+
     const closes = bars5m.map((b) => b.close);
     const ema9 = ema(closes, 9);
     const ema21 = ema(closes, 21);
     const ema50 = ema(closes, 50);
     const ema200 = ema(closes, 200);
-    const currentVolume = bars5m[bars5m.length - 1]?.volume ?? null;
+    const symbolTrend = trendFromEmas(ema50, ema200);
+
+    const benchmarks = await this.loadBenchmarkTrends();
+    const sectorTrend = TECH_SYMBOLS.has(upper) ? benchmarks.qqqTrend : "UNKNOWN";
+
+    const nowMins =
+      session.minutesToClose != null && session.regularCloseAt
+        ? closeMins - session.minutesToClose
+        : etMinutesOfDay(new Date().toISOString()) ?? openMins;
+
+    const relativeVolume =
+      session.marketDate && session.source !== "unavailable"
+        ? relativeVolumeSameTimeOfDay({
+            bars1mOr5m: bars5m,
+            marketDate: session.marketDate,
+            nowMinutesEt: nowMins,
+            sessionOpenMinutes: openMins,
+            sessionCloseMinutes: closeMins,
+            lookbackSessions: 20
+          })
+        : null;
+
     const averageDailyVolume =
       bars1d.length > 0
         ? bars1d.reduce((s, b) => s + b.volume, 0) / bars1d.length
         : null;
-    const now = new Date();
+    const currentVolume = sessionBars.reduce((s, b) => s + b.volume, 0) || null;
+
+    const indicatorsAsOf = bars5m[bars5m.length - 1]?.time ?? new Date().toISOString();
+    const indicatorsFresh = isIndicatorBarsFresh(bars5m, 5 * 60_000);
+
+    let sessionStatus: MarketIndicators["sessionStatus"] = "UNKNOWN";
+    if (session.source === "unavailable") sessionStatus = "UNKNOWN";
+    else if (session.isOpen) sessionStatus = "OPEN";
+    else if (!session.regularOpenAt) sessionStatus = "CLOSED";
+    else {
+      const now = Date.now();
+      const open = Date.parse(session.regularOpenAt);
+      const close = session.regularCloseAt ? Date.parse(session.regularCloseAt) : NaN;
+      if (Number.isFinite(open) && now < open) sessionStatus = "PRE";
+      else if (Number.isFinite(close) && now >= close) sessionStatus = "POST";
+      else sessionStatus = "CLOSED";
+    }
+
     return {
-      symbol: symbol.toUpperCase(),
-      vwap: vwap(bars5m.slice(-78)),
+      symbol: upper,
+      vwap:
+        session.marketDate && sessionBars.length
+          ? sessionVwap(bars5m, {
+              marketDate: session.marketDate,
+              sessionOpenMinutes: openMins,
+              sessionCloseMinutes: closeMins
+            })
+          : null,
       ema9,
       ema21,
       ema50,
       ema200,
       rsi: rsi(closes, 14),
       atr: atr(bars5m, 14),
-      relativeVolume:
-        currentVolume != null && averageDailyVolume != null
-          ? relativeVolume(currentVolume, averageDailyVolume)
-          : null,
+      relativeVolume,
       averageDailyVolume,
       currentVolume,
       volatilityPct: volatilityPct(closes, 20),
       relativeStrength: null,
-      broadMarketTrend: trendFromEmas(ema50, ema200),
-      sectorTrend: "UNKNOWN",
-      sessionStatus: usEquitySessionStatus(now),
-      minutesToClose: minutesToUsRegularClose(now),
+      symbolTrend,
+      broadMarketTrend: benchmarks.spyTrend,
+      sectorTrend,
+      sessionStatus,
+      minutesToClose: session.minutesToClose,
+      marketDate: session.marketDate,
+      indicatorsAsOf,
+      indicatorsFresh,
       earningsOrNewsRisk: null,
-      asOf: bars5m[bars5m.length - 1]?.time ?? now.toISOString(),
+      asOf: indicatorsAsOf,
       feed: this.config.feed,
       providerId: "alpaca",
       dataLabel: ALPACA_IEX_DATA_LABEL
@@ -314,6 +351,110 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
   isFresh(asOf: string, maxAgeMs: number): boolean {
     const age = Date.now() - Date.parse(asOf);
     return Number.isFinite(age) && age >= 0 && age <= maxAgeMs;
+  }
+
+  private quoteFromSnapshot(symbol: string, snap: SnapshotResponse): MarketQuote {
+    const bid = num(snap.latestQuote?.bp);
+    const ask = num(snap.latestQuote?.ap);
+    const last =
+      num(snap.latestTrade?.p) ??
+      (bid != null && ask != null ? (bid + ask) / 2 : null);
+    if (last == null || last <= 0) {
+      throw new MarketDataUnavailableError("ALPACA_QUOTE_MISSING");
+    }
+    const asOf =
+      snap.latestTrade?.t ?? snap.latestQuote?.t ?? new Date().toISOString();
+    let spreadBps: number | null = null;
+    if (bid != null && ask != null && last > 0) {
+      spreadBps = Number((((ask - bid) / last) * 10_000).toFixed(2));
+    }
+    return {
+      symbol,
+      bid,
+      ask,
+      last,
+      spreadBps,
+      asOf,
+      feed: this.config.feed,
+      providerId: "alpaca",
+      dataLabel: ALPACA_IEX_DATA_LABEL
+    };
+  }
+
+  private async fetchBarsPaginated(
+    symbol: string,
+    interval: CandleInterval,
+    limit: number
+  ): Promise<OhlcvBar[]> {
+    const want = Math.min(10_000, Math.max(1, limit));
+    const bars: OhlcvBar[] = [];
+    let pageToken: string | undefined;
+    let pages = 0;
+    while (bars.length < want && pages < 10) {
+      pages += 1;
+      const res = await this.client.getJson<BarsResponse>(
+        `/v2/stocks/${encodeURIComponent(symbol)}/bars`,
+        {
+          timeframe: TIMEFRAME[interval],
+          limit: String(Math.min(10_000, want - bars.length)),
+          feed: this.config.feed,
+          adjustment: "raw",
+          sort: "asc",
+          page_token: pageToken
+        }
+      );
+      for (const b of res.bars ?? []) {
+        bars.push({
+          time: b.t,
+          open: b.o,
+          high: b.h,
+          low: b.l,
+          close: b.c,
+          volume: b.v
+        });
+      }
+      if (!res.next_page_token) break;
+      pageToken = res.next_page_token;
+    }
+    return bars.slice(-want);
+  }
+
+  private async loadBenchmarkTrends(): Promise<{
+    spyTrend: MarketIndicators["broadMarketTrend"];
+    qqqTrend: MarketIndicators["sectorTrend"];
+  }> {
+    if (this.benchmarkCache && Date.now() - this.benchmarkCache.at < this.benchmarkTtlMs) {
+      return {
+        spyTrend: this.benchmarkCache.spyTrend,
+        qqqTrend: this.benchmarkCache.qqqTrend
+      };
+    }
+    const [spyBars, qqqBars] = await Promise.all([
+      this.getOhlcv("SPY", "5m", 250),
+      this.getOhlcv("QQQ", "5m", 250)
+    ]);
+    const spyTrend = trendFromEmas(
+      ema(
+        spyBars.map((b) => b.close),
+        50
+      ),
+      ema(
+        spyBars.map((b) => b.close),
+        200
+      )
+    );
+    const qqqTrend = trendFromEmas(
+      ema(
+        qqqBars.map((b) => b.close),
+        50
+      ),
+      ema(
+        qqqBars.map((b) => b.close),
+        200
+      )
+    );
+    this.benchmarkCache = { at: Date.now(), spyTrend, qqqTrend };
+    return { spyTrend, qqqTrend };
   }
 }
 
