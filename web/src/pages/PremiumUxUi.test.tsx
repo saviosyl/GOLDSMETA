@@ -171,6 +171,8 @@ describe("OverviewPage compact dashboard", () => {
     expect(await screen.findByTestId("dashboard-summary")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(await screen.findByTestId("primary-signal-card")).toBeInTheDocument();
+    expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
+    expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
     expect(await screen.findByTestId("goldmeta-score")).toBeInTheDocument();

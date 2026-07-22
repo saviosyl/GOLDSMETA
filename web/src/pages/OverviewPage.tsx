@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
@@ -8,14 +8,19 @@ import { formatSession, humanDecisionState, plainLanguageReason } from "../lib/p
 import {
   formatCompactLocalTime,
   formatLocalTimestamp,
-  loadTimezonePreference
+  loadTimezonePreference,
+  type FormattedTimestamp
 } from "../lib/timezone";
 import { buildOvernightReview } from "../lib/overnight";
+import type { BuildSnapshotInput } from "../lib/promoSnapshot";
+import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
 import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
+import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
+import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 
 type Briefing = {
   session?: string | null;
@@ -36,7 +41,60 @@ type Score = {
   disclaimer?: string;
 };
 
-/** V5.4.1 Dashboard — compact mobile, local time, ladder, semantic score. */
+function buildSnapshotFromPage(args: {
+  decision: Decision | null;
+  briefing: Briefing | null;
+  decisionCode: string;
+  score: Score | null;
+  livePrice: number | null;
+  sessionLabel: string;
+  compactTime: string;
+  localTs: FormattedTimestamp;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  hasPlan: boolean;
+  setup: SetupRecord | null;
+}): BuildSnapshotInput | null {
+  const { decision, briefing } = args;
+  if (!decision && !briefing) return null;
+  return {
+    decision: args.decisionCode,
+    scoreTotal: args.score?.total ?? null,
+    livePrice: args.livePrice,
+    sessionLabel: args.sessionLabel,
+    compactTime: args.compactTime,
+    timeZone: args.localTs.timeZone,
+    utcSecondary: args.localTs.secondaryUtc,
+    storyInput: {
+      decision: args.decisionCode,
+      session: briefing?.session ?? decision?.currentSession,
+      regime: briefing?.marketRegime ?? decision?.marketRegime,
+      positionVsPoc: briefing?.positionVsPoc,
+      atrLabel: briefing?.atrLabel,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      livePrice: args.livePrice,
+      reasonCodes: decision?.reasonCodes,
+      hasValidatedPlan: args.hasPlan,
+      insufficientData: Boolean(briefing?.insufficientData) && !decision,
+      components: args.score?.components
+    },
+    ladder: {
+      livePrice: args.livePrice,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      barHigh: decision?.ohlcv?.high ?? null,
+      barLow: decision?.ohlcv?.low ?? null
+    },
+    plan: args.setup,
+    scoreComponents: args.score?.components
+  };
+}
+
+/** V5.4.1 Dashboard — compact mobile, local time, ladder, semantic score + snapshot. */
 export function OverviewPage() {
   const { api } = useAuth();
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -114,8 +172,38 @@ export function OverviewPage() {
   const poc = briefing?.levels?.poc ?? decision?.marketStructure?.poc ?? null;
   const vah = briefing?.levels?.vah ?? decision?.marketStructure?.vah ?? null;
   const val = briefing?.levels?.val ?? decision?.marketStructure?.val ?? null;
+  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const hasPlan = Boolean(
+    setup &&
+      (setup.levels?.entryPrice != null ||
+        setup.levels?.stopLoss != null ||
+        setup.levels?.tp1 != null)
+  );
 
   const overnight = buildOvernightReview(overnightSetups, new Date(), localTs.timeZone);
+
+  const snapshotInputRef = useRef<() => BuildSnapshotInput | null>(() => null);
+  useEffect(() => {
+    snapshotInputRef.current = () =>
+      buildSnapshotFromPage({
+        decision,
+        briefing,
+        decisionCode,
+        score,
+        livePrice,
+        sessionLabel,
+        compactTime,
+        localTs,
+        poc,
+        vah,
+        val,
+        hasPlan,
+        setup
+      });
+  });
+
+  const buildSnapshotInput = useCallback(() => snapshotInputRef.current(), []);
+  const snapshot = usePromoSnapshot(buildSnapshotInput);
 
   return (
     <div data-testid="overview-page" className="gm-dashboard">
@@ -168,6 +256,25 @@ export function OverviewPage() {
         source={source}
         technicalId={decision?.decisionId}
         reasonCodes={decision?.reasonCodes}
+      />
+
+      <div className="gm-snapshot-actions-row">
+        <PromoSnapshotButton
+          onClick={snapshot.openModal}
+          disabled={!decision && !briefing}
+        />
+      </div>
+      <PromoSnapshotModal
+        open={snapshot.open}
+        onClose={snapshot.closeModal}
+        options={snapshot.options}
+        onOptionsChange={snapshot.updateOptions}
+        status={snapshot.status}
+        statusMessage={snapshot.statusMessage}
+        previewUrl={snapshot.previewUrl}
+        generating={snapshot.generating}
+        onShare={() => void snapshot.share()}
+        onDownload={snapshot.download}
       />
 
       <SectionCard title="Market Structure Map">

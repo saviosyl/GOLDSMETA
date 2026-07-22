@@ -292,7 +292,7 @@ a {
   right: 0;
   bottom: 0;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   padding: 8px max(8px, var(--safe-left)) calc(8px + var(--safe-bottom)) max(8px, var(--safe-right));
   background: rgba(10, 11, 13, 0.92);
   backdrop-filter: blur(12px);
@@ -1015,13 +1015,16 @@ a {
   font-size: 0.82rem;
 }
 
-.field input,
-.field select,
-.field textarea,
-input,
-select,
-textarea {
-  font-size: 16px; /* prevent iOS Safari auto-zoom */
+@media (max-width: 767px) {
+  /* iOS Safari focus-zoom guard — mobile only; heights/spacing unchanged */
+  .field input,
+  .field select,
+  .field textarea,
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 .danger-text {
