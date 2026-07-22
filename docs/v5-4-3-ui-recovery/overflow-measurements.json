@@ -1,0 +1,42 @@
+{
+  "dashboard-desktop-1440": {
+    "sw": 1440,
+    "cw": 1440,
+    "delta": 0
+  },
+  "dashboard-tablet-768": {
+    "sw": 768,
+    "cw": 768,
+    "delta": 0
+  },
+  "dashboard-mobile-390": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0
+  },
+  "dashboard-mobile-430": {
+    "sw": 430,
+    "cw": 430,
+    "delta": 0
+  },
+  "signin-mobile-390": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0
+  },
+  "settings-mobile-390": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0
+  },
+  "score-expanded-390": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0
+  },
+  "market-map-390": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0
+  }
+}
