@@ -138,4 +138,21 @@ test.describe("V5.4 responsive viewport matrix", () => {
     expect(widths.total).toBeGreaterThan(900);
     expect(widths.mapW).toBeGreaterThan(widths.scoreW);
   });
+
+  test("V5.4.3 Share Market Snapshot opens modal on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/ui-review/");
+    await expect(page.getByTestId("share-market-snapshot")).toBeVisible();
+    await page.getByTestId("share-market-snapshot").click();
+    await expect(page.getByTestId("promo-snapshot-modal")).toBeVisible();
+    await expect(page.getByTestId("promo-snapshot-status")).toContainText(/Preparing|Snapshot ready|Unable/i);
+    await page.waitForSelector('[data-testid="promo-snapshot-preview"]', { timeout: 15_000 });
+    await expect(page.getByTestId("promo-snapshot-share")).toBeEnabled();
+    await expect(page.getByTestId("promo-snapshot-download")).toBeEnabled();
+    const wrap = page.getByTestId("promo-snapshot-preview-wrap");
+    const overflowY = await wrap.evaluate((el) => getComputedStyle(el).overflowY);
+    expect(["auto", "scroll", "overlay"]).toContain(overflowY);
+    await page.getByTestId("promo-snapshot-close").click();
+    await expect(page.getByTestId("promo-snapshot-modal")).toHaveCount(0);
+  });
 });

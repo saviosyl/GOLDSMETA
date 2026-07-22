@@ -28,6 +28,9 @@ function buildReviewApi() {
   const params = new URLSearchParams(window.location.search);
   const empty = params.get("empty") === "1";
   const offline = params.get("offline") === "1";
+  const decisionOverride = (params.get("decision") || "WAIT").toUpperCase();
+  const decisionCode =
+    decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
 
   const decision = {
     schemaVersion: "3",
@@ -38,7 +41,7 @@ function buildReviewApi() {
     generatedAt: "2026-07-21T21:45:00.000Z",
     marketDataTime: "2026-07-21T21:45:00.000Z",
     validUntil: "2026-07-21T22:45:00.000Z",
-    decision: "WAIT",
+    decision: decisionCode,
     confidence: 42,
     confidenceLabel: "LOW",
     marketRegime: "RANGE",

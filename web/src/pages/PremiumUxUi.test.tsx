@@ -291,6 +291,7 @@ describe("OverviewPage V5.4.2", () => {
     expect(await screen.findByTestId("current-plan")).toBeInTheDocument();
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
     expect(await screen.findByTestId("goldmeta-score")).toBeInTheDocument();
+    expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
     const tech = screen.getByText("Technical details").closest("details");
     expect(tech).not.toHaveAttribute("open");
   });
