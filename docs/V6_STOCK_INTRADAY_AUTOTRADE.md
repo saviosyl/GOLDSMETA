@@ -99,7 +99,7 @@ by Firestore Emulator integration tests, not InMemory alone.
 
 Root collections:
 
-- `stockIntradayWebhookConnections/{routingIdHash}` — hashed routing id → owner
+- `stockIntradayWebhookConnections/{routingIdHash}` — hashed routing id → owner (no plaintext `connectionId` field)
 - `stockIntradaySchedulerUsers/{userId}` — SHADOW scheduler registry
 - `stockIntradayRetryIndex` — composite index `(state ASC, nextAttemptAt ASC)`
 

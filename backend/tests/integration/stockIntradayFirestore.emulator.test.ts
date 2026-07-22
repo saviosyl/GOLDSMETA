@@ -354,4 +354,57 @@ describeEmulator("Stock Intraday Firestore emulator", () => {
     expect(revoked?.enabled).toBe(false);
     expect(revoked?.revokedAt).toBeTruthy();
   });
+
+  it("persisted webhook documents never contain plaintext routing id", async () => {
+    const connectionId = `gm_si_plain_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const routingIdHash = hashRoutingId(connectionId);
+    await store.saveWebhookConnection({
+      connectionId,
+      routingIdHash,
+      userId,
+      label: "no-plain",
+      enabled: true,
+      expiresAt: null,
+      lastUsedAt: null,
+      revokedAt: null,
+      rateLimitWindowMs: 60_000,
+      rateLimitMax: 10,
+      rateCount: 0,
+      rateWindowStart: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      rotatedFromRoutingIdHash: null
+    });
+
+    const db = getFirestore(app);
+    const rootSnap = await db.collection("stockIntradayWebhookConnections").doc(routingIdHash).get();
+    expect(rootSnap.exists).toBe(true);
+    const rootData = rootSnap.data() as Record<string, unknown>;
+    expect(rootData).not.toHaveProperty("connectionId");
+    expect(JSON.stringify(rootData)).not.toContain(connectionId);
+
+    const mirrorSnap = await db
+      .collection("users")
+      .doc(userId)
+      .collection("stockIntraday")
+      .doc("data")
+      .collection("webhookConnections")
+      .doc(routingIdHash)
+      .get();
+    expect(mirrorSnap.exists).toBe(true);
+    const mirrorData = mirrorSnap.data() as Record<string, unknown>;
+    expect(mirrorData).not.toHaveProperty("connectionId");
+    expect(JSON.stringify(mirrorData)).not.toContain(connectionId);
+
+    // Lookup / revoke still work via hashing the request-supplied routing id.
+    const loaded = await store.getWebhookConnection(connectionId);
+    expect(loaded?.routingIdHash).toBe(routingIdHash);
+    expect(loaded?.connectionId).toBe(connectionId); // hydrated in-process only
+    await store.touchWebhookConnectionUse(connectionId);
+    const rootAfterTouch = (
+      await db.collection("stockIntradayWebhookConnections").doc(routingIdHash).get()
+    ).data() as Record<string, unknown>;
+    expect(rootAfterTouch).not.toHaveProperty("connectionId");
+    expect(JSON.stringify(rootAfterTouch)).not.toContain(connectionId);
+  });
 });

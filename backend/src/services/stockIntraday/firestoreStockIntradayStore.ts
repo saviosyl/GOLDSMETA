@@ -328,6 +328,10 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
     });
   }
 
+  async releaseExitReservation(userId: string, positionId: string): Promise<void> {
+    await this.exitReservationRef(userId, positionId).delete();
+  }
+
   async hasAlertId(userId: string, alertId: string): Promise<boolean> {
     const alertSnap = await this.alertIdRef(userId, alertId).get();
     if (alertSnap.exists) return true;
@@ -643,22 +647,30 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
   async getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null> {
     const hash = hashRoutingId(connectionId);
     const snap = await this.webhookRootRef(hash).get();
-    return snap.exists ? (snap.data() as StockWebhookConnection) : null;
+    if (!snap.exists) return null;
+    const data = snap.data() as Omit<StockWebhookConnection, "connectionId">;
+    // Hydrate routing id for in-process use only — never read plaintext from storage.
+    return { ...data, routingIdHash: hash, connectionId };
   }
 
   async saveWebhookConnection(conn: StockWebhookConnection): Promise<void> {
-    const hash = conn.routingIdHash || hashRoutingId(conn.connectionId);
+    const hash = conn.routingIdHash || (conn.connectionId ? hashRoutingId(conn.connectionId) : "");
+    if (!hash) {
+      throw new Error("WEBHOOK_ROUTING_HASH_REQUIRED");
+    }
+    const {
+      connectionId: _omitConnectionId,
+      ...persistable
+    } = conn;
+    void _omitConnectionId;
     const payload = stripUndefined({
-      ...conn,
-      routingIdHash: hash,
-      // Never persist raw routing id in Firestore document body for mirrors.
-      connectionId: conn.connectionId
+      ...persistable,
+      routingIdHash: hash
     }) as FirebaseFirestore.DocumentData;
+    // Explicitly ensure plaintext routing id is never written.
+    delete payload.connectionId;
     await this.webhookRootRef(hash).set(payload, { merge: true });
-    // Mirror keyed by hash — no raw routing id in path.
-    const mirrorPayload = { ...payload };
-    delete mirrorPayload.connectionId;
-    await this.webhookMirrorRef(conn.userId, hash).set(mirrorPayload, { merge: true });
+    await this.webhookMirrorRef(conn.userId, hash).set(payload, { merge: true });
   }
 
   async touchWebhookConnectionUse(connectionId: string): Promise<StockWebhookConnection | null> {
@@ -667,7 +679,7 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       const ref = this.webhookRootRef(hash);
       const snap = await tx.get(ref);
       if (!snap.exists) return null;
-      const existing = snap.data() as StockWebhookConnection;
+      const existing = snap.data() as Omit<StockWebhookConnection, "connectionId">;
       const now = nowIso();
       const windowMs = existing.rateLimitWindowMs || 60_000;
       const windowStartMs = Date.parse(existing.rateWindowStart);
@@ -679,22 +691,19 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       } else {
         rateCount += 1;
       }
-      const updated: StockWebhookConnection = {
+      const updated = {
         ...existing,
+        routingIdHash: hash,
         lastUsedAt: now,
         rateCount,
         rateWindowStart,
         updatedAt: now
       };
-      tx.set(ref, stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
-      const mirror = { ...updated } as Record<string, unknown>;
-      delete mirror.connectionId;
-      tx.set(
-        this.webhookMirrorRef(existing.userId, hash),
-        stripUndefined(mirror) as FirebaseFirestore.DocumentData,
-        { merge: true }
-      );
-      return updated;
+      const payload = stripUndefined(updated) as FirebaseFirestore.DocumentData;
+      delete payload.connectionId;
+      tx.set(ref, payload, { merge: true });
+      tx.set(this.webhookMirrorRef(existing.userId, hash), payload, { merge: true });
+      return { ...updated, connectionId };
     });
   }
 

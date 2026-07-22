@@ -1229,4 +1229,99 @@ describe("Stock Intraday hardening", () => {
     const after = await store.reserveEntryAtomically(mk("MSFT", "pp3"));
     expect(after.ok).toBe(true);
   });
+
+  it("TradingView EXIT_LONG and market-close sweep use current quote, never entry price", async () => {
+    await enableShadowReady(service);
+    await service.runAutonomousScan("u1");
+    const positions = await store.listPositions("u1");
+    expect(positions.length).toBeGreaterThan(0);
+    const pos = positions[0]!;
+    const entry = pos.entryPrice;
+    await store.savePosition({ ...pos, entryPrice: entry, highWaterMark: entry });
+
+    market.setOptions({ last: 172.5, bid: 172.4, ask: 172.6 });
+    await service.handleExitSignal(
+      "u1",
+      (parseStockTradingViewSignal(
+        freshSignal({ alertId: "tv-exit-1", action: "EXIT_LONG", symbol: pos.symbol })
+      ) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal })
+        .signal
+    );
+
+    expect(await store.listPositions("u1")).toHaveLength(0);
+    const sell = (await store.listShadowTrades("u1")).find((t) => t.side === "SELL");
+    expect(sell?.exitPrice).toBe(172.5);
+    expect(sell?.entryPrice).toBe(entry);
+    expect(sell?.exitPrice).not.toBe(entry);
+    expect(sell?.netRealizedPnl).not.toBe(0);
+    expect(sell?.grossPnl).toBeCloseTo((172.5 - entry) * pos.quantity, 6);
+  });
+
+  it("market-close sweep closes at current quote price", async () => {
+    await enableShadowReady(service);
+    await service.runAutonomousScan("u1");
+    const pos = (await store.listPositions("u1"))[0]!;
+    market.setOptions({ last: 165, bid: 164.9, ask: 165.1 });
+    await service.marketCloseSweep("u1");
+    expect(await store.listPositions("u1")).toHaveLength(0);
+    const sell = (await store.listShadowTrades("u1")).find((t) => t.side === "SELL");
+    expect(sell?.exitPrice).toBe(165);
+    expect(sell?.exitReason).toBe("END_OF_DAY");
+    expect(sell?.exitPrice).not.toBe(pos.entryPrice);
+  });
+
+  it("stale exit quote keeps position open with no SELL and allows safe retry", async () => {
+    await enableShadowReady(service);
+    await service.runAutonomousScan("u1");
+    const before = await store.listPositions("u1");
+    expect(before.length).toBeGreaterThan(0);
+    const sellsBefore = (await store.listShadowTrades("u1")).filter((t) => t.side === "SELL").length;
+
+    market.setOptions({ last: 170, stale: true });
+    await service.handleExitSignal(
+      "u1",
+      (parseStockTradingViewSignal(
+        freshSignal({ alertId: "tv-exit-stale", action: "EXIT_LONG", symbol: before[0]!.symbol })
+      ) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal })
+        .signal
+    );
+
+    expect(await store.listPositions("u1")).toHaveLength(before.length);
+    expect((await store.listShadowTrades("u1")).filter((t) => t.side === "SELL").length).toBe(
+      sellsBefore
+    );
+    const activity = await store.listActivity("u1");
+    expect(activity.some((a) => /Exit blocked|stale|no validated exit quote/i.test(a.message))).toBe(
+      true
+    );
+
+    // Retry with fresh quote succeeds once — no duplicate SELL from the blocked attempt.
+    market.setOptions({ last: 168, stale: false });
+    await service.handleExitSignal(
+      "u1",
+      (parseStockTradingViewSignal(
+        freshSignal({ alertId: "tv-exit-retry", action: "EXIT_LONG", symbol: before[0]!.symbol })
+      ) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal })
+        .signal
+    );
+    expect(await store.listPositions("u1")).toHaveLength(0);
+    const sells = (await store.listShadowTrades("u1")).filter((t) => t.side === "SELL");
+    expect(sells).toHaveLength(sellsBefore + 1);
+    expect(sells[0]?.exitPrice).toBe(168);
+  });
+
+  it("requestExit without quote does not fall back to entry price", async () => {
+    await enableShadowReady(service);
+    await service.runAutonomousScan("u1");
+    const pos = (await store.listPositions("u1"))[0]!;
+    market.setOptions({ outage: true });
+    await service.requestExit("u1", pos, "MANUAL_STOP");
+    expect(await store.listPositions("u1")).toHaveLength(1);
+    expect((await store.listShadowTrades("u1")).filter((t) => t.side === "SELL")).toHaveLength(0);
+    market.setOptions({ outage: false, last: 171 });
+    await service.requestExit("u1", pos, "MANUAL_STOP");
+    const sell = (await store.listShadowTrades("u1")).find((t) => t.side === "SELL");
+    expect(sell?.exitPrice).toBe(171);
+    expect(sell?.exitPrice).not.toBe(pos.entryPrice);
+  });
 });

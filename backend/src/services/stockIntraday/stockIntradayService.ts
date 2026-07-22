@@ -1127,6 +1127,7 @@ export class StockIntradayService {
 
   /**
    * Exit only GoldMeta-managed positions — never personal holdings.
+   * Loads a fresh market quote before SHADOW close; never uses entry price as fallback.
    */
   async handleExitSignal(userId: string, signal: StockTradingViewSignal): Promise<void> {
     const positions = await this.store.listPositions(userId);
@@ -1142,7 +1143,50 @@ export class StockIntradayService {
       return;
     }
     for (const position of managed) {
-      await this.requestExit(userId, position, "TV_EXIT_LONG");
+      const quote = await this.resolveValidatedExitQuote(userId, position.symbol);
+      if (!quote) continue;
+      await this.requestExit(userId, position, "TV_EXIT_LONG", quote);
+    }
+  }
+
+  /**
+   * Resolve a fresh exit quote for SHADOW closes.
+   * Missing/stale quotes block the exit, keep the position visible, and leave no SELL record.
+   */
+  private async resolveValidatedExitQuote(
+    userId: string,
+    symbol: string
+  ): Promise<{ last: number; spreadSlippageBps: number | null } | null> {
+    try {
+      const quote = await this.marketData.getQuote(symbol);
+      await this.persistDashboard(userId, { lastMarketDataAt: quote.asOf });
+      if (!this.marketData.isFresh(quote.asOf, 60_000)) {
+        await this.activity(
+          userId,
+          `Exit blocked for ${symbol} — market quote stale; position kept; will retry next monitor cycle.`,
+          "warn"
+        );
+        return null;
+      }
+      if (!Number.isFinite(quote.last) || quote.last <= 0) {
+        await this.activity(
+          userId,
+          `Exit blocked for ${symbol} — invalid market quote; position kept; will retry next monitor cycle.`,
+          "warn"
+        );
+        return null;
+      }
+      return {
+        last: quote.last,
+        spreadSlippageBps: estimateSlippageBpsFromQuote(quote)
+      };
+    } catch (error) {
+      await this.activity(
+        userId,
+        `Exit blocked for ${symbol} — quote unavailable (${error instanceof Error ? error.message : "error"}); position kept; will retry next monitor cycle.`,
+        "warn"
+      );
+      return null;
     }
   }
 
@@ -1166,14 +1210,32 @@ export class StockIntradayService {
     const risk = await this.store.getRiskState(userId);
     const settings = await this.store.getSettings(userId);
     if (risk.mode === "SHADOW") {
-      const exitPrice = exitQuote?.last ?? position.entryPrice;
+      let validated = exitQuote;
+      if (
+        !validated ||
+        !Number.isFinite(validated.last) ||
+        validated.last <= 0
+      ) {
+        validated = (await this.resolveValidatedExitQuote(userId, position.symbol)) ?? undefined;
+      }
+      if (!validated || !Number.isFinite(validated.last) || validated.last <= 0) {
+        await this.store.releaseExitReservation(userId, position.positionId);
+        await this.activity(
+          userId,
+          `SHADOW exit aborted for ${position.symbol} (${reason}) — no validated exit quote; position kept open (no entry-price fallback).`,
+          "warn"
+        );
+        return;
+      }
+
+      const exitPrice = validated.last;
       const exitAt = nowIso();
       const accounting = calculateShadowExitAccounting({
         position,
         exitPrice,
         exitReason: reason ?? "HARD_STOP",
         exitAt,
-        spreadSlippageBps: exitQuote?.spreadSlippageBps ?? settings.limits.maxSlippageBps,
+        spreadSlippageBps: validated.spreadSlippageBps ?? settings.limits.maxSlippageBps,
         fxImpactPct: 0,
         strategy: position.strategy ?? "MOMENTUM_BREAKOUT",
         confidenceAtEntry: position.confidenceAtEntry ?? null
@@ -1197,6 +1259,7 @@ export class StockIntradayService {
         lossCooldownUntil
       });
       if (!closed) {
+        await this.store.releaseExitReservation(userId, position.positionId);
         await this.activity(userId, `SHADOW exit skipped — position already closed (${position.symbol})`, "info");
         return;
       }
@@ -1217,13 +1280,14 @@ export class StockIntradayService {
 
       await this.activity(
         userId,
-        `SHADOW SELL ${position.quantity} ${position.symbol} (${reason}) netPnl=${accounting.netRealizedPnl.toFixed(4)}`,
+        `SHADOW SELL ${position.quantity} ${position.symbol} (${reason}) @ ${exitPrice} netPnl=${accounting.netRealizedPnl.toFixed(4)}`,
         "success"
       );
       return;
     }
 
     if (!T212_PAPER_ORDER_SUBMISSION_ENABLED && !T212_LIVE_EXECUTION_FEATURE_FLAG) {
+      await this.store.releaseExitReservation(userId, position.positionId);
       await this.activity(
         userId,
         `Exit requested for ${position.symbol} (${reason}) — order submission disabled; position kept visible.`,
@@ -1465,7 +1529,9 @@ export class StockIntradayService {
   async marketCloseSweep(userId: string): Promise<void> {
     const positions = (await this.store.listPositions(userId)).filter((p) => p.goldMetaManaged);
     for (const position of positions) {
-      await this.requestExit(userId, position, "END_OF_DAY");
+      const quote = await this.resolveValidatedExitQuote(userId, position.symbol);
+      if (!quote) continue;
+      await this.requestExit(userId, position, "END_OF_DAY", quote);
     }
   }
 

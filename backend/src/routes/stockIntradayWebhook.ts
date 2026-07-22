@@ -19,6 +19,7 @@ import { Router } from "express";
 import { createRateLimit } from "../middleware/rateLimit";
 import { logger } from "../services/logging/logger";
 import type { StockIntradayService } from "../services/stockIntraday/stockIntradayService";
+import { hashRoutingId } from "../services/stockIntraday/stockIntradayStore";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -31,6 +32,9 @@ export const buildStockIntradayWebhookRouter = (service: StockIntradayService): 
     createRateLimit("stock-intraday-webhook"),
     async (req, res) => {
       const connectionId = firstParam(req.params.connectionId) ?? "";
+      const routingIdHashPrefix = connectionId
+        ? hashRoutingId(connectionId).slice(0, 12)
+        : "unknown";
       try {
         const queryTokenPresent =
           typeof req.query.token === "string" ||
@@ -55,7 +59,7 @@ export const buildStockIntradayWebhookRouter = (service: StockIntradayService): 
         });
         if (!auth.ok) {
           logger.warn("Stock intraday webhook auth rejected", {
-            routingIdPrefix: connectionId.slice(0, 8),
+            routingIdHashPrefix,
             code: auth.code
           });
           res.status(auth.status).json({
@@ -88,7 +92,7 @@ export const buildStockIntradayWebhookRouter = (service: StockIntradayService): 
         });
       } catch (error: unknown) {
         logger.error("Stock intraday webhook failure", {
-          routingIdPrefix: connectionId.slice(0, 8),
+          routingIdHashPrefix,
           error: error instanceof Error ? error.message : "unknown"
         });
         res.status(500).json({

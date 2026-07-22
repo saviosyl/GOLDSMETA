@@ -293,6 +293,10 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
     });
   }
 
+  async releaseExitReservation(_userId: string, positionId: string): Promise<void> {
+    this.exitReservations.delete(positionId);
+  }
+
   async saveSignal(record: StockSignalRecord): Promise<void> {
     const list = this.signals.get(record.userId) ?? [];
     const idx = list.findIndex((s) => s.alertId === record.alertId || s.id === record.id);
@@ -556,15 +560,20 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
     const hash = hashRoutingId(connectionId);
     for (const conn of this.webhookConnections.values()) {
       if (constantTimeEqualHex(conn.routingIdHash, hash)) {
-        return this.clone(conn);
+        return this.clone({ ...conn, connectionId });
       }
     }
     return null;
   }
 
   async saveWebhookConnection(conn: StockWebhookConnection): Promise<void> {
-    const hash = conn.routingIdHash || hashRoutingId(conn.connectionId);
-    this.webhookConnections.set(hash, this.clone({ ...conn, routingIdHash: hash }));
+    const hash = conn.routingIdHash || (conn.connectionId ? hashRoutingId(conn.connectionId) : "");
+    if (!hash) {
+      throw new Error("WEBHOOK_ROUTING_HASH_REQUIRED");
+    }
+    const { connectionId: _omit, ...persistable } = conn;
+    void _omit;
+    this.webhookConnections.set(hash, this.clone({ ...persistable, routingIdHash: hash }));
   }
 
   async touchWebhookConnectionUse(connectionId: string): Promise<StockWebhookConnection | null> {
@@ -590,7 +599,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         updatedAt: now
       };
       await this.saveWebhookConnection(updated);
-      return this.clone(updated);
+      return this.clone({ ...updated, connectionId });
     });
   }
 
@@ -607,7 +616,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       updatedAt: nowIso()
     };
     await this.saveWebhookConnection(updated);
-    return this.clone(updated);
+    return this.clone({ ...updated, connectionId });
   }
 
   async listWebhookConnections(userId: string): Promise<StockWebhookConnection[]> {

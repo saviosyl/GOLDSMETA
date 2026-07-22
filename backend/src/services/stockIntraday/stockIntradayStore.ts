@@ -76,9 +76,12 @@ export interface StockIntradayJob {
 }
 
 export interface StockWebhookConnection {
-  /** Public non-secret routing identifier used in the webhook URL path. */
-  connectionId: string;
-  /** SHA-256 hex of connectionId — Firestore document key; never log raw id. */
+  /**
+   * Transient routing id hydrated only for in-process use after a request supplies it.
+   * Never persisted to Firestore (root or mirror).
+   */
+  connectionId?: string;
+  /** SHA-256 hex of routing id — Firestore document key; never log raw id. */
   routingIdHash: string;
   userId: string;
   label: string;
@@ -216,6 +219,8 @@ export interface StockIntradayStorePort {
   listActiveEntryReservations(userId: string): Promise<StockTradeIntent[]>;
   reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult>;
   reserveExit(userId: string, positionId: string, reason: string): Promise<boolean>;
+  /** Release a failed exit reservation so the next monitor cycle can retry safely. */
+  releaseExitReservation(userId: string, positionId: string): Promise<void>;
 
   hasAlertId(userId: string, alertId: string): Promise<boolean>;
   /** Atomic alert dedupe + signal persist. */
