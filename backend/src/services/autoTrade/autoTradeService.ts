@@ -29,7 +29,6 @@ import { createExecutionOwnerId } from "./inMemoryAutoTradeStore";
 import {
   AUTOTRADE_STRATEGY_VERSION,
   DEMO_ORDER_SUBMISSION_ENABLED,
-  FIRST_PILOT_LIMITS,
   LIVE_EXECUTION_FEATURE_FLAG,
   buildDealReference,
   displayStatusFor,

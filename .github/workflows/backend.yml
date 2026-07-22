@@ -4,7 +4,15 @@ on:
   push:
     branches: [main, cursor/production-connection]
   pull_request:
-    branches: [main, cursor/production-connection, cursor/webhook-delivery-400-c2c2, cursor/phase3-stage3-live-forward-c2c2, cursor/goldmeta-v4-stage-b-c2c2]
+    branches:
+      [
+        main,
+        cursor/production-connection,
+        cursor/webhook-delivery-400-c2c2,
+        cursor/phase3-stage3-live-forward-c2c2,
+        cursor/goldmeta-v4-stage-b-c2c2,
+        cursor/v5-4-3-approved-base-c2c2
+      ]
 
 jobs:
   backend:

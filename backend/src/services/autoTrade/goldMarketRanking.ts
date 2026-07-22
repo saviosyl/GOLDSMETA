@@ -20,30 +20,23 @@ export function rankGoldCandidates(
     const name = row.instrumentName || row.epic;
     const epic = row.epic;
     const status = mapStatus(row.marketStatus);
-    let score = 0;
     const reasons: string[] = [];
     if (/spot\s*gold/i.test(name)) {
-      score += 50;
       reasons.push("Name contains Spot Gold");
     }
     if (/xauusd|xau\/usd/i.test(name) || /XAUUSD/i.test(epic)) {
-      score += 40;
       reasons.push("XAUUSD identifier");
     }
     if (/gold/i.test(name)) {
-      score += 10;
       reasons.push("Gold instrument");
     }
     if (/USCGC|CFEGOLD|GOLD/i.test(epic)) {
-      score += 15;
       reasons.push("Gold-like EPIC");
     }
     if (row.expiry === "-" || row.expiry == null || row.expiry === "") {
-      score += 8;
       reasons.push("No dated expiry (spot/cash style)");
     }
     if (/future|mini|micro|option/i.test(name)) {
-      score -= 25;
       reasons.push("Likely futures/mini/option — deprioritised");
     }
     return {

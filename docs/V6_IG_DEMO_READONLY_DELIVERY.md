@@ -4,7 +4,8 @@
 **PR:** #21 (do not merge / do not promote)  
 **Approved base:** `4621156`  
 **Reviewed head (this pass started from):** `928e1f9`  
-**Current tip:**   
+**Current tip:** `c1225924375b4c9de8a6389ca61990a8cb02f30c`  
+
 **V6 frontend preview:** https://preview-v6-autotrade.goldmeta-web.pages.dev  
 **UI review:** https://preview-v6-autotrade.goldmeta-web.pages.dev/ui-review/autotrade  
 
