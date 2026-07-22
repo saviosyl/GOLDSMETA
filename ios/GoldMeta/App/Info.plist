@@ -2,8 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>APIBaseURL</key>
+    <string>$(GOLDMETA_API_BASE_URL)</string>
     <key>NSUserNotificationsUsageDescription</key>
     <string>GoldMeta uses notifications to alert you when a new XAUUSD decision-support signal is available.</string>
+    <key>UseMockAuth</key>
+    <string>$(GOLDMETA_USE_MOCK_AUTH)</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

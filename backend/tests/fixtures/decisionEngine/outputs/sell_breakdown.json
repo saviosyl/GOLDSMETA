@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "1.0",
+  "configVersion": "decision-engine-1.0.0",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "evaluatedAt": "2026-07-20T10:01:00.000Z",
+  "primaryAction": "SELL",
+  "confidence": 80,
+  "tradeScore": 82,
+  "setupGrade": "A",
+  "trend": "BEARISH",
+  "entryType": "breakout",
+  "entryRange": {
+    "low": 2398,
+    "high": 2398,
+    "reference": 2398
+  },
+  "stopLoss": 2403.25,
+  "takeProfits": {
+    "tp1": 2388,
+    "tp2": 2375,
+    "tp3": 2360
+  },
+  "riskReward": {
+    "tp1": 1.9,
+    "tp2": 4.38,
+    "tp3": 7.24
+  },
+  "invalidationLevel": 2403.88,
+  "supportingReasons": [
+    "Trend Meter bearish 86",
+    "Price accepted below nearby support",
+    "Price trading below POC",
+    "Price accepted below VAL",
+    "Price below VWAP with non-bullish bias",
+    "Bearish EMA stack with price below EMA21",
+    "Confirmed BEARISH_BREAKOUT",
+    "Relative volume 1.70 confirms bearish candle"
+  ],
+  "opposingReasons": [],
+  "missingDataWarnings": [],
+  "recommendedManagementAction": "ENTER",
+  "explanation": "SELL graded A (score 82, confidence 80%). Entry breakout; SL 2403.25; RR TP2 4.38. Analysis only — not an executed broker order. No martingale or loss-chasing.",
+  "scoreBreakdown": [
+    {
+      "factor": "trendMeter",
+      "weight": 18,
+      "awarded": 15.48,
+      "side": "BEARISH",
+      "note": "Trend Meter bearish 86"
+    },
+    {
+      "factor": "marketStructure",
+      "weight": 12,
+      "awarded": 10.8,
+      "side": "BEARISH",
+      "note": "Price accepted below nearby support"
+    },
+    {
+      "factor": "pocPosition",
+      "weight": 8,
+      "awarded": 6.8,
+      "side": "BEARISH",
+      "note": "Price trading below POC"
+    },
+    {
+      "factor": "valueArea",
+      "weight": 8,
+      "awarded": 7.2,
+      "side": "BEARISH",
+      "note": "Price accepted below VAL"
+    },
+    {
+      "factor": "vwapAlignment",
+      "weight": 7,
+      "awarded": 5.6,
+      "side": "BEARISH",
+      "note": "Price below VWAP with non-bullish bias"
+    },
+    {
+      "factor": "emaAlignment",
+      "weight": 10,
+      "awarded": 10,
+      "side": "BEARISH",
+      "note": "Bearish EMA stack with price below EMA21"
+    },
+    {
+      "factor": "confirmationCandle",
+      "weight": 12,
+      "awarded": 12,
+      "side": "BEARISH",
+      "note": "Confirmed BEARISH_BREAKOUT"
+    },
+    {
+      "factor": "volumeConfirmation",
+      "weight": 8,
+      "awarded": 7.2,
+      "side": "BEARISH",
+      "note": "Relative volume 1.70 confirms bearish candle"
+    },
+    {
+      "factor": "rsiCondition",
+      "weight": 5,
+      "awarded": 2,
+      "side": "BEARISH",
+      "note": "RSI constructive for shorts (38)"
+    },
+    {
+      "factor": "supportResistance",
+      "weight": 6,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "Clear of immediate S/R walls"
+    },
+    {
+      "factor": "atrVolatility",
+      "weight": 3,
+      "awarded": 2.1,
+      "side": "NEUTRAL",
+      "note": "ATR volatility usable for structure stops"
+    },
+    {
+      "factor": "spread",
+      "weight": 3,
+      "awarded": 3,
+      "side": "NEUTRAL",
+      "note": "Spread tight (0.25)"
+    },
+    {
+      "factor": "newsRisk",
+      "weight": 0,
+      "awarded": 0,
+      "side": "NEUTRAL",
+      "note": "No high-impact news block"
+    },
+    {
+      "factor": "dataCompleteness",
+      "weight": 5,
+      "awarded": 5,
+      "side": "NEUTRAL",
+      "note": "Data completeness 100%"
+    }
+  ],
+  "bullishScore": 5.05,
+  "bearishScore": 82.13,
+  "safetyFlags": [],
+  "analysisOnly": true
+}

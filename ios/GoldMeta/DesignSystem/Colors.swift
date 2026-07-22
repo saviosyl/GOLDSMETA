@@ -59,6 +59,8 @@ extension DataSourceLabel {
             return GoldMetaColor.wait
         case .stale, .offline:
             return GoldMetaColor.stale
+        case .test:
+            return GoldMetaColor.gold
         }
     }
 }

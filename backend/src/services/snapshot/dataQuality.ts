@@ -29,6 +29,19 @@ const hasDirectionalConflict = (snapshot: MarketSnapshot): boolean => {
   return trend !== candle;
 };
 
+const resolveVolumeProfile = (
+  snapshot: MarketSnapshot
+): { poc: number | null; vah: number | null; val: number | null } => {
+  const poc = snapshot.levels?.pocAll ?? snapshot.sessionVolumeProfile?.poc ?? null;
+  const vah = snapshot.levels?.vahAll ?? snapshot.sessionVolumeProfile?.vah ?? null;
+  const val = snapshot.levels?.valAll ?? snapshot.sessionVolumeProfile?.val ?? null;
+  return {
+    poc: isPositivePrice(poc) ? poc : null,
+    vah: isPositivePrice(vah) ? vah : null,
+    val: isPositivePrice(val) ? val : null
+  };
+};
+
 export const evaluateDataQuality = (
   snapshot: MarketSnapshot,
   now = Date.now()
@@ -70,14 +83,27 @@ export const evaluateDataQuality = (
     };
   }
 
+  const profile = resolveVolumeProfile(snapshot);
+  if (profile.poc === null || profile.vah === null || profile.val === null) {
+    missingInputs.push("volumeProfile");
+  }
   if (!snapshot.trend?.direction) {
     missingInputs.push("trend.direction");
   }
-  if (!snapshot.confirmationCandle?.direction) {
-    missingInputs.push("confirmationCandle.direction");
+  if (typeof snapshot.trend?.strength !== "number") {
+    missingInputs.push("trend.strength");
   }
-  if (!snapshot.levels && !snapshot.sessionVolumeProfile && !snapshot.marketProfile) {
-    missingInputs.push("market levels");
+  if (!snapshot.confirmationCandle?.confirmed || !snapshot.confirmationCandle?.direction) {
+    missingInputs.push("confirmationCandle");
+  }
+  if (
+    !snapshot.ohlcv ||
+    !isPositivePrice(snapshot.ohlcv.open) ||
+    !isPositivePrice(snapshot.ohlcv.high) ||
+    !isPositivePrice(snapshot.ohlcv.low) ||
+    !isPositivePrice(snapshot.ohlcv.close)
+  ) {
+    missingInputs.push("ohlcv");
   }
 
   if (!snapshot.isConfirmedBar) {

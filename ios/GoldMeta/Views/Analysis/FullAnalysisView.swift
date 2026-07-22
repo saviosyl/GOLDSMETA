@@ -35,7 +35,15 @@ struct FullAnalysisView: View {
         VStack(alignment: .leading, spacing: 16) {
             GoldCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { DecisionBadge(decision: decision.decision, isProvisional: decision.isProvisional); Spacer(); DataQualityBadge(dataQuality: decision.dataQuality, source: decision.dataSourceLabel) }
+                    HStack {
+                        DecisionBadge(
+                            decision: decision.decision,
+                            isProvisional: decision.isProvisional,
+                            isTestDecision: decision.shouldShowTestBadge
+                        )
+                        Spacer()
+                        DataQualityBadge(dataQuality: decision.dataQuality, source: decision.dataSourceLabel)
+                    }
                     PriceRow("Decision ID", value: decision.decisionId)
                     PriceRow("Lifecycle", value: decision.lifecycleState.rawValue)
                     PriceRow("Rule config", value: decision.ruleConfigVersion)

@@ -221,11 +221,33 @@ export interface AiExplanation {
   safetyDowngraded: boolean;
 }
 
+/** Display-oriented market structure stored on every new decision. */
+export interface DecisionMarketStructure {
+  trend: TrendDirection | null;
+  trendStrength: number | null;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  confirmationClassification:
+    | "REJECTION"
+    | "BREAKOUT"
+    | "RETEST"
+    | "CONTINUATION"
+    | "NONE"
+    | null;
+  confirmationDirection: TrendDirection | null;
+  confirmationCandleType: string | null;
+}
+
 export interface DecisionRecord {
   schemaVersion: "1.0";
   decisionId: string;
   userId: string;
   symbol: "XAUUSD";
+  /** Chart timeframe from the webhook payload. Null only on legacy records. */
+  timeframe: TradingViewPayload["timeframe"] | null;
+  /** Closed-bar time (ISO). Mirrors marketDataTime for explicit completeness. */
+  barTime: string;
   generatedAt: string;
   marketDataTime: string;
   validUntil: string;
@@ -262,14 +284,18 @@ export interface DecisionRecord {
   currentSession: string | null;
   higherTimeframeBias: TrendDirection | null;
   lastKnownPrice: number | null;
-  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE";
+  ohlcv: TradingViewPayload["ohlcv"];
+  marketStructure: DecisionMarketStructure | null;
+  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE" | "TEST";
+  environment: "LIVE" | "TEST";
+  isTestDecision: boolean;
 }
 
 export const deviceRegistrationSchema = z
   .object({
     deviceId: z.string().min(3),
     fcmToken: z.string().min(10),
-    platform: z.literal("ios"),
+    platform: z.enum(["ios", "web"]),
     appVersion: z.string().min(1).optional()
   })
   .strict();
@@ -281,15 +307,53 @@ export interface DeviceRecord extends DeviceRegistration {
   registeredAt: string;
 }
 
+export const webPushSubscriptionSchema = z
+  .object({
+    endpoint: z.string().url(),
+    expirationTime: z.number().nullable().optional(),
+    keys: z
+      .object({
+        p256dh: z.string().min(8),
+        auth: z.string().min(8)
+      })
+      .strict(),
+    userAgent: z.string().max(500).optional()
+  })
+  .strict();
+
+export type WebPushSubscriptionInput = z.infer<typeof webPushSubscriptionSchema>;
+
+export interface WebPushSubscriptionRecord extends WebPushSubscriptionInput {
+  userId: string;
+  subscriptionId: string;
+  registeredAt: string;
+  updatedAt: string;
+}
+
 export const journalCreateSchema = z
   .object({
     decisionId: z.string().optional(),
+    setupId: z.string().optional(),
     symbol: z.literal("XAUUSD").default("XAUUSD"),
     direction: z.enum(["BUY", "SELL", "WAIT"]),
     outcome: z.enum(["WIN", "LOSS", "BREAKEVEN", "OPEN"]).default("OPEN"),
     riskReward: z.number().nullable().optional(),
     pnl: z.number().nullable().optional(),
-    notes: z.string().max(2000).optional()
+    notes: z.string().max(2000).optional(),
+    tags: z
+      .array(
+        z.enum([
+          "followed",
+          "ignored",
+          "entered_manually",
+          "avoided",
+          "news_risk",
+          "poor_spread",
+          "discretionary_override"
+        ])
+      )
+      .max(12)
+      .optional()
   })
   .strict();
 
@@ -310,7 +374,20 @@ export const settingsPatchSchema = z
     aiEnabled: z.boolean().optional(),
     notificationsEnabled: z.boolean().optional(),
     provisionalSignalsEnabled: z.boolean().optional(),
-    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional()
+    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional(),
+    liveForwardAckAt: z.string().datetime().nullable().optional(),
+    manualRisk: z
+      .object({
+        currency: z.enum(["EUR", "USD", "GBP"]).optional(),
+        maxCashRiskPerTrade: z.number().positive().max(10_000).optional(),
+        maxSimultaneousManualTrades: z.number().int().min(1).max(5).optional(),
+        maxDailyRealisedLoss: z.number().positive().max(50_000).optional(),
+        stopAfterConsecutiveLosses: z.number().int().min(1).max(20).optional(),
+        valuePerPoint: z.number().positive().nullable().optional(),
+        estimatedSpreadPoints: z.number().nonnegative().nullable().optional()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 
@@ -320,5 +397,25 @@ export interface UserSettings {
   notificationsEnabled: boolean;
   provisionalSignalsEnabled: boolean;
   riskProfile: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE";
+  /** ISO timestamp when user acknowledged LIVE forward-testing banner; null = not yet. */
+  liveForwardAckAt: string | null;
+  manualRisk: {
+    currency: "EUR" | "USD" | "GBP";
+    maxCashRiskPerTrade: number;
+    maxSimultaneousManualTrades: number;
+    maxDailyRealisedLoss: number;
+    stopAfterConsecutiveLosses: number;
+    valuePerPoint: number | null;
+    estimatedSpreadPoints: number | null;
+    noAveragingDown: true;
+    noMartingale: true;
+    noAutomaticRecovery: true;
+  };
+  manualRiskLimitChangeLog: Array<{
+    at: string;
+    field: string;
+    from: string | number | boolean | null;
+    to: string | number | boolean | null;
+  }>;
   updatedAt: string;
 }

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0",
+  "source": "tradingview",
+  "eventId": "fixture-partial-vp",
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T08:00:00.000Z",
+  "sentAt": "2026-07-20T08:00:00.000Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2412,
+    "high": 2420,
+    "low": 2410,
+    "close": 2418,
+    "volume": 1000
+  },
+  "levels": {
+    "pocAll": null,
+    "vahAll": null,
+    "valAll": null,
+    "pocNonBroken": [],
+    "vahNonBroken": [],
+    "valNonBroken": []
+  },
+  "sessionVolumeProfile": {
+    "session": "UNKNOWN",
+    "poc": null,
+    "vah": null,
+    "val": null,
+    "hvn": [],
+    "lvn": [],
+    "acceptanceState": "UNKNOWN"
+  },
+  "marketProfile": {
+    "tpoPoc": null,
+    "valueMigration": "UNKNOWN",
+    "profileState": "UNKNOWN",
+    "acceptanceState": "UNKNOWN"
+  },
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 80,
+    "components": [
+      { "name": "gm_chart_ema_stack", "direction": "BULLISH", "strength": 80, "sourceTimeframe": "15" }
+    ]
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "classification": "CONTINUATION",
+    "open": 2412,
+    "high": 2420,
+    "low": 2410,
+    "close": 2418,
+    "isClosed": true
+  },
+  "metadata": {
+    "scriptVersion": "2.0.0",
+    "partial": true
+  }
+}
