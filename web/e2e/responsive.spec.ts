@@ -113,8 +113,9 @@ test.describe("V5.4 responsive viewport matrix", () => {
     await expect(page.getByTestId("market-story")).toBeVisible();
     await expect(page.getByTestId("market-level-ladder")).toBeVisible();
     await expect(page.getByTestId("current-plan")).toBeVisible();
-    // Email must not appear in the overview content
-    await expect(page.getByTestId("overview-page")).not.toContainText("@");
+    // Email must stay behind account menu, not in Dashboard content
+    await expect(page.getByTestId("overview-page")).not.toContainText("review@goldmeta.preview");
+    await expect(page.getByTestId("account-menu-button")).toBeVisible();
   });
 
   test("V5.4.2 desktop dash grid uses available width", async ({ page }) => {
