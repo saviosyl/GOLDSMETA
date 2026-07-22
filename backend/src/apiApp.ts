@@ -20,6 +20,7 @@ import { buildSetupsRouter } from "./routes/setups";
 import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
 import { buildAutoTradeRouter } from "./routes/autoTrade";
+import { buildStockIntradayRouter } from "./routes/stockIntraday";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -27,12 +28,15 @@ import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
 import { createAutoTradeService } from "./services/autoTrade/runtime";
 import type { AutoTradeService } from "./services/autoTrade/autoTradeService";
+import { createStockIntradayService } from "./services/stockIntraday/runtime";
+import type { StockIntradayService } from "./services/stockIntraday/stockIntradayService";
 
 export interface AppDependencies {
   store: GoldMetaStore;
   aiExplainer: AiExplainer;
   tradingService?: TradingModeService;
   autoTradeService?: AutoTradeService;
+  stockIntradayService?: StockIntradayService;
 }
 
 const isPayloadTooLarge = (error: unknown): boolean => {
@@ -74,6 +78,8 @@ export const createApiApp = (
   const tradingService =
     dependencies.tradingService ?? new TradingModeService(new InMemoryTradingStore());
   const autoTradeService = dependencies.autoTradeService ?? createAutoTradeService();
+  const stockIntradayService =
+    dependencies.stockIntradayService ?? createStockIntradayService();
 
   const app = express();
   app.disable("x-powered-by");
@@ -94,6 +100,7 @@ export const createApiApp = (
   app.use(buildSettingsRouter(store));
   app.use(buildTradingRouter(tradingService));
   app.use(buildAutoTradeRouter(autoTradeService, store));
+  app.use(buildStockIntradayRouter(stockIntradayService));
   app.use(buildSystemRouter());
   app.use(errorHandler);
 

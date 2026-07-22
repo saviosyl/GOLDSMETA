@@ -34,6 +34,11 @@ const SettingsPage = lazy(() =>
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
 );
+const StockIntradayAutoTradePage = lazy(() =>
+  import("./pages/StockIntradayAutoTradePage").then((m) => ({
+    default: m.StockIntradayAutoTradePage
+  }))
+);
 
 function RouteFallback({ label }: { label: string }) {
   return (
@@ -148,6 +153,14 @@ function ProtectedApp() {
           element={
             <LazyRoute label="AutoTrade">
               <AutoTradePage />
+            </LazyRoute>
+          }
+        />
+        <Route
+          path="/stocks-intraday"
+          element={
+            <LazyRoute label="Stocks Intraday">
+              <StockIntradayAutoTradePage />
             </LazyRoute>
           }
         />

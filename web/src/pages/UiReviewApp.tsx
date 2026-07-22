@@ -9,9 +9,14 @@ import { SettingsPage } from "./SettingsPage";
 import { RiskPlannerPage } from "./RiskPlannerPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
 import { AutoTradePage } from "./AutoTradePage";
+import { StockIntradayAutoTradePage } from "./StockIntradayAutoTradePage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
 import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
+import {
+  buildReviewStockIntradayStatus,
+  type StockIntradayStatus
+} from "../lib/stockIntradayTypes";
 import { ApiError } from "../types/models";
 
 /**
@@ -36,6 +41,7 @@ function buildReviewApi() {
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
 
   let autoTrade = buildReviewAutoTradeStatus();
+  let stockIntraday = buildReviewStockIntradayStatus();
 
   const decision = {
     schemaVersion: "3",
@@ -454,6 +460,118 @@ function buildReviewApi() {
         }
       };
       return { ...autoTrade };
+    },
+    stockIntradayStatus: async (): Promise<StockIntradayStatus> => ({
+      ...stockIntraday,
+      activity: [...stockIntraday.activity]
+    }),
+    stockIntradaySetMode: async (mode: StockIntradayStatus["mode"]) => {
+      if (mode === "T212_LIVE_AUTO") {
+        throw new ApiError(400, "LIVE_FEATURE_DISABLED", "LIVE Stock AutoTrade is hard-blocked.");
+      }
+      stockIntraday = {
+        ...stockIntraday,
+        mode,
+        displayStatus:
+          mode === "OFF"
+            ? "OFF"
+            : mode === "SHADOW"
+              ? "SHADOW"
+              : mode === "T212_PAPER_AUTO"
+                ? "PAPER"
+                : "LIVE",
+        paused: mode === "T212_PAPER_AUTO" || mode === "OFF",
+        activity: [
+          {
+            id: `sm-${Date.now()}`,
+            at: new Date().toISOString(),
+            message: `Stocks Intraday mode set to ${mode}.`,
+            level: "success"
+          },
+          ...stockIntraday.activity
+        ]
+      };
+      return { ...stockIntraday };
+    },
+    stockIntradayConnectPaper: async () => {
+      stockIntraday = {
+        ...stockIntraday,
+        connection: {
+          ...stockIntraday.connection,
+          connected: true,
+          connectionState: "Connected",
+          cash: 2500,
+          availableToTrade: 2000,
+          totalValue: 3200,
+          lastHeartbeatAt: new Date().toISOString()
+        }
+      };
+      return { ...stockIntraday };
+    },
+    stockIntradayDisconnect: async () => {
+      stockIntraday = {
+        ...stockIntraday,
+        connection: {
+          ...stockIntraday.connection,
+          connected: false,
+          connectionState: "Disconnected",
+          lastHeartbeatAt: null
+        }
+      };
+      return { ...stockIntraday };
+    },
+    stockIntradayEmergencyStop: async () => {
+      stockIntraday = {
+        ...stockIntraday,
+        mode: "OFF",
+        displayStatus: "LOCKED",
+        locked: true,
+        killSwitchActive: true,
+        emergencyStopActive: true,
+        lockReason: "kill_switch",
+        activity: [
+          {
+            id: `ss-${Date.now()}`,
+            at: new Date().toISOString(),
+            message:
+              "EMERGENCY STOP — new entries halted. GoldMeta positions remain visible; personal holdings untouched.",
+            level: "error"
+          },
+          ...stockIntraday.activity
+        ]
+      };
+      return { ...stockIntraday };
+    },
+    stockIntradayUnlock: async () => {
+      stockIntraday = {
+        ...stockIntraday,
+        mode: "OFF",
+        displayStatus: "OFF",
+        locked: false,
+        killSwitchActive: false,
+        emergencyStopActive: false,
+        lockReason: null
+      };
+      return { ...stockIntraday };
+    },
+    stockIntradayShadowScan: async (symbols: string[]) => {
+      stockIntraday = {
+        ...stockIntraday,
+        rankedOpportunities: symbols.slice(0, 3).map((symbol, i) => ({
+          symbol,
+          overallScore: 88 - i * 3,
+          confidence: 85,
+          qualifies: i === 0,
+          strategy: "MOMENTUM_BREAKOUT",
+          blockReasons: i === 0 ? [] : ["Relative volume too low"],
+          supportReasons: ["Review mock"],
+          estimatedEntry: 180,
+          stop: 178,
+          takeProfit: 184
+        })),
+        lastMarketDataAt: new Date().toISOString()
+      };
+      return { ...stockIntraday };
     }
   };
 }
@@ -506,6 +624,7 @@ function UiReviewApp() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
             <Route path="autotrade" element={<AutoTradePage />} />
+            <Route path="stocks-intraday" element={<StockIntradayAutoTradePage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<OverviewPage />} />
             <Route path="journal" element={<OverviewPage />} />

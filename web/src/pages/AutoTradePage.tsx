@@ -82,6 +82,10 @@ export function AutoTradePage() {
             IG Demo read-only verification. Authentication, account, Spot Gold discovery, and
             market rules only — no order submission in this stage.
           </p>
+          <p className="gm-meta">
+            Looking for stocks?{" "}
+            <a href="/stocks-intraday">Stocks Intraday AutoTrade</a>
+          </p>
         </div>
         <div className="gm-autotrade-status-block" data-testid="autotrade-status">
           <span className="gm-label">ENVIRONMENT</span>
