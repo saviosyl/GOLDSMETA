@@ -9,6 +9,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc",
     "test": "vitest run",
+    "test:emulator": "npx firebase emulators:exec --only firestore \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 vitest run tests/integration/stockIntradayFirestore.emulator.test.ts\"",
     "lint": "eslint src --ext .ts",
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore"
@@ -33,6 +34,7 @@
     "@typescript-eslint/parser": "latest",
     "eslint": "latest",
     "eslint-config-prettier": "latest",
+    "firebase-tools": "^13.35.1",
     "prettier": "latest",
     "supertest": "latest",
     "tsx": "latest",

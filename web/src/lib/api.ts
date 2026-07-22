@@ -583,4 +583,63 @@ export class ApiClient {
     });
     return body.status;
   }
+
+  async stockIntradayStatus(): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/status"
+    );
+    return body.status;
+  }
+
+  async stockIntradaySetMode(
+    mode: import("./stockIntradayTypes").StockIntradayMode
+  ): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/mode",
+      { method: "POST", body: JSON.stringify({ mode }) }
+    );
+    return body.status;
+  }
+
+  async stockIntradayConnectPaper(): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/connect/paper",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async stockIntradayDisconnect(): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/disconnect",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async stockIntradayEmergencyStop(): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/emergency-stop",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async stockIntradayUnlock(): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/unlock",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async stockIntradayShadowScan(
+    symbols: string[]
+  ): Promise<import("./stockIntradayTypes").StockIntradayStatus> {
+    const body = await this.request<{ status: import("./stockIntradayTypes").StockIntradayStatus }>(
+      "/v1/stock-intraday/shadow/scan",
+      { method: "POST", body: JSON.stringify({ symbols }) }
+    );
+    return body.status;
+  }
 }
