@@ -6,10 +6,14 @@ import { OverviewPage } from "./OverviewPage";
 import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
+import { CurrentPlanCard } from "../components/v5/CurrentPlanCard";
+import { MarketStoryCard } from "../components/v5/MarketStoryCard";
+import { buildMarketStory } from "../lib/marketStory";
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     user: { email: "tester@example.com" },
+    signOut: vi.fn(),
     api: {
       latestDecision: vi.fn().mockResolvedValue({
         decisionId: "dec_hidden",
@@ -20,7 +24,8 @@ vi.mock("../lib/auth", () => ({
         lastKnownPrice: 2385.4,
         ohlcv: { high: 2391, low: 2376, close: 2385.4 },
         marketStructure: { poc: 2380, vah: 2390, val: 2370, trend: "RANGE" },
-        environment: "LIVE"
+        environment: "LIVE",
+        marketRegime: "RANGE"
       }),
       listActiveSetups: vi.fn().mockResolvedValue([]),
       listSetups: vi.fn().mockResolvedValue([
@@ -34,6 +39,9 @@ vi.mock("../lib/auth", () => ({
       ]),
       v5Briefing: vi.fn().mockResolvedValue({
         session: "ASIA",
+        marketRegime: "RANGE",
+        positionVsPoc: "BELOW_POC",
+        atrLabel: "NORMAL",
         levels: { poc: 2380, vah: 2390, val: 2370 },
         dataTimestamp: "2026-07-21T21:45:00.000Z",
         insufficientData: false
@@ -59,20 +67,18 @@ vi.mock("../lib/auth", () => ({
 }));
 
 describe("PrimarySignalCard semantics", () => {
-  it("colours WAIT amber and shows no fabricated plan levels", () => {
+  it("colours WAIT amber and shows price/score/session inline", () => {
     render(
       <MemoryRouter>
         <PrimarySignalCard
           decisionCode="WAIT"
           sessionLabel="Asia"
-          reason="Waiting for confirmation"
+          reason="Waiting for confirmation across additional candles."
           scoreTotal={61}
-          localPrimary="22 Jul 2026 at 06:15"
-          localZone="Europe/Dublin"
+          compactTime="06:15"
+          timeZone="Europe/Dublin"
           utcSecondary="05:15 UTC"
-          poc={2380}
-          vah={2390}
-          val={2370}
+          livePrice={2385.4}
           setup={null}
         />
       </MemoryRouter>
@@ -80,9 +86,9 @@ describe("PrimarySignalCard semantics", () => {
     const hero = screen.getByTestId("primary-decision");
     expect(hero).toHaveTextContent("WAIT");
     expect(hero.className).toMatch(/tone-wait/);
-    expect(screen.getByTestId("no-shadow-plan")).toHaveTextContent(/No validated shadow plan yet/i);
+    expect(screen.getByTestId("primary-live-price")).toHaveTextContent("2385.40");
     expect(screen.getByTestId("primary-local-time")).toHaveTextContent(/Europe\/Dublin/);
-    expect(screen.getByTestId("primary-local-time")).toHaveTextContent(/05:15 UTC/);
+    expect(screen.getByTestId("primary-local-time")).toHaveAttribute("title", "05:15 UTC");
   });
 
   it("uses green for BUY and red for SELL", () => {
@@ -92,8 +98,8 @@ describe("PrimarySignalCard semantics", () => {
           decisionCode="BUY"
           sessionLabel="London"
           reason="Bias"
-          localPrimary="x"
-          localZone="UTC"
+          compactTime="x"
+          timeZone="UTC"
           utcSecondary="00:00 UTC"
         />
       </MemoryRouter>
@@ -105,8 +111,8 @@ describe("PrimarySignalCard semantics", () => {
           decisionCode="SELL"
           sessionLabel="London"
           reason="Bias"
-          localPrimary="x"
-          localZone="UTC"
+          compactTime="x"
+          timeZone="UTC"
           utcSecondary="00:00 UTC"
         />
       </MemoryRouter>
@@ -115,37 +121,72 @@ describe("PrimarySignalCard semantics", () => {
   });
 });
 
-describe("ScoreBreakdown", () => {
-  it("collapses components and expands on demand", async () => {
-    const user = userEvent.setup();
-    const components = Array.from({ length: 8 }, (_, i) => ({
-      label: `Component ${i}`,
-      score: i,
-      max: 10,
-      reason: "Reason"
-    }));
-    // Use priority labels so Market Structure ranks first
-    components[0]!.label = "News";
-    components[1]!.label = "Market Structure";
-    components[2]!.label = "Confirmation";
-    components[3]!.label = "Risk Geometry";
-    components[4]!.label = "Trend";
-    components[5]!.label = "Volume Profile";
-    components[6]!.label = "ATR";
-    components[7]!.label = "Momentum";
+describe("CurrentPlanCard", () => {
+  it("shows calm empty state without NA rows", () => {
+    render(
+      <MemoryRouter>
+        <CurrentPlanCard setup={null} />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("no-shadow-plan")).toHaveTextContent(/No validated shadow plan yet/i);
+    expect(screen.getByTestId("no-shadow-plan")).toHaveTextContent(/structure, confirmation/i);
+  });
+});
 
-    render(<ScoreBreakdown total={61} components={components} compact />);
-    expect(screen.getByTestId("score-band")).toHaveTextContent(/SETUP INCOMPLETE/i);
+describe("Market Story", () => {
+  it("builds deterministic story from verified fields only", () => {
+    const result = buildMarketStory({
+      decision: "WAIT",
+      session: "ASIA",
+      regime: "RANGE",
+      positionVsPoc: "BELOW_POC",
+      atrLabel: "NORMAL",
+      poc: 2380,
+      livePrice: 2375,
+      components: [
+        { label: "Trend", score: 12, max: 12, reason: "ok" },
+        { label: "Confirmation", score: 2, max: 12, reason: "weak" }
+      ]
+    });
+    expect(result.insufficient).toBe(false);
+    expect(result.story).toMatch(/POC/i);
+    expect(result.story).not.toMatch(/guaranteed|broker|probability of profit/i);
+    expect(result.evidence.some((e) => e.startsWith("poc="))).toBe(true);
+  });
+
+  it("shows insufficient state", () => {
+    render(<MarketStoryCard insufficientData />);
+    expect(screen.getByTestId("market-story-insufficient")).toBeInTheDocument();
+  });
+});
+
+describe("ScoreBreakdown", () => {
+  it("stays collapsed until expand, then supports show all", async () => {
+    const user = userEvent.setup();
+    const components = [
+      { label: "News", score: 1, max: 5, reason: "Reason" },
+      { label: "Market Structure", score: 2, max: 12, reason: "Reason" },
+      { label: "Confirmation", score: 3, max: 12, reason: "Reason" },
+      { label: "Risk Geometry", score: 4, max: 14, reason: "Reason" },
+      { label: "Trend", score: 10, max: 12, reason: "Reason" },
+      { label: "Volume Profile", score: 8, max: 12, reason: "Reason" },
+      { label: "ATR", score: 6, max: 10, reason: "Reason" },
+      { label: "Momentum", score: 7, max: 7, reason: "Reason" }
+    ];
+
+    render(<ScoreBreakdown total={61} components={components} />);
+    expect(screen.getByTestId("score-band")).toHaveTextContent(/incomplete/i);
+    expect(screen.getByTestId("score-readiness")).toBeInTheDocument();
+    expect(screen.queryByTestId("score-components")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("score-expand"));
     expect(screen.getByTestId("score-components").querySelectorAll("li")).toHaveLength(5);
     await user.click(screen.getByTestId("score-toggle"));
     expect(screen.getByTestId("score-components").querySelectorAll("li")).toHaveLength(8);
-    await user.click(screen.getByTestId("score-toggle"));
-    expect(screen.getByTestId("score-components").querySelectorAll("li")).toHaveLength(5);
   });
 });
 
 describe("MarketLevelLadder", () => {
-  it("renders live price marker", () => {
+  it("renders live price and nearest labels", () => {
     render(
       <MarketLevelLadder
         input={{ livePrice: 100, poc: 98, vah: 105, val: 90 }}
@@ -153,28 +194,103 @@ describe("MarketLevelLadder", () => {
       />
     );
     expect(screen.getByTestId("ladder-live-price")).toBeInTheDocument();
-    expect(screen.getByTestId("market-level-ladder")).toHaveTextContent(/verified stored market data/i);
+    expect(screen.getByTestId("nearest-resistance")).toHaveTextContent("105.00");
+    expect(screen.getByTestId("nearest-support")).toHaveTextContent("98.00");
   });
 });
 
-describe("OverviewPage compact dashboard", () => {
+describe("OvernightReviewCard relevance", () => {
+  it("hides when no overnight candidates", async () => {
+    const { OvernightReviewCard } = await import("../components/v5/OvernightReviewCard");
+    const { render: r, screen: s } = await import("@testing-library/react");
+    r(
+      <OvernightReviewCard
+        review={{
+          analysesHint: "",
+          candidatesCreated: 0,
+          validatedPlans: 0,
+          best: null,
+          items: [],
+          disclaimer: "x"
+        }}
+      />
+    );
+    expect(s.queryByTestId("overnight-review")).not.toBeInTheDocument();
+  });
+
+  it("shows collapsed summary when relevant", async () => {
+    const { OvernightReviewCard } = await import("../components/v5/OvernightReviewCard");
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <OvernightReviewCard
+          review={{
+            analysesHint: "hint",
+            candidatesCreated: 1,
+            validatedPlans: 0,
+            best: {
+              setupId: "s1",
+              direction: "BUY",
+              status: "REJECTED",
+              createdAt: "2026-07-21T22:00:00.000Z",
+              resultLabel: "REJECTED"
+            },
+            items: [],
+            disclaimer: "SHADOW RESULT — NOT AN EXECUTED TRADE."
+          }}
+        />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("overnight-summary")).toHaveTextContent(/1 candidate/i);
+    expect(screen.getByTestId("overnight-summary")).toHaveTextContent(/0 validated/i);
+    expect(screen.queryByTestId("overnight-expanded")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("overnight-summary"));
+    expect(screen.getByTestId("overnight-expanded")).toBeInTheDocument();
+  });
+});
+
+describe("CSS reduced-motion and density contracts", () => {
+  it("disables live pulse under prefers-reduced-motion", async () => {
+    const css = (await import("../styles/redesign.css?raw")).default as string;
+    expect(css).toMatch(/prefers-reduced-motion:\s*reduce/);
+    expect(css).toMatch(/gm-live-pulse/);
+    expect(css).toMatch(/\.gm-dash-grid/);
+    expect(css).toMatch(/gm-dashboard--v542/);
+  });
+});
+
+describe("local-time formatting", () => {
+  it("exposes UTC as secondary technical detail", async () => {
+    const { formatLocalTimestamp } = await import("../lib/timezone");
+    const ts = formatLocalTimestamp("2026-07-21T05:15:00.000Z", {
+      mode: "iana",
+      iana: "Europe/Dublin"
+    });
+    expect(ts.timeZone).toBe("Europe/Dublin");
+    expect(ts.secondaryUtc).toMatch(/UTC/);
+    expect(ts.primary).not.toMatch(/UTC/);
+  });
+});
+
+describe("OverviewPage V5.4.2", () => {
   beforeEach(() => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
-  it("renders compact summary without email and shows primary signal + ladder", async () => {
+  it("shows primary signal first without email or summary grid", async () => {
     render(
       <MemoryRouter>
         <OverviewPage />
       </MemoryRouter>
     );
-    expect(await screen.findByTestId("dashboard-summary")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(await screen.findByTestId("primary-signal-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("dashboard-summary")).not.toBeInTheDocument();
+    expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
+    expect(await screen.findByTestId("market-story")).toBeInTheDocument();
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
+    expect(await screen.findByTestId("current-plan")).toBeInTheDocument();
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
     expect(await screen.findByTestId("goldmeta-score")).toBeInTheDocument();
-    // technical id stays inside collapsed disclosure
     const tech = screen.getByText("Technical details").closest("details");
     expect(tech).not.toHaveAttribute("open");
   });
