@@ -8,28 +8,103 @@ struct DashboardView: View {
             ZStack {
                 GoldMetaColor.atmosphere.ignoresSafeArea()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 18) {
                         header
+                        scenarioPicker
                         content
                     }
-                    .padding(18)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
                 }
                 .refreshable { await viewModel.refresh() }
             }
-            .navigationTitle("Dashboard")
+            .navigationTitle("XAUUSD")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("XAUUSD")
-                .font(GoldMetaFont.display(34, weight: .bold))
-                .foregroundStyle(GoldMetaColor.textPrimary)
-            Text("Gold spot decision support")
+        VStack(alignment: .leading, spacing: 10) {
+            Text("GoldMeta")
+                .font(GoldMetaFont.display(28, weight: .bold))
+                .foregroundStyle(GoldMetaColor.gold)
+            Text("XAUUSD decision support")
+                .font(GoldMetaFont.rounded(.subheadline, weight: .medium))
                 .foregroundStyle(GoldMetaColor.textSecondary)
+            tradingModeBar
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var tradingModeBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(viewModel.tradingModeTitle)
+                    .font(GoldMetaFont.rounded(.caption, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(GoldMetaColor.gold.opacity(0.2)))
+                if viewModel.emergencyStopActive {
+                    Text("STOPPED")
+                        .font(GoldMetaFont.rounded(.caption, weight: .bold))
+                        .foregroundStyle(GoldMetaColor.sell)
+                }
+                Spacer()
+            }
+            Button(role: .destructive) {
+                Task { await viewModel.emergencyStopTrading() }
+            } label: {
+                Label("STOP AUTO TRADING", systemImage: "hand.raised.fill")
+                    .font(GoldMetaFont.rounded(.subheadline, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(GoldMetaColor.sell.opacity(0.9)))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Emergency stop auto trading")
+        }
+    }
+
+    private var scenarioPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Mock scenarios")
+                .font(GoldMetaFont.caption)
+                .foregroundStyle(GoldMetaColor.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(DashboardViewModel.mvpScenarioTitles.enumerated()), id: \.offset) { index, title in
+                        Button {
+                            Task { await viewModel.selectMVPScenario(index: index) }
+                        } label: {
+                            Text(title)
+                                .font(GoldMetaFont.rounded(.caption, weight: .semibold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(index == viewModel.selectedMVPScenarioIndex
+                                              ? GoldMetaColor.gold.opacity(0.24)
+                                              : GoldMetaColor.elevated)
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .stroke(
+                                            index == viewModel.selectedMVPScenarioIndex
+                                            ? GoldMetaColor.gold.opacity(0.7)
+                                            : GoldMetaColor.gold.opacity(0.15),
+                                            lineWidth: 1
+                                        )
+                                )
+                                .foregroundStyle(GoldMetaColor.textPrimary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Load \(title) scenario")
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -37,19 +112,23 @@ struct DashboardView: View {
         switch viewModel.state {
         case .idle, .loading:
             GoldCard {
-                HStack { ProgressView().tint(GoldMetaColor.gold); Text("Loading latest decision...") }
+                HStack(spacing: 12) {
+                    ProgressView().tint(GoldMetaColor.gold)
+                    Text("Loading latest decision...")
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                }
             }
         case .failed(let message):
             EmptyStateView(title: "Unable to load", message: message)
         case .offline(let cached):
             if let cached {
                 statusBanner("OFFLINE", message: "Showing cached decision. Treat as decision support only and verify live price.")
-                decisionCard(cached)
+                decisionCard(cached, sourceOverride: .offline)
             } else {
                 EmptyStateView(title: "Offline", message: "No cached decision is available yet.")
             }
         case .loaded(let decision):
-            if decision.isStale || decision.dataSourceLabel != .live && decision.dataSourceLabel != .mock {
+            if decision.isStale || (decision.dataSourceLabel != .live && decision.dataSourceLabel != .mock) {
                 statusBanner(decision.dataSourceLabel.rawValue, message: "Data is not live. WAIT or verify externally before taking any action.")
             }
             decisionCard(decision)
@@ -58,7 +137,7 @@ struct DashboardView: View {
 
     private func statusBanner(_ title: String, message: String) -> some View {
         GoldCard {
-            HStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(GoldMetaColor.wait)
                 VStack(alignment: .leading, spacing: 4) {
@@ -69,67 +148,191 @@ struct DashboardView: View {
         }
     }
 
-    private func decisionCard(_ decision: Decision) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            GoldCard {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .center) {
-                        DecisionBadge(decision: decision.decision, isProvisional: decision.isProvisional)
-                        Spacer()
-                        DataQualityBadge(dataQuality: decision.dataQuality, source: decision.dataSourceLabel)
-                    }
-                    Text(decision.lastKnownPrice?.xauPrice ?? "No price")
-                        .font(GoldMetaFont.price)
-                        .foregroundStyle(GoldMetaColor.textPrimary)
-                        .accessibilityLabel("Last known price \(decision.lastKnownPrice?.xauPrice ?? "unavailable")")
-                    HStack {
-                        metric("Confidence", value: "\(decision.confidence.percentText) \(decision.confidenceLabel.displayName)")
-                        metric("Age", value: decision.generatedAt.relativeShort)
-                        metric("Score", value: String(format: "%.0f", decision.setupScore))
-                    }
-                    Divider().overlay(GoldMetaColor.gold.opacity(0.2))
-                    PriceRow("Entry", value: decision.entry.displayPrice, detail: decision.entry.condition)
-                    PriceRow("Stop loss", value: decision.stopLoss.price?.xauPrice ?? "N/A", detail: decision.stopLoss.reason)
-                    ForEach(decision.takeProfits) { target in
-                        PriceRow(target.label, value: target.price.xauPrice, detail: target.reason)
-                    }
-                    PriceRow("Risk/reward", value: decision.riskReward.bestAvailable?.ratioText ?? "N/A", detail: "TP1 \(decision.riskReward.tp1?.ratioText ?? "-") / TP2 \(decision.riskReward.tp2?.ratioText ?? "-") / TP3 \(decision.riskReward.tp3?.ratioText ?? "-")")
-                    PriceRow("Session", value: decision.currentSession ?? "Unknown")
-                    PriceRow("HTF bias", value: decision.higherTimeframeBias?.rawValue ?? "Unknown")
-                }
-            }
+    private func decisionCard(_ decision: Decision, sourceOverride: DataSourceLabel? = nil) -> some View {
+        let display = decision.display
 
-            GoldCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionHeader("Explanation")
-                    ForEach(decision.reasonSummary, id: \.self) { reason in
-                        Label(reason, systemImage: "sparkle.magnifyingglass")
+        return VStack(alignment: .leading, spacing: 16) {
+            if decision.isAnalysisOnly {
+                statusBanner("ANALYSIS ONLY", message: "This is decision-engine analysis, not an executed broker order.")
+            }
+            heroCard(decision, display: display, sourceOverride: sourceOverride)
+            levelsCard(display)
+            tradePlanCard(decision, display: display)
+            scoreBreakdownCard(display)
+            evidenceCard(display)
+            actionsCard(decision)
+            DisclaimerBanner(compact: true)
+            secondaryLinks(decision)
+        }
+    }
+
+    private func heroCard(_ decision: Decision, display: DecisionDisplay, sourceOverride: DataSourceLabel?) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(display.scenarioTitle)
+                            .font(GoldMetaFont.caption)
                             .foregroundStyle(GoldMetaColor.textSecondary)
-                    }
-                    if !decision.warnings.isEmpty {
-                        Divider().overlay(GoldMetaColor.gold.opacity(0.2))
-                        ForEach(decision.warnings, id: \.self) { warning in
-                            Label(warning, systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(GoldMetaColor.wait)
+                        Text(display.decisionLabel)
+                            .font(GoldMetaFont.display(48, weight: .bold))
+                            .foregroundStyle(decision.decision.color)
+                            .accessibilityLabel("Decision \(display.decisionLabel)")
+                        if decision.isProvisional || decision.shouldShowTestBadge {
+                            DecisionBadge(
+                                decision: decision.decision,
+                                isProvisional: decision.isProvisional,
+                                isTestDecision: decision.shouldShowTestBadge
+                            )
                         }
                     }
+                    Spacer(minLength: 8)
+                    DataQualityBadge(dataQuality: decision.dataQuality, source: sourceOverride ?? decision.dataSourceLabel)
+                }
+
+                Text(display.currentPriceText)
+                    .font(GoldMetaFont.price)
+                    .foregroundStyle(GoldMetaColor.textPrimary)
+                    .accessibilityLabel("Current price \(display.currentPriceText)")
+
+                HStack(spacing: 12) {
+                    metricTile("Confidence", value: display.confidenceText, detail: display.confidenceDetail)
+                    metricTile("Score", value: display.tradeScoreText, detail: "Grade \(display.setupGradeText)")
+                    metricTile("Manage", value: display.managementText, detail: display.analysisOnlyText)
+                }
+
+                Text(display.explanationText)
+                    .font(GoldMetaFont.rounded(.caption))
+                    .foregroundStyle(GoldMetaColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !display.safetyFlagTexts.isEmpty {
+                    Text(display.safetyFlagTexts.joined(separator: " · "))
+                        .font(GoldMetaFont.caption)
+                        .foregroundStyle(GoldMetaColor.wait)
                 }
             }
+        }
+    }
 
-            HStack(spacing: 12) {
-                NavigationLink {
-                    FullAnalysisView(viewModel: AnalysisViewModel(environment: AppEnvironment.preview), suppliedDecision: decision)
-                } label: {
-                    Label("Open Full Analysis", systemImage: "doc.text.magnifyingglass")
+    private func levelsCard(_ display: DecisionDisplay) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("Market structure", subtitle: "Volume profile levels")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    levelCell("POC", value: display.pocText)
+                    levelCell("VAH", value: display.vahText)
+                    levelCell("VAL", value: display.valText)
+                    levelCell("Trend", value: display.trendText)
                 }
-                .buttonStyle(.bordered)
-                .tint(GoldMetaColor.gold)
-
-                Button("Mark Trade Taken") { viewModel.markTradeTaken() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(decision.decision.color)
-                    .accessibilityLabel(decision.decision == .wait ? "Record skipped trade" : "Mark trade taken")
             }
+        }
+    }
+
+    private func tradePlanCard(_ decision: Decision, display: DecisionDisplay) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("Trade plan", subtitle: decision.entry.condition)
+                PriceRow("Entry", value: display.entryText, detail: decision.entry.type.displayName)
+                PriceRow("Stop loss", value: display.stopLossText, detail: decision.stopLoss.reason)
+                PriceRow("TP1", value: display.tp1Text, detail: decision.takeProfits.first(where: { $0.label.uppercased() == "TP1" })?.reason)
+                PriceRow("TP2", value: display.tp2Text, detail: decision.takeProfits.first(where: { $0.label.uppercased() == "TP2" })?.reason)
+                PriceRow("TP3", value: display.tp3Text, detail: decision.takeProfits.first(where: { $0.label.uppercased() == "TP3" })?.reason)
+                PriceRow(
+                    "Risk / reward",
+                    value: display.riskRewardText,
+                    detail: "TP1 \(decision.riskReward.tp1?.ratioText ?? "—") · TP2 \(decision.riskReward.tp2?.ratioText ?? "—") · TP3 \(decision.riskReward.tp3?.ratioText ?? "—")"
+                )
+            }
+        }
+    }
+
+    private func scoreBreakdownCard(_ display: DecisionDisplay) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("Score breakdown", subtitle: "Decision engine factors")
+                if display.scoreBreakdownLines.isEmpty {
+                    Text("Breakdown unavailable for this fixture")
+                        .font(GoldMetaFont.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                } else {
+                    ForEach(display.scoreBreakdownLines, id: \.self) { line in
+                        Text(line)
+                            .font(GoldMetaFont.rounded(.caption))
+                            .foregroundStyle(GoldMetaColor.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func evidenceCard(_ display: DecisionDisplay) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeader("Reasons")
+                evidenceColumn(title: "Supporting", icon: "checkmark.circle.fill", color: GoldMetaColor.buy, items: display.supportingReasons)
+                evidenceColumn(title: "Opposing", icon: "exclamationmark.circle.fill", color: GoldMetaColor.sell, items: display.opposingReasons)
+            }
+        }
+    }
+
+    private func evidenceColumn(title: String, icon: String, color: Color, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(GoldMetaFont.rounded(.subheadline, weight: .semibold))
+                .foregroundStyle(color)
+            if items.isEmpty {
+                Text("None listed")
+                    .font(.caption)
+                    .foregroundStyle(GoldMetaColor.textSecondary)
+            } else {
+                ForEach(items, id: \.self) { item in
+                    Text(item)
+                        .font(GoldMetaFont.rounded(.callout))
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actionsCard(_ decision: Decision) -> some View {
+        GoldCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("Actions", subtitle: "Log the next step for this decision")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(decision.actionsForDisplay) { action in
+                        Button {
+                            viewModel.applyTradeAction(action)
+                        } label: {
+                            actionLabel(action)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(action.title)
+                    }
+                }
+                if let message = viewModel.lastActionMessage {
+                    Text(message)
+                        .font(GoldMetaFont.caption)
+                        .foregroundStyle(GoldMetaColor.gold)
+                        .accessibilityLabel(message)
+                }
+            }
+        }
+    }
+
+    private func secondaryLinks(_ decision: Decision) -> some View {
+        VStack(spacing: 10) {
+            NavigationLink {
+                FullAnalysisView(viewModel: AnalysisViewModel(environment: viewModel.environment), suppliedDecision: decision)
+            } label: {
+                Label("Open full analysis", systemImage: "doc.text.magnifyingglass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(GoldMetaColor.gold)
+
             Button {
                 Task { await viewModel.refresh() }
             } label: {
@@ -141,11 +344,72 @@ struct DashboardView: View {
         }
     }
 
-    private func metric(_ label: String, value: String) -> some View {
+    private func metricTile(_ label: String, value: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(GoldMetaColor.textSecondary)
-            Text(value).font(GoldMetaFont.rounded(.callout, weight: .semibold))
+            Text(label).font(.caption2).foregroundStyle(GoldMetaColor.textSecondary)
+            Text(value).font(GoldMetaFont.rounded(.callout, weight: .bold))
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(GoldMetaColor.textSecondary)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func levelCell(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(GoldMetaFont.caption)
+                .foregroundStyle(GoldMetaColor.textSecondary)
+            Text(value)
+                .font(GoldMetaFont.rounded(.title3, weight: .semibold))
+                .foregroundStyle(GoldMetaColor.textPrimary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(GoldMetaColor.elevated.opacity(0.9))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(value)")
+    }
+
+    @ViewBuilder
+    private func actionLabel(_ action: RecommendedTradeAction) -> some View {
+        let content = VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: action.systemImage)
+                .font(.title3)
+            Text(action.title)
+                .font(GoldMetaFont.rounded(.caption, weight: .semibold))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+
+        if action.isPrimary {
+            content
+                .foregroundStyle(Color.black.opacity(0.86))
+                .background(
+                    LinearGradient(
+                        colors: [GoldMetaColor.gold, Color(red: 0.98, green: 0.78, blue: 0.33)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+        } else {
+            content
+                .foregroundStyle(GoldMetaColor.textPrimary)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(GoldMetaColor.elevated)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(GoldMetaColor.gold.opacity(0.18), lineWidth: 1)
+                        )
+                )
+        }
     }
 }

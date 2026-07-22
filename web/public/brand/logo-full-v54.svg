@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 460" role="img" aria-label="GoldMeta by MetaMech Solutions">
+  <!-- Official full logo matching Savio photo: stacked mark + GOLDMETΛ + MetaMech tagline -->
+  <g transform="translate(82,8)">
+    <path
+      d="M158.90 32.89 A86 86 0 1 0 223.11 97.10"
+      fill="none"
+      stroke="#11284A"
+      stroke-width="28"
+      stroke-linecap="butt"
+    />
+    <path
+      d="M76 178 V88 h23 l19 54 19-54 h23 v52 l26-40 v66 h-21 v-38 L142 178 h-16 L104 132 v46 H76 Z"
+      fill="#D8A33D"
+    />
+    <path d="M168 114 L214 52 L230 66 L192 108 H234 V124 H168 Z" fill="#D8A33D"/>
+    <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+    <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+    <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+    <path d="M108 178 v26 M128 178 v34 M148 178 v26" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="108" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="128" cy="218" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="148" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  </g>
+
+  <text
+    x="210"
+    y="320"
+    text-anchor="middle"
+    font-family="Montserrat, Avenir Next, Segoe UI, sans-serif"
+    font-size="48"
+    font-weight="780"
+    letter-spacing="0.12em"
+  >
+    <tspan fill="#D8A33D">GOLD</tspan><tspan fill="#11284A">METΛ</tspan>
+  </text>
+
+  <line x1="78" y1="352" x2="118" y2="352" stroke="#D8A33D" stroke-width="2"/>
+  <text
+    x="210"
+    y="358"
+    text-anchor="middle"
+    font-family="Montserrat, Avenir Next, Segoe UI, sans-serif"
+    font-size="16"
+    font-weight="500"
+    fill="#11284A"
+    letter-spacing="0.04em"
+  >by MetaMech Solutions</text>
+  <line x1="302" y1="352" x2="342" y2="352" stroke="#D8A33D" stroke-width="2"/>
+</svg>

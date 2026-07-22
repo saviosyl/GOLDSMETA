@@ -4,12 +4,15 @@ struct TradePlanSummaryView: View {
     let decision: Decision
 
     var body: some View {
+        let display = decision.display
         GoldCard {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("Trade plan summary")
-                PriceRow("Entry", value: decision.entry.displayPrice, detail: decision.entry.condition)
-                PriceRow("Stop", value: decision.stopLoss.price?.xauPrice ?? "N/A", detail: decision.stopLoss.reason)
-                PriceRow("Best RR", value: decision.riskReward.bestAvailable?.ratioText ?? "N/A")
+                PriceRow("Decision", value: display.decisionLabel)
+                PriceRow("Entry", value: display.entryText, detail: decision.entry.condition)
+                PriceRow("Stop", value: display.stopLossText, detail: decision.stopLoss.reason)
+                PriceRow("POC / VAH / VAL", value: "\(display.pocText) / \(display.vahText) / \(display.valText)")
+                PriceRow("Best RR", value: display.riskRewardText)
             }
         }
     }

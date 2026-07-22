@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GoldMeta">
+  <!-- Official GoldMeta mark: navy G (open top-right) + gold M, bars, growth arrow, circuit nodes -->
+  <rect width="256" height="256" fill="none"/>
+
+  <!-- G ring via thick stroke arc — gap at ~2 o'clock -->
+  <path
+    d="M158.90 32.89 A86 86 0 1 0 223.11 97.10"
+    fill="none"
+    stroke="#11284A"
+    stroke-width="28"
+    stroke-linecap="butt"
+  />
+
+  <!-- Gold M -->
+  <path
+    d="M76 178 V88 h23 l19 54 19-54 h23 v52 l26-40 v66 h-21 v-38 L142 178 h-16 L104 132 v46 H76 Z"
+    fill="#D8A33D"
+  />
+
+  <!-- Growth arrow through G opening -->
+  <path d="M168 114 L214 52 L230 66 L192 108 H234 V124 H168 Z" fill="#D8A33D"/>
+
+  <!-- Ascending volume bars -->
+  <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+  <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+  <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+
+  <!-- Circuit traces + hollow nodes -->
+  <path d="M108 178 v26 M128 178 v34 M148 178 v26" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="108" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="128" cy="218" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="148" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+</svg>
