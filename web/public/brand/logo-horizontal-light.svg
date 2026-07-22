@@ -1,17 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 128" role="img" aria-label="GoldMeta">
-  <defs>
-    <linearGradient id="g" x1="20" y1="20" x2="108" y2="108" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#E8D48A"/>
-      <stop offset="1" stop-color="#C9A227"/>
-    </linearGradient>
-  </defs>
-  <g transform="translate(0,0)">
-    <rect width="128" height="128" rx="28" fill="#F7F4EA"/>
-    <rect x="6" y="6" width="116" height="116" rx="24" fill="#FFFDF6" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="1.5"/>
-    <polyline points="28,86 46,74 58,78 78,52 94,58 104,42" fill="none" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="104" cy="42" r="3.5" fill="#8A6B12"/>
-    <text x="64" y="78" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700" fill="#8A6B12">GM</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-label="GoldMeta">
+  <!-- Horizontal application logo -->
+  <g transform="translate(4,4) scale(0.44)">
+    <path d="M158.9 32.9A86 86 0 1 0 223.1 97.1" fill="none" stroke="#11284A" stroke-width="28" stroke-linecap="butt"/>
+    <path d="M76 178V88h23l19 54 19-54h23v52l26-40v66h-21v-38L142 178h-16L104 132v46H76z" fill="#D8A33D"/>
+    <path d="M168 114l46-62 16 14-38 42h42v16H168z" fill="#D8A33D"/>
+    <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+    <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+    <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+    <path d="M108 178v26M128 178v34M148 178v26" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="108" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="128" cy="218" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="148" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
   </g>
-  <text x="152" y="78" font-family="Georgia, 'Times New Roman', serif" font-size="52" font-weight="700" fill="#1A170F">GoldMeta</text>
-  <text x="154" y="104" font-family="Segoe UI, system-ui, sans-serif" font-size="16" fill="#6B6558">Gold Market Intelligence</text>
+  <text x="130" y="62" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="42" font-weight="780" letter-spacing="0.06em">
+    <tspan fill="#D8A33D">GOLD</tspan><tspan fill="#11284A">META</tspan>
+  </text>
+  <text x="132" y="92" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="500" fill="#667085">by MetaMech Solutions</text>
 </svg>

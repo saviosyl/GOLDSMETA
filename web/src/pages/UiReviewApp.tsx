@@ -62,7 +62,10 @@ function buildReviewApi() {
     ruleConfigVersion: "v3",
     backendVersion: "review",
     notificationSent: false,
-    currentSession: "NEWYORK"
+    currentSession: "NEWYORK",
+    lastKnownPrice: 2385.4,
+    ohlcv: { open: 2382, high: 2391, low: 2376, close: 2385.4, volume: 1200 },
+    marketStructure: { trend: "RANGE", poc: 2380, vah: 2390, val: 2370 }
   };
 
   const setup = {
@@ -139,13 +142,21 @@ function buildReviewApi() {
       empty
         ? null
         : {
-            total: 48,
+            total: 61,
             components: [
-              { label: "Structure", score: 10, max: 20, reason: "Partial" },
-              { label: "Profile", score: 12, max: 20, reason: "Near POC" }
+              { label: "Trend", score: 12, max: 12, reason: "Directional context supports the current bias." },
+              { label: "Market Structure", score: 2, max: 12, reason: "No clear invalidation structure." },
+              { label: "Volume Profile", score: 12, max: 12, reason: "Price interacting with verified POC." },
+              { label: "Risk Geometry", score: 0, max: 14, reason: "Not evaluated — no validated plan geometry yet." },
+              { label: "ATR", score: 10, max: 10, reason: "Volatility within expected band." },
+              { label: "Session", score: 5.6, max: 8, reason: "Acceptable session context." },
+              { label: "Confirmation", score: 3.6, max: 12, reason: "Multi-bar confirmation incomplete." },
+              { label: "Liquidity", score: 3.2, max: 8, reason: "Partial verified liquidity context." },
+              { label: "Momentum", score: 7, max: 7, reason: "Momentum aligned with bias." },
+              { label: "News", score: 0, max: 5, reason: "No verified calendar available." }
             ],
             disclaimer:
-              "GoldMeta Score is a rules-based setup-quality measurement. It is not the probability of a profitable trade."
+              "GoldMeta Score is a rules-based quality score, not the probability of profit."
           },
     v5Ask: async () => ({
       answer: offline

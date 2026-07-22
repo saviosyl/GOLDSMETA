@@ -4,17 +4,17 @@ import { useAuth } from "../../lib/auth";
 
 const DESKTOP_LINKS = [
   { to: "/", label: "Dashboard", end: true },
-  { to: "/intelligence", label: "Market Overview", end: false },
+  { to: "/intelligence", label: "Markets", end: false },
   { to: "/analytics", label: "Analytics", end: false },
   { to: "/replay", label: "Replay", end: false },
-  { to: "/journal", label: "Journal", end: false },
-  { to: "/settings", label: "Settings", end: false }
+  { to: "/journal", label: "Journal", end: false }
 ];
 
 const DESKTOP_SECONDARY = [
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "V4 Research" }
+  { to: "/v4", label: "Research" },
+  { to: "/settings", label: "Settings" }
 ];
 
 const MOBILE_PRIMARY = [
@@ -28,7 +28,7 @@ const MOBILE_MORE = [
   { to: "/journal", label: "Journal" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "V4 Research" },
+  { to: "/v4", label: "Research" },
   { to: "/settings", label: "Settings" }
 ];
 
@@ -90,7 +90,7 @@ export function AppShell({
             </NavLink>
           ))}
           <p className="gm-meta" style={{ margin: "16px 8px 6px" }}>
-            Advanced
+            More
           </p>
           {DESKTOP_SECONDARY.map((link) => (
             <NavLink

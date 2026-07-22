@@ -2,6 +2,8 @@
  * User-facing copy helpers — hide technical IDs unless expanded.
  */
 
+import { formatLocalTimestamp } from "./timezone";
+
 export function formatSession(raw: string | null | undefined): string {
   if (!raw) return "—";
   const key = raw.toUpperCase().replace(/\s+/g, "");
@@ -16,21 +18,12 @@ export function formatSession(raw: string | null | undefined): string {
   return map[key] ?? raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Local-first timestamp for ordinary UI (UTC secondary via timezone helpers). */
 export function formatUserTimestamp(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC"
-  })
-    .format(d)
-    .replace(",", "") + " UTC";
+  const formatted = formatLocalTimestamp(iso);
+  if (formatted.timeZone === "UTC") return `${formatted.primary} UTC`;
+  return `${formatted.primary} · ${formatted.timeZone}`;
 }
 
 export function plainLanguageReason(codes: string[] | undefined, fallback?: string): string {

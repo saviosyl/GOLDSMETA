@@ -11,6 +11,20 @@ import {
 import { cacheKeys, saveCache } from "../lib/offlineCache";
 import { formatWhen } from "../lib/format";
 import { formatClientError } from "../lib/errors";
+import {
+  detectBrowserTimezone,
+  loadTimezonePreference,
+  saveTimezonePreference,
+  type TimezonePreference
+} from "../lib/timezone";
+import {
+  loadAlertPrefs,
+  loadTradingHours,
+  saveAlertPrefs,
+  saveTradingHours,
+  type AlertPrefs,
+  type TradingHoursPreference
+} from "../lib/overnight";
 
 const connectionUrl = (conn: TradingViewConnection): string =>
   conn.webhookURL ?? conn.webhookUrl ?? "";
@@ -98,6 +112,10 @@ export function SettingsPage() {
   const [pushStatus, setPushStatus] = useState(getNotificationPermission());
   const [busy, setBusy] = useState(false);
   const [createdWebhookUrl, setCreatedWebhookUrl] = useState<string | null>(null);
+  const [tzPref, setTzPref] = useState<TimezonePreference>(() => loadTimezonePreference());
+  const [hoursPref, setHoursPref] = useState<TradingHoursPreference>(() => loadTradingHours());
+  const [alertPrefs, setAlertPrefs] = useState<AlertPrefs>(() => loadAlertPrefs());
+  const browserTz = detectBrowserTimezone();
   const [revealedWebhooks, setRevealedWebhooks] = useState<Record<string, boolean>>({});
   const [settingsTab, setSettingsTab] = useState("account");
   const [online, setOnline] = useState(
@@ -284,6 +302,7 @@ export function SettingsPage() {
     { id: "notifications", label: "Notifications" },
     { id: "tradingview", label: "TradingView" },
     { id: "risk", label: "Risk preferences" },
+    { id: "timezone", label: "Timezone" },
     { id: "appearance", label: "Appearance" },
     { id: "installation", label: "Installation" },
     { id: "advanced", label: "Advanced" }
@@ -381,6 +400,91 @@ export function SettingsPage() {
               Enable Web Push: {notif.enableReason}
             </p>
           )}
+
+          <h3 style={{ marginTop: 24 }}>Alert priorities</h3>
+          <p className="muted settings-help">
+            Analysis and SHADOW alerts only — never BUY NOW / SELL NOW execution prompts. Ordinary
+            WAIT updates stay quiet by default.
+          </p>
+          <div className="gm-alert-prefs" data-testid="alert-prefs">
+            {(
+              [
+                ["validatedShadowPlan", "Validated shadow plan"],
+                ["highQualityOnly", "High-quality setup only"],
+                ["planWeakening", "Plan weakening"],
+                ["planConflict", "Plan conflict"],
+                ["planResolved", "Plan resolved"],
+                ["overnightSummary", "Overnight summary"],
+                ["candidateForming", "Candidate forming"],
+                ["allAnalysis", "All analysis updates"]
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="gm-check-row">
+                <input
+                  type="checkbox"
+                  checked={alertPrefs[key]}
+                  onChange={(e) => {
+                    const next = { ...alertPrefs, [key]: e.target.checked };
+                    setAlertPrefs(next);
+                    saveAlertPrefs(next);
+                  }}
+                />
+                {label}
+              </label>
+            ))}
+            <label className="gm-check-row">
+              <input
+                type="checkbox"
+                checked={alertPrefs.quietHoursEnabled}
+                onChange={(e) => {
+                  const next = { ...alertPrefs, quietHoursEnabled: e.target.checked };
+                  setAlertPrefs(next);
+                  saveAlertPrefs(next);
+                }}
+              />
+              Quiet hours
+            </label>
+            {alertPrefs.quietHoursEnabled && (
+              <div className="gm-inline-fields">
+                <label>
+                  From
+                  <input
+                    type="time"
+                    value={alertPrefs.quietStart}
+                    onChange={(e) => {
+                      const next = { ...alertPrefs, quietStart: e.target.value };
+                      setAlertPrefs(next);
+                      saveAlertPrefs(next);
+                    }}
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    type="time"
+                    value={alertPrefs.quietEnd}
+                    onChange={(e) => {
+                      const next = { ...alertPrefs, quietEnd: e.target.value };
+                      setAlertPrefs(next);
+                      saveAlertPrefs(next);
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+            <label className="gm-check-row">
+              <input
+                type="checkbox"
+                checked={alertPrefs.urgentHighQuality}
+                onChange={(e) => {
+                  const next = { ...alertPrefs, urgentHighQuality: e.target.checked };
+                  setAlertPrefs(next);
+                  saveAlertPrefs(next);
+                }}
+              />
+              Urgent high-quality shadow alert (off by default — not a profit guarantee)
+            </label>
+          </div>
         </div>
       )}
 
@@ -627,16 +731,100 @@ export function SettingsPage() {
         </div>
       )}
 
+      {settingsTab === "timezone" && (
+        <div className="card settings-card" data-testid="timezone-settings">
+          <h2>Timezone</h2>
+          <p className="muted settings-help">
+            Backend timestamps stay in UTC. The interface shows your local time first. Ireland
+            daylight saving uses Europe/Dublin when selected — never a hard-coded offset.
+          </p>
+          <label className="gm-field">
+            Display timezone
+            <select
+              value={tzPref.mode === "iana" ? `iana:${tzPref.iana}` : tzPref.mode}
+              onChange={(e) => {
+                const v = e.target.value;
+                let next: TimezonePreference = { mode: "auto" };
+                if (v === "utc") next = { mode: "utc" };
+                else if (v.startsWith("iana:")) next = { mode: "iana", iana: v.slice(5) };
+                setTzPref(next);
+                saveTimezonePreference(next);
+                setMessage("Timezone preference saved on this device.");
+              }}
+            >
+              <option value="auto">Automatic local ({browserTz})</option>
+              <option value="utc">UTC</option>
+              <option value="iana:Europe/Dublin">Europe/Dublin</option>
+              <option value="iana:Europe/London">Europe/London</option>
+              <option value="iana:America/New_York">America/New_York</option>
+              <option value="iana:Asia/Dubai">Asia/Dubai</option>
+              <option value="iana:Asia/Singapore">Asia/Singapore</option>
+            </select>
+          </label>
+
+          <h3 style={{ marginTop: 24 }}>Preferred trading hours</h3>
+          <p className="muted settings-help">
+            Affects alert preference and overnight summaries only. V4 continues collecting full
+            24-hour shadow evidence.
+          </p>
+          <label className="gm-field">
+            Hours
+            <select
+              value={hoursPref.mode}
+              onChange={(e) => {
+                const next = {
+                  ...hoursPref,
+                  mode: e.target.value as TradingHoursPreference["mode"]
+                };
+                setHoursPref(next);
+                saveTradingHours(next);
+              }}
+            >
+              <option value="24h">24 hours</option>
+              <option value="london">London session</option>
+              <option value="newyork">New York session</option>
+              <option value="london_ny">London + New York</option>
+              <option value="asia">Asia session</option>
+              <option value="custom">Custom schedule</option>
+            </select>
+          </label>
+          {hoursPref.mode === "custom" && (
+            <div className="gm-inline-fields">
+              <label>
+                Start
+                <input
+                  type="time"
+                  value={hoursPref.customStart ?? "08:00"}
+                  onChange={(e) => {
+                    const next = { ...hoursPref, customStart: e.target.value };
+                    setHoursPref(next);
+                    saveTradingHours(next);
+                  }}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="time"
+                  value={hoursPref.customEnd ?? "17:00"}
+                  onChange={(e) => {
+                    const next = { ...hoursPref, customEnd: e.target.value };
+                    setHoursPref(next);
+                    saveTradingHours(next);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+
       {settingsTab === "appearance" && (
         <div className="card settings-card">
           <h2>Appearance</h2>
           <p className="muted settings-help">
-            GoldMeta uses a restrained dark institutional theme. Brand concept selection is available
-            on the Brand preview page and does not change production assets until approved.
+            GoldMeta uses the approved navy + gold light theme. Brand assets use the official logo.
           </p>
-          <a className="gm-linkish" href="/brand">
-            Open brand concepts
-          </a>
         </div>
       )}
 
