@@ -138,11 +138,15 @@ export const processJob = async (
           source: "tradingview-ohlcv",
           dataQuality: "OK"
         };
-        await getOutcomeMonitorJobStore().enqueue({
-          userId: claimed.userId,
-          eventId: claimed.eventId,
-          bar
-        });
+        const { enqueueMatchingOutcomeMonitorJobs, getSignalOutcomeStore } = await import(
+          "../signalOutcome/monitor.js"
+        );
+        await enqueueMatchingOutcomeMonitorJobs(
+          claimed.userId,
+          bar,
+          getSignalOutcomeStore(),
+          getOutcomeMonitorJobStore()
+        );
       }
     } catch (error: unknown) {
       const { SignalOutcomeStorageUnavailableError } = await import(

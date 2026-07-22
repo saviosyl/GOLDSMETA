@@ -4,8 +4,13 @@
  * Never silently falls back to memory in production/serverless.
  */
 
-import type { SignalBarInput, SignalOutcomeRecord, SignalPerformanceDailyAggregate } from "./types";
-import type { ActiveMatchFilter, ApplyBarResult, SignalOutcomeStore } from "./store";
+import type {
+  ApplyBarResult,
+  SignalBarInput,
+  SignalOutcomeRecord,
+  SignalPerformanceDailyAggregate
+} from "./types";
+import type { ActiveMatchFilter, SignalOutcomeStore } from "./store";
 import { SignalOutcomeStorageUnavailableError } from "./storagePolicy";
 
 export class FailClosedSignalOutcomeStore implements SignalOutcomeStore {
@@ -57,7 +62,7 @@ export class FailClosedSignalOutcomeStore implements SignalOutcomeStore {
     _bar: SignalBarInput,
     _ownerId: string,
     _leaseMs?: number
-  ): Promise<ApplyBarResult | null> {
+  ): Promise<ApplyBarResult> {
     return this.fail();
   }
   async upsertDailyAggregateDelta(

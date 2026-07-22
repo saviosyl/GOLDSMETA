@@ -9,6 +9,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { createSignalOutcomeFromDecision } from "../../src/services/signalOutcome/engine";
 import { FirestoreSignalOutcomeStore } from "../../src/services/signalOutcome/store";
 import { FirestoreOutcomeMonitorJobStore } from "../../src/services/signalOutcome/monitorJobs";
+import { processOutcomeMonitorJob } from "../../src/services/signalOutcome/monitor";
 import type { DecisionRecord } from "../../src/models/types";
 import type { SignalBarInput } from "../../src/services/signalOutcome/types";
 
@@ -146,8 +147,12 @@ describe("Firestore emulator — atomic signal outcome apply", () => {
         store.applyBarAtomic("emu-user", record.snapshot.signalId, b, "worker-c")
       ]);
 
-      const acquired = results.filter((r) => r != null);
-      expect(acquired.length).toBeGreaterThanOrEqual(1);
+      const applied = results.filter((r) => r.status === "APPLIED");
+      const busyOrDup = results.filter(
+        (r) => r.status === "LEASE_BUSY" || r.status === "DUPLICATE"
+      );
+      expect(applied.length).toBeGreaterThanOrEqual(1);
+      expect(applied.length + busyOrDup.length).toBe(3);
       const final = await store.get("emu-user", record.snapshot.signalId);
       expect(final?.appliedBarEventIds.filter((id) => id === b.eventId)).toHaveLength(1);
       expect(final?.entry.entryReached).toBe(true);
@@ -164,19 +169,92 @@ describe("Firestore emulator — atomic signal outcome apply", () => {
       }
       const record = createSignalOutcomeFromDecision(decision(`emu2-${Date.now()}`));
       await store.save(record);
-      await store.applyBarAtomic(
+      const r1 = await store.applyBarAtomic(
         "emu-user",
         record.snapshot.signalId,
         bar({ eventId: `e1-${Date.now()}`, barTime: T1, low: 4130, high: 4132, close: 4131 }),
         "w1"
       );
-      await store.applyBarAtomic(
+      expect(r1.status).toBe("APPLIED");
+      const r2 = await store.applyBarAtomic(
         "emu-user",
         record.snapshot.signalId,
         bar({ eventId: `e2-${Date.now()}`, barTime: T2, low: 4126, high: 4130, close: 4126.5 }),
         "w2"
       );
+      expect(r2.status).toBe("APPLIED");
       const final = await store.get("emu-user", record.snapshot.signalId);
+      expect(final?.finalResult?.outcome).toBe("LOSS");
+      expect(final?.lastAppliedBarTime).toBe(T2);
+    },
+    30_000
+  );
+
+  it(
+    "T1/T2 concurrent jobs: T2 first does not lose T1 — final order entry then stop",
+    async () => {
+      if (!ready) throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
+      const record = createSignalOutcomeFromDecision(decision(`race-${Date.now()}`));
+      await store.save(record);
+      const signalId = record.snapshot.signalId;
+      const barT1 = bar({
+        eventId: `race-t1-${Date.now()}`,
+        barTime: T1,
+        low: 4130,
+        high: 4132,
+        close: 4131
+      });
+      const barT2 = bar({
+        eventId: `race-t2-${Date.now()}`,
+        barTime: T2,
+        low: 4126,
+        high: 4130,
+        close: 4126.5
+      });
+      const jobT1 = await jobStore.enqueue({
+        userId: "emu-user",
+        signalId,
+        eventId: barT1.eventId,
+        bar: barT1
+      });
+      const jobT2 = await jobStore.enqueue({
+        userId: "emu-user",
+        signalId,
+        eventId: barT2.eventId,
+        bar: barT2
+      });
+
+      await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "emu-t2" });
+      expect((await jobStore.get(jobT2.jobId))?.state).toBe("FAILED");
+      expect((await jobStore.get(jobT2.jobId))?.lastApplyStatus).toBe("OUT_OF_ORDER_WAIT");
+
+      await processOutcomeMonitorJob(jobT1.jobId, { store, jobStore, workerId: "emu-t1" });
+      expect((await jobStore.get(jobT1.jobId))?.state).toBe("COMPLETED");
+
+      // Advance backoff for T2 retry
+      const failed = await jobStore.get(jobT2.jobId);
+      await jobStore.fail(jobT2.jobId!, "force-due", "OUT_OF_ORDER_WAIT", "OUT_OF_ORDER_WAIT");
+      // Re-read and manually set nextAttemptAt via transaction-like re-enqueue path:
+      // claim requires nextAttemptAt <= now — use fail then patch by re-getting.
+      // Emulator: write nextAttemptAt directly.
+      const db = getFirestore(app);
+      await db
+        .collection("outcomeMonitorJobs")
+        .doc(jobT2.jobId)
+        .set(
+          {
+            state: "FAILED",
+            nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
+            lastApplyStatus: "OUT_OF_ORDER_WAIT"
+          },
+          { merge: true }
+        );
+      void failed;
+
+      await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "emu-t2b" });
+      expect((await jobStore.get(jobT2.jobId))?.state).toBe("COMPLETED");
+      const final = await store.get("emu-user", signalId);
+      expect(final?.entry.entryReached).toBe(true);
       expect(final?.finalResult?.outcome).toBe("LOSS");
       expect(final?.lastAppliedBarTime).toBe(T2);
     },
@@ -210,8 +288,11 @@ describe("Firestore emulator — atomic signal outcome apply", () => {
     async () => {
       if (!ready) throw new Error(`Firestore emulator not reachable at ${EMULATOR}`);
       const eventId = `due-${Date.now()}`;
+      const record = createSignalOutcomeFromDecision(decision(`due-sig-${Date.now()}`));
+      await store.save(record);
       await jobStore.enqueue({
         userId: "emu-user",
+        signalId: record.snapshot.signalId,
         eventId,
         bar: bar({ eventId, barTime: T1, low: 4130, high: 4132, close: 4131 })
       });

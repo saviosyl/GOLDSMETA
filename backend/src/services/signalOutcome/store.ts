@@ -8,25 +8,23 @@
  */
 
 import type { Firestore, Query, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
-import { applyBarToSignalOutcome } from "./engine";
+import { applyBarToSignalOutcome, validateBarForSignal } from "./engine";
 import {
   ACTIVE_MONITOR_LIFECYCLES,
+  type ApplyBarResult,
+  type SignalBarApplyStatus,
   type SignalBarInput,
   type SignalOutcomeRecord,
   type SignalPerformanceDailyAggregate
 } from "./types";
 import { nowIso } from "../../utils/time";
 
+export type { ApplyBarResult, SignalBarApplyStatus };
+
 export interface ActiveMatchFilter {
   symbol: string;
   timeframe: string | null;
   environment: "LIVE" | "TEST";
-}
-
-export interface ApplyBarResult {
-  record: SignalOutcomeRecord;
-  applied: boolean;
-  skippedReason?: string;
 }
 
 export interface SignalOutcomeStore {
@@ -52,6 +50,7 @@ export interface SignalOutcomeStore {
   ): Promise<SignalOutcomeRecord | null>;
   /**
    * Single transactional bar application for one signal.
+   * Always returns an explicit status — never treats LEASE_BUSY as success.
    */
   applyBarAtomic(
     userId: string,
@@ -59,7 +58,7 @@ export interface SignalOutcomeStore {
     bar: SignalBarInput,
     ownerId: string,
     leaseMs?: number
-  ): Promise<ApplyBarResult | null>;
+  ): Promise<ApplyBarResult>;
   upsertDailyAggregateDelta(
     userId: string,
     day: string,
@@ -76,6 +75,34 @@ const matchesFilter = (r: SignalOutcomeRecord, match: ActiveMatchFilter): boolea
   r.snapshot.symbol === match.symbol &&
   String(r.snapshot.timeframe ?? "") === String(match.timeframe ?? "") &&
   r.snapshot.environment === match.environment;
+
+function classifyPreApply(
+  record: SignalOutcomeRecord,
+  bar: SignalBarInput
+): SignalBarApplyStatus | null {
+  if (
+    !matchesFilter(record, {
+      symbol: bar.symbol,
+      timeframe: bar.timeframe,
+      environment: bar.environment
+    })
+  ) {
+    return "IDENTITY_MISMATCH";
+  }
+  const reject = validateBarForSignal(record, bar);
+  if (reject === "DUPLICATE_EVENT") return "DUPLICATE";
+  if (
+    reject === "WRONG_SYMBOL" ||
+    reject === "WRONG_TIMEFRAME" ||
+    reject === "WRONG_ENVIRONMENT" ||
+    reject === "UNCONFIRMED"
+  ) {
+    return "IDENTITY_MISMATCH";
+  }
+  if (reject === "OUT_OF_ORDER_WAIT") return "OUT_OF_ORDER_WAIT";
+  if (reject === "SAME_CANDLE_SKIP") return "SAME_CANDLE_SKIP";
+  return null;
+}
 
 function releaseLease(record: SignalOutcomeRecord): void {
   record.leaseOwnerId = null;
@@ -171,38 +198,38 @@ export class InMemorySignalOutcomeStore implements SignalOutcomeStore {
     bar: SignalBarInput,
     ownerId: string,
     leaseMs = 60_000
-  ): Promise<ApplyBarResult | null> {
+  ): Promise<ApplyBarResult> {
     const current = await this.get(userId, signalId);
-    if (!current) return null;
-    if (!isActiveLife(current.monitoring.lifecycle) && current.monitoring.lifecycle !== "WAIT_ONLY") {
-      // Still allow idempotent/chronology checks on active only for monitoring.
-    }
+    if (!current) return { record: null, status: "NOT_FOUND", signalId };
+
     const now = Date.now();
     const until = current.leaseUntil ? Date.parse(current.leaseUntil) : 0;
     if (current.leaseOwnerId && current.leaseOwnerId !== ownerId && until > now) {
-      return null;
+      return { record: structuredClone(current), status: "LEASE_BUSY", signalId };
     }
+
     if (!isActiveLife(current.monitoring.lifecycle)) {
-      return { record: current, applied: false, skippedReason: "NOT_ACTIVE" };
+      const pre = classifyPreApply(current, bar);
+      if (pre === "DUPLICATE") return { record: current, status: "DUPLICATE", signalId };
+      return { record: current, status: "TERMINAL", signalId };
     }
-    if (!matchesFilter(current, {
-      symbol: bar.symbol,
-      timeframe: bar.timeframe,
-      environment: bar.environment
-    })) {
-      return { record: current, applied: false, skippedReason: "IDENTITY_MISMATCH" };
+
+    const preStatus = classifyPreApply(current, bar);
+    if (preStatus === "DUPLICATE") return { record: current, status: "DUPLICATE", signalId };
+    if (preStatus === "IDENTITY_MISMATCH") {
+      return { record: current, status: "IDENTITY_MISMATCH", signalId };
+    }
+    if (preStatus === "OUT_OF_ORDER_WAIT") {
+      return { record: current, status: "OUT_OF_ORDER_WAIT", signalId };
     }
 
     current.leaseOwnerId = ownerId;
     current.leaseUntil = new Date(now + leaseMs).toISOString();
-    const beforeIds = current.appliedBarEventIds.length;
-    const beforeLife = current.monitoring.lifecycle;
     const beforeFinal = current.finalResult?.outcome ?? null;
     const next = applyBarToSignalOutcome(current, bar);
     releaseLease(next);
     const saved = await this.save(next);
 
-    // Transactional daily aggregate when a countable outcome newly appears.
     if (
       saved.finalResult &&
       saved.finalResult.outcome &&
@@ -228,9 +255,8 @@ export class InMemorySignalOutcomeStore implements SignalOutcomeStore {
 
     return {
       record: saved,
-      applied:
-        saved.appliedBarEventIds.length > beforeIds || saved.monitoring.lifecycle !== beforeLife,
-      skippedReason: undefined
+      status: preStatus === "SAME_CANDLE_SKIP" ? "SAME_CANDLE_SKIP" : "APPLIED",
+      signalId
     };
   }
 
@@ -389,28 +415,31 @@ export class FirestoreSignalOutcomeStore implements SignalOutcomeStore {
     bar: SignalBarInput,
     ownerId: string,
     leaseMs = 60_000
-  ): Promise<ApplyBarResult | null> {
+  ): Promise<ApplyBarResult> {
     const ref = this.col(userId).doc(signalId);
     return this.db.runTransaction(async (tx: Transaction) => {
       const snap = await tx.get(ref);
-      if (!snap.exists) return null;
+      if (!snap.exists) return { record: null, status: "NOT_FOUND" as const, signalId };
       const current = snap.data() as SignalOutcomeRecord;
       const now = Date.now();
       const until = current.leaseUntil ? Date.parse(current.leaseUntil) : 0;
       if (current.leaseOwnerId && current.leaseOwnerId !== ownerId && until > now) {
-        return null;
+        return { record: current, status: "LEASE_BUSY" as const, signalId };
       }
+
       if (!isActiveLife(current.monitoring.lifecycle)) {
-        return { record: current, applied: false, skippedReason: "NOT_ACTIVE" };
+        const pre = classifyPreApply(current, bar);
+        if (pre === "DUPLICATE") return { record: current, status: "DUPLICATE" as const, signalId };
+        return { record: current, status: "TERMINAL" as const, signalId };
       }
-      if (
-        !matchesFilter(current, {
-          symbol: bar.symbol,
-          timeframe: bar.timeframe,
-          environment: bar.environment
-        })
-      ) {
-        return { record: current, applied: false, skippedReason: "IDENTITY_MISMATCH" };
+
+      const preStatus = classifyPreApply(current, bar);
+      if (preStatus === "DUPLICATE") return { record: current, status: "DUPLICATE" as const, signalId };
+      if (preStatus === "IDENTITY_MISMATCH") {
+        return { record: current, status: "IDENTITY_MISMATCH" as const, signalId };
+      }
+      if (preStatus === "OUT_OF_ORDER_WAIT") {
+        return { record: current, status: "OUT_OF_ORDER_WAIT" as const, signalId };
       }
 
       // All reads before writes (Firestore transaction rule).
@@ -418,10 +447,8 @@ export class FirestoreSignalOutcomeStore implements SignalOutcomeStore {
       const aggRef = this.aggCol(userId).doc(`${day}_${current.snapshot.environment}`);
       const aggSnap = await tx.get(aggRef);
 
-      // Claim lease, apply transition, persist, release — all in this transaction.
       current.leaseOwnerId = ownerId;
       current.leaseUntil = new Date(now + leaseMs).toISOString();
-      const beforeIds = current.appliedBarEventIds.length;
       const beforeFinal = current.finalResult?.outcome ?? null;
       const next = applyBarToSignalOutcome(current, bar);
       releaseLease(next);
@@ -474,8 +501,8 @@ export class FirestoreSignalOutcomeStore implements SignalOutcomeStore {
 
       return {
         record: next,
-        applied: next.appliedBarEventIds.length > beforeIds,
-        skippedReason: undefined
+        status: (preStatus === "SAME_CANDLE_SKIP" ? "SAME_CANDLE_SKIP" : "APPLIED") as SignalBarApplyStatus,
+        signalId
       };
     });
   }

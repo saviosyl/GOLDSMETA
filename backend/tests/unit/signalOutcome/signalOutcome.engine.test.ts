@@ -168,7 +168,7 @@ describe("Signal Outcome Tracking", () => {
       low: 4120,
       high: 4160,
       close: 4155
-    }))).toBe("SAME_OR_OLDER_CANDLE");
+    }))).toBe("SAME_CANDLE_SKIP");
   });
 
   it("price movements earlier inside creation candle cannot create TP or stop result", () => {
@@ -565,7 +565,7 @@ describe("Signal Outcome Tracking", () => {
       store,
       "worker-1"
     );
-    expect(updated.length).toBe(2);
+    expect(updated.filter((r) => r.status === "APPLIED").length).toBe(2);
     const a2 = await store.get(a.snapshot.userId, a.snapshot.signalId);
     const b2 = await store.get(b.snapshot.userId, b.snapshot.signalId);
     const c2 = await store.get(otherTf.snapshot.userId, otherTf.snapshot.signalId);
@@ -582,8 +582,9 @@ describe("Signal Outcome Tracking", () => {
       bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       "worker-a"
     );
-    expect(result?.record.entry.entryReached).toBe(true);
-    expect(result?.record.leaseOwnerId).toBeNull();
+    expect(result.status).toBe("APPLIED");
+    expect(result.record?.entry.entryReached).toBe(true);
+    expect(result.record?.leaseOwnerId).toBeNull();
     // Another worker can proceed
     const again = await store.applyBarAtomic(
       "user-1",
@@ -591,13 +592,15 @@ describe("Signal Outcome Tracking", () => {
       bar({ eventId: "e2", barTime: T2, low: 4126, high: 4130, close: 4126.5 }),
       "worker-b"
     );
-    expect(again?.record.finalResult?.outcome).toBe("LOSS");
+    expect(again.status).toBe("APPLIED");
+    expect(again.record?.finalResult?.outcome).toBe("LOSS");
   });
 
   it("durable outcome-monitor job retries independently", async () => {
-    await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
     const job = await jobStore.enqueue({
       userId: "user-1",
+      signalId: created.snapshot.signalId,
       eventId: "evt-1",
       bar: bar({ eventId: "evt-1", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       maxRetries: 2
@@ -608,6 +611,7 @@ describe("Signal Outcome Tracking", () => {
 
     const failJob = await jobStore.enqueue({
       userId: "user-1",
+      signalId: created.snapshot.signalId,
       eventId: "evt-fail",
       bar: bar({ eventId: "evt-fail", barTime: T2, low: 4130, high: 4132, close: 4131 }),
       maxRetries: 2
@@ -631,11 +635,14 @@ describe("Signal Outcome Tracking", () => {
     );
     expect(record.entry.entryReached).toBe(false);
     const job = await jobStore.get(
-      (await jobStore.enqueue({
-        userId: "user-1",
-        eventId: "creation",
-        bar: bar({ eventId: "creation", barTime: CREATION, low: 4120, high: 4160, close: 4155 })
-      })).jobId
+      (
+        await jobStore.enqueue({
+          userId: "user-1",
+          signalId: record.snapshot.signalId,
+          eventId: "creation",
+          bar: bar({ eventId: "creation", barTime: CREATION, low: 4120, high: 4160, close: 4155 })
+        })
+      ).jobId
     );
     expect(job?.state === "QUEUED" || job?.state === "COMPLETED" || job?.state === "PROCESSING").toBe(
       true
@@ -780,7 +787,8 @@ describe("Signal Outcome Tracking", () => {
       store,
       "worker-1"
     );
-    expect(updated[0]?.entry.entryReached).toBe(true);
+    expect(updated[0]?.status).toBe("APPLIED");
+    expect(updated[0]?.record?.entry.entryReached).toBe(true);
     expect(JSON.stringify(updated)).not.toMatch(/positions\/otc|working-orders/);
   });
 });
@@ -839,7 +847,7 @@ describe("Entry-candle ordering ambiguity", () => {
     expect(r.finalResult?.outcome).toBe("AMBIGUOUS");
   });
 
-  it("target in range before possible entry (ticks) → no entry, AMBIGUOUS", () => {
+  it("TP before entry in ordered ticks is ignored — OPEN with TP1 PENDING", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
@@ -848,19 +856,21 @@ describe("Entry-candle ordering ambiguity", () => {
         barTime: T1,
         low: 4130,
         high: 4140,
-        close: 4135,
+        close: 4133,
         orderedTicks: [
-          { t: 1, price: 4139 },
+          { t: 1, price: 4138 },
           { t: 2, price: 4131.3 },
-          { t: 3, price: 4132 }
+          { t: 3, price: 4133 }
         ]
       })
     );
-    expect(r.entry.entryReached).toBe(false);
-    expect(r.monitoring.lifecycle).toBe("ENTRY_SEQUENCE_AMBIGUOUS");
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.lifecycle).toBe("OPEN");
+    expect(r.monitoring.tp1Status).toBe("PENDING");
+    expect(r.finalResult).toBeNull();
   });
 
-  it("stop in range before possible entry (ticks) → no entry, AMBIGUOUS", () => {
+  it("stop before entry in ordered ticks is ignored — entry then continues", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
@@ -877,8 +887,78 @@ describe("Entry-candle ordering ambiguity", () => {
         ]
       })
     );
-    expect(r.entry.entryReached).toBe(false);
-    expect(r.monitoring.lifecycle).toBe("ENTRY_SEQUENCE_AMBIGUOUS");
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.lifecycle).toBe("OPEN");
+    expect(r.finalResult).toBeNull();
+  });
+
+  it("ordered ticks: entry then TP1 records 40% exit (OPEN or TP1_HIT/BREAKEVEN)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4130,
+        high: 4140,
+        close: 4138,
+        orderedTicks: [
+          { t: 1, price: 4131.3 },
+          { t: 2, price: 4138 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.tp1Status).toBe("HIT");
+    expect(r.exitLegs.some((l) => l.reason === "TP1" && l.quantityPct === 40)).toBe(true);
+    expect(r.finalResult?.outcome).not.toBe("WIN");
+  });
+
+  it("ordered ticks: entry then stop then TP later → LOSS (stop first)", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4126,
+        high: 4140,
+        close: 4130,
+        orderedTicks: [
+          { t: 1, price: 4131.3 },
+          { t: 2, price: 4127 },
+          { t: 3, price: 4138 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.finalResult?.outcome).toBe("LOSS");
+    expect(r.monitoring.stopStatus).toBe("HIT");
+  });
+
+  it("ordered ticks: entry → TP1 → breakeven stop → weighted positive", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "e1",
+        barTime: T1,
+        low: 4130,
+        high: 4140,
+        close: 4131.3,
+        orderedTicks: [
+          { t: 1, price: 4131.3 },
+          { t: 2, price: 4138 },
+          { t: 3, price: 4131.3 }
+        ]
+      })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    expect(r.monitoring.tp1Status).toBe("HIT");
+    expect(r.exitLegs.some((l) => l.reason === "TP1")).toBe(true);
+    expect(r.exitLegs.some((l) => l.reason === "BREAKEVEN" || l.reason === "STOP")).toBe(true);
+    expect(r.finalResult).not.toBeNull();
+    expect((r.finalResult?.netPoints ?? 0) > 0).toBe(true);
   });
 
   it("ordered ticks with entry first then TP resolve sequence (entry then TP allowed)", () => {
@@ -903,16 +983,138 @@ describe("Entry-candle ordering ambiguity", () => {
   });
 });
 
+describe("Concurrent bar ordering + lease retry", () => {
+  let store: SignalOutcomeStore;
+  let jobStore: InMemoryOutcomeMonitorJobStore;
+
+  beforeEach(() => {
+    store = new InMemorySignalOutcomeStore();
+    jobStore = new InMemoryOutcomeMonitorJobStore();
+    setSignalOutcomeStoreForTests(store);
+    setOutcomeMonitorJobStoreForTests(jobStore);
+  });
+
+  it("T1/T2 concurrent: T2 lease-first does not lose T1 — final order T1 then T2 (entry then stop)", async () => {
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const signalId = created.snapshot.signalId;
+    const barT1 = bar({ eventId: "evt-t1", barTime: T1, low: 4130, high: 4132, close: 4131 });
+    const barT2 = bar({ eventId: "evt-t2", barTime: T2, low: 4126, high: 4130, close: 4126.5 });
+
+    const jobT1 = await jobStore.enqueue({
+      userId: "user-1",
+      signalId,
+      eventId: barT1.eventId,
+      bar: barT1
+    });
+    const jobT2 = await jobStore.enqueue({
+      userId: "user-1",
+      signalId,
+      eventId: barT2.eventId,
+      bar: barT2
+    });
+
+    // T2 arrives / claims first — must not COMPLETE while T1 incomplete.
+    await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "w-t2" });
+    const afterT2First = await jobStore.get(jobT2.jobId);
+    expect(afterT2First?.state).toBe("FAILED");
+    expect(afterT2First?.lastApplyStatus).toBe("OUT_OF_ORDER_WAIT");
+    expect((await store.get("user-1", signalId))?.entry.entryReached).toBe(false);
+
+    // T1 applies entry.
+    await processOutcomeMonitorJob(jobT1.jobId, { store, jobStore, workerId: "w-t1" });
+    expect((await jobStore.get(jobT1.jobId))?.state).toBe("COMPLETED");
+    expect((await store.get("user-1", signalId))?.entry.entryReached).toBe(true);
+    expect((await store.get("user-1", signalId))?.lastAppliedBarTime).toBe(T1);
+
+    // Retry T2 after backoff elapsed → stop / LOSS.
+    jobStore.forceNextAttemptAt(jobT2.jobId, new Date(Date.now() - 1000).toISOString());
+    await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "w-t2b" });
+    expect((await jobStore.get(jobT2.jobId))?.state).toBe("COMPLETED");
+    const final = await store.get("user-1", signalId);
+    expect(final?.finalResult?.outcome).toBe("LOSS");
+    expect(final?.lastAppliedBarTime).toBe(T2);
+  });
+
+  it("T1 then T2 target path — entry on T1, TP on T2", async () => {
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const signalId = created.snapshot.signalId;
+    const jobT1 = await jobStore.enqueue({
+      userId: "user-1",
+      signalId,
+      eventId: "tp-t1",
+      bar: bar({ eventId: "tp-t1", barTime: T1, low: 4130, high: 4132, close: 4131 })
+    });
+    const jobT2 = await jobStore.enqueue({
+      userId: "user-1",
+      signalId,
+      eventId: "tp-t2",
+      bar: bar({ eventId: "tp-t2", barTime: T2, low: 4135, high: 4140, close: 4138 })
+    });
+    await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "early" });
+    expect((await jobStore.get(jobT2.jobId))?.state).toBe("FAILED");
+    await processOutcomeMonitorJob(jobT1.jobId, { store, jobStore, workerId: "t1" });
+    jobStore.forceNextAttemptAt(jobT2.jobId, new Date(Date.now() - 1000).toISOString());
+    await processOutcomeMonitorJob(jobT2.jobId, { store, jobStore, workerId: "t2" });
+    const final = await store.get("user-1", signalId);
+    expect(final?.entry.entryReached).toBe(true);
+    expect(final?.monitoring.tp1Status).toBe("HIT");
+  });
+
+  it("lease conflict retries automatically and does not COMPLETE", async () => {
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const signalId = created.snapshot.signalId;
+    // Hold lease with another worker.
+    await store.tryAcquireLease("user-1", signalId, "holder", 120_000);
+    const job = await jobStore.enqueue({
+      userId: "user-1",
+      signalId,
+      eventId: "lease-evt",
+      bar: bar({ eventId: "lease-evt", barTime: T1, low: 4130, high: 4132, close: 4131 })
+    });
+    await processOutcomeMonitorJob(job.jobId, { store, jobStore, workerId: "challenger" });
+    const failed = await jobStore.get(job.jobId);
+    expect(failed?.state).toBe("FAILED");
+    expect(failed?.lastApplyStatus).toBe("LEASE_BUSY");
+    expect(failed?.auditReason).toBe("LEASE_BUSY");
+    expect(Date.parse(failed!.nextAttemptAt)).toBeGreaterThan(Date.now());
+
+    // Release lease and retry after backoff.
+    const held = await store.get("user-1", signalId);
+    if (held) {
+      held.leaseOwnerId = null;
+      held.leaseUntil = null;
+      await store.save(held);
+    }
+    jobStore.forceNextAttemptAt(job.jobId, new Date(Date.now() - 1000).toISOString());
+    await processOutcomeMonitorJob(job.jobId, { store, jobStore, workerId: "challenger-2" });
+    expect((await jobStore.get(job.jobId))?.state).toBe("COMPLETED");
+    expect((await store.get("user-1", signalId))?.entry.entryReached).toBe(true);
+  });
+
+  it("duplicate retry does not apply twice", async () => {
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const signalId = created.snapshot.signalId;
+    const b = bar({ eventId: "dup-evt", barTime: T1, low: 4130, high: 4132, close: 4131 });
+    const first = await store.applyBarAtomic("user-1", signalId, b, "w1");
+    expect(first.status).toBe("APPLIED");
+    const second = await store.applyBarAtomic("user-1", signalId, b, "w2");
+    expect(second.status).toBe("DUPLICATE");
+    const final = await store.get("user-1", signalId);
+    expect(final?.appliedBarEventIds.filter((id) => id === "dup-evt")).toHaveLength(1);
+  });
+});
+
 describe("Automatic outcome-monitor retries", () => {
   it("failed job retries automatically via retry pass without manual processOutcomeMonitorJob loop", async () => {
     const localStore = new InMemorySignalOutcomeStore();
     const localJobs = new InMemoryOutcomeMonitorJobStore();
     setSignalOutcomeStoreForTests(localStore);
     setOutcomeMonitorJobStoreForTests(localJobs);
-    await ensureSignalOutcomeFromDecision(baseDecision(), localStore);
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), localStore);
 
     const job = await localJobs.enqueue({
       userId: "user-1",
+      signalId: created.snapshot.signalId,
       eventId: "retry-evt",
       bar: bar({ eventId: "retry-evt", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       maxRetries: 5
@@ -951,8 +1153,10 @@ describe("Automatic outcome-monitor retries", () => {
     const { runOutcomeMonitorRetryPass } = await import(
       "../../../src/services/signalOutcome/retryPass"
     );
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), localStore);
     const job = await localJobs.enqueue({
       userId: "user-1",
+      signalId: created.snapshot.signalId,
       eventId: "future-evt",
       bar: bar({ eventId: "future-evt", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       maxRetries: 3

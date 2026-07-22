@@ -227,12 +227,33 @@ export type OutcomeMonitorJobState =
   | "FAILED"
   | "DEAD_LETTER";
 
+export type SignalBarApplyStatus =
+  | "APPLIED"
+  | "DUPLICATE"
+  | "TERMINAL"
+  | "IDENTITY_MISMATCH"
+  | "LEASE_BUSY"
+  | "OUT_OF_ORDER_WAIT"
+  | "SAME_CANDLE_SKIP"
+  | "NOT_FOUND";
+
+export interface ApplyBarResult {
+  record: SignalOutcomeRecord | null;
+  status: SignalBarApplyStatus;
+  signalId: string;
+}
+
 /** Durable bar-monitoring job — retries independently of the decision job. */
 export interface OutcomeMonitorJob {
   jobId: string;
   userId: string;
+  /** Per-signal child jobs always set this; chronological gate uses it. */
+  signalId: string;
   eventId: string;
   bar: SignalBarInput;
+  barTime: string;
+  symbol: string;
+  timeframe: string | null;
   state: OutcomeMonitorJobState;
   retryCount: number;
   maxRetries: number;
@@ -241,6 +262,7 @@ export interface OutcomeMonitorJob {
   leaseUntil: string | null;
   auditReason: string | null;
   errorMessage: string | null;
+  lastApplyStatus: SignalBarApplyStatus | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

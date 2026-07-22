@@ -49,6 +49,15 @@
       ]
     },
     {
+      "collectionGroup": "outcomeMonitorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "signalId", "order": "ASCENDING" },
+        { "fieldPath": "barTime", "order": "ASCENDING" },
+        { "fieldPath": "state", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "signalOutcomes",
       "queryScope": "COLLECTION",
       "fields": [

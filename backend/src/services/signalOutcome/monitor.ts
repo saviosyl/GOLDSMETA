@@ -3,8 +3,8 @@
  * Market data: TradingView confirmed OHLCV via webhook pipeline (same as decision engine).
  * Never places broker orders.
  *
- * Every confirmed bar monitors ALL matching active signals (userId+symbol+timeframe+environment),
- * not only the decision created from that same event.
+ * Per-signal child jobs process bars chronologically by barTime. A job must not
+ * COMPLETE while any intended apply returned LEASE_BUSY or OUT_OF_ORDER_WAIT.
  */
 
 import { randomUUID } from "crypto";
@@ -15,7 +15,7 @@ import {
   createSignalOutcomeFromDecision,
   signalIdForDecision
 } from "./engine";
-import type { SignalBarInput, SignalOutcomeRecord } from "./types";
+import type { ApplyBarResult, SignalBarInput, SignalOutcomeRecord } from "./types";
 import {
   FirestoreSignalOutcomeStore,
   InMemorySignalOutcomeStore,
@@ -28,6 +28,8 @@ import {
 } from "./storagePolicy";
 import {
   getOutcomeMonitorJobStore,
+  RETRY_APPLY_STATUSES,
+  SAFE_COMPLETE_APPLY_STATUSES,
   type OutcomeMonitorJobStore
 } from "./monitorJobs";
 
@@ -77,21 +79,48 @@ export async function ensureSignalOutcomeFromDecision(
 }
 
 /**
+ * Fan-out durable per-signal child jobs for every matching active signal.
+ */
+export async function enqueueMatchingOutcomeMonitorJobs(
+  userId: string,
+  bar: SignalBarInput,
+  store: SignalOutcomeStore = getSignalOutcomeStore(),
+  jobStore: OutcomeMonitorJobStore = getOutcomeMonitorJobStore()
+): Promise<string[]> {
+  const active = await store.listActiveMatching(userId, {
+    symbol: bar.symbol,
+    timeframe: bar.timeframe,
+    environment: bar.environment
+  });
+  const jobIds: string[] = [];
+  for (const signal of active) {
+    const job = await jobStore.enqueue({
+      userId,
+      signalId: signal.snapshot.signalId,
+      eventId: bar.eventId,
+      bar: { ...bar, source: bar.source ?? "tradingview-ohlcv" }
+    });
+    jobIds.push(job.jobId);
+  }
+  return jobIds;
+}
+
+/**
  * Apply one confirmed bar to every matching active signal.
- * Uses atomic Firestore/in-memory apply (lease + transition + persist in one step).
+ * Returns explicit per-signal statuses (including LEASE_BUSY).
  */
 export async function monitorMatchingSignalsWithBar(
   userId: string,
   bar: SignalBarInput,
   store: SignalOutcomeStore = getSignalOutcomeStore(),
   workerId: string = `monitor-${randomUUID().slice(0, 8)}`
-): Promise<SignalOutcomeRecord[]> {
+): Promise<ApplyBarResult[]> {
   const active = await store.listActiveMatching(userId, {
     symbol: bar.symbol,
     timeframe: bar.timeframe,
     environment: bar.environment
   });
-  const updated: SignalOutcomeRecord[] = [];
+  const results: ApplyBarResult[] = [];
   for (const signal of active) {
     const result = await store.applyBarAtomic(
       userId,
@@ -100,16 +129,16 @@ export async function monitorMatchingSignalsWithBar(
       workerId,
       60_000
     );
-    if (!result) {
-      logger.info("Signal monitor lease not acquired", {
+    if (result.status === "LEASE_BUSY") {
+      logger.info("Signal monitor lease busy — will durable-retry", {
         signalId: signal.snapshot.signalId,
-        workerId
+        workerId,
+        status: result.status
       });
-      continue;
     }
-    updated.push(result.record);
+    results.push(result);
   }
-  return updated;
+  return results;
 }
 
 /** @deprecated Use monitorMatchingSignalsWithBar */
@@ -118,13 +147,13 @@ export async function monitorSignalWithBar(
   bar: SignalBarInput,
   store: SignalOutcomeStore = getSignalOutcomeStore(),
   workerId?: string
-): Promise<SignalOutcomeRecord[]> {
+): Promise<ApplyBarResult[]> {
   return monitorMatchingSignalsWithBar(userId, bar, store, workerId);
 }
 
 /**
  * Create/load signal from decision. Does NOT apply the creation candle
- * (no same-candle lookahead). Optionally enqueues durable monitor work for a future bar.
+ * (no same-candle lookahead). Enqueues durable per-signal child jobs.
  */
 export async function syncDecisionAndMonitor(
   decision: DecisionRecord,
@@ -135,20 +164,19 @@ export async function syncDecisionAndMonitor(
   const record = await ensureSignalOutcomeFromDecision(decision, store);
   if (!bar) return record;
 
-  // Enqueue durable monitoring for ALL matching active signals (including this one).
-  // Engine rejects barTime <= marketDataTimestamp for the newly created signal.
-  await jobStore.enqueue({
-    userId: decision.userId,
-    eventId: bar.eventId,
-    bar: { ...bar, source: bar.source ?? "tradingview-ohlcv" }
-  });
+  await enqueueMatchingOutcomeMonitorJobs(
+    decision.userId,
+    { ...bar, source: bar.source ?? "tradingview-ohlcv" },
+    store,
+    jobStore
+  );
 
   return record;
 }
 
 /**
- * Process one durable outcome-monitor job.
- * Retries on failure; decision job must not treat this as fire-and-forget complete.
+ * Process one durable per-signal outcome-monitor job.
+ * Completes only on safe statuses; LEASE_BUSY / OUT_OF_ORDER_WAIT → backoff retry.
  */
 export async function processOutcomeMonitorJob(
   jobId: string,
@@ -166,8 +194,63 @@ export async function processOutcomeMonitorJob(
   if (!claimed) return;
 
   try {
-    await monitorMatchingSignalsWithBar(claimed.userId, claimed.bar, store, workerId);
-    await jobStore.complete(jobId);
+    // Chronological gate: do not apply a later bar while an earlier incomplete job exists.
+    const earlier = await jobStore.listEarlierIncomplete(
+      claimed.signalId,
+      claimed.barTime,
+      claimed.jobId
+    );
+    if (earlier.length > 0) {
+      logger.info("Outcome monitor waiting for earlier bar", {
+        jobId,
+        signalId: claimed.signalId,
+        barTime: claimed.barTime,
+        blockedBy: earlier[0]!.jobId,
+        earlierBarTime: earlier[0]!.barTime
+      });
+      await jobStore.fail(
+        jobId,
+        `OUT_OF_ORDER_WAIT: earlier bar ${earlier[0]!.barTime} still incomplete`,
+        "OUT_OF_ORDER_WAIT",
+        "OUT_OF_ORDER_WAIT"
+      );
+      return;
+    }
+
+    const result = await store.applyBarAtomic(
+      claimed.userId,
+      claimed.signalId,
+      { ...claimed.bar, source: claimed.bar.source ?? "tradingview-ohlcv" },
+      workerId,
+      60_000
+    );
+
+    if (RETRY_APPLY_STATUSES.has(result.status)) {
+      logger.info("Outcome monitor durable retry required", {
+        jobId,
+        signalId: claimed.signalId,
+        status: result.status
+      });
+      await jobStore.fail(
+        jobId,
+        result.status,
+        result.status,
+        result.status
+      );
+      return;
+    }
+
+    if (!SAFE_COMPLETE_APPLY_STATUSES.has(result.status)) {
+      await jobStore.fail(
+        jobId,
+        `Unexpected apply status ${result.status}`,
+        "MONITOR_APPLY_FAILED",
+        result.status
+      );
+      return;
+    }
+
+    await jobStore.complete(jobId, result.status);
   } catch (error: unknown) {
     await jobStore.fail(
       jobId,

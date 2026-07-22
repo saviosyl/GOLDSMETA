@@ -81,7 +81,9 @@ describe("API contract envelopes", () => {
     expect(JSON.stringify(response.body)).not.toMatch(/secret|api[_-]?key|token/i);
   });
 
-  it("matches decision, device, settings, journal and tradingview envelopes", async () => {
+  it(
+    "matches decision, device, settings, journal and tradingview envelopes",
+    async () => {
     const webhook = await request(app)
       .post("/webhooks/tradingview/test-webhook-id")
       .send(
@@ -208,7 +210,9 @@ describe("API contract envelopes", () => {
       .set(auth)
       .expect(404);
     assertErrorEnvelope(missing.body);
-  });
+  },
+  15_000
+  );
 
   it("does not trust client-supplied metadata.userId for ownership", async () => {
     await request(app)

@@ -176,14 +176,16 @@ export type BarRejectReason =
   | "WRONG_SYMBOL"
   | "WRONG_TIMEFRAME"
   | "WRONG_ENVIRONMENT"
-  | "SAME_OR_OLDER_CANDLE"
-  | "TERMINAL"
+  | "SAME_CANDLE_SKIP"
+  | "OUT_OF_ORDER_WAIT"
   | "UNCONFIRMED"
   | null;
 
 /**
  * Validate bar identity / chronology before mutation.
- * Same-candle lookahead: barTime <= marketDataTimestamp (and <= lastAppliedBarTime) is rejected.
+ * - Creation candle (barTime <= marketDataTimestamp) → SAME_CANDLE_SKIP
+ * - Chronologically older than lastApplied (but after creation) → OUT_OF_ORDER_WAIT
+ *   (do not permanently discard — earlier bar may still be in flight)
  */
 export function validateBarForSignal(
   record: SignalOutcomeRecord,
@@ -195,19 +197,19 @@ export function validateBarForSignal(
   const barTf = bar.timeframe ?? null;
   if (String(snapTf ?? "") !== String(barTf ?? "")) return "WRONG_TIMEFRAME";
   if (bar.environment !== record.snapshot.environment) return "WRONG_ENVIRONMENT";
+  if (!bar.isConfirmedBar) return "UNCONFIRMED";
 
   const barMs = Date.parse(bar.barTime);
   const creationMs = Date.parse(record.snapshot.marketDataTimestamp);
   if (Number.isFinite(barMs) && Number.isFinite(creationMs) && barMs <= creationMs) {
-    return "SAME_OR_OLDER_CANDLE";
+    return "SAME_CANDLE_SKIP";
   }
   if (record.lastAppliedBarTime) {
     const lastMs = Date.parse(record.lastAppliedBarTime);
     if (Number.isFinite(barMs) && Number.isFinite(lastMs) && barMs <= lastMs) {
-      return "SAME_OR_OLDER_CANDLE";
+      return "OUT_OF_ORDER_WAIT";
     }
   }
-  if (!bar.isConfirmedBar) return "UNCONFIRMED";
   return null;
 }
 
@@ -427,57 +429,196 @@ function conflictingExitInBar(snapshot: SignalSnapshot, bar: SignalBarInput): {
 }
 
 /**
- * Walk ordered ticks to decide whether entry occurs, and whether stop/target
- * occur before or after entry. Returns null when ticks cannot resolve.
+ * Walk ordered ticks chronologically:
+ * - Ignore stop/target before the first entry tick
+ * - If entry never reached → null (caller keeps PENDING_ENTRY)
+ * - After entry, first stop/target event drives lifecycle; successive TPs allowed
  */
-function resolveEntrySequenceFromTicks(
+export function findEntryTickIndex(
   snapshot: SignalSnapshot,
-  bar: SignalBarInput
-): {
-  entryIndex: number;
-  stopBeforeEntry: boolean;
-  targetBeforeEntry: boolean;
-  stopAfterEntry: boolean;
-  targetAfterEntry: boolean;
-} | null {
-  const ticks = bar.orderedTicks;
-  if (!ticks || ticks.length === 0) return null;
-  const sorted = [...ticks].sort((a, b) => a.t - b.t);
+  ticks: Array<{ t: number; price: number }>
+): number {
   const fill = fillPrice(snapshot);
-  if (fill == null || (snapshot.direction !== "BUY" && snapshot.direction !== "SELL")) return null;
-  const dir = snapshot.direction;
+  if (fill == null) return -1;
   const low = snapshot.entryZoneLow ?? fill;
   const high = snapshot.entryZoneHigh ?? fill;
-  const stop = snapshot.stopLoss;
-  const targets = [snapshot.tp1, snapshot.tp2, snapshot.tp3].filter((x): x is number => x != null);
-
-  let entryIndex = -1;
+  const sorted = [...ticks].sort((a, b) => a.t - b.t);
   for (let i = 0; i < sorted.length; i++) {
     const p = sorted[i]!.price;
-    if (p >= low && p <= high) {
-      entryIndex = i;
+    if (p >= low && p <= high) return i;
+  }
+  return -1;
+}
+
+/**
+ * Apply stop/TP events from ticks that occur at or after entryIndex.
+ * Mutates record. Returns true if trade closed.
+ */
+function applyPostEntryTicks(
+  record: SignalOutcomeRecord,
+  bar: SignalBarInput,
+  sortedTicks: Array<{ t: number; price: number }>,
+  entryIndex: number
+): boolean {
+  const snap = record.snapshot;
+  if (snap.direction !== "BUY" && snap.direction !== "SELL") return false;
+  const direction = snap.direction;
+  const after = sortedTicks.slice(entryIndex);
+
+  for (const tick of after) {
+    if (
+      record.monitoring.lifecycle !== "OPEN" &&
+      record.monitoring.lifecycle !== "TP1_HIT" &&
+      record.monitoring.lifecycle !== "TP2_HIT" &&
+      record.monitoring.lifecycle !== "BREAKEVEN"
+    ) {
       break;
     }
-  }
-  if (entryIndex < 0) return null;
+    const stop = record.monitoring.workingStop;
+    const pendingTargets: Array<{
+      label: "TP1" | "TP2" | "TP3";
+      price: number;
+      statusKey: "tp1Status" | "tp2Status" | "tp3Status";
+    }> = [];
+    if (snap.tp1 != null && record.monitoring.tp1Status === "PENDING") {
+      pendingTargets.push({ label: "TP1", price: snap.tp1, statusKey: "tp1Status" });
+    }
+    if (snap.tp2 != null && record.monitoring.tp2Status === "PENDING") {
+      pendingTargets.push({ label: "TP2", price: snap.tp2, statusKey: "tp2Status" });
+    }
+    if (snap.tp3 != null && record.monitoring.tp3Status === "PENDING") {
+      pendingTargets.push({ label: "TP3", price: snap.tp3, statusKey: "tp3Status" });
+    }
 
-  const before = sorted.slice(0, entryIndex);
-  const after = sorted.slice(entryIndex);
-  const hitStop = (xs: typeof sorted): boolean =>
-    stop != null &&
-    xs.some((tick) => (dir === "BUY" ? tick.price <= stop : tick.price >= stop));
-  const hitTarget = (xs: typeof sorted): boolean =>
-    targets.some((t) =>
-      xs.some((tick) => (dir === "BUY" ? tick.price >= t : tick.price <= t))
+    const stopHitNow =
+      stop != null && (direction === "BUY" ? tick.price <= stop : tick.price >= stop);
+    const targetsHitNow = pendingTargets.filter((t) =>
+      direction === "BUY" ? tick.price >= t.price : tick.price <= t.price
     );
 
-  return {
-    entryIndex,
-    stopBeforeEntry: hitStop(before),
-    targetBeforeEntry: hitTarget(before),
-    stopAfterEntry: hitStop(after),
-    targetAfterEntry: hitTarget(after)
-  };
+    if (stop != null && stopHitNow && targetsHitNow.length > 0) {
+      record.ambiguity = {
+        candleTimestamp: bar.barTime,
+        candleHigh: bar.high,
+        candleLow: bar.low,
+        stop,
+        target: targetsHitNow[0]!.price,
+        missingDataRequired: "finer tick resolution — stop and target on same tick"
+      };
+      const remaining = record.monitoring.quantityRemainingPct;
+      const contrib = buildLegContributions(record, remaining, stop);
+      addExitLeg(record, {
+        reason: "AMBIGUOUS",
+        quantityPct: remaining,
+        exitPrice: stop,
+        barTime: bar.barTime,
+        ...contrib
+      });
+      finalizeFromExitLegs(
+        record,
+        "AMBIGUOUS_INTRABAR",
+        bar,
+        "Ambiguous same-tick stop and target",
+        targetsReachedList(record),
+        true
+      );
+      return true;
+    }
+
+    if (stop != null && stopHitNow) {
+      const remaining = record.monitoring.quantityRemainingPct;
+      const isBe =
+        record.monitoring.lifecycle === "BREAKEVEN" ||
+        (record.entry.entryPrice != null && stop === record.entry.entryPrice);
+      const contrib = buildLegContributions(record, remaining, stop);
+      addExitLeg(record, {
+        reason: isBe ? "BREAKEVEN" : "STOP",
+        quantityPct: remaining,
+        exitPrice: stop,
+        barTime: bar.barTime,
+        ...contrib
+      });
+      record.monitoring.stopStatus = "HIT";
+      pushEvent(record, {
+        type: "STOP",
+        barTime: bar.barTime,
+        price: stop,
+        oldStop: stop,
+        newStop: stop,
+        targetReached: null,
+        quantityPctClosed: remaining,
+        reason: isBe ? "Stop hit at breakeven (ordered ticks)" : "Stop hit (ordered ticks)",
+        priceSource: "ordered-ticks"
+      });
+      finalizeFromExitLegs(
+        record,
+        "STOP_HIT",
+        bar,
+        isBe ? "Stop loss hit at breakeven" : "Stop loss hit",
+        targetsReachedList(record)
+      );
+      return true;
+    }
+
+    for (const t of targetsHitNow) {
+      record.monitoring[t.statusKey] = "HIT";
+      const pct = t.label === "TP1" ? 40 : t.label === "TP2" ? 30 : 30;
+      const closePct = Math.min(pct, record.monitoring.quantityRemainingPct);
+      record.monitoring.quantityRemainingPct = Math.max(
+        0,
+        record.monitoring.quantityRemainingPct - closePct
+      );
+      record.monitoring.lifecycle =
+        t.label === "TP1" ? "TP1_HIT" : t.label === "TP2" ? "TP2_HIT" : "TP3_HIT";
+      const contrib = buildLegContributions(record, closePct, t.price);
+      addExitLeg(record, {
+        reason: t.label,
+        quantityPct: closePct,
+        exitPrice: t.price,
+        barTime: bar.barTime,
+        ...contrib
+      });
+      pushEvent(record, {
+        type: t.label,
+        barTime: bar.barTime,
+        price: t.price,
+        oldStop: record.monitoring.workingStop,
+        newStop: record.monitoring.workingStop,
+        targetReached: t.label,
+        quantityPctClosed: closePct,
+        reason: `${t.label} hit (ordered ticks)`,
+        priceSource: "ordered-ticks"
+      });
+      if (t.label === "TP1" && record.entry.entryPrice != null) {
+        const old = record.monitoring.workingStop;
+        record.monitoring.workingStop = record.entry.entryPrice;
+        record.monitoring.stopStatus = "MOVED_BREAKEVEN";
+        record.monitoring.lifecycle = "BREAKEVEN";
+        pushEvent(record, {
+          type: "BREAKEVEN_MOVE",
+          barTime: bar.barTime,
+          price: record.entry.entryPrice,
+          oldStop: old,
+          newStop: record.entry.entryPrice,
+          targetReached: null,
+          quantityPctClosed: null,
+          reason: "Stop moved to breakeven after TP1 (ordered ticks)",
+          priceSource: "ordered-ticks"
+        });
+      }
+      if (t.label === "TP3" || record.monitoring.quantityRemainingPct <= 0) {
+        finalizeFromExitLegs(
+          record,
+          t.label === "TP3" ? "TP3_HIT" : "CLOSED",
+          bar,
+          `${t.label} completed hypothetical trade (ordered ticks)`,
+          targetsReachedList(record)
+        );
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function applyEntryFill(
@@ -528,30 +669,29 @@ export function applyBarToSignalOutcome(
     reject === "WRONG_SYMBOL" ||
     reject === "WRONG_TIMEFRAME" ||
     reject === "WRONG_ENVIRONMENT" ||
-    reject === "SAME_OR_OLDER_CANDLE" ||
     reject === "UNCONFIRMED"
   ) {
-    // Identity / chronology rejects do not poison appliedBarEventIds (except same-candle
-    // of the creation event is already covered by lastAppliedBarTime seed).
-    if (reject === "SAME_OR_OLDER_CANDLE" && !record.appliedBarEventIds.includes(bar.eventId)) {
-      // Mark creation-candle event consumed so durable jobs don't retry forever.
-      const creationMs = Date.parse(record.snapshot.marketDataTimestamp);
-      const barMs = Date.parse(bar.barTime);
-      if (Number.isFinite(barMs) && Number.isFinite(creationMs) && barMs <= creationMs) {
-        record.appliedBarEventIds.push(bar.eventId);
-        pushEvent(record, {
-          type: "BAR_SKIPPED",
-          barTime: bar.barTime,
-          price: bar.close,
-          oldStop: record.monitoring.workingStop,
-          newStop: record.monitoring.workingStop,
-          targetReached: null,
-          quantityPctClosed: null,
-          reason: "Same-candle lookahead rejected — entry monitoring starts on next confirmed bar",
-          priceSource: bar.source ?? "tradingview-ohlcv"
-        });
-        record.updatedAt = nowIso();
-      }
+    return record;
+  }
+  if (reject === "OUT_OF_ORDER_WAIT") {
+    // Do not mutate / do not consume eventId — earlier bar may still be in flight.
+    return record;
+  }
+  if (reject === "SAME_CANDLE_SKIP") {
+    if (!record.appliedBarEventIds.includes(bar.eventId)) {
+      record.appliedBarEventIds.push(bar.eventId);
+      pushEvent(record, {
+        type: "BAR_SKIPPED",
+        barTime: bar.barTime,
+        price: bar.close,
+        oldStop: record.monitoring.workingStop,
+        newStop: record.monitoring.workingStop,
+        targetReached: null,
+        quantityPctClosed: null,
+        reason: "Same-candle lookahead rejected — entry monitoring starts on next confirmed bar",
+        priceSource: bar.source ?? "tradingview-ohlcv"
+      });
+      record.updatedAt = nowIso();
     }
     return record;
   }
@@ -635,27 +775,24 @@ export function applyBarToSignalOutcome(
   if (record.monitoring.lifecycle === "PENDING_ENTRY") {
     const maxBars = opts.maxPendingBars ?? 48;
     const seen = (opts.pendingBarsSeen ?? record.appliedBarEventIds.length) + 1;
-    if (entryTouched(snap, bar)) {
-      const fill = fillPrice(snap);
-      if (fill == null) {
-        markBarApplied(record, bar);
-        return record;
-      }
+    const ticks = bar.orderedTicks;
+    const sortedTicks = ticks && ticks.length > 0 ? [...ticks].sort((a, b) => a.t - b.t) : null;
+    const entryTickIndex = sortedTicks ? findEntryTickIndex(snap, sortedTicks) : -1;
 
-      const conflict = conflictingExitInBar(snap, bar);
-      const tickResolution = resolveEntrySequenceFromTicks(snap, bar);
-
-      if (tickResolution) {
-        if (tickResolution.stopBeforeEntry || tickResolution.targetBeforeEntry) {
-          // Stop/target traded before entry — do not invent an entry fill.
+    if (sortedTicks) {
+      if (entryTickIndex < 0) {
+        // Entry never reached in ticks — remain PENDING_ENTRY.
+        // Ambiguous only when tick coverage is incomplete AND OHLC has conflicting levels.
+        const conflict = conflictingExitInBar(snap, bar);
+        if (entryTouched(snap, bar) && conflict.stopInRange && conflict.targetInRange) {
           record.monitoring.lifecycle = "ENTRY_SEQUENCE_AMBIGUOUS";
           record.ambiguity = {
             candleTimestamp: bar.barTime,
             candleHigh: bar.high,
             candleLow: bar.low,
-            stop: snap.stopLoss ?? fill,
-            target: snap.tp1 ?? snap.tp2 ?? snap.tp3 ?? fill,
-            missingDataRequired: "none — ordered ticks show stop/target before entry"
+            stop: snap.stopLoss!,
+            target: snap.tp1 ?? snap.tp2 ?? snap.tp3!,
+            missingDataRequired: "complete ordered tick coverage through entry"
           };
           pushEvent(record, {
             type: "ENTRY_SEQUENCE_AMBIGUOUS",
@@ -665,13 +802,12 @@ export function applyBarToSignalOutcome(
             newStop: record.monitoring.workingStop,
             targetReached: null,
             quantityPctClosed: null,
-            reason:
-              "Ordered ticks: stop/target before entry — ENTRY_SEQUENCE_AMBIGUOUS (no win bias)",
+            reason: "Incomplete ticks with conflicting OHLC levels — ENTRY_SEQUENCE_AMBIGUOUS",
             priceSource: bar.source ?? "tradingview-ohlcv"
           });
           record.finalResult = {
             outcome: "AMBIGUOUS",
-            exitReason: "Entry sequence ambiguous — stop/target before entry on ordered ticks",
+            exitReason: "Incomplete ordered ticks with conflicting OHLC levels",
             exitTimestamp: bar.barTime,
             exitPrice: null,
             entryPrice: null,
@@ -695,39 +831,41 @@ export function applyBarToSignalOutcome(
           markBarApplied(record, bar);
           return record;
         }
-        // Ticks prove entry first — fill entry; allow same-bar stop/TP only via open path
-        // after entry (ticks already ordered; OHLC open path remains conservative below).
-        applyEntryFill(
-          record,
-          bar,
-          fill,
-          "Hypothetical entry — ordered ticks prove entry before stop/target"
-        );
-        // Rule B still applies for OHLC open-path: defer stop/TP to next bar unless we
-        // continue only when ticks also show post-entry hits — handled by skipping open
-        // evaluation on this bar and letting a subsequent bar (or same-bar re-entry via
-        // ticks) apply. Defer always on entry bar even with ticks for stop/TP awards
-        // to keep one rule: stop/TP evaluation starts next confirmed candle after entry
-        // unless a dedicated tick-driven exit is applied here.
-        if (tickResolution.stopAfterEntry || tickResolution.targetAfterEntry) {
-          // Apply open-path exits on this bar only when ticks prove post-entry sequence.
-          // Fall through to OPEN handling below.
-        } else {
-          pushEvent(record, {
-            type: "ENTRY_SEQUENCE_DEFERRED",
-            barTime: bar.barTime,
-            price: fill,
-            oldStop: record.monitoring.workingStop,
-            newStop: record.monitoring.workingStop,
-            targetReached: null,
-            quantityPctClosed: null,
-            reason: "Entry recorded — stop/target evaluation begins on next confirmed candle",
-            priceSource: bar.source ?? "tradingview-ohlcv"
-          });
-          markBarApplied(record, bar);
-          return record;
-        }
-      } else if (conflict.stopInRange && conflict.targetInRange) {
+        record.monitoring.currentPrice = bar.close;
+        record.monitoring.latestMarketDataTimestamp = bar.barTime;
+        record.monitoring.lastMonitoringAt = nowIso();
+        markBarApplied(record, bar);
+        return record;
+      }
+
+      // Ignore pre-entry stop/target ticks; enter at first valid entry tick.
+      const fill = fillPrice(snap);
+      if (fill == null) {
+        markBarApplied(record, bar);
+        return record;
+      }
+      applyEntryFill(
+        record,
+        bar,
+        fill,
+        "Hypothetical entry — ordered ticks; pre-entry stop/target ignored"
+      );
+      const closed = applyPostEntryTicks(record, bar, sortedTicks, entryTickIndex);
+      markBarApplied(record, bar);
+      if (closed) return record;
+      return record;
+    }
+
+    if (entryTouched(snap, bar)) {
+      const fill = fillPrice(snap);
+      if (fill == null) {
+        markBarApplied(record, bar);
+        return record;
+      }
+
+      const conflict = conflictingExitInBar(snap, bar);
+
+      if (conflict.stopInRange && conflict.targetInRange) {
         // Rule A: entry + stop + TP in one OHLC candle without ordered data.
         record.monitoring.lifecycle = "ENTRY_SEQUENCE_AMBIGUOUS";
         record.ambiguity = {
@@ -883,6 +1021,15 @@ export function applyBarToSignalOutcome(
       record.monitoring.currentGrossPoints,
       snap.initialRiskDistance
     );
+
+    // Prefer ordered ticks when present — ignore OHLC stop/TP conflict ambiguity.
+    const openTicks = bar.orderedTicks;
+    if (openTicks && openTicks.length > 0) {
+      const sortedOpenTicks = [...openTicks].sort((a, b) => a.t - b.t);
+      applyPostEntryTicks(record, bar, sortedOpenTicks, 0);
+      markBarApplied(record, bar);
+      return record;
+    }
 
     const stopPrice = record.monitoring.workingStop;
     const targets: Array<{
