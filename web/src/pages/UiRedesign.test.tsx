@@ -112,8 +112,10 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(screen.getByTestId("primary-decision")).toHaveTextContent(/WAIT/i);
-    expect(screen.getByText(/another plan is still being tracked/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("primary-decision")).toHaveTextContent(/WAIT/i);
+    expect(
+      await screen.findByText(/another plan is still being tracked/i)
+    ).toBeInTheDocument();
     expect(screen.getAllByText(/New York/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     expect(screen.getByText("No validated shadow plan yet.")).toBeInTheDocument();

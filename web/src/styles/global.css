@@ -1442,3 +1442,64 @@ a {
   outline-offset: 2px;
 }
 
+
+.history-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.history-perf-link {
+  color: var(--accent, #c9a227);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.history-disclaimer {
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+.history-outcome {
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.history-outcome-row {
+  margin-bottom: 0.2rem;
+}
+
+.history-outcome-label {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.signal-perf-page {
+  padding-bottom: 2rem;
+}
+
+.signal-perf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.signal-perf-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+.signal-perf-card strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1.1rem;
+}

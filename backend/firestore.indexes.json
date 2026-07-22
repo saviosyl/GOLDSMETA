@@ -39,6 +39,33 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "outcomeMonitorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "outcomeMonitorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "signalId", "order": "ASCENDING" },
+        { "fieldPath": "barTime", "order": "ASCENDING" },
+        { "fieldPath": "state", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "signalOutcomes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "monitoring.lifecycle", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.symbol", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.environment", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.timeframe", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -8,8 +8,11 @@ import { ReplayPage } from "./ReplayPage";
 import { SettingsPage } from "./SettingsPage";
 import { RiskPlannerPage } from "./RiskPlannerPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
+import { HistoryPage } from "./HistoryPage";
+import { SignalPerformancePage } from "./SignalPerformancePage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
+import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
@@ -31,6 +34,8 @@ function buildReviewApi() {
   const decisionOverride = (params.get("decision") || "WAIT").toUpperCase();
   const decisionCode =
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
+  const signalOutcomes = params.get("scenario") === "signal-outcomes";
+  const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
 
   const decision = {
     schemaVersion: "3",
@@ -272,7 +277,45 @@ function buildReviewApi() {
     sendTestAlert: async () => ({ message: "queued" }),
     getVapidPublicKey: async () => "",
     registerWebPushSubscription: async () => ({}),
-    deleteWebPushSubscription: async () => ({})
+    deleteWebPushSubscription: async () => ({}),
+    decisionHistory: async () => (soFixtures ? soFixtures.decisions : empty ? [] : [decision]),
+    listSignalOutcomes: async () => (soFixtures ? soFixtures.outcomes : []),
+    signalPerformance: async () =>
+      soFixtures
+        ? soFixtures.performance
+        : {
+            label: "HYPOTHETICAL SIGNAL PERFORMANCE",
+            disclaimer: "Past hypothetical results do not guarantee future trading performance.",
+            totalConfirmedBuySell: 0,
+            pendingEntries: 0,
+            openSignals: 0,
+            closedSignals: 0,
+            wins: 0,
+            losses: 0,
+            breakeven: 0,
+            expired: 0,
+            cancelled: 0,
+            ambiguousIntrabar: 0,
+            dataUnavailable: 0,
+            waitOnly: 0,
+            winRate: null,
+            netPoints: 0,
+            netR: 0,
+            averageWin: null,
+            averageLoss: null,
+            profitFactor: null,
+            maximumDrawdownR: 0,
+            maximumConsecutiveLosses: 0,
+            averageHoldingTimeMs: null,
+            tp1HitRate: null,
+            tp2HitRate: null,
+            tp3HitRate: null,
+            stopLossRate: null,
+            byDirection: { BUY: 0, SELL: 0 },
+            byConfidenceRange: {}
+          },
+    signalOutcomeByDecision: async (id: string) =>
+      soFixtures?.outcomes.find((o) => o.snapshot.decisionId === id) ?? null
   };
 }
 
@@ -324,7 +367,8 @@ function UiReviewApp() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
-            <Route path="history" element={<OverviewPage />} />
+            <Route path="history" element={<HistoryPage />} />
+            <Route path="signal-performance" element={<SignalPerformancePage />} />
             <Route path="journal" element={<OverviewPage />} />
             <Route path="v4" element={<OverviewPage />} />
             <Route path="*" element={<OverviewPage />} />

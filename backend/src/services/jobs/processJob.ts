@@ -90,6 +90,78 @@ export const processJob = async (
       });
     }
 
+    // V6 Signal Outcome Tracking — hypothetical only; never places broker orders.
+    // Create signal + enqueue durable outcome-monitor job. Monitoring failures retry
+    // independently — do not permanently complete the only processing path when
+    // monitoring fails after a swallowed non-fatal error.
+    try {
+      const { ensureSignalOutcomeFromDecision } = await import("../signalOutcome/monitor.js");
+      const { getOutcomeMonitorJobStore } = await import("../signalOutcome/monitorJobs.js");
+      const { SignalOutcomeStorageUnavailableError } = await import(
+        "../signalOutcome/storagePolicy.js"
+      );
+      try {
+        await ensureSignalOutcomeFromDecision(decision);
+      } catch (error: unknown) {
+        if (error instanceof SignalOutcomeStorageUnavailableError) {
+          logger.warn("Signal outcome skipped — storage unavailable (fail closed)", {
+            jobId,
+            code: error.code
+          });
+          // Decision job continues; no hypothetical create/monitor without durable storage.
+          return await store.completeProcessingJob(jobId, decision.decisionId);
+        }
+        throw error;
+      }
+
+      const ohlcv = rawEvent.payload.ohlcv;
+      if (
+        rawEvent.payload.isConfirmedBar &&
+        ohlcv &&
+        typeof ohlcv.open === "number" &&
+        typeof ohlcv.high === "number" &&
+        typeof ohlcv.low === "number" &&
+        typeof ohlcv.close === "number"
+      ) {
+        const environment: "LIVE" | "TEST" = claimed.environment === "TEST" ? "TEST" : "LIVE";
+        const bar = {
+          eventId: claimed.eventId,
+          barTime: rawEvent.payload.barTime,
+          open: ohlcv.open,
+          high: ohlcv.high,
+          low: ohlcv.low,
+          close: ohlcv.close,
+          isConfirmedBar: true as const,
+          symbol: (rawEvent.payload.symbol as string) || decision.symbol || "XAUUSD",
+          timeframe: rawEvent.payload.timeframe ?? decision.timeframe ?? null,
+          environment,
+          source: "tradingview-ohlcv",
+          dataQuality: "OK"
+        };
+        const { enqueueMatchingOutcomeMonitorJobs, getSignalOutcomeStore } = await import(
+          "../signalOutcome/monitor.js"
+        );
+        await enqueueMatchingOutcomeMonitorJobs(
+          claimed.userId,
+          bar,
+          getSignalOutcomeStore(),
+          getOutcomeMonitorJobStore()
+        );
+      }
+    } catch (error: unknown) {
+      const { SignalOutcomeStorageUnavailableError } = await import(
+        "../signalOutcome/storagePolicy.js"
+      );
+      if (error instanceof SignalOutcomeStorageUnavailableError) {
+        logger.warn("Signal outcome enqueue skipped — storage unavailable (fail closed)", {
+          jobId,
+          code: error.code
+        });
+      } else {
+        throw error;
+      }
+    }
+
     return await store.completeProcessingJob(jobId, decision.decisionId);
   } catch (error: unknown) {
     const failed = await store.failProcessingJob(
