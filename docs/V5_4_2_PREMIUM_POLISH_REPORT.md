@@ -9,7 +9,7 @@
 | Item | URL |
 |------|-----|
 | Preview alias | https://preview-v5-4-2.goldmeta-web.pages.dev |
-| Direct deploy | https://9d827148.goldmeta-web.pages.dev |
+| Direct deploy | https://b935e834.goldmeta-web.pages.dev |
 | Review shell | https://preview-v5-4-2.goldmeta-web.pages.dev/ui-review/ |
 | Prior V5.4.1 preview | https://preview-v5-4-ux.goldmeta-web.pages.dev |
 
