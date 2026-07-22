@@ -4,6 +4,8 @@
  * until a provider is wired. Tests use MockMarketDataProvider only.
  */
 
+/* eslint-disable @typescript-eslint/require-await -- fail-closed stubs */
+
 export type CandleInterval = "1m" | "5m" | "15m" | "1d";
 
 export interface OhlcvBar {
@@ -41,6 +43,8 @@ export interface MarketIndicators {
   broadMarketTrend: "BULL" | "BEAR" | "NEUTRAL" | "UNKNOWN";
   sectorTrend: "BULL" | "BEAR" | "NEUTRAL" | "UNKNOWN";
   sessionStatus: "OPEN" | "CLOSED" | "PRE" | "POST" | "UNKNOWN";
+  /** Minutes until regular-session close when known from exchange calendar/provider. */
+  minutesToClose?: number | null;
   earningsOrNewsRisk: boolean | null;
   asOf: string;
 }

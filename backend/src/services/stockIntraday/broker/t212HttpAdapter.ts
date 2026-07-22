@@ -2,9 +2,10 @@
  * Trading 212 Paper/Live HTTP adapter.
  * Read-only methods are implemented. Order methods are scaffolded and blocked
  * by feature flags (both false in this delivery).
- *
  * Automated tests must use FakeT212BrokerAdapter — never this class with real secrets.
  */
+
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-base-to-string -- HTTP mapping of unknown JSON */
 
 import { logger } from "../../logging/logger";
 import {
@@ -368,16 +369,27 @@ export class T212HttpBrokerAdapter implements T212BrokerAdapter {
 }
 
 function mapInstrument(row: Record<string, unknown>): T212Instrument {
-  const typeRaw = String(row.type ?? row.instrumentType ?? "STOCK").toUpperCase();
+  const typeRaw = String(row.type ?? row.instrumentType ?? "").toUpperCase();
   const type =
-    typeRaw.includes("ETF") ? "ETF" : typeRaw.includes("STOCK") || typeRaw === "EQUITY" ? "STOCK" : "OTHER";
+    typeRaw.includes("ETF")
+      ? "ETF"
+      : typeRaw.includes("STOCK") || typeRaw === "EQUITY"
+        ? "STOCK"
+        : typeRaw
+          ? "OTHER"
+          : "OTHER";
+  const minRaw = row.minTradeQuantity ?? row.extendedHoursMinTradeQuantity;
+  const minTradeQuantity =
+    minRaw != null && Number.isFinite(Number(minRaw)) && Number(minRaw) > 0
+      ? Number(minRaw)
+      : NaN;
   return {
     ticker: String(row.ticker ?? row.symbol ?? ""),
     name: String(row.name ?? row.ticker ?? ""),
     type,
-    currency: String(row.currencyCode ?? row.currency ?? "USD"),
+    currency: String(row.currencyCode ?? row.currency ?? ""),
     exchange: String(row.exchangeName ?? row.exchange ?? ""),
-    minTradeQuantity: Number(row.minTradeQuantity ?? row.extendedHoursMinTradeQuantity ?? 0.001),
+    minTradeQuantity,
     maxOpenQuantity: row.maxOpenQuantity != null ? Number(row.maxOpenQuantity) : null,
     extendedHoursAllowed: Boolean(row.extendedHoursAllowed ?? false),
     tradable: row.workingScheduleId != null || row.addedOn != null ? true : Boolean(row.tradable ?? true),

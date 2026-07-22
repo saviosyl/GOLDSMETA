@@ -1,9 +1,12 @@
 /**
  * Stocks Intraday AutoTrade runtime wiring.
- * Tests use FakeT212 + MockMarketData. Real modes fail closed without secrets/provider.
+ * Tests / explicit local memory: InMemoryStockIntradayStore.
+ * All other environments: FirestoreStockIntradayStore (fail closed if unavailable).
+ * Never silently use in-memory outside tests or explicitly selected local development.
  */
 
 import { env } from "../../config/env";
+import { getFirestoreDb } from "../firebaseAdmin";
 import { FakeT212BrokerAdapter } from "./broker/fakeT212BrokerAdapter";
 import { T212HttpBrokerAdapter, loadT212CredentialsFromServerEnv } from "./broker/t212HttpAdapter";
 import type { T212BrokerAdapter } from "./broker/t212BrokerAdapter";
@@ -12,7 +15,9 @@ import {
   UnconfiguredMarketDataProvider,
   type MarketDataProvider
 } from "./marketData/marketDataProvider";
-import { InMemoryStockIntradayStore, type StockIntradayStorePort } from "./stockIntradayStore";
+import { InMemoryStockIntradayStore } from "./inMemoryStockIntradayStore";
+import { FirestoreStockIntradayStore } from "./firestoreStockIntradayStore";
+import type { StockIntradayStorePort } from "./stockIntradayStore";
 import { StockIntradayService } from "./stockIntradayService";
 import { logger } from "../logging/logger";
 
@@ -23,9 +28,31 @@ export function createStockIntradayMarketData(): MarketDataProvider {
   return new UnconfiguredMarketDataProvider();
 }
 
+/**
+ * Resolve the stock intraday store.
+ * - test OR STORAGE_BACKEND=memory (non-production): in-memory
+ * - otherwise: Firestore required; throw if Admin SDK unavailable
+ */
 export function createStockIntradayStore(): StockIntradayStorePort {
-  // First delivery: in-memory for local/test; Firestore port can replace without API change.
-  return new InMemoryStockIntradayStore();
+  const allowMemory =
+    env.APP_ENV === "test" ||
+    (env.STORAGE_BACKEND === "memory" && env.APP_ENV !== "production");
+
+  if (allowMemory) {
+    if (env.APP_ENV === "production") {
+      throw new Error("InMemoryStockIntradayStore is not allowed when APP_ENV=production");
+    }
+    return new InMemoryStockIntradayStore();
+  }
+
+  const firestore = getFirestoreDb();
+  if (!firestore) {
+    throw new Error(
+      "FirestoreStockIntradayStore required; Firestore Admin unavailable. " +
+        "Set STORAGE_BACKEND=memory only for explicit local development/test."
+    );
+  }
+  return new FirestoreStockIntradayStore(firestore);
 }
 
 export function createT212AdapterFactory(): () => T212BrokerAdapter {
@@ -54,6 +81,7 @@ export function createStockIntradayService(options?: {
   const adapterFactory = options?.adapterFactory ?? createT212AdapterFactory();
   logger.info("Stock Intraday AutoTrade runtime configured", {
     marketData: marketData.capabilities.providerId,
+    store: store.constructor.name,
     paperOrders: false,
     liveOrders: false
   });

@@ -3,6 +3,8 @@
  * Never used as a silent fallback when a real Auto mode expects live data.
  */
 
+/* eslint-disable @typescript-eslint/require-await -- sync mock fixtures */
+
 import type {
   CandleInterval,
   MarketDataCapabilities,
@@ -17,6 +19,7 @@ export interface MockMarketDataOptions {
   bid?: number;
   ask?: number;
   sessionStatus?: MarketIndicators["sessionStatus"];
+  minutesToClose?: number | null;
   relativeVolume?: number;
   averageDailyVolume?: number;
   volatilityPct?: number;
@@ -39,23 +42,21 @@ export class MockMarketDataProvider implements MarketDataProvider {
     notes: ["Deterministic fixtures for automated tests only."]
   };
 
-  private opts: Required<
-    Pick<
-      MockMarketDataOptions,
-      | "last"
-      | "bid"
-      | "ask"
-      | "sessionStatus"
-      | "relativeVolume"
-      | "averageDailyVolume"
-      | "volatilityPct"
-      | "rsi"
-      | "atr"
-      | "vwap"
-      | "stale"
-      | "outage"
-    >
-  >;
+  private opts: {
+    last: number;
+    bid: number;
+    ask: number;
+    sessionStatus: MarketIndicators["sessionStatus"];
+    minutesToClose: number | null;
+    relativeVolume: number;
+    averageDailyVolume: number;
+    volatilityPct: number;
+    rsi: number;
+    atr: number;
+    vwap: number;
+    stale: boolean;
+    outage: boolean;
+  };
 
   constructor(opts: MockMarketDataOptions = {}) {
     const last = opts.last ?? 180;
@@ -64,6 +65,7 @@ export class MockMarketDataProvider implements MarketDataProvider {
       bid: opts.bid ?? last - 0.05,
       ask: opts.ask ?? last + 0.05,
       sessionStatus: opts.sessionStatus ?? "OPEN",
+      minutesToClose: opts.minutesToClose ?? 180,
       relativeVolume: opts.relativeVolume ?? 1.8,
       averageDailyVolume: opts.averageDailyVolume ?? 5_000_000,
       volatilityPct: opts.volatilityPct ?? 1.2,
@@ -135,6 +137,7 @@ export class MockMarketDataProvider implements MarketDataProvider {
       broadMarketTrend: "BULL",
       sectorTrend: "BULL",
       sessionStatus: this.opts.sessionStatus,
+      minutesToClose: this.opts.minutesToClose,
       earningsOrNewsRisk: false,
       asOf: this.asOf()
     };

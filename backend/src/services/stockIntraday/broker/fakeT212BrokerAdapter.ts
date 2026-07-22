@@ -2,6 +2,8 @@
  * Fake Trading 212 adapter for automated tests — never contacts T212.
  */
 
+/* eslint-disable @typescript-eslint/require-await -- sync fake adapter */
+
 import { nowIso } from "../../../utils/time";
 import {
   T212_PAPER_ORDER_SUBMISSION_ENABLED,

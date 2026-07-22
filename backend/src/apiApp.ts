@@ -21,6 +21,7 @@ import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
 import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { buildStockIntradayRouter } from "./routes/stockIntraday";
+import { buildStockIntradayWebhookRouter } from "./routes/stockIntradayWebhook";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -89,6 +90,7 @@ export const createApiApp = (
 
   app.use(buildHealthRouter());
   app.use(buildWebhooksRouter(store, aiExplainer));
+  app.use(buildStockIntradayWebhookRouter(stockIntradayService));
   app.use(buildTradingViewRouter(store, aiExplainer));
   app.use(buildDevicesRouter(store));
   app.use(buildPushRouter(store));

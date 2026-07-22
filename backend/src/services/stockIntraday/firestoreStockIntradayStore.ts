@@ -1,0 +1,654 @@
+/**
+ * Firestore-backed Stocks Intraday store (Firebase Admin SDK only).
+ */
+
+import type { Firestore, Transaction } from "firebase-admin/firestore";
+import type { StockIntradayRiskState, StockManagedPosition, StockTradeIntent } from "./types";
+import type { StockSignalRecord } from "./signalIngestion";
+import { isTerminalState } from "./stateMachine";
+import { refreshRiskPeriod } from "./risk/riskEngine";
+import { nowIso } from "../../utils/time";
+import {
+  type StockIntradayStorePort,
+  type StockIntradaySettings,
+  type StockIntradayActivityEntry,
+  type StockIntradayAuditEntry,
+  type StockIntradayJob,
+  type StockJobState,
+  type StockWebhookConnection,
+  type StockCashReservation,
+  type StockReconciliationRecord,
+  type StockRestartGate,
+  type ReserveAlertResult,
+  type ReserveIntentResult,
+  defaultSettings,
+  defaultRestartGate,
+  createDefaultRisk,
+  sanitizeDocId,
+  STOCK_JOB_LEASE_MS,
+  STOCK_INTENT_LEASE_MS
+} from "./stockIntradayStore";
+
+const stripUndefined = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripUndefined);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, stripUndefined(v)])
+    );
+  }
+  return value;
+};
+
+function isLeaseExpired(leaseExpiresAt: string | null): boolean {
+  if (!leaseExpiresAt) return true;
+  return Date.now() > new Date(leaseExpiresAt).getTime();
+}
+
+function leaseExpiresFromNow(ms: number): string {
+  return new Date(Date.now() + ms).toISOString();
+}
+
+interface IdempotencyDoc {
+  intentId: string;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
+
+export class FirestoreStockIntradayStore implements StockIntradayStorePort {
+  constructor(private readonly db: Firestore) {}
+
+  private userRoot(userId: string) {
+    return this.db.collection("users").doc(userId).collection("stockIntraday");
+  }
+
+  private col(userId: string, name: string) {
+    return this.userRoot(userId).doc("data").collection(name);
+  }
+
+  private settingsRef(userId: string) {
+    return this.col(userId, "settings").doc("current");
+  }
+
+  private riskRef(userId: string) {
+    return this.col(userId, "riskState").doc("current");
+  }
+
+  private restartGateRef(userId: string) {
+    return this.col(userId, "restartGate").doc("current");
+  }
+
+  private intentRef(userId: string, intentId: string) {
+    return this.col(userId, "intents").doc(intentId);
+  }
+
+  private idempotencyRef(userId: string, key: string) {
+    return this.col(userId, "idempotency").doc(sanitizeDocId(key));
+  }
+
+  private alertIdRef(userId: string, alertId: string) {
+    return this.col(userId, "alertIds").doc(alertId);
+  }
+
+  private signalRef(userId: string, alertId: string) {
+    return this.col(userId, "signals").doc(alertId);
+  }
+
+  private positionRef(userId: string, positionId: string) {
+    return this.col(userId, "positions").doc(positionId);
+  }
+
+  private jobRef(userId: string, jobId: string) {
+    return this.col(userId, "jobs").doc(jobId);
+  }
+
+  private cashReservationRef(userId: string, intentId: string) {
+    return this.col(userId, "reservations").doc(intentId);
+  }
+
+  private exitReservationRef(userId: string, positionId: string) {
+    return this.col(userId, "exitReservations").doc(positionId);
+  }
+
+  private webhookRootRef(connectionId: string) {
+    return this.db.collection("stockIntradayWebhookConnections").doc(connectionId);
+  }
+
+  private webhookMirrorRef(userId: string, connectionId: string) {
+    return this.col(userId, "webhookConnections").doc(connectionId);
+  }
+
+  async getRiskState(userId: string): Promise<StockIntradayRiskState> {
+    const snap = await this.riskRef(userId).get();
+    if (!snap.exists) {
+      const created = refreshRiskPeriod(createDefaultRisk(userId));
+      await this.riskRef(userId).set(stripUndefined(created) as FirebaseFirestore.DocumentData);
+      return created;
+    }
+    const state = refreshRiskPeriod(snap.data() as StockIntradayRiskState);
+    if (state.dayKey !== (snap.data() as StockIntradayRiskState).dayKey) {
+      await this.riskRef(userId).set(stripUndefined(state) as FirebaseFirestore.DocumentData, {
+        merge: true
+      });
+    }
+    return state;
+  }
+
+  async saveRiskState(state: StockIntradayRiskState): Promise<StockIntradayRiskState> {
+    const next = { ...state, updatedAt: nowIso() };
+    await this.riskRef(state.userId).set(stripUndefined(next) as FirebaseFirestore.DocumentData, {
+      merge: true
+    });
+    return next;
+  }
+
+  async incrementDailyTradeCounters(
+    userId: string,
+    patch: { trades?: number; allocationUsed?: number; realisedPnl?: number }
+  ): Promise<StockIntradayRiskState> {
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const ref = this.riskRef(userId);
+      const snap = await tx.get(ref);
+      let state = snap.exists
+        ? refreshRiskPeriod(snap.data() as StockIntradayRiskState)
+        : refreshRiskPeriod(createDefaultRisk(userId));
+      if (patch.trades) state.tradesUsedToday += patch.trades;
+      if (patch.allocationUsed) state.dailyAllocationUsed += patch.allocationUsed;
+      if (patch.realisedPnl) state.dailyRealisedPnl += patch.realisedPnl;
+      state.updatedAt = nowIso();
+      tx.set(ref, stripUndefined(state) as FirebaseFirestore.DocumentData, { merge: true });
+      return state;
+    });
+  }
+
+  async getSettings(userId: string): Promise<StockIntradaySettings> {
+    const snap = await this.settingsRef(userId).get();
+    if (!snap.exists) {
+      const created = defaultSettings(userId);
+      await this.settingsRef(userId).set(stripUndefined(created) as FirebaseFirestore.DocumentData);
+      return created;
+    }
+    return snap.data() as StockIntradaySettings;
+  }
+
+  async saveSettings(settings: StockIntradaySettings): Promise<StockIntradaySettings> {
+    const next = { ...settings, updatedAt: nowIso() };
+    await this.settingsRef(settings.userId).set(
+      stripUndefined(next) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    return next;
+  }
+
+  async listPositions(userId: string): Promise<StockManagedPosition[]> {
+    const snap = await this.col(userId, "positions").get();
+    return snap.docs.map((d) => d.data() as StockManagedPosition);
+  }
+
+  async savePosition(position: StockManagedPosition): Promise<void> {
+    await this.positionRef(position.userId, position.positionId).set(
+      stripUndefined(position) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+  }
+
+  async deletePosition(userId: string, positionId: string): Promise<void> {
+    await Promise.all([
+      this.positionRef(userId, positionId).delete(),
+      this.exitReservationRef(userId, positionId).delete()
+    ]);
+  }
+
+  async reservePositionSlot(position: StockManagedPosition): Promise<boolean> {
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const positionsSnap = await tx.get(this.col(position.userId, "positions"));
+      const hasSymbol = positionsSnap.docs.some(
+        (d) => (d.data() as StockManagedPosition).symbol === position.symbol
+      );
+      if (hasSymbol) return false;
+      tx.set(
+        this.positionRef(position.userId, position.positionId),
+        stripUndefined(position) as FirebaseFirestore.DocumentData
+      );
+      return true;
+    });
+  }
+
+  async getIntent(userId: string, intentId: string): Promise<StockTradeIntent | null> {
+    const snap = await this.intentRef(userId, intentId).get();
+    return snap.exists ? (snap.data() as StockTradeIntent) : null;
+  }
+
+  async saveIntent(intent: StockTradeIntent): Promise<void> {
+    const next = { ...intent, updatedAt: nowIso() };
+    await this.intentRef(intent.userId, intent.intentId).set(
+      stripUndefined(next) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+  }
+
+  async listOpenIntents(userId: string): Promise<StockTradeIntent[]> {
+    const snap = await this.col(userId, "intents").get();
+    return snap.docs
+      .map((d) => d.data() as StockTradeIntent)
+      .filter((intent) => !isTerminalState(intent.state));
+  }
+
+  async listUnresolvedIntents(userId: string): Promise<StockTradeIntent[]> {
+    return this.listOpenIntents(userId);
+  }
+
+  async reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult> {
+    const idemRef = this.idempotencyRef(intent.userId, idempotencyKey);
+    const intentRef = this.intentRef(intent.userId, intent.intentId);
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const idemSnap = await tx.get(idemRef);
+      if (idemSnap.exists) {
+        const existing = idemSnap.data() as IdempotencyDoc;
+        const owner = intent.leaseOwner;
+        if (
+          existing.leaseOwner &&
+          existing.leaseOwner !== owner &&
+          !isLeaseExpired(existing.leaseExpiresAt)
+        ) {
+          return "lease_held";
+        }
+        return "duplicate";
+      }
+
+      const leaseOwner = intent.leaseOwner;
+      const leaseExpiresAt =
+        intent.leaseExpiresAt ??
+        (leaseOwner ? leaseExpiresFromNow(STOCK_INTENT_LEASE_MS) : null);
+
+      const toSave: StockTradeIntent = {
+        ...intent,
+        leaseOwner,
+        leaseExpiresAt,
+        updatedAt: nowIso()
+      };
+
+      tx.set(intentRef, stripUndefined(toSave) as FirebaseFirestore.DocumentData);
+      tx.set(idemRef, {
+        intentId: intent.intentId,
+        leaseOwner,
+        leaseExpiresAt,
+        updatedAt: nowIso()
+      });
+      return "reserved";
+    });
+  }
+
+  async reserveExit(userId: string, positionId: string, reason: string): Promise<boolean> {
+    const ref = this.exitReservationRef(userId, positionId);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (snap.exists) return false;
+      tx.set(ref, {
+        userId,
+        positionId,
+        reason,
+        createdAt: nowIso()
+      });
+      return true;
+    });
+  }
+
+  async hasAlertId(userId: string, alertId: string): Promise<boolean> {
+    const alertSnap = await this.alertIdRef(userId, alertId).get();
+    if (alertSnap.exists) return true;
+    const signalSnap = await this.signalRef(userId, alertId).get();
+    return signalSnap.exists;
+  }
+
+  async reserveAlert(
+    userId: string,
+    alertId: string,
+    signal: StockSignalRecord
+  ): Promise<ReserveAlertResult> {
+    const alertRef = this.alertIdRef(userId, alertId);
+    const signalDocRef = this.signalRef(userId, alertId);
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const alertSnap = await tx.get(alertRef);
+      const signalSnap = await tx.get(signalDocRef);
+      if (alertSnap.exists || signalSnap.exists) return "duplicate";
+      tx.set(alertRef, { alertId, userId, createdAt: nowIso() });
+      tx.set(signalDocRef, stripUndefined({ ...signal, updatedAt: nowIso() }) as FirebaseFirestore.DocumentData);
+      return "reserved";
+    });
+  }
+
+  async saveSignal(record: StockSignalRecord): Promise<void> {
+    await this.signalRef(record.userId, record.alertId).set(
+      stripUndefined({ ...record, updatedAt: nowIso() }) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    await this.alertIdRef(record.userId, record.alertId).set(
+      { alertId: record.alertId, userId: record.userId, createdAt: nowIso() },
+      { merge: true }
+    );
+  }
+
+  async getSignalByAlertId(userId: string, alertId: string): Promise<StockSignalRecord | null> {
+    const snap = await this.signalRef(userId, alertId).get();
+    return snap.exists ? (snap.data() as StockSignalRecord) : null;
+  }
+
+  async createJob(
+    job: Omit<
+      StockIntradayJob,
+      | "createdAt"
+      | "updatedAt"
+      | "completedAt"
+      | "attemptCount"
+      | "leaseOwner"
+      | "leaseExpiresAt"
+      | "lastError"
+      | "state"
+    > & { state?: StockJobState; maxAttempts?: number }
+  ): Promise<StockIntradayJob> {
+    const ts = nowIso();
+    const created: StockIntradayJob = {
+      ...job,
+      state: job.state ?? "QUEUED",
+      maxAttempts: job.maxAttempts ?? 5,
+      attemptCount: 0,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: null,
+      createdAt: ts,
+      updatedAt: ts,
+      completedAt: null
+    };
+    await this.jobRef(job.userId, job.jobId).set(
+      stripUndefined(created) as FirebaseFirestore.DocumentData
+    );
+    return created;
+  }
+
+  async getJob(userId: string, jobId: string): Promise<StockIntradayJob | null> {
+    const snap = await this.jobRef(userId, jobId).get();
+    return snap.exists ? (snap.data() as StockIntradayJob) : null;
+  }
+
+  async claimJob(
+    userId: string,
+    jobId: string,
+    ownerId: string,
+    leaseMs = STOCK_JOB_LEASE_MS
+  ): Promise<StockIntradayJob | null> {
+    const ref = this.jobRef(userId, jobId);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const job = snap.data() as StockIntradayJob;
+      if (job.state === "COMPLETED") return null;
+      if (
+        job.state === "PROCESSING" &&
+        job.leaseOwner &&
+        job.leaseOwner !== ownerId &&
+        !isLeaseExpired(job.leaseExpiresAt)
+      ) {
+        return null;
+      }
+      const next: StockIntradayJob = {
+        ...job,
+        state: "PROCESSING",
+        leaseOwner: ownerId,
+        leaseExpiresAt: leaseExpiresFromNow(leaseMs),
+        attemptCount: job.attemptCount + 1,
+        updatedAt: nowIso()
+      };
+      tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      return next;
+    });
+  }
+
+  async completeJob(userId: string, jobId: string): Promise<StockIntradayJob | null> {
+    const ref = this.jobRef(userId, jobId);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const job = snap.data() as StockIntradayJob;
+      const next: StockIntradayJob = {
+        ...job,
+        state: "COMPLETED",
+        completedAt: nowIso(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastError: null,
+        updatedAt: nowIso()
+      };
+      tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      return next;
+    });
+  }
+
+  async failJob(userId: string, jobId: string, error: string): Promise<StockIntradayJob | null> {
+    const ref = this.jobRef(userId, jobId);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const job = snap.data() as StockIntradayJob;
+      const exhausted = job.attemptCount >= job.maxAttempts;
+      const next: StockIntradayJob = {
+        ...job,
+        state: exhausted ? "DEAD_LETTER" : "QUEUED",
+        lastError: error,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        updatedAt: nowIso()
+      };
+      tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      return next;
+    });
+  }
+
+  async reserveCash(userId: string, intentId: string, amount: number): Promise<boolean> {
+    const ref = this.cashReservationRef(userId, intentId);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (snap.exists) {
+        const existing = snap.data() as StockCashReservation;
+        if (!existing.released) return false;
+      }
+      const reservation: StockCashReservation = {
+        reservationId: intentId,
+        userId,
+        intentId,
+        amount,
+        released: false,
+        createdAt: nowIso()
+      };
+      tx.set(ref, stripUndefined(reservation) as FirebaseFirestore.DocumentData);
+      return true;
+    });
+  }
+
+  async releaseCash(userId: string, intentId: string): Promise<void> {
+    const ref = this.cashReservationRef(userId, intentId);
+    await ref.set({ released: true, updatedAt: nowIso() }, { merge: true });
+  }
+
+  async getReservedCashTotal(userId: string): Promise<number> {
+    const snap = await this.col(userId, "reservations").where("released", "==", false).get();
+    return snap.docs.reduce((sum, d) => sum + Number((d.data() as StockCashReservation).amount ?? 0), 0);
+  }
+
+  async appendActivity(
+    userId: string,
+    entry: Omit<StockIntradayActivityEntry, "id"> & { id?: string }
+  ): Promise<void> {
+    const id = entry.id ?? this.db.collection("_").doc().id;
+    await this.col(userId, "activity")
+      .doc(id)
+      .set(
+        stripUndefined({
+          id,
+          at: entry.at,
+          message: entry.message,
+          level: entry.level
+        }) as FirebaseFirestore.DocumentData
+      );
+  }
+
+  async listActivity(userId: string, limit = 50): Promise<StockIntradayActivityEntry[]> {
+    const snap = await this.col(userId, "activity").orderBy("at", "desc").limit(limit).get();
+    return snap.docs.map((d) => d.data() as StockIntradayActivityEntry);
+  }
+
+  async appendAudit(
+    entry: Omit<StockIntradayAuditEntry, "id" | "at"> & { id?: string; at?: string }
+  ): Promise<void> {
+    const id = entry.id ?? this.db.collection("_").doc().id;
+    await this.col(entry.userId, "audit")
+      .doc(id)
+      .set(
+        stripUndefined({
+          id,
+          userId: entry.userId,
+          at: entry.at ?? nowIso(),
+          action: entry.action,
+          detail: entry.detail
+        }) as FirebaseFirestore.DocumentData
+      );
+  }
+
+  async getSymbolCooldown(userId: string, symbol: string): Promise<string | null> {
+    const snap = await this.col(userId, "cooldowns").doc(symbol.toUpperCase()).get();
+    if (!snap.exists) return null;
+    return String((snap.data() as { untilIso?: string }).untilIso ?? "") || null;
+  }
+
+  async setSymbolCooldown(userId: string, symbol: string, untilIso: string): Promise<void> {
+    await this.col(userId, "cooldowns")
+      .doc(symbol.toUpperCase())
+      .set({ symbol: symbol.toUpperCase(), untilIso, updatedAt: nowIso() });
+  }
+
+  async listShadowTrades(
+    userId: string
+  ): Promise<
+    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
+  > {
+    const snap = await this.col(userId, "shadowTrades").orderBy("at", "desc").limit(200).get();
+    return snap.docs.map((d) => d.data() as {
+      id: string;
+      symbol: string;
+      side: "BUY" | "SELL";
+      quantity: number;
+      at: string;
+      note: string;
+    });
+  }
+
+  async appendShadowTrade(
+    userId: string,
+    trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
+  ): Promise<void> {
+    const id = this.db.collection("_").doc().id;
+    await this.col(userId, "shadowTrades").doc(id).set({
+      id,
+      symbol: trade.symbol,
+      side: trade.side,
+      quantity: trade.quantity,
+      at: nowIso(),
+      note: trade.note
+    });
+  }
+
+  async getRestartGate(userId: string): Promise<StockRestartGate> {
+    const snap = await this.restartGateRef(userId).get();
+    if (!snap.exists) {
+      const created = defaultRestartGate(userId);
+      await this.restartGateRef(userId).set(stripUndefined(created) as FirebaseFirestore.DocumentData);
+      return created;
+    }
+    return snap.data() as StockRestartGate;
+  }
+
+  async saveRestartGate(gate: StockRestartGate): Promise<void> {
+    await this.restartGateRef(gate.userId).set(
+      stripUndefined({ ...gate, updatedAt: nowIso() }) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+  }
+
+  async saveReconciliation(record: StockReconciliationRecord): Promise<void> {
+    await this.col(record.userId, "reconciliation")
+      .doc(record.id)
+      .set(stripUndefined({ ...record, updatedAt: nowIso() }) as FirebaseFirestore.DocumentData, {
+        merge: true
+      });
+  }
+
+  async listPendingReconciliation(userId: string): Promise<StockReconciliationRecord[]> {
+    const snap = await this.col(userId, "reconciliation").where("status", "==", "PENDING").get();
+    return snap.docs.map((d) => d.data() as StockReconciliationRecord);
+  }
+
+  async getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null> {
+    const snap = await this.webhookRootRef(connectionId).get();
+    return snap.exists ? (snap.data() as StockWebhookConnection) : null;
+  }
+
+  async saveWebhookConnection(conn: StockWebhookConnection): Promise<void> {
+    const payload = stripUndefined(conn) as FirebaseFirestore.DocumentData;
+    await this.webhookRootRef(conn.connectionId).set(payload, { merge: true });
+    await this.webhookMirrorRef(conn.userId, conn.connectionId).set(payload, { merge: true });
+  }
+
+  async recordWebhookAuthFailure(connectionId: string): Promise<StockWebhookConnection | null> {
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const ref = this.webhookRootRef(connectionId);
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const existing = snap.data() as StockWebhookConnection;
+      const failureCount = existing.failureCount + 1;
+      let lockedUntil = existing.lockedUntil;
+      if (failureCount >= 5) {
+        lockedUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+      }
+      const updated: StockWebhookConnection = {
+        ...existing,
+        failureCount,
+        lockedUntil,
+        updatedAt: nowIso()
+      };
+      tx.set(ref, stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
+      tx.set(
+        this.webhookMirrorRef(existing.userId, connectionId),
+        stripUndefined(updated) as FirebaseFirestore.DocumentData,
+        { merge: true }
+      );
+      return updated;
+    });
+  }
+
+  async clearWebhookAuthFailures(connectionId: string): Promise<void> {
+    const existing = await this.getWebhookConnection(connectionId);
+    if (!existing) return;
+    const updated: StockWebhookConnection = {
+      ...existing,
+      failureCount: 0,
+      lockedUntil: null,
+      updatedAt: nowIso()
+    };
+    await this.saveWebhookConnection(updated);
+  }
+
+  async registerSchedulerUser(userId: string): Promise<void> {
+    await this.db
+      .collection("stockIntradaySchedulerUsers")
+      .doc(userId)
+      .set({ userId, updatedAt: nowIso() }, { merge: true });
+  }
+
+  async listSchedulerUserIds(): Promise<string[]> {
+    const snap = await this.db.collection("stockIntradaySchedulerUsers").get();
+    return snap.docs.map((d) => d.id);
+  }
+}

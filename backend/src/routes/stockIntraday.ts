@@ -129,9 +129,24 @@ export const buildStockIntradayRouter = (service: StockIntradayService): Router 
     res.json({ status });
   });
 
+  router.post("/v1/stock-intraday/webhook-connection", requireAuth, async (req, res) => {
+    const body = z
+      .object({ label: z.string().min(1).max(80).optional() })
+      .safeParse(req.body ?? {});
+    const label = body.success && body.data.label ? body.data.label : "TradingView Stocks";
+    const created = await service.createWebhookConnection(getAuthenticatedUserId(req), label);
+    res.status(201).json({
+      connectionId: created.connectionId,
+      secret: created.secret,
+      webhookPath: created.webhookPath,
+      note: "Store the secret securely. Only a hash is retained server-side. Secret is shown once."
+    });
+  });
+
   /**
-   * Authenticated stock-signal ingress (TradingView → GoldMeta).
-   * Fast ACK; full analysis is asynchronous. Never calls broker adapters here.
+   * Authenticated UI/test signal ingress. TradingView production alerts must use
+   * `/webhooks/stock-intraday/:connectionId` with the webhook token (no Firebase session).
+   * Fast ACK + durable job; never fire-and-forget in-process processing.
    */
   router.post("/v1/stock-intraday/signals/tradingview", requireAuth, async (req, res) => {
     const ack = await service.acknowledgeStockSignal(getAuthenticatedUserId(req), req.body);
@@ -143,7 +158,8 @@ export const buildStockIntradayRouter = (service: StockIntradayService): Router 
       accepted: true,
       code: ack.code,
       signalId: ack.signalId,
-      message: "Signal queued for asynchronous processing"
+      jobId: ack.jobId,
+      message: "Signal queued for durable asynchronous processing"
     });
   });
 

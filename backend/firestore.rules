@@ -122,6 +122,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Stocks Intraday TradingView webhook registry (Admin SDK only).
+    match /stockIntradayWebhookConnections/{connectionId} {
+      allow read, write: if false;
+    }
+
+    match /stockIntradaySchedulerUsers/{userId} {
+      allow read, write: if false;
+    }
+
     match /processingJobs/{jobId} {
       allow read, write: if false;
     }

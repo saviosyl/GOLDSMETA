@@ -37,15 +37,42 @@ const stockSignalSchema = z
     /** Explicitly rejected if present */
     apiKey: z.never().optional(),
     apiSecret: z.never().optional(),
-    password: z.never().optional()
+    password: z.never().optional(),
+    t212ApiKey: z.never().optional(),
+    t212ApiSecret: z.never().optional(),
+    trading212ApiKey: z.never().optional(),
+    trading212ApiSecret: z.never().optional()
   })
   .strict();
+
+const FORBIDDEN_CREDENTIAL_KEYS = [
+  "apikey",
+  "apisecret",
+  "password",
+  "t212apikey",
+  "t212apisecret",
+  "trading212apikey",
+  "trading212apisecret",
+  "authorization",
+  "secret"
+];
 
 export type StockSignalParseResult =
   | { ok: true; signal: StockTradingViewSignal }
   | { ok: false; code: string; message: string };
 
 export function parseStockTradingViewSignal(body: unknown): StockSignalParseResult {
+  if (body && typeof body === "object") {
+    for (const key of Object.keys(body)) {
+      if (FORBIDDEN_CREDENTIAL_KEYS.includes(key.toLowerCase().replace(/[_-]/g, ""))) {
+        return {
+          ok: false,
+          code: "CREDENTIALS_IN_PAYLOAD",
+          message: "Trading 212 credentials must never be sent in webhook payloads"
+        };
+      }
+    }
+  }
   const parsed = stockSignalSchema.safeParse(body);
   if (!parsed.success) {
     return { ok: false, code: "MALFORMED_PAYLOAD", message: "Invalid stock signal payload" };

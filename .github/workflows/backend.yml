@@ -2,9 +2,9 @@ name: Backend
 
 on:
   push:
-    branches: [main, cursor/production-connection]
+    branches: [main, cursor/production-connection, cursor/goldmeta-v6-t212-intraday-autotrade-c2c2]
   pull_request:
-    branches: [main, cursor/production-connection, cursor/webhook-delivery-400-c2c2, cursor/phase3-stage3-live-forward-c2c2, cursor/goldmeta-v4-stage-b-c2c2]
+    branches: [main, cursor/production-connection, cursor/webhook-delivery-400-c2c2, cursor/phase3-stage3-live-forward-c2c2, cursor/goldmeta-v4-stage-b-c2c2, cursor/goldmeta-v6-ig-autotrade-c2c2]
 
 jobs:
   backend:

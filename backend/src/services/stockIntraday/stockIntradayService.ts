@@ -55,9 +55,20 @@ import {
   type StockSignalRecord
 } from "./signalIngestion";
 import { redactSecrets } from "./redact";
-import type { StockIntradayStorePort } from "./stockIntradayStore";
+import type { StockIntradayJob, StockIntradayStorePort } from "./stockIntradayStore";
+import {
+  generateWebhookSecret,
+  hashWebhookSecret,
+  verifyWebhookSecret
+} from "./stockIntradayStore";
+import {
+  estimateMinutesToClose,
+  estimateSlippageBpsFromQuote
+} from "./sessionClock";
+import { processStockIntradayJob } from "./processStockIntradayJob";
 
-const restartUsers = new Set<string>();
+/** Process-local boot id — restart gate persistence lives in the store. */
+const PROCESS_BOOT_ID = randomUUID();
 
 export class StockIntradayService {
   private adapters = new Map<string, T212BrokerAdapter>();
@@ -78,20 +89,47 @@ export class StockIntradayService {
       : marketData.capabilities.providerId !== "unconfigured";
   }
 
-  static resetRestartGateForTests(): void {
-    restartUsers.clear();
+  /** Test helper — resets persistent restart gate for a user. */
+  static async resetRestartGateForTests(
+    store: StockIntradayStorePort,
+    userId = "u1"
+  ): Promise<void> {
+    await store.saveRestartGate({
+      userId,
+      entriesPaused: true,
+      lastReconciledAt: null,
+      processBootId: null,
+      updatedAt: nowIso()
+    });
   }
 
   private async ensureRestartPolicy(userId: string): Promise<void> {
-    if (restartUsers.has(userId)) return;
-    restartUsers.add(userId);
+    const gate = await this.store.getRestartGate(userId);
+    if (gate.processBootId === PROCESS_BOOT_ID) return;
+
     let risk = await this.store.getRiskState(userId);
-    if (risk.mode !== "OFF") {
+    if (risk.mode !== "OFF" && risk.mode !== "SHADOW") {
+      // Paper/Live always reset to OFF on process boot; SHADOW keeps monitoring after reconcile.
       const previous = risk.mode;
       risk = resetModeAfterRestart(risk);
       await this.store.saveRiskState(risk);
-      await this.activity(userId, `Restart: mode reset to OFF (was ${previous}). New entries paused.`, "warn");
+      await this.activity(
+        userId,
+        `Restart: mode reset to OFF (was ${previous}). New entries paused pending reconciliation.`,
+        "warn"
+      );
+    } else if (risk.mode === "SHADOW") {
+      risk = { ...risk, paused: true, updatedAt: nowIso() };
+      await this.store.saveRiskState(risk);
     }
+
+    await this.store.saveRestartGate({
+      userId,
+      entriesPaused: true,
+      lastReconciledAt: gate.lastReconciledAt,
+      processBootId: PROCESS_BOOT_ID,
+      updatedAt: nowIso()
+    });
   }
 
   async getStatus(userId: string): Promise<StockIntradayStatusPayload> {
@@ -270,6 +308,9 @@ export class StockIntradayService {
 
     risk = { ...risk, mode, paused: mode === "OFF", updatedAt: nowIso() };
     await this.store.saveRiskState(risk);
+    if (mode === "SHADOW") {
+      await this.registerForScheduler(userId);
+    }
     await this.audit(userId, "mode_set", { mode });
     await this.activity(userId, `Stocks Intraday mode set to ${mode}.`, mode === "OFF" ? "warn" : "success");
     return this.getStatus(userId);
@@ -331,20 +372,20 @@ export class StockIntradayService {
   }
 
   /**
-   * Fast webhook acknowledgement path — validates + queues, does not run full analysis.
+   * Fast webhook acknowledgement — authenticate happens at the route layer.
+   * Validates payload, atomically rejects duplicate alert IDs, stores signal,
+   * creates a durable processing job, and returns without running analysis.
    */
   async acknowledgeStockSignal(
     userId: string,
     body: unknown
-  ): Promise<{ accepted: boolean; code: string; signalId?: string }> {
+  ): Promise<{ accepted: boolean; code: string; signalId?: string; jobId?: string }> {
     const parsed = parseStockTradingViewSignal(body);
     if (!parsed.ok) {
       return { accepted: false, code: parsed.code };
     }
     const signal = parsed.signal;
-    if (await this.store.hasAlertId(userId, signal.alertId)) {
-      return { accepted: false, code: "DUPLICATE_ALERT" };
-    }
+
     if (isStaleSignal(signal, 5 * 60_000)) {
       const record = this.signalRecord(userId, signal, "REJECTED", "STALE", "IGNORED");
       await this.store.saveSignal(record);
@@ -358,17 +399,118 @@ export class StockIntradayService {
     }
 
     const record = this.signalRecord(userId, signal, "QUEUED", "PENDING", "PENDING");
-    await this.store.saveSignal(record);
+    const reserved = await this.store.reserveAlert(userId, signal.alertId, record);
+    if (reserved === "duplicate") {
+      return { accepted: false, code: "DUPLICATE_ALERT" };
+    }
+
     this.lastSignal.set(userId, signal);
-    // Async processing (same tick for tests; production would enqueue a job)
-    void this.processQueuedSignal(userId, record.id, signal).catch(async (err) => {
-      await this.activity(
-        userId,
-        `Signal processing failed: ${err instanceof Error ? err.message : "error"}`,
-        "error"
-      );
+    const job = await this.store.createJob({
+      jobId: `sig_${signal.alertId.slice(0, 48)}_${Date.now()}`,
+      userId,
+      kind: "PROCESS_SIGNAL",
+      signalId: record.id,
+      alertId: signal.alertId,
+      maxAttempts: 5,
+      payload: { alertId: signal.alertId, signalId: record.id }
     });
-    return { accepted: true, code: "QUEUED", signalId: record.id };
+
+    return { accepted: true, code: "QUEUED", signalId: record.id, jobId: job.jobId };
+  }
+
+  /** Process a durable job by id (claim + execute). Idempotent under duplicate triggers. */
+  async processDurableJobById(userId: string, jobId: string): Promise<StockIntradayJob | null> {
+    return processStockIntradayJob(userId, jobId, {
+      store: this.store,
+      service: this
+    });
+  }
+
+  /** Execute claimed durable job work. */
+  async executeDurableJob(job: StockIntradayJob): Promise<void> {
+    switch (job.kind) {
+      case "PROCESS_SIGNAL": {
+        const alertIdRaw = job.alertId ?? job.payload.alertId;
+        const alertId = typeof alertIdRaw === "string" ? alertIdRaw : "";
+        const signalRec = alertId
+          ? await this.store.getSignalByAlertId(job.userId, alertId)
+          : null;
+        if (!signalRec) {
+          throw new Error("SIGNAL_NOT_FOUND");
+        }
+        await this.processQueuedSignal(job.userId, signalRec.id, signalRec.signal);
+        return;
+      }
+      case "SCHEDULED_SCAN":
+        await this.runAutonomousScan(job.userId);
+        return;
+      case "MONITOR_POSITIONS":
+        await this.monitorOpenPositions(job.userId);
+        return;
+      case "MARKET_CLOSE_SWEEP":
+        await this.marketCloseSweep(job.userId);
+        return;
+      case "RECONCILE":
+        await this.reconcileOnStartup(job.userId);
+        return;
+      default: {
+        const kind = String(job.kind);
+        throw new Error(`UNKNOWN_JOB_KIND:${kind}`);
+      }
+    }
+  }
+
+  /**
+   * Create a TradingView webhook connection. Returns plaintext secret once;
+   * only the hash is persisted.
+   */
+  async createWebhookConnection(
+    userId: string,
+    label = "TradingView Stocks"
+  ): Promise<{ connectionId: string; secret: string; webhookPath: string }> {
+    const connectionId = randomUUID();
+    const secret = generateWebhookSecret();
+    await this.store.saveWebhookConnection({
+      connectionId,
+      userId,
+      secretHash: hashWebhookSecret(secret),
+      label,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      failureCount: 0,
+      lockedUntil: null
+    });
+    await this.audit(userId, "stock_webhook_created", { connectionId, label });
+    return {
+      connectionId,
+      secret,
+      webhookPath: `/webhooks/stock-intraday/${connectionId}`
+    };
+  }
+
+  /**
+   * Authenticate TradingView webhook token → owner userId.
+   * Never logs the secret. Rate-limits repeated failures via store.
+   */
+  async authenticateWebhook(
+    connectionId: string,
+    presentedSecret: string | undefined
+  ): Promise<{ ok: true; userId: string } | { ok: false; code: string; status: number }> {
+    const conn = await this.store.getWebhookConnection(connectionId);
+    if (!conn) {
+      return { ok: false, code: "WEBHOOK_NOT_FOUND", status: 401 };
+    }
+    if (conn.lockedUntil && Date.parse(conn.lockedUntil) > Date.now()) {
+      return { ok: false, code: "WEBHOOK_AUTH_LOCKED", status: 429 };
+    }
+    if (!presentedSecret || !verifyWebhookSecret(presentedSecret, conn.secretHash)) {
+      await this.store.recordWebhookAuthFailure(connectionId);
+      // Never log secret
+      await this.audit(conn.userId, "stock_webhook_auth_failed", { connectionId });
+      return { ok: false, code: "INVALID_WEBHOOK_TOKEN", status: 401 };
+    }
+    await this.store.clearWebhookAuthFailures(connectionId);
+    return { ok: true, userId: conn.userId };
   }
 
   async processQueuedSignal(
@@ -424,9 +566,16 @@ export class StockIntradayService {
     let risk = refreshRiskPeriod(await this.store.getRiskState(userId));
     const settings = await this.store.getSettings(userId);
     const positions = await this.store.listPositions(userId);
+    const gateState = await this.store.getRestartGate(userId);
 
     if (risk.mode === "OFF") {
       return { outcome: "BLOCKED", message: "BLOCKED — mode OFF" };
+    }
+    if (risk.paused || gateState.entriesPaused) {
+      return { outcome: "BLOCKED", message: "BLOCKED — entries paused pending reconciliation" };
+    }
+    if (risk.killSwitchActive || risk.emergencyStopActive || risk.locked) {
+      return { outcome: "BLOCKED", message: "BLOCKED — kill switch or lock active" };
     }
 
     let quote;
@@ -446,19 +595,49 @@ export class StockIntradayService {
       return { outcome: "BLOCKED", message: "BLOCKED — stale data" };
     }
 
-    const adapter = this.adapters.get(userId);
-    let instrumentType: "STOCK" | "ETF" | "OTHER" = "STOCK";
-    if (adapter?.isConnected()) {
-      const instruments = await adapter.listInstruments(signal.symbol);
-      const match = instruments.find((i) => i.ticker.toUpperCase() === signal.symbol.toUpperCase());
-      if (!match) {
-        return { outcome: "BLOCKED", message: "BLOCKED — instrument unavailable on Trading 212" };
-      }
-      if (match.type === "OTHER" || match.suspended || !match.tradable) {
-        return { outcome: "BLOCKED", message: "BLOCKED — instrument not an eligible stock/ETF" };
-      }
-      instrumentType = match.type;
+    const closeEst = estimateMinutesToClose(indicators);
+    if (closeEst.minutesToClose == null) {
+      this.pushRejected(userId, signal.symbol, "BLOCKED — minutes-to-close unavailable");
+      return { outcome: "BLOCKED", message: "BLOCKED — minutes-to-close unavailable" };
     }
+
+    const estimatedSlippageBps = estimateSlippageBpsFromQuote(quote);
+    if (estimatedSlippageBps == null) {
+      this.pushRejected(userId, signal.symbol, "BLOCKED — slippage estimate unavailable");
+      return { outcome: "BLOCKED", message: "BLOCKED — slippage estimate unavailable" };
+    }
+
+    const adapter = this.adapters.get(userId);
+    if (!adapter?.isConnected()) {
+      return {
+        outcome: "BLOCKED",
+        message: "BLOCKED — Trading 212 instrument validation unavailable"
+      };
+    }
+
+    let instruments;
+    try {
+      instruments = await adapter.listInstruments(signal.symbol);
+    } catch {
+      return {
+        outcome: "BLOCKED",
+        message: "BLOCKED — Trading 212 instrument validation unavailable"
+      };
+    }
+    const match = instruments.find((i) => i.ticker.toUpperCase() === signal.symbol.toUpperCase());
+    if (!match) {
+      return { outcome: "BLOCKED", message: "BLOCKED — instrument unavailable on Trading 212" };
+    }
+    if (match.type !== "STOCK" && match.type !== "ETF") {
+      return { outcome: "BLOCKED", message: "BLOCKED — instrument not an eligible stock/ETF" };
+    }
+    if (match.suspended || !match.tradable) {
+      return { outcome: "BLOCKED", message: "BLOCKED — instrument not tradable" };
+    }
+    if (!Number.isFinite(match.minTradeQuantity) || match.minTradeQuantity <= 0) {
+      return { outcome: "BLOCKED", message: "BLOCKED — instrument minTradeQuantity unavailable" };
+    }
+    const instrumentType = match.type;
 
     const strategy = mapStrategy(signal.strategyId);
     const ranked = rankIntradayOpportunity({
@@ -487,8 +666,8 @@ export class StockIntradayService {
       openPositionCount: positions.length,
       hasSymbolPosition: positions.some((p) => p.symbol === signal.symbol),
       symbolCooldownActive,
-      minutesToClose: 120,
-      estimatedSlippageBps: 5,
+      minutesToClose: closeEst.minutesToClose,
+      estimatedSlippageBps,
       instrumentType
     });
 
@@ -502,19 +681,32 @@ export class StockIntradayService {
     }
 
     const opportunity = top!;
-    const cash = (await adapter?.getAccountSummary())?.availableToTrade ?? 2000;
+    let cash: number;
+    try {
+      const summary = await adapter.getAccountSummary();
+      if (summary.availableToTrade == null || !Number.isFinite(summary.availableToTrade)) {
+        return { outcome: "BLOCKED", message: "BLOCKED — available cash unavailable from broker" };
+      }
+      cash = summary.availableToTrade;
+    } catch {
+      return { outcome: "BLOCKED", message: "BLOCKED — available cash unavailable from broker" };
+    }
+
+    const reservedCashTotal = await this.store.getReservedCashTotal(userId);
+    const availableCash = cash - reservedCashTotal;
+
     const sizing = calculateStockPositionSize({
       estimatedEntry: opportunity.estimatedEntry,
       stop: opportunity.stop,
       limits: settings.limits,
-      availableCash: cash,
+      availableCash,
       dailyAllocationRemaining: Math.max(
         0,
         settings.limits.dailyCapitalAllocation - risk.dailyAllocationUsed
       ),
       portfolioExposureUsed: positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0),
       symbolExposureUsed: 0,
-      minTradeQuantity: 0.001
+      minTradeQuantity: match.minTradeQuantity
     });
 
     if (!sizing.ok) {
@@ -533,8 +725,23 @@ export class StockIntradayService {
     });
 
     const reserved = await this.store.reserveIntent(intent, idempotencyKey);
-    if (!reserved) {
-      return { outcome: "BLOCKED", message: "BLOCKED — duplicate signal / intent" };
+    if (reserved !== "reserved") {
+      return {
+        outcome: "BLOCKED",
+        message:
+          reserved === "lease_held"
+            ? "BLOCKED — intent lease held"
+            : "BLOCKED — duplicate signal / intent"
+      };
+    }
+
+    const cashOk = await this.store.reserveCash(userId, intent.intentId, sizing.estimatedCost);
+    if (!cashOk) {
+      intent.state = "CANCELLED";
+      intent.blockReason = "CASH_RESERVATION_FAILED";
+      intent.updatedAt = nowIso();
+      await this.store.saveIntent(intent);
+      return { outcome: "BLOCKED", message: "BLOCKED — cash reservation failed" };
     }
 
     assertTransition("CANDIDATE", "VALIDATING");
@@ -547,13 +754,33 @@ export class StockIntradayService {
     await this.store.saveIntent(intent);
 
     if (risk.mode === "SHADOW") {
+      const position: StockManagedPosition = {
+        positionId: randomUUID(),
+        userId,
+        intentId: intent.intentId,
+        symbol: signal.symbol,
+        environment: "PAPER",
+        quantity: sizing.quantity,
+        entryPrice: opportunity.estimatedEntry,
+        stop: opportunity.stop,
+        takeProfit: opportunity.takeProfit,
+        currentExitRule: "HARD_STOP",
+        unrealisedPnl: 0,
+        openedAt: nowIso(),
+        goldMetaManaged: true
+      };
+      await this.store.reservePositionSlot(position);
       await this.store.appendShadowTrade(userId, {
         symbol: signal.symbol,
         side: "BUY",
         quantity: sizing.quantity,
         note: "SHADOW hypothetical entry — no broker order"
       });
-      intent.state = "CLOSED";
+      await this.store.incrementDailyTradeCounters(userId, {
+        trades: 1,
+        allocationUsed: sizing.estimatedCost
+      });
+      intent.state = "OPEN";
       intent.outcome = "BUY";
       intent.updatedAt = nowIso();
       await this.store.saveIntent(intent);
@@ -568,6 +795,7 @@ export class StockIntradayService {
     // PAPER / LIVE — submission flags false: do not place orders
     if (risk.mode === "T212_PAPER_AUTO") {
       if (!T212_PAPER_ORDER_SUBMISSION_ENABLED) {
+        await this.store.releaseCash(userId, intent.intentId);
         intent.state = "CANCELLED";
         intent.blockReason = "T212_PAPER_ORDER_SUBMISSION_DISABLED";
         intent.updatedAt = nowIso();
@@ -586,6 +814,7 @@ export class StockIntradayService {
     }
 
     if (risk.mode === "T212_LIVE_AUTO") {
+      await this.store.releaseCash(userId, intent.intentId);
       intent.state = "LOCKED";
       intent.blockReason = "T212_LIVE_EXECUTION_DISABLED";
       await this.store.saveIntent(intent);
@@ -626,6 +855,12 @@ export class StockIntradayService {
         code: "NOT_GOLDMETA_POSITION"
       });
     }
+    const reserved = await this.store.reserveExit(userId, position.positionId, reason ?? "EXIT");
+    if (!reserved) {
+      await this.activity(userId, `Exit already reserved for ${position.symbol}`, "info");
+      return;
+    }
+
     const risk = await this.store.getRiskState(userId);
     if (risk.mode === "SHADOW") {
       await this.store.appendShadowTrade(userId, {
@@ -634,6 +869,7 @@ export class StockIntradayService {
         quantity: position.quantity,
         note: `SHADOW exit: ${reason}`
       });
+      await this.store.releaseCash(userId, position.intentId);
       await this.store.deletePosition(userId, position.positionId);
       await this.activity(userId, `SHADOW SELL ${position.quantity} ${position.symbol} (${reason})`, "success");
       return;
@@ -651,14 +887,23 @@ export class StockIntradayService {
 
   /**
    * Startup reconciliation — new entries stay paused until complete.
+   * Matches only GoldMeta-managed records. Paper/Live execution remain disabled.
    */
   async reconcileOnStartup(userId: string): Promise<StockIntradayStatusPayload> {
     let risk = await this.store.getRiskState(userId);
     risk = { ...risk, paused: true, updatedAt: nowIso() };
     await this.store.saveRiskState(risk);
+    await this.store.saveRestartGate({
+      userId,
+      entriesPaused: true,
+      lastReconciledAt: null,
+      processBootId: PROCESS_BOOT_ID,
+      updatedAt: nowIso()
+    });
 
     const adapter = this.adapters.get(userId);
-    const openIntents = await this.store.listOpenIntents(userId);
+    const unresolved = await this.store.listUnresolvedIntents(userId);
+    const managed = await this.store.listPositions(userId);
     const ambiguous: string[] = [];
 
     if (adapter?.isConnected()) {
@@ -666,7 +911,8 @@ export class StockIntradayService {
         adapter.getPendingOrders(),
         adapter.getPositions()
       ]);
-      for (const intent of openIntents) {
+
+      for (const intent of unresolved) {
         if (requiresReconciliation(intent.state) || intent.state === "ENTRY_UNKNOWN") {
           const matchOrder = brokerOrders.find((o) => o.id === intent.brokerOrderId);
           const matchPos = brokerPositions.find((p) => p.ticker === intent.symbol);
@@ -674,7 +920,25 @@ export class StockIntradayService {
             ambiguous.push(intent.symbol);
             intent.state = "LOCKED";
             await this.store.saveIntent(intent);
+            await this.store.saveReconciliation({
+              id: randomUUID(),
+              userId,
+              symbol: intent.symbol,
+              status: "AMBIGUOUS",
+              detail: { intentId: intent.intentId, reason: "ENTRY_UNKNOWN_NO_BROKER_MATCH" },
+              createdAt: nowIso(),
+              updatedAt: nowIso()
+            });
           }
+        }
+      }
+
+      // Never manage broker positions that are not GoldMeta-managed in our store.
+      for (const bp of brokerPositions) {
+        const ours = managed.find((m) => m.symbol === bp.ticker && m.goldMetaManaged);
+        if (!ours) {
+          // Personal holding — leave untouched; record for audit only if symbol also has unresolved intent.
+          continue;
         }
       }
     }
@@ -683,14 +947,122 @@ export class StockIntradayService {
       await this.lock(userId, `reconciliation:${symbol}`);
     }
 
+    const ok = ambiguous.length === 0;
+    if (ok) {
+      // Resume SHADOW monitoring only after successful reconciliation.
+      // Paper/Live stay paused and submission flags remain false.
+      if (risk.mode === "SHADOW") {
+        risk = { ...risk, paused: false, updatedAt: nowIso() };
+        await this.store.saveRiskState(risk);
+      }
+      await this.store.saveRestartGate({
+        userId,
+        entriesPaused: risk.mode !== "SHADOW",
+        lastReconciledAt: nowIso(),
+        processBootId: PROCESS_BOOT_ID,
+        updatedAt: nowIso()
+      });
+    }
+
     await this.activity(
       userId,
       ambiguous.length
         ? `Reconciliation locked symbols: ${ambiguous.join(", ")}`
-        : "Reconciliation complete — new entries remain paused until you resume.",
+        : risk.mode === "SHADOW"
+          ? "Reconciliation complete — SHADOW monitoring resumed."
+          : "Reconciliation complete — new entries remain paused until you resume (Paper/Live disabled).",
       ambiguous.length ? "warn" : "info"
     );
     return this.getStatus(userId);
+  }
+
+  /**
+   * Autonomous SHADOW watchlist scan (no manual button required when scheduled).
+   */
+  async runAutonomousScan(userId: string): Promise<StockIntradayStatusPayload> {
+    const settings = await this.store.getSettings(userId);
+    const symbols = settings.universe.allowlist.slice(0, settings.universe.maxScannedCandidates);
+    return this.runShadowScan(userId, symbols);
+  }
+
+  /**
+   * Monitor GoldMeta-managed open positions for exit rules.
+   * Never touches personal holdings. Never places broker orders while flags are false.
+   */
+  async monitorOpenPositions(userId: string): Promise<void> {
+    const risk = await this.store.getRiskState(userId);
+    if (risk.mode === "OFF") return;
+    const positions = (await this.store.listPositions(userId)).filter((p) => p.goldMetaManaged);
+    const settings = await this.store.getSettings(userId);
+
+    for (const position of positions) {
+      try {
+        const quote = await this.marketData.getQuote(position.symbol);
+        const indicators = await this.marketData.getIndicators(position.symbol);
+        this.lastMarketDataAt.set(userId, quote.asOf);
+
+        if (!this.marketData.isFresh(quote.asOf, 60_000)) {
+          await this.lock(userId, "market_data_stale_monitor");
+          continue;
+        }
+
+        const closeEst = estimateMinutesToClose(indicators);
+        const holdMinutes =
+          (Date.now() - Date.parse(position.openedAt)) / 60_000;
+
+        let exitReason: StockTradeIntent["exitReason"] | null = null;
+        if (position.stop != null && quote.last <= position.stop) exitReason = "HARD_STOP";
+        else if (position.takeProfit != null && quote.last >= position.takeProfit) {
+          exitReason = "TAKE_PROFIT";
+        } else if (holdMinutes >= settings.limits.maxPositionDurationMinutes) {
+          exitReason = "MAX_HOLDING_TIME";
+        } else if (
+          closeEst.minutesToClose != null &&
+          closeEst.minutesToClose <= settings.limits.forceCloseBeforeCloseMinutes
+        ) {
+          exitReason = "END_OF_DAY";
+        } else if (
+          indicators.vwap != null &&
+          quote.last < indicators.vwap &&
+          position.currentExitRule === "VWAP_LOSS"
+        ) {
+          exitReason = "VWAP_LOSS";
+        }
+
+        if (exitReason) {
+          await this.requestExit(userId, position, exitReason);
+        }
+      } catch (error) {
+        await this.activity(
+          userId,
+          `Monitor failed for ${position.symbol}: ${error instanceof Error ? error.message : "error"}`,
+          "warn"
+        );
+      }
+    }
+  }
+
+  async marketCloseSweep(userId: string): Promise<void> {
+    const positions = (await this.store.listPositions(userId)).filter((p) => p.goldMetaManaged);
+    for (const position of positions) {
+      await this.requestExit(userId, position, "END_OF_DAY");
+    }
+  }
+
+  getStore(): StockIntradayStorePort {
+    return this.store;
+  }
+
+  /**
+   * Users registered for autonomous scheduler ticks.
+   * Persisted via activity of registering webhook / enabling SHADOW.
+   */
+  async listSchedulerUserIds(): Promise<string[]> {
+    return this.store.listSchedulerUserIds();
+  }
+
+  async registerForScheduler(userId: string): Promise<void> {
+    await this.store.registerSchedulerUser(userId);
   }
 
   async runShadowScan(

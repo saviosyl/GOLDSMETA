@@ -1,13 +1,10 @@
 /**
- * In-memory Stocks Intraday store (tests + local).
+ * Shared helpers and extended port for Stocks Intraday persistence.
  */
 
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { nowIso } from "../../utils/time";
-import {
-  DEFAULT_STOCK_INTRADAY_LIMITS,
-  type StockIntradayMode
-} from "./featureFlags";
+import { DEFAULT_STOCK_INTRADAY_LIMITS } from "./featureFlags";
 import {
   DEFAULT_STOCK_UNIVERSE,
   type StockIntradayRiskState,
@@ -16,7 +13,10 @@ import {
   type StockUniverseFilters
 } from "./types";
 import type { StockSignalRecord } from "./signalIngestion";
-import { createDefaultRiskState, refreshRiskPeriod } from "./risk/riskEngine";
+import { createDefaultRiskState } from "./risk/riskEngine";
+
+export const STOCK_JOB_LEASE_MS = 5 * 60 * 1000;
+export const STOCK_INTENT_LEASE_MS = 60_000;
 
 export interface StockIntradaySettings {
   userId: string;
@@ -41,27 +41,135 @@ export interface StockIntradayAuditEntry {
   detail: Record<string, unknown>;
 }
 
+export type StockJobState =
+  | "QUEUED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED"
+  | "DEAD_LETTER";
+
+export type StockJobKind =
+  | "PROCESS_SIGNAL"
+  | "SCHEDULED_SCAN"
+  | "MONITOR_POSITIONS"
+  | "RECONCILE"
+  | "MARKET_CLOSE_SWEEP";
+
+export interface StockIntradayJob {
+  jobId: string;
+  userId: string;
+  kind: StockJobKind;
+  state: StockJobState;
+  signalId: string | null;
+  alertId: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface StockWebhookConnection {
+  connectionId: string;
+  userId: string;
+  /** SHA-256 hex of secret — never store plaintext. */
+  secretHash: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+  failureCount: number;
+  lockedUntil: string | null;
+}
+
+export interface StockCashReservation {
+  reservationId: string;
+  userId: string;
+  intentId: string;
+  amount: number;
+  released: boolean;
+  createdAt: string;
+}
+
+export interface StockReconciliationRecord {
+  id: string;
+  userId: string;
+  symbol: string;
+  status: "PENDING" | "MATCHED" | "AMBIGUOUS" | "RESOLVED";
+  detail: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StockRestartGate {
+  userId: string;
+  entriesPaused: boolean;
+  lastReconciledAt: string | null;
+  processBootId: string | null;
+  updatedAt: string;
+}
+
+export type ReserveAlertResult = "reserved" | "duplicate";
+export type ReserveIntentResult = "reserved" | "duplicate" | "lease_held";
+
 export interface StockIntradayStorePort {
   getRiskState(userId: string): Promise<StockIntradayRiskState>;
   saveRiskState(state: StockIntradayRiskState): Promise<StockIntradayRiskState>;
+  /** Atomic risk patch inside a transaction-friendly API. */
+  incrementDailyTradeCounters(
+    userId: string,
+    patch: { trades?: number; allocationUsed?: number; realisedPnl?: number }
+  ): Promise<StockIntradayRiskState>;
+
   getSettings(userId: string): Promise<StockIntradaySettings>;
   saveSettings(settings: StockIntradaySettings): Promise<StockIntradaySettings>;
+
   listPositions(userId: string): Promise<StockManagedPosition[]>;
   savePosition(position: StockManagedPosition): Promise<void>;
   deletePosition(userId: string, positionId: string): Promise<void>;
+  /** Atomic: fail if symbol already has a managed open position. */
+  reservePositionSlot(position: StockManagedPosition): Promise<boolean>;
+
   getIntent(userId: string, intentId: string): Promise<StockTradeIntent | null>;
   saveIntent(intent: StockTradeIntent): Promise<void>;
   listOpenIntents(userId: string): Promise<StockTradeIntent[]>;
-  /** Atomic reservation: returns false if duplicate idempotency key exists. */
-  reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<boolean>;
+  listUnresolvedIntents(userId: string): Promise<StockTradeIntent[]>;
+  reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult>;
+  reserveExit(userId: string, positionId: string, reason: string): Promise<boolean>;
+
   hasAlertId(userId: string, alertId: string): Promise<boolean>;
+  /** Atomic alert dedupe + signal persist. */
+  reserveAlert(
+    userId: string,
+    alertId: string,
+    signal: StockSignalRecord
+  ): Promise<ReserveAlertResult>;
   saveSignal(record: StockSignalRecord): Promise<void>;
   getSignalByAlertId(userId: string, alertId: string): Promise<StockSignalRecord | null>;
+
+  createJob(job: Omit<StockIntradayJob, "createdAt" | "updatedAt" | "completedAt" | "attemptCount" | "leaseOwner" | "leaseExpiresAt" | "lastError" | "state"> & {
+    state?: StockJobState;
+    maxAttempts?: number;
+  }): Promise<StockIntradayJob>;
+  getJob(userId: string, jobId: string): Promise<StockIntradayJob | null>;
+  claimJob(userId: string, jobId: string, ownerId: string, leaseMs?: number): Promise<StockIntradayJob | null>;
+  completeJob(userId: string, jobId: string): Promise<StockIntradayJob | null>;
+  failJob(userId: string, jobId: string, error: string): Promise<StockIntradayJob | null>;
+
+  reserveCash(userId: string, intentId: string, amount: number): Promise<boolean>;
+  releaseCash(userId: string, intentId: string): Promise<void>;
+  getReservedCashTotal(userId: string): Promise<number>;
+
   appendActivity(userId: string, entry: Omit<StockIntradayActivityEntry, "id"> & { id?: string }): Promise<void>;
   listActivity(userId: string, limit?: number): Promise<StockIntradayActivityEntry[]>;
   appendAudit(entry: Omit<StockIntradayAuditEntry, "id" | "at"> & { id?: string; at?: string }): Promise<void>;
+
   getSymbolCooldown(userId: string, symbol: string): Promise<string | null>;
   setSymbolCooldown(userId: string, symbol: string, untilIso: string): Promise<void>;
+
   listShadowTrades(userId: string): Promise<
     Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
   >;
@@ -69,149 +177,64 @@ export interface StockIntradayStorePort {
     userId: string,
     trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
   ): Promise<void>;
+
+  getRestartGate(userId: string): Promise<StockRestartGate>;
+  saveRestartGate(gate: StockRestartGate): Promise<void>;
+
+  saveReconciliation(record: StockReconciliationRecord): Promise<void>;
+  listPendingReconciliation(userId: string): Promise<StockReconciliationRecord[]>;
+
+  getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null>;
+  saveWebhookConnection(conn: StockWebhookConnection): Promise<void>;
+  recordWebhookAuthFailure(connectionId: string): Promise<StockWebhookConnection | null>;
+  clearWebhookAuthFailures(connectionId: string): Promise<void>;
+
+  registerSchedulerUser(userId: string): Promise<void>;
+  listSchedulerUserIds(): Promise<string[]>;
 }
 
-export class InMemoryStockIntradayStore implements StockIntradayStorePort {
-  private risk = new Map<string, StockIntradayRiskState>();
-  private settings = new Map<string, StockIntradaySettings>();
-  private positions = new Map<string, StockManagedPosition[]>();
-  private intents = new Map<string, StockTradeIntent[]>();
-  private idempotency = new Set<string>();
-  private alerts = new Map<string, StockSignalRecord>();
-  private activity = new Map<string, StockIntradayActivityEntry[]>();
-  private audit: StockIntradayAuditEntry[] = [];
-  private cooldowns = new Map<string, string>();
-  private shadow = new Map<
-    string,
-    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
-  >();
-
-  async getRiskState(userId: string): Promise<StockIntradayRiskState> {
-    const existing = this.risk.get(userId) ?? createDefaultRiskState(userId);
-    return refreshRiskPeriod(existing);
-  }
-
-  async saveRiskState(state: StockIntradayRiskState): Promise<StockIntradayRiskState> {
-    this.risk.set(state.userId, state);
-    return state;
-  }
-
-  async getSettings(userId: string): Promise<StockIntradaySettings> {
-    return (
-      this.settings.get(userId) ?? {
-        userId,
-        limits: { ...DEFAULT_STOCK_INTRADAY_LIMITS },
-        universe: { ...DEFAULT_STOCK_UNIVERSE, allowlist: [...DEFAULT_STOCK_UNIVERSE.allowlist] },
-        allowedStrategyIds: [],
-        updatedAt: nowIso()
-      }
-    );
-  }
-
-  async saveSettings(settings: StockIntradaySettings): Promise<StockIntradaySettings> {
-    this.settings.set(settings.userId, settings);
-    return settings;
-  }
-
-  async listPositions(userId: string): Promise<StockManagedPosition[]> {
-    return [...(this.positions.get(userId) ?? [])];
-  }
-
-  async savePosition(position: StockManagedPosition): Promise<void> {
-    const list = this.positions.get(position.userId) ?? [];
-    const idx = list.findIndex((p) => p.positionId === position.positionId);
-    if (idx >= 0) list[idx] = position;
-    else list.push(position);
-    this.positions.set(position.userId, list);
-  }
-
-  async deletePosition(userId: string, positionId: string): Promise<void> {
-    const list = (this.positions.get(userId) ?? []).filter((p) => p.positionId !== positionId);
-    this.positions.set(userId, list);
-  }
-
-  async getIntent(userId: string, intentId: string): Promise<StockTradeIntent | null> {
-    return (this.intents.get(userId) ?? []).find((i) => i.intentId === intentId) ?? null;
-  }
-
-  async saveIntent(intent: StockTradeIntent): Promise<void> {
-    const list = this.intents.get(intent.userId) ?? [];
-    const idx = list.findIndex((i) => i.intentId === intent.intentId);
-    if (idx >= 0) list[idx] = intent;
-    else list.push(intent);
-    this.intents.set(intent.userId, list);
-  }
-
-  async listOpenIntents(userId: string): Promise<StockTradeIntent[]> {
-    return (this.intents.get(userId) ?? []).filter(
-      (i) => !["CLOSED", "CANCELLED", "REJECTED"].includes(i.state)
-    );
-  }
-
-  async reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<boolean> {
-    if (this.idempotency.has(idempotencyKey)) return false;
-    this.idempotency.add(idempotencyKey);
-    await this.saveIntent(intent);
-    return true;
-  }
-
-  async hasAlertId(userId: string, alertId: string): Promise<boolean> {
-    return this.alerts.has(`${userId}:${alertId}`);
-  }
-
-  async saveSignal(record: StockSignalRecord): Promise<void> {
-    this.alerts.set(`${record.userId}:${record.alertId}`, record);
-  }
-
-  async getSignalByAlertId(userId: string, alertId: string): Promise<StockSignalRecord | null> {
-    return this.alerts.get(`${userId}:${alertId}`) ?? null;
-  }
-
-  async appendActivity(
-    userId: string,
-    entry: Omit<StockIntradayActivityEntry, "id"> & { id?: string }
-  ): Promise<void> {
-    const list = this.activity.get(userId) ?? [];
-    list.unshift({ id: entry.id ?? randomUUID(), at: entry.at, message: entry.message, level: entry.level });
-    this.activity.set(userId, list.slice(0, 100));
-  }
-
-  async listActivity(userId: string, limit = 40): Promise<StockIntradayActivityEntry[]> {
-    return (this.activity.get(userId) ?? []).slice(0, limit);
-  }
-
-  async appendAudit(
-    entry: Omit<StockIntradayAuditEntry, "id" | "at"> & { id?: string; at?: string }
-  ): Promise<void> {
-    this.audit.push({
-      id: entry.id ?? randomUUID(),
-      userId: entry.userId,
-      at: entry.at ?? nowIso(),
-      action: entry.action,
-      detail: entry.detail
-    });
-  }
-
-  async getSymbolCooldown(userId: string, symbol: string): Promise<string | null> {
-    return this.cooldowns.get(`${userId}:${symbol.toUpperCase()}`) ?? null;
-  }
-
-  async setSymbolCooldown(userId: string, symbol: string, untilIso: string): Promise<void> {
-    this.cooldowns.set(`${userId}:${symbol.toUpperCase()}`, untilIso);
-  }
-
-  async listShadowTrades(userId: string) {
-    return [...(this.shadow.get(userId) ?? [])];
-  }
-
-  async appendShadowTrade(
-    userId: string,
-    trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
-  ): Promise<void> {
-    const list = this.shadow.get(userId) ?? [];
-    list.unshift({ id: randomUUID(), at: nowIso(), ...trade });
-    this.shadow.set(userId, list.slice(0, 100));
-  }
+export function defaultSettings(userId: string): StockIntradaySettings {
+  return {
+    userId,
+    limits: { ...DEFAULT_STOCK_INTRADAY_LIMITS },
+    universe: { ...DEFAULT_STOCK_UNIVERSE, allowlist: [...DEFAULT_STOCK_UNIVERSE.allowlist] },
+    allowedStrategyIds: [],
+    updatedAt: nowIso()
+  };
 }
 
-void (null as unknown as StockIntradayMode);
+export function defaultRestartGate(userId: string): StockRestartGate {
+  return {
+    userId,
+    entriesPaused: true,
+    lastReconciledAt: null,
+    processBootId: null,
+    updatedAt: nowIso()
+  };
+}
+
+export function hashWebhookSecret(secret: string): string {
+  return createHash("sha256").update(secret, "utf8").digest("hex");
+}
+
+export function verifyWebhookSecret(secret: string, secretHash: string): boolean {
+  const computed = Buffer.from(hashWebhookSecret(secret), "hex");
+  const expected = Buffer.from(secretHash, "hex");
+  if (computed.length !== expected.length) return false;
+  return timingSafeEqual(computed, expected);
+}
+
+export function generateWebhookSecret(): string {
+  return `gm_stock_${randomBytes(24).toString("base64url")}`;
+}
+
+export function createDefaultRisk(userId: string): StockIntradayRiskState {
+  return createDefaultRiskState(userId);
+}
+
+export function sanitizeDocId(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 700);
+}
+
+export { InMemoryStockIntradayStore } from "./inMemoryStockIntradayStore";
+export { FirestoreStockIntradayStore } from "./firestoreStockIntradayStore";
