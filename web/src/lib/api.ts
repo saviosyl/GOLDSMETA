@@ -187,6 +187,33 @@ export class ApiClient {
     return body.setups;
   }
 
+  async listSignalOutcomes(limit = 100): Promise<import("../types/models").SignalOutcomeRecord[]> {
+    const body = await this.request<{ items: import("../types/models").SignalOutcomeRecord[] }>(
+      `/v1/signal-outcomes?limit=${encodeURIComponent(String(limit))}`
+    );
+    return body.items;
+  }
+
+  async signalOutcomeByDecision(
+    decisionId: string
+  ): Promise<import("../types/models").SignalOutcomeRecord | null> {
+    try {
+      const body = await this.request<{ item: import("../types/models").SignalOutcomeRecord }>(
+        `/v1/signal-outcomes/by-decision/${encodeURIComponent(decisionId)}`
+      );
+      return body.item;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async signalPerformance(): Promise<import("../types/models").SignalPerformanceSummary> {
+    return this.request<import("../types/models").SignalPerformanceSummary>(
+      "/v1/signal-outcomes/performance"
+    );
+  }
+
   async listActiveSetups(environment?: "LIVE" | "TEST"): Promise<SetupRecord[]> {
     const q = environment ? `?environment=${environment}` : "";
     const body = await this.request<{ setups: SetupRecord[] }>(`/v1/setups/active${q}`);

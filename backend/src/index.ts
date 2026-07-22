@@ -16,6 +16,7 @@ import { buildWebhooksRouter } from "./routes/webhooks";
 import { buildSetupsRouter } from "./routes/setups";
 import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
+import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { AiExplainer } from "./services/ai/explainer";
 import { processJob } from "./services/jobs/processJob";
 import { createStore } from "./services/storage/createStore";
@@ -90,6 +91,7 @@ export const createApp = (
   app.use(buildSetupsRouter(dependencies.store));
   app.use(buildV4Router(dependencies.store));
   app.use(buildV5Router(dependencies.store));
+  app.use(buildSignalOutcomesRouter());
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));
   app.use(buildTradingRouter(tradingService));

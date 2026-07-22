@@ -439,3 +439,88 @@ export interface WebPushSubscriptionPayload {
   userAgent?: string;
 }
 
+
+/** V6 Signal Outcome Tracking — hypothetical only. */
+export interface SignalOutcomeSnapshot {
+  signalId: string;
+  decisionId: string;
+  direction: DecisionAction;
+  confidence: number;
+  timeframe: string | null;
+  createdAt: string;
+  proposedEntryPrice: number | null;
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  dataQuality: string;
+}
+
+export interface SignalOutcomeRecord {
+  schemaVersion: "1.0";
+  snapshot: SignalOutcomeSnapshot;
+  entry: {
+    entryReached: boolean;
+    entryTimestamp: string | null;
+    entryPrice: number | null;
+    expiredWithoutEntry: boolean;
+  };
+  monitoring: {
+    lifecycle: string;
+    currentPrice: number | null;
+    currentGrossPoints: number | null;
+    currentRMultiple: number | null;
+    timeInTradeMs: number | null;
+    tp1Status: string;
+    tp2Status: string;
+    tp3Status: string;
+    stopStatus: string;
+  };
+  finalResult: {
+    outcome: string | null;
+    exitReason: string | null;
+    exitTimestamp: string | null;
+    exitPrice: number | null;
+    entryPrice: number | null;
+    grossPoints: number | null;
+    netPoints: number | null;
+    netR: number | null;
+    holdingDurationMs: number | null;
+    targetsReached: string[];
+    label: string;
+    disclaimer: string;
+  } | null;
+}
+
+export interface SignalPerformanceSummary {
+  label: string;
+  disclaimer: string;
+  totalConfirmedBuySell: number;
+  pendingEntries: number;
+  openSignals: number;
+  closedSignals: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  expired: number;
+  cancelled: number;
+  ambiguousIntrabar: number;
+  dataUnavailable: number;
+  waitOnly: number;
+  winRate: number | null;
+  netPoints: number;
+  netR: number;
+  averageWin: number | null;
+  averageLoss: number | null;
+  profitFactor: number | null;
+  maximumDrawdownR: number;
+  maximumConsecutiveLosses: number;
+  averageHoldingTimeMs: number | null;
+  tp1HitRate: number | null;
+  tp2HitRate: number | null;
+  tp3HitRate: number | null;
+  stopLossRate: number | null;
+  byDirection: { BUY: number; SELL: number };
+}

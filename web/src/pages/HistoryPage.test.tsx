@@ -10,13 +10,15 @@ import wait from "../fixtures/wait.json";
 
 const decisionHistory = vi.fn();
 const listSetups = vi.fn();
+const listSignalOutcomes = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     api: {
       decisionHistory,
-      listSetups
+      listSetups,
+      listSignalOutcomes
     }
   })
 }));
@@ -33,6 +35,7 @@ describe("HistoryPage", () => {
   beforeEach(() => {
     decisionHistory.mockReset();
     listSetups.mockReset();
+    listSignalOutcomes.mockReset();
     navigate.mockReset();
     decisionHistory.mockResolvedValue([
       { ...(buy as Decision), timeframe: "15" },
@@ -40,6 +43,7 @@ describe("HistoryPage", () => {
       wait as Decision
     ]);
     listSetups.mockResolvedValue([]);
+    listSignalOutcomes.mockResolvedValue([]);
   });
 
   it("formats history rows without raw decision IDs", async () => {

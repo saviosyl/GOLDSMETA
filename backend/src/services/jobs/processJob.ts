@@ -90,6 +90,37 @@ export const processJob = async (
       });
     }
 
+    // V6 Signal Outcome Tracking — hypothetical only; never places broker orders.
+    try {
+      const { syncDecisionAndMonitor } = await import("../signalOutcome/monitor.js");
+      const ohlcv = rawEvent.payload.ohlcv;
+      const bar =
+        rawEvent.payload.isConfirmedBar &&
+        ohlcv &&
+        typeof ohlcv.open === "number" &&
+        typeof ohlcv.high === "number" &&
+        typeof ohlcv.low === "number" &&
+        typeof ohlcv.close === "number"
+          ? {
+              eventId: claimed.eventId,
+              barTime: rawEvent.payload.barTime,
+              open: ohlcv.open,
+              high: ohlcv.high,
+              low: ohlcv.low,
+              close: ohlcv.close,
+              isConfirmedBar: true as const,
+              source: "tradingview-ohlcv",
+              dataQuality: "OK"
+            }
+          : null;
+      await syncDecisionAndMonitor(decision, bar);
+    } catch (error: unknown) {
+      logger.warn("Signal outcome follow-up failed (non-fatal)", {
+        jobId,
+        error: error instanceof Error ? error.message : "unknown"
+      });
+    }
+
     return await store.completeProcessingJob(jobId, decision.decisionId);
   } catch (error: unknown) {
     const failed = await store.failProcessingJob(

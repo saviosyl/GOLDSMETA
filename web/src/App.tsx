@@ -8,6 +8,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
+import { SignalPerformancePage } from "./pages/SignalPerformancePage";
 import { JournalPage } from "./pages/JournalPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SetupDetailPage } from "./pages/SetupDetailPage";
@@ -102,6 +103,7 @@ function ProtectedApp() {
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
+        <Route path="/signal-performance" element={<SignalPerformancePage />} />
         <Route path="/setups/:setupId" element={<SetupDetailPage />} />
         <Route
           path="/analytics"

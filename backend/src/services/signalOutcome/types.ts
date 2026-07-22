@@ -1,0 +1,204 @@
+/**
+ * V6 Signal Outcome Tracking — types.
+ * Hypothetical signal performance only. Never places broker orders.
+ */
+
+export type SignalDirection = "BUY" | "SELL" | "WAIT";
+
+export type SignalLifecycle =
+  | "WAIT_ONLY"
+  | "PENDING_ENTRY"
+  | "OPEN"
+  | "TP1_HIT"
+  | "TP2_HIT"
+  | "TP3_HIT"
+  | "STOP_HIT"
+  | "BREAKEVEN"
+  | "CLOSED"
+  | "EXPIRED"
+  | "CANCELLED"
+  | "DATA_UNAVAILABLE"
+  | "AMBIGUOUS_INTRABAR";
+
+export type SignalFinalOutcome =
+  | "WIN"
+  | "LOSS"
+  | "BREAKEVEN"
+  | "EXPIRED"
+  | "CANCELLED"
+  | "DATA_UNAVAILABLE"
+  | "AMBIGUOUS"
+  | null;
+
+export type ManagementEventType =
+  | "ENTRY"
+  | "TP1"
+  | "TP2"
+  | "TP3"
+  | "STOP"
+  | "BREAKEVEN_MOVE"
+  | "TRAIL_STOP"
+  | "PARTIAL_CLOSE"
+  | "INVALIDATION"
+  | "EXPIRE"
+  | "AMBIGUOUS"
+  | "DATA_STALE"
+  | "MONITOR";
+
+/** Immutable freeze at signal creation — never rewritten. */
+export interface SignalSnapshot {
+  signalId: string;
+  decisionId: string;
+  userId: string;
+  symbol: "XAUUSD";
+  market: "XAUUSD";
+  timeframe: string | null;
+  direction: SignalDirection;
+  createdAt: string;
+  marketDataTimestamp: string;
+  entryType: string | null;
+  proposedEntryPrice: number | null;
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  initialRiskDistance: number | null;
+  riskReward: { tp1: number | null; tp2: number | null; tp3: number | null };
+  confidence: number;
+  setupScore: number;
+  strategy: string | null;
+  reasons: string[];
+  blockingReasons: string[];
+  dataQuality: string;
+  signalSource: string;
+  decisionVersion: string;
+  environment: "LIVE" | "TEST";
+  session: string | null;
+}
+
+export interface SignalManagementEvent {
+  eventId: string;
+  type: ManagementEventType;
+  at: string;
+  barTime: string | null;
+  price: number | null;
+  oldStop: number | null;
+  newStop: number | null;
+  targetReached: "TP1" | "TP2" | "TP3" | null;
+  quantityPctClosed: number | null;
+  reason: string;
+  priceSource: string;
+}
+
+export interface SignalMonitoringState {
+  lifecycle: SignalLifecycle;
+  currentPrice: number | null;
+  latestMarketDataTimestamp: string | null;
+  highestFavourablePrice: number | null;
+  lowestAdversePrice: number | null;
+  mfe: number | null;
+  mae: number | null;
+  stopStatus: "ACTIVE" | "HIT" | "MOVED_BREAKEVEN" | "TRAILED" | "N/A";
+  tp1Status: "PENDING" | "HIT" | "N/A";
+  tp2Status: "PENDING" | "HIT" | "N/A";
+  tp3Status: "PENDING" | "HIT" | "N/A";
+  currentGrossPoints: number | null;
+  currentNetPoints: number | null;
+  currentRMultiple: number | null;
+  timeInTradeMs: number | null;
+  lastMonitoringAt: string | null;
+  workingStop: number | null;
+  quantityRemainingPct: number;
+}
+
+export interface SignalEntryState {
+  entryReached: boolean;
+  entryTimestamp: string | null;
+  entryPrice: number | null;
+  entrySpreadEstimate: number | null;
+  entrySlippageEstimate: number | null;
+  entryMarketDataSource: string | null;
+  entryBlockedByStaleData: boolean;
+  expiredWithoutEntry: boolean;
+}
+
+export interface SignalFinalResult {
+  outcome: SignalFinalOutcome;
+  exitReason: string | null;
+  exitTimestamp: string | null;
+  exitPrice: number | null;
+  entryPrice: number | null;
+  holdingDurationMs: number | null;
+  grossPoints: number | null;
+  estimatedSpread: number | null;
+  estimatedSlippage: number | null;
+  estimatedFees: number | null;
+  netPoints: number | null;
+  percentageResult: number | null;
+  grossR: number | null;
+  netR: number | null;
+  mfe: number | null;
+  mae: number | null;
+  targetsReached: Array<"TP1" | "TP2" | "TP3">;
+  dataQualityAtEntry: string | null;
+  dataQualityAtExit: string | null;
+  label: "HYPOTHETICAL SIGNAL PERFORMANCE";
+  disclaimer: "Past hypothetical results do not guarantee future trading performance.";
+}
+
+export interface AmbiguityRecord {
+  candleTimestamp: string;
+  candleHigh: number;
+  candleLow: number;
+  stop: number;
+  target: number;
+  missingDataRequired: string;
+}
+
+export interface SignalOutcomeRecord {
+  schemaVersion: "1.0";
+  snapshot: SignalSnapshot;
+  entry: SignalEntryState;
+  monitoring: SignalMonitoringState;
+  managementEvents: SignalManagementEvent[];
+  finalResult: SignalFinalResult | null;
+  ambiguity: AmbiguityRecord | null;
+  appliedBarEventIds: string[];
+  leaseOwnerId: string | null;
+  leaseUntil: string | null;
+  updatedAt: string;
+}
+
+export interface SignalBarInput {
+  eventId: string;
+  barTime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  isConfirmedBar: boolean;
+  dataQuality?: string;
+  stale?: boolean;
+  source?: string;
+}
+
+export const TERMINAL_LIFECYCLES: SignalLifecycle[] = [
+  "CLOSED",
+  "EXPIRED",
+  "CANCELLED",
+  "DATA_UNAVAILABLE",
+  "AMBIGUOUS_INTRABAR",
+  "WAIT_ONLY"
+];
+
+export const TRADE_COUNTABLE_OUTCOMES: SignalFinalOutcome[] = [
+  "WIN",
+  "LOSS",
+  "BREAKEVEN"
+];
+
+export const HYPOTHETICAL_LABEL = "HYPOTHETICAL SIGNAL PERFORMANCE" as const;
+export const HYPOTHETICAL_DISCLAIMER =
+  "Past hypothetical results do not guarantee future trading performance." as const;
