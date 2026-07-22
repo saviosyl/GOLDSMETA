@@ -12,7 +12,7 @@
 | Draft PR | https://github.com/saviosyl/GOLDSMETA/pull/20 |
 | Preview | https://preview-v5-4-3-from-v541.goldmeta-web.pages.dev |
 | Exact base | `c7e427d` (V5.4.1 Premium UX; parent `87171ca`) |
-| Tip | see latest on branch |
+| Tip | `6fea0c1` |
 | Based on `384eb56`? | **No** (`384eb56` is not an ancestor) |
 | Production asset | still `index-Bd_7E5U2.js` |
 
