@@ -12,7 +12,7 @@
 | Corrective preview | https://preview-v5-4-3-ui-recovery.goldmeta-web.pages.dev |
 | Base (cut from) | `8639232` (V5.4.3 testing merge) |
 | Visual source of truth | `384eb56` (approved V5.4.2) |
-| Tip (this delivery) | see latest commit on corrective branch |
+| Tip (this delivery) | `d2d3bc6` |
 | Production | unchanged — V5.4.2 / assets `index-Bd_7E5U2.js` |
 
 ## Exact cause of visual drift
