@@ -5,7 +5,7 @@
  * They verify the request shape used by the read-only V6 diagnostics before
  * real Firebase secrets are configured.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import {
@@ -426,8 +426,163 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
       dryRun: false
     });
 
-    await expect(adapter.connect("server:test-contract")).rejects.toThrow("IG_SESSION_FAILED");
+    await expect(adapter.connect("server:test-contract")).rejects.toThrow(
+      "error.security.api-key-invalid"
+    );
     expect(adapter.isConnected()).toBe(false);
+  });
+
+  describe("safe IG login errorCode diagnostics", () => {
+    const secretPassword = "super-secret-password-never-log";
+    const secretUser = "secret-username-never-log";
+    const secretKey = "secret-api-key-never-log-0123456789abcdef";
+
+    beforeEach(() => {
+      process.env.IG_DEMO_API_KEY = secretKey;
+      process.env.IG_DEMO_USERNAME = secretUser;
+      process.env.IG_DEMO_PASSWORD = secretPassword;
+      process.env.IG_DEMO_ACCOUNT_ID = "DEMO-2";
+    });
+
+    async function connectExpecting(
+      status: number,
+      errorCode: string,
+      expectedUi: string
+    ): Promise<{ requests: CapturedRequest[]; logs: string[] }> {
+      const requests: CapturedRequest[] = [];
+      const logs: string[] = [];
+      const errorSpy = vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+        logs.push(String(line));
+      });
+
+      const fetchImpl = (async (
+        input: string | URL | Request,
+        init?: RequestInit
+      ): Promise<Response> => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        requests.push({
+          url,
+          method: (init?.method ?? "GET").toUpperCase(),
+          headers: new Headers(init?.headers),
+          body: parseBody(init?.body)
+        });
+        return jsonResponse(
+          {
+            errorCode,
+            // Poison fields that must never appear in logs
+            password: secretPassword,
+            identifier: secretUser,
+            apiKey: secretKey,
+            CST: "must-not-log-cst",
+            "X-SECURITY-TOKEN": "must-not-log-sec",
+            accountId: "FULL-ACCOUNT-ID-SHOULD-NOT-LOG",
+            rawDump: "entire-body-must-not-be-logged"
+          },
+          { status }
+        );
+      }) as typeof fetch;
+
+      const adapter = new IgBrokerAdapter({
+        environment: "DEMO",
+        fetchImpl,
+        dryRun: false
+      });
+
+      await expect(adapter.connect("server:diag")).rejects.toThrow(expectedUi);
+      expect(adapter.isConnected()).toBe(false);
+      errorSpy.mockRestore();
+      return { requests, logs };
+    }
+
+    function assertNoSecretsInLogs(logs: string[]): void {
+      const joined = logs.join("\n");
+      expect(joined).not.toContain(secretPassword);
+      expect(joined).not.toContain(secretUser);
+      expect(joined).not.toContain(secretKey);
+      expect(joined).not.toContain("must-not-log-cst");
+      expect(joined).not.toContain("must-not-log-sec");
+      expect(joined).not.toContain("FULL-ACCOUNT-ID-SHOULD-NOT-LOG");
+      expect(joined).not.toContain("entire-body-must-not-be-logged");
+      expect(joined).not.toMatch(/X-SECURITY-TOKEN|CST[=:]/i);
+    }
+
+    it("captures HTTP 400 invalid.input", async () => {
+      const { requests, logs } = await connectExpecting(400, "invalid.input", "invalid.input");
+      expect(logs.some((l) => /"status":400/.test(l))).toBe(true);
+      expect(logs.some((l) => /"errorCode":"invalid\.input"/.test(l))).toBe(true);
+      expect(logs.some((l) => /"environment":"DEMO"/.test(l))).toBe(true);
+      expect(logs.some((l) => /"timestamp":"/.test(l))).toBe(true);
+      assertNoSecretsInLogs(logs);
+      expect(requests.every((r) => r.url.startsWith(IG_ENDPOINTS.DEMO))).toBe(true);
+      expect(
+        requests.some((r) => /\/positions\/otc|\/working-orders/.test(new URL(r.url).pathname))
+      ).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.method).toBe("POST");
+      expect(new URL(requests[0]!.url).pathname).toBe("/gateway/deal/session");
+    });
+
+    it("captures HTTP 401 invalid-details", async () => {
+      const { requests, logs } = await connectExpecting(
+        401,
+        "error.security.invalid-details",
+        "error.security.invalid-details"
+      );
+      expect(logs.some((l) => /"status":401/.test(l))).toBe(true);
+      expect(logs.some((l) => /"errorCode":"error\.security\.invalid-details"/.test(l))).toBe(true);
+      assertNoSecretsInLogs(logs);
+      expect(
+        requests.some((r) => /\/positions\/otc|\/working-orders/.test(new URL(r.url).pathname))
+      ).toBe(false);
+    });
+
+    it("captures HTTP 403 api-key-invalid", async () => {
+      const { requests, logs } = await connectExpecting(
+        403,
+        "error.security.api-key-invalid",
+        "error.security.api-key-invalid"
+      );
+      expect(logs.some((l) => /"status":403/.test(l))).toBe(true);
+      expect(logs.some((l) => /"errorCode":"error\.security\.api-key-invalid"/.test(l))).toBe(true);
+      assertNoSecretsInLogs(logs);
+      expect(
+        requests.some((r) => /\/positions\/otc|\/working-orders/.test(new URL(r.url).pathname))
+      ).toBe(false);
+    });
+
+    it("never logs password, username, API key or response body", async () => {
+      const { logs } = await connectExpecting(400, "invalid.input", "invalid.input");
+      assertNoSecretsInLogs(logs);
+      // Log context must only include the safe diagnostic fields
+      const sessionFail = logs.find((l) => l.includes("IG session failed"));
+      expect(sessionFail).toBeTruthy();
+      const parsed = JSON.parse(sessionFail!) as {
+        context: Record<string, unknown>;
+      };
+      expect(Object.keys(parsed.context).sort()).toEqual(
+        ["environment", "errorCode", "status", "timestamp"].sort()
+      );
+    });
+
+    it("maps unknown safe codes to UNKNOWN_IG_LOGIN_ERROR without leaking body", async () => {
+      const { logs } = await connectExpecting(
+        400,
+        "error.some.unlisted.code",
+        "UNKNOWN_IG_LOGIN_ERROR"
+      );
+      expect(logs.some((l) => /"errorCode":"error\.some\.unlisted\.code"/.test(l))).toBe(true);
+      assertNoSecretsInLogs(logs);
+    });
+
+    it("keeps dealing endpoint count at zero on login failure", async () => {
+      const { requests } = await connectExpecting(400, "invalid.input", "invalid.input");
+      const dealing = requests.filter((r) =>
+        /\/positions\/otc|\/working-orders/.test(new URL(r.url).pathname)
+      );
+      expect(dealing).toHaveLength(0);
+      expect(DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
+      expect(LIVE_EXECUTION_FEATURE_FLAG).toBe(false);
+    });
   });
 
   it("fails closed when Demo credentials are missing", () => {

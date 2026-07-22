@@ -30,6 +30,61 @@ import { rankGoldCandidates } from "./goldMarketRanking";
 const IG_DEMO_BASE = "https://demo-api.ig.com/gateway/deal";
 const IG_LIVE_BASE = "https://api.ig.com/gateway/deal";
 
+/** Safe IG login errorCode pattern — short identifier only. */
+const SAFE_IG_ERROR_CODE = /^[A-Za-z0-9._-]{1,120}$/;
+
+const KNOWN_IG_LOGIN_UI_REASONS = new Set([
+  "invalid.input",
+  "error.security.api-key-missing",
+  "error.security.invalid-details",
+  "error.security.api-key-invalid",
+  "error.security.api-key-disabled",
+  "error.public-api.failure.pending.agreements.required",
+  "error.public-api.failure.kyc.required"
+]);
+
+/**
+ * Extract a safe IG `errorCode` from a failed login JSON body.
+ * Never accepts or returns raw body text, credentials, or tokens.
+ */
+export function extractSafeIgErrorCode(payload: unknown): string | null {
+  if (payload == null || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const raw = (payload as Record<string, unknown>).errorCode;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!SAFE_IG_ERROR_CODE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Map a safe IG errorCode to a stable UI reason (never echoes unsafe text). */
+export function mapIgLoginUiReason(safeErrorCode: string | null): string {
+  if (safeErrorCode && KNOWN_IG_LOGIN_UI_REASONS.has(safeErrorCode)) {
+    return safeErrorCode;
+  }
+  return "UNKNOWN_IG_LOGIN_ERROR";
+}
+
+/**
+ * Read only `errorCode` from a failed IG response. Discards the rest of the body.
+ * Never logs or returns the raw text.
+ */
+export async function readSafeIgLoginErrorCode(res: Response): Promise<string | null> {
+  try {
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!/json/i.test(contentType)) {
+      // Drain without retaining text
+      await res.arrayBuffer().catch(() => undefined);
+      return null;
+    }
+    const parsed: unknown = await res.json().catch(() => null);
+    return extractSafeIgErrorCode(parsed);
+  } catch {
+    return null;
+  }
+}
+
 export interface IgCredentialBundle {
   apiKey: string;
   username: string;
@@ -153,8 +208,16 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
     });
 
     if (!res.ok) {
-      logger.error("IG session failed", { status: res.status, environment: this.environment });
-      throw new Error("IG_SESSION_FAILED");
+      const safeErrorCode = await readSafeIgLoginErrorCode(res);
+      const uiReason = mapIgLoginUiReason(safeErrorCode);
+      const timestamp = new Date().toISOString();
+      logger.error("IG session failed", {
+        status: res.status,
+        errorCode: safeErrorCode,
+        environment: this.environment,
+        timestamp
+      });
+      throw new Error(uiReason);
     }
 
     const cst = res.headers.get("CST");
