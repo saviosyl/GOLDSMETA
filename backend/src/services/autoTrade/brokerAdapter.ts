@@ -101,6 +101,8 @@ export interface AutoTradeBrokerAdapter {
 
   listAccounts(): Promise<IgAccount[]>;
   selectAccount(accountId: string): Promise<IgAccount>;
+  /** Active session account id if known (no network). Used to skip unnecessary PUT /session. */
+  getSessionAccountId(): string | null;
   /** Search IG for Spot Gold / XAUUSD candidates — never silently picks when multiple. */
   searchGoldMarkets(): Promise<import("./igDemoTypes").IgGoldMarketCandidate[]>;
   discoverSpotGold(): Promise<IgMarketDetails>;

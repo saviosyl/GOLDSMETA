@@ -169,6 +169,7 @@ describe("IG Demo read-only diagnostics", () => {
       apiKey: "abc123",
       CST: "cst-token-value",
       "X-SECURITY-TOKEN": "sec-token",
+      Authorization: "Bearer abcdefghijklmnopqrstuvwxyz",
       accountId: "ABCD12345678",
       nested: { access_token: "tok" }
     });
@@ -176,8 +177,10 @@ describe("IG Demo read-only diagnostics", () => {
     expect(redacted.apiKey).toBe("[REDACTED]");
     expect(redacted.CST).toBe("[REDACTED]");
     expect(redacted["X-SECURITY-TOKEN"]).toBe("[REDACTED]");
+    expect(redacted.Authorization).toBe("[REDACTED]");
     expect(redacted.accountId).toBe(maskAccountId("ABCD12345678"));
     expect(redacted.nested.access_token).toBe("[REDACTED]");
+    expect(assertNoSecretsInText(JSON.stringify(redacted))).toBe(true);
   });
 
   it("fails closed for missing IG Demo secrets on ig_demo mode", () => {

@@ -505,6 +505,14 @@ export class AutoTradeService {
           );
           throw Object.assign(new Error("ACCOUNT_MISMATCH"), { code: "ACCOUNT_MISMATCH" });
         }
+        const activeId = adapter.getSessionAccountId();
+        if (activeId === configuredId) {
+          await this.activity(
+            userId,
+            "Configured Demo account already active — skipped account switch.",
+            "info"
+          );
+        }
         account = await adapter.selectAccount(configuredId);
         this.accountMatchByUser.set(userId, "matched");
       } else {

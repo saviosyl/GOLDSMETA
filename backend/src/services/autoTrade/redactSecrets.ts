@@ -15,7 +15,11 @@ export function redactSecrets<T>(value: T): T {
 function redactValue(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === "string") {
-    if (/CST|X-SECURITY-TOKEN|Bearer\s+\S+/i.test(value)) return "[REDACTED]";
+    if (
+      /CST|X-SECURITY-TOKEN|Bearer\s+\S+|Authorization[=:\s]/i.test(value)
+    ) {
+      return "[REDACTED]";
+    }
     return value;
   }
   if (typeof value !== "object") return value;
@@ -39,6 +43,7 @@ export function assertNoSecretsInText(text: string): boolean {
     /X-SECURITY-TOKEN[=:\s]+\S+/i,
     /api[_-]?key[=:\s]+\S+/i,
     /password[=:\s]+\S+/i,
+    /Authorization[=:\s]+\S+/i,
     /Bearer\s+[A-Za-z0-9._-]{20,}/i
   ];
   return !forbidden.some((re) => re.test(text));

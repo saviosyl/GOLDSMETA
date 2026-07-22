@@ -75,6 +75,10 @@ export async function runIgDemoReadOnlyDiagnostics(
       return redactSecrets(report);
     }
     const configuredId = pinnedAccountId;
+    const activeId = adapter.getSessionAccountId();
+    if (activeId) {
+      notes.push(`Active session account (masked): ${maskAccountId(activeId)}`);
+    }
     if (configuredId) {
       const match = accounts.find((a) => a.accountId === configuredId);
       if (!match) {
@@ -83,10 +87,16 @@ export async function runIgDemoReadOnlyDiagnostics(
         notes.push("Configured IG_DEMO_ACCOUNT_ID does not match any demo account.");
         return redactSecrets(report);
       }
+      if (activeId === configuredId) {
+        notes.push("Configured account already active — skipped PUT /session.");
+      }
       account = await adapter.selectAccount(configuredId);
       report.accountMatch = "matched";
     } else {
       account = accounts[0]!;
+      if (activeId === account.accountId) {
+        notes.push("First account already active — skipped PUT /session.");
+      }
       await adapter.selectAccount(account.accountId);
       report.accountMatch = "unconfigured";
       notes.push("IG_DEMO_ACCOUNT_ID not set — used first account for diagnostics only.");

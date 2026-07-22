@@ -102,7 +102,16 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
   }
 
   private baseUrl(): string {
-    return this.environment === "LIVE" ? IG_LIVE_BASE : IG_DEMO_BASE;
+    // DEMO can never switch to the Live host — environment is fixed at construction.
+    if (this.environment === "DEMO") {
+      return IG_DEMO_BASE;
+    }
+    return IG_LIVE_BASE;
+  }
+
+  /** Active session account id from login / last switch (no network). */
+  getSessionAccountId(): string | null {
+    return this.session?.currentAccountId ?? null;
   }
 
   async connect(credentialsRef: string): Promise<void> {
@@ -251,15 +260,14 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
 
   async selectAccount(accountId: string): Promise<IgAccount> {
     this.requireConnected();
-    if (!this.dryRun) {
-      await this.igJson(
-        "/session",
-        "PUT",
-        "1",
-        { accountId }
-      );
+    const alreadyActive = this.session?.currentAccountId === accountId;
+    if (!this.dryRun && !alreadyActive) {
+      // Switch only when the requested account is not already active.
+      await this.igJson("/session", "PUT", "1", { accountId });
+      if (this.session) this.session.currentAccountId = accountId;
+    } else if (this.session) {
+      this.session.currentAccountId = accountId;
     }
-    if (this.session) this.session.currentAccountId = accountId;
     const accounts = await this.listAccounts();
     const found = accounts.find((a) => a.accountId === accountId);
     if (!found) throw new Error("ACCOUNT_NOT_FOUND");

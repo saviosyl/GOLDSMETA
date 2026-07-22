@@ -128,6 +128,10 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
     return { ...this.account };
   }
 
+  getSessionAccountId(): string | null {
+    return this.connected ? this.account.accountId : null;
+  }
+
 
   async searchGoldMarkets(): Promise<IgGoldMarketCandidate[]> {
     this.requireConnected();
