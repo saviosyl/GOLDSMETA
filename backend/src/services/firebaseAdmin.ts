@@ -1,5 +1,6 @@
 import { applicationDefault, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getMessaging, type Message } from "firebase-admin/messaging";
 import { env } from "../config/env";
 import { logger } from "./logging/logger";
@@ -52,4 +53,9 @@ export const sendFirebaseMessages = async (messages: Message[]): Promise<number>
   }
   const response = await getMessaging(app).sendEach(messages);
   return response.successCount;
+};
+
+export const getFirestoreDb = (): Firestore | null => {
+  const app = getFirebaseApp();
+  return app ? getFirestore(app) : null;
 };

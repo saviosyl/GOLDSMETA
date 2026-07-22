@@ -8,23 +8,28 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc",
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/integration/signalOutcome.firestore.emulator.test.ts",
+    "test:firestore-emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 GCLOUD_PROJECT=goldmeta-signal-outcome-test GOOGLE_CLOUD_PROJECT=goldmeta-signal-outcome-test firebase emulators:exec --only firestore --project goldmeta-signal-outcome-test \"npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts\"",
     "lint": "eslint src --ext .ts",
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "latest",
     "express": "latest",
     "firebase-admin": "latest",
     "firebase-functions": "latest",
     "openai": "latest",
+    "web-push": "^3.6.7",
     "zod": "latest"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/supertest": "latest",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "latest",
     "@typescript-eslint/parser": "latest",
     "eslint": "latest",

@@ -2,7 +2,8 @@ import type { Message } from "firebase-admin/messaging";
 import type { DecisionRecord } from "../../models/types";
 import { sendFirebaseMessages } from "../firebaseAdmin";
 import { logger } from "../logging/logger";
-import type { InMemoryStore } from "../storage/inMemoryStore";
+import type { GoldMetaStore } from "../storage/types";
+import { sendWebPushToUser } from "./webPush";
 
 const notificationReason = (decision: DecisionRecord, previous: DecisionRecord | undefined): string | null => {
   if (!previous && decision.decision !== "WAIT") {
@@ -35,7 +36,7 @@ const buildBody = (decision: DecisionRecord): string => {
 };
 
 export const sendDecisionPushIfMeaningful = async (
-  store: InMemoryStore,
+  store: GoldMetaStore,
   decision: DecisionRecord,
   previous: DecisionRecord | undefined
 ): Promise<boolean> => {
@@ -45,32 +46,34 @@ export const sendDecisionPushIfMeaningful = async (
   }
 
   const dedupeKey = `${decision.decisionId}:${reason}`;
-  if (!store.markNotification(dedupeKey)) {
+  if (!(await store.markNotification(decision.userId, dedupeKey))) {
     return false;
   }
 
-  const devices = store.listDevices(decision.userId);
-  if (devices.length === 0) {
-    logger.info("No registered devices for meaningful decision", {
+  const devices = await store.listDevices(decision.userId);
+  const title = "GoldMeta Decision";
+  const body = buildBody(decision);
+  const data = {
+    decisionId: decision.decisionId,
+    decision: decision.decision,
+    reason
+  };
+
+  let fcmSent = 0;
+  if (devices.length > 0) {
+    const messages: Message[] = devices.map((device) => ({
+      token: device.fcmToken,
+      notification: { title, body },
+      data
+    }));
+    fcmSent = await sendFirebaseMessages(messages);
+  } else {
+    logger.info("No registered FCM devices for meaningful decision", {
       decisionId: decision.decisionId,
       reason
     });
-    return false;
   }
 
-  const messages: Message[] = devices.map((device) => ({
-    token: device.fcmToken,
-    notification: {
-      title: "GoldMeta Decision",
-      body: buildBody(decision)
-    },
-    data: {
-      decisionId: decision.decisionId,
-      decision: decision.decision,
-      reason
-    }
-  }));
-
-  const sentCount = await sendFirebaseMessages(messages);
-  return sentCount > 0;
+  const webSent = await sendWebPushToUser(store, decision.userId, { title, body, data });
+  return fcmSent > 0 || webSent > 0;
 };

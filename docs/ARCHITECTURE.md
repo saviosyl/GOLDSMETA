@@ -11,9 +11,9 @@ GoldMeta is a personal XAUUSD trading assistant. It receives structured market d
 5. Deterministic math for prices, risk, SL, targets, and safety rules.
 6. AI explains and reviews; it does not invent market data or override hard guards.
 7. Default to WAIT on incomplete, stale, contradictory, or unreliable data.
-8. No automatic trade execution in MVP.
-9. API keys and secrets stay on the backend.
-10. Full audit trail for every decision.
+8. Trading modes: Manual (instructions only), Confirm (Face ID / explicit confirm), Demo Auto (simulated funds + full ledger), Live Auto (locked until demo testing + manual enable). Broker adapters execute only officially supported actions. Trading 212 is manual-only for XAUUSD CFD today — see `docs/TRADING_212_API_VERIFICATION.md`.
+9. API keys and secrets stay on the backend (encrypted broker secrets; never on iOS/GitHub).
+10. Full audit trail for every decision. No guaranteed profits. No martingale / grid recovery / averaging down.
 
 ## Disclaimer (onboarding + settings)
 

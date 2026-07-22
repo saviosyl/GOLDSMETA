@@ -14,11 +14,20 @@ GoldMeta uses push notifications to notify the user when a new BUY, SELL, or WAI
 ## iOS setup
 
 1. Enable **Push Notifications** capability in the Apple Developer portal.
-2. Enable **Background Modes** only if the app has a specific background sync need.
-3. Add Firebase Messaging to the iOS app.
-4. Request notification permission after onboarding explains what the alerts mean.
-5. Register the FCM token with the backend for the authenticated user.
-6. Refresh the backend token record whenever FCM rotates the token.
+2. Enable **Background Modes** with remote notifications.
+3. Add Firebase Messaging to the iOS app through the Firebase iOS SDK package.
+4. Add the real `GoogleService-Info.plist` locally; never commit it.
+5. Request notification permission after onboarding explains what the alerts mean.
+6. Register the FCM token with the backend for the authenticated user.
+7. Refresh the backend token record whenever FCM rotates the token.
+8. Unregister the backend device record on sign-out.
+
+Implemented iOS source files:
+
+- `ios/GoldMeta/App/GoldMetaAppDelegate.swift`
+- `ios/GoldMeta/Services/PushNotificationService.swift`
+- `ios/GoldMeta/Services/APIClient.swift`
+- `ios/GoldMeta/Services/NotificationRouter.swift`
 
 ## Backend device model
 
@@ -26,14 +35,11 @@ Suggested fields for `users/{userId}/devices/{deviceId}`:
 
 ```json
 {
+  "deviceId": "ios-device-or-install-id",
   "platform": "ios",
   "fcmToken": "<stored-server-side>",
   "appVersion": "1.0.0",
-  "environment": "prod",
-  "notificationsEnabled": true,
-  "lastSeenAt": "2026-07-20T00:00:00Z",
-  "createdAt": "2026-07-20T00:00:00Z",
-  "updatedAt": "2026-07-20T00:00:00Z"
+  "registeredAt": "2026-07-20T00:00:00Z"
 }
 ```
 
@@ -79,6 +85,8 @@ Recommended FCM data payload:
 
 The app should fetch the full decision from the backend after opening.
 
+The current iOS source routes `decisionId` through `NotificationRouter` and opens the matching decision analysis sheet.
+
 ## Delivery rules
 
 - Send only after final safety validation.
@@ -105,5 +113,7 @@ The app should let users configure:
 - Quiet hours
 - Minimum confidence label for notifications, if supported
 - Push token reset or troubleshooting
+
+The current Settings screen shows the last push registration status reported by `PushNotificationService`.
 
 Confidence is a quality/completeness score. It is not a probability that a trade will win.

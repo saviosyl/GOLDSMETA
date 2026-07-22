@@ -1,0 +1,72 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "webhookConnections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "decisions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "generatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "setups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "decisionId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "setups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "environment", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "setups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "outcomeMonitorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "outcomeMonitorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "signalId", "order": "ASCENDING" },
+        { "fieldPath": "barTime", "order": "ASCENDING" },
+        { "fieldPath": "state", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "signalOutcomes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "monitoring.lifecycle", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.symbol", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.environment", "order": "ASCENDING" },
+        { "fieldPath": "snapshot.timeframe", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

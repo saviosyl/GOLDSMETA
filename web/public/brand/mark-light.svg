@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GoldMeta">
+  <!-- Mark-only vector (light bg): navy G open right + gold M/arrow/bars/circuit -->
+  <path d="M158.9 32.9A86 86 0 1 0 223.1 97.1" fill="none" stroke="#11284A" stroke-width="28" stroke-linecap="butt"/>
+  <path d="M76 178V88h23l19 54 19-54h23v52l26-40v66h-21v-38L142 178h-16L104 132v46H76z" fill="#D8A33D"/>
+  <path d="M168 114l46-62 16 14-38 42h42v16H168z" fill="#D8A33D"/>
+  <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+  <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+  <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+  <path d="M108 178v26M128 178v34M148 178v26" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="108" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="128" cy="218" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  <circle cx="148" cy="210" r="5.5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+</svg>

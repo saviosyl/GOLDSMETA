@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { tradingViewPayloadSchema, type TradingViewPayload } from "../src/models/types";
+import type { InMemoryStore } from "../src/services/storage/inMemoryStore";
 
 export const freshPayload = (
   fixture: unknown,
@@ -18,3 +19,12 @@ export const freshPayload = (
 
 export const stalePayload = (fixture: unknown): TradingViewPayload =>
   tradingViewPayloadSchema.parse(JSON.parse(JSON.stringify(fixture)) as unknown);
+
+export const createTestWebhookConnection = async (
+  store: InMemoryStore,
+  userId = "default-user",
+  webhookId = "test-webhook-id",
+  secret: string | null = null
+): Promise<void> => {
+  await store.createWebhookConnection({ userId, webhookId, secret });
+};

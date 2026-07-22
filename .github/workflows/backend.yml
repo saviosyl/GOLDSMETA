@@ -1,0 +1,57 @@
+name: Backend
+
+on:
+  push:
+    branches: [main, cursor/production-connection]
+  pull_request:
+    branches:
+      - main
+      - cursor/production-connection
+      - cursor/webhook-delivery-400-c2c2
+      - cursor/phase3-stage3-live-forward-c2c2
+      - cursor/goldmeta-v4-stage-b-c2c2
+      - cursor/v5-4-3-approved-base-c2c2
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+        env:
+          NODE_ENV: test
+          APP_ENV: test
+          STORAGE_BACKEND: memory
+
+      - name: Firestore Emulator concurrency tests
+        run: |
+          npx --yes firebase-tools@13 emulators:exec --only firestore --project goldmeta-signal-outcome-test \
+            "npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts"
+        env:
+          NODE_ENV: test
+          APP_ENV: test
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8081
+          GCLOUD_PROJECT: goldmeta-signal-outcome-test
+          GOOGLE_CLOUD_PROJECT: goldmeta-signal-outcome-test
+
+      - name: Build
+        run: npm run build
