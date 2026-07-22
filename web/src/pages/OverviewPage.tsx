@@ -4,20 +4,18 @@ import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 import { formatClientError } from "../lib/errors";
+import { formatSession, humanDecisionState, plainLanguageReason } from "../lib/plainLanguage";
 import {
-  formatSession,
-  formatUserTimestamp,
-  humanDecisionState,
-  plainLanguageReason
-} from "../lib/plainLanguage";
-import {
-  DisclosurePanel,
-  EmptyState,
-  MetricCard,
-  PageHeader,
-  SectionCard,
-  StatusBadge
-} from "../components/ui/primitives";
+  formatCompactLocalTime,
+  formatLocalTimestamp,
+  loadTimezonePreference
+} from "../lib/timezone";
+import { buildOvernightReview } from "../lib/overnight";
+import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
+import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
+import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
+import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
+import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
 
 type Briefing = {
   session?: string | null;
@@ -38,31 +36,35 @@ type Score = {
   disclaimer?: string;
 };
 
-/** V5.4 Dashboard — clean light premium overview. */
+/** V5.4.1 Dashboard — compact mobile, local time, ladder, semantic score. */
 export function OverviewPage() {
-  const { api, user } = useAuth();
+  const { api } = useAuth();
   const [decision, setDecision] = useState<Decision | null>(null);
   const [setup, setSetup] = useState<SetupRecord | null>(null);
   const [recent, setRecent] = useState<SetupRecord[]>([]);
+  const [overnightSetups, setOvernightSetups] = useState<SetupRecord[]>([]);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [score, setScore] = useState<Score | null>(null);
   const [source, setSource] = useState<"live" | "cached" | "offline">("live");
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [latest, active, recentSetups, b, s] = await Promise.all([
+      const [latest, active, recentSetups, overnight, b, s] = await Promise.all([
         api.latestDecision(),
         api.listActiveSetups().catch(() => [] as SetupRecord[]),
         api.listSetups(6, "LIVE").catch(() => [] as SetupRecord[]),
+        api.listSetups(20, "LIVE").catch(() => [] as SetupRecord[]),
         api.v5Briefing("LIVE").catch(() => null),
         api.v5Score("LIVE").catch(() => null)
       ]);
       setDecision(latest);
       setRecent(recentSetups.slice(0, 3));
+      setOvernightSetups(overnight);
       setBriefing(b as Briefing | null);
       setScore(s as Score | null);
       setSource("live");
@@ -96,24 +98,28 @@ export function OverviewPage() {
       (Array.isArray(decision?.reasonSummary) ? decision.reasonSummary : undefined),
     undefined
   );
+
+  const stampIso = decision?.generatedAt ?? briefing?.dataTimestamp ?? cachedAt;
+  const localTs = formatLocalTimestamp(stampIso, tzPref);
+  const compactTime = formatCompactLocalTime(stampIso, tzPref);
+
   const freshness =
     source === "offline"
-      ? `Offline · last stored ${formatUserTimestamp(cachedAt)}`
+      ? `Offline · last stored ${compactTime}`
       : source === "cached"
-        ? `Cached · ${formatUserTimestamp(cachedAt)}`
-        : `Updated ${formatUserTimestamp(decision?.generatedAt ?? briefing?.dataTimestamp)}`;
+        ? `Cached · ${compactTime}`
+        : `Updated ${compactTime} local time`;
+
+  const sessionLabel = formatSession(briefing?.session ?? decision?.currentSession);
+  const poc = briefing?.levels?.poc ?? decision?.marketStructure?.poc ?? null;
+  const vah = briefing?.levels?.vah ?? decision?.marketStructure?.vah ?? null;
+  const val = briefing?.levels?.val ?? decision?.marketStructure?.val ?? null;
+
+  const overnight = buildOvernightReview(overnightSetups, new Date(), localTs.timeZone);
 
   return (
-    <div data-testid="overview-page">
-      <PageHeader
-        title="Dashboard"
-        environment={decision?.environment ?? "LIVE"}
-        freshness={freshness}
-        accountLabel={user?.email ?? null}
-      />
-      <p className="gm-meta" style={{ marginTop: -12, marginBottom: 16 }}>
-        Current XAUUSD context — analysis only. GoldMeta does not place trades.
-      </p>
+    <div data-testid="overview-page" className="gm-dashboard">
+      <PageHeader title="Dashboard" freshness={freshness} />
 
       {error && (
         <div className="banner error" role="alert">
@@ -126,64 +132,73 @@ export function OverviewPage() {
         </SectionCard>
       )}
 
-      <div className="gm-summary-row" data-testid="dashboard-summary">
-        <MetricCard label="Symbol" value="XAUUSD" />
-        <MetricCard label="State" value={humanDecisionState(decisionCode)} />
-        <MetricCard
-          label="Setup quality"
-          value={score?.total != null ? `${score.total}/100` : "—"}
-          hint="Rules-based score, not win probability"
-        />
-        <MetricCard
-          label="Session"
-          value={formatSession(briefing?.session ?? decision?.currentSession)}
-        />
+      {/* Compact 2×2 summary — no email, no duplicate LIVE */}
+      <div className="gm-dash-summary" data-testid="dashboard-summary">
+        <div className="gm-dash-cell">
+          <span className="gm-label">XAUUSD</span>
+          <strong data-testid="summary-decision">{humanDecisionState(decisionCode)}</strong>
+        </div>
+        <div className="gm-dash-cell">
+          <span className="gm-label">Score</span>
+          <strong>{score?.total != null ? `${score.total} / 100` : "—"}</strong>
+        </div>
+        <div className="gm-dash-cell">
+          <span className="gm-label">Session</span>
+          <strong>{sessionLabel}</strong>
+        </div>
+        <div className="gm-dash-cell">
+          <span className="gm-label">Your time</span>
+          <strong>{compactTime}</strong>
+          <span className="gm-meta">{localTs.timeZone}</span>
+        </div>
       </div>
 
-      <SectionCard className="gm-primary-state" title="Primary signal">
-        <div className="row" style={{ gap: 8, marginBottom: 8, display: "flex", flexWrap: "wrap" }}>
-          <StatusBadge tone="gold">XAUUSD</StatusBadge>
-          <StatusBadge tone="neutral">
-            {formatSession(briefing?.session ?? decision?.currentSession)}
-          </StatusBadge>
-          {source !== "live" && (
-            <StatusBadge tone="warning">{source === "offline" ? "Offline" : "Stale"}</StatusBadge>
-          )}
-        </div>
-        <div className={`gm-decision ${decisionCode.toLowerCase()}`} data-testid="primary-decision">
-          {humanDecisionState(decisionCode)}
-        </div>
-        <p style={{ margin: "0 0 12px", maxWidth: 720, color: "var(--text-secondary)" }}>{reason}</p>
-        <div className="gm-metrics-grid">
-          <MetricCard label="POC" value={briefing?.levels?.poc ?? "—"} />
-          <MetricCard label="VAH" value={briefing?.levels?.vah ?? "—"} />
-          <MetricCard label="VAL" value={briefing?.levels?.val ?? "—"} />
-          <MetricCard
-            label="Confirmed bar"
-            value={formatUserTimestamp(decision?.barTime ?? decision?.generatedAt)}
-          />
-        </div>
-        {setup ? (
-          <div className="gm-metrics-grid" style={{ marginTop: 12 }}>
-            <MetricCard label="Plan status" value={String(setup.status).replace(/_/g, " ")} />
-            <MetricCard label="Entry" value={setup.levels?.entryPrice ?? "—"} />
-            <MetricCard label="Stop" value={setup.levels?.stopLoss ?? "—"} />
-            <MetricCard label="TP1" value={setup.levels?.tp1 ?? "—"} />
-          </div>
-        ) : (
-          <EmptyState
-            title="No validated shadow plan yet."
-            body="V4 remains SHADOW only."
-          />
-        )}
-        <DisclosurePanel summary="Technical details">
-          <p className="gm-meta">
-            Decision ID: {decision?.decisionId ?? "—"}
-            <br />
-            Raw codes: {(decision?.reasonCodes ?? []).join(", ") || "none"}
-          </p>
-        </DisclosurePanel>
+      <PrimarySignalCard
+        decisionCode={decisionCode}
+        sessionLabel={sessionLabel}
+        reason={reason}
+        scoreTotal={score?.total}
+        localPrimary={localTs.primary}
+        localZone={localTs.timeZone}
+        utcSecondary={localTs.secondaryUtc}
+        poc={poc}
+        vah={vah}
+        val={val}
+        setup={setup}
+        source={source}
+        technicalId={decision?.decisionId}
+        reasonCodes={decision?.reasonCodes}
+      />
+
+      <SectionCard title="Market Structure Map">
+        <MarketLevelLadder
+          input={{
+            livePrice: decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null,
+            poc,
+            vah,
+            val,
+            barHigh: decision?.ohlcv?.high ?? null,
+            barLow: decision?.ohlcv?.low ?? null,
+            entry: setup?.levels?.entryPrice ?? null,
+            stop: setup?.levels?.stopLoss ?? null,
+            tp1: setup?.levels?.tp1 ?? null,
+            tp2: setup?.levels?.tp2 ?? null,
+            tp3: setup?.levels?.tp3 ?? null
+          }}
+          dataTimestamp={stampIso}
+        />
       </SectionCard>
+
+      <SectionCard title="Setup readiness">
+        <ScoreBreakdown
+          total={score?.total}
+          components={score?.components}
+          disclaimer={score?.disclaimer}
+          compact
+        />
+      </SectionCard>
+
+      <OvernightReviewCard review={overnight} />
 
       <div className="gm-two-col">
         <SectionCard title="Market briefing">
@@ -191,9 +206,9 @@ export function OverviewPage() {
             <EmptyState title="Insufficient verified data for a full briefing." />
           ) : (
             <p style={{ margin: 0, maxWidth: 720, color: "var(--text-secondary)" }}>
-              Session {formatSession(briefing?.session)}. Regime {briefing?.marketRegime ?? "unknown"}.
-              Position vs POC {briefing?.positionVsPoc?.replace(/_/g, " ") ?? "—"}. ATR{" "}
-              {briefing?.atrLabel ?? "—"}. This summary is informational only.
+              Session {sessionLabel}. Regime {briefing?.marketRegime ?? "unknown"}. Position vs POC{" "}
+              {briefing?.positionVsPoc?.replace(/_/g, " ") ?? "—"}. ATR {briefing?.atrLabel ?? "—"}.
+              This summary is informational only.
             </p>
           )}
           <p className="gm-meta">{briefing?.disclaimer}</p>
@@ -216,7 +231,7 @@ export function OverviewPage() {
                   <Link to={`/setups/${s.setupId}`}>
                     {s.direction ?? "—"} · {String(s.status).replace(/_/g, " ")}
                   </Link>
-                  <div className="gm-meta">{formatUserTimestamp(s.createdAt)}</div>
+                  <div className="gm-meta">{formatLocalTimestamp(s.createdAt, tzPref).primary}</div>
                 </li>
               ))}
             </ul>
@@ -227,42 +242,19 @@ export function OverviewPage() {
       <SectionCard
         title="Risk planner"
         action={
-          <Link className="gm-btn-outline" to="/planner" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+          <Link
+            className="gm-btn-outline"
+            to="/planner"
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+          >
             Open planner
           </Link>
         }
       >
         <p className="gm-meta" style={{ margin: 0 }}>
-          Manual sizing aid only. Prefer the dedicated Risk planner for progressive inputs. GoldMeta
-          never places broker orders.
+          Manual sizing aid only. GoldMeta never places broker orders.
         </p>
       </SectionCard>
-
-      <DisclosurePanel summary="View full score breakdown">
-        {score?.total == null ? (
-          <EmptyState title="Insufficient verified data." />
-        ) : (
-          <>
-            <p>
-              <strong>{score.total} / 100</strong>
-            </p>
-            <p className="gm-meta" data-testid="score-disclaimer">
-              {score.disclaimer ??
-                "GoldMeta Score is a rules-based setup-quality measurement. It is not the probability of a profitable trade."}
-            </p>
-            <ul className="list compact">
-              {(score.components ?? []).map((c) => (
-                <li key={c.label}>
-                  <strong>
-                    {c.label} {c.score}/{c.max}
-                  </strong>
-                  <div className="gm-meta">{c.reason}</div>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </DisclosurePanel>
     </div>
   );
 }
