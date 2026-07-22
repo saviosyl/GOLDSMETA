@@ -1,7 +1,7 @@
 /**
  * Market data provider abstraction.
- * No real provider selected yet — Auto modes that need live data stay disabled
- * until a provider is wired. Tests use MockMarketDataProvider only.
+ * SHADOW pilot uses Alpaca IEX via AlpacaMarketDataProvider.
+ * Tests use MockMarketDataProvider. Never silently invent quotes for real modes.
  */
 
 /* eslint-disable @typescript-eslint/require-await -- fail-closed stubs */
@@ -24,6 +24,9 @@ export interface MarketQuote {
   last: number;
   spreadBps: number | null;
   asOf: string;
+  feed?: string;
+  providerId?: string;
+  dataLabel?: string;
 }
 
 export interface MarketIndicators {
@@ -47,6 +50,9 @@ export interface MarketIndicators {
   minutesToClose?: number | null;
   earningsOrNewsRisk: boolean | null;
   asOf: string;
+  feed?: string;
+  providerId?: string;
+  dataLabel?: string;
 }
 
 export interface MarketDataCapabilities {
@@ -57,7 +63,21 @@ export interface MarketDataCapabilities {
   supportsIndicators: boolean;
   supportsSessionStatus: boolean;
   isMock: boolean;
+  feedId?: string;
+  dataLabel?: string;
   notes: string[];
+}
+
+export interface MarketDataProviderHealth {
+  healthy: boolean;
+  feed: string;
+  dataLabel: string;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastErrorCode: string | null;
+  circuitOpen: boolean;
+  rateLimitedUntil: string | null;
+  requestCountWindow: number;
 }
 
 export interface MarketDataProvider {
@@ -66,6 +86,12 @@ export interface MarketDataProvider {
   getOhlcv(symbol: string, interval: CandleInterval, limit: number): Promise<OhlcvBar[]>;
   getIndicators(symbol: string): Promise<MarketIndicators>;
   isFresh(asOf: string, maxAgeMs: number): boolean;
+  getHealth?(): Promise<MarketDataProviderHealth>;
+  getFeedId?(): string;
+  getDataLabel?(): string;
+  symbolAvailable?(symbol: string): Promise<boolean>;
+  validateCredentials?(): Promise<boolean>;
+  getQuotesBatch?(symbols: string[]): Promise<MarketQuote[]>;
 }
 
 export class MarketDataUnavailableError extends Error {
@@ -112,5 +138,19 @@ export class UnconfiguredMarketDataProvider implements MarketDataProvider {
 
   isFresh(): boolean {
     return false;
+  }
+
+  async getHealth(): Promise<MarketDataProviderHealth> {
+    return {
+      healthy: false,
+      feed: "none",
+      dataLabel: "UNCONFIGURED",
+      lastSuccessAt: null,
+      lastErrorAt: null,
+      lastErrorCode: "UNCONFIGURED",
+      circuitOpen: false,
+      rateLimitedUntil: null,
+      requestCountWindow: 0
+    };
   }
 }

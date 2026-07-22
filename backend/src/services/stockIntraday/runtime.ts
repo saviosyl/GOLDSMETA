@@ -1,8 +1,7 @@
 /**
  * Stocks Intraday AutoTrade runtime wiring.
  * Tests / explicit local memory: InMemoryStockIntradayStore.
- * All other environments: FirestoreStockIntradayStore (fail closed if unavailable).
- * Never silently use in-memory outside tests or explicitly selected local development.
+ * Market data: Alpaca IEX when credentials present; mock in tests; never silent mock for SHADOW alpaca.
  */
 
 import { env } from "../../config/env";
@@ -15,6 +14,8 @@ import {
   UnconfiguredMarketDataProvider,
   type MarketDataProvider
 } from "./marketData/marketDataProvider";
+import { AlpacaMarketDataProvider } from "./marketData/alpacaMarketDataProvider";
+import { loadAlpacaMarketDataConfig } from "./marketData/alpacaConfig";
 import { InMemoryStockIntradayStore } from "./inMemoryStockIntradayStore";
 import { FirestoreStockIntradayStore } from "./firestoreStockIntradayStore";
 import type { StockIntradayStorePort } from "./stockIntradayStore";
@@ -22,9 +23,30 @@ import { StockIntradayService } from "./stockIntradayService";
 import { logger } from "../logging/logger";
 
 export function createStockIntradayMarketData(): MarketDataProvider {
-  if (env.APP_ENV === "test" || process.env.STOCK_INTRADAY_MARKET_DATA === "mock") {
+  // Explicit mock only — never a silent fallback when Alpaca is requested.
+  if (process.env.STOCK_INTRADAY_MARKET_DATA === "mock") {
     return new MockMarketDataProvider();
   }
+
+  const preferAlpaca =
+    process.env.STOCK_INTRADAY_MARKET_DATA === "alpaca" ||
+    process.env.STOCK_INTRADAY_MARKET_DATA === "alpaca-iex" ||
+    Boolean(process.env.ALPACA_MARKET_DATA_API_KEY?.trim());
+
+  if (preferAlpaca) {
+    const config = loadAlpacaMarketDataConfig();
+    if (!config) {
+      throw new Error(
+        "ALPACA_CREDENTIALS_REQUIRED: set ALPACA_MARKET_DATA_API_KEY and ALPACA_MARKET_DATA_API_SECRET"
+      );
+    }
+    return new AlpacaMarketDataProvider(config);
+  }
+
+  if (env.APP_ENV === "test") {
+    return new MockMarketDataProvider();
+  }
+
   return new UnconfiguredMarketDataProvider();
 }
 
@@ -81,6 +103,8 @@ export function createStockIntradayService(options?: {
   const adapterFactory = options?.adapterFactory ?? createT212AdapterFactory();
   logger.info("Stock Intraday AutoTrade runtime configured", {
     marketData: marketData.capabilities.providerId,
+    feed: marketData.capabilities.feedId ?? null,
+    dataLabel: marketData.capabilities.dataLabel ?? null,
     store: store.constructor.name,
     paperOrders: false,
     liveOrders: false

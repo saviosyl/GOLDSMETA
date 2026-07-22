@@ -4,6 +4,8 @@
 **Base:** `cursor/goldmeta-v6-ig-autotrade-c2c2`  
 **Separate from:** IG Gold CFD AutoTrade (PR #21)
 
+Alpaca IEX SHADOW pilot (stacked): see [`V6_STOCK_SHADOW_ALPACA.md`](./V6_STOCK_SHADOW_ALPACA.md).
+
 ## Purpose
 
 Automatic **intraday** long-only stock/ETF trading on Trading 212 Invest:

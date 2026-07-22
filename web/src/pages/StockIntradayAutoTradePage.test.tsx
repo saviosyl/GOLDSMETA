@@ -38,5 +38,9 @@ describe("StockIntradayAutoTradePage", () => {
     expect(screen.getByTestId("stock-intraday-safety")).toHaveTextContent(/qualifying opportunities/i);
     expect(screen.getByTestId("stock-intraday-emergency-stop")).toBeInTheDocument();
     expect(screen.getByTestId("stock-intraday-mode-T212_LIVE_AUTO")).toBeDisabled();
+    expect(screen.getByTestId("stock-intraday-shadow-performance")).toBeInTheDocument();
+    expect(screen.getByTestId("stock-intraday-shadow-performance")).toHaveTextContent(
+      /do not guarantee future performance/i
+    );
   });
 });

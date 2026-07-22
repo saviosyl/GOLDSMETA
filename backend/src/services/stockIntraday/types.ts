@@ -264,6 +264,14 @@ export interface StockIntradayStatusPayload {
   }>;
   lastTradingViewAlert: StockTradingViewSignal | null;
   lastMarketDataAt: string | null;
+  marketData: {
+    providerId: string;
+    feedId: string | null;
+    dataLabel: string | null;
+    ready: boolean;
+  };
+  shadowPerformance: import("./shadowPerformance").ShadowPerformanceMetrics;
+  readinessGates: Array<{ id: string; ok: boolean; detail: string }>;
   strategyVersion: string;
   safetyStatement: string;
 }

@@ -11,6 +11,10 @@ test.describe("Stocks Intraday AutoTrade", () => {
     );
     await expect(page.getByTestId("stock-intraday-emergency-stop")).toBeVisible();
     await expect(page.getByTestId("stock-intraday-mode-T212_LIVE_AUTO")).toBeDisabled();
+    await expect(page.getByTestId("stock-intraday-shadow-performance")).toBeVisible();
+    await expect(page.getByTestId("stock-intraday-shadow-performance")).toContainText(
+      "do not guarantee future performance"
+    );
   });
 
   test("stocks kill switch locks mode", async ({ page }) => {

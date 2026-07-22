@@ -393,7 +393,13 @@ function mapInstrument(row: Record<string, unknown>): T212Instrument {
     maxOpenQuantity: row.maxOpenQuantity != null ? Number(row.maxOpenQuantity) : null,
     extendedHoursAllowed: Boolean(row.extendedHoursAllowed ?? false),
     tradable: row.workingScheduleId != null || row.addedOn != null ? true : Boolean(row.tradable ?? true),
-    suspended: Boolean(row.suspended ?? false)
+    suspended: Boolean(row.suspended ?? false),
+    currentPrice:
+      row.currentPrice != null && Number.isFinite(Number(row.currentPrice))
+        ? Number(row.currentPrice)
+        : row.lastPrice != null && Number.isFinite(Number(row.lastPrice))
+          ? Number(row.lastPrice)
+          : null
   };
 }
 

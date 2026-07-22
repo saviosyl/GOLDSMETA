@@ -892,7 +892,9 @@ describe("Stock Intraday hardening", () => {
     await service.getStatus("u1");
     const gate = await store.getRestartGate("u1");
     expect(gate.deploymentGeneration).toBeTruthy();
-    expect(gate.entriesPaused).toBe(true);
+    // SHADOW reconcile completes and releases the entries pause when gates pass.
+    expect(gate.reconciledGeneration).toBe(gate.deploymentGeneration);
+    expect(gate.entriesPaused).toBe(false);
   });
 
   it("personal holdings are never sold", async () => {

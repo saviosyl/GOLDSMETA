@@ -89,6 +89,40 @@ export interface StockIntradayStatus {
   activity: Array<{ id: string; at: string; message: string; level: string }>;
   lastTradingViewAlert: { alertId: string; symbol: string; action: string; timestamp: string } | null;
   lastMarketDataAt: string | null;
+  marketData?: {
+    providerId: string;
+    feedId: string | null;
+    dataLabel: string | null;
+    ready: boolean;
+  };
+  shadowPerformance?: {
+    disclaimer: string;
+    marketSessionsObserved: number;
+    opportunitiesEvaluated: number;
+    tradesOpened: number;
+    tradesClosed: number;
+    winRate: number | null;
+    lossRate: number | null;
+    grossPnl: number;
+    netPnl: number;
+    averageWin: number | null;
+    averageLoss: number | null;
+    profitFactor: number | null;
+    maximumDrawdown: number;
+    maximumConsecutiveLosses: number;
+    averageHoldingTimeMinutes: number | null;
+    stopLossExits: number;
+    takeProfitExits: number;
+    trailingStopExits: number;
+    strategyInvalidationExits: number;
+    endOfDayExits: number;
+    blockedOpportunities: number;
+    waitOpportunities: number;
+    dataOutages: number;
+    staleDataBlocks: number;
+    providerDivergenceBlocks: number;
+  };
+  readinessGates?: Array<{ id: string; ok: boolean; detail: string }>;
   strategyVersion: string;
   safetyStatement: string;
 }
@@ -156,6 +190,41 @@ export function buildReviewStockIntradayStatus(
     ],
     lastTradingViewAlert: null,
     lastMarketDataAt: null,
+    marketData: {
+      providerId: "unconfigured",
+      feedId: null,
+      dataLabel: "ALPACA IEX — SHADOW VALIDATION ONLY",
+      ready: false
+    },
+    shadowPerformance: {
+      disclaimer:
+        "SHADOW results are hypothetical validation only and do not guarantee future performance.",
+      marketSessionsObserved: 0,
+      opportunitiesEvaluated: 0,
+      tradesOpened: 0,
+      tradesClosed: 0,
+      winRate: null,
+      lossRate: null,
+      grossPnl: 0,
+      netPnl: 0,
+      averageWin: null,
+      averageLoss: null,
+      profitFactor: null,
+      maximumDrawdown: 0,
+      maximumConsecutiveLosses: 0,
+      averageHoldingTimeMinutes: null,
+      stopLossExits: 0,
+      takeProfitExits: 0,
+      trailingStopExits: 0,
+      strategyInvalidationExits: 0,
+      endOfDayExits: 0,
+      blockedOpportunities: 0,
+      waitOpportunities: 0,
+      dataOutages: 0,
+      staleDataBlocks: 0,
+      providerDivergenceBlocks: 0
+    },
+    readinessGates: [],
     strategyVersion: "v6.0.0-stock-intraday-scaffold",
     safetyStatement:
       "GoldMeta trades only qualifying opportunities. No trade will be placed when the safety requirements are not met.",

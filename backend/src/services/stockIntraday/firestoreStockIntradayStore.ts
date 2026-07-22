@@ -614,6 +614,71 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       );
   }
 
+  async appendShadowDecision(
+    userId: string,
+    decision: Omit<import("./shadowPerformance").ShadowDecisionRecord, "id" | "userId" | "createdAt"> & {
+      id?: string;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord> {
+    const id = decision.id ?? this.db.collection("_").doc().id;
+    const record = {
+      ...decision,
+      id,
+      userId,
+      createdAt: nowIso()
+    };
+    await this.col(userId, "shadowDecisions")
+      .doc(id)
+      .set(stripUndefined(record) as FirebaseFirestore.DocumentData);
+    return record;
+  }
+
+  async listShadowDecisions(
+    userId: string,
+    limit = 200
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord[]> {
+    const snap = await this.col(userId, "shadowDecisions")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map(
+      (d) => d.data() as import("./shadowPerformance").ShadowDecisionRecord
+    );
+  }
+
+  async completeShadowDecisionExit(
+    userId: string,
+    symbol: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const snap = await this.col(userId, "shadowDecisions")
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
+    const doc = snap.docs.find((d) => {
+      const data = d.data() as import("./shadowPerformance").ShadowDecisionRecord;
+      return (
+        data.symbol.toUpperCase() === symbol.toUpperCase() &&
+        data.outcome === "BUY" &&
+        data.hypotheticalExit == null
+      );
+    });
+    if (!doc) return null;
+    const current = doc.data() as import("./shadowPerformance").ShadowDecisionRecord;
+    const updated: import("./shadowPerformance").ShadowDecisionRecord = { ...current, ...exit };
+    await doc.ref.set(stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
+    return updated;
+  }
+
   async getRestartGate(userId: string): Promise<StockRestartGate> {
     const snap = await this.restartGateRef(userId).get();
     if (!snap.exists) {

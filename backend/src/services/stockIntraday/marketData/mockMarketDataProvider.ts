@@ -9,6 +9,7 @@ import type {
   CandleInterval,
   MarketDataCapabilities,
   MarketDataProvider,
+  MarketDataProviderHealth,
   MarketIndicators,
   MarketQuote,
   OhlcvBar
@@ -43,6 +44,8 @@ export class MockMarketDataProvider implements MarketDataProvider {
     supportsIndicators: true,
     supportsSessionStatus: true,
     isMock: true,
+    feedId: "mock",
+    dataLabel: "MOCK — TESTS ONLY",
     notes: ["Deterministic fixtures for automated tests only."]
   };
 
@@ -159,6 +162,42 @@ export class MockMarketDataProvider implements MarketDataProvider {
     if (this.opts.stale) return false;
     const age = Date.now() - new Date(asOf).getTime();
     return Number.isFinite(age) && age <= maxAgeMs;
+  }
+
+  getFeedId(): string {
+    return "mock";
+  }
+
+  getDataLabel(): string {
+    return "MOCK — TESTS ONLY";
+  }
+
+  async getHealth(): Promise<MarketDataProviderHealth> {
+    return {
+      healthy: !this.opts.outage,
+      feed: "mock",
+      dataLabel: "MOCK — TESTS ONLY",
+      lastSuccessAt: this.opts.outage ? null : new Date().toISOString(),
+      lastErrorAt: this.opts.outage ? new Date().toISOString() : null,
+      lastErrorCode: this.opts.outage ? "MARKET_DATA_OUTAGE" : null,
+      circuitOpen: false,
+      rateLimitedUntil: null,
+      requestCountWindow: 0
+    };
+  }
+
+  async symbolAvailable(symbol: string): Promise<boolean> {
+    void symbol;
+    if (this.opts.outage) return false;
+    return true;
+  }
+
+  async validateCredentials(): Promise<boolean> {
+    return !this.opts.outage;
+  }
+
+  async getQuotesBatch(symbols: string[]): Promise<MarketQuote[]> {
+    return Promise.all(symbols.map((s) => this.getQuote(s)));
   }
 
   private asOf(): string {

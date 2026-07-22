@@ -258,6 +258,32 @@ export interface StockIntradayStorePort {
     trade: Omit<import("./types").StockShadowTradeRecord, "id"> & { id?: string }
   ): Promise<void>;
 
+  appendShadowDecision(
+    userId: string,
+    decision: Omit<import("./shadowPerformance").ShadowDecisionRecord, "id" | "userId" | "createdAt"> & {
+      id?: string;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord>;
+  listShadowDecisions(
+    userId: string,
+    limit?: number
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord[]>;
+  /** Attach exit accounting to the latest open BUY decision for a symbol. */
+  completeShadowDecisionExit(
+    userId: string,
+    symbol: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null>;
+
   getRestartGate(userId: string): Promise<StockRestartGate>;
   saveRestartGate(gate: StockRestartGate): Promise<void>;
 
