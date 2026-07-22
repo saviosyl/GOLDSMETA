@@ -1651,4 +1651,24 @@ button.gm-linkish {
   .gm-decision-label {
     font-size: clamp(1.9rem, 9vw, 2.4rem);
   }
+
+  .gm-market-story {
+    padding: 14px;
+  }
+
+  .gm-story-body {
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .gm-story-body.is-clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .gm-page-header {
+    margin-bottom: 10px;
+  }
 }
