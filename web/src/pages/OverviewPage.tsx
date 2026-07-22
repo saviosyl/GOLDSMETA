@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
@@ -8,9 +8,12 @@ import { formatSession, plainLanguageReason } from "../lib/plainLanguage";
 import {
   formatCompactLocalTime,
   formatLocalTimestamp,
-  loadTimezonePreference
+  loadTimezonePreference,
+  type FormattedTimestamp
 } from "../lib/timezone";
 import { buildOvernightReview } from "../lib/overnight";
+import type { BuildSnapshotInput } from "../lib/promoSnapshot";
+import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
 import { MarketStoryCard } from "../components/v5/MarketStoryCard";
@@ -18,6 +21,8 @@ import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
 import { CurrentPlanCard } from "../components/v5/CurrentPlanCard";
 import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
+import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
+import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 
 type Briefing = {
   session?: string | null;
@@ -38,7 +43,60 @@ type Score = {
   disclaimer?: string;
 };
 
-/** V5.4.2 Dashboard — Primary Signal first, Market Story, denser layout. */
+function buildSnapshotFromPage(args: {
+  decision: Decision | null;
+  briefing: Briefing | null;
+  decisionCode: string;
+  score: Score | null;
+  livePrice: number | null;
+  sessionLabel: string;
+  compactTime: string;
+  localTs: FormattedTimestamp;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  hasPlan: boolean;
+  setup: SetupRecord | null;
+}): BuildSnapshotInput | null {
+  const { decision, briefing } = args;
+  if (!decision && !briefing) return null;
+  return {
+    decision: args.decisionCode,
+    scoreTotal: args.score?.total ?? null,
+    livePrice: args.livePrice,
+    sessionLabel: args.sessionLabel,
+    compactTime: args.compactTime,
+    timeZone: args.localTs.timeZone,
+    utcSecondary: args.localTs.secondaryUtc,
+    storyInput: {
+      decision: args.decisionCode,
+      session: briefing?.session ?? decision?.currentSession,
+      regime: briefing?.marketRegime ?? decision?.marketRegime,
+      positionVsPoc: briefing?.positionVsPoc,
+      atrLabel: briefing?.atrLabel,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      livePrice: args.livePrice,
+      reasonCodes: decision?.reasonCodes,
+      hasValidatedPlan: args.hasPlan,
+      insufficientData: Boolean(briefing?.insufficientData) && !decision,
+      components: args.score?.components
+    },
+    ladder: {
+      livePrice: args.livePrice,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      barHigh: decision?.ohlcv?.high ?? null,
+      barLow: decision?.ohlcv?.low ?? null
+    },
+    plan: args.setup,
+    scoreComponents: args.score?.components
+  };
+}
+
+/** V5.4.3 Dashboard — Primary Signal first + promotional Market Snapshot. */
 export function OverviewPage() {
   const { api } = useAuth();
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -126,6 +184,30 @@ export function OverviewPage() {
 
   const overnight = buildOvernightReview(overnightSetups, new Date(), localTs.timeZone);
 
+  const snapshotInputRef = useRef<() => BuildSnapshotInput | null>(() => null);
+  useEffect(() => {
+    snapshotInputRef.current = () =>
+      buildSnapshotFromPage({
+        decision,
+        briefing,
+        decisionCode,
+        score,
+        livePrice,
+        sessionLabel,
+        compactTime,
+        localTs,
+        poc,
+        vah,
+        val,
+        hasPlan,
+        setup
+      });
+  });
+
+  const buildSnapshotInput = useCallback(() => snapshotInputRef.current(), []);
+
+  const snapshot = usePromoSnapshot(buildSnapshotInput);
+
   return (
     <div data-testid="overview-page" className="gm-dashboard gm-dashboard--v542">
       <PageHeader title="Dashboard" freshness={freshness} />
@@ -157,20 +239,40 @@ export function OverviewPage() {
 
       {/* 1. Primary Signal */}
       {!loading && (
-        <PrimarySignalCard
-          decisionCode={decisionCode}
-          sessionLabel={sessionLabel}
-          reason={reason}
-          scoreTotal={score?.total}
-          compactTime={compactTime}
-          timeZone={localTs.timeZone}
-          utcSecondary={localTs.secondaryUtc}
-          livePrice={livePrice}
-          setup={setup}
-          source={source}
-          technicalId={decision?.decisionId}
-          reasonCodes={decision?.reasonCodes}
-        />
+        <>
+          <PrimarySignalCard
+            decisionCode={decisionCode}
+            sessionLabel={sessionLabel}
+            reason={reason}
+            scoreTotal={score?.total}
+            compactTime={compactTime}
+            timeZone={localTs.timeZone}
+            utcSecondary={localTs.secondaryUtc}
+            livePrice={livePrice}
+            setup={setup}
+            source={source}
+            technicalId={decision?.decisionId}
+            reasonCodes={decision?.reasonCodes}
+          />
+          <div className="gm-snapshot-actions-row">
+            <PromoSnapshotButton
+              onClick={snapshot.openModal}
+              disabled={!decision && !briefing}
+            />
+          </div>
+          <PromoSnapshotModal
+            open={snapshot.open}
+            onClose={snapshot.closeModal}
+            options={snapshot.options}
+            onOptionsChange={snapshot.updateOptions}
+            status={snapshot.status}
+            statusMessage={snapshot.statusMessage}
+            previewUrl={snapshot.previewUrl}
+            generating={snapshot.generating}
+            onShare={() => void snapshot.share()}
+            onDownload={snapshot.download}
+          />
+        </>
       )}
 
       {/* 2. Market Story */}
