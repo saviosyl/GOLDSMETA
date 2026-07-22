@@ -33,6 +33,19 @@ const IG_LIVE_BASE = "https://api.ig.com/gateway/deal";
 /** Safe IG login errorCode pattern — short identifier only. */
 const SAFE_IG_ERROR_CODE = /^[A-Za-z0-9._-]{1,120}$/;
 
+/** IG Demo/API username (identifier) — fail closed locally before network. */
+export const IG_IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]{1,30}$/;
+
+export function validateIgIdentifierFormat(identifier: string): {
+  valid: boolean;
+  length: number;
+} {
+  return {
+    valid: IG_IDENTIFIER_PATTERN.test(identifier),
+    length: identifier.length
+  };
+}
+
 const KNOWN_IG_LOGIN_UI_REASONS = new Set([
   "invalid.input",
   "error.security.api-key-missing",
@@ -191,6 +204,17 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
       this.connected = true;
       this.lastHeartbeatAt = new Date().toISOString();
       return;
+    }
+
+    // Preflight: never call IG with an identifier that cannot match IG's pattern.
+    const identifierCheck = validateIgIdentifierFormat(loaded.username);
+    if (!identifierCheck.valid) {
+      logger.error("IG identifier format invalid", {
+        identifierPatternValid: false,
+        identifierLength: identifierCheck.length,
+        environment: this.environment
+      });
+      throw new Error("IG_IDENTIFIER_FORMAT_INVALID");
     }
 
     const res = await this.fetchImpl(`${this.baseUrl()}/session`, {

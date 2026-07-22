@@ -432,6 +432,45 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
     expect(adapter.isConnected()).toBe(false);
   });
 
+  it("rejects invalid identifier format before any IG network call", async () => {
+    process.env.IG_DEMO_USERNAME = "user@email.com"; // invalid for IG identifier pattern
+    const requests: CapturedRequest[] = [];
+    const logs: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+      logs.push(String(line));
+    });
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit
+    ): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push({
+        url,
+        method: (init?.method ?? "GET").toUpperCase(),
+        headers: new Headers(init?.headers),
+        body: parseBody(init?.body)
+      });
+      return jsonResponse({ errorCode: "should-not-reach" }, { status: 500 });
+    }) as typeof fetch;
+
+    const adapter = new IgBrokerAdapter({
+      environment: "DEMO",
+      fetchImpl,
+      dryRun: false
+    });
+
+    await expect(adapter.connect("server:preflight")).rejects.toThrow("IG_IDENTIFIER_FORMAT_INVALID");
+    expect(adapter.isConnected()).toBe(false);
+    expect(requests).toHaveLength(0);
+    const joined = logs.join("\n");
+    expect(joined).toMatch(/identifierPatternValid":false/);
+    expect(joined).toMatch(/identifierLength":14/);
+    expect(joined).toMatch(/"environment":"DEMO"/);
+    expect(joined).not.toContain("user@email.com");
+    expect(joined).not.toContain("@");
+    errorSpy.mockRestore();
+  });
+
   describe("safe IG login errorCode diagnostics", () => {
     const secretPassword = "super-secret-password-never-log";
     const secretUser = "secret-username-never-log";
