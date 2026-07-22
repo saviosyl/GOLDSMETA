@@ -13,6 +13,7 @@ import type {
   IgOrderRequest,
   IgOrderResult
 } from "./brokerAdapter";
+import type { IgGoldMarketCandidate } from "./igDemoTypes";
 import type { BrokerEnvironment, StopProtectionMode } from "./types";
 
 export type FakeIgScenario =
@@ -25,7 +26,10 @@ export type FakeIgScenario =
   | "wide_spread"
   | "min_size_large"
   | "no_guaranteed_stop"
-  | "session_fail";
+  | "session_fail"
+  | "multi_gold"
+  | "auth_fail"
+  | "expired_session";
 
 export interface FakeIgOptions {
   environment?: BrokerEnvironment;
@@ -85,9 +89,13 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
     if (scenario === "min_size_large") this.minDealSize = 5;
   }
 
+  setAccountId(accountId: string): void {
+    this.account = { ...this.account, accountId };
+  }
+
   async connect(_credentialsRef: string): Promise<void> {
-    if (this.scenario === "session_fail") {
-      throw new Error("IG_SESSION_FAILED");
+    if (this.scenario === "session_fail" || this.scenario === "auth_fail") {
+      throw new Error(this.scenario === "auth_fail" ? "IG_AUTH_FAILED" : "IG_SESSION_FAILED");
     }
     this.connected = true;
   }
@@ -103,6 +111,7 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
   async heartbeat(): Promise<string> {
     if (!this.connected) throw new Error("NOT_CONNECTED");
     if (this.scenario === "session_fail") throw new Error("IG_SESSION_FAILED");
+    if (this.scenario === "expired_session") throw new Error("IG_SESSION_EXPIRED");
     return nowIso();
   }
 
@@ -119,8 +128,68 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
     return { ...this.account };
   }
 
+
+  async searchGoldMarkets(): Promise<IgGoldMarketCandidate[]> {
+    this.requireConnected();
+    if (this.scenario === "multi_gold") {
+      return [
+        {
+          epic: "CS.D.USCGC.TODAY.IP",
+          instrumentName: "Spot Gold",
+          instrumentType: "CURRENCIES",
+          expiry: "-",
+          marketStatus: "TRADEABLE",
+          currencyCode: this.account.currency,
+          bid: this.bid,
+          offer: this.offer,
+          proposedPrimary: true,
+          reason: "Matches Spot Gold / continuous CFD naming"
+        },
+        {
+          epic: "CS.D.CFEGOLD.CFD.IP",
+          instrumentName: "Gold Cash CFD",
+          instrumentType: "CURRENCIES",
+          expiry: "-",
+          marketStatus: "TRADEABLE",
+          currencyCode: this.account.currency,
+          bid: this.bid - 0.1,
+          offer: this.offer + 0.1,
+          proposedPrimary: false,
+          reason: "Alternate Gold CFD — requires explicit selection"
+        }
+      ];
+    }
+    return [
+      {
+        epic: "CS.D.USCGC.TODAY.IP",
+        instrumentName: "Spot Gold",
+        instrumentType: "CURRENCIES",
+        expiry: "-",
+        marketStatus: this.scenario === "closed_market" ? "CLOSED" : "TRADEABLE",
+        currencyCode: this.account.currency,
+        bid: this.bid,
+        offer: this.offer,
+        proposedPrimary: true,
+        reason: "Single Spot Gold candidate"
+      }
+    ];
+  }
+
+  async renewSession(): Promise<string> {
+    this.requireConnected();
+    if (this.scenario === "expired_session" || this.scenario === "auth_fail") {
+      this.connected = false;
+      throw new Error(this.scenario === "auth_fail" ? "IG_AUTH_FAILED" : "IG_SESSION_EXPIRED");
+    }
+    return this.heartbeat();
+  }
+
   async discoverSpotGold(): Promise<IgMarketDetails> {
-    return this.getMarket("CS.D.USCGC.TODAY.IP");
+    const candidates = await this.searchGoldMarkets();
+    if (candidates.length !== 1) {
+      throw new Error("MULTIPLE_GOLD_CANDIDATES");
+    }
+    return this.getMarket(candidates[0]!.epic);
   }
 
   async getMarket(epic: string): Promise<IgMarketDetails> {
@@ -147,12 +216,19 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
         valueOfOnePip: this.valueOfOnePip,
         currencyCode: this.account.currency,
         guaranteedStopAvailable: this.guaranteedStopAvailable,
+        minNormalStopDistance: 0.3,
+        minGuaranteedStopDistance: 0.5,
+        marginRequirement: 5,
+        instrumentType: "CURRENCIES",
+        expiry: "-",
         scalingFactor: 1
       };
     }
     return {
       epic,
       instrumentName: "Spot Gold",
+      instrumentType: "CURRENCIES",
+      expiry: "-",
       marketStatus: status,
       bid,
       offer,
@@ -166,6 +242,9 @@ export class FakeIgBrokerAdapter implements AutoTradeBrokerAdapter {
       valueOfOnePip: this.valueOfOnePip,
       currencyCode: this.account.currency,
       guaranteedStopAvailable: this.guaranteedStopAvailable,
+      minNormalStopDistance: 0.3,
+      minGuaranteedStopDistance: 0.5,
+      marginRequirement: 5,
       scalingFactor: 1
     };
   }

@@ -147,12 +147,34 @@ export const buildAutoTradeRouter = (
   router.post("/v1/autotrade/demo/diagnostics", requireAuth, async (req, res) => {
     try {
       const status = await service.refreshDemoDiagnostics(getAuthenticatedUserId(req));
-      res.json({ status, readOnly: true, ordersEnabled: false });
+      res.json({
+        status,
+        report: status.lastDiagnosticReport,
+        readOnly: true,
+        ordersEnabled: false,
+        environment: "IG DEMO — READ ONLY",
+        demoOrderSubmissionEnabled: false,
+        liveExecutionFeatureEnabled: false
+      });
     } catch (error) {
       res.status(400).json({
         error: {
           code: (error as { code?: string }).code ?? "DIAGNOSTICS_FAILED",
           message: error instanceof Error ? error.message : "Diagnostics failed"
+        }
+      });
+    }
+  });
+
+  router.post("/v1/autotrade/disconnect", requireAuth, async (req, res) => {
+    try {
+      const status = await service.disconnectBroker(getAuthenticatedUserId(req));
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "DISCONNECT_FAILED",
+          message: error instanceof Error ? error.message : "Disconnect failed"
         }
       });
     }

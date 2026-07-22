@@ -19,8 +19,15 @@ vi.mock("../lib/auth", () => ({
       })),
       autoTradeConnect: vi.fn(async () => ({
         ...status,
-        connection: { ...status.connection, connected: true, accountIdMasked: "****1234" }
+        connection: {
+          ...status.connection,
+          connected: true,
+          connectionState: "Connected",
+          accountIdMasked: "****1234"
+        }
       })),
+      autoTradeDisconnect: vi.fn(async () => status),
+      autoTradeDemoDiagnostics: vi.fn(async () => status),
       autoTradeEmergencyStop: vi.fn(async () => ({
         ...status,
         displayStatus: "LOCKED",
@@ -44,9 +51,14 @@ describe("AutoTradePage", () => {
     );
     await waitFor(() => expect(screen.getByTestId("autotrade-page")).toBeInTheDocument());
     expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("autotrade-env-pill")).toHaveTextContent("IG DEMO — READ ONLY");
+    expect(screen.getByTestId("autotrade-readonly-banner")).toHaveTextContent(
+      /Demo order submission is disabled/i
+    );
     expect(screen.getByTestId("autotrade-emergency-stop")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-live-activation")).toBeInTheDocument();
     expect(screen.getByText(/Remaining daily/i)).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-mode-IG_DEMO_AUTO")).toBeDisabled();
   });
 
   it("keeps live enable disabled until confirmation phrase", async () => {

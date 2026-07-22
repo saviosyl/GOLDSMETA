@@ -10,6 +10,8 @@ import type { DecisionRecord } from "../../models/types";
 import type { GoldMetaStore } from "../storage/types";
 import type { AutoTradeBrokerAdapter } from "./brokerAdapter";
 import { FakeIgBrokerAdapter } from "./fakeIgBrokerAdapter";
+import { loadPinnedAccountIdFromServerEnv } from "./igBrokerAdapter";
+import { runIgDemoReadOnlyDiagnostics } from "./igDemoDiagnostics";
 import { evaluateEligibility } from "./eligibility";
 import { calculatePositionSize } from "./positionSizing";
 import { redactSecrets } from "./redactSecrets";
@@ -116,6 +118,22 @@ export function decisionRecordToSignal(decision: DecisionRecord): DecisionSignal
 export class AutoTradeService {
   private adapters = new Map<string, AutoTradeBrokerAdapter>();
   private processBootstrapped = new Set<string>();
+  private goldCandidatesByUser = new Map<string, import("./igDemoTypes").IgGoldMarketCandidate[]>();
+  private proposedEpicByUser = new Map<string, string | null>();
+  private selectionRequiredByUser = new Map<string, boolean>();
+  private lastDiagnosticByUser = new Map<
+    string,
+    import("./igDemoTypes").IgDemoDiagnosticReport | null
+  >();
+  private accountMatchByUser = new Map<
+    string,
+    "matched" | "mismatch" | "unconfigured" | "unknown"
+  >();
+  private connectionErrorByUser = new Map<string, string | null>();
+  private marketExtrasByUser = new Map<
+    string,
+    Partial<AutoTradeStatusPayload["connection"]>
+  >();
   readonly ownerId: string;
 
   constructor(
@@ -175,12 +193,32 @@ export class AutoTradeService {
     const activity = await this.store.listActivity(userId, 40);
     const adapter = this.adapters.get(userId);
     let positions: AutoTradeStatusPayload["positions"] = [];
-    let marketFields: Partial<AutoTradeStatusPayload["connection"]> = {};
+    let marketFields: Partial<AutoTradeStatusPayload["connection"]> =
+      this.marketExtrasByUser.get(userId) ?? {};
+    const connError = this.connectionErrorByUser.get(userId) ?? null;
 
     if (adapter?.isConnected()) {
       try {
         const open = await adapter.getOpenPositions();
-        const market = await adapter.discoverSpotGold();
+        const preferred =
+          this.proposedEpicByUser.get(userId) ??
+          connection.marketEpic ??
+          connection.pinnedMarketEpic;
+        let market: import("./brokerAdapter").IgMarketDetails | undefined;
+        if (preferred && !this.selectionRequiredByUser.get(userId)) {
+          market = await adapter.getMarket(preferred);
+        } else {
+          const candidates = await adapter.searchGoldMarkets();
+          this.goldCandidatesByUser.set(userId, candidates);
+          const primary = candidates.filter((c) => c.proposedPrimary);
+          if (candidates.length === 1 || primary.length === 1) {
+            market = await adapter.getMarket((primary[0] ?? candidates[0])!.epic);
+            this.selectionRequiredByUser.set(userId, candidates.length > 1 && primary.length !== 1);
+          } else {
+            this.selectionRequiredByUser.set(userId, true);
+            if (primary[0]) this.proposedEpicByUser.set(userId, primary[0].epic);
+          }
+        }
         positions = open.map((p) => ({
           positionId: p.dealId,
           environment: adapter.environment,
@@ -192,8 +230,8 @@ export class AutoTradeService {
           stop: p.stopLevel,
           takeProfit: p.limitLevel,
           monetaryRisk: null,
-          currentBid: market.bid,
-          currentAsk: market.offer,
+          currentBid: market?.bid ?? null,
+          currentAsk: market?.offer ?? null,
           unrealisedPnl: p.upl,
           score: null,
           decisionId: null,
@@ -205,28 +243,47 @@ export class AutoTradeService {
               : "MISSING",
           openedAt: p.createdDate
         }));
-        marketFields = {
-          marketStatus: market.marketStatus,
-          marketEpic: market.epic,
-          marketName: market.instrumentName,
-          bid: market.bid,
-          ask: market.offer,
-          spread: Number((market.offer - market.bid).toFixed(4)),
-          minDealSize: market.minDealSize,
-          sizeIncrement: market.dealSizeIncrement,
-          valuePerPoint: market.valueOfOnePip
-        };
+        if (market) {
+          marketFields = {
+            marketStatus: market.marketStatus,
+            marketEpic: market.epic,
+            marketName: market.instrumentName,
+            instrumentType: market.instrumentType,
+            expiry: market.expiry,
+            bid: market.bid,
+            ask: market.offer,
+            spread: Number((market.offer - market.bid).toFixed(4)),
+            minDealSize: market.minDealSize,
+            sizeIncrement: market.dealSizeIncrement,
+            valuePerPoint: market.valueOfOnePip,
+            minNormalStopDistance: market.minNormalStopDistance,
+            minGuaranteedStopDistance: market.minGuaranteedStopDistance,
+            guaranteedStopAvailable: market.guaranteedStopAvailable,
+            marginRequirement: market.marginRequirement
+          };
+          this.marketExtrasByUser.set(userId, marketFields);
+          this.proposedEpicByUser.set(userId, market.epic);
+        }
         const hb = await adapter.heartbeat();
         connection.lastHeartbeatAt = hb;
         connection.connected = true;
         connection.environment = adapter.environment;
         await this.store.saveConnection(connection);
-      } catch {
-        // leave connection as stored
+        this.connectionErrorByUser.set(userId, null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "broker_status_error";
+        this.connectionErrorByUser.set(userId, message);
       }
     }
 
     const limits = settings.limits;
+    const connected = Boolean(adapter?.isConnected() && connection.connected);
+    const connectionState: AutoTradeStatusPayload["connection"]["connectionState"] = connError
+      ? "Error"
+      : connected
+        ? "Connected"
+        : "Disconnected";
+
     return {
       displayStatus: displayStatusFor(risk.mode, risk.locked || risk.emergencyStopActive),
       mode: risk.mode,
@@ -234,9 +291,13 @@ export class AutoTradeService {
       lockReason: risk.lockReason,
       emergencyStopActive: risk.emergencyStopActive,
       liveExecutionFeatureEnabled: LIVE_EXECUTION_FEATURE_FLAG,
+      demoOrderSubmissionEnabled: DEMO_ORDER_SUBMISSION_ENABLED,
+      readOnly: true,
+      ordersEnabled: false,
       connection: {
-        connected: connection.connected,
+        connected,
         environment: connection.environment,
+        environmentLabel: "IG DEMO — READ ONLY",
         accountIdMasked: maskAccountId(connection.accountId),
         accountName: connection.accountName,
         currency: connection.currency ?? limits.currency,
@@ -246,13 +307,21 @@ export class AutoTradeService {
         marketStatus: marketFields.marketStatus ?? null,
         marketEpic: marketFields.marketEpic ?? connection.marketEpic,
         marketName: marketFields.marketName ?? connection.marketName,
+        instrumentType: marketFields.instrumentType ?? null,
+        expiry: marketFields.expiry ?? null,
         bid: marketFields.bid ?? null,
         ask: marketFields.ask ?? null,
         spread: marketFields.spread ?? null,
         minDealSize: marketFields.minDealSize ?? null,
         sizeIncrement: marketFields.sizeIncrement ?? null,
         valuePerPoint: marketFields.valuePerPoint ?? null,
-        lastHeartbeatAt: connection.lastHeartbeatAt
+        minNormalStopDistance: marketFields.minNormalStopDistance ?? null,
+        minGuaranteedStopDistance: marketFields.minGuaranteedStopDistance ?? null,
+        guaranteedStopAvailable: marketFields.guaranteedStopAvailable ?? null,
+        marginRequirement: marketFields.marginRequirement ?? null,
+        lastHeartbeatAt: connection.lastHeartbeatAt,
+        accountMatch: this.accountMatchByUser.get(userId) ?? null,
+        connectionState
       },
       limits,
       budget: {
@@ -271,7 +340,11 @@ export class AutoTradeService {
       },
       positions,
       activity,
-      strategyVersion: AUTOTRADE_STRATEGY_VERSION
+      strategyVersion: AUTOTRADE_STRATEGY_VERSION,
+      goldCandidates: this.goldCandidatesByUser.get(userId) ?? [],
+      proposedEpic: this.proposedEpicByUser.get(userId) ?? connection.marketEpic,
+      selectionRequired: this.selectionRequiredByUser.get(userId) ?? false,
+      lastDiagnosticReport: this.lastDiagnosticByUser.get(userId) ?? null
     };
   }
 
@@ -399,15 +472,118 @@ export class AutoTradeService {
     }
 
     const previous = await this.store.getConnection(userId);
-    const adapter = this.adapterFactory(environment);
+    const configuredId = loadPinnedAccountIdFromServerEnv("DEMO");
+    let adapter: AutoTradeBrokerAdapter;
+    try {
+      adapter = this.adapterFactory(environment);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ADAPTER_INIT_FAILED";
+      this.connectionErrorByUser.set(userId, message);
+      if (message === "IG_DEMO_CREDENTIALS_NOT_CONFIGURED" || message === "IG_CREDENTIALS_NOT_CONFIGURED") {
+        await this.activity(userId, "IG Demo secrets are not configured (fail closed).", "error");
+        throw Object.assign(new Error(message), { code: "IG_CREDENTIALS_MISSING" });
+      }
+      throw error;
+    }
     try {
       await adapter.connect(credentialsRef);
       const accounts = await adapter.listAccounts();
-      const account = accounts[0];
-      if (!account) throw new Error("No IG accounts found");
-      await adapter.selectAccount(account.accountId);
-      const market = await adapter.discoverSpotGold();
+      if (!accounts.length) throw new Error("No IG accounts found");
+
+      let account = accounts[0]!;
+      if (configuredId) {
+        const match = accounts.find((a) => a.accountId === configuredId);
+        if (!match) {
+          this.accountMatchByUser.set(userId, "mismatch");
+          this.connectionErrorByUser.set(userId, "ACCOUNT_MISMATCH");
+          await adapter.disconnect();
+          await this.lock(userId, "account_mismatch");
+          await this.activity(
+            userId,
+            "Account mismatch — configured IG_DEMO_ACCOUNT_ID does not match Demo accounts. AutoTrade locked.",
+            "error"
+          );
+          throw Object.assign(new Error("ACCOUNT_MISMATCH"), { code: "ACCOUNT_MISMATCH" });
+        }
+        account = await adapter.selectAccount(configuredId);
+        this.accountMatchByUser.set(userId, "matched");
+      } else {
+        account = await adapter.selectAccount(account.accountId);
+        this.accountMatchByUser.set(userId, "unconfigured");
+      }
+
+      const candidates = await adapter.searchGoldMarkets();
+      this.goldCandidatesByUser.set(userId, candidates);
+      const primary = candidates.filter((c) => c.proposedPrimary);
+      let marketEpic: string | null = null;
+      let marketName: string | null = null;
+      let selectionRequired = false;
+
+      if (candidates.length === 0) {
+        throw new Error("GOLD_MARKET_NOT_FOUND");
+      }
+
+      const pinned = previous.pinnedMarketEpic;
+      if (pinned && candidates.some((c) => c.epic === pinned)) {
+        marketEpic = pinned;
+        const market = await adapter.getMarket(pinned);
+        marketName = market.instrumentName;
+        this.marketExtrasByUser.set(userId, {
+          marketStatus: market.marketStatus,
+          marketEpic: market.epic,
+          marketName: market.instrumentName,
+          instrumentType: market.instrumentType,
+          expiry: market.expiry,
+          bid: market.bid,
+          ask: market.offer,
+          spread: Number((market.offer - market.bid).toFixed(4)),
+          minDealSize: market.minDealSize,
+          sizeIncrement: market.dealSizeIncrement,
+          valuePerPoint: market.valueOfOnePip,
+          minNormalStopDistance: market.minNormalStopDistance,
+          minGuaranteedStopDistance: market.minGuaranteedStopDistance,
+          guaranteedStopAvailable: market.guaranteedStopAvailable,
+          marginRequirement: market.marginRequirement
+        });
+        selectionRequired = false;
+      } else if (candidates.length === 1 || primary.length === 1) {
+        const chosen = (primary[0] ?? candidates[0])!;
+        marketEpic = chosen.epic;
+        const market = await adapter.getMarket(chosen.epic);
+        marketName = market.instrumentName;
+        this.marketExtrasByUser.set(userId, {
+          marketStatus: market.marketStatus,
+          marketEpic: market.epic,
+          marketName: market.instrumentName,
+          instrumentType: market.instrumentType,
+          expiry: market.expiry,
+          bid: market.bid,
+          ask: market.offer,
+          spread: Number((market.offer - market.bid).toFixed(4)),
+          minDealSize: market.minDealSize,
+          sizeIncrement: market.dealSizeIncrement,
+          valuePerPoint: market.valueOfOnePip,
+          minNormalStopDistance: market.minNormalStopDistance,
+          minGuaranteedStopDistance: market.minGuaranteedStopDistance,
+          guaranteedStopAvailable: market.guaranteedStopAvailable,
+          marginRequirement: market.marginRequirement
+        });
+        selectionRequired = candidates.length > 1 && primary.length !== 1;
+      } else {
+        selectionRequired = true;
+        marketEpic = primary[0]?.epic ?? null;
+        marketName = primary[0]?.instrumentName ?? null;
+        await this.activity(
+          userId,
+          "Multiple Gold markets found — explicit EPIC selection required before any execution stage.",
+          "warn"
+        );
+      }
+
+      this.proposedEpicByUser.set(userId, marketEpic);
+      this.selectionRequiredByUser.set(userId, selectionRequired);
       this.adapters.set(userId, adapter);
+      this.connectionErrorByUser.set(userId, null);
 
       if (
         previous.pinnedAccountId &&
@@ -417,7 +593,8 @@ export class AutoTradeService {
       }
       if (
         previous.pinnedMarketEpic &&
-        previous.pinnedMarketEpic !== market.epic
+        marketEpic &&
+        previous.pinnedMarketEpic !== marketEpic
       ) {
         await this.lock(userId, "market_epic_change");
       }
@@ -432,28 +609,34 @@ export class AutoTradeService {
         balance: account.balance,
         available: account.available,
         marginUsed: account.marginUsed,
-        marketEpic: market.epic,
-        marketName: market.instrumentName,
+        marketEpic,
+        marketName,
         lastHeartbeatAt: await adapter.heartbeat(),
         credentialsRef,
         pinnedAccountId: previous.pinnedAccountId ?? account.accountId,
-        pinnedMarketEpic: previous.pinnedMarketEpic ?? market.epic,
+        pinnedMarketEpic: previous.pinnedMarketEpic ?? marketEpic,
         updatedAt: nowIso()
       });
       await this.audit(userId, "broker_connected", {
         environment,
-        accountIdMasked: maskAccountId(account.accountId)
+        accountIdMasked: maskAccountId(account.accountId),
+        selectionRequired,
+        proposedEpic: marketEpic
       });
       await this.activity(
         userId,
-        `Connected to IG ${environment} (${maskAccountId(account.accountId)}) — read-only diagnostics.`,
+        `Connected to IG DEMO — READ ONLY (${maskAccountId(account.accountId)}). Demo order submission disabled.`,
         "success"
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "IG session failed";
+      this.connectionErrorByUser.set(userId, message);
       if (message === "IG_DEMO_CREDENTIALS_NOT_CONFIGURED" || message === "IG_CREDENTIALS_NOT_CONFIGURED") {
         await this.activity(userId, "IG Demo secrets are not configured (fail closed).", "error");
         throw Object.assign(new Error(message), { code: "IG_CREDENTIALS_MISSING" });
+      }
+      if (message === "ACCOUNT_MISMATCH") {
+        throw error;
       }
       await this.lock(userId, "ig_session_failed");
       await this.activity(userId, message, "error");
@@ -462,60 +645,166 @@ export class AutoTradeService {
     return this.getStatus(userId);
   }
 
-  /** Read-only DEMO diagnostics refresh (no order submission). */
+  async disconnectBroker(userId: string): Promise<AutoTradeStatusPayload> {
+    const adapter = this.adapters.get(userId);
+    if (adapter) {
+      try {
+        await adapter.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.adapters.delete(userId);
+    }
+    const connection = await this.store.getConnection(userId);
+    await this.store.saveConnection({
+      ...connection,
+      connected: false,
+      lastHeartbeatAt: null,
+      updatedAt: nowIso()
+    });
+    this.connectionErrorByUser.set(userId, null);
+    await this.audit(userId, "broker_disconnected", {});
+    await this.activity(userId, "Disconnected from IG Demo (session cleared server-side).", "info");
+    return this.getStatus(userId);
+  }
+
+  /** Read-only DEMO diagnostics refresh (no order submission / dealing endpoints). */
   async refreshDemoDiagnostics(userId: string): Promise<AutoTradeStatusPayload> {
     await this.ensureRestartPolicy(userId);
     let adapter = this.adapters.get(userId);
     if (!adapter?.isConnected() || adapter.environment !== "DEMO") {
-      await this.connectBroker(userId, "DEMO");
+      try {
+        await this.connectBroker(userId, "DEMO");
+      } catch (error) {
+        // Still attempt diagnostics if adapter was partially created — connectBroker already locked
+        const message = error instanceof Error ? error.message : "CONNECT_FAILED";
+        if (message === "ACCOUNT_MISMATCH" || message === "IG_CREDENTIALS_NOT_CONFIGURED" || message === "IG_DEMO_CREDENTIALS_NOT_CONFIGURED") {
+          throw error;
+        }
+      }
       adapter = this.adapters.get(userId);
     }
-    if (!adapter) throw new Error("NOT_CONNECTED");
-    try {
-      await adapter.heartbeat();
-      const accounts = await adapter.listAccounts();
-      const account = accounts[0];
-      const market = await adapter.discoverSpotGold();
-      const connection = await this.store.getConnection(userId);
-
-      if (connection.pinnedAccountId && account && connection.pinnedAccountId !== account.accountId) {
-        await this.lock(userId, "account_change");
+    if (!adapter) {
+      // Fail closed without silent FakeIg when credentials missing
+      try {
+        adapter = this.adapterFactory("DEMO");
+        await adapter.connect("server:demo-diagnostics");
+        this.adapters.set(userId, adapter);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "NOT_CONNECTED";
+        this.connectionErrorByUser.set(userId, message);
+        throw Object.assign(new Error(message), {
+          code:
+            message.includes("CREDENTIALS") ? "IG_CREDENTIALS_MISSING" : "DIAGNOSTICS_FAILED"
+        });
       }
-      if (connection.pinnedMarketEpic && connection.pinnedMarketEpic !== market.epic) {
-        await this.lock(userId, "market_epic_change");
-      }
-
-      await this.store.saveConnection({
-        ...connection,
-        connected: true,
-        environment: "DEMO",
-        accountId: account?.accountId ?? connection.accountId,
-        accountName: account?.accountName ?? connection.accountName,
-        currency: account?.currency ?? connection.currency,
-        balance: account?.balance ?? null,
-        available: account?.available ?? null,
-        marginUsed: account?.marginUsed ?? null,
-        marketEpic: market.epic,
-        marketName: market.instrumentName,
-        lastHeartbeatAt: nowIso(),
-        updatedAt: nowIso()
-      });
-      await this.store.appendBrokerEvent({
-        id: randomUUID(),
-        userId,
-        at: nowIso(),
-        type: "demo_diagnostics_refresh",
-        detail: redactSecrets({
-          marketStatus: market.marketStatus,
-          spread: market.offer - market.bid,
-          minDealSize: market.minDealSize,
-          guaranteedStopAvailable: market.guaranteedStopAvailable
-        })
-      });
-    } catch (error) {
-      await this.lock(userId, "ig_session_failed");
-      throw error;
     }
+
+    const preferred =
+      this.proposedEpicByUser.get(userId) ??
+      (await this.store.getConnection(userId)).pinnedMarketEpic;
+    const report = await runIgDemoReadOnlyDiagnostics(adapter, { preferredEpic: preferred });
+    this.lastDiagnosticByUser.set(userId, report);
+    this.goldCandidatesByUser.set(userId, report.goldCandidates);
+    this.proposedEpicByUser.set(userId, report.proposedEpic);
+    this.selectionRequiredByUser.set(userId, report.selectionRequired);
+    this.accountMatchByUser.set(userId, report.accountMatch);
+
+    if (report.accountMatch === "mismatch") {
+      await this.lock(userId, "account_mismatch");
+      this.connectionErrorByUser.set(userId, "ACCOUNT_MISMATCH");
+      try {
+        await adapter.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.adapters.delete(userId);
+      throw Object.assign(new Error("ACCOUNT_MISMATCH"), { code: "ACCOUNT_MISMATCH" });
+    }
+
+    if (report.selectedMarket) {
+      const m = report.selectedMarket;
+      this.marketExtrasByUser.set(userId, {
+        marketStatus: m.marketStatus,
+        marketEpic: m.epic,
+        marketName: m.instrumentName,
+        instrumentType: m.instrumentType,
+        expiry: m.expiry,
+        bid: m.bid,
+        ask: m.offer,
+        spread: m.spread,
+        minDealSize: m.minDealSize,
+        sizeIncrement: m.dealSizeIncrement,
+        valuePerPoint: m.valueOfOnePip,
+        minNormalStopDistance: m.minNormalStopDistance,
+        minGuaranteedStopDistance: m.minGuaranteedStopDistance,
+        guaranteedStopAvailable: m.guaranteedStopAvailable,
+        marginRequirement: m.marginRequirement
+      });
+    }
+
+    const connection = await this.store.getConnection(userId);
+    let accountId = connection.accountId;
+    let accountName = report.accountName ?? connection.accountName;
+    try {
+      const accounts = await adapter.listAccounts();
+      const configuredId = loadPinnedAccountIdFromServerEnv("DEMO");
+      const selected =
+        (configuredId && accounts.find((a) => a.accountId === configuredId)) || accounts[0];
+      if (selected) {
+        accountId = selected.accountId;
+        accountName = selected.accountName;
+      }
+    } catch {
+      /* keep prior */
+    }
+    await this.store.saveConnection({
+      ...connection,
+      connected: report.connected,
+      environment: "DEMO",
+      accountId,
+      accountName,
+      currency: report.currency ?? connection.currency,
+      balance: report.balance,
+      available: report.available,
+      marginUsed: report.marginUsed,
+      marketEpic: report.proposedEpic ?? connection.marketEpic,
+      marketName: report.selectedMarket?.instrumentName ?? connection.marketName,
+      lastHeartbeatAt: report.heartbeatAt,
+      updatedAt: nowIso()
+    });
+    await this.store.appendBrokerEvent({
+      id: randomUUID(),
+      userId,
+      at: nowIso(),
+      type: "demo_diagnostics_refresh",
+      detail: redactSecrets({
+        ok: report.ok,
+        accountMatch: report.accountMatch,
+        proposedEpic: report.proposedEpic,
+        selectionRequired: report.selectionRequired,
+        sessionRenewal: report.sessionRenewal,
+        openPositionsCount: report.openPositionsCount,
+        dealingEndpointsCalled: report.dealingEndpointsCalled,
+        marketStatus: report.selectedMarket?.marketStatus ?? null,
+        spread: report.selectedMarket?.spread ?? null,
+        errors: report.errors
+      })
+    });
+
+    if (!report.ok && report.errors.length) {
+      this.connectionErrorByUser.set(userId, report.errors[0] ?? "DIAGNOSTICS_FAILED");
+    } else {
+      this.connectionErrorByUser.set(userId, null);
+    }
+
+    await this.activity(
+      userId,
+      report.ok
+        ? "IG Demo read-only diagnostics OK — no dealing endpoints called."
+        : `IG Demo diagnostics issues: ${report.errors.join(", ")}`,
+      report.ok ? "success" : "warn"
+    );
     return this.getStatus(userId);
   }
 

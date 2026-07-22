@@ -19,10 +19,13 @@ import type {
   IgOrderResult
 } from "./brokerAdapter";
 import {
+  DEMO_ORDER_SUBMISSION_ENABLED,
   LIVE_EXECUTION_FEATURE_FLAG,
   type BrokerEnvironment,
   type StopProtectionMode
 } from "./types";
+import type { IgGoldMarketCandidate } from "./igDemoTypes";
+import { rankGoldCandidates } from "./goldMarketRanking";
 
 const IG_DEMO_BASE = "https://demo-api.ig.com/gateway/deal";
 const IG_LIVE_BASE = "https://api.ig.com/gateway/deal";
@@ -71,6 +74,15 @@ export function loadIgCredentialsFromServerEnv(
     password,
     accountId: process.env[`${prefix}_ACCOUNT_ID`]
   };
+}
+
+/** Pinned account id may be present even when FakeIg is used in tests. */
+export function loadPinnedAccountIdFromServerEnv(
+  environment: BrokerEnvironment
+): string | null {
+  const prefix = environment === "LIVE" ? "IG_LIVE" : "IG_DEMO";
+  const id = (process.env[`${prefix}_ACCOUNT_ID`] ?? "").trim();
+  return id || null;
 }
 
 export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
@@ -158,6 +170,13 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
   }
 
   async disconnect(): Promise<void> {
+    if (this.connected && this.session && this.credentials && !this.dryRun) {
+      try {
+        await this.igJson("/session", "DELETE", "1");
+      } catch {
+        // Best-effort logout — never log tokens
+      }
+    }
     this.connected = false;
     this.session = null;
     this.credentials = null;
@@ -169,8 +188,34 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
 
   async heartbeat(): Promise<string> {
     this.requireConnected();
+    if (!this.dryRun) {
+      try {
+        await this.igJson("/session", "GET", "1");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (/IG_HTTP_401|IG_HTTP_403/.test(message)) {
+          throw new Error("IG_SESSION_EXPIRED");
+        }
+        throw error;
+      }
+    }
     this.lastHeartbeatAt = new Date().toISOString();
     return this.lastHeartbeatAt;
+  }
+
+  async renewSession(): Promise<string> {
+    this.requireConnected();
+    if (this.dryRun) {
+      this.lastHeartbeatAt = new Date().toISOString();
+      return this.lastHeartbeatAt;
+    }
+    const creds = this.credentials;
+    if (!creds) throw new Error("NOT_CONNECTED");
+    // Clear tokens then re-login (read-only session refresh)
+    this.session = null;
+    this.connected = false;
+    await this.connect("server:demo-renew");
+    return this.lastHeartbeatAt ?? new Date().toISOString();
   }
 
   async listAccounts(): Promise<IgAccount[]> {
@@ -221,9 +266,61 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
     return found;
   }
 
+  async searchGoldMarkets(): Promise<IgGoldMarketCandidate[]> {
+    this.requireConnected();
+    if (this.dryRun) {
+      return rankGoldCandidates([
+        {
+          epic: "CS.D.USCGC.TODAY.IP",
+          instrumentName: "Spot Gold",
+          instrumentType: "CURRENCIES",
+          expiry: "-",
+          marketStatus: "TRADEABLE",
+          currencyCode: "EUR",
+          bid: 0,
+          offer: 0
+        }
+      ]);
+    }
+    const data = await this.igJson<{ markets?: Array<Record<string, unknown>> }>(
+      `/markets?searchTerm=${encodeURIComponent("Spot Gold")}`,
+      "GET",
+      "1"
+    );
+    let markets = data.markets ?? [];
+    if (markets.length === 0) {
+      const alt = await this.igJson<{ markets?: Array<Record<string, unknown>> }>(
+        `/markets?searchTerm=${encodeURIComponent("XAUUSD")}`,
+        "GET",
+        "1"
+      );
+      markets = alt.markets ?? [];
+    }
+    return rankGoldCandidates(
+      markets.map((m) => ({
+        epic: String(m.epic ?? ""),
+        instrumentName: String(m.instrumentName ?? m.instrumentName ?? m.epic ?? ""),
+        instrumentType: m.instrumentType != null ? String(m.instrumentType) : null,
+        expiry: m.expiry != null ? String(m.expiry) : null,
+        marketStatus: m.marketStatus != null ? String(m.marketStatus) : null,
+        currencyCode: null,
+        bid: m.bid != null ? Number(m.bid) : null,
+        offer: m.offer != null ? Number(m.offer) : null
+      }))
+    );
+  }
+
   async discoverSpotGold(): Promise<IgMarketDetails> {
-    // Common IG Spot Gold epic; live discovery can refine via markets?searchTerm=Gold
-    return this.getMarket("CS.D.USCGC.TODAY.IP");
+    const candidates = await this.searchGoldMarkets();
+    const primary = candidates.filter((c) => c.proposedPrimary);
+    if (candidates.length === 0) {
+      throw new Error("GOLD_MARKET_NOT_FOUND");
+    }
+    if (candidates.length > 1 && primary.length !== 1) {
+      throw Object.assign(new Error("MULTIPLE_GOLD_CANDIDATES"), { candidates });
+    }
+    const epic = (primary[0] ?? candidates[0])!.epic;
+    return this.getMarket(epic);
   }
 
   async getMarket(epic: string): Promise<IgMarketDetails> {
@@ -232,6 +329,8 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
       return {
         epic,
         instrumentName: "Spot Gold",
+        instrumentType: "CURRENCIES",
+        expiry: "-",
         marketStatus: "UNKNOWN",
         bid: 0,
         offer: 0,
@@ -245,24 +344,36 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
         valueOfOnePip: 1,
         currencyCode: "EUR",
         guaranteedStopAvailable: true,
+        minNormalStopDistance: null,
+        minGuaranteedStopDistance: null,
+        marginRequirement: null,
         scalingFactor: 1
       };
     }
-    const data = await this.igJson<Record<string, unknown>>(`/markets/${encodeURIComponent(epic)}`, "GET", "3");
+    const data = await this.igJson<Record<string, unknown>>(
+      `/markets/${encodeURIComponent(epic)}`,
+      "GET",
+      "3"
+    );
     const snapshot = (data.snapshot ?? {}) as Record<string, unknown>;
     const dealing = (data.dealingRules ?? {}) as Record<string, unknown>;
     const instrument = (data.instrument ?? {}) as Record<string, unknown>;
-    const minDeal = Number(
-      (dealing.minDealSize as { value?: number })?.value ?? 0.1
-    );
+    const minDeal = Number((dealing.minDealSize as { value?: number })?.value ?? 0.1);
     const increment = Number(
       (dealing.dealSizeIncrement as { value?: number })?.value ??
         (dealing.minDealSize as { value?: number })?.value ??
         0.1
     );
+    const minStop = (dealing.minNormalStopOrLimitDistance as { value?: number })?.value;
+    const minGStop = (dealing.minControlledRiskStopDistance as { value?: number })?.value;
+    const margin =
+      (instrument.marginDepositBands as Array<{ margin?: number }> | undefined)?.[0]?.margin ??
+      null;
     return {
       epic,
       instrumentName: String(instrument.name ?? "Spot Gold"),
+      instrumentType: instrument.type != null ? String(instrument.type) : null,
+      expiry: instrument.expiry != null ? String(instrument.expiry) : null,
       marketStatus: mapMarketStatus(String(snapshot.marketStatus ?? "UNKNOWN")),
       bid: Number(snapshot.bid ?? 0),
       offer: Number(snapshot.offer ?? 0),
@@ -282,7 +393,10 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
           (instrument.currencies[0] as { code?: string }).code) ||
           "EUR"
       ),
-      guaranteedStopAvailable: Boolean(instrument.guaranteedStopsAllowed ?? true),
+      guaranteedStopAvailable: Boolean(instrument.guaranteedStopsAllowed ?? false),
+      minNormalStopDistance: minStop != null ? Number(minStop) : null,
+      minGuaranteedStopDistance: minGStop != null ? Number(minGStop) : null,
+      marginRequirement: margin != null ? Number(margin) : null,
       scalingFactor: Number(instrument.scalingFactor ?? 1)
     };
   }
@@ -318,6 +432,7 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
 
   async placeMarketOrder(request: IgOrderRequest): Promise<IgOrderResult> {
     this.requireConnected();
+    this.assertDealingAllowed();
     this.assertLiveExecutionAllowed();
 
     if (this.dryRun) {
@@ -426,6 +541,7 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
 
   async closePosition(dealId: string): Promise<IgOrderResult> {
     this.requireConnected();
+    this.assertDealingAllowed();
     this.assertLiveExecutionAllowed();
     if (this.dryRun) {
       return {
@@ -458,6 +574,7 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
     patch: { stopLevel?: number; limitLevel?: number }
   ): Promise<IgOrderResult> {
     this.requireConnected();
+    this.assertDealingAllowed();
     this.assertLiveExecutionAllowed();
     if (this.dryRun) {
       return {
@@ -484,6 +601,12 @@ export class IgBrokerAdapter implements AutoTradeBrokerAdapter {
     if (mode === "NORMAL_ALLOWED") return true;
     // Guaranteed stops assumed available until market rules say otherwise
     return true;
+  }
+
+  private assertDealingAllowed(): void {
+    if (!DEMO_ORDER_SUBMISSION_ENABLED) {
+      throw new Error("DEMO_ORDER_SUBMISSION_DISABLED");
+    }
   }
 
   private assertLiveExecutionAllowed(): void {

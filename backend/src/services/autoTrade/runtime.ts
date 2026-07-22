@@ -55,7 +55,11 @@ export function createAutoTradeStore(): AutoTradeStorePort {
     logger.warn("Firestore unavailable for AutoTrade; using in-memory store (non-production only)");
     return new InMemoryAutoTradeStore();
   }
-  return new FirestoreAutoTradeStore(db);
+  const root = (process.env.AUTOTRADE_FIRESTORE_ROOT ?? "").trim();
+  return new FirestoreAutoTradeStore(
+    db,
+    root ? { rootCollection: root } : {}
+  );
 }
 
 export function createBrokerAdapterFactory(

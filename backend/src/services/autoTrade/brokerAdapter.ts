@@ -19,6 +19,8 @@ export interface IgAccount {
 export interface IgMarketDetails {
   epic: string;
   instrumentName: string;
+  instrumentType: string | null;
+  expiry: string | null;
   marketStatus: "OPEN" | "CLOSED" | "TRADEABLE" | "UNKNOWN";
   bid: number;
   offer: number;
@@ -32,6 +34,9 @@ export interface IgMarketDetails {
   valueOfOnePip: number;
   currencyCode: string;
   guaranteedStopAvailable: boolean;
+  minNormalStopDistance: number | null;
+  minGuaranteedStopDistance: number | null;
+  marginRequirement: number | null;
   scalingFactor: number;
 }
 
@@ -96,9 +101,13 @@ export interface AutoTradeBrokerAdapter {
 
   listAccounts(): Promise<IgAccount[]>;
   selectAccount(accountId: string): Promise<IgAccount>;
+  /** Search IG for Spot Gold / XAUUSD candidates — never silently picks when multiple. */
+  searchGoldMarkets(): Promise<import("./igDemoTypes").IgGoldMarketCandidate[]>;
   discoverSpotGold(): Promise<IgMarketDetails>;
   getMarket(epic: string): Promise<IgMarketDetails>;
   getOpenPositions(): Promise<IgOpenPosition[]>;
+  /** Re-authenticate / refresh session tokens without logging secrets. */
+  renewSession(): Promise<string>;
 
   placeMarketOrder(request: IgOrderRequest): Promise<IgOrderResult>;
   confirmDeal(dealReference: string): Promise<IgDealConfirmation>;

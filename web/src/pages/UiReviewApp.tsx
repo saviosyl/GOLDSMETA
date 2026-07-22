@@ -323,29 +323,63 @@ function buildReviewApi() {
           ...autoTrade.connection,
           connected: true,
           environment,
+          environmentLabel: "IG DEMO — READ ONLY",
+          connectionState: "Connected",
           accountIdMasked: environment === "LIVE" ? "****9988" : "****1234",
           accountName: environment === "LIVE" ? "Live CFD" : "Demo CFD",
           balance: 10000,
           available: 9500,
           marginUsed: 120,
           marketName: "Spot Gold",
+          marketEpic: "CS.D.USCGC.TODAY.IP",
+          marketStatus: "TRADEABLE",
           bid: 2385.2,
           ask: 2385.5,
           spread: 0.3,
           minDealSize: 0.1,
           sizeIncrement: 0.1,
           valuePerPoint: 1,
+          minNormalStopDistance: 0.3,
+          minGuaranteedStopDistance: 0.5,
+          guaranteedStopAvailable: true,
           lastHeartbeatAt: new Date().toISOString()
         },
+        proposedEpic: "CS.D.USCGC.TODAY.IP",
+        goldCandidates: [
+          {
+            epic: "CS.D.USCGC.TODAY.IP",
+            instrumentName: "Spot Gold",
+            instrumentType: "CURRENCIES",
+            expiry: "-",
+            marketStatus: "TRADEABLE",
+            currencyCode: "EUR",
+            bid: 2385.2,
+            offer: 2385.5,
+            proposedPrimary: true,
+            reason: "Review mock Spot Gold"
+          }
+        ],
         activity: [
           {
             id: `c-${Date.now()}`,
             at: new Date().toISOString(),
-            message: `Connected to IG ${environment} (scaffold / review).`,
+            message: `Connected to IG DEMO — READ ONLY (scaffold / review).`,
             level: "success"
           },
           ...autoTrade.activity
         ]
+      };
+      return { ...autoTrade };
+    },
+    autoTradeDisconnect: async () => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: false,
+          connectionState: "Disconnected",
+          lastHeartbeatAt: null
+        }
       };
       return { ...autoTrade };
     },
@@ -397,18 +431,25 @@ function buildReviewApi() {
           ...autoTrade.connection,
           connected: true,
           environment: "DEMO",
+          environmentLabel: "IG DEMO — READ ONLY",
+          connectionState: "Connected",
           accountIdMasked: "****1234",
           accountName: "Demo CFD",
           balance: 10000,
           available: 9500,
           marginUsed: 120,
           marketName: "Spot Gold",
+          marketEpic: "CS.D.USCGC.TODAY.IP",
+          marketStatus: "TRADEABLE",
           bid: 2385.2,
           ask: 2385.5,
           spread: 0.3,
           minDealSize: 0.1,
           sizeIncrement: 0.1,
           valuePerPoint: 1,
+          minNormalStopDistance: 0.3,
+          minGuaranteedStopDistance: 0.5,
+          guaranteedStopAvailable: true,
           lastHeartbeatAt: new Date().toISOString()
         }
       };

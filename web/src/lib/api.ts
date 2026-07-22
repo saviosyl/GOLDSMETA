@@ -576,4 +576,11 @@ export class ApiClient {
     });
     return body.status;
   }
+
+  async autoTradeDisconnect(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/disconnect", {
+      method: "POST"
+    });
+    return body.status;
+  }
 }

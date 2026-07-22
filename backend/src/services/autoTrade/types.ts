@@ -87,6 +87,8 @@ export interface AutoTradeRiskState {
 export interface AutoTradeConnectionStatus {
   connected: boolean;
   environment: BrokerEnvironment | null;
+  /** Always shown in V6 preview: IG DEMO — READ ONLY */
+  environmentLabel: string;
   accountIdMasked: string | null;
   accountName: string | null;
   currency: string | null;
@@ -96,13 +98,21 @@ export interface AutoTradeConnectionStatus {
   marketStatus: "OPEN" | "CLOSED" | "TRADEABLE" | "UNKNOWN" | null;
   marketEpic: string | null;
   marketName: string | null;
+  instrumentType: string | null;
+  expiry: string | null;
   bid: number | null;
   ask: number | null;
   spread: number | null;
   minDealSize: number | null;
   sizeIncrement: number | null;
   valuePerPoint: number | null;
+  minNormalStopDistance: number | null;
+  minGuaranteedStopDistance: number | null;
+  guaranteedStopAvailable: boolean | null;
+  marginRequirement: number | null;
   lastHeartbeatAt: string | null;
+  accountMatch: "matched" | "mismatch" | "unconfigured" | "unknown" | null;
+  connectionState: "Connected" | "Disconnected" | "Error";
 }
 
 export interface AutoTradeSettings {
@@ -213,12 +223,22 @@ export interface AutoTradeStatusPayload {
   lockReason: string | null;
   emergencyStopActive: boolean;
   liveExecutionFeatureEnabled: boolean;
+  /** Hard false for this verification stage. */
+  demoOrderSubmissionEnabled: boolean;
+  readOnly: true;
+  ordersEnabled: false;
   connection: AutoTradeConnectionStatus;
   limits: AutoTradeRiskLimits;
   budget: AutoTradeBudgetView;
   positions: AutoTradePositionView[];
   activity: AutoTradeActivityEntry[];
   strategyVersion: string;
+  /** Spot Gold discovery candidates — never silently auto-selected when ambiguous. */
+  goldCandidates: import("./igDemoTypes").IgGoldMarketCandidate[];
+  proposedEpic: string | null;
+  selectionRequired: boolean;
+  /** Last sanitised read-only diagnostic report (no tokens/credentials). */
+  lastDiagnosticReport: import("./igDemoTypes").IgDemoDiagnosticReport | null;
 }
 
 /** First live pilot defaults (EUR). Mode always starts OFF. */

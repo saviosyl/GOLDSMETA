@@ -3,6 +3,60 @@
 export type AutoTradeMode = "OFF" | "SHADOW" | "IG_DEMO_AUTO" | "IG_LIVE_AUTO";
 export type AutoTradeDisplayStatus = "OFF" | "SHADOW" | "DEMO" | "LIVE" | "LOCKED";
 
+export interface IgGoldMarketCandidate {
+  epic: string;
+  instrumentName: string;
+  instrumentType: string | null;
+  expiry: string | null;
+  marketStatus: string;
+  currencyCode: string | null;
+  bid: number | null;
+  offer: number | null;
+  proposedPrimary: boolean;
+  reason: string;
+}
+
+export interface IgDemoDiagnosticReport {
+  ok: boolean;
+  environment: "DEMO";
+  readOnly: true;
+  ordersEnabled: false;
+  liveExecutionEnabled: boolean;
+  connected: boolean;
+  accountIdMasked: string | null;
+  accountName: string | null;
+  currency: string | null;
+  balance: number | null;
+  available: number | null;
+  marginUsed: number | null;
+  accountMatch: string;
+  configuredAccountIdMasked: string | null;
+  goldCandidates: IgGoldMarketCandidate[];
+  proposedEpic: string | null;
+  selectionRequired: boolean;
+  selectedMarket: {
+    epic: string;
+    instrumentName: string;
+    marketStatus: string;
+    bid: number;
+    offer: number;
+    spread: number;
+    minDealSize: number;
+    dealSizeIncrement: number;
+    valueOfOnePip: number;
+    minNormalStopDistance: number | null;
+    minGuaranteedStopDistance: number | null;
+    guaranteedStopAvailable: boolean;
+    marginRequirement: number | null;
+  } | null;
+  openPositionsCount: number;
+  sessionRenewal: string;
+  heartbeatAt: string | null;
+  dealingEndpointsCalled: false;
+  errors: string[];
+  notes: string[];
+}
+
 export interface AutoTradeStatus {
   displayStatus: AutoTradeDisplayStatus;
   mode: AutoTradeMode;
@@ -10,9 +64,13 @@ export interface AutoTradeStatus {
   lockReason: string | null;
   emergencyStopActive: boolean;
   liveExecutionFeatureEnabled: boolean;
+  demoOrderSubmissionEnabled?: boolean;
+  readOnly?: true;
+  ordersEnabled?: false;
   connection: {
     connected: boolean;
     environment: "DEMO" | "LIVE" | null;
+    environmentLabel?: string;
     accountIdMasked: string | null;
     accountName: string | null;
     currency: string | null;
@@ -22,13 +80,21 @@ export interface AutoTradeStatus {
     marketStatus: string | null;
     marketEpic: string | null;
     marketName: string | null;
+    instrumentType?: string | null;
+    expiry?: string | null;
     bid: number | null;
     ask: number | null;
     spread: number | null;
     minDealSize: number | null;
     sizeIncrement: number | null;
     valuePerPoint: number | null;
+    minNormalStopDistance?: number | null;
+    minGuaranteedStopDistance?: number | null;
+    guaranteedStopAvailable?: boolean | null;
+    marginRequirement?: number | null;
     lastHeartbeatAt: string | null;
+    accountMatch?: string | null;
+    connectionState?: "Connected" | "Disconnected" | "Error";
   };
   limits: {
     maxLossPerTrade: number;
@@ -87,6 +153,10 @@ export interface AutoTradeStatus {
     level: "info" | "warn" | "error" | "success";
   }>;
   strategyVersion: string;
+  goldCandidates?: IgGoldMarketCandidate[];
+  proposedEpic?: string | null;
+  selectionRequired?: boolean;
+  lastDiagnosticReport?: IgDemoDiagnosticReport | null;
 }
 
 export const FIRST_PILOT_LIMITS_CLIENT = {
@@ -116,9 +186,13 @@ export function buildReviewAutoTradeStatus(
     lockReason: null,
     emergencyStopActive: false,
     liveExecutionFeatureEnabled: false,
+    demoOrderSubmissionEnabled: false,
+    readOnly: true,
+    ordersEnabled: false,
     connection: {
       connected: false,
-      environment: null,
+      environment: "DEMO",
+      environmentLabel: "IG DEMO — READ ONLY",
       accountIdMasked: null,
       accountName: null,
       currency: "EUR",
@@ -128,13 +202,21 @@ export function buildReviewAutoTradeStatus(
       marketStatus: null,
       marketEpic: null,
       marketName: "Spot Gold",
+      instrumentType: null,
+      expiry: null,
       bid: null,
       ask: null,
       spread: null,
       minDealSize: 0.1,
       sizeIncrement: 0.1,
       valuePerPoint: 1,
-      lastHeartbeatAt: null
+      minNormalStopDistance: null,
+      minGuaranteedStopDistance: null,
+      guaranteedStopAvailable: null,
+      marginRequirement: null,
+      lastHeartbeatAt: null,
+      accountMatch: null,
+      connectionState: "Disconnected"
     },
     limits: { ...FIRST_PILOT_LIMITS_CLIENT },
     budget: {
@@ -156,11 +238,15 @@ export function buildReviewAutoTradeStatus(
       {
         id: "review-1",
         at: new Date().toISOString(),
-        message: "AutoTrade Control Centre ready. Mode OFF.",
+        message: "AutoTrade Control Centre ready. Mode OFF. IG DEMO — READ ONLY.",
         level: "info"
       }
     ],
     strategyVersion: "v6.0.0-pilot",
+    goldCandidates: [],
+    proposedEpic: null,
+    selectionRequired: false,
+    lastDiagnosticReport: null,
     ...overrides
   };
 }

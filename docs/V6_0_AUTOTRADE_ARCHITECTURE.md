@@ -6,6 +6,9 @@
 **Draft PR:** https://github.com/saviosyl/GOLDSMETA/pull/21  
 **Preview:** https://preview-v6-autotrade.goldmeta-web.pages.dev  
 **UI review AutoTrade:** https://preview-v6-autotrade.goldmeta-web.pages.dev/ui-review/autotrade  
+**Isolated preview API:** `apiV6Preview` → `https://us-central1-goldmeta-web.cloudfunctions.net/apiV6Preview`  
+**PR:** https://github.com/saviosyl/GOLDSMETA/pull/21 (do not merge)  
+**Stage:** IG DEMO — READ ONLY (no order submission)
 **Release posture:** preview only — do not merge, do not promote, do not enable real IG trading.
 
 ## Safety confirmations

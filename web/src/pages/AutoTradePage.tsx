@@ -79,23 +79,30 @@ export function AutoTradePage() {
           <p className="gm-autotrade-kicker">GoldMeta · Control Centre</p>
           <h1 className="gm-page-title gm-autotrade-title">AutoTrade</h1>
           <p className="gm-meta gm-autotrade-lead">
-            Server-side IG automation with hard risk budgets. Default mode is OFF. LIVE
-            execution stays feature-flagged until Savio enables it.
+            IG Demo read-only verification. Authentication, account, Spot Gold discovery, and
+            market rules only — no order submission in this stage.
           </p>
         </div>
         <div className="gm-autotrade-status-block" data-testid="autotrade-status">
+          <span className="gm-label">ENVIRONMENT</span>
+          <span className={`gm-at-pill gm-at-pill--demo`} data-testid="autotrade-env-pill">
+            {connection?.environmentLabel ?? "IG DEMO — READ ONLY"}
+          </span>
           <span className="gm-label">AUTOTRADE</span>
           <span className={`gm-at-pill ${statusTone(display)}`} data-testid="autotrade-mode-pill">
             {display}
           </span>
           {status?.locked && status.lockReason ? (
             <p className="gm-autotrade-lock-reason" data-testid="autotrade-lock-reason">
-              Locked: {status.lockReason}
+              Locked: {status.lockReason === "account_mismatch" ? "Account mismatch" : status.lockReason}
             </p>
           ) : null}
         </div>
       </header>
 
+      <div className="gm-autotrade-readonly-banner" data-testid="autotrade-readonly-banner">
+        Demo order submission is disabled for this verification stage.
+      </div>
       <div className="gm-autotrade-stop-bar" data-testid="autotrade-emergency-stop-bar">
         <div>
           <strong>Emergency STOP</strong>
@@ -121,23 +128,38 @@ export function AutoTradePage() {
       <section className="gm-section gm-autotrade-panel" data-testid="autotrade-connection">
         <div className="gm-section-head">
           <h2 className="gm-section-title">Broker connection</h2>
-          <p className="gm-meta">Credentials stay on Firebase server secrets only.</p>
+          <p className="gm-meta">Credentials stay on Firebase Secret Manager only — never in the browser.</p>
         </div>
         <div className="gm-autotrade-metrics">
           <div>
             <span className="gm-label">Connection</span>
-            <strong>{connection?.connected ? "Connected" : "Disconnected"}</strong>
+            <strong data-testid="autotrade-connection-state">
+              {connection?.connectionState ??
+                (connection?.connected ? "Connected" : "Disconnected")}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Environment</span>
+            <strong data-testid="autotrade-environment">
+              {connection?.environmentLabel ?? "IG DEMO — READ ONLY"}
+            </strong>
           </div>
           <div>
             <span className="gm-label">Account</span>
-            <strong>{connection?.accountIdMasked ?? "—"}</strong>
+            <strong data-testid="autotrade-account-masked">
+              {connection?.accountIdMasked ?? "—"}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Currency</span>
+            <strong>{connection?.currency ?? "—"}</strong>
           </div>
           <div>
             <span className="gm-label">Balance</span>
             <strong>{money(connection?.balance, connection?.currency ?? "EUR")}</strong>
           </div>
           <div>
-            <span className="gm-label">Available</span>
+            <span className="gm-label">Available funds</span>
             <strong>{money(connection?.available, connection?.currency ?? "EUR")}</strong>
           </div>
           <div>
@@ -145,8 +167,8 @@ export function AutoTradePage() {
             <strong>{money(connection?.marginUsed, connection?.currency ?? "EUR")}</strong>
           </div>
           <div>
-            <span className="gm-label">Heartbeat</span>
-            <strong>
+            <span className="gm-label">Last heartbeat</span>
+            <strong data-testid="autotrade-heartbeat">
               {connection?.lastHeartbeatAt
                 ? new Date(connection.lastHeartbeatAt).toLocaleString()
                 : "—"}
@@ -157,7 +179,8 @@ export function AutoTradePage() {
           <button
             type="button"
             className="gm-btn gm-btn-primary"
-            disabled={busy}
+            disabled={busy || status?.locked}
+            data-testid="autotrade-connect-demo"
             onClick={() => void run(() => api.autoTradeConnect("DEMO"))}
           >
             Connect IG Demo
@@ -165,10 +188,20 @@ export function AutoTradePage() {
           <button
             type="button"
             className="gm-btn"
-            disabled={busy}
+            disabled={busy || status?.locked}
+            data-testid="autotrade-refresh-diagnostics"
             onClick={() => void run(() => api.autoTradeDemoDiagnostics())}
           >
-            Refresh Demo diagnostics
+            Run read-only diagnostics
+          </button>
+          <button
+            type="button"
+            className="gm-btn"
+            disabled={busy || !connection?.connected}
+            data-testid="autotrade-disconnect"
+            onClick={() => void run(() => api.autoTradeDisconnect())}
+          >
+            Disconnect
           </button>
           <button
             type="button"
@@ -181,6 +214,86 @@ export function AutoTradePage() {
         </div>
       </section>
 
+      <section className="gm-section gm-autotrade-panel" data-testid="autotrade-spot-gold">
+        <div className="gm-section-head">
+          <h2 className="gm-section-title">Spot Gold</h2>
+          <p className="gm-meta">
+            Discovered from IG Demo search — not permanently hard-coded.
+            {status?.selectionRequired
+              ? " Multiple candidates found; explicit selection required before execution."
+              : null}
+          </p>
+        </div>
+        <div className="gm-autotrade-metrics">
+          <div>
+            <span className="gm-label">Instrument</span>
+            <strong>{connection?.marketName ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">EPIC</span>
+            <strong data-testid="autotrade-epic">{connection?.marketEpic ?? status?.proposedEpic ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Market status</span>
+            <strong>{connection?.marketStatus ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Bid</span>
+            <strong>{connection?.bid ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Offer</span>
+            <strong>{connection?.ask ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Spread</span>
+            <strong>{connection?.spread ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Minimum size</span>
+            <strong>{connection?.minDealSize ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Size increment</span>
+            <strong>{connection?.sizeIncrement ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Value per point</span>
+            <strong>{connection?.valuePerPoint ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Min normal stop</span>
+            <strong>{connection?.minNormalStopDistance ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Min guaranteed stop</span>
+            <strong>{connection?.minGuaranteedStopDistance ?? "—"}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Guaranteed stop</span>
+            <strong>
+              {connection?.guaranteedStopAvailable == null
+                ? "—"
+                : connection.guaranteedStopAvailable
+                  ? "Available"
+                  : "Not available"}
+            </strong>
+          </div>
+        </div>
+        {(status?.goldCandidates?.length ?? 0) > 0 ? (
+          <div className="gm-autotrade-candidates" data-testid="autotrade-gold-candidates">
+            <h3 className="gm-section-title">Gold market candidates</h3>
+            <ul className="gm-autotrade-limits-list">
+              {status!.goldCandidates!.map((c) => (
+                <li key={c.epic}>
+                  <strong>{c.instrumentName}</strong> · {c.epic}
+                  {c.proposedPrimary ? " · proposed" : ""} — {c.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
       <section className="gm-section gm-autotrade-panel" data-testid="autotrade-mode">
         <div className="gm-section-head">
           <h2 className="gm-section-title">Operating mode</h2>
@@ -191,7 +304,7 @@ export function AutoTradePage() {
             [
               ["OFF", "OFF"],
               ["SHADOW", "SHADOW"],
-              ["IG_DEMO_AUTO", "IG DEMO AUTO"],
+              ["IG_DEMO_AUTO", "IG DEMO AUTO (orders off)"],
               ["IG_LIVE_AUTO", "IG LIVE AUTO"]
             ] as Array<[AutoTradeMode, string]>
           ).map(([mode, label]) => (
@@ -199,18 +312,29 @@ export function AutoTradePage() {
               key={mode}
               type="button"
               className={`gm-btn gm-at-mode${status?.mode === mode ? " is-active" : ""}`}
-              disabled={busy || (status?.locked && mode !== "OFF")}
+              disabled={
+                busy ||
+                (status?.locked && mode !== "OFF") ||
+                mode === "IG_LIVE_AUTO" ||
+                mode === "IG_DEMO_AUTO"
+              }
+              title={
+                mode === "IG_DEMO_AUTO"
+                  ? "Demo order submission is disabled for this verification stage"
+                  : mode === "IG_LIVE_AUTO"
+                    ? "LIVE execution is feature-flagged off"
+                    : undefined
+              }
               data-testid={`autotrade-mode-${mode}`}
               onClick={() => {
-                if (mode === "IG_LIVE_AUTO") return;
+                if (mode === "IG_LIVE_AUTO" || mode === "IG_DEMO_AUTO") return;
                 void run(() => api.autoTradeSetMode(mode));
               }}
             >
               {label}
             </button>
           ))}
-        </div>
-        {status?.locked ? (
+        </div>        {status?.locked ? (
           <button
             type="button"
             className="gm-btn gm-btn-gold"
@@ -284,10 +408,11 @@ export function AutoTradePage() {
 
       <section className="gm-section gm-autotrade-panel" data-testid="autotrade-positions">
         <div className="gm-section-head">
-          <h2 className="gm-section-title">Open positions</h2>
+          <h2 className="gm-section-title">Open Demo positions</h2>
+          <p className="gm-meta">Read-only list. Close / amend controls are disabled.</p>
         </div>
         {(status?.positions?.length ?? 0) === 0 ? (
-          <p className="gm-empty">No open AutoTrade positions.</p>
+          <p className="gm-empty">No open Demo positions.</p>
         ) : (
           <ul className="gm-autotrade-positions">
             {status!.positions.map((p) => (
@@ -299,12 +424,14 @@ export function AutoTradePage() {
                   Entry {p.entry} · Stop {p.stop ?? "—"} · TP {p.takeProfit ?? "—"} ·{" "}
                   {p.protectionStatus}
                 </span>
+                <button type="button" className="gm-btn" disabled title="Orders disabled">
+                  Close (disabled)
+                </button>
               </li>
             ))}
           </ul>
         )}
       </section>
-
       <section className="gm-section gm-autotrade-panel" data-testid="autotrade-activity">
         <div className="gm-section-head">
           <h2 className="gm-section-title">Activity log</h2>

@@ -44,10 +44,24 @@ const stripUndefined = (value: unknown): unknown => {
 };
 
 export class FirestoreAutoTradeStore implements AutoTradeStorePort {
-  constructor(private readonly db: Firestore) {}
+  /**
+   * @param rootCollection When set (e.g. "autoTradePreview"), all docs live under
+   *   users/{userId}/{rootCollection}/workspace/... isolating preview data.
+   */
+  constructor(
+    private readonly db: Firestore,
+    private readonly options: { rootCollection?: string } = {}
+  ) {}
 
   private userCol(userId: string, name: string) {
-    return this.db.collection("users").doc(userId).collection(name);
+    const user = this.db.collection("users").doc(userId);
+    if (this.options.rootCollection) {
+      return user
+        .collection(this.options.rootCollection)
+        .doc("workspace")
+        .collection(name);
+    }
+    return user.collection(name);
   }
 
   private riskRef(userId: string) {
