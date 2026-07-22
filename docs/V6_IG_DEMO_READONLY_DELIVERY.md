@@ -4,7 +4,7 @@
 **PR:** #21 (do not merge / do not promote)  
 **Approved base:** `4621156`  
 **Previous approved tip:** `dd87b0b`  
-**Current tip:** `f6c640e`  
+**Current tip:** `9f52f0c`  
 **V6 frontend preview:** https://preview-v6-autotrade.goldmeta-web.pages.dev  
 **UI review:** https://preview-v6-autotrade.goldmeta-web.pages.dev/ui-review/autotrade  
 
