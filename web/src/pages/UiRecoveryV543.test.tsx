@@ -73,7 +73,6 @@ describe("V5.4.3 UI recovery — approved Dashboard structure", () => {
     await screen.findByTestId("market-level-ladder");
     await screen.findByTestId("goldmeta-score");
     await screen.findByTestId("current-plan");
-    await screen.findByTestId("overnight-review");
     expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
 
     const order = documentOrder([
@@ -82,8 +81,7 @@ describe("V5.4.3 UI recovery — approved Dashboard structure", () => {
       "market-story",
       "market-level-ladder",
       "goldmeta-score",
-      "current-plan",
-      "overnight-review"
+      "current-plan"
     ]);
     expect(order).toEqual([
       "primary-signal-card",
@@ -91,9 +89,11 @@ describe("V5.4.3 UI recovery — approved Dashboard structure", () => {
       "market-story",
       "market-level-ladder",
       "goldmeta-score",
-      "current-plan",
-      "overnight-review"
+      "current-plan"
     ]);
+
+    // Overnight Review remains optional (hidden when not relevant) — same as 384eb56
+    expect(screen.queryByTestId("overnight-review")).not.toBeInTheDocument();
 
     const root = screen.getByTestId("overview-page");
     expect(root.className).toContain("gm-dashboard");
