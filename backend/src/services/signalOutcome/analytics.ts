@@ -1,13 +1,16 @@
 /**
  * Hypothetical signal performance analytics.
  * WAIT and AMBIGUOUS outcomes are excluded from win-rate / trade counts.
+ * Confidence uses GoldMeta 0–100 scale bands.
  */
 
 import {
   TRADE_COUNTABLE_OUTCOMES,
   type SignalFinalOutcome,
-  type SignalOutcomeRecord
+  type SignalOutcomeRecord,
+  type SignalPerformanceDailyAggregate
 } from "./types";
+import { confidenceOnHundredScale } from "./engine";
 
 export interface SignalPerformanceSummary {
   label: "HYPOTHETICAL SIGNAL PERFORMANCE";
@@ -44,13 +47,17 @@ export interface SignalPerformanceSummary {
   byDirection: { BUY: number; SELL: number };
   bySession: Record<string, number>;
   byDataQuality: Record<string, number>;
+  historyComplete: boolean;
+  aggregateDays: number;
 }
 
-const confBand = (confidence: number): string => {
-  if (confidence >= 0.9) return "90-100";
-  if (confidence >= 0.8) return "80-89";
-  if (confidence >= 0.7) return "70-79";
-  if (confidence >= 0.6) return "60-69";
+/** Confidence bands on the GoldMeta 0–100 scale. */
+export const confidenceBand = (confidence: number): string => {
+  const c = confidenceOnHundredScale(confidence);
+  if (c >= 90) return "90-100";
+  if (c >= 80) return "80-89";
+  if (c >= 70) return "70-79";
+  if (c >= 60) return "60-69";
   return "below-60";
 };
 
@@ -65,7 +72,8 @@ const isTrade = (o: SignalFinalOutcome): boolean =>
   o != null && (TRADE_COUNTABLE_OUTCOMES as string[]).includes(o);
 
 export function computeSignalPerformance(
-  records: SignalOutcomeRecord[]
+  records: SignalOutcomeRecord[],
+  opts: { aggregates?: SignalPerformanceDailyAggregate[]; historyComplete?: boolean } = {}
 ): SignalPerformanceSummary {
   const confirmed = records.filter((r) => r.snapshot.direction !== "WAIT");
   const waitOnly = records.filter((r) => r.snapshot.direction === "WAIT").length;
@@ -139,7 +147,7 @@ export function computeSignalPerformance(
     bySession[sess] = (bySession[sess] ?? 0) + 1;
     byDataQuality[r.snapshot.dataQuality] = (byDataQuality[r.snapshot.dataQuality] ?? 0) + 1;
 
-    const cb = confBand(r.snapshot.confidence);
+    const cb = confidenceBand(r.snapshot.confidence);
     byConfidenceRange[cb] ??= { count: 0, wins: 0, losses: 0 };
     byConfidenceRange[cb].count += 1;
     const sb = scoreBand(r.snapshot.setupScore);
@@ -185,6 +193,23 @@ export function computeSignalPerformance(
     }
   }
 
+  // When full record set is unavailable, fold persisted daily aggregates for closed totals.
+  const aggregates = opts.aggregates ?? [];
+  if (aggregates.length > 0 && opts.historyComplete === false) {
+    for (const a of aggregates) {
+      wins += a.wins;
+      losses += a.losses;
+      breakeven += a.breakeven;
+      expired += a.expired;
+      cancelled += a.cancelled;
+      ambiguousIntrabar += a.ambiguousIntrabar;
+      dataUnavailable += a.dataUnavailable;
+      netPoints += a.netPoints;
+      netR += a.netR;
+      closedSignals += a.closedTradeCount;
+    }
+  }
+
   const tradeN = wins + losses + breakeven;
   const avg = (xs: number[]): number | null =>
     xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null;
@@ -225,6 +250,63 @@ export function computeSignalPerformance(
     byTimeframe,
     byDirection,
     bySession,
-    byDataQuality
+    byDataQuality,
+    historyComplete: opts.historyComplete !== false,
+    aggregateDays: aggregates.length
+  };
+}
+
+/** Merge daily aggregates into a compact closed-trade summary (for >500 histories). */
+export function summarizeFromDailyAggregates(
+  aggregates: SignalPerformanceDailyAggregate[]
+): Pick<
+  SignalPerformanceSummary,
+  | "wins"
+  | "losses"
+  | "breakeven"
+  | "expired"
+  | "cancelled"
+  | "ambiguousIntrabar"
+  | "dataUnavailable"
+  | "netPoints"
+  | "netR"
+  | "closedSignals"
+  | "winRate"
+> {
+  let wins = 0;
+  let losses = 0;
+  let breakeven = 0;
+  let expired = 0;
+  let cancelled = 0;
+  let ambiguousIntrabar = 0;
+  let dataUnavailable = 0;
+  let netPoints = 0;
+  let netR = 0;
+  let closedSignals = 0;
+  for (const a of aggregates) {
+    wins += a.wins;
+    losses += a.losses;
+    breakeven += a.breakeven;
+    expired += a.expired;
+    cancelled += a.cancelled;
+    ambiguousIntrabar += a.ambiguousIntrabar;
+    dataUnavailable += a.dataUnavailable;
+    netPoints += a.netPoints;
+    netR += a.netR;
+    closedSignals += a.closedTradeCount;
+  }
+  const tradeN = wins + losses + breakeven;
+  return {
+    wins,
+    losses,
+    breakeven,
+    expired,
+    cancelled,
+    ambiguousIntrabar,
+    dataUnavailable,
+    netPoints: Math.round(netPoints * 100) / 100,
+    netR: Math.round(netR * 100) / 100,
+    closedSignals,
+    winRate: tradeN > 0 ? Math.round((wins / tradeN) * 10000) / 100 : null
   };
 }

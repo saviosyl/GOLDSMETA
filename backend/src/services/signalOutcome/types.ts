@@ -43,7 +43,8 @@ export type ManagementEventType =
   | "EXPIRE"
   | "AMBIGUOUS"
   | "DATA_STALE"
-  | "MONITOR";
+  | "MONITOR"
+  | "BAR_SKIPPED";
 
 /** Immutable freeze at signal creation — never rewritten. */
 export interface SignalSnapshot {
@@ -90,6 +91,22 @@ export interface SignalManagementEvent {
   quantityPctClosed: number | null;
   reason: string;
   priceSource: string;
+}
+
+/** One notional exit leg — tracked independently for partial PnL. */
+export interface SignalExitLeg {
+  legId: string;
+  reason: "TP1" | "TP2" | "TP3" | "STOP" | "BREAKEVEN" | "INVALIDATION" | "AMBIGUOUS";
+  quantityPct: number;
+  exitPrice: number;
+  /** Already weighted: (quantityPct/100) × points at this exit. */
+  grossPointsContribution: number;
+  /** Already weighted spread+slippage allocated to this leg. */
+  spreadSlippageContribution: number;
+  /** Already weighted: (quantityPct/100) × R at this exit (before spread allocation). */
+  realizedRContribution: number;
+  at: string;
+  barTime: string;
 }
 
 export interface SignalMonitoringState {
@@ -163,9 +180,13 @@ export interface SignalOutcomeRecord {
   entry: SignalEntryState;
   monitoring: SignalMonitoringState;
   managementEvents: SignalManagementEvent[];
+  /** Independent notional exit legs for correct partial PnL. */
+  exitLegs: SignalExitLeg[];
   finalResult: SignalFinalResult | null;
   ambiguity: AmbiguityRecord | null;
   appliedBarEventIds: string[];
+  /** Last chronologically applied confirmed bar time (ISO). */
+  lastAppliedBarTime: string | null;
   leaseOwnerId: string | null;
   leaseUntil: string | null;
   updatedAt: string;
@@ -179,9 +200,57 @@ export interface SignalBarInput {
   low: number;
   close: number;
   isConfirmedBar: boolean;
+  symbol: string;
+  timeframe: string | null;
+  environment: "LIVE" | "TEST";
   dataQuality?: string;
   stale?: boolean;
   source?: string;
+}
+
+export type OutcomeMonitorJobState =
+  | "QUEUED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED"
+  | "DEAD_LETTER";
+
+/** Durable bar-monitoring job — retries independently of the decision job. */
+export interface OutcomeMonitorJob {
+  jobId: string;
+  userId: string;
+  eventId: string;
+  bar: SignalBarInput;
+  state: OutcomeMonitorJobState;
+  retryCount: number;
+  maxRetries: number;
+  nextAttemptAt: string;
+  leaseOwnerId: string | null;
+  leaseUntil: string | null;
+  auditReason: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+/** Daily aggregate for complete performance history beyond newest-N. */
+export interface SignalPerformanceDailyAggregate {
+  day: string;
+  userId: string;
+  environment: "LIVE" | "TEST" | "ALL";
+  wins: number;
+  losses: number;
+  breakeven: number;
+  expired: number;
+  cancelled: number;
+  ambiguousIntrabar: number;
+  dataUnavailable: number;
+  waitOnly: number;
+  netPoints: number;
+  netR: number;
+  closedTradeCount: number;
+  updatedAt: string;
 }
 
 export const TERMINAL_LIFECYCLES: SignalLifecycle[] = [
@@ -191,6 +260,14 @@ export const TERMINAL_LIFECYCLES: SignalLifecycle[] = [
   "DATA_UNAVAILABLE",
   "AMBIGUOUS_INTRABAR",
   "WAIT_ONLY"
+];
+
+export const ACTIVE_MONITOR_LIFECYCLES: SignalLifecycle[] = [
+  "PENDING_ENTRY",
+  "OPEN",
+  "TP1_HIT",
+  "TP2_HIT",
+  "BREAKEVEN"
 ];
 
 export const TRADE_COUNTABLE_OUTCOMES: SignalFinalOutcome[] = [

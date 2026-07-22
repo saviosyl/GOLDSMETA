@@ -26,8 +26,13 @@ export const buildSignalOutcomesRouter = (): Router => {
   router.get("/v1/signal-outcomes/performance", requireAuth, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const store = getSignalOutcomeStore();
-    const items = await store.list(userId, 500);
-    const summary = computeSignalPerformance(items);
+    // Complete history via pagination — not newest-500 only.
+    const items = await store.listAllPaginated(userId, 200);
+    const aggregates = await store.listDailyAggregates(userId);
+    const summary = computeSignalPerformance(items, {
+      aggregates,
+      historyComplete: true
+    });
     res.json(summary);
   });
 

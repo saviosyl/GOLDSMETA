@@ -2,6 +2,9 @@
  * Signal outcome monitoring — durable, idempotent, lease-protected.
  * Market data: TradingView confirmed OHLCV via webhook pipeline (same as decision engine).
  * Never places broker orders.
+ *
+ * Every confirmed bar monitors ALL matching active signals (userId+symbol+timeframe+environment),
+ * not only the decision created from that same event.
  */
 
 import { randomUUID } from "crypto";
@@ -9,7 +12,6 @@ import type { DecisionRecord } from "../../models/types";
 import { logger } from "../logging/logger";
 import { getFirestoreDb } from "../firebaseAdmin";
 import {
-  applyBarToSignalOutcome,
   createSignalOutcomeFromDecision,
   signalIdForDecision
 } from "./engine";
@@ -19,6 +21,10 @@ import {
   InMemorySignalOutcomeStore,
   type SignalOutcomeStore
 } from "./store";
+import {
+  getOutcomeMonitorJobStore,
+  type OutcomeMonitorJobStore
+} from "./monitorJobs";
 
 let singleton: SignalOutcomeStore | null = null;
 
@@ -45,54 +51,106 @@ export async function ensureSignalOutcomeFromDecision(
   return store.save(created);
 }
 
-export async function monitorSignalWithBar(
+/**
+ * Apply one confirmed bar to every matching active signal.
+ * Uses atomic Firestore/in-memory apply (lease + transition + persist in one step).
+ */
+export async function monitorMatchingSignalsWithBar(
   userId: string,
   bar: SignalBarInput,
   store: SignalOutcomeStore = getSignalOutcomeStore(),
   workerId: string = `monitor-${randomUUID().slice(0, 8)}`
 ): Promise<SignalOutcomeRecord[]> {
-  const active = await store.listActive(userId);
+  const active = await store.listActiveMatching(userId, {
+    symbol: bar.symbol,
+    timeframe: bar.timeframe,
+    environment: bar.environment
+  });
   const updated: SignalOutcomeRecord[] = [];
   for (const signal of active) {
-    const leased = await store.tryAcquireLease(
+    const result = await store.applyBarAtomic(
       userId,
       signal.snapshot.signalId,
+      { ...bar, source: bar.source ?? "tradingview-ohlcv" },
       workerId,
       60_000
     );
-    if (!leased) {
+    if (!result) {
       logger.info("Signal monitor lease not acquired", {
         signalId: signal.snapshot.signalId,
         workerId
       });
       continue;
     }
-    const next = applyBarToSignalOutcome(leased, bar);
-    updated.push(await store.save(next));
+    updated.push(result.record);
   }
   return updated;
 }
 
+/** @deprecated Use monitorMatchingSignalsWithBar */
+export async function monitorSignalWithBar(
+  userId: string,
+  bar: SignalBarInput,
+  store: SignalOutcomeStore = getSignalOutcomeStore(),
+  workerId?: string
+): Promise<SignalOutcomeRecord[]> {
+  return monitorMatchingSignalsWithBar(userId, bar, store, workerId);
+}
+
+/**
+ * Create/load signal from decision. Does NOT apply the creation candle
+ * (no same-candle lookahead). Optionally enqueues durable monitor work for a future bar.
+ */
 export async function syncDecisionAndMonitor(
   decision: DecisionRecord,
   bar: SignalBarInput | null,
-  store: SignalOutcomeStore = getSignalOutcomeStore()
+  store: SignalOutcomeStore = getSignalOutcomeStore(),
+  jobStore: OutcomeMonitorJobStore = getOutcomeMonitorJobStore()
 ): Promise<SignalOutcomeRecord> {
   const record = await ensureSignalOutcomeFromDecision(decision, store);
   if (!bar) return record;
-  // Also apply to this specific signal (idempotent) even if not yet in active list semantics
-  const leased = await store.tryAcquireLease(
-    decision.userId,
-    record.snapshot.signalId,
-    `job-${bar.eventId}`,
-    60_000
-  );
-  if (!leased) return record;
-  const next = applyBarToSignalOutcome(leased, {
-    ...bar,
-    source: bar.source ?? "tradingview-ohlcv"
+
+  // Enqueue durable monitoring for ALL matching active signals (including this one).
+  // Engine rejects barTime <= marketDataTimestamp for the newly created signal.
+  await jobStore.enqueue({
+    userId: decision.userId,
+    eventId: bar.eventId,
+    bar: { ...bar, source: bar.source ?? "tradingview-ohlcv" }
   });
-  return store.save(next);
+
+  return record;
+}
+
+/**
+ * Process one durable outcome-monitor job.
+ * Retries on failure; decision job must not treat this as fire-and-forget complete.
+ */
+export async function processOutcomeMonitorJob(
+  jobId: string,
+  options: {
+    store?: SignalOutcomeStore;
+    jobStore?: OutcomeMonitorJobStore;
+    workerId?: string;
+  } = {}
+): Promise<void> {
+  const jobStore = options.jobStore ?? getOutcomeMonitorJobStore();
+  const store = options.store ?? getSignalOutcomeStore();
+  const workerId = options.workerId ?? `om-${randomUUID().slice(0, 8)}`;
+
+  const claimed = await jobStore.claim(jobId, workerId, 120_000);
+  if (!claimed) return;
+
+  try {
+    await monitorMatchingSignalsWithBar(claimed.userId, claimed.bar, store, workerId);
+    await jobStore.complete(jobId);
+  } catch (error: unknown) {
+    await jobStore.fail(
+      jobId,
+      error instanceof Error ? error : "unknown",
+      "MONITOR_APPLY_FAILED"
+    );
+    throw error;
+  }
 }
 
 export { signalIdForDecision };

@@ -88,6 +88,21 @@ export function SignalPerformancePage() {
       <p className="muted" style={{ marginTop: "1rem" }}>
         Label: {summary?.label ?? "HYPOTHETICAL SIGNAL PERFORMANCE"}
       </p>
+      {summary?.byConfidenceRange && (
+        <div data-testid="confidence-bands" style={{ marginTop: "1rem" }}>
+          <h2 className="section-title">Confidence bands (0–100)</h2>
+          <ul>
+            {Object.entries(summary.byConfidenceRange).map(([band, stats]) => (
+              <li key={band} data-testid={`confidence-band-${band}`}>
+                {band}: count {stats.count}, wins {stats.wins}, losses {stats.losses}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div data-testid="partial-tp-note" className="muted" style={{ marginTop: "0.75rem" }}>
+        Partial TP results use weighted exit legs (not final-exit-only PnL).
+      </div>
     </div>
   );
 }

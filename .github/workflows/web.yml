@@ -8,6 +8,7 @@ on:
       - cursor/webhook-delivery-400-c2c2
       - cursor/phase3-stage3-live-forward-c2c2
       - cursor/goldmeta-v4-stage-b-c2c2
+      - cursor/v5-4-3-approved-base-c2c2
   push:
     branches:
       - main
@@ -53,3 +54,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Signal History Playwright
+        run: npx playwright test e2e/signalHistory.spec.ts --project=desktop-chromium

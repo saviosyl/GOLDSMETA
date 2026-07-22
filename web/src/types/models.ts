@@ -523,4 +523,5 @@ export interface SignalPerformanceSummary {
   tp3HitRate: number | null;
   stopLossRate: number | null;
   byDirection: { BUY: number; SELL: number };
+  byConfidenceRange?: Record<string, { count: number; wins: number; losses: number }>;
 }

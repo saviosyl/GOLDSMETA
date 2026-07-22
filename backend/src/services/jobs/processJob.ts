@@ -91,34 +91,44 @@ export const processJob = async (
     }
 
     // V6 Signal Outcome Tracking — hypothetical only; never places broker orders.
-    try {
-      const { syncDecisionAndMonitor } = await import("../signalOutcome/monitor.js");
+    // Create signal + enqueue durable outcome-monitor job. Monitoring failures retry
+    // independently — do not permanently complete the only processing path when
+    // monitoring fails after a swallowed non-fatal error.
+    {
+      const { ensureSignalOutcomeFromDecision } = await import("../signalOutcome/monitor.js");
+      const { getOutcomeMonitorJobStore } = await import("../signalOutcome/monitorJobs.js");
+      await ensureSignalOutcomeFromDecision(decision);
+
       const ohlcv = rawEvent.payload.ohlcv;
-      const bar =
+      if (
         rawEvent.payload.isConfirmedBar &&
         ohlcv &&
         typeof ohlcv.open === "number" &&
         typeof ohlcv.high === "number" &&
         typeof ohlcv.low === "number" &&
         typeof ohlcv.close === "number"
-          ? {
-              eventId: claimed.eventId,
-              barTime: rawEvent.payload.barTime,
-              open: ohlcv.open,
-              high: ohlcv.high,
-              low: ohlcv.low,
-              close: ohlcv.close,
-              isConfirmedBar: true as const,
-              source: "tradingview-ohlcv",
-              dataQuality: "OK"
-            }
-          : null;
-      await syncDecisionAndMonitor(decision, bar);
-    } catch (error: unknown) {
-      logger.warn("Signal outcome follow-up failed (non-fatal)", {
-        jobId,
-        error: error instanceof Error ? error.message : "unknown"
-      });
+      ) {
+        const environment: "LIVE" | "TEST" = claimed.environment === "TEST" ? "TEST" : "LIVE";
+        const bar = {
+          eventId: claimed.eventId,
+          barTime: rawEvent.payload.barTime,
+          open: ohlcv.open,
+          high: ohlcv.high,
+          low: ohlcv.low,
+          close: ohlcv.close,
+          isConfirmedBar: true as const,
+          symbol: (rawEvent.payload.symbol as string) || decision.symbol || "XAUUSD",
+          timeframe: rawEvent.payload.timeframe ?? decision.timeframe ?? null,
+          environment,
+          source: "tradingview-ohlcv",
+          dataQuality: "OK"
+        };
+        await getOutcomeMonitorJobStore().enqueue({
+          userId: claimed.userId,
+          eventId: claimed.eventId,
+          bar
+        });
+      }
     }
 
     return await store.completeProcessingJob(jobId, decision.decisionId);

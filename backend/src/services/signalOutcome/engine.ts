@@ -11,6 +11,7 @@ import {
   HYPOTHETICAL_LABEL,
   type AmbiguityRecord,
   type SignalBarInput,
+  type SignalExitLeg,
   type SignalLifecycle,
   type SignalManagementEvent,
   type SignalOutcomeRecord,
@@ -100,6 +101,7 @@ export function createSignalOutcomeFromDecision(decision: DecisionRecord): Signa
       quantityRemainingPct: 100
     },
     managementEvents: [],
+    exitLegs: [],
     finalResult: isWait
       ? {
           outcome: null,
@@ -127,6 +129,8 @@ export function createSignalOutcomeFromDecision(decision: DecisionRecord): Signa
       : null,
     ambiguity: null,
     appliedBarEventIds: [],
+    // Seed so the creation candle (barTime === marketDataTimestamp) cannot create lookahead.
+    lastAppliedBarTime: snapshot.marketDataTimestamp,
     leaseOwnerId: null,
     leaseUntil: null,
     updatedAt: now
@@ -152,20 +156,66 @@ const pushEvent = (
   });
 };
 
-const pointsFrom = (direction: "BUY" | "SELL", entry: number, exit: number): number =>
+export const pointsFrom = (direction: "BUY" | "SELL", entry: number, exit: number): number =>
   Math.round(((direction === "BUY" ? exit - entry : entry - exit) + Number.EPSILON) * 100) / 100;
 
-const rFrom = (points: number, risk: number | null): number | null => {
+export const rFrom = (points: number, risk: number | null): number | null => {
   if (risk == null || risk <= 0) return null;
   return Math.round((points / risk) * 100) / 100;
 };
+
+/** Normalize GoldMeta confidence to 0–100 (accept legacy 0–1 fractions). */
+export function confidenceOnHundredScale(confidence: number): number {
+  if (!Number.isFinite(confidence)) return 0;
+  if (confidence > 0 && confidence <= 1) return Math.round(confidence * 100);
+  return Math.round(confidence);
+}
+
+export type BarRejectReason =
+  | "DUPLICATE_EVENT"
+  | "WRONG_SYMBOL"
+  | "WRONG_TIMEFRAME"
+  | "WRONG_ENVIRONMENT"
+  | "SAME_OR_OLDER_CANDLE"
+  | "TERMINAL"
+  | "UNCONFIRMED"
+  | null;
+
+/**
+ * Validate bar identity / chronology before mutation.
+ * Same-candle lookahead: barTime <= marketDataTimestamp (and <= lastAppliedBarTime) is rejected.
+ */
+export function validateBarForSignal(
+  record: SignalOutcomeRecord,
+  bar: SignalBarInput
+): BarRejectReason {
+  if (record.appliedBarEventIds.includes(bar.eventId)) return "DUPLICATE_EVENT";
+  if (bar.symbol !== record.snapshot.symbol) return "WRONG_SYMBOL";
+  const snapTf = record.snapshot.timeframe ?? null;
+  const barTf = bar.timeframe ?? null;
+  if (String(snapTf ?? "") !== String(barTf ?? "")) return "WRONG_TIMEFRAME";
+  if (bar.environment !== record.snapshot.environment) return "WRONG_ENVIRONMENT";
+
+  const barMs = Date.parse(bar.barTime);
+  const creationMs = Date.parse(record.snapshot.marketDataTimestamp);
+  if (Number.isFinite(barMs) && Number.isFinite(creationMs) && barMs <= creationMs) {
+    return "SAME_OR_OLDER_CANDLE";
+  }
+  if (record.lastAppliedBarTime) {
+    const lastMs = Date.parse(record.lastAppliedBarTime);
+    if (Number.isFinite(barMs) && Number.isFinite(lastMs) && barMs <= lastMs) {
+      return "SAME_OR_OLDER_CANDLE";
+    }
+  }
+  if (!bar.isConfirmedBar) return "UNCONFIRMED";
+  return null;
+}
 
 function entryTouched(snapshot: SignalSnapshot, bar: SignalBarInput): boolean {
   if (snapshot.direction !== "BUY" && snapshot.direction !== "SELL") return false;
   const low = snapshot.entryZoneLow ?? snapshot.proposedEntryPrice;
   const high = snapshot.entryZoneHigh ?? snapshot.proposedEntryPrice;
   if (low == null || high == null) return false;
-  // Deterministic: bar must trade through the zone/price (not assume best fill).
   return bar.low <= high && bar.high >= low;
 }
 
@@ -185,48 +235,128 @@ function stopHit(direction: "BUY" | "SELL", stop: number, bar: SignalBarInput): 
   return direction === "BUY" ? bar.low <= stop : bar.high >= stop;
 }
 
-function closeTrade(
+function markBarApplied(record: SignalOutcomeRecord, bar: SignalBarInput): void {
+  if (!record.appliedBarEventIds.includes(bar.eventId)) {
+    record.appliedBarEventIds.push(bar.eventId);
+  }
+  record.lastAppliedBarTime = bar.barTime;
+  record.updatedAt = nowIso();
+}
+
+function addExitLeg(
   record: SignalOutcomeRecord,
-  lifecycle: SignalLifecycle,
-  outcome: NonNullable<SignalOutcomeRecord["finalResult"]>["outcome"],
-  exitPrice: number,
-  bar: SignalBarInput,
-  reason: string,
-  targetsReached: Array<"TP1" | "TP2" | "TP3">
-): void {
+  partial: Omit<SignalExitLeg, "legId" | "at"> & { at?: string }
+): SignalExitLeg {
+  const leg: SignalExitLeg = {
+    legId: randomUUID(),
+    at: partial.at ?? nowIso(),
+    reason: partial.reason,
+    quantityPct: partial.quantityPct,
+    exitPrice: partial.exitPrice,
+    grossPointsContribution: partial.grossPointsContribution,
+    spreadSlippageContribution: partial.spreadSlippageContribution,
+    realizedRContribution: partial.realizedRContribution,
+    barTime: partial.barTime
+  };
+  record.exitLegs.push(leg);
+  return leg;
+}
+
+function buildLegContributions(
+  record: SignalOutcomeRecord,
+  quantityPct: number,
+  exitPrice: number
+): Pick<
+  SignalExitLeg,
+  "grossPointsContribution" | "spreadSlippageContribution" | "realizedRContribution"
+> {
   const entryPrice = record.entry.entryPrice!;
   const direction = record.snapshot.direction as "BUY" | "SELL";
-  const gross = pointsFrom(direction, entryPrice, exitPrice);
+  const unitGross = pointsFrom(direction, entryPrice, exitPrice);
   const spread = record.entry.entrySpreadEstimate ?? 0;
   const slip = record.entry.entrySlippageEstimate ?? 0;
-  const fees = 0;
-  const net = Math.round((gross - spread - slip - fees) * 100) / 100;
+  const unitCost = spread + slip;
   const risk = record.snapshot.initialRiskDistance;
+  const frac = quantityPct / 100;
+  const grossPointsContribution = Math.round(unitGross * frac * 100) / 100;
+  const spreadSlippageContribution = Math.round(unitCost * frac * 100) / 100;
+  const unitR = rFrom(unitGross, risk) ?? 0;
+  const realizedRContribution = Math.round(unitR * frac * 100) / 100;
+  return { grossPointsContribution, spreadSlippageContribution, realizedRContribution };
+}
+
+/**
+ * total result = sum(closed% × leg result) + remaining% × final exit
+ * Outcome is derived from net R across all legs — never from the final exit price alone.
+ */
+export function finalizeFromExitLegs(
+  record: SignalOutcomeRecord,
+  lifecycle: SignalLifecycle,
+  bar: SignalBarInput,
+  reason: string,
+  targetsReached: Array<"TP1" | "TP2" | "TP3">,
+  ambiguousOutcome = false
+): void {
+  const entryPrice = record.entry.entryPrice;
+  const grossPoints =
+    Math.round(record.exitLegs.reduce((s, l) => s + l.grossPointsContribution, 0) * 100) / 100;
+  const spreadSlip =
+    Math.round(record.exitLegs.reduce((s, l) => s + l.spreadSlippageContribution, 0) * 100) / 100;
+  const fees = 0;
+  const netPoints = Math.round((grossPoints - spreadSlip - fees) * 100) / 100;
+  const risk = record.snapshot.initialRiskDistance;
+  const grossRRaw = record.exitLegs.reduce((s, l) => s + l.realizedRContribution, 0);
+  const costR = risk != null && risk > 0 ? spreadSlip / risk : 0;
+  const netR =
+    risk != null && risk > 0 ? Math.round((grossRRaw - costR) * 100) / 100 : rFrom(netPoints, risk);
+
+  const lastLeg = record.exitLegs[record.exitLegs.length - 1] ?? null;
   const holding =
     record.entry.entryTimestamp != null
       ? Math.max(0, new Date(bar.barTime).getTime() - new Date(record.entry.entryTimestamp).getTime())
       : null;
 
-  record.monitoring.lifecycle = lifecycle === "AMBIGUOUS_INTRABAR" ? "AMBIGUOUS_INTRABAR" : "CLOSED";
-  if (lifecycle !== "AMBIGUOUS_INTRABAR" && lifecycle !== "CLOSED") {
-    record.monitoring.lifecycle = lifecycle;
+  let outcome: NonNullable<SignalOutcomeRecord["finalResult"]>["outcome"];
+  if (ambiguousOutcome) {
+    outcome = "AMBIGUOUS";
+  } else if (netR == null) {
+    outcome = netPoints > 0.01 ? "WIN" : netPoints < -0.01 ? "LOSS" : "BREAKEVEN";
+  } else if (netR > 0.01) {
+    outcome = "WIN";
+  } else if (netR < -0.01) {
+    outcome = "LOSS";
+  } else {
+    outcome = "BREAKEVEN";
   }
+
+  if (lifecycle === "AMBIGUOUS_INTRABAR") {
+    record.monitoring.lifecycle = "AMBIGUOUS_INTRABAR";
+  } else if (lifecycle === "STOP_HIT" || lifecycle === "TP3_HIT" || lifecycle === "CLOSED") {
+    record.monitoring.lifecycle = lifecycle === "STOP_HIT" ? "STOP_HIT" : "CLOSED";
+    if (lifecycle === "TP3_HIT") record.monitoring.lifecycle = "CLOSED";
+    if (lifecycle === "STOP_HIT") record.monitoring.lifecycle = "CLOSED";
+  } else {
+    record.monitoring.lifecycle = "CLOSED";
+  }
+
   record.finalResult = {
     outcome,
     exitReason: reason,
     exitTimestamp: bar.barTime,
-    exitPrice,
+    exitPrice: lastLeg?.exitPrice ?? null,
     entryPrice,
     holdingDurationMs: holding,
-    grossPoints: gross,
-    estimatedSpread: spread,
-    estimatedSlippage: slip,
+    grossPoints,
+    estimatedSpread: record.entry.entrySpreadEstimate,
+    estimatedSlippage: record.entry.entrySlippageEstimate,
     estimatedFees: fees,
-    netPoints: net,
+    netPoints,
     percentageResult:
-      entryPrice !== 0 ? Math.round(((net / entryPrice) * 10000)) / 100 : null,
-    grossR: rFrom(gross, risk),
-    netR: rFrom(net, risk),
+      entryPrice != null && entryPrice !== 0
+        ? Math.round((netPoints / entryPrice) * 10000) / 100
+        : null,
+    grossR: Math.round(grossRRaw * 100) / 100,
+    netR,
     mfe: record.monitoring.mfe,
     mae: record.monitoring.mae,
     targetsReached,
@@ -235,6 +365,7 @@ function closeTrade(
     label: HYPOTHETICAL_LABEL,
     disclaimer: HYPOTHETICAL_DISCLAIMER
   };
+  record.monitoring.quantityRemainingPct = 0;
   record.updatedAt = nowIso();
 }
 
@@ -244,8 +375,6 @@ function updateExcursion(record: SignalOutcomeRecord, bar: SignalBarInput): void
     return;
   }
   const dir = record.snapshot.direction;
-  const fav = dir === "BUY" ? bar.high : -bar.low;
-  const adv = dir === "BUY" ? -bar.low : bar.high;
   const favPrice = dir === "BUY" ? bar.high : bar.low;
   const advPrice = dir === "BUY" ? bar.low : bar.high;
 
@@ -270,25 +399,58 @@ function updateExcursion(record: SignalOutcomeRecord, bar: SignalBarInput): void
   const maePts = pointsFrom(dir, entry, record.monitoring.lowestAdversePrice);
   record.monitoring.mfe = Math.max(0, mfePts);
   record.monitoring.mae = Math.min(0, maePts);
-  void fav;
-  void adv;
+}
+
+function targetsReachedList(record: SignalOutcomeRecord): Array<"TP1" | "TP2" | "TP3"> {
+  const out: Array<"TP1" | "TP2" | "TP3"> = [];
+  if (record.monitoring.tp1Status === "HIT") out.push("TP1");
+  if (record.monitoring.tp2Status === "HIT") out.push("TP2");
+  if (record.monitoring.tp3Status === "HIT") out.push("TP3");
+  return out;
 }
 
 /**
  * Apply one confirmed bar. Idempotent on eventId.
- * Returns the same object reference mutated, or unchanged if skipped.
+ * Rejects wrong identity, duplicates, and barTime <= lastApplied/creation candle.
  */
 export function applyBarToSignalOutcome(
   record: SignalOutcomeRecord,
   bar: SignalBarInput,
   opts: { maxPendingBars?: number; pendingBarsSeen?: number } = {}
 ): SignalOutcomeRecord {
-  if (record.appliedBarEventIds.includes(bar.eventId)) {
+  const reject = validateBarForSignal(record, bar);
+  if (reject === "DUPLICATE_EVENT") return record;
+  if (
+    reject === "WRONG_SYMBOL" ||
+    reject === "WRONG_TIMEFRAME" ||
+    reject === "WRONG_ENVIRONMENT" ||
+    reject === "SAME_OR_OLDER_CANDLE" ||
+    reject === "UNCONFIRMED"
+  ) {
+    // Identity / chronology rejects do not poison appliedBarEventIds (except same-candle
+    // of the creation event is already covered by lastAppliedBarTime seed).
+    if (reject === "SAME_OR_OLDER_CANDLE" && !record.appliedBarEventIds.includes(bar.eventId)) {
+      // Mark creation-candle event consumed so durable jobs don't retry forever.
+      const creationMs = Date.parse(record.snapshot.marketDataTimestamp);
+      const barMs = Date.parse(bar.barTime);
+      if (Number.isFinite(barMs) && Number.isFinite(creationMs) && barMs <= creationMs) {
+        record.appliedBarEventIds.push(bar.eventId);
+        pushEvent(record, {
+          type: "BAR_SKIPPED",
+          barTime: bar.barTime,
+          price: bar.close,
+          oldStop: record.monitoring.workingStop,
+          newStop: record.monitoring.workingStop,
+          targetReached: null,
+          quantityPctClosed: null,
+          reason: "Same-candle lookahead rejected — entry monitoring starts on next confirmed bar",
+          priceSource: bar.source ?? "tradingview-ohlcv"
+        });
+        record.updatedAt = nowIso();
+      }
+    }
     return record;
   }
-  // Out-of-order: if we already have a later bar applied via lastMonitoringAt, still accept
-  // only if eventId is new — but skip if barTime is older than last applied monitoring on open trade
-  // for safety we still process if event is new (idempotent by eventId only).
 
   if (
     record.monitoring.lifecycle === "WAIT_ONLY" ||
@@ -296,14 +458,11 @@ export function applyBarToSignalOutcome(
     record.monitoring.lifecycle === "EXPIRED" ||
     record.monitoring.lifecycle === "CANCELLED" ||
     record.monitoring.lifecycle === "AMBIGUOUS_INTRABAR" ||
-    record.monitoring.lifecycle === "DATA_UNAVAILABLE"
+    record.monitoring.lifecycle === "DATA_UNAVAILABLE" ||
+    record.monitoring.lifecycle === "STOP_HIT" ||
+    record.monitoring.lifecycle === "TP3_HIT"
   ) {
-    record.appliedBarEventIds.push(bar.eventId);
-    record.updatedAt = nowIso();
-    return record;
-  }
-
-  if (!bar.isConfirmedBar) {
+    markBarApplied(record, bar);
     return record;
   }
 
@@ -320,11 +479,9 @@ export function applyBarToSignalOutcome(
       reason: "Stale market data — no hit inferred",
       priceSource: bar.source ?? "ohlcv"
     });
-    // Preserve OPEN/PENDING for safe retry; do not fabricate hits.
     record.monitoring.lastMonitoringAt = nowIso();
     record.monitoring.latestMarketDataTimestamp = bar.barTime;
-    record.appliedBarEventIds.push(bar.eventId);
-    record.updatedAt = nowIso();
+    markBarApplied(record, bar);
     return record;
   }
 
@@ -358,14 +515,13 @@ export function applyBarToSignalOutcome(
       label: HYPOTHETICAL_LABEL,
       disclaimer: HYPOTHETICAL_DISCLAIMER
     };
-    record.appliedBarEventIds.push(bar.eventId);
-    record.updatedAt = nowIso();
+    markBarApplied(record, bar);
     return record;
   }
 
   const snap = record.snapshot;
   if (snap.direction !== "BUY" && snap.direction !== "SELL") {
-    record.appliedBarEventIds.push(bar.eventId);
+    markBarApplied(record, bar);
     return record;
   }
   const direction = snap.direction;
@@ -377,7 +533,7 @@ export function applyBarToSignalOutcome(
     if (entryTouched(snap, bar)) {
       const fill = fillPrice(snap);
       if (fill == null) {
-        record.appliedBarEventIds.push(bar.eventId);
+        markBarApplied(record, bar);
         return record;
       }
       record.entry = {
@@ -405,7 +561,7 @@ export function applyBarToSignalOutcome(
         reason: "Hypothetical entry — frozen plan fill at proposed entry (not best-of-candle)",
         priceSource: bar.source ?? "tradingview-ohlcv"
       });
-      // Continue into open path on same bar (entry + target/stop same bar possible)
+      // Continue into open path on same (post-creation) bar — allowed after entry.
     } else if (seen >= maxBars) {
       record.entry.expiredWithoutEntry = true;
       record.monitoring.lifecycle = "EXPIRED";
@@ -443,15 +599,13 @@ export function applyBarToSignalOutcome(
         reason: "Entry not reached within max pending bars",
         priceSource: bar.source ?? "tradingview-ohlcv"
       });
-      record.appliedBarEventIds.push(bar.eventId);
-      record.updatedAt = nowIso();
+      markBarApplied(record, bar);
       return record;
     } else {
       record.monitoring.currentPrice = bar.close;
       record.monitoring.latestMarketDataTimestamp = bar.barTime;
       record.monitoring.lastMonitoringAt = nowIso();
-      record.appliedBarEventIds.push(bar.eventId);
-      record.updatedAt = nowIso();
+      markBarApplied(record, bar);
       return record;
     }
   }
@@ -475,22 +629,32 @@ export function applyBarToSignalOutcome(
     updateExcursion(record, bar);
     const entry = record.entry.entryPrice!;
     const gross = pointsFrom(direction, entry, bar.close);
-    record.monitoring.currentGrossPoints = gross;
-    record.monitoring.currentNetPoints = gross;
-    record.monitoring.currentRMultiple = rFrom(gross, snap.initialRiskDistance);
+    // Mark-to-market includes already-realized weighted legs + remaining open notionals.
+    const realizedGross = record.exitLegs.reduce((s, l) => s + l.grossPointsContribution, 0);
+    const remainingFrac = record.monitoring.quantityRemainingPct / 100;
+    record.monitoring.currentGrossPoints =
+      Math.round((realizedGross + gross * remainingFrac) * 100) / 100;
+    record.monitoring.currentNetPoints = record.monitoring.currentGrossPoints;
+    record.monitoring.currentRMultiple = rFrom(
+      record.monitoring.currentGrossPoints,
+      snap.initialRiskDistance
+    );
 
-    const stop = record.monitoring.workingStop;
-    const targets: Array<{ label: "TP1" | "TP2" | "TP3"; price: number | null; statusKey: "tp1Status" | "tp2Status" | "tp3Status" }> =
-      [
-        { label: "TP1", price: snap.tp1, statusKey: "tp1Status" },
-        { label: "TP2", price: snap.tp2, statusKey: "tp2Status" },
-        { label: "TP3", price: snap.tp3, statusKey: "tp3Status" }
-      ];
+    const stopPrice = record.monitoring.workingStop;
+    const targets: Array<{
+      label: "TP1" | "TP2" | "TP3";
+      price: number | null;
+      statusKey: "tp1Status" | "tp2Status" | "tp3Status";
+    }> = [
+      { label: "TP1", price: snap.tp1, statusKey: "tp1Status" },
+      { label: "TP2", price: snap.tp2, statusKey: "tp2Status" },
+      { label: "TP3", price: snap.tp3, statusKey: "tp3Status" }
+    ];
 
     const pendingTargets = targets.filter(
       (t) => t.price != null && record.monitoring[t.statusKey] === "PENDING"
     );
-    const stopWouldHit = stop != null && stopHit(direction, stop, bar);
+    const stopWouldHit = stopPrice != null && stopHit(direction, stopPrice, bar);
     const targetsWouldHit = pendingTargets.filter((t) => targetHit(direction, t.price!, bar));
 
     if (stopWouldHit && targetsWouldHit.length > 0) {
@@ -498,72 +662,98 @@ export function applyBarToSignalOutcome(
         candleTimestamp: bar.barTime,
         candleHigh: bar.high,
         candleLow: bar.low,
-        stop: stop,
+        stop: stopPrice,
         target: targetsWouldHit[0]!.price!,
         missingDataRequired: "tick-level or ordered intrabar data to resolve stop vs target sequence"
       };
       record.ambiguity = ambiguity;
-      record.monitoring.lifecycle = "AMBIGUOUS_INTRABAR";
+      const remaining = record.monitoring.quantityRemainingPct;
+      const contrib = buildLegContributions(record, remaining, stopPrice);
+      addExitLeg(record, {
+        reason: "AMBIGUOUS",
+        quantityPct: remaining,
+        exitPrice: stopPrice,
+        barTime: bar.barTime,
+        ...contrib
+      });
       pushEvent(record, {
         type: "AMBIGUOUS",
         barTime: bar.barTime,
         price: bar.close,
-        oldStop: stop,
-        newStop: stop,
+        oldStop: stopPrice,
+        newStop: stopPrice,
         targetReached: null,
-        quantityPctClosed: null,
+        quantityPctClosed: remaining,
         reason: "Same-candle stop and target — AMBIGUOUS_INTRABAR (excluded from win rate)",
         priceSource: bar.source ?? "tradingview-ohlcv"
       });
-      closeTrade(
+      finalizeFromExitLegs(
         record,
         "AMBIGUOUS_INTRABAR",
-        "AMBIGUOUS",
-        stop,
         bar,
         "Ambiguous intrabar — not classified as win",
-        []
+        targetsReachedList(record),
+        true
       );
-      record.appliedBarEventIds.push(bar.eventId);
+      markBarApplied(record, bar);
       return record;
     }
 
     if (stopWouldHit) {
       record.monitoring.stopStatus = "HIT";
+      const remaining = record.monitoring.quantityRemainingPct;
+      const isBe =
+        record.monitoring.lifecycle === "BREAKEVEN" ||
+        (record.entry.entryPrice != null && stopPrice === record.entry.entryPrice);
+      const contrib = buildLegContributions(record, remaining, stopPrice);
+      addExitLeg(record, {
+        reason: isBe ? "BREAKEVEN" : "STOP",
+        quantityPct: remaining,
+        exitPrice: stopPrice,
+        barTime: bar.barTime,
+        ...contrib
+      });
       pushEvent(record, {
         type: "STOP",
         barTime: bar.barTime,
-        price: stop,
-        oldStop: stop,
-        newStop: stop,
+        price: stopPrice,
+        oldStop: stopPrice,
+        newStop: stopPrice,
         targetReached: null,
-        quantityPctClosed: record.monitoring.quantityRemainingPct,
-        reason: "Stop hit",
+        quantityPctClosed: remaining,
+        reason: isBe ? "Stop hit at breakeven" : "Stop hit",
         priceSource: bar.source ?? "tradingview-ohlcv"
       });
-      const targetsReached: Array<"TP1" | "TP2" | "TP3"> = [];
-      if (record.monitoring.tp1Status === "HIT") targetsReached.push("TP1");
-      if (record.monitoring.tp2Status === "HIT") targetsReached.push("TP2");
-      if (record.monitoring.tp3Status === "HIT") targetsReached.push("TP3");
-      const outcome =
-        record.monitoring.lifecycle === "BREAKEVEN" ||
-        (record.entry.entryPrice != null && stop === record.entry.entryPrice)
-          ? "BREAKEVEN"
-          : "LOSS";
-      closeTrade(record, "STOP_HIT", outcome, stop, bar, "Stop loss hit", targetsReached);
-      record.appliedBarEventIds.push(bar.eventId);
+      finalizeFromExitLegs(
+        record,
+        "STOP_HIT",
+        bar,
+        isBe ? "Stop loss hit at breakeven" : "Stop loss hit",
+        targetsReachedList(record)
+      );
+      markBarApplied(record, bar);
       return record;
     }
 
     for (const t of targetsWouldHit) {
       record.monitoring[t.statusKey] = "HIT";
       const pct = t.label === "TP1" ? 40 : t.label === "TP2" ? 30 : 30;
+      const closePct = Math.min(pct, record.monitoring.quantityRemainingPct);
       record.monitoring.quantityRemainingPct = Math.max(
         0,
-        record.monitoring.quantityRemainingPct - pct
+        record.monitoring.quantityRemainingPct - closePct
       );
       record.monitoring.lifecycle =
         t.label === "TP1" ? "TP1_HIT" : t.label === "TP2" ? "TP2_HIT" : "TP3_HIT";
+
+      const contrib = buildLegContributions(record, closePct, t.price!);
+      addExitLeg(record, {
+        reason: t.label,
+        quantityPct: closePct,
+        exitPrice: t.price!,
+        barTime: bar.barTime,
+        ...contrib
+      });
       pushEvent(record, {
         type: t.label,
         barTime: bar.barTime,
@@ -571,12 +761,11 @@ export function applyBarToSignalOutcome(
         oldStop: record.monitoring.workingStop,
         newStop: record.monitoring.workingStop,
         targetReached: t.label,
-        quantityPctClosed: pct,
+        quantityPctClosed: closePct,
         reason: `${t.label} hit (hypothetical partial)`,
         priceSource: bar.source ?? "tradingview-ohlcv"
       });
 
-      // After TP1: move stop to breakeven (management event — does not rewrite snapshot stop)
       if (t.label === "TP1" && record.entry.entryPrice != null) {
         const old = record.monitoring.workingStop;
         record.monitoring.workingStop = record.entry.entryPrice;
@@ -596,27 +785,20 @@ export function applyBarToSignalOutcome(
       }
 
       if (t.label === "TP3" || record.monitoring.quantityRemainingPct <= 0) {
-        const targetsReached: Array<"TP1" | "TP2" | "TP3"> = [];
-        if (record.monitoring.tp1Status === "HIT") targetsReached.push("TP1");
-        if (record.monitoring.tp2Status === "HIT") targetsReached.push("TP2");
-        if (record.monitoring.tp3Status === "HIT") targetsReached.push("TP3");
-        closeTrade(
+        finalizeFromExitLegs(
           record,
-          t.label === "TP3" ? "TP3_HIT" : record.monitoring.lifecycle,
-          "WIN",
-          t.price!,
+          t.label === "TP3" ? "TP3_HIT" : "CLOSED",
           bar,
           `${t.label} completed hypothetical trade`,
-          targetsReached
+          targetsReachedList(record)
         );
-        record.appliedBarEventIds.push(bar.eventId);
+        markBarApplied(record, bar);
         return record;
       }
     }
   }
 
-  record.appliedBarEventIds.push(bar.eventId);
-  record.updatedAt = nowIso();
+  markBarApplied(record, bar);
   return record;
 }
 
@@ -658,6 +840,17 @@ export function invalidateSignal(
     return record;
   }
   record.monitoring.lifecycle = "CANCELLED";
+  if (record.entry.entryReached && record.entry.entryPrice != null && record.monitoring.quantityRemainingPct > 0) {
+    const exitPrice = record.monitoring.currentPrice ?? record.entry.entryPrice;
+    const contrib = buildLegContributions(record, record.monitoring.quantityRemainingPct, exitPrice);
+    addExitLeg(record, {
+      reason: "INVALIDATION",
+      quantityPct: record.monitoring.quantityRemainingPct,
+      exitPrice,
+      barTime,
+      ...contrib
+    });
+  }
   pushEvent(record, {
     type: "INVALIDATION",
     barTime,
@@ -669,33 +862,52 @@ export function invalidateSignal(
     reason,
     priceSource: "strategy-invalidation"
   });
-  record.finalResult = {
-    outcome: "CANCELLED",
-    exitReason: reason,
-    exitTimestamp: barTime,
-    exitPrice: record.monitoring.currentPrice,
-    entryPrice: record.entry.entryPrice,
-    holdingDurationMs: record.monitoring.timeInTradeMs,
-    grossPoints: record.monitoring.currentGrossPoints,
-    estimatedSpread: record.entry.entrySpreadEstimate,
-    estimatedSlippage: record.entry.entrySlippageEstimate,
-    estimatedFees: 0,
-    netPoints: record.monitoring.currentNetPoints,
-    percentageResult: null,
-    grossR: record.monitoring.currentRMultiple,
-    netR: record.monitoring.currentRMultiple,
-    mfe: record.monitoring.mfe,
-    mae: record.monitoring.mae,
-    targetsReached: [
-      ...(record.monitoring.tp1Status === "HIT" ? (["TP1"] as const) : []),
-      ...(record.monitoring.tp2Status === "HIT" ? (["TP2"] as const) : []),
-      ...(record.monitoring.tp3Status === "HIT" ? (["TP3"] as const) : [])
-    ],
-    dataQualityAtEntry: record.snapshot.dataQuality,
-    dataQualityAtExit: "OK",
-    label: HYPOTHETICAL_LABEL,
-    disclaimer: HYPOTHETICAL_DISCLAIMER
-  };
+  if (record.exitLegs.length > 0) {
+    finalizeFromExitLegs(
+      record,
+      "CANCELLED",
+      {
+        eventId: `invalidate-${barTime}`,
+        barTime,
+        open: 0,
+        high: 0,
+        low: 0,
+        close: record.monitoring.currentPrice ?? 0,
+        isConfirmedBar: true,
+        symbol: record.snapshot.symbol,
+        timeframe: record.snapshot.timeframe,
+        environment: record.snapshot.environment
+      },
+      reason,
+      targetsReachedList(record)
+    );
+    record.finalResult!.outcome = "CANCELLED";
+    record.monitoring.lifecycle = "CANCELLED";
+  } else {
+    record.finalResult = {
+      outcome: "CANCELLED",
+      exitReason: reason,
+      exitTimestamp: barTime,
+      exitPrice: record.monitoring.currentPrice,
+      entryPrice: record.entry.entryPrice,
+      holdingDurationMs: record.monitoring.timeInTradeMs,
+      grossPoints: record.monitoring.currentGrossPoints,
+      estimatedSpread: record.entry.entrySpreadEstimate,
+      estimatedSlippage: record.entry.entrySlippageEstimate,
+      estimatedFees: 0,
+      netPoints: record.monitoring.currentNetPoints,
+      percentageResult: null,
+      grossR: record.monitoring.currentRMultiple,
+      netR: record.monitoring.currentRMultiple,
+      mfe: record.monitoring.mfe,
+      mae: record.monitoring.mae,
+      targetsReached: targetsReachedList(record),
+      dataQualityAtEntry: record.snapshot.dataQuality,
+      dataQualityAtExit: "OK",
+      label: HYPOTHETICAL_LABEL,
+      disclaimer: HYPOTHETICAL_DISCLAIMER
+    };
+  }
   record.updatedAt = nowIso();
   return record;
 }

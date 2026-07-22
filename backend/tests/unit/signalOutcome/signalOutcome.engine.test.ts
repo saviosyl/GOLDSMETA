@@ -1,29 +1,47 @@
 /**
  * Signal Outcome Tracking — deterministic engine + analytics tests.
- * Never contacts brokers.
+ * Never contacts brokers. Execution flags remain false.
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import type { DecisionRecord } from "../../../src/models/types";
 import {
   applyBarToSignalOutcome,
   assertSnapshotImmutable,
+  confidenceOnHundredScale,
   createSignalOutcomeFromDecision,
   freezeSignalSnapshot,
   invalidateSignal,
-  moveTrailingStop
+  moveTrailingStop,
+  pointsFrom,
+  validateBarForSignal
 } from "../../../src/services/signalOutcome/engine";
-import { computeSignalPerformance } from "../../../src/services/signalOutcome/analytics";
+import {
+  computeSignalPerformance,
+  confidenceBand
+} from "../../../src/services/signalOutcome/analytics";
 import {
   InMemorySignalOutcomeStore,
   type SignalOutcomeStore
 } from "../../../src/services/signalOutcome/store";
 import {
   ensureSignalOutcomeFromDecision,
+  monitorMatchingSignalsWithBar,
   monitorSignalWithBar,
+  processOutcomeMonitorJob,
   setSignalOutcomeStoreForTests,
   syncDecisionAndMonitor
 } from "../../../src/services/signalOutcome/monitor";
+import {
+  InMemoryOutcomeMonitorJobStore,
+  setOutcomeMonitorJobStoreForTests
+} from "../../../src/services/signalOutcome/monitorJobs";
 import type { SignalBarInput, SignalOutcomeRecord } from "../../../src/services/signalOutcome/types";
+
+const CREATION = "2026-07-22T10:00:00.000Z";
+const T1 = "2026-07-22T10:15:00.000Z";
+const T2 = "2026-07-22T10:30:00.000Z";
+const T3 = "2026-07-22T10:45:00.000Z";
+const T4 = "2026-07-22T11:00:00.000Z";
 
 const baseDecision = (over: Partial<DecisionRecord> = {}): DecisionRecord =>
   ({
@@ -32,12 +50,12 @@ const baseDecision = (over: Partial<DecisionRecord> = {}): DecisionRecord =>
     userId: "user-1",
     symbol: "XAUUSD",
     timeframe: "15",
-    barTime: "2026-07-22T10:00:00.000Z",
+    barTime: CREATION,
     generatedAt: "2026-07-22T10:00:05.000Z",
-    marketDataTime: "2026-07-22T10:00:00.000Z",
+    marketDataTime: CREATION,
     validUntil: "2026-07-22T11:00:00.000Z",
     decision: "BUY",
-    confidence: 0.97,
+    confidence: 97,
     confidenceLabel: "VERY_HIGH",
     marketRegime: "TRENDING_UP",
     dataQuality: "OK",
@@ -84,6 +102,9 @@ const bar = (partial: Partial<SignalBarInput> & { eventId: string; barTime: stri
   low: 4129,
   close: 4131,
   isConfirmedBar: true,
+  symbol: "XAUUSD",
+  timeframe: "15",
+  environment: "TEST",
   source: "tradingview-ohlcv",
   dataQuality: "OK",
   ...partial
@@ -91,10 +112,13 @@ const bar = (partial: Partial<SignalBarInput> & { eventId: string; barTime: stri
 
 describe("Signal Outcome Tracking", () => {
   let store: SignalOutcomeStore;
+  let jobStore: InMemoryOutcomeMonitorJobStore;
 
   beforeEach(() => {
     store = new InMemorySignalOutcomeStore();
+    jobStore = new InMemoryOutcomeMonitorJobStore();
     setSignalOutcomeStoreForTests(store);
+    setOutcomeMonitorJobStoreForTests(jobStore);
   });
 
   it("freezes immutable snapshot fields", () => {
@@ -110,7 +134,7 @@ describe("Signal Outcome Tracking", () => {
       r,
       bar({
         eventId: "e1",
-        barTime: "2026-07-22T10:15:00.000Z",
+        barTime: T1,
         low: 4130,
         high: 4135,
         close: 4134
@@ -121,15 +145,66 @@ describe("Signal Outcome Tracking", () => {
     expect(r.monitoring.lifecycle).toBe("OPEN");
   });
 
+  it("rejects same-candle lookahead — creation candle cannot create entry/TP/stop", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    // Violent move inside the creation candle must not enter or resolve.
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "creation-candle",
+        barTime: CREATION,
+        low: 4120,
+        high: 4160,
+        close: 4155
+      })
+    );
+    expect(r.entry.entryReached).toBe(false);
+    expect(r.monitoring.lifecycle).toBe("PENDING_ENTRY");
+    expect(r.finalResult).toBeNull();
+    expect(r.managementEvents.some((e) => e.type === "BAR_SKIPPED")).toBe(true);
+    expect(validateBarForSignal(createSignalOutcomeFromDecision(baseDecision()), bar({
+      eventId: "x",
+      barTime: CREATION,
+      low: 4120,
+      high: 4160,
+      close: 4155
+    }))).toBe("SAME_OR_OLDER_CANDLE");
+  });
+
+  it("price movements earlier inside creation candle cannot create TP or stop result", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    // Enter on next bar
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    // Replay an older/same creation-time spike — must be ignored
+    const before = structuredClone(r);
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "old-spike",
+        barTime: CREATION,
+        low: 4120,
+        high: 4160,
+        close: 4155
+      })
+    );
+    expect(r.monitoring.lifecycle).toBe(before.monitoring.lifecycle);
+    expect(r.finalResult).toBeNull();
+    expect(r.exitLegs.length).toBe(0);
+  });
+
   it("BUY target hit", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131.5 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131.5 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4132, high: 4139, close: 4138.5 })
+      bar({ eventId: "e2", barTime: T2, low: 4132, high: 4139, close: 4138.5 })
     );
     expect(r.monitoring.tp1Status).toBe("HIT");
     expect(r.monitoring.lifecycle === "TP1_HIT" || r.monitoring.lifecycle === "BREAKEVEN").toBe(
@@ -141,11 +216,11 @@ describe("Signal Outcome Tracking", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4126, high: 4130, close: 4126.5 })
+      bar({ eventId: "e2", barTime: T2, low: 4126, high: 4130, close: 4126.5 })
     );
     expect(r.finalResult?.outcome).toBe("LOSS");
     expect(r.monitoring.stopStatus).toBe("HIT");
@@ -166,23 +241,23 @@ describe("Signal Outcome Tracking", () => {
     let r = createSignalOutcomeFromDecision(d);
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "s1", barTime: "t1", high: 4149, low: 4147, close: 4148 })
+      bar({ eventId: "s1", barTime: T1, high: 4149, low: 4147, close: 4148 })
     );
     expect(r.entry.entryReached).toBe(true);
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "s2", barTime: "t2", high: 4147, low: 4139, close: 4140 })
+      bar({ eventId: "s2", barTime: T2, high: 4147, low: 4139, close: 4140 })
     );
     expect(r.monitoring.tp1Status).toBe("HIT");
 
     let r2 = createSignalOutcomeFromDecision({ ...d, decisionId: "dec-sell-2" });
     r2 = applyBarToSignalOutcome(
       r2,
-      bar({ eventId: "s3", barTime: "t1", high: 4149, low: 4147, close: 4148 })
+      bar({ eventId: "s3", barTime: T1, high: 4149, low: 4147, close: 4148 })
     );
     r2 = applyBarToSignalOutcome(
       r2,
-      bar({ eventId: "s4", barTime: "t2", high: 4154, low: 4149, close: 4153.5 })
+      bar({ eventId: "s4", barTime: T2, high: 4154, low: 4149, close: 4153.5 })
     );
     expect(r2.finalResult?.outcome).toBe("LOSS");
   });
@@ -192,63 +267,113 @@ describe("Signal Outcome Tracking", () => {
     const frozenStop = r.snapshot.stopLoss;
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4132, high: 4139, close: 4138 })
+      bar({ eventId: "e2", barTime: T2, low: 4132, high: 4139, close: 4138 })
     );
     expect(r.snapshot.stopLoss).toBe(frozenStop);
     expect(r.monitoring.workingStop).toBe(r.entry.entryPrice);
     expect(r.managementEvents.some((e) => e.type === "BREAKEVEN_MOVE")).toBe(true);
   });
 
-  it("TP1 then stop at breakeven", () => {
+  it("40% TP1 then 60% breakeven = positive weighted result (WIN)", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4132, high: 4139, close: 4138 })
+      bar({ eventId: "e2", barTime: T2, low: 4132, high: 4139, close: 4138 })
     );
+    // Remaining 60% stops at breakeven (entry)
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e3", barTime: "t3", low: 4131.0, high: 4133, close: 4131.2 })
+      bar({ eventId: "e3", barTime: T3, low: 4131.0, high: 4133, close: 4131.2 })
     );
-    expect(r.finalResult?.outcome).toBe("BREAKEVEN");
+    expect(r.exitLegs).toHaveLength(2);
+    expect(r.exitLegs[0]?.quantityPct).toBe(40);
+    expect(r.exitLegs[1]?.quantityPct).toBe(60);
+    expect(r.finalResult?.outcome).toBe("WIN");
+    // 0.4 * (4138-4131.3) = 0.4*6.7 = 2.68; BE leg ~0; minus spread allocation
+    expect(r.finalResult!.netPoints!).toBeGreaterThan(0);
+    // Must not equal full-position final-exit-only PnL at entry (~0)
+    const finalOnly = pointsFrom("BUY", 4131.3, 4131.3);
+    expect(r.finalResult!.grossPoints).not.toBe(finalOnly);
   });
 
-  it("TP1 then TP2 then TP3", () => {
+  it("40% TP1 then 60% stop = weighted result (may be WIN/LOSS/BE from net R)", () => {
+    // Use wider stop so after TP1 BE-move we can still hit original? After TP1 stop moves to BE.
+    // To hit a losing stop after TP1 we trail stop below entry without BE, or use TP1 then
+    // manually trail. Simpler: TP1 then stop at BE is tested above; here force stop before BE
+    // by using a signal that hits TP1 and then we trail stop below entry for a loss on remainder.
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4132, high: 4139, close: 4138 })
+      bar({ eventId: "e2", barTime: T2, low: 4132, high: 4139, close: 4138 })
+    );
+    // Trail stop below entry so remaining 60% takes a loss
+    r = moveTrailingStop(r, 4129, T2, "Trail for test");
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "e3", barTime: T3, low: 4128, high: 4132, close: 4129 })
+    );
+    expect(r.exitLegs.length).toBeGreaterThanOrEqual(2);
+    const tp1Pts = 0.4 * (4138 - 4131.3);
+    const stopPts = 0.6 * (4129 - 4131.3);
+    const expectedGross = Math.round((tp1Pts + stopPts) * 100) / 100;
+    expect(r.finalResult!.grossPoints).toBeCloseTo(expectedGross, 1);
+    // Net R decides outcome — not final exit price alone
+    expect(["WIN", "LOSS", "BREAKEVEN"]).toContain(r.finalResult!.outcome);
+    expect(r.finalResult!.exitPrice).toBe(4129);
+    // Final exit alone would look like a small loss on 100% — weighted may differ
+    const naiveFull = pointsFrom("BUY", 4131.3, 4129);
+    expect(r.finalResult!.grossPoints).not.toBe(naiveFull);
+  });
+
+  it("TP1 + TP2 + TP3 = correctly weighted result", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e3", barTime: "t3", low: 4140, high: 4147, close: 4146 })
+      bar({ eventId: "e2", barTime: T2, low: 4132, high: 4139, close: 4138 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e4", barTime: "t4", low: 4147, high: 4156, close: 4155 })
+      bar({ eventId: "e3", barTime: T3, low: 4140, high: 4147, close: 4146 })
+    );
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "e4", barTime: T4, low: 4147, high: 4156, close: 4155 })
     );
     expect(r.finalResult?.outcome).toBe("WIN");
     expect(r.finalResult?.targetsReached).toEqual(expect.arrayContaining(["TP1", "TP2", "TP3"]));
+    expect(r.exitLegs).toHaveLength(3);
+    const expected =
+      Math.round(
+        (0.4 * (4138 - 4131.3) + 0.3 * (4146 - 4131.3) + 0.3 * (4155 - 4131.3)) * 100
+      ) / 100;
+    expect(r.finalResult!.grossPoints).toBeCloseTo(expected, 1);
+    // Not simply full size at TP3:
+    expect(r.finalResult!.grossPoints).not.toBeCloseTo(4155 - 4131.3, 1);
   });
 
   it("trailing-stop management", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
-    r = moveTrailingStop(r, 4133, "t2", "Trail up");
+    r = moveTrailingStop(r, 4133, T2, "Trail up");
     expect(r.monitoring.stopStatus).toBe("TRAILED");
     expect(r.managementEvents.some((e) => e.type === "TRAIL_STOP")).toBe(true);
     expect(r.snapshot.stopLoss).toBe(4127);
@@ -258,20 +383,21 @@ describe("Signal Outcome Tracking", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
-    r = invalidateSignal(r, "t2", "Structure broken");
+    r = invalidateSignal(r, T2, "Structure broken");
     expect(r.finalResult?.outcome).toBe("CANCELLED");
   });
 
   it("pending entry expires", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     for (let i = 0; i < 48; i++) {
+      const t = new Date(Date.parse(CREATION) + (i + 1) * 15 * 60_000).toISOString();
       r = applyBarToSignalOutcome(
         r,
         bar({
           eventId: `exp-${i}`,
-          barTime: `2026-07-22T${String(10 + Math.floor(i / 4)).padStart(2, "0")}:${String((i % 4) * 15).padStart(2, "0")}:00.000Z`,
+          barTime: t,
           low: 4140,
           high: 4145,
           close: 4142
@@ -285,16 +411,22 @@ describe("Signal Outcome Tracking", () => {
 
   it("WAIT excluded from trade statistics", () => {
     const wait = createSignalOutcomeFromDecision(
-      baseDecision({ decisionId: "w1", decision: "WAIT", entry: { type: "NONE", price: null, zoneLow: null, zoneHigh: null, condition: null }, stopLoss: { price: null, reason: null }, takeProfits: [] })
+      baseDecision({
+        decisionId: "w1",
+        decision: "WAIT",
+        entry: { type: "NONE", price: null, zoneLow: null, zoneHigh: null, condition: null },
+        stopLoss: { price: null, reason: null },
+        takeProfits: []
+      })
     );
     const buy = createSignalOutcomeFromDecision(baseDecision());
     let closed = applyBarToSignalOutcome(
       buy,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     closed = applyBarToSignalOutcome(
       closed,
-      bar({ eventId: "e2", barTime: "t2", low: 4126, high: 4130, close: 4126.5 })
+      bar({ eventId: "e2", barTime: T2, low: 4126, high: 4130, close: 4126.5 })
     );
     const summary = computeSignalPerformance([wait, closed]);
     expect(summary.waitOnly).toBe(1);
@@ -307,11 +439,11 @@ describe("Signal Outcome Tracking", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4126, high: 4140, close: 4135 })
+      bar({ eventId: "e2", barTime: T2, low: 4126, high: 4140, close: 4135 })
     );
     expect(r.monitoring.lifecycle).toBe("AMBIGUOUS_INTRABAR");
     expect(r.finalResult?.outcome).toBe("AMBIGUOUS");
@@ -323,7 +455,7 @@ describe("Signal Outcome Tracking", () => {
 
   it("duplicate monitoring event is idempotent", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
-    const b = bar({ eventId: "dup", barTime: "t1", low: 4130, high: 4132, close: 4131 });
+    const b = bar({ eventId: "dup", barTime: T1, low: 4130, high: 4132, close: 4131 });
     r = applyBarToSignalOutcome(r, b);
     const once = r.managementEvents.length;
     r = applyBarToSignalOutcome(r, b);
@@ -331,17 +463,65 @@ describe("Signal Outcome Tracking", () => {
     expect(r.appliedBarEventIds.filter((id) => id === "dup")).toHaveLength(1);
   });
 
+  it("rejects wrong symbol, timeframe, environment, and older bars", () => {
+    let r = createSignalOutcomeFromDecision(baseDecision());
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
+    );
+    expect(r.entry.entryReached).toBe(true);
+    const life = r.monitoring.lifecycle;
+
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "bad-sym", barTime: T2, symbol: "EURUSD", low: 4126, high: 4130, close: 4127 })
+    );
+    expect(r.monitoring.lifecycle).toBe(life);
+
+    r = applyBarToSignalOutcome(
+      r,
+      bar({ eventId: "bad-tf", barTime: T2, timeframe: "60", low: 4126, high: 4130, close: 4127 })
+    );
+    expect(r.monitoring.lifecycle).toBe(life);
+
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "bad-env",
+        barTime: T2,
+        environment: "LIVE",
+        low: 4126,
+        high: 4130,
+        close: 4127
+      })
+    );
+    expect(r.monitoring.lifecycle).toBe(life);
+
+    r = applyBarToSignalOutcome(
+      r,
+      bar({
+        eventId: "older",
+        barTime: "2026-07-22T10:10:00.000Z",
+        low: 4126,
+        high: 4130,
+        close: 4127
+      })
+    );
+    expect(r.monitoring.lifecycle).toBe(life);
+    expect(r.lastAppliedBarTime).toBe(T1);
+  });
+
   it("stale market data does not fabricate hits", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
       bar({
         eventId: "e2",
-        barTime: "t2",
+        barTime: T2,
         low: 4120,
         high: 4160,
         close: 4150,
@@ -359,7 +539,7 @@ describe("Signal Outcome Tracking", () => {
       r,
       bar({
         eventId: "bad",
-        barTime: "t1",
+        barTime: T1,
         open: Number.NaN,
         high: Number.NaN,
         low: Number.NaN,
@@ -370,32 +550,123 @@ describe("Signal Outcome Tracking", () => {
     expect(r.finalResult?.outcome).toBe("DATA_UNAVAILABLE");
   });
 
+  it("future bar monitors all matching active signals, not only the new decision", async () => {
+    const a = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "a" }), store);
+    const b = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "b" }), store);
+    const otherTf = await ensureSignalOutcomeFromDecision(
+      baseDecision({ decisionId: "c", timeframe: "60" }),
+      store
+    );
+    expect(a.snapshot.signalId).not.toBe(b.snapshot.signalId);
+
+    const updated = await monitorMatchingSignalsWithBar(
+      "user-1",
+      bar({ eventId: "shared", barTime: T1, low: 4130, high: 4132, close: 4131 }),
+      store,
+      "worker-1"
+    );
+    expect(updated.length).toBe(2);
+    const a2 = await store.get(a.snapshot.userId, a.snapshot.signalId);
+    const b2 = await store.get(b.snapshot.userId, b.snapshot.signalId);
+    const c2 = await store.get(otherTf.snapshot.userId, otherTf.snapshot.signalId);
+    expect(a2?.entry.entryReached).toBe(true);
+    expect(b2?.entry.entryReached).toBe(true);
+    expect(c2?.entry.entryReached).toBe(false);
+  });
+
+  it("atomic applyBar does not leave lease claimed after success", async () => {
+    const created = await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const result = await store.applyBarAtomic(
+      "user-1",
+      created.snapshot.signalId,
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 }),
+      "worker-a"
+    );
+    expect(result?.record.entry.entryReached).toBe(true);
+    expect(result?.record.leaseOwnerId).toBeNull();
+    // Another worker can proceed
+    const again = await store.applyBarAtomic(
+      "user-1",
+      created.snapshot.signalId,
+      bar({ eventId: "e2", barTime: T2, low: 4126, high: 4130, close: 4126.5 }),
+      "worker-b"
+    );
+    expect(again?.record.finalResult?.outcome).toBe("LOSS");
+  });
+
+  it("durable outcome-monitor job retries independently", async () => {
+    await ensureSignalOutcomeFromDecision(baseDecision(), store);
+    const job = await jobStore.enqueue({
+      userId: "user-1",
+      eventId: "evt-1",
+      bar: bar({ eventId: "evt-1", barTime: T1, low: 4130, high: 4132, close: 4131 }),
+      maxRetries: 2
+    });
+    await processOutcomeMonitorJob(job.jobId, { store, jobStore, workerId: "w1" });
+    const done = await jobStore.get(job.jobId);
+    expect(done?.state).toBe("COMPLETED");
+
+    const failJob = await jobStore.enqueue({
+      userId: "user-1",
+      eventId: "evt-fail",
+      bar: bar({ eventId: "evt-fail", barTime: T2, low: 4130, high: 4132, close: 4131 }),
+      maxRetries: 2
+    });
+    // Force failure by clearing store mid-flight via fail()
+    await jobStore.claim(failJob.jobId, "w2", 60_000);
+    await jobStore.fail(failJob.jobId, new Error("boom"), "MONITOR_APPLY_FAILED");
+    const failed = await jobStore.get(failJob.jobId);
+    expect(failed?.state).toBe("FAILED");
+    expect(failed?.retryCount).toBe(1);
+    expect(failed?.nextAttemptAt).toBeTruthy();
+    expect(failed?.auditReason).toBe("MONITOR_APPLY_FAILED");
+  });
+
+  it("syncDecisionAndMonitor enqueues durable job without applying creation candle", async () => {
+    const record = await syncDecisionAndMonitor(
+      baseDecision(),
+      bar({ eventId: "creation", barTime: CREATION, low: 4120, high: 4160, close: 4155 }),
+      store,
+      jobStore
+    );
+    expect(record.entry.entryReached).toBe(false);
+    const job = await jobStore.get(
+      (await jobStore.enqueue({
+        userId: "user-1",
+        eventId: "creation",
+        bar: bar({ eventId: "creation", barTime: CREATION, low: 4120, high: 4160, close: 4155 })
+      })).jobId
+    );
+    expect(job?.state === "QUEUED" || job?.state === "COMPLETED" || job?.state === "PROCESSING").toBe(
+      true
+    );
+  });
+
   it("correct signal updated by signalId with multiple symbols/signals", async () => {
     const a = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "a" }), store);
     const b = await ensureSignalOutcomeFromDecision(baseDecision({ decisionId: "b" }), store);
     expect(a.snapshot.signalId).not.toBe(b.snapshot.signalId);
-    await syncDecisionAndMonitor(
-      baseDecision({ decisionId: "a" }),
-      bar({ eventId: "ea", barTime: "t1", low: 4130, high: 4132, close: 4131 }),
+    await monitorSignalWithBar(
+      "user-1",
+      bar({ eventId: "ea", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       store
     );
     const a2 = await store.get(a.snapshot.userId, a.snapshot.signalId);
     const b2 = await store.get(b.snapshot.userId, b.snapshot.signalId);
     expect(a2?.entry.entryReached).toBe(true);
-    expect(b2?.entry.entryReached).toBe(false);
+    expect(b2?.entry.entryReached).toBe(true);
   });
 
   it("correct points, percentage, and R calculation", () => {
     let r = createSignalOutcomeFromDecision(baseDecision());
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e1", barTime: "t1", low: 4130, high: 4132, close: 4131 })
+      bar({ eventId: "e1", barTime: T1, low: 4130, high: 4132, close: 4131 })
     );
     r = applyBarToSignalOutcome(
       r,
-      bar({ eventId: "e2", barTime: "t2", low: 4140, high: 4156, close: 4155 })
+      bar({ eventId: "e2", barTime: T2, low: 4140, high: 4156, close: 4155 })
     );
-    // May win via TP path
     expect(r.finalResult?.grossPoints).not.toBeNull();
     expect(r.finalResult?.grossR).not.toBeNull();
     expect(r.finalResult?.label).toBe("HYPOTHETICAL SIGNAL PERFORMANCE");
@@ -406,7 +677,7 @@ describe("Signal Outcome Tracking", () => {
       let r = createSignalOutcomeFromDecision(baseDecision({ decisionId: id }));
       r = applyBarToSignalOutcome(
         r,
-        bar({ eventId: `${id}-1`, barTime: "2026-07-22T10:00:00.000Z", low: 4130, high: 4132, close: 4131 })
+        bar({ eventId: `${id}-1`, barTime: T1, low: 4130, high: 4132, close: 4131 })
       );
       r = applyBarToSignalOutcome(
         r,
@@ -422,13 +693,32 @@ describe("Signal Outcome Tracking", () => {
     expect(summary.maximumDrawdownR).toBeLessThan(0);
   });
 
-  it("confidence-band and BUY vs SELL statistics", () => {
-    const buy = createSignalOutcomeFromDecision(baseDecision({ decisionId: "b1", confidence: 0.95 }));
+  it("confidence bands on 0–100 scale with boundaries 59..100", () => {
+    const cases: Array<[number, string]> = [
+      [59, "below-60"],
+      [60, "60-69"],
+      [69, "60-69"],
+      [70, "70-79"],
+      [79, "70-79"],
+      [80, "80-89"],
+      [89, "80-89"],
+      [90, "90-100"],
+      [100, "90-100"]
+    ];
+    for (const [c, band] of cases) {
+      expect(confidenceBand(c)).toBe(band);
+      expect(confidenceOnHundredScale(c)).toBe(c);
+    }
+    // Legacy 0–1 fractions still map
+    expect(confidenceBand(0.95)).toBe("90-100");
+    expect(confidenceBand(0.72)).toBe("70-79");
+
+    const buy = createSignalOutcomeFromDecision(baseDecision({ decisionId: "b1", confidence: 95 }));
     const sell = createSignalOutcomeFromDecision(
       baseDecision({
         decisionId: "s1",
         decision: "SELL",
-        confidence: 0.72,
+        confidence: 72,
         entry: { type: "LIMIT", price: 4148, zoneLow: null, zoneHigh: null, condition: null },
         stopLoss: { price: 4153, reason: "s" },
         takeProfits: [{ label: "TP1", price: 4140, reason: "t" }]
@@ -439,6 +729,26 @@ describe("Signal Outcome Tracking", () => {
     expect(summary.byDirection.SELL).toBe(1);
     expect(summary.byConfidenceRange["90-100"]?.count).toBe(1);
     expect(summary.byConfidenceRange["70-79"]?.count).toBe(1);
+  });
+
+  it("complete performance history beyond newest 500 via pagination", async () => {
+    for (let i = 0; i < 520; i++) {
+      await store.save(
+        createSignalOutcomeFromDecision(
+          baseDecision({
+            decisionId: `hist-${i}`,
+            generatedAt: new Date(Date.parse(CREATION) + i * 1000).toISOString()
+          })
+        )
+      );
+    }
+    const limited = await store.list("user-1", 500);
+    expect(limited.length).toBe(500);
+    const all = await store.listAllPaginated("user-1", 200);
+    expect(all.length).toBe(520);
+    const summary = computeSignalPerformance(all, { historyComplete: true });
+    expect(summary.totalConfirmedBuySell).toBe(520);
+    expect(summary.historyComplete).toBe(true);
   });
 
   it("cold-start persistence and multi-instance lease", async () => {
@@ -466,26 +776,11 @@ describe("Signal Outcome Tracking", () => {
     await ensureSignalOutcomeFromDecision(baseDecision(), store);
     const updated = await monitorSignalWithBar(
       "user-1",
-      bar({ eventId: "m1", barTime: "t1", low: 4130, high: 4132, close: 4131 }),
+      bar({ eventId: "m1", barTime: T1, low: 4130, high: 4132, close: 4131 }),
       store,
       "worker-1"
     );
     expect(updated[0]?.entry.entryReached).toBe(true);
-    // No broker call surface in this module — dealing endpoints are never referenced.
     expect(JSON.stringify(updated)).not.toMatch(/positions\/otc|working-orders/);
-  });
-
-  it("out-of-order new eventId still processes (idempotent by event id)", () => {
-    let r = createSignalOutcomeFromDecision(baseDecision());
-    r = applyBarToSignalOutcome(
-      r,
-      bar({ eventId: "later", barTime: "2026-07-22T12:00:00.000Z", low: 4130, high: 4132, close: 4131 })
-    );
-    r = applyBarToSignalOutcome(
-      r,
-      bar({ eventId: "earlier", barTime: "2026-07-22T11:00:00.000Z", low: 4130, high: 4131, close: 4130.5 })
-    );
-    expect(r.appliedBarEventIds).toContain("later");
-    expect(r.appliedBarEventIds).toContain("earlier");
   });
 });

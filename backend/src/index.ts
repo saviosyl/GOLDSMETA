@@ -19,6 +19,7 @@ import { buildV5Router } from "./routes/v5";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { AiExplainer } from "./services/ai/explainer";
 import { processJob } from "./services/jobs/processJob";
+import { processOutcomeMonitorJob } from "./services/signalOutcome/monitor";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
@@ -119,6 +120,14 @@ export const processProcessingJob = onDocumentCreated(
   { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
   async (event) => {
     await processJob(event.params.jobId);
+  }
+);
+
+/** Durable signal-outcome bar monitor — retries independently of decision jobs. */
+export const processOutcomeMonitorJobDoc = onDocumentCreated(
+  { document: "outcomeMonitorJobs/{jobId}", region: env.FIREBASE_REGION },
+  async (event) => {
+    await processOutcomeMonitorJob(event.params.jobId);
   }
 );
 
