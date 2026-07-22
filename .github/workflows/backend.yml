@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Java (Firestore emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Lint
         # Stocks Intraday PR is stacked on the IG AutoTrade base. IG autoTrade lint
         # debt is owned by PR #21 — do not block this PR's CI on those inherited files.
