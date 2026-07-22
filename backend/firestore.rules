@@ -58,6 +58,58 @@ service cloud.firestore {
         allow read: if false;
         allow write: if false;
       }
+
+      // V6 AutoTrade — owner read; client write forbidden (Admin SDK only).
+      // Clients must never mark trade intents APPROVED/ACCEPTED/OPEN/CLOSED.
+      match /brokerSettings/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeRiskState/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /tradeIntents/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerExecutions/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerPositions/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerEvents/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeAudit/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeLocks/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerConnections/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeActivity/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Isolated V6 preview AutoTrade namespace (server Admin SDK only).
+      match /autoTradePreview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /tradeIntentDealRefs/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
     }
 
     match /webhookConnections/{webhookId} {

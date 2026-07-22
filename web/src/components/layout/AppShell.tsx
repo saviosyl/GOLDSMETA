@@ -11,6 +11,7 @@ const DESKTOP_LINKS = [
 ];
 
 const DESKTOP_SECONDARY = [
+  { to: "/autotrade", label: "AutoTrade" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
@@ -25,6 +26,7 @@ const MOBILE_PRIMARY = [
 ];
 
 const MOBILE_MORE = [
+  { to: "/autotrade", label: "AutoTrade" },
   { to: "/journal", label: "Journal" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
