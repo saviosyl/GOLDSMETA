@@ -138,14 +138,16 @@ export async function runStockIntradaySchedulerForUser(
 /** Capabilities checklist for documentation / status. */
 export const INTRADAY_ENGINE_CAPABILITIES = [
   "Scheduled watchlist scans",
-  "TradingView-triggered scans",
+  "TradingView-triggered scans (analysis; automatic entry only when source verified)",
   "Entry evaluation",
   "Open-position monitoring",
   "Stop-loss evaluation",
   "Take-profit evaluation",
   "Trailing-stop evaluation",
   "Break-even evaluation",
-  "Strategy invalidation",
+  "VWAP loss exit",
+  "Indicator reversal exit",
+  "Trend invalidation exit",
   "Maximum holding-time exit",
   "Entry cutoff before market close",
   "End-of-day forced close",

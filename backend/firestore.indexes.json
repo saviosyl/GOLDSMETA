@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "stockIntradayRetryIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "decisions",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

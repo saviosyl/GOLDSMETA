@@ -131,28 +131,76 @@ export const buildStockIntradayRouter = (service: StockIntradayService): Router 
 
   router.post("/v1/stock-intraday/webhook-connection", requireAuth, async (req, res) => {
     const body = z
-      .object({ label: z.string().min(1).max(80).optional() })
+      .object({
+        label: z.string().min(1).max(80).optional(),
+        expiresInDays: z.number().int().min(1).max(365).optional()
+      })
       .safeParse(req.body ?? {});
     const label = body.success && body.data.label ? body.data.label : "TradingView Stocks";
-    const created = await service.createWebhookConnection(getAuthenticatedUserId(req), label);
+    const created = await service.createWebhookConnection(getAuthenticatedUserId(req), label, {
+      expiresInDays: body.success ? body.data.expiresInDays : undefined
+    });
     res.status(201).json({
       connectionId: created.connectionId,
       webhookPath: created.webhookPath,
       webhookUrlTemplate: created.webhookUrlTemplate,
+      expiresAt: created.expiresAt,
+      enabled: created.enabled,
       note:
-        "Configure TradingView alert webhook URL to this path only. " +
-        "Do not put passwords, Trading 212 credentials, or secrets in the alert message. " +
-        "Auth is the unguessable connectionId path segment."
+        "Configure TradingView alert webhook URL to this path. " +
+        "connectionId is a non-secret routing identifier only — not a reusable credential. " +
+        "Do not put passwords or Trading 212 credentials in the alert message. " +
+        "Automatic entry requires verified TradingView source (trusted edge IP/cert) " +
+        "plus independent GoldMeta market-data scan and risk checks."
     });
   });
 
+  router.post(
+    "/v1/stock-intraday/webhook-connection/:connectionId/revoke",
+    requireAuth,
+    async (req, res) => {
+      const connectionId = String(req.params.connectionId ?? "");
+      const ok = await service.revokeWebhookConnection(getAuthenticatedUserId(req), connectionId);
+      if (!ok) {
+        res.status(404).json({ error: { code: "WEBHOOK_NOT_FOUND", message: "Not found" } });
+        return;
+      }
+      res.json({ revoked: true });
+    }
+  );
+
+  router.post(
+    "/v1/stock-intraday/webhook-connection/:connectionId/rotate",
+    requireAuth,
+    async (req, res) => {
+      const connectionId = String(req.params.connectionId ?? "");
+      try {
+        const created = await service.rotateWebhookConnection(
+          getAuthenticatedUserId(req),
+          connectionId
+        );
+        res.status(201).json(created);
+      } catch (error) {
+        res.status(404).json({
+          error: {
+            code: (error as { code?: string }).code ?? "WEBHOOK_NOT_FOUND",
+            message: error instanceof Error ? error.message : "Not found"
+          }
+        });
+      }
+    }
+  );
+
   /**
    * Authenticated UI/test signal ingress. TradingView production alerts must use
-   * `/webhooks/stock-intraday/:connectionId` with the webhook token (no Firebase session).
+   * `/webhooks/stock-intraday/:connectionId`. Firebase session auth authorizes this path.
    * Fast ACK + durable job; never fire-and-forget in-process processing.
    */
   router.post("/v1/stock-intraday/signals/tradingview", requireAuth, async (req, res) => {
-    const ack = await service.acknowledgeStockSignal(getAuthenticatedUserId(req), req.body);
+    const ack = await service.acknowledgeStockSignal(getAuthenticatedUserId(req), req.body, {
+      authorizesAutomaticEntry: true,
+      sourceVerified: true
+    });
     if (!ack.accepted) {
       res.status(400).json({ error: { code: ack.code, message: ack.code } });
       return;

@@ -26,6 +26,10 @@ export interface MockMarketDataOptions {
   rsi?: number;
   atr?: number;
   vwap?: number;
+  ema21?: number;
+  ema50?: number;
+  ema200?: number;
+  broadMarketTrend?: MarketIndicators["broadMarketTrend"];
   stale?: boolean;
   outage?: boolean;
 }
@@ -54,6 +58,10 @@ export class MockMarketDataProvider implements MarketDataProvider {
     rsi: number;
     atr: number;
     vwap: number;
+    ema21: number | null;
+    ema50: number | null;
+    ema200: number | null;
+    broadMarketTrend: MarketIndicators["broadMarketTrend"];
     stale: boolean;
     outage: boolean;
   };
@@ -72,6 +80,10 @@ export class MockMarketDataProvider implements MarketDataProvider {
       rsi: opts.rsi ?? 58,
       atr: opts.atr ?? 1.5,
       vwap: opts.vwap ?? last - 0.2,
+      ema21: opts.ema21 ?? last - 0.3,
+      ema50: opts.ema50 ?? last - 0.8,
+      ema200: opts.ema200 ?? last - 2,
+      broadMarketTrend: opts.broadMarketTrend ?? "BULL",
       stale: opts.stale ?? false,
       outage: opts.outage ?? false
     };
@@ -124,9 +136,9 @@ export class MockMarketDataProvider implements MarketDataProvider {
       symbol,
       vwap: this.opts.vwap,
       ema9: this.opts.last - 0.1,
-      ema21: this.opts.last - 0.3,
-      ema50: this.opts.last - 0.8,
-      ema200: this.opts.last - 2,
+      ema21: this.opts.ema21,
+      ema50: this.opts.ema50,
+      ema200: this.opts.ema200,
       rsi: this.opts.rsi,
       atr: this.opts.atr,
       relativeVolume: this.opts.relativeVolume,
@@ -134,7 +146,7 @@ export class MockMarketDataProvider implements MarketDataProvider {
       currentVolume: this.opts.averageDailyVolume * this.opts.relativeVolume,
       volatilityPct: this.opts.volatilityPct,
       relativeStrength: 1.05,
-      broadMarketTrend: "BULL",
+      broadMarketTrend: this.opts.broadMarketTrend,
       sectorTrend: "BULL",
       sessionStatus: this.opts.sessionStatus,
       minutesToClose: this.opts.minutesToClose,

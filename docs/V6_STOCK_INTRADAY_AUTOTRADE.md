@@ -29,29 +29,51 @@ Flags (hard-coded false):
 - `T212_PAPER_ORDER_SUBMISSION_ENABLED=false`
 - `T212_LIVE_EXECUTION_FEATURE_FLAG=false`
 
+## Shared deployment generation
+
+All Stock Intraday Cloud Run / Functions services (API, Firestore job trigger,
+scheduler, retry tick) **must** share one explicit value:
+
+```
+STOCK_INTRADAY_DEPLOYMENT_GENERATION=<same-string>
+```
+
+`K_REVISION` is **never** used as a fallback — services may have different
+revisions. Missing the explicit variable fails closed outside test / explicit
+local development (`STORAGE_BACKEND=memory` or
+`STOCK_INTRADAY_ALLOW_LOCAL_GENERATION=1`).
+
+A new function instance with the same generation must not re-pause an already
+reconciled SHADOW engine.
+
 ## Architecture
 
 ```
-TradingView webhook (secret token)
+TradingView webhook (routing id in path)
         │
         ▼
-Auth (hash verify) → validate payload → atomic alert dedupe
+Trusted-edge source verify (TV cert CN / allowlisted IP)
+        │  (if unavailable → store/analyse only; no auto entry)
+        ▼
+Hash routing id → Firestore lookup → enabled/expiry/rate-limit
         │
         ▼
-Persist signal + durable job (Firestore) ──► HTTP 202
+Validate payload → atomic alert dedupe → durable job → HTTP 202
         │
         ▼
 onDocumentCreated(jobs) → claim lease → process
         │
         ▼
-rankingEngine → riskEngine → positionSizing → stateMachine
+Internal market-data scan + rankingEngine + riskEngine (independent confirm)
         │
         ▼
-SHADOW records / PAPER+LIVE blocked by flags
+SHADOW records / PAPER pending reservation / LIVE blocked by flags
 ```
 
-Runtime storage: **`FirestoreStockIntradayStore`** (production/dev).  
-`InMemoryStockIntradayStore` is for unit tests / explicit `STORAGE_BACKEND=memory` local only — never a silent production fallback.
+Runtime storage: **`FirestoreStockIntradayStore`**.  
+`InMemoryStockIntradayStore` is for unit tests / explicit `STORAGE_BACKEND=memory`
+local only — never a silent production fallback. Multi-instance safety is covered
+by Firestore Emulator integration tests, not InMemory alone.
 
 ### Firestore layout (`users/{userId}/stockIntraday/data/…`)
 
@@ -62,139 +84,119 @@ Runtime storage: **`FirestoreStockIntradayStore`** (production/dev).
 | `restartGate/current` | Persistent restart / entries-paused gate |
 | `signals/{alertId}` | Signal records |
 | `alertIds/{alertId}` | Atomic alert dedupe keys |
-| `intents/{intentId}` | Trade intents |
+| `intents/{intentId}` | Trade intents + entryReservationState |
 | `idempotency/{key}` | Intent idempotency + lease |
 | `reservations/{intentId}` | Cash/exposure reservations |
 | `positions/{positionId}` | GoldMeta-managed positions |
 | `exitReservations/{positionId}` | Exit reservation locks |
 | `reconciliation/{id}` | Pending/ambiguous reconcile records |
-| `cooldowns/{symbol}` | Symbol cooldowns |
-| `shadowTrades/{id}` | Hypothetical SHADOW fills |
-| `activity/{id}` / `audit/{id}` | Activity + audit |
+| `cooldowns/{symbol}` | Symbol / loss cooldowns |
+| `shadowTrades/{id}` | Hypothetical SHADOW fills with full P/L |
+| `activity/{id}` / `audit/{id}` | Activity + audit (no raw routing ids) |
 | `jobs/{jobId}` | Durable processing jobs |
-| `webhookConnections/{id}` | Per-user webhook mirrors |
+| `webhookConnections/{routingIdHash}` | Per-user webhook mirrors (hashed keys) |
+| `dashboard/current` | Persisted dashboard snapshot |
 
 Root collections:
 
-- `stockIntradayWebhookConnections/{connectionId}` — token hash → owner userId
+- `stockIntradayWebhookConnections/{routingIdHash}` — hashed routing id → owner
 - `stockIntradaySchedulerUsers/{userId}` — SHADOW scheduler registry
+- `stockIntradayRetryIndex` — composite index `(state ASC, nextAttemptAt ASC)`
 
-### Transaction boundaries
+## TradingView webhook security
 
-Firestore transactions (or in-memory mutex) protect:
+TradingView is an **untrusted** signal source.
 
-- Alert deduplication (`reserveAlert`)
-- Trade-intent idempotency (`reserveIntent`)
-- Cash/exposure reservation (`reserveCash`)
-- Daily trade-count / allocation increments
-- Position slot reservation
-- Exit reservation
-- Job claim / complete / fail (+ dead-letter)
+Official guidance: do **not** put credentials in the webhook URL or message.
+TradingView documents:
 
-## TradingView webhook authentication
+- Client certificate: Subject O=`TradingView, Inc.`, CN=`webhook-server@tradingview.com`
+- Source IP allowlist: `52.89.214.238`, `34.212.75.30`, `54.218.53.128`, `52.32.178.7`
 
-TradingView official support: alerts POST to a URL with the message body only.
-Custom HTTP headers are **not** supported. Official guidance: do **not** put
-passwords or login credentials in the webhook body.
+### Firebase Functions limitation
 
-**Supported GoldMeta setup (capability URL):**
+Firebase Functions Gen2 (Cloud Run) does **not** expose TradingView client
+certificates to application code. Reliable mTLS / peer-IP attestation requires a
+trusted edge (custom load balancer / Cloud Armor) in front. Client-supplied
+`X-Forwarded-For` is **never** trusted.
+
+When reliable verification is unavailable:
+
+- Signals may be stored and analysed
+- They must **not** independently authorize automatic entry
+- An internal market-data scan and all GoldMeta risk checks must independently
+  confirm the opportunity (scheduled SHADOW scan path)
+
+### Connection lifecycle
 
 1. Authenticated UI: `POST /v1/stock-intraday/webhook-connection`
-2. Configure TradingView alert **Webhook URL** to:
+2. Configure TradingView alert URL:
 
 ```
 https://<CLOUD_FUNCTIONS_HOST>/webhooks/stock-intraday/<CONNECTION_ID>
 ```
 
-`<CONNECTION_ID>` is an unguessable opaque path token mapped server-side to the
-owner. Query-string tokens (`?token=`) are **rejected**.
+`<CONNECTION_ID>` is a **non-secret routing identifier** only. Lookup hashes the
+path value before Firestore get. Mirrors use the hash as the document id.
 
-3. Alert message = JSON signal fields only — **no** passwords, Trading 212 API
-   keys/secrets, or reusable auth secrets in the payload.
+3. Features: enabled/disabled, expiry, last-used, per-connection rate limit,
+   authenticated revoke (`…/revoke`), rotation (`…/rotate`), constant-time hash
+   compare. Unused `secretHash` / failure-lock fields removed.
+4. Audit logs store hash prefixes only — never raw routing/capability values.
+5. Alert message = JSON signal fields only — no passwords or T212 secrets.
 
-### JSON payload template (placeholders only)
+## Paper pending entry reservations
 
-```json
-{
-  "alertId": "{{timenow}}-AAPL-ENTRY",
-  "strategyId": "momentum_breakout",
-  "symbol": "AAPL",
-  "exchange": "NASDAQ",
-  "timeframe": "5m",
-  "action": "ENTRY_LONG",
-  "price": 180.25,
-  "timestamp": "{{timenow}}",
-  "barTime": "{{timenow}}",
-  "barClosed": true,
-  "volume": 1000000,
-  "confidence": 85,
-  "reasonCodes": ["BREAKOUT"]
-}
-```
+`reserveEntryAtomically` reserves capacity before a broker fill:
 
-Rotate by creating a new connection and updating the TradingView URL; revoke the old connectionId.
+- Pending position slot, daily trade slot, daily allocation, portfolio/symbol
+  exposure, cash, idempotency key, intent
+
+States: `RESERVED` | `SUBMITTED` | `FILLED` | `CANCELLED` | `RELEASED` | `UNKNOWN`
+
+Pending Paper reservations count against future concurrent entries. Cancellation
+releases slots/cash/exposure and reverses daily counters. Fill converts to a
+GoldMeta-managed position without double-counting. Paper submission remains
+disabled in this delivery.
+
+## SHADOW exit accounting
+
+Every SHADOW exit persists: exit timestamp, validated exit price, entry price,
+quantity, gross P/L, estimated spread/slippage, estimated FX impact, net realised
+P/L, exit reason, holding duration, strategy, confidence at entry.
+
+Atomic updates: `dailyRealisedPnl`, `losingTradesToday`, `dailyUnrealisedPnl`,
+intent `CLOSED` + `exitReason`, position removal, cash release, symbol cooldown,
+loss cooldown when negative. Enforces `maxLosingTradesPerDay`, `maxDailyLoss`,
+`perSymbolCooldownMinutes`, `cooldownAfterLossMinutes`. Loss limits lock/pause
+SHADOW and preserve audit information.
+
+## Exit capabilities (SHADOW — implemented)
+
+- Hard stop / take profit
+- Trailing stop
+- Break-even movement
+- VWAP loss
+- Indicator reversal
+- Trend invalidation
+- Maximum holding time
+- End-of-day exit
 
 ## Durable asynchronous processing
 
 Webhook / authenticated ACK path:
 
-1. Authenticate (webhook) or Firebase session (UI test route only)
+1. Authenticate (webhook routing + optional trusted-edge source verify) or Firebase session (UI test)
 2. Validate basic payload
 3. Atomically reject duplicate alert IDs
 4. Store signal
-5. Create durable `PROCESS_SIGNAL` job
-6. Return **HTTP 202** quickly — **no** `void processQueuedSignal(...)`
-
-Cloud Function `onStockIntradayJobCreated` claims a lease, increments attempts, processes, completes or fails → dead-letter after max attempts. Safe under duplicate trigger delivery.
+5. Create durable `PROCESS_SIGNAL` job (`authorizesAutomaticEntry` flag)
+6. Return **HTTP 202** quickly
 
 ## Automatic intraday engine
 
-`stockIntradaySchedulerTick` (every 5 minutes, US/Eastern) enqueues:
-
-- Scheduled watchlist scans (SHADOW only while Paper/Live submission disabled)
-- Open-position monitoring (stops, TP, trailing/BE hooks, invalidation, max hold, EOD)
-- Market-data health checks
-- Broker reconciliation / market-close sweep job kinds
-
-Cadence is coarse on purpose (provider rate limits + Firebase cost).
-
-## Fail-closed market / broker inputs
-
-No placeholders:
-
-- Symbols must verify against Trading 212 instrument list; unavailable → **BLOCKED**
-- No default `instrumentType = STOCK`
-- `minutesToClose`, slippage, available cash, `minTradeQuantity` come from provider/broker; missing → **BLOCKED**
-
-## Restart and reconciliation
-
-On process boot (persisted `restartGate`, not a process-local `Set`):
-
-- Keep new entries paused
-- Load unresolved intents + broker pending/positions
-- Match only GoldMeta-managed records
-- Lock ambiguous symbols
-- Resume **SHADOW** monitoring only after successful reconciliation
-- Paper/Live execution remain disabled
-
-## API routes
-
-Authenticated (Firebase): `/v1/stock-intraday/*` — status, mode, limits, connect/paper, disconnect, emergency-stop, unlock, reconcile, shadow/scan, webhook-connection, signals/tradingview (UI/test)
-
-Unauthenticated (webhook token): `/webhooks/stock-intraday/:connectionId`
-
-## UI
-
-- `/stocks-intraday` and `/ui-review/stocks-intraday`
-- Nav: Gold CFD · Stocks Intraday
-
-## Known limitations
-
-- No market-data vendor selected yet → real Auto remains disabled outside mock/test
-- T212 protective-stop behaviour for Live not certified → Live stays blocked
-- Paper order submission intentionally false
-- Scheduler requires registered SHADOW users (`stockIntradaySchedulerUsers`)
-- T212 equity API field shapes may vary; HTTP adapter maps defensively and fails closed on missing min qty
+`stockIntradaySchedulerTick` enqueues monitor + scan + health jobs. Cadence is
+coarse on purpose (provider rate limits + Firebase cost).
 
 ## Safety confirmations
 

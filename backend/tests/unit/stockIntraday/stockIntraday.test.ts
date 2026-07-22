@@ -457,7 +457,9 @@ describe("Stock Intraday AutoTrade", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      entryReservationState: null,
+      confidenceAtEntry: 85
     };
     expect(await store.reserveIntent(intent, "key-1")).toBe("reserved");
     expect(await store.reserveIntent({ ...intent, intentId: "i2" }, "key-1")).toBe("duplicate");
@@ -562,7 +564,9 @@ describe("Stock Intraday hardening", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      entryReservationState: null,
+      confidenceAtEntry: 85
     };
     const intentResults = await Promise.all([
       store.reserveIntent({ ...baseIntent, intentId: "i1" }, "same-key"),
@@ -635,13 +639,26 @@ describe("Stock Intraday hardening", () => {
     expect([a?.state, b?.state].filter((s) => s === "COMPLETED").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("TradingView path-capability auth rejects query tokens and unknown connections", async () => {
+  it("TradingView routing id is non-secret; unverified source does not authorize entry", async () => {
     const created = await service.createWebhookConnection("u1", "test");
     expect(created.connectionId.length).toBeGreaterThan(16);
     expect("secret" in created).toBe(false);
 
-    const ok = await service.authenticateWebhook(created.connectionId);
+    const ok = await service.authenticateWebhook(created.connectionId, {
+      trustedSourceIp: "52.89.214.238"
+    });
     expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.sourceVerified).toBe(true);
+      expect(ok.authorizesAutomaticEntry).toBe(true);
+    }
+
+    const unverified = await service.authenticateWebhook(created.connectionId);
+    expect(unverified.ok).toBe(true);
+    if (unverified.ok) {
+      expect(unverified.sourceVerified).toBe(false);
+      expect(unverified.authorizesAutomaticEntry).toBe(false);
+    }
 
     const queryRejected = await service.authenticateWebhook(created.connectionId, {
       queryTokenPresent: true
@@ -653,9 +670,15 @@ describe("Stock Intraday hardening", () => {
 
     const missing = await service.authenticateWebhook("totally-unknown-connection-id");
     expect(missing.ok).toBe(false);
+
+    await service.revokeWebhookConnection("u1", created.connectionId);
+    const revoked = await service.authenticateWebhook(created.connectionId, {
+      trustedSourceIp: "52.89.214.238"
+    });
+    expect(revoked.ok).toBe(false);
   });
 
-  it("webhook HTTP integration returns 202 using path connectionId only", async () => {
+  it("webhook HTTP stores unverified signals without authorizing automatic entry", async () => {
     const created = await service.createWebhookConnection("u1", "tv");
     const app = createApiApp({ stockIntradayService: service });
     const res = await request(app)
@@ -663,9 +686,11 @@ describe("Stock Intraday hardening", () => {
       .send(freshSignal({ alertId: "http-ack-1" }));
     expect(res.status).toBe(202);
     expect(res.body.accepted).toBe(true);
+    expect(res.body.authorizesAutomaticEntry).toBe(false);
     expect(res.body.jobId).toBeTruthy();
     const job = await store.getJob("u1", res.body.jobId);
     expect(job?.state).toBe("QUEUED");
+    expect(job?.payload.authorizesAutomaticEntry).toBe(false);
 
     const rejected = await request(app)
       .post(`/webhooks/stock-intraday/${created.connectionId}?token=should-not-work`)
@@ -751,7 +776,9 @@ describe("Stock Intraday hardening", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         leaseOwner: null,
-        leaseExpiresAt: null
+        leaseExpiresAt: null,
+        entryReservationState: null,
+        confidenceAtEntry: 85
       },
       position: {
         positionId: `p-${symbol}`,
@@ -928,5 +955,278 @@ describe("Stock Intraday hardening", () => {
       kind: "SCHEDULED_SCAN"
     });
     expect(tick.enqueued).toBe(false);
+  });
+
+  it("shared STOCK_INTRADAY_DEPLOYMENT_GENERATION ignores divergent K_REVISION", async () => {
+    const previousGen = process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION;
+    const previousRev = process.env.K_REVISION;
+    process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION = "shared-gen-v1";
+    process.env.K_REVISION = "api-revision-AAA";
+
+    const { currentDeploymentGeneration } = await import(
+      "../../../src/services/stockIntraday/stockIntradayStore"
+    );
+    expect(currentDeploymentGeneration()).toBe("shared-gen-v1");
+
+    await enableShadowReady(service);
+    const gate = await store.getRestartGate("u1");
+    expect(gate.reconciledGeneration).toBe("shared-gen-v1");
+    expect(gate.entriesPaused).toBe(false);
+
+    // Simulate job-trigger / scheduler instances with different K_REVISION.
+    process.env.K_REVISION = "job-trigger-revision-BBB";
+    const jobInstance = new StockIntradayService(store, market, () => broker);
+    await jobInstance.getStatus("u1");
+    expect((await store.getRestartGate("u1")).entriesPaused).toBe(false);
+
+    process.env.K_REVISION = "scheduler-revision-CCC";
+    const schedInstance = new StockIntradayService(store, market, () => broker);
+    await schedInstance.getStatus("u1");
+    expect((await store.getRestartGate("u1")).entriesPaused).toBe(false);
+    expect((await store.getRestartGate("u1")).reconciledGeneration).toBe("shared-gen-v1");
+
+    if (previousGen === undefined) delete process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION;
+    else process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION = previousGen;
+    if (previousRev === undefined) delete process.env.K_REVISION;
+    else process.env.K_REVISION = previousRev;
+  });
+
+  it("fails closed when STOCK_INTRADAY_DEPLOYMENT_GENERATION missing outside test/local", async () => {
+    const previousGen = process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION;
+    const previousApp = process.env.APP_ENV;
+    const previousNode = process.env.NODE_ENV;
+    const previousStorage = process.env.STORAGE_BACKEND;
+    const previousAllow = process.env.STOCK_INTRADAY_ALLOW_LOCAL_GENERATION;
+    delete process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION;
+    delete process.env.STOCK_INTRADAY_ALLOW_LOCAL_GENERATION;
+    process.env.APP_ENV = "production";
+    process.env.NODE_ENV = "production";
+    process.env.STORAGE_BACKEND = "firestore";
+
+    const { currentDeploymentGeneration } = await import(
+      "../../../src/services/stockIntraday/stockIntradayStore"
+    );
+    expect(() => currentDeploymentGeneration()).toThrow(/STOCK_INTRADAY_DEPLOYMENT_GENERATION/);
+
+    if (previousGen === undefined) delete process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION;
+    else process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION = previousGen;
+    if (previousApp === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previousApp;
+    if (previousNode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNode;
+    if (previousStorage === undefined) delete process.env.STORAGE_BACKEND;
+    else process.env.STORAGE_BACKEND = previousStorage;
+    if (previousAllow === undefined) delete process.env.STOCK_INTRADAY_ALLOW_LOCAL_GENERATION;
+    else process.env.STOCK_INTRADAY_ALLOW_LOCAL_GENERATION = previousAllow;
+  });
+
+  it("SHADOW hard-stop loss updates realised P/L, losingTrades, cooldown, and daily-loss lock", async () => {
+    await enableShadowReady(service);
+    await store.saveSettings({
+      ...(await store.getSettings("u1")),
+      limits: {
+        ...DEFAULT_STOCK_INTRADAY_LIMITS,
+        maxDailyLoss: 5,
+        maxLosingTradesPerDay: 1,
+        perSymbolCooldownMinutes: 30,
+        cooldownAfterLossMinutes: 45
+      }
+    });
+
+    await service.runAutonomousScan("u1");
+    const positions = await store.listPositions("u1");
+    expect(positions.length).toBeGreaterThan(0);
+    const pos = positions[0]!;
+    await store.savePosition({ ...pos, stop: 190, entryPrice: 200, highWaterMark: 200 });
+
+    market.setOptions({ last: 185 });
+    await service.monitorOpenPositions("u1");
+
+    expect(await store.listPositions("u1")).toHaveLength(0);
+    const risk = await store.getRiskState("u1");
+    expect(risk.dailyRealisedPnl).toBeLessThan(0);
+    expect(risk.losingTradesToday).toBeGreaterThanOrEqual(1);
+    expect(risk.locked || risk.paused).toBe(true);
+
+    const sell = (await store.listShadowTrades("u1")).find((t) => t.side === "SELL");
+    expect(sell?.netRealizedPnl).toBeLessThan(0);
+    expect(sell?.exitReason).toBeTruthy();
+    expect(sell?.entryPrice).toBe(200);
+    expect(sell?.exitPrice).toBe(185);
+
+    const cooldown = await store.getSymbolCooldown("u1", pos.symbol);
+    expect(cooldown).toBeTruthy();
+    expect(Date.parse(cooldown!)).toBeGreaterThan(Date.now());
+
+    const reentry = await service.evaluateEntryFromSignal(
+      "u1",
+      (parseStockTradingViewSignal(freshSignal({ alertId: "reentry-blocked" })) as {
+        ok: true;
+        signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal;
+      }).signal
+    );
+    expect(reentry.outcome).toBe("BLOCKED");
+  });
+
+  it("evaluates trailing-stop, break-even, VWAP, indicator, trend, max-hold, and EOD exits", async () => {
+    const { evaluateShadowExitRules } = await import(
+      "../../../src/services/stockIntraday/exitRules"
+    );
+    const base = {
+      positionId: "p1",
+      userId: "u1",
+      intentId: "i1",
+      symbol: "AAPL",
+      environment: "PAPER" as const,
+      quantity: 1,
+      entryPrice: 100,
+      stop: 95,
+      takeProfit: 110,
+      currentExitRule: "HARD_STOP",
+      unrealisedPnl: 0,
+      openedAt: new Date(Date.now() - 60_000).toISOString(),
+      goldMetaManaged: true as const,
+      highWaterMark: 100,
+      breakEvenArmed: false
+    };
+
+    const trail = evaluateShadowExitRules({
+      position: { ...base, highWaterMark: 108 },
+      quote: { last: 106.5 },
+      indicators: {},
+      limits: { maxPositionDurationMinutes: 240, forceCloseBeforeCloseMinutes: 10, trailingStopPct: 0.01 }
+    });
+    expect(trail.exitReason).toBe("TRAILING_STOP");
+
+    const be = evaluateShadowExitRules({
+      position: { ...base, highWaterMark: 108, breakEvenArmed: true, stop: 100 },
+      quote: { last: 100 },
+      indicators: {},
+      limits: { maxPositionDurationMinutes: 240, forceCloseBeforeCloseMinutes: 10, breakEvenArmPct: 0.5 }
+    });
+    expect(be.exitReason).toBe("BREAK_EVEN");
+
+    const vwap = evaluateShadowExitRules({
+      position: { ...base, currentExitRule: "VWAP_LOSS", highWaterMark: 100 },
+      quote: { last: 99.5 },
+      indicators: { vwap: 100 },
+      limits: {
+        maxPositionDurationMinutes: 240,
+        forceCloseBeforeCloseMinutes: 10,
+        trailingStopPct: 0.02
+      }
+    });
+    expect(vwap.exitReason).toBe("VWAP_LOSS");
+
+    const reversal = evaluateShadowExitRules({
+      position: { ...base, highWaterMark: 100 },
+      quote: { last: 98.5 },
+      indicators: { rsi: 30, ema21: 99 },
+      limits: {
+        maxPositionDurationMinutes: 240,
+        forceCloseBeforeCloseMinutes: 10,
+        trailingStopPct: 0.05
+      }
+    });
+    expect(reversal.exitReason).toBe("INDICATOR_REVERSAL");
+
+    const trend = evaluateShadowExitRules({
+      position: { ...base, highWaterMark: 100 },
+      quote: { last: 98.5 },
+      indicators: { broadMarketTrend: "BEAR", ema50: 99, ema200: 101 },
+      limits: {
+        maxPositionDurationMinutes: 240,
+        forceCloseBeforeCloseMinutes: 10,
+        trailingStopPct: 0.05
+      }
+    });
+    expect(trend.exitReason).toBe("TREND_INVALIDATION");
+
+    const maxHold = evaluateShadowExitRules({
+      position: { ...base, openedAt: new Date(Date.now() - 300 * 60_000).toISOString() },
+      quote: { last: 101 },
+      indicators: {},
+      limits: { maxPositionDurationMinutes: 240, forceCloseBeforeCloseMinutes: 10 }
+    });
+    expect(maxHold.exitReason).toBe("MAX_HOLDING_TIME");
+
+    const eod = evaluateShadowExitRules({
+      position: base,
+      quote: { last: 101 },
+      indicators: { minutesToClose: 5 },
+      limits: { maxPositionDurationMinutes: 240, forceCloseBeforeCloseMinutes: 10 }
+    });
+    expect(eod.exitReason).toBe("END_OF_DAY");
+  });
+
+  it("Paper pending reservation counts against concurrent capacity then releases on cancel", async () => {
+    const limits = {
+      ...DEFAULT_STOCK_INTRADAY_LIMITS,
+      maxSimultaneousPositions: 1,
+      maxTradesPerDay: 5,
+      dailyCapitalAllocation: 100,
+      maxPortfolioExposure: 500,
+      maxExposurePerSymbol: 100,
+      minCashReserve: 0
+    };
+    const mk = (symbol: string, intentId: string) => ({
+      userId: "u1",
+      idempotencyKey: `paper-pend-${symbol}`,
+      intent: {
+        intentId,
+        userId: "u1",
+        symbol,
+        environment: "PAPER" as const,
+        strategy: "MOMENTUM_BREAKOUT" as const,
+        signalAlertId: symbol,
+        barTimestamp: "t",
+        side: "BUY" as const,
+        state: "ENTRY_RESERVED" as const,
+        quantity: 0.1,
+        estimatedEntry: 180,
+        stop: 178,
+        takeProfit: 185,
+        reservedCash: 18,
+        brokerOrderId: null,
+        filledQuantity: 0,
+        averageFillPrice: null,
+        outcome: null,
+        blockReason: null,
+        exitReason: null,
+        goldMetaManaged: true as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        entryReservationState: null,
+        confidenceAtEntry: 85
+      },
+      position: null,
+      cashAmount: 18,
+      availableCashFromBroker: 5000,
+      limits,
+      openShadowPosition: false,
+      reservePendingCapacity: true
+    });
+
+    const first = await store.reserveEntryAtomically(mk("AAPL", "pp1"));
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.reservationState).toBe("RESERVED");
+
+    const blocked = await store.reserveEntryAtomically(mk("MSFT", "pp2"));
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.code).toBe("MAX_POSITIONS");
+
+    const released = await store.releaseEntryReservationAtomically({
+      userId: "u1",
+      intentId: "pp1",
+      reverseDailyCounters: true,
+      nextState: "CANCELLED",
+      blockReason: "TEST_CANCEL"
+    });
+    expect(released).toBe(true);
+
+    const after = await store.reserveEntryAtomically(mk("MSFT", "pp3"));
+    expect(after.ok).toBe(true);
   });
 });

@@ -107,6 +107,15 @@ export interface RankedIntradayOpportunity {
   invalidationReason: string;
 }
 
+/** Explicit Paper/SHADOW capacity reservation lifecycle. */
+export type EntryReservationState =
+  | "RESERVED"
+  | "SUBMITTED"
+  | "FILLED"
+  | "CANCELLED"
+  | "RELEASED"
+  | "UNKNOWN";
+
 export interface StockTradeIntent {
   intentId: string;
   userId: string;
@@ -133,6 +142,9 @@ export interface StockTradeIntent {
   updatedAt: string;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
+  /** Pending Paper / SHADOW capacity reservation state. */
+  entryReservationState: EntryReservationState | null;
+  confidenceAtEntry: number | null;
 }
 
 export interface StockManagedPosition {
@@ -149,6 +161,32 @@ export interface StockManagedPosition {
   unrealisedPnl: number | null;
   openedAt: string;
   goldMetaManaged: true;
+  /** High-water mark for trailing-stop evaluation. */
+  highWaterMark?: number;
+  /** Break-even stop has been armed. */
+  breakEvenArmed?: boolean;
+  confidenceAtEntry?: number | null;
+  strategy?: StockStrategyProfile;
+}
+
+export interface StockShadowTradeRecord {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  at: string;
+  note: string;
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  exitAt?: string | null;
+  grossPnl?: number | null;
+  estimatedSpreadSlippage?: number | null;
+  estimatedFxImpact?: number | null;
+  netRealizedPnl?: number | null;
+  exitReason?: StockExitReason | null;
+  holdingDurationMinutes?: number | null;
+  strategy?: string | null;
+  confidenceAtEntry?: number | null;
 }
 
 export interface StockIntradayRiskState {
@@ -217,14 +255,7 @@ export interface StockIntradayStatusPayload {
     status: string;
   }>;
   rejectedRecently: Array<{ symbol: string; reason: string; at: string }>;
-  shadowTrades: Array<{
-    id: string;
-    symbol: string;
-    side: "BUY" | "SELL";
-    quantity: number;
-    at: string;
-    note: string;
-  }>;
+  shadowTrades: StockShadowTradeRecord[];
   activity: Array<{
     id: string;
     at: string;

@@ -37,6 +37,16 @@ jobs:
           NODE_ENV: test
           APP_ENV: test
           STORAGE_BACKEND: memory
+          STOCK_INTRADAY_DEPLOYMENT_GENERATION: ci-shared-gen
+
+      - name: Firestore emulator integration tests
+        run: npm run test:emulator
+        env:
+          NODE_ENV: test
+          APP_ENV: test
+          STORAGE_BACKEND: firestore
+          STOCK_INTRADAY_DEPLOYMENT_GENERATION: ci-shared-gen
+          GOOGLE_CLOUD_PROJECT: goldmeta-stock-intraday-emu
 
       - name: Build
         run: npm run build

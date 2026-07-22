@@ -5,7 +5,7 @@
 import { maskSecret } from "./featureFlags";
 
 const SENSITIVE_KEY =
-  /password|passwd|api[_-]?key|api[_-]?secret|secret|token|authorization|credential/i;
+  /password|passwd|api[_-]?key|api[_-]?secret|secret|token|authorization|credential|connectionid/i;
 
 export function redactSecrets<T>(value: T): T {
   return redactValue(value) as T;
@@ -15,13 +15,14 @@ function redactValue(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === "string") {
     if (/Bearer\s+\S+/i.test(value) || /Basic\s+\S+/i.test(value)) return "[REDACTED]";
+    if (/^gm_si_[A-Za-z0-9_-]{16,}$/i.test(value)) return "[REDACTED_ROUTING]";
     return value;
   }
   if (typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(redactValue);
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
-      if (SENSITIVE_KEY.test(key)) {
+      if (SENSITIVE_KEY.test(key) || /^routingid$/i.test(key)) {
         if (typeof entry === "string") return [key, maskSecret(entry)];
         return [key, "[REDACTED]"];
       }

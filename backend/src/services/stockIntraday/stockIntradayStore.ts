@@ -7,6 +7,7 @@ import { nowIso } from "../../utils/time";
 import { DEFAULT_STOCK_INTRADAY_LIMITS } from "./featureFlags";
 import {
   DEFAULT_STOCK_UNIVERSE,
+  type EntryReservationState,
   type StockIntradayRiskState,
   type StockManagedPosition,
   type StockTradeIntent,
@@ -75,16 +76,27 @@ export interface StockIntradayJob {
 }
 
 export interface StockWebhookConnection {
+  /** Public non-secret routing identifier used in the webhook URL path. */
   connectionId: string;
+  /** SHA-256 hex of connectionId — Firestore document key; never log raw id. */
+  routingIdHash: string;
   userId: string;
-  /** SHA-256 hex of secret — never store plaintext. */
-  secretHash: string;
   label: string;
+  enabled: boolean;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  rateLimitWindowMs: number;
+  rateLimitMax: number;
+  rateCount: number;
+  rateWindowStart: string;
   createdAt: string;
   updatedAt: string;
-  failureCount: number;
-  lockedUntil: string | null;
+  /** Hash of previous routing id after rotation (never raw). */
+  rotatedFromRoutingIdHash: string | null;
 }
+
+export type StockCashReservationState = EntryReservationState;
 
 export interface StockCashReservation {
   reservationId: string;
@@ -93,6 +105,8 @@ export interface StockCashReservation {
   amount: number;
   released: boolean;
   createdAt: string;
+  /** Capacity reservation lifecycle for Paper pending / SHADOW. */
+  state: EntryReservationState;
 }
 
 export interface StockReconciliationRecord {
@@ -131,13 +145,47 @@ export interface AtomicEntryReservationInput {
   cashAmount: number;
   availableCashFromBroker: number;
   limits: typeof DEFAULT_STOCK_INTRADAY_LIMITS;
-  /** When true, also open position + increment daily counters and set intent OPEN */
+  /**
+   * SHADOW: open a GoldMeta-managed position immediately (FILLED).
+   * Paper pending: reserve capacity without a broker fill (RESERVED).
+   */
   openShadowPosition: boolean;
+  /** When true (Paper), reserve position/daily/exposure/cash slots before fill. */
+  reservePendingCapacity?: boolean;
 }
 
 export type AtomicEntryReservationResult =
-  | { ok: true; intent: import("./types").StockTradeIntent; position: import("./types").StockManagedPosition | null }
+  | {
+      ok: true;
+      intent: import("./types").StockTradeIntent;
+      position: import("./types").StockManagedPosition | null;
+      reservationState: EntryReservationState;
+    }
   | { ok: false; code: string };
+
+export interface ReleaseEntryReservationInput {
+  userId: string;
+  intentId: string;
+  /** Reverse daily trade + allocation counters reserved at entry. */
+  reverseDailyCounters: boolean;
+  nextState: "CANCELLED" | "RELEASED";
+  blockReason?: string | null;
+}
+
+export interface FinalizeEntryFillInput {
+  userId: string;
+  intentId: string;
+  position: import("./types").StockManagedPosition;
+}
+
+export interface CloseShadowPositionInput {
+  userId: string;
+  position: import("./types").StockManagedPosition;
+  accounting: import("./exitRules").ShadowExitAccounting;
+  limits: typeof DEFAULT_STOCK_INTRADAY_LIMITS;
+  perSymbolCooldownUntil: string;
+  lossCooldownUntil: string | null;
+}
 
 export type ReserveAlertResult = "reserved" | "duplicate";
 export type ReserveIntentResult = "reserved" | "duplicate" | "lease_held";
@@ -164,6 +212,8 @@ export interface StockIntradayStorePort {
   saveIntent(intent: StockTradeIntent): Promise<void>;
   listOpenIntents(userId: string): Promise<StockTradeIntent[]>;
   listUnresolvedIntents(userId: string): Promise<StockTradeIntent[]>;
+  /** Pending Paper reservations that still consume capacity. */
+  listActiveEntryReservations(userId: string): Promise<StockTradeIntent[]>;
   reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult>;
   reserveExit(userId: string, positionId: string, reason: string): Promise<boolean>;
 
@@ -197,12 +247,10 @@ export interface StockIntradayStorePort {
   getSymbolCooldown(userId: string, symbol: string): Promise<string | null>;
   setSymbolCooldown(userId: string, symbol: string, untilIso: string): Promise<void>;
 
-  listShadowTrades(userId: string): Promise<
-    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
-  >;
+  listShadowTrades(userId: string): Promise<import("./types").StockShadowTradeRecord[]>;
   appendShadowTrade(
     userId: string,
-    trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
+    trade: Omit<import("./types").StockShadowTradeRecord, "id"> & { id?: string }
   ): Promise<void>;
 
   getRestartGate(userId: string): Promise<StockRestartGate>;
@@ -211,15 +259,20 @@ export interface StockIntradayStorePort {
   saveReconciliation(record: StockReconciliationRecord): Promise<void>;
   listPendingReconciliation(userId: string): Promise<StockReconciliationRecord[]>;
 
+  /** Lookup by routing id — implementation hashes before Firestore get. */
   getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null>;
   saveWebhookConnection(conn: StockWebhookConnection): Promise<void>;
-  recordWebhookAuthFailure(connectionId: string): Promise<StockWebhookConnection | null>;
-  clearWebhookAuthFailures(connectionId: string): Promise<void>;
+  touchWebhookConnectionUse(connectionId: string): Promise<StockWebhookConnection | null>;
+  revokeWebhookConnection(connectionId: string, userId: string): Promise<StockWebhookConnection | null>;
+  listWebhookConnections(userId: string): Promise<StockWebhookConnection[]>;
 
   registerSchedulerUser(userId: string): Promise<void>;
   listSchedulerUserIds(): Promise<string[]>;
 
   reserveEntryAtomically(input: AtomicEntryReservationInput): Promise<AtomicEntryReservationResult>;
+  releaseEntryReservationAtomically(input: ReleaseEntryReservationInput): Promise<boolean>;
+  finalizeEntryFillAtomically(input: FinalizeEntryFillInput): Promise<boolean>;
+  closeShadowPositionAtomically(input: CloseShadowPositionInput): Promise<boolean>;
   getDashboardSnapshot(userId: string): Promise<StockDashboardSnapshot>;
   saveDashboardSnapshot(snapshot: StockDashboardSnapshot): Promise<void>;
   listDueRetryJobs(nowMs?: number): Promise<Array<{ userId: string; jobId: string }>>;
@@ -257,11 +310,31 @@ export function emptyDashboardSnapshot(userId: string): StockDashboardSnapshot {
   };
 }
 
+/**
+ * Shared explicit deployment generation for API, Firestore triggers, and schedulers.
+ * Never falls back to K_REVISION — Cloud Run services may have different revisions.
+ * Fail closed outside test / explicit local development.
+ */
 export function currentDeploymentGeneration(): string {
-  return (
-    process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION?.trim() ||
-    process.env.K_REVISION?.trim() ||
-    "default"
+  const explicit = process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION?.trim();
+  if (explicit) return explicit;
+
+  const appEnv = process.env.APP_ENV?.trim();
+  const nodeEnv = process.env.NODE_ENV?.trim();
+  const allowLocal =
+    appEnv === "test" ||
+    nodeEnv === "test" ||
+    process.env.STOCK_INTRADAY_ALLOW_LOCAL_GENERATION === "1" ||
+    (process.env.STORAGE_BACKEND === "memory" && appEnv !== "production");
+
+  if (allowLocal) {
+    return "local-dev";
+  }
+
+  throw new Error(
+    "STOCK_INTRADAY_DEPLOYMENT_GENERATION is required for Stock Intraday functions. " +
+      "Set the same explicit value on API, job-trigger, and scheduler services. " +
+      "Do not use K_REVISION."
   );
 }
 
@@ -271,19 +344,35 @@ export function jobRetryBackoffMs(attemptCount: number): number {
   return capped;
 }
 
-export function hashWebhookSecret(secret: string): string {
-  return createHash("sha256").update(secret, "utf8").digest("hex");
+/** Hash an externally supplied routing / capability path value before lookup. */
+export function hashRoutingId(connectionId: string): string {
+  return createHash("sha256").update(connectionId, "utf8").digest("hex");
 }
 
+/** Constant-time hex digest comparison. */
+export function constantTimeEqualHex(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+export function generateWebhookRoutingId(): string {
+  return `gm_si_${randomBytes(24).toString("base64url")}`;
+}
+
+/** @deprecated Use hashRoutingId — retained name only for migration of call sites. */
+export function hashWebhookSecret(secret: string): string {
+  return hashRoutingId(secret);
+}
+
+/** @deprecated Prefer constantTimeEqualHex(hashRoutingId(a), expectedHash). */
 export function verifyWebhookSecret(secret: string, secretHash: string): boolean {
-  const computed = Buffer.from(hashWebhookSecret(secret), "hex");
-  const expected = Buffer.from(secretHash, "hex");
-  if (computed.length !== expected.length) return false;
-  return timingSafeEqual(computed, expected);
+  return constantTimeEqualHex(hashRoutingId(secret), secretHash);
 }
 
 export function generateWebhookSecret(): string {
-  return `gm_stock_${randomBytes(24).toString("base64url")}`;
+  return generateWebhookRoutingId();
 }
 
 export function createDefaultRisk(userId: string): StockIntradayRiskState {
@@ -292,6 +381,10 @@ export function createDefaultRisk(userId: string): StockIntradayRiskState {
 
 export function sanitizeDocId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 700);
+}
+
+export function isActiveReservationState(state: EntryReservationState | null | undefined): boolean {
+  return state === "RESERVED" || state === "SUBMITTED";
 }
 
 export { InMemoryStockIntradayStore } from "./inMemoryStockIntradayStore";

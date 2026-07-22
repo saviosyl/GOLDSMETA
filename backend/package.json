@@ -9,6 +9,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc",
     "test": "vitest run",
+    "test:emulator": "firebase emulators:exec --only firestore \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 vitest run tests/integration/stockIntradayFirestore.emulator.test.ts\"",
     "lint": "eslint src --ext .ts",
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore"

@@ -3,7 +3,13 @@
  */
 
 import type { Firestore, Transaction } from "firebase-admin/firestore";
-import type { StockIntradayRiskState, StockManagedPosition, StockTradeIntent } from "./types";
+import type {
+  EntryReservationState,
+  StockIntradayRiskState,
+  StockManagedPosition,
+  StockShadowTradeRecord,
+  StockTradeIntent
+} from "./types";
 import type { StockSignalRecord } from "./signalIngestion";
 import { isTerminalState } from "./stateMachine";
 import { refreshRiskPeriod } from "./risk/riskEngine";
@@ -22,6 +28,9 @@ import {
   type StockDashboardSnapshot,
   type AtomicEntryReservationInput,
   type AtomicEntryReservationResult,
+  type ReleaseEntryReservationInput,
+  type FinalizeEntryFillInput,
+  type CloseShadowPositionInput,
   type ReserveAlertResult,
   type ReserveIntentResult,
   defaultSettings,
@@ -30,9 +39,12 @@ import {
   createDefaultRisk,
   sanitizeDocId,
   jobRetryBackoffMs,
+  hashRoutingId,
+  isActiveReservationState,
   STOCK_JOB_LEASE_MS,
   STOCK_INTENT_LEASE_MS
 } from "./stockIntradayStore";
+import { randomUUID } from "crypto";
 
 const stripUndefined = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stripUndefined);
@@ -124,12 +136,12 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
     return this.col(userId, "exitReservations").doc(positionId);
   }
 
-  private webhookRootRef(connectionId: string) {
-    return this.db.collection("stockIntradayWebhookConnections").doc(connectionId);
+  private webhookRootRef(routingIdHash: string) {
+    return this.db.collection("stockIntradayWebhookConnections").doc(routingIdHash);
   }
 
-  private webhookMirrorRef(userId: string, connectionId: string) {
-    return this.col(userId, "webhookConnections").doc(connectionId);
+  private webhookMirrorRef(userId: string, routingIdHash: string) {
+    return this.col(userId, "webhookConnections").doc(routingIdHash);
   }
 
   async getRiskState(userId: string): Promise<StockIntradayRiskState> {
@@ -250,6 +262,13 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
 
   async listUnresolvedIntents(userId: string): Promise<StockTradeIntent[]> {
     return this.listOpenIntents(userId);
+  }
+
+  async listActiveEntryReservations(userId: string): Promise<StockTradeIntent[]> {
+    const snap = await this.col(userId, "intents").get();
+    return snap.docs
+      .map((d) => d.data() as StockTradeIntent)
+      .filter((intent) => isActiveReservationState(intent.entryReservationState));
   }
 
   async reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult> {
@@ -501,7 +520,8 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
         intentId,
         amount,
         released: false,
-        createdAt: nowIso()
+        createdAt: nowIso(),
+        state: "RESERVED"
       };
       tx.set(ref, stripUndefined(reservation) as FirebaseFirestore.DocumentData);
       return true;
@@ -569,35 +589,25 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       .set({ symbol: symbol.toUpperCase(), untilIso, updatedAt: nowIso() });
   }
 
-  async listShadowTrades(
-    userId: string
-  ): Promise<
-    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
-  > {
+  async listShadowTrades(userId: string): Promise<StockShadowTradeRecord[]> {
     const snap = await this.col(userId, "shadowTrades").orderBy("at", "desc").limit(200).get();
-    return snap.docs.map((d) => d.data() as {
-      id: string;
-      symbol: string;
-      side: "BUY" | "SELL";
-      quantity: number;
-      at: string;
-      note: string;
-    });
+    return snap.docs.map((d) => d.data() as StockShadowTradeRecord);
   }
 
   async appendShadowTrade(
     userId: string,
-    trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
+    trade: Omit<StockShadowTradeRecord, "id"> & { id?: string }
   ): Promise<void> {
-    const id = this.db.collection("_").doc().id;
-    await this.col(userId, "shadowTrades").doc(id).set({
-      id,
-      symbol: trade.symbol,
-      side: trade.side,
-      quantity: trade.quantity,
-      at: nowIso(),
-      note: trade.note
-    });
+    const id = trade.id ?? this.db.collection("_").doc().id;
+    await this.col(userId, "shadowTrades")
+      .doc(id)
+      .set(
+        stripUndefined({
+          ...trade,
+          id,
+          at: trade.at ?? nowIso()
+        }) as FirebaseFirestore.DocumentData
+      );
   }
 
   async getRestartGate(userId: string): Promise<StockRestartGate> {
@@ -631,53 +641,82 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
   }
 
   async getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null> {
-    const snap = await this.webhookRootRef(connectionId).get();
+    const hash = hashRoutingId(connectionId);
+    const snap = await this.webhookRootRef(hash).get();
     return snap.exists ? (snap.data() as StockWebhookConnection) : null;
   }
 
   async saveWebhookConnection(conn: StockWebhookConnection): Promise<void> {
-    const payload = stripUndefined(conn) as FirebaseFirestore.DocumentData;
-    await this.webhookRootRef(conn.connectionId).set(payload, { merge: true });
-    await this.webhookMirrorRef(conn.userId, conn.connectionId).set(payload, { merge: true });
+    const hash = conn.routingIdHash || hashRoutingId(conn.connectionId);
+    const payload = stripUndefined({
+      ...conn,
+      routingIdHash: hash,
+      // Never persist raw routing id in Firestore document body for mirrors.
+      connectionId: conn.connectionId
+    }) as FirebaseFirestore.DocumentData;
+    await this.webhookRootRef(hash).set(payload, { merge: true });
+    // Mirror keyed by hash — no raw routing id in path.
+    const mirrorPayload = { ...payload };
+    delete mirrorPayload.connectionId;
+    await this.webhookMirrorRef(conn.userId, hash).set(mirrorPayload, { merge: true });
   }
 
-  async recordWebhookAuthFailure(connectionId: string): Promise<StockWebhookConnection | null> {
+  async touchWebhookConnectionUse(connectionId: string): Promise<StockWebhookConnection | null> {
+    const hash = hashRoutingId(connectionId);
     return this.db.runTransaction(async (tx: Transaction) => {
-      const ref = this.webhookRootRef(connectionId);
+      const ref = this.webhookRootRef(hash);
       const snap = await tx.get(ref);
       if (!snap.exists) return null;
       const existing = snap.data() as StockWebhookConnection;
-      const failureCount = existing.failureCount + 1;
-      let lockedUntil = existing.lockedUntil;
-      if (failureCount >= 5) {
-        lockedUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+      const now = nowIso();
+      const windowMs = existing.rateLimitWindowMs || 60_000;
+      const windowStartMs = Date.parse(existing.rateWindowStart);
+      let rateCount = existing.rateCount;
+      let rateWindowStart = existing.rateWindowStart;
+      if (!Number.isFinite(windowStartMs) || Date.now() - windowStartMs >= windowMs) {
+        rateCount = 1;
+        rateWindowStart = now;
+      } else {
+        rateCount += 1;
       }
       const updated: StockWebhookConnection = {
         ...existing,
-        failureCount,
-        lockedUntil,
-        updatedAt: nowIso()
+        lastUsedAt: now,
+        rateCount,
+        rateWindowStart,
+        updatedAt: now
       };
       tx.set(ref, stripUndefined(updated) as FirebaseFirestore.DocumentData, { merge: true });
+      const mirror = { ...updated } as Record<string, unknown>;
+      delete mirror.connectionId;
       tx.set(
-        this.webhookMirrorRef(existing.userId, connectionId),
-        stripUndefined(updated) as FirebaseFirestore.DocumentData,
+        this.webhookMirrorRef(existing.userId, hash),
+        stripUndefined(mirror) as FirebaseFirestore.DocumentData,
         { merge: true }
       );
       return updated;
     });
   }
 
-  async clearWebhookAuthFailures(connectionId: string): Promise<void> {
+  async revokeWebhookConnection(
+    connectionId: string,
+    userId: string
+  ): Promise<StockWebhookConnection | null> {
     const existing = await this.getWebhookConnection(connectionId);
-    if (!existing) return;
+    if (!existing || existing.userId !== userId) return null;
     const updated: StockWebhookConnection = {
       ...existing,
-      failureCount: 0,
-      lockedUntil: null,
+      enabled: false,
+      revokedAt: nowIso(),
       updatedAt: nowIso()
     };
     await this.saveWebhookConnection(updated);
+    return updated;
+  }
+
+  async listWebhookConnections(userId: string): Promise<StockWebhookConnection[]> {
+    const snap = await this.col(userId, "webhookConnections").get();
+    return snap.docs.map((d) => d.data() as StockWebhookConnection);
   }
 
   async registerSchedulerUser(userId: string): Promise<void> {
@@ -701,7 +740,8 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       cashAmount,
       availableCashFromBroker,
       limits,
-      openShadowPosition
+      openShadowPosition,
+      reservePendingCapacity
     } = input;
 
     const idemRef = this.idempotencyRef(userId, idempotencyKey);
@@ -709,6 +749,7 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
     const cashRef = this.cashReservationRef(userId, intent.intentId);
     const riskRef = this.riskRef(userId);
     const positionsCol = this.col(userId, "positions");
+    const intentsCol = this.col(userId, "intents");
     const reservationsCol = this.col(userId, "reservations");
 
     return this.db.runTransaction(async (tx: Transaction) => {
@@ -719,12 +760,16 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
 
       const positionsSnap = await tx.get(positionsCol);
       const positions = positionsSnap.docs.map((d) => d.data() as StockManagedPosition);
+      const intentsSnap = await tx.get(intentsCol);
+      const pending = intentsSnap.docs
+        .map((d) => d.data() as StockTradeIntent)
+        .filter((i) => isActiveReservationState(i.entryReservationState));
 
-      if (positions.some((p) => p.symbol === intent.symbol)) {
+      if (positions.some((p) => p.symbol === intent.symbol) || pending.some((p) => p.symbol === intent.symbol)) {
         return { ok: false as const, code: "SYMBOL_POSITION_EXISTS" };
       }
 
-      if (positions.length >= limits.maxSimultaneousPositions) {
+      if (positions.length + pending.length >= limits.maxSimultaneousPositions) {
         return { ok: false as const, code: "MAX_POSITIONS" };
       }
 
@@ -751,28 +796,32 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
         return { ok: false as const, code: "CASH_RESERVE" };
       }
 
-      const portfolioExposure = positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      const pendingExposure = pending.reduce((s, i) => s + i.reservedCash, 0);
+      const portfolioExposure =
+        positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0) + pendingExposure;
       if (portfolioExposure + cashAmount > limits.maxPortfolioExposure) {
         return { ok: false as const, code: "PORTFOLIO_EXPOSURE" };
       }
 
-      const symbolExposure = positions
-        .filter((p) => p.symbol === intent.symbol)
-        .reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      const symbolExposure =
+        positions
+          .filter((p) => p.symbol === intent.symbol)
+          .reduce((s, p) => s + p.quantity * p.entryPrice, 0) +
+        pending
+          .filter((p) => p.symbol === intent.symbol)
+          .reduce((s, i) => s + i.reservedCash, 0);
       if (symbolExposure + cashAmount > limits.maxExposurePerSymbol) {
         return { ok: false as const, code: "SYMBOL_EXPOSURE" };
       }
 
       const shouldOpen = openShadowPosition && position != null;
-      if (shouldOpen && position) {
-        if (positions.some((p) => p.symbol === position.symbol)) {
-          return { ok: false as const, code: "POSITION_SLOT_TAKEN" };
-        }
-      }
+      const shouldReservePending = Boolean(reservePendingCapacity) && !shouldOpen;
+      const reservationState: EntryReservationState = shouldOpen ? "FILLED" : "RESERVED";
 
       const finalIntent: StockTradeIntent = {
         ...intent,
         state: shouldOpen ? "OPEN" : intent.state,
+        entryReservationState: reservationState,
         updatedAt: nowIso()
       };
 
@@ -795,7 +844,8 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
         intentId: intent.intentId,
         amount: cashAmount,
         released: false,
-        createdAt: nowIso()
+        createdAt: nowIso(),
+        state: reservationState
       };
       tx.set(cashRef, stripUndefined(reservation) as FirebaseFirestore.DocumentData);
 
@@ -806,14 +856,213 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
           stripUndefined(position) as FirebaseFirestore.DocumentData
         );
         savedPosition = position;
+      }
 
+      if (shouldOpen || shouldReservePending) {
         risk.tradesUsedToday += 1;
         risk.dailyAllocationUsed += cashAmount;
         risk.updatedAt = nowIso();
         tx.set(riskRef, stripUndefined(risk) as FirebaseFirestore.DocumentData, { merge: true });
       }
 
-      return { ok: true as const, intent: finalIntent, position: savedPosition };
+      return {
+        ok: true as const,
+        intent: finalIntent,
+        position: savedPosition,
+        reservationState
+      };
+    });
+  }
+
+  async releaseEntryReservationAtomically(input: ReleaseEntryReservationInput): Promise<boolean> {
+    const { userId, intentId, reverseDailyCounters, nextState, blockReason } = input;
+    const intentRef = this.intentRef(userId, intentId);
+    const cashRef = this.cashReservationRef(userId, intentId);
+    const riskRef = this.riskRef(userId);
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const intentSnap = await tx.get(intentRef);
+      if (!intentSnap.exists) return false;
+      const intent = intentSnap.data() as StockTradeIntent;
+      if (intent.entryReservationState === "FILLED") return false;
+      const wasActive = isActiveReservationState(intent.entryReservationState);
+      const cashAmount = intent.reservedCash;
+
+      tx.set(
+        intentRef,
+        stripUndefined({
+          ...intent,
+          state: nextState === "CANCELLED" ? "CANCELLED" : intent.state,
+          entryReservationState: nextState,
+          blockReason: blockReason ?? intent.blockReason,
+          updatedAt: nowIso()
+        }) as FirebaseFirestore.DocumentData,
+        { merge: true }
+      );
+
+      const cashSnap = await tx.get(cashRef);
+      if (cashSnap.exists) {
+        const cash = cashSnap.data() as StockCashReservation;
+        tx.set(
+          cashRef,
+          stripUndefined({ ...cash, released: true, state: nextState }) as FirebaseFirestore.DocumentData,
+          { merge: true }
+        );
+      }
+
+      if (reverseDailyCounters && wasActive) {
+        const riskSnap = await tx.get(riskRef);
+        let risk = riskSnap.exists
+          ? refreshRiskPeriod(riskSnap.data() as StockIntradayRiskState)
+          : refreshRiskPeriod(createDefaultRisk(userId));
+        risk.tradesUsedToday = Math.max(0, risk.tradesUsedToday - 1);
+        risk.dailyAllocationUsed = Math.max(0, risk.dailyAllocationUsed - cashAmount);
+        risk.updatedAt = nowIso();
+        tx.set(riskRef, stripUndefined(risk) as FirebaseFirestore.DocumentData, { merge: true });
+      }
+      return true;
+    });
+  }
+
+  async finalizeEntryFillAtomically(input: FinalizeEntryFillInput): Promise<boolean> {
+    const { userId, intentId, position } = input;
+    const intentRef = this.intentRef(userId, intentId);
+    const cashRef = this.cashReservationRef(userId, intentId);
+    const positionRef = this.positionRef(userId, position.positionId);
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const intentSnap = await tx.get(intentRef);
+      if (!intentSnap.exists) return false;
+      const intent = intentSnap.data() as StockTradeIntent;
+      if (intent.entryReservationState === "FILLED") return true;
+      if (!isActiveReservationState(intent.entryReservationState)) return false;
+
+      tx.set(
+        intentRef,
+        stripUndefined({
+          ...intent,
+          state: "OPEN",
+          entryReservationState: "FILLED",
+          filledQuantity: position.quantity,
+          averageFillPrice: position.entryPrice,
+          updatedAt: nowIso()
+        }) as FirebaseFirestore.DocumentData,
+        { merge: true }
+      );
+      tx.set(positionRef, stripUndefined(position) as FirebaseFirestore.DocumentData);
+      const cashSnap = await tx.get(cashRef);
+      if (cashSnap.exists) {
+        const cash = cashSnap.data() as StockCashReservation;
+        tx.set(
+          cashRef,
+          stripUndefined({ ...cash, state: "FILLED" }) as FirebaseFirestore.DocumentData,
+          { merge: true }
+        );
+      }
+      return true;
+    });
+  }
+
+  async closeShadowPositionAtomically(input: CloseShadowPositionInput): Promise<boolean> {
+    const { userId, position, accounting, limits, perSymbolCooldownUntil, lossCooldownUntil } =
+      input;
+    const positionRef = this.positionRef(userId, position.positionId);
+    const intentRef = this.intentRef(userId, position.intentId);
+    const cashRef = this.cashReservationRef(userId, position.intentId);
+    const riskRef = this.riskRef(userId);
+    const exitRef = this.exitReservationRef(userId, position.positionId);
+    const cooldownRef = this.col(userId, "cooldowns").doc(position.symbol.toUpperCase());
+    const lossCooldownRef = this.col(userId, "cooldowns").doc("__LOSS__");
+    const shadowRef = this.col(userId, "shadowTrades").doc(randomUUID());
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const posSnap = await tx.get(positionRef);
+      if (!posSnap.exists) return false;
+
+      const intentSnap = await tx.get(intentRef);
+      if (intentSnap.exists) {
+        const intent = intentSnap.data() as StockTradeIntent;
+        tx.set(
+          intentRef,
+          stripUndefined({
+            ...intent,
+            state: "CLOSED",
+            exitReason: accounting.exitReason,
+            entryReservationState: "RELEASED",
+            updatedAt: nowIso()
+          }) as FirebaseFirestore.DocumentData,
+          { merge: true }
+        );
+      }
+
+      tx.delete(positionRef);
+
+      const cashSnap = await tx.get(cashRef);
+      if (cashSnap.exists) {
+        const cash = cashSnap.data() as StockCashReservation;
+        tx.set(
+          cashRef,
+          stripUndefined({ ...cash, released: true, state: "RELEASED" }) as FirebaseFirestore.DocumentData,
+          { merge: true }
+        );
+      }
+
+      tx.set(
+        shadowRef,
+        stripUndefined({
+          id: shadowRef.id,
+          symbol: position.symbol,
+          side: "SELL",
+          quantity: position.quantity,
+          at: accounting.exitAt,
+          note: `SHADOW exit: ${accounting.exitReason}`,
+          entryPrice: accounting.entryPrice,
+          exitPrice: accounting.exitPrice,
+          exitAt: accounting.exitAt,
+          grossPnl: accounting.grossPnl,
+          estimatedSpreadSlippage: accounting.estimatedSpreadSlippage,
+          estimatedFxImpact: accounting.estimatedFxImpact,
+          netRealizedPnl: accounting.netRealizedPnl,
+          exitReason: accounting.exitReason,
+          holdingDurationMinutes: accounting.holdingDurationMinutes,
+          strategy: accounting.strategy,
+          confidenceAtEntry: accounting.confidenceAtEntry
+        }) as FirebaseFirestore.DocumentData
+      );
+
+      const riskSnap = await tx.get(riskRef);
+      let risk = riskSnap.exists
+        ? refreshRiskPeriod(riskSnap.data() as StockIntradayRiskState)
+        : refreshRiskPeriod(createDefaultRisk(userId));
+      risk.dailyRealisedPnl += accounting.netRealizedPnl;
+      risk.dailyUnrealisedPnl = 0;
+      if (accounting.netRealizedPnl < 0) {
+        risk.losingTradesToday += 1;
+      }
+      const hitLosing = risk.losingTradesToday >= limits.maxLosingTradesPerDay;
+      const hitDailyLoss = risk.dailyRealisedPnl <= -Math.abs(limits.maxDailyLoss);
+      if (hitLosing || hitDailyLoss) {
+        risk.paused = true;
+        risk.locked = true;
+        risk.lockReason = hitDailyLoss ? "MAX_DAILY_LOSS" : "MAX_LOSING_TRADES";
+      }
+      risk.updatedAt = nowIso();
+      tx.set(riskRef, stripUndefined(risk) as FirebaseFirestore.DocumentData, { merge: true });
+
+      tx.set(cooldownRef, {
+        symbol: position.symbol.toUpperCase(),
+        untilIso: perSymbolCooldownUntil,
+        updatedAt: nowIso()
+      });
+      if (lossCooldownUntil) {
+        tx.set(lossCooldownRef, {
+          symbol: "__LOSS__",
+          untilIso: lossCooldownUntil,
+          updatedAt: nowIso()
+        });
+      }
+      tx.delete(exitRef);
+      return true;
     });
   }
 

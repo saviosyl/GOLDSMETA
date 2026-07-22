@@ -59,9 +59,17 @@ import type { StockIntradayJob, StockIntradayStorePort } from "./stockIntradaySt
 import {
   currentDeploymentGeneration,
   emptyDashboardSnapshot,
-  generateWebhookSecret,
-  hashWebhookSecret
+  generateWebhookRoutingId,
+  hashRoutingId
 } from "./stockIntradayStore";
+import {
+  calculateShadowExitAccounting,
+  evaluateShadowExitRules
+} from "./exitRules";
+import {
+  extractTrustedSourceIp,
+  verifyTradingViewSource
+} from "./tradingViewSource";
 import {
   estimateMinutesToClose,
   estimateSlippageBpsFromQuote
@@ -435,16 +443,22 @@ export class StockIntradayService {
    * Fast webhook acknowledgement — authenticate happens at the route layer.
    * Validates payload, atomically rejects duplicate alert IDs, stores signal,
    * creates a durable processing job, and returns without running analysis.
+   *
+   * When `authorizesAutomaticEntry` is false (unverified TradingView source),
+   * the job stores/analyses the signal but does not independently authorize entry.
    */
   async acknowledgeStockSignal(
     userId: string,
-    body: unknown
+    body: unknown,
+    options?: { authorizesAutomaticEntry?: boolean; sourceVerified?: boolean }
   ): Promise<{ accepted: boolean; code: string; signalId?: string; jobId?: string }> {
     const parsed = parseStockTradingViewSignal(body);
     if (!parsed.ok) {
       return { accepted: false, code: parsed.code };
     }
     const signal = parsed.signal;
+    const authorizesAutomaticEntry = options?.authorizesAutomaticEntry !== false;
+    const sourceVerified = options?.sourceVerified === true;
 
     if (isStaleSignal(signal, 5 * 60_000)) {
       const record = this.signalRecord(userId, signal, "REJECTED", "STALE", "IGNORED");
@@ -472,7 +486,12 @@ export class StockIntradayService {
       signalId: record.id,
       alertId: signal.alertId,
       maxAttempts: 5,
-      payload: { alertId: signal.alertId, signalId: record.id }
+      payload: {
+        alertId: signal.alertId,
+        signalId: record.id,
+        authorizesAutomaticEntry,
+        sourceVerified
+      }
     });
 
     return { accepted: true, code: "QUEUED", signalId: record.id, jobId: job.jobId };
@@ -512,7 +531,10 @@ export class StockIntradayService {
         if (!signalRec) {
           throw new Error("SIGNAL_NOT_FOUND");
         }
-        await this.processQueuedSignal(job.userId, signalRec.id, signalRec.signal);
+        const authorizesAutomaticEntry = job.payload.authorizesAutomaticEntry !== false;
+        await this.processQueuedSignal(job.userId, signalRec.id, signalRec.signal, {
+          authorizesAutomaticEntry
+        });
         return;
       }
       case "SCHEDULED_SCAN":
@@ -535,63 +557,178 @@ export class StockIntradayService {
   }
 
   /**
-   * Create TradingView webhook capability URL.
-   * Auth is the unguessable path connectionId (TradingView cannot set custom headers;
-   * official docs forbid passwords/credentials in the alert body).
+   * Create TradingView webhook routing URL.
+   * connectionId is a non-secret routing identifier only — never a reusable credential.
+   * Source verification uses TradingView client cert / allowlisted IP via a trusted edge.
    */
   async createWebhookConnection(
     userId: string,
-    label = "TradingView Stocks"
-  ): Promise<{ connectionId: string; webhookPath: string; webhookUrlTemplate: string }> {
-    const connectionId = generateWebhookSecret().replace(/^gm_stock_/, "gm_si_");
+    label = "TradingView Stocks",
+    options?: { expiresInDays?: number }
+  ): Promise<{
+    connectionId: string;
+    webhookPath: string;
+    webhookUrlTemplate: string;
+    expiresAt: string | null;
+    enabled: boolean;
+  }> {
+    const connectionId = generateWebhookRoutingId();
+    const routingIdHash = hashRoutingId(connectionId);
+    const expiresAt =
+      options?.expiresInDays != null
+        ? new Date(Date.now() + options.expiresInDays * 24 * 60 * 60_000).toISOString()
+        : null;
     await this.store.saveWebhookConnection({
       connectionId,
+      routingIdHash,
       userId,
-      secretHash: hashWebhookSecret(connectionId),
       label,
+      enabled: true,
+      expiresAt,
+      lastUsedAt: null,
+      revokedAt: null,
+      rateLimitWindowMs: 60_000,
+      rateLimitMax: 30,
+      rateCount: 0,
+      rateWindowStart: nowIso(),
       createdAt: nowIso(),
       updatedAt: nowIso(),
-      failureCount: 0,
-      lockedUntil: null
+      rotatedFromRoutingIdHash: null
     });
-    await this.audit(userId, "stock_webhook_created", { connectionId, label });
+    await this.audit(userId, "stock_webhook_created", {
+      routingIdHashPrefix: routingIdHash.slice(0, 12),
+      label,
+      expiresAt
+    });
     const webhookPath = `/webhooks/stock-intraday/${connectionId}`;
     return {
       connectionId,
       webhookPath,
-      webhookUrlTemplate: `https://<CLOUD_FUNCTIONS_HOST>${webhookPath}`
+      webhookUrlTemplate: `https://<CLOUD_FUNCTIONS_HOST>${webhookPath}`,
+      expiresAt,
+      enabled: true
     };
   }
 
+  async rotateWebhookConnection(
+    userId: string,
+    previousConnectionId: string,
+    label?: string
+  ): Promise<{
+    connectionId: string;
+    webhookPath: string;
+    webhookUrlTemplate: string;
+    expiresAt: string | null;
+    enabled: boolean;
+  }> {
+    const previous = await this.store.getWebhookConnection(previousConnectionId);
+    if (!previous || previous.userId !== userId) {
+      throw Object.assign(new Error("Webhook connection not found"), { code: "WEBHOOK_NOT_FOUND" });
+    }
+    await this.store.revokeWebhookConnection(previousConnectionId, userId);
+    const created = await this.createWebhookConnection(userId, label ?? previous.label);
+    const next = await this.store.getWebhookConnection(created.connectionId);
+    if (next) {
+      await this.store.saveWebhookConnection({
+        ...next,
+        rotatedFromRoutingIdHash: previous.routingIdHash
+      });
+    }
+    await this.audit(userId, "stock_webhook_rotated", {
+      previousHashPrefix: previous.routingIdHash.slice(0, 12),
+      nextHashPrefix: hashRoutingId(created.connectionId).slice(0, 12)
+    });
+    return created;
+  }
+
+  async revokeWebhookConnection(userId: string, connectionId: string): Promise<boolean> {
+    const revoked = await this.store.revokeWebhookConnection(connectionId, userId);
+    if (!revoked) return false;
+    await this.audit(userId, "stock_webhook_revoked", {
+      routingIdHashPrefix: revoked.routingIdHash.slice(0, 12)
+    });
+    return true;
+  }
+
   /**
-   * Authenticate TradingView webhook via opaque connectionId path only.
-   * Rejects query-string tokens. Never expects secrets/passwords/T212 keys in body.
+   * Authenticate TradingView webhook:
+   * - connectionId is routing only (hashed before lookup)
+   * - enabled / expiry / rate-limit enforced
+   * - source verified only via trusted edge IP/cert — never client X-Forwarded-For
+   * - when source verification unavailable, ACK may still store signals but must not
+   *   authorize automatic entry
    */
   async authenticateWebhook(
     connectionId: string,
-    options?: { queryTokenPresent?: boolean }
-  ): Promise<{ ok: true; userId: string } | { ok: false; code: string; status: number }> {
+    options?: {
+      queryTokenPresent?: boolean;
+      trustedSourceIp?: string | null;
+      trustedClientCertCn?: string | null;
+      forwardedFor?: string | null;
+      socketRemoteAddress?: string | null;
+    }
+  ): Promise<
+    | {
+        ok: true;
+        userId: string;
+        sourceVerified: boolean;
+        authorizesAutomaticEntry: boolean;
+        verificationReason: string;
+      }
+    | { ok: false; code: string; status: number }
+  > {
     if (options?.queryTokenPresent) {
       return { ok: false, code: "QUERY_TOKEN_REJECTED", status: 400 };
     }
     if (!connectionId || connectionId.length < 16) {
       return { ok: false, code: "WEBHOOK_NOT_FOUND", status: 401 };
     }
+
     const conn = await this.store.getWebhookConnection(connectionId);
     if (!conn) {
       return { ok: false, code: "WEBHOOK_NOT_FOUND", status: 401 };
     }
-    if (conn.lockedUntil && Date.parse(conn.lockedUntil) > Date.now()) {
-      return { ok: false, code: "WEBHOOK_AUTH_LOCKED", status: 429 };
+    if (!conn.enabled || conn.revokedAt) {
+      return { ok: false, code: "WEBHOOK_DISABLED", status: 403 };
     }
-    await this.store.clearWebhookAuthFailures(connectionId);
-    return { ok: true, userId: conn.userId };
+    if (conn.expiresAt && Date.parse(conn.expiresAt) <= Date.now()) {
+      return { ok: false, code: "WEBHOOK_EXPIRED", status: 403 };
+    }
+
+    const touched = await this.store.touchWebhookConnectionUse(connectionId);
+    if (touched && touched.rateCount > touched.rateLimitMax) {
+      return { ok: false, code: "WEBHOOK_RATE_LIMITED", status: 429 };
+    }
+
+    const hopsRaw = process.env.STOCK_INTRADAY_TV_TRUSTED_PROXY_HOPS?.trim();
+    const hops = hopsRaw ? Number(hopsRaw) : undefined;
+    const trustedIp =
+      options?.trustedSourceIp ??
+      extractTrustedSourceIp({
+        trustedProxyHops: Number.isFinite(hops) ? hops : undefined,
+        forwardedFor: options?.forwardedFor,
+        socketRemoteAddress: options?.socketRemoteAddress
+      });
+
+    const verification = verifyTradingViewSource({
+      trustedSourceIp: trustedIp,
+      trustedClientCertCn: options?.trustedClientCertCn ?? null
+    });
+
+    return {
+      ok: true,
+      userId: conn.userId,
+      sourceVerified: verification.verified,
+      authorizesAutomaticEntry: verification.verified,
+      verificationReason: verification.reason
+    };
   }
 
   async processQueuedSignal(
     userId: string,
     signalId: string,
-    signal: StockTradingViewSignal
+    signal: StockTradingViewSignal,
+    options?: { authorizesAutomaticEntry?: boolean }
   ): Promise<StockIntradayStatusPayload> {
     const existing = await this.store.getSignalByAlertId(userId, signal.alertId);
     if (existing) {
@@ -600,7 +737,23 @@ export class StockIntradayService {
       await this.store.saveSignal(existing);
     }
 
+    const authorizesAutomaticEntry = options?.authorizesAutomaticEntry !== false;
+
     if (signal.action === "EXIT_LONG") {
+      if (!authorizesAutomaticEntry) {
+        await this.activity(
+          userId,
+          `EXIT_LONG stored for analysis only (${signal.symbol}) — TradingView source not verified; no automatic exit.`,
+          "info"
+        );
+        if (existing) {
+          existing.processingStatus = "PROCESSED";
+          existing.decisionStatus = "IGNORED";
+          existing.updatedAt = nowIso();
+          await this.store.saveSignal(existing);
+        }
+        return this.getStatus(userId);
+      }
       await this.handleExitSignal(userId, signal);
       if (existing) {
         existing.processingStatus = "PROCESSED";
@@ -615,6 +768,21 @@ export class StockIntradayService {
       if (existing) {
         existing.processingStatus = "PROCESSED";
         existing.decisionStatus = "IGNORED";
+        existing.updatedAt = nowIso();
+        await this.store.saveSignal(existing);
+      }
+      return this.getStatus(userId);
+    }
+
+    if (!authorizesAutomaticEntry) {
+      await this.activity(
+        userId,
+        `ENTRY_LONG stored for analysis only (${signal.symbol}) — TradingView source not verified; awaiting internal market scan + risk confirmation.`,
+        "info"
+      );
+      if (existing) {
+        existing.processingStatus = "PROCESSED";
+        existing.decisionStatus = "WAIT";
         existing.updatedAt = nowIso();
         await this.store.saveSignal(existing);
       }
@@ -731,6 +899,22 @@ export class StockIntradayService {
 
     const cooldownUntil = await this.store.getSymbolCooldown(userId, signal.symbol);
     const symbolCooldownActive = Boolean(cooldownUntil && Date.parse(cooldownUntil) > Date.now());
+    const lossCooldownUntil = await this.store.getSymbolCooldown(userId, "__LOSS__");
+    if (lossCooldownUntil && Date.parse(lossCooldownUntil) > Date.now()) {
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — cooldown after loss");
+      return { outcome: "BLOCKED", message: "BLOCKED — cooldown after loss" };
+    }
+    if (risk.losingTradesToday >= settings.limits.maxLosingTradesPerDay) {
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — max losing trades per day");
+      return { outcome: "BLOCKED", message: "BLOCKED — max losing trades per day" };
+    }
+    if (risk.dailyRealisedPnl <= -Math.abs(settings.limits.maxDailyLoss)) {
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — max daily loss");
+      return { outcome: "BLOCKED", message: "BLOCKED — max daily loss" };
+    }
+
+    const pending = await this.store.listActiveEntryReservations(userId);
+    const reservedSlotCount = positions.length + pending.length;
 
     const gate = evaluateEntryGates({
       mode: risk.mode,
@@ -740,8 +924,10 @@ export class StockIntradayService {
       opportunity: top,
       quote,
       indicators,
-      openPositionCount: positions.length,
-      hasSymbolPosition: positions.some((p) => p.symbol === signal.symbol),
+      openPositionCount: reservedSlotCount,
+      hasSymbolPosition:
+        positions.some((p) => p.symbol === signal.symbol) ||
+        pending.some((p) => p.symbol === signal.symbol),
       symbolCooldownActive,
       minutesToClose: closeEst.minutesToClose,
       estimatedSlippageBps,
@@ -826,7 +1012,11 @@ export class StockIntradayService {
       currentExitRule: "HARD_STOP",
       unrealisedPnl: 0,
       openedAt: nowIso(),
-      goldMetaManaged: true
+      goldMetaManaged: true,
+      highWaterMark: opportunity.estimatedEntry,
+      breakEvenArmed: false,
+      confidenceAtEntry: opportunity.confidence,
+      strategy: opportunity.strategy
     };
 
     if (risk.mode === "SHADOW") {
@@ -838,7 +1028,8 @@ export class StockIntradayService {
         cashAmount: sizing.estimatedCost,
         availableCashFromBroker: cash,
         limits: settings.limits,
-        openShadowPosition: true
+        openShadowPosition: true,
+        reservePendingCapacity: false
       });
       if (!reserved.ok) {
         await this.pushRejected(userId, signal.symbol, `BLOCKED — ${reserved.code}`);
@@ -848,7 +1039,11 @@ export class StockIntradayService {
         symbol: signal.symbol,
         side: "BUY",
         quantity: sizing.quantity,
-        note: "SHADOW hypothetical entry — no broker order"
+        at: nowIso(),
+        note: "SHADOW hypothetical entry — no broker order",
+        entryPrice: opportunity.estimatedEntry,
+        strategy: opportunity.strategy,
+        confidenceAtEntry: opportunity.confidence
       });
       await this.activity(
         userId,
@@ -862,7 +1057,7 @@ export class StockIntradayService {
       };
     }
 
-    // PAPER / LIVE — reserve intent+cash atomically, then cancel (submission flags false)
+    // PAPER / LIVE — reserve pending capacity atomically before any broker fill
     const reserved = await this.store.reserveEntryAtomically({
       userId,
       idempotencyKey,
@@ -871,7 +1066,8 @@ export class StockIntradayService {
       cashAmount: sizing.estimatedCost,
       availableCashFromBroker: cash,
       limits: settings.limits,
-      openShadowPosition: false
+      openShadowPosition: false,
+      reservePendingCapacity: true
     });
     if (!reserved.ok) {
       return { outcome: "BLOCKED", message: `BLOCKED — ${reserved.code}` };
@@ -879,14 +1075,13 @@ export class StockIntradayService {
 
     if (risk.mode === "T212_PAPER_AUTO") {
       if (!T212_PAPER_ORDER_SUBMISSION_ENABLED) {
-        await this.store.releaseCash(userId, reserved.intent.intentId);
-        const cancelled = {
-          ...reserved.intent,
-          state: "CANCELLED" as const,
-          blockReason: "T212_PAPER_ORDER_SUBMISSION_DISABLED",
-          updatedAt: nowIso()
-        };
-        await this.store.saveIntent(cancelled);
+        await this.store.releaseEntryReservationAtomically({
+          userId,
+          intentId: reserved.intent.intentId,
+          reverseDailyCounters: true,
+          nextState: "CANCELLED",
+          blockReason: "T212_PAPER_ORDER_SUBMISSION_DISABLED"
+        });
         await this.activity(
           userId,
           "Paper Auto intent reserved then cancelled — submission flag is false.",
@@ -895,15 +1090,23 @@ export class StockIntradayService {
         return {
           outcome: "BLOCKED",
           message: "BLOCKED — Paper order submission disabled",
-          intentId: cancelled.intentId
+          intentId: reserved.intent.intentId
         };
       }
+      // Submission enabled path would mark SUBMITTED then FILLED via finalizeEntryFillAtomically.
+      // Kept disabled in this delivery.
     }
 
     if (risk.mode === "T212_LIVE_AUTO") {
-      await this.store.releaseCash(userId, reserved.intent.intentId);
+      await this.store.releaseEntryReservationAtomically({
+        userId,
+        intentId: reserved.intent.intentId,
+        reverseDailyCounters: true,
+        nextState: "CANCELLED",
+        blockReason: "T212_LIVE_EXECUTION_DISABLED"
+      });
       const locked = {
-        ...reserved.intent,
+        ...(await this.store.getIntent(userId, reserved.intent.intentId))!,
         state: "LOCKED" as const,
         blockReason: "T212_LIVE_EXECUTION_DISABLED",
         updatedAt: nowIso()
@@ -912,7 +1115,13 @@ export class StockIntradayService {
       return { outcome: "BLOCKED", message: "BLOCKED — Live execution disabled" };
     }
 
-    await this.store.releaseCash(userId, reserved.intent.intentId);
+    await this.store.releaseEntryReservationAtomically({
+      userId,
+      intentId: reserved.intent.intentId,
+      reverseDailyCounters: true,
+      nextState: "RELEASED",
+      blockReason: "NO_EXECUTION_PATH"
+    });
     return { outcome: "WAIT", message: "WAIT — no execution path" };
   }
 
@@ -940,7 +1149,8 @@ export class StockIntradayService {
   async requestExit(
     userId: string,
     position: StockManagedPosition,
-    reason: StockTradeIntent["exitReason"]
+    reason: StockTradeIntent["exitReason"],
+    exitQuote?: { last: number; spreadSlippageBps?: number | null }
   ): Promise<void> {
     if (!position.goldMetaManaged) {
       throw Object.assign(new Error("Refusing to manage non-GoldMeta position"), {
@@ -954,16 +1164,62 @@ export class StockIntradayService {
     }
 
     const risk = await this.store.getRiskState(userId);
+    const settings = await this.store.getSettings(userId);
     if (risk.mode === "SHADOW") {
-      await this.store.appendShadowTrade(userId, {
-        symbol: position.symbol,
-        side: "SELL",
-        quantity: position.quantity,
-        note: `SHADOW exit: ${reason}`
+      const exitPrice = exitQuote?.last ?? position.entryPrice;
+      const exitAt = nowIso();
+      const accounting = calculateShadowExitAccounting({
+        position,
+        exitPrice,
+        exitReason: reason ?? "HARD_STOP",
+        exitAt,
+        spreadSlippageBps: exitQuote?.spreadSlippageBps ?? settings.limits.maxSlippageBps,
+        fxImpactPct: 0,
+        strategy: position.strategy ?? "MOMENTUM_BREAKOUT",
+        confidenceAtEntry: position.confidenceAtEntry ?? null
       });
-      await this.store.releaseCash(userId, position.intentId);
-      await this.store.deletePosition(userId, position.positionId);
-      await this.activity(userId, `SHADOW SELL ${position.quantity} ${position.symbol} (${reason})`, "success");
+      const perSymbolCooldownUntil = new Date(
+        Date.now() + settings.limits.perSymbolCooldownMinutes * 60_000
+      ).toISOString();
+      const lossCooldownUntil =
+        accounting.netRealizedPnl < 0
+          ? new Date(
+              Date.now() + settings.limits.cooldownAfterLossMinutes * 60_000
+            ).toISOString()
+          : null;
+
+      const closed = await this.store.closeShadowPositionAtomically({
+        userId,
+        position,
+        accounting,
+        limits: settings.limits,
+        perSymbolCooldownUntil,
+        lossCooldownUntil
+      });
+      if (!closed) {
+        await this.activity(userId, `SHADOW exit skipped — position already closed (${position.symbol})`, "info");
+        return;
+      }
+
+      const after = await this.store.getRiskState(userId);
+      if (after.locked || after.paused) {
+        await this.store.saveRestartGate({
+          ...(await this.store.getRestartGate(userId)),
+          entriesPaused: true,
+          updatedAt: nowIso()
+        });
+        await this.audit(userId, "shadow_loss_limit_lock", {
+          lockReason: after.lockReason,
+          dailyRealisedPnl: after.dailyRealisedPnl,
+          losingTradesToday: after.losingTradesToday
+        });
+      }
+
+      await this.activity(
+        userId,
+        `SHADOW SELL ${position.quantity} ${position.symbol} (${reason}) netPnl=${accounting.netRealizedPnl.toFixed(4)}`,
+        "success"
+      );
       return;
     }
 
@@ -1143,6 +1399,7 @@ export class StockIntradayService {
   async monitorOpenPositions(userId: string): Promise<void> {
     const risk = await this.store.getRiskState(userId);
     if (risk.mode === "OFF") return;
+    if (risk.locked || risk.killSwitchActive || risk.emergencyStopActive) return;
     const positions = (await this.store.listPositions(userId)).filter((p) => p.goldMetaManaged);
     const settings = await this.store.getSettings(userId);
 
@@ -1158,30 +1415,42 @@ export class StockIntradayService {
         }
 
         const closeEst = estimateMinutesToClose(indicators);
-        const holdMinutes =
-          (Date.now() - Date.parse(position.openedAt)) / 60_000;
+        const evaluation = evaluateShadowExitRules({
+          position,
+          quote: { last: quote.last, bid: quote.bid, ask: quote.ask },
+          indicators: {
+            vwap: indicators.vwap,
+            ema21: indicators.ema21,
+            ema50: indicators.ema50,
+            ema200: indicators.ema200,
+            rsi: indicators.rsi,
+            broadMarketTrend: indicators.broadMarketTrend,
+            minutesToClose: closeEst.minutesToClose
+          },
+          limits: {
+            maxPositionDurationMinutes: settings.limits.maxPositionDurationMinutes,
+            forceCloseBeforeCloseMinutes: settings.limits.forceCloseBeforeCloseMinutes
+          }
+        });
 
-        let exitReason: StockTradeIntent["exitReason"] | null = null;
-        if (position.stop != null && quote.last <= position.stop) exitReason = "HARD_STOP";
-        else if (position.takeProfit != null && quote.last >= position.takeProfit) {
-          exitReason = "TAKE_PROFIT";
-        } else if (holdMinutes >= settings.limits.maxPositionDurationMinutes) {
-          exitReason = "MAX_HOLDING_TIME";
-        } else if (
-          closeEst.minutesToClose != null &&
-          closeEst.minutesToClose <= settings.limits.forceCloseBeforeCloseMinutes
+        if (
+          evaluation.highWaterMark !== position.highWaterMark ||
+          evaluation.breakEvenArmed !== Boolean(position.breakEvenArmed)
         ) {
-          exitReason = "END_OF_DAY";
-        } else if (
-          indicators.vwap != null &&
-          quote.last < indicators.vwap &&
-          position.currentExitRule === "VWAP_LOSS"
-        ) {
-          exitReason = "VWAP_LOSS";
+          await this.store.savePosition({
+            ...position,
+            highWaterMark: evaluation.highWaterMark,
+            breakEvenArmed: evaluation.breakEvenArmed,
+            stop: evaluation.effectiveStop ?? position.stop
+          });
         }
 
-        if (exitReason) {
-          await this.requestExit(userId, position, exitReason);
+        if (evaluation.exitReason) {
+          const slip = estimateSlippageBpsFromQuote(quote);
+          await this.requestExit(userId, position, evaluation.exitReason, {
+            last: quote.last,
+            spreadSlippageBps: slip
+          });
         }
       } catch (error) {
         await this.activity(
@@ -1288,7 +1557,9 @@ export class StockIntradayService {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       leaseOwner: null,
-      leaseExpiresAt: null
+      leaseExpiresAt: null,
+      entryReservationState: null,
+      confidenceAtEntry: opportunity.confidence
     };
   }
 

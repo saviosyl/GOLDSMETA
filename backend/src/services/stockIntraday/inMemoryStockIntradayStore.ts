@@ -6,7 +6,13 @@
 /* eslint-disable @typescript-eslint/require-await -- sync Map-backed implementation of async port */
 
 import { randomUUID } from "crypto";
-import type { StockIntradayRiskState, StockManagedPosition, StockTradeIntent } from "./types";
+import type {
+  EntryReservationState,
+  StockIntradayRiskState,
+  StockManagedPosition,
+  StockShadowTradeRecord,
+  StockTradeIntent
+} from "./types";
 import type { StockSignalRecord } from "./signalIngestion";
 import { isTerminalState } from "./stateMachine";
 import { refreshRiskPeriod } from "./risk/riskEngine";
@@ -25,6 +31,9 @@ import {
   type StockDashboardSnapshot,
   type AtomicEntryReservationInput,
   type AtomicEntryReservationResult,
+  type ReleaseEntryReservationInput,
+  type FinalizeEntryFillInput,
+  type CloseShadowPositionInput,
   type ReserveAlertResult,
   type ReserveIntentResult,
   defaultSettings,
@@ -33,6 +42,9 @@ import {
   createDefaultRisk,
   sanitizeDocId,
   jobRetryBackoffMs,
+  hashRoutingId,
+  constantTimeEqualHex,
+  isActiveReservationState,
   STOCK_JOB_LEASE_MS,
   STOCK_INTENT_LEASE_MS
 } from "./stockIntradayStore";
@@ -73,13 +85,11 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
   private activity = new Map<string, StockIntradayActivityEntry[]>();
   private audit = new Map<string, StockIntradayAuditEntry[]>();
   private cooldowns = new Map<string, Map<string, string>>();
-  private shadowTrades = new Map<
-    string,
-    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
-  >();
+  private shadowTrades = new Map<string, StockShadowTradeRecord[]>();
   private restartGates = new Map<string, StockRestartGate>();
   private dashboardSnapshots = new Map<string, StockDashboardSnapshot>();
   private reconciliation = new Map<string, StockReconciliationRecord[]>();
+  /** Keyed by routingIdHash */
   private webhookConnections = new Map<string, StockWebhookConnection>();
   private schedulerUsers = new Set<string>();
   private txChain: Promise<unknown> = Promise.resolve();
@@ -206,6 +216,12 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
 
   async listUnresolvedIntents(userId: string): Promise<StockTradeIntent[]> {
     return this.clone(this.filterNonTerminalIntents(userId));
+  }
+
+  async listActiveEntryReservations(userId: string): Promise<StockTradeIntent[]> {
+    return this.clone(
+      (this.intents.get(userId) ?? []).filter((i) => isActiveReservationState(i.entryReservationState))
+    );
   }
 
   async reserveIntent(intent: StockTradeIntent, idempotencyKey: string): Promise<ReserveIntentResult> {
@@ -428,7 +444,8 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         intentId,
         amount,
         released: false,
-        createdAt: nowIso()
+        createdAt: nowIso(),
+        state: "RESERVED"
       });
       this.cashReservations.set(userId, list);
       return true;
@@ -493,26 +510,19 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
     this.cooldowns.set(userId, map);
   }
 
-  async listShadowTrades(
-    userId: string
-  ): Promise<
-    Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
-  > {
+  async listShadowTrades(userId: string): Promise<StockShadowTradeRecord[]> {
     return this.clone(this.shadowTrades.get(userId) ?? []);
   }
 
   async appendShadowTrade(
     userId: string,
-    trade: { symbol: string; side: "BUY" | "SELL"; quantity: number; note: string }
+    trade: Omit<StockShadowTradeRecord, "id"> & { id?: string }
   ): Promise<void> {
     const list = this.shadowTrades.get(userId) ?? [];
     list.unshift({
-      id: randomUUID(),
-      symbol: trade.symbol,
-      side: trade.side,
-      quantity: trade.quantity,
-      at: nowIso(),
-      note: trade.note
+      id: trade.id ?? randomUUID(),
+      ...trade,
+      at: trade.at ?? nowIso()
     });
     this.shadowTrades.set(userId, list.slice(0, 200));
   }
@@ -543,43 +553,67 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
   }
 
   async getWebhookConnection(connectionId: string): Promise<StockWebhookConnection | null> {
-    const conn = this.webhookConnections.get(connectionId);
-    return conn ? this.clone(conn) : null;
+    const hash = hashRoutingId(connectionId);
+    for (const conn of this.webhookConnections.values()) {
+      if (constantTimeEqualHex(conn.routingIdHash, hash)) {
+        return this.clone(conn);
+      }
+    }
+    return null;
   }
 
   async saveWebhookConnection(conn: StockWebhookConnection): Promise<void> {
-    this.webhookConnections.set(conn.connectionId, this.clone(conn));
+    const hash = conn.routingIdHash || hashRoutingId(conn.connectionId);
+    this.webhookConnections.set(hash, this.clone({ ...conn, routingIdHash: hash }));
   }
 
-  async recordWebhookAuthFailure(connectionId: string): Promise<StockWebhookConnection | null> {
-    const existing = this.webhookConnections.get(connectionId);
-    if (!existing) return null;
+  async touchWebhookConnectionUse(connectionId: string): Promise<StockWebhookConnection | null> {
+    return this.runAtomic(async () => {
+      const existing = await this.getWebhookConnection(connectionId);
+      if (!existing) return null;
+      const now = nowIso();
+      const windowMs = existing.rateLimitWindowMs || 60_000;
+      const windowStartMs = Date.parse(existing.rateWindowStart);
+      let rateCount = existing.rateCount;
+      let rateWindowStart = existing.rateWindowStart;
+      if (!Number.isFinite(windowStartMs) || Date.now() - windowStartMs >= windowMs) {
+        rateCount = 1;
+        rateWindowStart = now;
+      } else {
+        rateCount += 1;
+      }
+      const updated: StockWebhookConnection = {
+        ...existing,
+        lastUsedAt: now,
+        rateCount,
+        rateWindowStart,
+        updatedAt: now
+      };
+      await this.saveWebhookConnection(updated);
+      return this.clone(updated);
+    });
+  }
 
-    const failureCount = existing.failureCount + 1;
-    let lockedUntil = existing.lockedUntil;
-    if (failureCount >= 5) {
-      lockedUntil = new Date(Date.now() + 15 * 60_000).toISOString();
-    }
-
+  async revokeWebhookConnection(
+    connectionId: string,
+    userId: string
+  ): Promise<StockWebhookConnection | null> {
+    const existing = await this.getWebhookConnection(connectionId);
+    if (!existing || existing.userId !== userId) return null;
     const updated: StockWebhookConnection = {
       ...existing,
-      failureCount,
-      lockedUntil,
+      enabled: false,
+      revokedAt: nowIso(),
       updatedAt: nowIso()
     };
-    this.webhookConnections.set(connectionId, updated);
+    await this.saveWebhookConnection(updated);
     return this.clone(updated);
   }
 
-  async clearWebhookAuthFailures(connectionId: string): Promise<void> {
-    const existing = this.webhookConnections.get(connectionId);
-    if (!existing) return;
-    this.webhookConnections.set(connectionId, {
-      ...existing,
-      failureCount: 0,
-      lockedUntil: null,
-      updatedAt: nowIso()
-    });
+  async listWebhookConnections(userId: string): Promise<StockWebhookConnection[]> {
+    return this.clone(
+      [...this.webhookConnections.values()].filter((c) => c.userId === userId)
+    );
   }
 
   async registerSchedulerUser(userId: string): Promise<void> {
@@ -600,7 +634,8 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         cashAmount,
         availableCashFromBroker,
         limits,
-        openShadowPosition
+        openShadowPosition,
+        reservePendingCapacity
       } = input;
 
       const idemKey = this.userKey(userId, sanitizeDocId(idempotencyKey));
@@ -609,11 +644,16 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       }
 
       const positions = this.positions.get(userId) ?? [];
-      if (positions.some((p) => p.symbol === intent.symbol)) {
+      const pending = (this.intents.get(userId) ?? []).filter((i) =>
+        isActiveReservationState(i.entryReservationState)
+      );
+      const reservedSlotCount = positions.length + pending.length;
+
+      if (positions.some((p) => p.symbol === intent.symbol) || pending.some((p) => p.symbol === intent.symbol)) {
         return { ok: false, code: "SYMBOL_POSITION_EXISTS" };
       }
 
-      if (positions.length >= limits.maxSimultaneousPositions) {
+      if (reservedSlotCount >= limits.maxSimultaneousPositions) {
         return { ok: false, code: "MAX_POSITIONS" };
       }
 
@@ -634,29 +674,40 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         return { ok: false, code: "CASH_RESERVE" };
       }
 
-      const portfolioExposure = positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      const pendingExposure = pending.reduce((s, i) => s + i.reservedCash, 0);
+      const portfolioExposure =
+        positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0) + pendingExposure;
       if (portfolioExposure + cashAmount > limits.maxPortfolioExposure) {
         return { ok: false, code: "PORTFOLIO_EXPOSURE" };
       }
 
-      const symbolExposure = positions
-        .filter((p) => p.symbol === intent.symbol)
-        .reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      const symbolExposure =
+        positions
+          .filter((p) => p.symbol === intent.symbol)
+          .reduce((s, p) => s + p.quantity * p.entryPrice, 0) +
+        pending
+          .filter((p) => p.symbol === intent.symbol)
+          .reduce((s, i) => s + i.reservedCash, 0);
       if (symbolExposure + cashAmount > limits.maxExposurePerSymbol) {
         return { ok: false, code: "SYMBOL_EXPOSURE" };
       }
 
       const shouldOpen = openShadowPosition && position != null;
-      if (shouldOpen && position) {
-        const positionList = this.positions.get(userId) ?? [];
-        if (positionList.some((p) => p.symbol === position.symbol)) {
-          return { ok: false, code: "POSITION_SLOT_TAKEN" };
-        }
+      const shouldReservePending = Boolean(reservePendingCapacity) && !shouldOpen;
+      if (!shouldOpen && !shouldReservePending && !openShadowPosition) {
+        // legacy path still reserves cash/idempotency without counting daily slots
       }
+
+      const reservationState: EntryReservationState = shouldOpen
+        ? "FILLED"
+        : shouldReservePending
+          ? "RESERVED"
+          : "RESERVED";
 
       const finalIntent: StockTradeIntent = {
         ...intent,
         state: shouldOpen ? "OPEN" : intent.state,
+        entryReservationState: reservationState,
         updatedAt: nowIso()
       };
 
@@ -681,7 +732,8 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         intentId: intent.intentId,
         amount: cashAmount,
         released: false,
-        createdAt: nowIso()
+        createdAt: nowIso(),
+        state: reservationState
       });
       this.cashReservations.set(userId, cashList);
 
@@ -691,14 +743,187 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         positionList.push(this.clone(position));
         this.positions.set(userId, positionList);
         savedPosition = this.clone(position);
+      }
 
+      if (shouldOpen || shouldReservePending) {
         risk.tradesUsedToday += 1;
         risk.dailyAllocationUsed += cashAmount;
         risk.updatedAt = nowIso();
         this.risk.set(userId, risk);
       }
 
-      return { ok: true, intent: this.clone(finalIntent), position: savedPosition };
+      return {
+        ok: true,
+        intent: this.clone(finalIntent),
+        position: savedPosition,
+        reservationState
+      };
+    });
+  }
+
+  async releaseEntryReservationAtomically(input: ReleaseEntryReservationInput): Promise<boolean> {
+    return this.runAtomic(async () => {
+      const { userId, intentId, reverseDailyCounters, nextState, blockReason } = input;
+      const intentList = this.intents.get(userId) ?? [];
+      const idx = intentList.findIndex((i) => i.intentId === intentId);
+      if (idx < 0) return false;
+      const intent = intentList[idx]!;
+      if (
+        intent.entryReservationState === "RELEASED" ||
+        intent.entryReservationState === "CANCELLED" ||
+        intent.entryReservationState === "FILLED"
+      ) {
+        if (intent.entryReservationState === "FILLED") return false;
+      }
+      const wasActive = isActiveReservationState(intent.entryReservationState);
+      const cashAmount = intent.reservedCash;
+      intentList[idx] = {
+        ...intent,
+        state: nextState === "CANCELLED" ? "CANCELLED" : intent.state,
+        entryReservationState: nextState,
+        blockReason: blockReason ?? intent.blockReason,
+        updatedAt: nowIso()
+      };
+      this.intents.set(userId, intentList);
+
+      const cashList = this.cashReservations.get(userId) ?? [];
+      for (const reservation of cashList) {
+        if (reservation.intentId === intentId && !reservation.released) {
+          reservation.released = true;
+          reservation.state = nextState;
+        }
+      }
+      this.cashReservations.set(userId, cashList);
+
+      if (reverseDailyCounters && wasActive) {
+        let risk = refreshRiskPeriod(await this.getRiskState(userId));
+        risk.tradesUsedToday = Math.max(0, risk.tradesUsedToday - 1);
+        risk.dailyAllocationUsed = Math.max(0, risk.dailyAllocationUsed - cashAmount);
+        risk.updatedAt = nowIso();
+        this.risk.set(userId, risk);
+      }
+      return true;
+    });
+  }
+
+  async finalizeEntryFillAtomically(input: FinalizeEntryFillInput): Promise<boolean> {
+    return this.runAtomic(async () => {
+      const { userId, intentId, position } = input;
+      const intentList = this.intents.get(userId) ?? [];
+      const idx = intentList.findIndex((i) => i.intentId === intentId);
+      if (idx < 0) return false;
+      const intent = intentList[idx]!;
+      if (intent.entryReservationState === "FILLED") {
+        return true;
+      }
+      if (!isActiveReservationState(intent.entryReservationState)) {
+        return false;
+      }
+      intentList[idx] = {
+        ...intent,
+        state: "OPEN",
+        entryReservationState: "FILLED",
+        filledQuantity: position.quantity,
+        averageFillPrice: position.entryPrice,
+        updatedAt: nowIso()
+      };
+      this.intents.set(userId, intentList);
+
+      const positions = this.positions.get(userId) ?? [];
+      if (!positions.some((p) => p.positionId === position.positionId || p.symbol === position.symbol)) {
+        positions.push(this.clone(position));
+        this.positions.set(userId, positions);
+      }
+
+      const cashList = this.cashReservations.get(userId) ?? [];
+      for (const reservation of cashList) {
+        if (reservation.intentId === intentId) {
+          reservation.state = "FILLED";
+        }
+      }
+      this.cashReservations.set(userId, cashList);
+      return true;
+    });
+  }
+
+  async closeShadowPositionAtomically(input: CloseShadowPositionInput): Promise<boolean> {
+    return this.runAtomic(async () => {
+      const { userId, position, accounting, limits, perSymbolCooldownUntil, lossCooldownUntil } =
+        input;
+      const positions = this.positions.get(userId) ?? [];
+      if (!positions.some((p) => p.positionId === position.positionId)) {
+        return false;
+      }
+
+      const intentList = this.intents.get(userId) ?? [];
+      const intentIdx = intentList.findIndex((i) => i.intentId === position.intentId);
+      if (intentIdx >= 0) {
+        const intent = intentList[intentIdx]!;
+        intentList[intentIdx] = {
+          ...intent,
+          state: "CLOSED",
+          exitReason: accounting.exitReason,
+          entryReservationState: "RELEASED",
+          updatedAt: nowIso()
+        };
+        this.intents.set(userId, intentList);
+      }
+
+      this.positions.set(
+        userId,
+        positions.filter((p) => p.positionId !== position.positionId)
+      );
+
+      const cashList = this.cashReservations.get(userId) ?? [];
+      for (const reservation of cashList) {
+        if (reservation.intentId === position.intentId && !reservation.released) {
+          reservation.released = true;
+          reservation.state = "RELEASED";
+        }
+      }
+      this.cashReservations.set(userId, cashList);
+
+      await this.appendShadowTrade(userId, {
+        symbol: position.symbol,
+        side: "SELL",
+        quantity: position.quantity,
+        at: accounting.exitAt,
+        note: `SHADOW exit: ${accounting.exitReason}`,
+        entryPrice: accounting.entryPrice,
+        exitPrice: accounting.exitPrice,
+        exitAt: accounting.exitAt,
+        grossPnl: accounting.grossPnl,
+        estimatedSpreadSlippage: accounting.estimatedSpreadSlippage,
+        estimatedFxImpact: accounting.estimatedFxImpact,
+        netRealizedPnl: accounting.netRealizedPnl,
+        exitReason: accounting.exitReason,
+        holdingDurationMinutes: accounting.holdingDurationMinutes,
+        strategy: accounting.strategy,
+        confidenceAtEntry: accounting.confidenceAtEntry
+      });
+
+      let risk = refreshRiskPeriod(await this.getRiskState(userId));
+      risk.dailyRealisedPnl += accounting.netRealizedPnl;
+      risk.dailyUnrealisedPnl = 0;
+      if (accounting.netRealizedPnl < 0) {
+        risk.losingTradesToday += 1;
+      }
+      const hitLosing = risk.losingTradesToday >= limits.maxLosingTradesPerDay;
+      const hitDailyLoss = risk.dailyRealisedPnl <= -Math.abs(limits.maxDailyLoss);
+      if (hitLosing || hitDailyLoss) {
+        risk.paused = true;
+        risk.locked = true;
+        risk.lockReason = hitDailyLoss ? "MAX_DAILY_LOSS" : "MAX_LOSING_TRADES";
+      }
+      risk.updatedAt = nowIso();
+      this.risk.set(userId, risk);
+
+      await this.setSymbolCooldown(userId, position.symbol, perSymbolCooldownUntil);
+      if (lossCooldownUntil) {
+        await this.setSymbolCooldown(userId, "__LOSS__", lossCooldownUntil);
+      }
+      this.exitReservations.delete(position.positionId);
+      return true;
     });
   }
 
