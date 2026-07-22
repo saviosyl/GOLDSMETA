@@ -6,10 +6,15 @@ body,
 #root {
   background: var(--bg);
   color: var(--text);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-a {
-  color: var(--navy-2);
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 .gm-shell {
@@ -18,6 +23,10 @@ a {
   grid-template-columns: 1fr;
   background: var(--bg);
   color: var(--text);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .gm-sidebar {
@@ -27,13 +36,36 @@ a {
 .gm-main {
   min-width: 0;
   width: 100%;
+  max-width: 100%;
 }
 
 .gm-main-inner {
   width: min(100%, var(--content-max));
+  max-width: 100%;
+  min-width: 0;
   margin: 0 auto;
   padding: 20px max(16px, var(--safe-left)) calc(96px + var(--safe-bottom))
     max(16px, var(--safe-right));
+}
+
+a {
+  color: var(--navy-2);
+}
+
+/* Prevent iOS Safari focus-zoom on interactive controls (<16px triggers zoom). */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea,
+  .gm-field input,
+  .gm-field select,
+  .gm-field textarea,
+  .gm-snapshot-field select,
+  .field input,
+  .field select,
+  .field textarea {
+    font-size: 16px !important;
+  }
 }
 
 .gm-topbar {
@@ -159,10 +191,13 @@ a {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
+  width: 100%;
+  max-width: 100%;
   padding: 8px max(8px, var(--safe-left)) calc(8px + var(--safe-bottom)) max(8px, var(--safe-right));
   background: rgba(255, 255, 255, 0.96);
   border-top: 1px solid var(--border);
   backdrop-filter: blur(12px);
+  box-sizing: border-box;
 }
 
 .gm-mobile-nav a,
@@ -1090,13 +1125,15 @@ a {
 
 .gm-ladder-row {
   display: grid;
-  grid-template-columns: 88px 1fr minmax(120px, 1.2fr);
+  grid-template-columns: minmax(0, 88px) minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-alt);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .gm-ladder-row.is-live {
@@ -1157,6 +1194,8 @@ a {
 
 .gm-ladder-labels {
   min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Score breakdown */
@@ -1313,14 +1352,14 @@ a {
   min-height: 44px;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .gm-ladder-row {
-    grid-template-columns: 76px 1fr;
+    grid-template-columns: minmax(0, 72px) minmax(0, 1fr);
     grid-template-areas:
       "price labels"
       "bar bar";
   }
-  .gm-ladder-price { grid-area: price; }
+  .gm-ladder-price { grid-area: price; min-width: 0; }
   .gm-ladder-bar-wrap { grid-area: bar; }
   .gm-ladder-labels { grid-area: labels; }
 }
@@ -1520,7 +1559,9 @@ a {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 200px;
+  width: max-content;
+  max-width: min(240px, 100%);
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1723,6 +1764,28 @@ button.gm-linkish {
   font-size: 0.75rem;
 }
 
+.gm-section,
+.gm-dash-grid,
+.gm-dashboard--v542,
+.gm-ladder,
+.gm-ladder-list,
+.gm-ladder-nearest,
+.gm-primary-signal,
+.gm-market-story,
+.gm-score-breakdown,
+.gm-metrics-grid,
+.gm-primary-inline,
+.gm-readiness-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.gm-ladder-nearest > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .gm-snapshot-overlay {
   position: fixed;
   inset: 0;
@@ -1733,12 +1796,18 @@ button.gm-linkish {
   justify-content: center;
   padding: 12px;
   padding-bottom: calc(12px + var(--safe-bottom) + 64px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .gm-snapshot-modal {
-  width: min(560px, 100%);
+  width: 100%;
+  max-width: min(560px, 100%);
   max-height: min(90vh, 900px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--surface);
   border-radius: 18px 18px 14px 14px;
   border: 1px solid var(--border);
@@ -1747,6 +1816,8 @@ button.gm-linkish {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .gm-snapshot-modal-head {
@@ -1754,27 +1825,33 @@ button.gm-linkish {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .gm-snapshot-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .gm-snapshot-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .gm-snapshot-field select {
+  width: 100%;
+  max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   background: var(--input-bg);
   color: var(--text);
   font: 500 0.875rem var(--font-sans);
+  min-width: 0;
 }
 
 .gm-snapshot-toggles {
@@ -1796,14 +1873,19 @@ button.gm-linkish {
   border-radius: 14px;
   background: var(--surface-alt);
   padding: 10px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   max-height: min(48vh, 420px);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .gm-snapshot-preview {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
+  object-fit: contain;
   border-radius: 8px;
   background: #fff;
 }
@@ -1822,12 +1904,13 @@ button.gm-linkish {
 
 .gm-snapshot-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   position: sticky;
   bottom: 0;
   background: var(--surface);
   padding-top: 4px;
+  min-width: 0;
 }
 
 .gm-btn-primary {

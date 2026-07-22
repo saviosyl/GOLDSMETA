@@ -51,6 +51,9 @@ describe("GoldMeta V5.4 branding assets", () => {
     expect(indexHtml).toContain('name="theme-color" content="#F7F8FA"');
     expect(indexHtml).toContain('name="color-scheme" content="light"');
     expect(indexHtml).toContain("viewport-fit=cover");
+    expect(indexHtml).toContain('content="width=device-width, initial-scale=1, viewport-fit=cover"');
+    expect(indexHtml).not.toContain("maximum-scale=1");
+    expect(indexHtml).not.toContain("user-scalable=no");
     expect(indexHtml).toContain("/brand/mark-official.png");
   });
 });

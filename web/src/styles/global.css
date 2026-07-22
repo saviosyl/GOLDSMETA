@@ -292,7 +292,7 @@ a {
   right: 0;
   bottom: 0;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   padding: 8px max(8px, var(--safe-left)) calc(8px + var(--safe-bottom)) max(8px, var(--safe-right));
   background: rgba(10, 11, 13, 0.92);
   backdrop-filter: blur(12px);
