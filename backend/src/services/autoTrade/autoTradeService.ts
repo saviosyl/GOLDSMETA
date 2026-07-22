@@ -1,10 +1,13 @@
 /**
  * GoldMeta V6 AutoTrade orchestration service.
  * Browser never marks intents APPROVED/ACCEPTED/OPEN/CLOSED — server only.
+ * Execution input is loaded from immutable GoldMeta decision documents.
  */
 
 import { randomUUID } from "crypto";
 import { nowIso } from "../../utils/time";
+import type { DecisionRecord } from "../../models/types";
+import type { GoldMetaStore } from "../storage/types";
 import type { AutoTradeBrokerAdapter } from "./brokerAdapter";
 import { FakeIgBrokerAdapter } from "./fakeIgBrokerAdapter";
 import { evaluateEligibility } from "./eligibility";
@@ -20,8 +23,10 @@ import {
   resetModeAfterRestart
 } from "./riskEngine";
 import type { AutoTradeStorePort } from "./autoTradeStore";
+import { createExecutionOwnerId } from "./inMemoryAutoTradeStore";
 import {
   AUTOTRADE_STRATEGY_VERSION,
+  DEMO_ORDER_SUBMISSION_ENABLED,
   FIRST_PILOT_LIMITS,
   LIVE_EXECUTION_FEATURE_FLAG,
   buildDealReference,
@@ -55,28 +60,110 @@ export interface ExecuteResult {
   message: string;
 }
 
+export interface LimitUpdateOptions {
+  confirmIncrease?: boolean;
+  actorUserId?: string;
+}
+
 const LIVE_CONFIRMATION_PHRASE = "ENABLE LIVE AUTOTRADE";
+
+/** Per-process restart gate shared across AutoTradeService instances. */
+const autoTradeRestartUsers = new Set<string>();
+
+const INCREASEABLE_LIMIT_KEYS: Array<keyof AutoTradeRiskLimits> = [
+  "maxLossPerTrade",
+  "maxMarginPerPosition",
+  "maxDailyLoss",
+  "maxWeeklyLoss",
+  "maxOpenPositions",
+  "maxTradesPerDay",
+  "maxConsecutiveLosses",
+  "maxSpread"
+];
+
+function mapSession(raw: string | null | undefined): TradingSessionId | "OTHER" {
+  const s = (raw ?? "").toUpperCase().replace(/\s+/g, "_");
+  if (s.includes("OVERLAP") || s === "LONDON_NY_OVERLAP") return "LONDON_NY_OVERLAP";
+  if (s.includes("LONDON")) return "LONDON";
+  if (s.includes("NEW") || s.includes("NY") || s === "NEWYORK" || s === "NEW_YORK") return "NEW_YORK";
+  return "OTHER";
+}
+
+export function decisionRecordToSignal(decision: DecisionRecord): DecisionSignalInput {
+  const tp = decision.takeProfits[0]?.price ?? null;
+  const entry = decision.entry.price;
+  const stop = decision.stopLoss.price;
+  const rr =
+    decision.riskReward.tp1 ??
+    decision.riskReward.tp2 ??
+    decision.riskReward.tp3 ??
+    null;
+  const generatedMs = new Date(decision.generatedAt).getTime();
+  return {
+    decisionId: decision.decisionId,
+    decision: decision.decision,
+    score: decision.setupScore,
+    entry,
+    stop,
+    takeProfit: tp,
+    riskReward: rr,
+    decisionAgeMs: Number.isFinite(generatedMs) ? Math.max(0, Date.now() - generatedMs) : 0,
+    session: mapSession(decision.currentSession),
+    newsBlackoutActive: decision.reasonCodes.some((c) => /NEWS|BLACKOUT/i.test(c))
+  };
+}
 
 export class AutoTradeService {
   private adapters = new Map<string, AutoTradeBrokerAdapter>();
   private processBootstrapped = new Set<string>();
+  readonly ownerId: string;
 
   constructor(
     private readonly store: AutoTradeStorePort,
     private readonly adapterFactory: (env: BrokerEnvironment) => AutoTradeBrokerAdapter = (env) =>
-      new FakeIgBrokerAdapter({ environment: env })
-  ) {}
+      new FakeIgBrokerAdapter({ environment: env }),
+    options: { ownerId?: string } = {}
+  ) {
+    this.ownerId = options.ownerId ?? createExecutionOwnerId("svc");
+  }
 
-  /** Ensure mode resets to OFF after process restart (in-memory bootstrap). */
+  /** After process restart/deploy, mode must not restore — force OFF on first touch. */
   private async ensureRestartPolicy(userId: string): Promise<void> {
-    if (this.processBootstrapped.has(userId)) return;
-    this.processBootstrapped.add(userId);
-    // First touch in this process: do not restore LIVE. Mode defaults OFF in store.
-    const risk = await this.store.getRiskState(userId);
-    if (risk.mode === "IG_LIVE_AUTO") {
-      await this.store.saveRiskState(resetModeAfterRestart(risk));
-      await this.audit(userId, "restart_cleared_live_mode", {});
+    if (autoTradeRestartUsers.has(userId)) {
+      this.processBootstrapped.add(userId);
+      return;
     }
+    autoTradeRestartUsers.add(userId);
+    this.processBootstrapped.add(userId);
+    const risk = await this.store.getRiskState(userId);
+    const lock = await this.store.getLock(userId);
+    if (risk.mode !== "OFF" || (lock.locked && !risk.locked)) {
+      const previousMode = risk.mode;
+      let next = risk.mode !== "OFF" ? resetModeAfterRestart(risk) : { ...risk, mode: "OFF" as const };
+      if (lock.locked) {
+        next = {
+          ...next,
+          locked: true,
+          lockReason: lock.reason,
+          emergencyStopActive: lock.reason === "emergency_stop",
+          updatedAt: nowIso()
+        };
+      }
+      await this.store.saveRiskState(next);
+      if (previousMode !== "OFF") {
+        await this.audit(userId, "restart_reset_mode_off", { previousMode });
+        await this.activity(
+          userId,
+          `Process restart: AutoTrade mode reset to OFF (was ${previousMode}).`,
+          "warn"
+        );
+      }
+    }
+  }
+
+  /** Test helper — clear process restart gate. */
+  static resetRestartGateForTests(): void {
+    autoTradeRestartUsers.clear();
   }
 
   async getStatus(userId: string): Promise<AutoTradeStatusPayload> {
@@ -190,18 +277,52 @@ export class AutoTradeService {
 
   async updateLimits(
     userId: string,
-    patch: Partial<AutoTradeRiskLimits>
+    patch: Partial<AutoTradeRiskLimits>,
+    opts: LimitUpdateOptions = {}
   ): Promise<AutoTradeStatusPayload> {
     const settings = await this.store.getSettings(userId);
+    const current = settings.limits;
+    const increases: Array<{ key: string; from: unknown; to: unknown }> = [];
+
+    for (const key of INCREASEABLE_LIMIT_KEYS) {
+      if (patch[key] === undefined) continue;
+      const from = current[key];
+      const to = patch[key];
+      if (typeof from === "number" && typeof to === "number" && to > from) {
+        increases.push({ key, from, to });
+      }
+      if (from == null && typeof to === "number") {
+        increases.push({ key, from, to });
+      }
+    }
+
+    if (increases.length > 0 && !opts.confirmIncrease) {
+      throw Object.assign(
+        new Error(
+          "Increasing AutoTrade limits requires explicit confirmation with old and new values."
+        ),
+        { code: "LIMIT_INCREASE_CONFIRMATION_REQUIRED", increases }
+      );
+    }
+
     const next = {
       ...settings,
       limits: { ...settings.limits, ...patch, currency: "EUR" as const },
       updatedAt: nowIso()
     };
-    // Forbidden behaviours stay enforced regardless of client patch
     await this.store.saveSettings(next);
-    await this.audit(userId, "limits_updated", { patch: redactSecrets(patch) });
-    await this.activity(userId, "Risk limits updated.", "info");
+    await this.audit(userId, increases.length ? "limits_increased" : "limits_updated", {
+      patch: redactSecrets(patch),
+      increases,
+      actorUserId: opts.actorUserId ?? userId,
+      confirmed: Boolean(opts.confirmIncrease),
+      at: nowIso()
+    });
+    await this.activity(
+      userId,
+      increases.length ? "Risk limits increased (confirmed)." : "Risk limits updated.",
+      "info"
+    );
     return this.getStatus(userId);
   }
 
@@ -271,15 +392,13 @@ export class AutoTradeService {
     environment: BrokerEnvironment,
     credentialsRef = `server:${environment.toLowerCase()}`
   ): Promise<AutoTradeStatusPayload> {
-    if (environment === "LIVE" && !LIVE_EXECUTION_FEATURE_FLAG) {
-      // Allow scaffolding connection UI but adapter must not place LIVE orders.
-      await this.activity(
-        userId,
-        "LIVE connection scaffolding only — execution feature flag is OFF.",
-        "warn"
-      );
+    if (environment === "LIVE") {
+      throw Object.assign(new Error("LIVE broker connection is blocked for this release."), {
+        code: "LIVE_ADAPTER_BLOCKED"
+      });
     }
 
+    const previous = await this.store.getConnection(userId);
     const adapter = this.adapterFactory(environment);
     try {
       await adapter.connect(credentialsRef);
@@ -289,6 +408,20 @@ export class AutoTradeService {
       await adapter.selectAccount(account.accountId);
       const market = await adapter.discoverSpotGold();
       this.adapters.set(userId, adapter);
+
+      if (
+        previous.pinnedAccountId &&
+        previous.pinnedAccountId !== account.accountId
+      ) {
+        await this.lock(userId, "account_change");
+      }
+      if (
+        previous.pinnedMarketEpic &&
+        previous.pinnedMarketEpic !== market.epic
+      ) {
+        await this.lock(userId, "market_epic_change");
+      }
+
       await this.store.saveConnection({
         userId,
         environment,
@@ -303,6 +436,8 @@ export class AutoTradeService {
         marketName: market.instrumentName,
         lastHeartbeatAt: await adapter.heartbeat(),
         credentialsRef,
+        pinnedAccountId: previous.pinnedAccountId ?? account.accountId,
+        pinnedMarketEpic: previous.pinnedMarketEpic ?? market.epic,
         updatedAt: nowIso()
       });
       await this.audit(userId, "broker_connected", {
@@ -311,16 +446,74 @@ export class AutoTradeService {
       });
       await this.activity(
         userId,
-        `Connected to IG ${environment} (${maskAccountId(account.accountId)}).`,
+        `Connected to IG ${environment} (${maskAccountId(account.accountId)}) — read-only diagnostics.`,
         "success"
       );
     } catch (error) {
+      const message = error instanceof Error ? error.message : "IG session failed";
+      if (message === "IG_DEMO_CREDENTIALS_NOT_CONFIGURED" || message === "IG_CREDENTIALS_NOT_CONFIGURED") {
+        await this.activity(userId, "IG Demo secrets are not configured (fail closed).", "error");
+        throw Object.assign(new Error(message), { code: "IG_CREDENTIALS_MISSING" });
+      }
       await this.lock(userId, "ig_session_failed");
-      await this.activity(
+      await this.activity(userId, message, "error");
+      throw error;
+    }
+    return this.getStatus(userId);
+  }
+
+  /** Read-only DEMO diagnostics refresh (no order submission). */
+  async refreshDemoDiagnostics(userId: string): Promise<AutoTradeStatusPayload> {
+    await this.ensureRestartPolicy(userId);
+    let adapter = this.adapters.get(userId);
+    if (!adapter?.isConnected() || adapter.environment !== "DEMO") {
+      await this.connectBroker(userId, "DEMO");
+      adapter = this.adapters.get(userId);
+    }
+    if (!adapter) throw new Error("NOT_CONNECTED");
+    try {
+      await adapter.heartbeat();
+      const accounts = await adapter.listAccounts();
+      const account = accounts[0];
+      const market = await adapter.discoverSpotGold();
+      const connection = await this.store.getConnection(userId);
+
+      if (connection.pinnedAccountId && account && connection.pinnedAccountId !== account.accountId) {
+        await this.lock(userId, "account_change");
+      }
+      if (connection.pinnedMarketEpic && connection.pinnedMarketEpic !== market.epic) {
+        await this.lock(userId, "market_epic_change");
+      }
+
+      await this.store.saveConnection({
+        ...connection,
+        connected: true,
+        environment: "DEMO",
+        accountId: account?.accountId ?? connection.accountId,
+        accountName: account?.accountName ?? connection.accountName,
+        currency: account?.currency ?? connection.currency,
+        balance: account?.balance ?? null,
+        available: account?.available ?? null,
+        marginUsed: account?.marginUsed ?? null,
+        marketEpic: market.epic,
+        marketName: market.instrumentName,
+        lastHeartbeatAt: nowIso(),
+        updatedAt: nowIso()
+      });
+      await this.store.appendBrokerEvent({
+        id: randomUUID(),
         userId,
-        error instanceof Error ? error.message : "IG session failed",
-        "error"
-      );
+        at: nowIso(),
+        type: "demo_diagnostics_refresh",
+        detail: redactSecrets({
+          marketStatus: market.marketStatus,
+          spread: market.offer - market.bid,
+          minDealSize: market.minDealSize,
+          guaranteedStopAvailable: market.guaranteedStopAvailable
+        })
+      });
+    } catch (error) {
+      await this.lock(userId, "ig_session_failed");
       throw error;
     }
     return this.getStatus(userId);
@@ -383,17 +576,32 @@ export class AutoTradeService {
   }
 
   /**
-   * Evaluate + optionally execute a decision.
-   * SHADOW never submits. DEMO uses adapter. LIVE blocked by feature flag.
+   * Trusted path: load immutable decision from GoldMeta store, then evaluate.
+   * Browser must never supply decision/score/entry/stop/TP payloads.
    */
-  async evaluateAndMaybeExecute(
+  async evaluateFromStoredDecision(
     userId: string,
-    signal: DecisionSignalInput
+    decisionId: string,
+    goldMetaStore: GoldMetaStore
   ): Promise<ExecuteResult> {
-    return this.store.withUserLock(userId, () => this.evaluateAndMaybeExecuteLocked(userId, signal));
+    const decision = await goldMetaStore.getDecision(userId, decisionId);
+    if (!decision) {
+      throw Object.assign(new Error("Decision not found"), { code: "DECISION_NOT_FOUND" });
+    }
+    if (decision.userId && decision.userId !== userId) {
+      throw Object.assign(new Error("Decision ownership mismatch"), { code: "DECISION_FORBIDDEN" });
+    }
+    const signal = decisionRecordToSignal(decision);
+    return this.evaluateAndMaybeExecute(userId, signal);
   }
 
-  private async evaluateAndMaybeExecuteLocked(
+  /**
+   * Evaluate + optionally execute a server-loaded decision signal.
+   * Uses Firestore/in-memory transactional lease claiming — not a process mutex.
+   * SHADOW never submits. DEMO order submission gated off this release.
+   * LIVE blocked by feature flag.
+   */
+  async evaluateAndMaybeExecute(
     userId: string,
     signal: DecisionSignalInput
   ): Promise<ExecuteResult> {
@@ -412,21 +620,56 @@ export class AutoTradeService {
       environment
     });
 
-    const existing = await this.store.getIntentByDealReference(userId, dealReference);
-    if (existing) {
+    const claim = await this.store.claimIntent({
+      userId,
+      dealReference,
+      ownerId: this.ownerId,
+      create: () =>
+        this.newIntent(userId, signal, dealReference, environment, risk.mode, settings.limits)
+    });
+
+    if (claim.status === "duplicate") {
       await this.activity(userId, "Duplicate decision suppressed (idempotency).", "warn", {
         dealReference,
-        intentId: existing.intentId
+        intentId: claim.intent.intentId
       });
       return {
-        intent: existing,
+        intent: claim.intent,
         skipped: true,
         message: "Duplicate decision — existing intent reused."
       };
     }
 
-    let intent = this.newIntent(userId, signal, dealReference, environment, risk.mode, settings.limits);
-    intent = await this.transition(intent, "ELIGIBILITY_CHECK", "Starting eligibility");
+    if (claim.status === "lease_held") {
+      await this.activity(userId, "Execution lease held by another instance.", "warn", {
+        dealReference,
+        leaseOwnerId: claim.intent.leaseOwnerId
+      });
+      return {
+        intent: claim.intent,
+        skipped: true,
+        message: "Another instance holds the execution lease."
+      };
+    }
+
+    let intent = claim.intent;
+    try {
+      return await this.evaluateClaimedIntent(userId, signal, intent, settings.limits);
+    } finally {
+      await this.store.releaseIntentLease(userId, intent.intentId, this.ownerId);
+    }
+  }
+
+  private async evaluateClaimedIntent(
+    userId: string,
+    signal: DecisionSignalInput,
+    claimedIntent: TradeIntent,
+    limits: AutoTradeRiskLimits
+  ): Promise<ExecuteResult> {
+    let risk = await this.store.getRiskState(userId);
+    const connection = await this.store.getConnection(userId);
+    let intent = await this.transition(claimedIntent, "ELIGIBILITY_CHECK", "Starting eligibility");
+    await this.store.heartbeatIntentLease(userId, intent.intentId, this.ownerId);
 
     const adapter = this.adapters.get(userId);
     let marketStatus: "OPEN" | "CLOSED" | "TRADEABLE" | "UNKNOWN" = "UNKNOWN";
@@ -443,16 +686,21 @@ export class AutoTradeService {
         quoteAgeMs = Date.now() - new Date(market.updateTime).getTime();
         spread = market.offer - market.bid;
         openCount = (await adapter.getOpenPositions()).length;
+
+        if (connection.pinnedAccountId && connection.accountId && connection.pinnedAccountId !== connection.accountId) {
+          await this.lock(userId, "account_change");
+        }
+        if (connection.pinnedMarketEpic && market.epic !== connection.pinnedMarketEpic) {
+          await this.lock(userId, "market_epic_change");
+        }
+
         if (marketStatus === "CLOSED") {
           await this.lock(userId, "market_closed");
         }
         if (quoteAgeMs > 60_000) {
           await this.lock(userId, "quote_stale");
         }
-        if (
-          settings.limits.maxSpread != null &&
-          spread > settings.limits.maxSpread
-        ) {
+        if (limits.maxSpread != null && spread > limits.maxSpread) {
           await this.lock(userId, "spread_exceeds_limit");
         }
         risk = await this.store.getRiskState(userId);
@@ -481,7 +729,7 @@ export class AutoTradeService {
       brokerHealthy: risk.mode === "SHADOW" ? true : brokerHealthy,
       session: signal.session,
       riskState: risk,
-      limits: settings.limits
+      limits
     });
 
     if (!eligibility.ok) {
@@ -504,17 +752,16 @@ export class AutoTradeService {
       return { intent, skipped: true, message: reason };
     }
 
-    const entry =
-      signal.decision === "BUY" ? market.offer : market.bid;
+    const entry = signal.decision === "BUY" ? market.offer : market.bid;
     const sizing = calculatePositionSize({
       direction: signal.decision as "BUY" | "SELL",
       entryPrice: entry,
       stopPrice: signal.stop,
       takeProfitPrice: signal.takeProfit,
-      maxLossPerTrade: settings.limits.maxLossPerTrade,
-      remainingDailyLossCapacity: remainingDailyLossCapacity(risk, settings.limits),
-      remainingWeeklyLossCapacity: remainingWeeklyLossCapacity(risk, settings.limits),
-      maxMarginPerPosition: settings.limits.maxMarginPerPosition,
+      maxLossPerTrade: limits.maxLossPerTrade,
+      remainingDailyLossCapacity: remainingDailyLossCapacity(risk, limits),
+      remainingWeeklyLossCapacity: remainingWeeklyLossCapacity(risk, limits),
+      maxMarginPerPosition: limits.maxMarginPerPosition,
       availableFunds: connection.available ?? 0,
       valuePerPoint: market.valueOfOnePip,
       minDealSize: market.minDealSize,
@@ -562,6 +809,20 @@ export class AutoTradeService {
       return { intent, skipped: true, message: reason };
     }
 
+    if (
+      risk.mode === "IG_DEMO_AUTO" &&
+      !DEMO_ORDER_SUBMISSION_ENABLED &&
+      adapter &&
+      adapter.name !== "fake-ig"
+    ) {
+      const reason =
+        "IG Demo connected read-only — order submission disabled for this hardening release.";
+      intent = { ...intent, rejectionReason: reason };
+      intent = await this.transition(intent, "BLOCKED", reason);
+      await this.activity(userId, reason, "info");
+      return { intent, skipped: true, message: reason };
+    }
+
     if (!adapter?.isConnected()) {
       const reason = "Broker not connected.";
       intent = { ...intent, rejectionReason: reason };
@@ -571,7 +832,7 @@ export class AutoTradeService {
     }
 
     if (
-      settings.limits.stopProtection === "GUARANTEED_REQUIRED" &&
+      limits.stopProtection === "GUARANTEED_REQUIRED" &&
       !adapter.supportsStopProtection("GUARANTEED_REQUIRED")
     ) {
       const reason = "Guaranteed stop required but unavailable.";
@@ -581,8 +842,12 @@ export class AutoTradeService {
       return { intent, skipped: true, message: reason };
     }
 
+    // Remaining order-submit path kept for future DEMO_ORDER_SUBMISSION_ENABLED=true.
+    // Unreachable while DEMO_ORDER_SUBMISSION_ENABLED is false.
     intent = await this.transition(intent, "SUBMITTING", "Submitting to broker");
+    await this.store.heartbeatIntentLease(userId, intent.intentId, this.ownerId);
 
+    const dealReference = intent.dealReference!;
     const orderRequest = {
       dealReference,
       epic: market.epic,
@@ -591,7 +856,7 @@ export class AutoTradeService {
       orderType: "MARKET" as const,
       stopLevel: signal.stop,
       limitLevel: signal.takeProfit,
-      guaranteedStop: settings.limits.stopProtection !== "NORMAL_ALLOWED",
+      guaranteedStop: limits.stopProtection !== "NORMAL_ALLOWED",
       forceOpen: true as const,
       currencyCode: market.currencyCode
     };
@@ -601,7 +866,6 @@ export class AutoTradeService {
       orderResult = await adapter.placeMarketOrder(orderRequest);
     } catch (error) {
       const message = error instanceof Error ? error.message : "UNKNOWN_BROKER_ERROR";
-      // Never blindly retry — reconcile
       intent = await this.transition(intent, "RECONCILIATION_REQUIRED", message);
       await this.lock(userId, "unexpected_broker_response");
       await this.activity(
@@ -609,7 +873,6 @@ export class AutoTradeService {
         `Broker uncertainty (${message}). AutoTrade locked for reconciliation.`,
         "error"
       );
-      // Attempt confirm + positions
       try {
         const conf = await adapter.confirmDeal(dealReference);
         const positions = await adapter.getOpenPositions();
@@ -715,6 +978,26 @@ export class AutoTradeService {
 
     intent = await this.transition(intent, "OPEN", "Position open and protected");
     await this.bumpTradesUsed(userId);
+    await this.store.savePosition(userId, {
+      positionId: opened.dealId,
+      environment: adapter.environment,
+      direction: opened.direction,
+      marketName: opened.instrumentName,
+      epic: opened.epic,
+      entry: opened.level,
+      size: opened.size,
+      stop: opened.stopLevel,
+      takeProfit: opened.limitLevel,
+      monetaryRisk: intent.monetaryRisk,
+      currentBid: market.bid,
+      currentAsk: market.offer,
+      unrealisedPnl: opened.upl,
+      score: intent.score,
+      decisionId: signal.decisionId,
+      dealId: opened.dealId,
+      protectionStatus: opened.guaranteedStop ? "GUARANTEED" : "NORMAL",
+      openedAt: opened.createdDate
+    });
     await this.activity(
       userId,
       `Opened ${opened.direction} ${opened.size} @ ${opened.level} (demo/auto).`,
@@ -760,6 +1043,9 @@ export class AutoTradeService {
       rejectionReason: null,
       dealReference,
       dealId: null,
+      leaseOwnerId: null,
+      leaseExpiresAt: null,
+      leaseHeartbeatAt: null,
       limitsSnapshot: { ...limits },
       createdAt: at,
       updatedAt: at,

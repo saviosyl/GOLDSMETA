@@ -23,9 +23,9 @@ import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
-import { AutoTradeService } from "./services/autoTrade/autoTradeService";
-import { InMemoryAutoTradeStore } from "./services/autoTrade/autoTradeStore";
-import { FakeIgBrokerAdapter } from "./services/autoTrade/fakeIgBrokerAdapter";
+import { createAutoTradeService } from "./services/autoTrade/runtime";
+import { processDecisionForAutoTrade } from "./services/autoTrade/decisionTrigger";
+import type { AutoTradeService } from "./services/autoTrade/autoTradeService";
 
 export interface AppDependencies {
   store: GoldMetaStore;
@@ -36,10 +36,7 @@ export interface AppDependencies {
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
-const defaultAutoTradeService = new AutoTradeService(
-  new InMemoryAutoTradeStore(),
-  (environment) => new FakeIgBrokerAdapter({ environment })
-);
+const defaultAutoTradeService = createAutoTradeService();
 
 const isPayloadTooLarge = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) {
@@ -104,7 +101,7 @@ export const createApp = (
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));
   app.use(buildTradingRouter(tradingService));
-  app.use(buildAutoTradeRouter(autoTradeService));
+  app.use(buildAutoTradeRouter(autoTradeService, dependencies.store));
   app.use(buildSystemRouter());
   app.use(errorHandler);
 
@@ -129,6 +126,24 @@ export const processProcessingJob = onDocumentCreated(
   { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
   async (event) => {
     await processJob(event.params.jobId);
+  }
+);
+
+/** Trusted AutoTrade path — never trusts browser execution payloads. */
+export const onGoldMetaDecisionCreated = onDocumentCreated(
+  {
+    document: "users/{userId}/decisions/{decisionId}",
+    region: env.FIREBASE_REGION
+  },
+  async (event) => {
+    const userId = event.params.userId;
+    const decisionId = event.params.decisionId;
+    await processDecisionForAutoTrade({
+      userId,
+      decisionId,
+      autoTrade: defaultAutoTradeService,
+      store: defaultStore
+    });
   }
 );
 

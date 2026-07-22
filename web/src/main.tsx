@@ -1,4 +1,4 @@
-export const GOLD_META_BUILD_STAMP = "v6.0.0-autotrade-preview-2026-07-22";
+export const GOLD_META_BUILD_STAMP = "v6.0.0-autotrade-hardening-2026-07-22";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

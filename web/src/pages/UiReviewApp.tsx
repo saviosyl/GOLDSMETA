@@ -389,7 +389,31 @@ function buildReviewApi() {
       };
       return { ...autoTrade };
     },
-    autoTradeUpdateLimits: async () => ({ ...autoTrade })
+    autoTradeUpdateLimits: async () => ({ ...autoTrade }),
+    autoTradeDemoDiagnostics: async () => {
+      autoTrade = {
+        ...autoTrade,
+        connection: {
+          ...autoTrade.connection,
+          connected: true,
+          environment: "DEMO",
+          accountIdMasked: "****1234",
+          accountName: "Demo CFD",
+          balance: 10000,
+          available: 9500,
+          marginUsed: 120,
+          marketName: "Spot Gold",
+          bid: 2385.2,
+          ask: 2385.5,
+          spread: 0.3,
+          minDealSize: 0.1,
+          sizeIncrement: 0.1,
+          valuePerPoint: 1,
+          lastHeartbeatAt: new Date().toISOString()
+        }
+      };
+      return { ...autoTrade };
+    }
   };
 }
 

@@ -1,19 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import request from "supertest";
 import { createApp } from "../../src/index";
 import { AiExplainer } from "../../src/services/ai/explainer";
 import { createStore } from "../../src/services/storage/createStore";
 import { AutoTradeService } from "../../src/services/autoTrade/autoTradeService";
-import { InMemoryAutoTradeStore } from "../../src/services/autoTrade/autoTradeStore";
+import { InMemoryAutoTradeStore } from "../../src/services/autoTrade/inMemoryAutoTradeStore";
 import { FakeIgBrokerAdapter } from "../../src/services/autoTrade/fakeIgBrokerAdapter";
 
 describe("autotrade HTTP routes", () => {
+  beforeEach(() => {
+    AutoTradeService.resetRestartGateForTests();
+  });
+
+  const store = createStore();
   const autoTradeService = new AutoTradeService(
     new InMemoryAutoTradeStore(),
-    (environment) => new FakeIgBrokerAdapter({ environment })
+    (environment) => new FakeIgBrokerAdapter({ environment }),
+    { ownerId: "route-tests" }
   );
   const app = createApp({
-    store: createStore(),
+    store,
     aiExplainer: new AiExplainer(),
     autoTradeService
   });
@@ -52,5 +58,32 @@ describe("autotrade HTTP routes", () => {
       });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("LIVE_FEATURE_DISABLED");
+  });
+
+  it("removes public evaluate execution endpoint", async () => {
+    const res = await request(app)
+      .post("/v1/autotrade/evaluate")
+      .set("x-test-user-id", "route-user-4")
+      .send({
+        decisionId: "dec-x",
+        decision: "BUY",
+        score: 90,
+        entry: 1,
+        stop: 0.5,
+        takeProfit: 2,
+        riskReward: 2,
+        decisionAgeMs: 1,
+        session: "LONDON"
+      });
+    expect(res.status).toBe(410);
+    expect(res.body.error.code).toBe("EVALUATE_REMOVED");
+  });
+
+  it("blocks non-admin internal evaluate", async () => {
+    const res = await request(app)
+      .post("/v1/autotrade/internal/evaluate-decision")
+      .set("x-test-user-id", "route-user-5")
+      .send({ decisionId: "dec-x" });
+    expect(res.status).toBe(403);
   });
 });

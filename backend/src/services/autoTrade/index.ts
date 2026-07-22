@@ -7,4 +7,8 @@ export * from "./eligibility";
 export * from "./riskEngine";
 export * from "./redactSecrets";
 export * from "./autoTradeStore";
+export * from "./inMemoryAutoTradeStore";
+export * from "./firestoreAutoTradeStore";
 export * from "./autoTradeService";
+export * from "./runtime";
+export * from "./decisionTrigger";

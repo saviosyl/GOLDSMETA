@@ -166,10 +166,17 @@ export function AutoTradePage() {
             type="button"
             className="gm-btn"
             disabled={busy}
-            onClick={() => void run(() => api.autoTradeConnect("LIVE"))}
-            title="Scaffolding only while LIVE feature flag is off"
+            onClick={() => void run(() => api.autoTradeDemoDiagnostics())}
           >
-            Verify IG Live (scaffold)
+            Refresh Demo diagnostics
+          </button>
+          <button
+            type="button"
+            className="gm-btn"
+            disabled
+            title="LIVE connection blocked until Savio enables it"
+          >
+            Verify IG Live (blocked)
           </button>
         </div>
       </section>

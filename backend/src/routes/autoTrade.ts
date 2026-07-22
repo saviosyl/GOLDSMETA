@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
-import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { env } from "../config/env";
+import { getAuthenticatedUserId, requireAuth, requireAdmin } from "../middleware/auth";
 import type { AutoTradeService } from "../services/autoTrade/autoTradeService";
 import { FIRST_PILOT_LIMITS } from "../services/autoTrade/types";
+import type { GoldMetaStore } from "../services/storage/types";
 
 const modeSchema = z.enum(["OFF", "SHADOW", "IG_DEMO_AUTO", "IG_LIVE_AUTO"]);
 
@@ -33,7 +35,8 @@ const limitsSchema = z
       .optional(),
     allowedSessions: z
       .array(z.enum(["LONDON", "NEW_YORK", "LONDON_NY_OVERLAP", "CUSTOM"]))
-      .optional()
+      .optional(),
+    confirmIncrease: z.boolean().optional()
   })
   .strict();
 
@@ -44,22 +47,24 @@ const connectSchema = z
   })
   .strict();
 
-const evaluateSchema = z
+const internalEvaluateSchema = z
   .object({
-    decisionId: z.string().min(4),
-    decision: z.string().min(2),
-    score: z.number().nullable(),
-    entry: z.number().nullable(),
-    stop: z.number().nullable(),
-    takeProfit: z.number().nullable(),
-    riskReward: z.number().nullable(),
-    decisionAgeMs: z.number().nonnegative(),
-    session: z.enum(["LONDON", "NEW_YORK", "LONDON_NY_OVERLAP", "CUSTOM", "OTHER"]),
-    newsBlackoutActive: z.boolean().optional()
+    decisionId: z.string().min(4)
   })
   .strict();
 
-export const buildAutoTradeRouter = (service: AutoTradeService): Router => {
+function internalEvaluateAllowed(): boolean {
+  return (
+    env.APP_ENV === "test" ||
+    process.env.ALLOW_AUTOTRADE_INTERNAL_EVALUATE === "true" ||
+    process.env.FUNCTIONS_EMULATOR === "true"
+  );
+}
+
+export const buildAutoTradeRouter = (
+  service: AutoTradeService,
+  goldMetaStore: GoldMetaStore
+): Router => {
   const router = Router();
 
   router.get("/v1/autotrade/status", requireAuth, async (req, res) => {
@@ -73,8 +78,23 @@ export const buildAutoTradeRouter = (service: AutoTradeService): Router => {
       res.status(400).json({ error: { code: "INVALID_LIMITS", message: "Invalid risk limits" } });
       return;
     }
-    const status = await service.updateLimits(getAuthenticatedUserId(req), parsed.data);
-    res.json({ status });
+    const { confirmIncrease, ...patch } = parsed.data;
+    try {
+      const status = await service.updateLimits(getAuthenticatedUserId(req), patch, {
+        confirmIncrease,
+        actorUserId: getAuthenticatedUserId(req)
+      });
+      res.json({ status });
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? "LIMITS_ERROR";
+      res.status(400).json({
+        error: {
+          code,
+          message: error instanceof Error ? error.message : "Unable to update limits",
+          increases: (error as { increases?: unknown }).increases
+        }
+      });
+    }
   });
 
   router.post("/v1/autotrade/mode", requireAuth, async (req, res) => {
@@ -117,8 +137,22 @@ export const buildAutoTradeRouter = (service: AutoTradeService): Router => {
     } catch (error) {
       res.status(400).json({
         error: {
-          code: "CONNECT_FAILED",
+          code: (error as { code?: string }).code ?? "CONNECT_FAILED",
           message: error instanceof Error ? error.message : "Connect failed"
+        }
+      });
+    }
+  });
+
+  router.post("/v1/autotrade/demo/diagnostics", requireAuth, async (req, res) => {
+    try {
+      const status = await service.refreshDemoDiagnostics(getAuthenticatedUserId(req));
+      res.json({ status, readOnly: true, ordersEnabled: false });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "DIAGNOSTICS_FAILED",
+          message: error instanceof Error ? error.message : "Diagnostics failed"
         }
       });
     }
@@ -138,15 +172,59 @@ export const buildAutoTradeRouter = (service: AutoTradeService): Router => {
     res.json({ status });
   });
 
-  /** Internal/dev evaluate endpoint — uses fake adapter in tests; never called from browser for APPROVED. */
-  router.post("/v1/autotrade/evaluate", requireAuth, async (req, res) => {
-    const parsed = evaluateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: { code: "INVALID_SIGNAL", message: "Invalid evaluate payload" } });
-      return;
+  /**
+   * Admin/emulator-only: evaluate using a stored decision id.
+   * Browser clients must not send executable decision fields.
+   * Disabled outside test/emulator unless ALLOW_AUTOTRADE_INTERNAL_EVALUATE=true.
+   */
+  router.post(
+    "/v1/autotrade/internal/evaluate-decision",
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+      if (!internalEvaluateAllowed()) {
+        res.status(404).json({
+          error: {
+            code: "NOT_FOUND",
+            message: "Internal AutoTrade evaluate is not enabled in this environment."
+          }
+        });
+        return;
+      }
+      const parsed = internalEvaluateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: { code: "INVALID_SIGNAL", message: "decisionId is required" }
+        });
+        return;
+      }
+      try {
+        const result = await service.evaluateFromStoredDecision(
+          getAuthenticatedUserId(req),
+          parsed.data.decisionId,
+          goldMetaStore
+        );
+        res.json(result);
+      } catch (error) {
+        res.status(400).json({
+          error: {
+            code: (error as { code?: string }).code ?? "EVALUATE_FAILED",
+            message: error instanceof Error ? error.message : "Evaluate failed"
+          }
+        });
+      }
     }
-    const result = await service.evaluateAndMaybeExecute(getAuthenticatedUserId(req), parsed.data);
-    res.json(result);
+  );
+
+  /** Explicitly blocked — former public evaluate endpoint. */
+  router.post("/v1/autotrade/evaluate", requireAuth, (_req, res) => {
+    res.status(410).json({
+      error: {
+        code: "EVALUATE_REMOVED",
+        message:
+          "Public AutoTrade evaluate was removed. Execution is triggered from trusted server decision documents only."
+      }
+    });
   });
 
   return router;

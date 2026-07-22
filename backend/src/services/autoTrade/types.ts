@@ -8,6 +8,9 @@ export const AUTOTRADE_STRATEGY_VERSION = "v6.0.0-pilot";
 /** Server-side kill switch — must stay false for this preview release. */
 export const LIVE_EXECUTION_FEATURE_FLAG = false;
 
+/** Demo order submission stays off during read-only IG Demo hardening. */
+export const DEMO_ORDER_SUBMISSION_ENABLED = false;
+
 export type AutoTradeMode = "OFF" | "SHADOW" | "IG_DEMO_AUTO" | "IG_LIVE_AUTO";
 
 export type AutoTradeDisplayStatus =
@@ -127,6 +130,10 @@ export interface TradeIntent {
   rejectionReason: string | null;
   dealReference: string | null;
   dealId: string | null;
+  /** Distributed execution lease owner (function instance id). */
+  leaseOwnerId: string | null;
+  leaseExpiresAt: string | null;
+  leaseHeartbeatAt: string | null;
   limitsSnapshot: AutoTradeRiskLimits;
   createdAt: string;
   updatedAt: string;

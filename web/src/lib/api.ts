@@ -561,11 +561,18 @@ export class ApiClient {
   }
 
   async autoTradeUpdateLimits(
-    patch: Partial<AutoTradeStatus["limits"]>
+    patch: Partial<AutoTradeStatus["limits"]> & { confirmIncrease?: boolean }
   ): Promise<AutoTradeStatus> {
     const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/limits", {
       method: "PATCH",
       body: JSON.stringify(patch)
+    });
+    return body.status;
+  }
+
+  async autoTradeDemoDiagnostics(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/demo/diagnostics", {
+      method: "POST"
     });
     return body.status;
   }

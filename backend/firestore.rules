@@ -97,6 +97,14 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false;
       }
+      match /autoTradeActivity/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /tradeIntentDealRefs/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
     }
 
     match /webhookConnections/{webhookId} {
