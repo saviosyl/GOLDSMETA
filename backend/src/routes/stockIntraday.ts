@@ -129,6 +129,31 @@ export const buildStockIntradayRouter = (service: StockIntradayService): Router 
     res.json({ status });
   });
 
+  router.put("/v1/stock-intraday/watchlist", requireAuth, async (req, res) => {
+    const parsed = z
+      .object({ symbols: z.array(z.string().min(1).max(16)).max(10) })
+      .strict()
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "INVALID_WATCHLIST", message: "Invalid watchlist" } });
+      return;
+    }
+    try {
+      const status = await service.updateWatchlist(
+        getAuthenticatedUserId(req),
+        parsed.data.symbols
+      );
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "WATCHLIST_ERROR",
+          message: error instanceof Error ? error.message : "Unable to update watchlist"
+        }
+      });
+    }
+  });
+
   router.post("/v1/stock-intraday/webhook-connection", requireAuth, async (req, res) => {
     const body = z
       .object({

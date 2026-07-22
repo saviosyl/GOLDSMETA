@@ -10,7 +10,9 @@ export default defineConfig({
       ALLOW_TEST_AUTH_HEADER: "true",
       SETUP_TRACKING_ENVIRONMENTS: "TEST,LIVE",
       BROKER_MODE: "DISABLED",
-      AI_ENABLED: "false"
+      AI_ENABLED: "false",
+      STOCK_INTRADAY_MARKET_DATA: "mock",
+      STOCK_INTRADAY_DEPLOYMENT_GENERATION: "test-gen"
     },
     globals: true,
     restoreMocks: true,

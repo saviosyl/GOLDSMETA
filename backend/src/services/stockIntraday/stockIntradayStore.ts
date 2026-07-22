@@ -16,6 +16,21 @@ import {
 import type { StockSignalRecord } from "./signalIngestion";
 import { createDefaultRiskState } from "./risk/riskEngine";
 
+export interface StockReadinessSnapshot {
+  userId: string;
+  checkedAt: string;
+  gates: Array<{ id: string; ok: boolean; detail: string }>;
+  ttlMs: number;
+}
+
+export interface StockWatchlistValidationState {
+  userId: string;
+  symbols: string[];
+  accepted: string[];
+  rejected: Array<{ symbol: string; reasons: string[] }>;
+  validatedAt: string;
+}
+
 export const STOCK_JOB_LEASE_MS = 5 * 60 * 1000;
 export const STOCK_INTENT_LEASE_MS = 60_000;
 
@@ -256,6 +271,67 @@ export interface StockIntradayStorePort {
   appendShadowTrade(
     userId: string,
     trade: Omit<import("./types").StockShadowTradeRecord, "id"> & { id?: string }
+  ): Promise<void>;
+
+  appendShadowDecision(
+    userId: string,
+    decision: Omit<import("./shadowPerformance").ShadowDecisionRecord, "id" | "userId" | "createdAt"> & {
+      id?: string;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord>;
+  listShadowDecisions(
+    userId: string,
+    limit?: number
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord[]>;
+  getShadowDecision(
+    userId: string,
+    decisionId: string
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null>;
+  /** Update the exact SHADOW decision document by ID (preferred). */
+  completeShadowDecisionExitById(
+    userId: string,
+    decisionId: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null>;
+  /**
+   * @deprecated Prefer completeShadowDecisionExitById — symbol search is unsafe with many decisions.
+   */
+  completeShadowDecisionExit(
+    userId: string,
+    symbol: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null>;
+
+  getReadinessSnapshot(userId: string): Promise<StockReadinessSnapshot | null>;
+  saveReadinessSnapshot(snapshot: StockReadinessSnapshot): Promise<void>;
+  getWatchlistValidation(userId: string): Promise<StockWatchlistValidationState | null>;
+  saveWatchlistValidation(state: StockWatchlistValidationState): Promise<void>;
+  touchSchedulerHeartbeat(userId: string, atIso?: string): Promise<void>;
+  getSchedulerHeartbeat(userId: string): Promise<string | null>;
+  getShadowPerformanceAggregate(
+    userId: string
+  ): Promise<import("./shadowPerformance").ShadowPerformanceMetrics | null>;
+  saveShadowPerformanceAggregate(
+    userId: string,
+    metrics: import("./shadowPerformance").ShadowPerformanceMetrics
   ): Promise<void>;
 
   getRestartGate(userId: string): Promise<StockRestartGate>;

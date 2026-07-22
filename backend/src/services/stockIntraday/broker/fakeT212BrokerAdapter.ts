@@ -50,43 +50,35 @@ export class FakeT212BrokerAdapter implements T212BrokerAdapter {
       totalValue: 3200,
       currency: "EUR"
     };
+    const mk = (
+      ticker: string,
+      name: string,
+      type: T212Instrument["type"],
+      exchange: string,
+      minTradeQuantity = 0.001
+    ): T212Instrument => ({
+      ticker,
+      name,
+      type,
+      currency: "USD",
+      exchange,
+      minTradeQuantity,
+      maxOpenQuantity: null,
+      extendedHoursAllowed: false,
+      tradable: true,
+      suspended: false
+      // Official instrument metadata has no currentPrice — do not invent one here.
+    });
     this.instruments = [
-      {
-        ticker: "AAPL",
-        name: "Apple Inc",
-        type: "STOCK",
-        currency: "USD",
-        exchange: "NASDAQ",
-        minTradeQuantity: 0.001,
-        maxOpenQuantity: null,
-        extendedHoursAllowed: false,
-        tradable: true,
-        suspended: false
-      },
-      {
-        ticker: "SPY",
-        name: "SPDR S&P 500 ETF",
-        type: "ETF",
-        currency: "USD",
-        exchange: "NYSE",
-        minTradeQuantity: 0.001,
-        maxOpenQuantity: null,
-        extendedHoursAllowed: false,
-        tradable: true,
-        suspended: false
-      },
-      {
-        ticker: "XAUUSD.CFD",
-        name: "Gold CFD",
-        type: "OTHER",
-        currency: "USD",
-        exchange: "CFD",
-        minTradeQuantity: 0.1,
-        maxOpenQuantity: null,
-        extendedHoursAllowed: false,
-        tradable: true,
-        suspended: false
-      }
+      mk("AAPL", "Apple Inc", "STOCK", "NASDAQ"),
+      mk("MSFT", "Microsoft", "STOCK", "NASDAQ"),
+      mk("NVDA", "NVIDIA", "STOCK", "NASDAQ"),
+      mk("AMZN", "Amazon", "STOCK", "NASDAQ"),
+      mk("META", "Meta Platforms", "STOCK", "NASDAQ"),
+      mk("GOOGL", "Alphabet", "STOCK", "NASDAQ"),
+      mk("SPY", "SPDR S&P 500 ETF", "ETF", "NYSE"),
+      mk("QQQ", "Invesco QQQ", "ETF", "NASDAQ"),
+      mk("XAUUSD.CFD", "Gold CFD", "OTHER", "CFD", 0.1)
     ];
   }
 

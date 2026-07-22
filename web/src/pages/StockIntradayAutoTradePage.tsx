@@ -17,11 +17,13 @@ export function StockIntradayAutoTradePage() {
   const [status, setStatus] = useState<StockIntradayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [watchlistDraft, setWatchlistDraft] = useState("");
 
   const reload = useCallback(async () => {
     try {
       const next = await api.stockIntradayStatus();
       setStatus(next);
+      setWatchlistDraft((next.watchlist?.symbols ?? []).join(", "));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Stocks Intraday status");
@@ -78,6 +80,23 @@ export function StockIntradayAutoTradePage() {
       <div className="gm-autotrade-readonly-banner" data-testid="stock-intraday-safety">
         {status?.safetyStatement ??
           "GoldMeta trades only qualifying opportunities. No trade will be placed when the safety requirements are not met."}
+      </div>
+
+      {status?.marketData?.dataLabel ? (
+        <div className="gm-autotrade-readonly-banner" data-testid="stock-intraday-data-label">
+          Market data: {status.marketData.dataLabel}
+          {status.marketData.feedId ? ` · feed=${status.marketData.feedId}` : ""}
+          {" · "}
+          provider={status.marketData.providerId}
+        </div>
+      ) : null}
+
+      <div
+        className="gm-autotrade-readonly-banner"
+        data-testid="stock-intraday-t212-price-label"
+      >
+        {status?.t212ExecutionPrice?.label ??
+          "T212 EXECUTION PRICE — NOT AVAILABLE FROM CURRENT PUBLIC API"}
       </div>
 
       <div className="gm-autotrade-stop-bar" data-testid="stock-intraday-kill-switch-bar">
@@ -239,6 +258,50 @@ export function StockIntradayAutoTradePage() {
         </div>
       </section>
 
+      <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-watchlist">
+        <div className="gm-section-head">
+          <h2 className="gm-section-title">SHADOW watchlist</h2>
+          <p className="gm-meta">Max 10 symbols. Saved list is preserved across SHADOW re-enable.</p>
+        </div>
+        <label className="gm-label" htmlFor="stock-watchlist-input">
+          Symbols (comma-separated)
+        </label>
+        <input
+          id="stock-watchlist-input"
+          className="gm-input"
+          data-testid="stock-intraday-watchlist-input"
+          value={watchlistDraft}
+          disabled={busy}
+          onChange={(e) => setWatchlistDraft(e.target.value)}
+        />
+        <div className="gm-autotrade-actions">
+          <button
+            type="button"
+            className="gm-btn gm-btn-primary"
+            disabled={busy}
+            data-testid="stock-intraday-watchlist-save"
+            onClick={() => {
+              const symbols = watchlistDraft
+                .split(/[,\s]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              void run(() => api.stockIntradayUpdateWatchlist(symbols));
+            }}
+          >
+            Save watchlist
+          </button>
+        </div>
+        {(status?.watchlist?.rejected?.length ?? 0) > 0 ? (
+          <ul className="gm-autotrade-limits-list" data-testid="stock-intraday-watchlist-rejected">
+            {status!.watchlist!.rejected.map((r) => (
+              <li key={r.symbol}>
+                <strong>{r.symbol}</strong> rejected: {r.reasons.join(", ")}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
       <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-ranked">
         <div className="gm-section-head">
           <h2 className="gm-section-title">Ranked Intraday Opportunities</h2>
@@ -270,6 +333,135 @@ export function StockIntradayAutoTradePage() {
         >
           Run shadow scan
         </button>
+      </section>
+
+      <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-shadow-performance">
+        <div className="gm-section-head">
+          <h2 className="gm-section-title">Shadow Performance</h2>
+          <p className="gm-meta">
+            {status?.shadowPerformance?.disclaimer ??
+              "SHADOW results are hypothetical validation only and do not guarantee future performance."}
+          </p>
+        </div>
+        <div className="gm-autotrade-metrics">
+          <div>
+            <span className="gm-label">Sessions</span>
+            <strong>{status?.shadowPerformance?.marketSessionsObserved ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Evaluated</span>
+            <strong>{status?.shadowPerformance?.opportunitiesEvaluated ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Opened</span>
+            <strong>{status?.shadowPerformance?.tradesOpened ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Closed</span>
+            <strong>{status?.shadowPerformance?.tradesClosed ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Win rate</span>
+            <strong>
+              {status?.shadowPerformance?.winRate == null
+                ? "—"
+                : `${(status.shadowPerformance.winRate * 100).toFixed(1)}%`}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Loss rate</span>
+            <strong>
+              {status?.shadowPerformance?.lossRate == null
+                ? "—"
+                : `${(status.shadowPerformance.lossRate * 100).toFixed(1)}%`}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Gross P/L</span>
+            <strong>{money(status?.shadowPerformance?.grossPnl)}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Net P/L</span>
+            <strong>{money(status?.shadowPerformance?.netPnl)}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Avg win</span>
+            <strong>{money(status?.shadowPerformance?.averageWin)}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Avg loss</span>
+            <strong>{money(status?.shadowPerformance?.averageLoss)}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Profit factor</span>
+            <strong>
+              {status?.shadowPerformance?.profitFactor == null
+                ? "—"
+                : status.shadowPerformance.profitFactor.toFixed(2)}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Max drawdown</span>
+            <strong>{money(status?.shadowPerformance?.maximumDrawdown)}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Max consec. losses</span>
+            <strong>{status?.shadowPerformance?.maximumConsecutiveLosses ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Avg hold (min)</span>
+            <strong>
+              {status?.shadowPerformance?.averageHoldingTimeMinutes == null
+                ? "—"
+                : status.shadowPerformance.averageHoldingTimeMinutes.toFixed(1)}
+            </strong>
+          </div>
+          <div>
+            <span className="gm-label">Stop exits</span>
+            <strong>{status?.shadowPerformance?.stopLossExits ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Take-profit exits</span>
+            <strong>{status?.shadowPerformance?.takeProfitExits ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Trailing exits</span>
+            <strong>{status?.shadowPerformance?.trailingStopExits ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Invalidation exits</span>
+            <strong>{status?.shadowPerformance?.strategyInvalidationExits ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">EOD exits</span>
+            <strong>{status?.shadowPerformance?.endOfDayExits ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Blocked</span>
+            <strong>{status?.shadowPerformance?.blockedOpportunities ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Data outages</span>
+            <strong>{status?.shadowPerformance?.dataOutages ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Stale blocks</span>
+            <strong>{status?.shadowPerformance?.staleDataBlocks ?? 0}</strong>
+          </div>
+          <div>
+            <span className="gm-label">Divergence blocks</span>
+            <strong>{status?.shadowPerformance?.providerDivergenceBlocks ?? 0}</strong>
+          </div>
+        </div>
+        {(status?.readinessGates?.length ?? 0) > 0 ? (
+          <ul className="gm-autotrade-limits-list" data-testid="stock-intraday-readiness-gates">
+            {status!.readinessGates!.map((g) => (
+              <li key={g.id}>
+                <strong>{g.ok ? "OK" : "FAIL"}</strong> {g.id} — {g.detail}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <section className="gm-section gm-autotrade-panel" data-testid="stock-intraday-positions">

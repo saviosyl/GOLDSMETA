@@ -9,11 +9,13 @@ on:
       - cursor/phase3-stage3-live-forward-c2c2
       - cursor/goldmeta-v4-stage-b-c2c2
       - cursor/goldmeta-v6-ig-autotrade-c2c2
+      - cursor/goldmeta-v6-t212-intraday-autotrade-c2c2
   push:
     branches:
       - main
       - cursor/production-connection
       - cursor/goldmeta-v6-t212-intraday-autotrade-c2c2
+      - cursor/goldmeta-v6-stock-shadow-alpaca-c2c2
 
 defaults:
   run:
@@ -55,3 +57,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright — Stock Intraday
+        run: npx playwright test e2e/stockIntraday.spec.ts

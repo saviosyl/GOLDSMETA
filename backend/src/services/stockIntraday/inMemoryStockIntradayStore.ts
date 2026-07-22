@@ -86,6 +86,14 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
   private audit = new Map<string, StockIntradayAuditEntry[]>();
   private cooldowns = new Map<string, Map<string, string>>();
   private shadowTrades = new Map<string, StockShadowTradeRecord[]>();
+  private readinessSnapshots = new Map<string, import("./stockIntradayStore").StockReadinessSnapshot>();
+  private watchlistValidations = new Map<string, import("./stockIntradayStore").StockWatchlistValidationState>();
+  private schedulerHeartbeats = new Map<string, string>();
+  private shadowPerfAggregates = new Map<string, import("./shadowPerformance").ShadowPerformanceMetrics>();
+  private shadowDecisions = new Map<
+    string,
+    import("./shadowPerformance").ShadowDecisionRecord[]
+  >();
   private restartGates = new Map<string, StockRestartGate>();
   private dashboardSnapshots = new Map<string, StockDashboardSnapshot>();
   private reconciliation = new Map<string, StockReconciliationRecord[]>();
@@ -529,6 +537,129 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       at: trade.at ?? nowIso()
     });
     this.shadowTrades.set(userId, list.slice(0, 200));
+  }
+
+  async appendShadowDecision(
+    userId: string,
+    decision: Omit<import("./shadowPerformance").ShadowDecisionRecord, "id" | "userId" | "createdAt"> & {
+      id?: string;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord> {
+    const record = {
+      ...decision,
+      id: decision.id ?? randomUUID(),
+      userId,
+      createdAt: nowIso()
+    };
+    const list = this.shadowDecisions.get(userId) ?? [];
+    list.unshift(record);
+    this.shadowDecisions.set(userId, list.slice(0, 500));
+    return this.clone(record);
+  }
+
+  async listShadowDecisions(
+    userId: string,
+    limit = 200
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord[]> {
+    return this.clone((this.shadowDecisions.get(userId) ?? []).slice(0, limit));
+  }
+
+  async getShadowDecision(
+    userId: string,
+    decisionId: string
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const list = this.shadowDecisions.get(userId) ?? [];
+    const found = list.find((d) => d.id === decisionId);
+    return found ? this.clone(found) : null;
+  }
+
+  async completeShadowDecisionExitById(
+    userId: string,
+    decisionId: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const list = this.shadowDecisions.get(userId) ?? [];
+    const idx = list.findIndex((d) => d.id === decisionId);
+    if (idx < 0) return null;
+    const updated: import("./shadowPerformance").ShadowDecisionRecord = {
+      ...list[idx]!,
+      ...exit
+    };
+    list[idx] = updated;
+    this.shadowDecisions.set(userId, list);
+    return this.clone(updated);
+  }
+
+  async completeShadowDecisionExit(
+    userId: string,
+    symbol: string,
+    exit: {
+      hypotheticalExit: number;
+      exitReason: import("./featureFlags").StockExitReason;
+      grossPnl: number;
+      estimatedSlippage: number;
+      netPnl: number;
+      holdingDurationMinutes: number;
+      highestFavourableMovement: number | null;
+      maximumAdverseMovement: number | null;
+    }
+  ): Promise<import("./shadowPerformance").ShadowDecisionRecord | null> {
+    const list = this.shadowDecisions.get(userId) ?? [];
+    const idx = list.findIndex(
+      (d) =>
+        d.symbol.toUpperCase() === symbol.toUpperCase() &&
+        d.outcome === "BUY" &&
+        d.hypotheticalExit == null
+    );
+    if (idx < 0) return null;
+    return this.completeShadowDecisionExitById(userId, list[idx]!.id, exit);
+  }
+
+  async getReadinessSnapshot(userId: string) {
+    const s = this.readinessSnapshots.get(userId);
+    return s ? this.clone(s) : null;
+  }
+
+  async saveReadinessSnapshot(snapshot: import("./stockIntradayStore").StockReadinessSnapshot) {
+    this.readinessSnapshots.set(snapshot.userId, this.clone(snapshot));
+  }
+
+  async getWatchlistValidation(userId: string) {
+    const s = this.watchlistValidations.get(userId);
+    return s ? this.clone(s) : null;
+  }
+
+  async saveWatchlistValidation(state: import("./stockIntradayStore").StockWatchlistValidationState) {
+    this.watchlistValidations.set(state.userId, this.clone(state));
+  }
+
+  async touchSchedulerHeartbeat(userId: string, atIso?: string) {
+    this.schedulerHeartbeats.set(userId, atIso ?? new Date().toISOString());
+  }
+
+  async getSchedulerHeartbeat(userId: string) {
+    return this.schedulerHeartbeats.get(userId) ?? null;
+  }
+
+  async getShadowPerformanceAggregate(userId: string) {
+    const m = this.shadowPerfAggregates.get(userId);
+    return m ? this.clone(m) : null;
+  }
+
+  async saveShadowPerformanceAggregate(
+    userId: string,
+    metrics: import("./shadowPerformance").ShadowPerformanceMetrics
+  ) {
+    this.shadowPerfAggregates.set(userId, this.clone(metrics));
   }
 
   async getRestartGate(userId: string): Promise<StockRestartGate> {

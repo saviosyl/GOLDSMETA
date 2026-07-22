@@ -27,6 +27,8 @@ export interface T212Instrument {
   extendedHoursAllowed: boolean;
   tradable: boolean;
   suspended: boolean;
+  /** Never populated from official instrument metadata (Public API has no price). */
+  currentPrice?: number | null;
 }
 
 export interface T212Position {
