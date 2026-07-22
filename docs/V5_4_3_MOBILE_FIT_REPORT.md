@@ -32,7 +32,7 @@
 |------|-------|
 | Draft / merge PR | https://github.com/saviosyl/GOLDSMETA/pull/18 |
 | Revised preview | https://preview-v5-4-3-snapshot.goldmeta-web.pages.dev |
-| Tip | see branch HEAD after this commit |
+| Tip | `70584ae` · merge `8639232` |
 
 ## Validation
 
@@ -44,3 +44,7 @@
 ## Safety
 
 backend / ios / pine untouched · V4 SHADOW · broker DISABLED
+
+## Merge
+
+PR #18 merged into `cursor/goldmeta-v5-4-light-theme-c2c2` as `8639232` for testing. **Production not promoted.**
