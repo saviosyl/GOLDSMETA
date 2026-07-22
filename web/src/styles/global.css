@@ -1015,13 +1015,16 @@ a {
   font-size: 0.82rem;
 }
 
-.field input,
-.field select,
-.field textarea,
-input,
-select,
-textarea {
-  font-size: 16px; /* prevent iOS Safari auto-zoom */
+@media (max-width: 767px) {
+  /* iOS Safari focus-zoom guard — mobile only; heights/spacing unchanged */
+  .field input,
+  .field select,
+  .field textarea,
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 .danger-text {
