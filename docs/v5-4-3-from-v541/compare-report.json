@@ -1,0 +1,30 @@
+{
+  "dashboard-desktop-1440": {
+    "sampled_diff_ratio": 0.0497,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-dashboard-desktop-1440.png"
+  },
+  "dashboard-mobile-390": {
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-dashboard-mobile-390.png"
+  },
+  "dashboard-mobile-430": {
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-dashboard-mobile-430.png"
+  },
+  "score-expanded-390": {
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-score-expanded-390.png"
+  },
+  "market-map-390": {
+    "sampled_diff_ratio": 0.0001,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-market-map-390.png"
+  },
+  "signin-mobile-390": {
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-signin-mobile-390.png"
+  },
+  "settings-mobile-390": {
+    "sampled_diff_ratio": 0.0,
+    "compare": "/home/ubuntu/GOLDSMETA/docs/v5-4-3-from-v541/compare-settings-mobile-390.png"
+  }
+}

@@ -14,8 +14,6 @@ vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     signIn: vi.fn(),
     signUp: vi.fn(),
-    signOut: vi.fn(),
-    user: { email: "tester@example.com" },
     configured: true,
     apiBaseUrl: "https://example.invalid"
   })

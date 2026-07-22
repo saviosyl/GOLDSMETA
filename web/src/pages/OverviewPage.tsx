@@ -1,23 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 import { formatClientError } from "../lib/errors";
-import { formatSession, plainLanguageReason } from "../lib/plainLanguage";
+import { formatSession, humanDecisionState, plainLanguageReason } from "../lib/plainLanguage";
 import {
   formatCompactLocalTime,
   formatLocalTimestamp,
-  loadTimezonePreference
+  loadTimezonePreference,
+  type FormattedTimestamp
 } from "../lib/timezone";
 import { buildOvernightReview } from "../lib/overnight";
+import type { BuildSnapshotInput } from "../lib/promoSnapshot";
+import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
-import { MarketStoryCard } from "../components/v5/MarketStoryCard";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
-import { CurrentPlanCard } from "../components/v5/CurrentPlanCard";
 import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
+import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
+import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 
 type Briefing = {
   session?: string | null;
@@ -38,7 +41,60 @@ type Score = {
   disclaimer?: string;
 };
 
-/** V5.4.2 Dashboard — Primary Signal first, Market Story, denser layout. */
+function buildSnapshotFromPage(args: {
+  decision: Decision | null;
+  briefing: Briefing | null;
+  decisionCode: string;
+  score: Score | null;
+  livePrice: number | null;
+  sessionLabel: string;
+  compactTime: string;
+  localTs: FormattedTimestamp;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  hasPlan: boolean;
+  setup: SetupRecord | null;
+}): BuildSnapshotInput | null {
+  const { decision, briefing } = args;
+  if (!decision && !briefing) return null;
+  return {
+    decision: args.decisionCode,
+    scoreTotal: args.score?.total ?? null,
+    livePrice: args.livePrice,
+    sessionLabel: args.sessionLabel,
+    compactTime: args.compactTime,
+    timeZone: args.localTs.timeZone,
+    utcSecondary: args.localTs.secondaryUtc,
+    storyInput: {
+      decision: args.decisionCode,
+      session: briefing?.session ?? decision?.currentSession,
+      regime: briefing?.marketRegime ?? decision?.marketRegime,
+      positionVsPoc: briefing?.positionVsPoc,
+      atrLabel: briefing?.atrLabel,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      livePrice: args.livePrice,
+      reasonCodes: decision?.reasonCodes,
+      hasValidatedPlan: args.hasPlan,
+      insufficientData: Boolean(briefing?.insufficientData) && !decision,
+      components: args.score?.components
+    },
+    ladder: {
+      livePrice: args.livePrice,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      barHigh: decision?.ohlcv?.high ?? null,
+      barLow: decision?.ohlcv?.low ?? null
+    },
+    plan: args.setup,
+    scoreComponents: args.score?.components
+  };
+}
+
+/** V5.4.1 Dashboard — compact mobile, local time, ladder, semantic score + snapshot. */
 export function OverviewPage() {
   const { api } = useAuth();
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -107,10 +163,10 @@ export function OverviewPage() {
 
   const freshness =
     source === "offline"
-      ? `Offline · ${compactTime}`
+      ? `Offline · last stored ${compactTime}`
       : source === "cached"
         ? `Cached · ${compactTime}`
-        : `Updated ${compactTime}`;
+        : `Updated ${compactTime} local time`;
 
   const sessionLabel = formatSession(briefing?.session ?? decision?.currentSession);
   const poc = briefing?.levels?.poc ?? decision?.marketStructure?.poc ?? null;
@@ -126,126 +182,185 @@ export function OverviewPage() {
 
   const overnight = buildOvernightReview(overnightSetups, new Date(), localTs.timeZone);
 
+  const snapshotInputRef = useRef<() => BuildSnapshotInput | null>(() => null);
+  useEffect(() => {
+    snapshotInputRef.current = () =>
+      buildSnapshotFromPage({
+        decision,
+        briefing,
+        decisionCode,
+        score,
+        livePrice,
+        sessionLabel,
+        compactTime,
+        localTs,
+        poc,
+        vah,
+        val,
+        hasPlan,
+        setup
+      });
+  });
+
+  const buildSnapshotInput = useCallback(() => snapshotInputRef.current(), []);
+  const snapshot = usePromoSnapshot(buildSnapshotInput);
+
   return (
-    <div data-testid="overview-page" className="gm-dashboard gm-dashboard--v542">
+    <div data-testid="overview-page" className="gm-dashboard">
       <PageHeader title="Dashboard" freshness={freshness} />
 
       {error && (
-        <div className="banner error gm-state-card" role="alert" data-testid="dashboard-error">
-          <strong>Could not refresh market state.</strong>
-          <p className="gm-meta">{error}</p>
-          <button type="button" className="gm-btn-outline" onClick={() => void load()}>
-            Try again
-          </button>
+        <div className="banner error" role="alert">
+          {error}
         </div>
       )}
-
       {loading && (
-        <div className="gm-skeleton-stack" data-testid="dashboard-loading" aria-busy="true">
-          <div className="gm-skeleton gm-skeleton--hero" />
-          <div className="gm-skeleton" />
-          <div className="gm-skeleton" />
-        </div>
+        <SectionCard>
+          <p className="gm-meta">Loading market state…</p>
+        </SectionCard>
       )}
 
-      {!loading && !decision && !error && (
-        <div className="gm-empty gm-state-card" role="status" data-testid="dashboard-empty">
-          <strong>No market data yet.</strong>
-          <p className="gm-meta">Connect TradingView alerts or wait for the next verified snapshot.</p>
+      {/* Compact 2×2 summary — no email, no duplicate LIVE */}
+      <div className="gm-dash-summary" data-testid="dashboard-summary">
+        <div className="gm-dash-cell">
+          <span className="gm-label">XAUUSD</span>
+          <strong data-testid="summary-decision">{humanDecisionState(decisionCode)}</strong>
         </div>
-      )}
+        <div className="gm-dash-cell">
+          <span className="gm-label">Score</span>
+          <strong>{score?.total != null ? `${score.total} / 100` : "—"}</strong>
+        </div>
+        <div className="gm-dash-cell">
+          <span className="gm-label">Session</span>
+          <strong>{sessionLabel}</strong>
+        </div>
+        <div className="gm-dash-cell">
+          <span className="gm-label">Your time</span>
+          <strong>{compactTime}</strong>
+          <span className="gm-meta">{localTs.timeZone}</span>
+        </div>
+      </div>
 
-      {/* 1. Primary Signal */}
-      {!loading && (
-        <PrimarySignalCard
-          decisionCode={decisionCode}
-          sessionLabel={sessionLabel}
-          reason={reason}
-          scoreTotal={score?.total}
-          compactTime={compactTime}
-          timeZone={localTs.timeZone}
-          utcSecondary={localTs.secondaryUtc}
-          livePrice={livePrice}
-          setup={setup}
-          source={source}
-          technicalId={decision?.decisionId}
-          reasonCodes={decision?.reasonCodes}
+      <PrimarySignalCard
+        decisionCode={decisionCode}
+        sessionLabel={sessionLabel}
+        reason={reason}
+        scoreTotal={score?.total}
+        localPrimary={localTs.primary}
+        localZone={localTs.timeZone}
+        utcSecondary={localTs.secondaryUtc}
+        poc={poc}
+        vah={vah}
+        val={val}
+        setup={setup}
+        source={source}
+        technicalId={decision?.decisionId}
+        reasonCodes={decision?.reasonCodes}
+      />
+
+      <div className="gm-snapshot-actions-row">
+        <PromoSnapshotButton
+          onClick={snapshot.openModal}
+          disabled={!decision && !briefing}
         />
-      )}
+      </div>
+      <PromoSnapshotModal
+        open={snapshot.open}
+        onClose={snapshot.closeModal}
+        options={snapshot.options}
+        onOptionsChange={snapshot.updateOptions}
+        status={snapshot.status}
+        statusMessage={snapshot.statusMessage}
+        previewUrl={snapshot.previewUrl}
+        generating={snapshot.generating}
+        onShare={() => void snapshot.share()}
+        onDownload={snapshot.download}
+      />
 
-      {/* 2. Market Story */}
-      {!loading && (
-        <MarketStoryCard
-          decision={decisionCode}
-          session={briefing?.session ?? decision?.currentSession}
-          regime={briefing?.marketRegime ?? decision?.marketRegime}
-          positionVsPoc={briefing?.positionVsPoc}
-          atrLabel={briefing?.atrLabel}
-          poc={poc}
-          vah={vah}
-          val={val}
-          livePrice={livePrice}
-          reasonCodes={decision?.reasonCodes}
-          hasValidatedPlan={hasPlan}
-          insufficientData={Boolean(briefing?.insufficientData) && !decision}
+      <SectionCard title="Market Structure Map">
+        <MarketLevelLadder
+          input={{
+            livePrice: decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null,
+            poc,
+            vah,
+            val,
+            barHigh: decision?.ohlcv?.high ?? null,
+            barLow: decision?.ohlcv?.low ?? null,
+            entry: setup?.levels?.entryPrice ?? null,
+            stop: setup?.levels?.stopLoss ?? null,
+            tp1: setup?.levels?.tp1 ?? null,
+            tp2: setup?.levels?.tp2 ?? null,
+            tp3: setup?.levels?.tp3 ?? null
+          }}
+          dataTimestamp={stampIso}
+        />
+      </SectionCard>
+
+      <SectionCard title="Setup readiness">
+        <ScoreBreakdown
+          total={score?.total}
           components={score?.components}
+          disclaimer={score?.disclaimer}
+          compact
         />
-      )}
+      </SectionCard>
 
-      {/* 3 + 4 desktop grid: Map + Setup readiness */}
-      <div className="gm-dash-grid">
-        <SectionCard title="Market Structure Map" className="gm-dash-map">
-          <MarketLevelLadder
-            input={{
-              livePrice,
-              poc,
-              vah,
-              val,
-              barHigh: decision?.ohlcv?.high ?? null,
-              barLow: decision?.ohlcv?.low ?? null
-            }}
-            dataTimestamp={stampIso}
-          />
+      <OvernightReviewCard review={overnight} />
+
+      <div className="gm-two-col">
+        <SectionCard title="Market briefing">
+          {briefing?.insufficientData ? (
+            <EmptyState title="Insufficient verified data for a full briefing." />
+          ) : (
+            <p style={{ margin: 0, maxWidth: 720, color: "var(--text-secondary)" }}>
+              Session {sessionLabel}. Regime {briefing?.marketRegime ?? "unknown"}. Position vs POC{" "}
+              {briefing?.positionVsPoc?.replace(/_/g, " ") ?? "—"}. ATR {briefing?.atrLabel ?? "—"}.
+              This summary is informational only.
+            </p>
+          )}
+          <p className="gm-meta">{briefing?.disclaimer}</p>
         </SectionCard>
 
-        <SectionCard title="Setup readiness" className="gm-dash-score">
-          <ScoreBreakdown
-            total={score?.total}
-            components={score?.components}
-            disclaimer={score?.disclaimer}
-          />
+        <SectionCard
+          title="Recent activity"
+          action={
+            <Link className="gm-linkish" to="/history">
+              View history
+            </Link>
+          }
+        >
+          {recent.length === 0 ? (
+            <EmptyState title="No recent setups yet." />
+          ) : (
+            <ul className="list">
+              {recent.map((s) => (
+                <li key={s.setupId}>
+                  <Link to={`/setups/${s.setupId}`}>
+                    {s.direction ?? "—"} · {String(s.status).replace(/_/g, " ")}
+                  </Link>
+                  <div className="gm-meta">{formatLocalTimestamp(s.createdAt, tzPref).primary}</div>
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
       </div>
 
-      {/* 5. Current Plan */}
-      {!loading && <CurrentPlanCard setup={setup} />}
-
-      {/* 6. Overnight Review (only when relevant) */}
-      <OvernightReviewCard review={overnight} />
-
-      {/* 7. Recent Activity */}
       <SectionCard
-        title="Recent activity"
+        title="Risk planner"
         action={
-          <Link className="gm-linkish" to="/history">
-            View history
+          <Link
+            className="gm-btn-outline"
+            to="/planner"
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+          >
+            Open planner
           </Link>
         }
       >
-        {recent.length === 0 ? (
-          <EmptyState title="No recent setups yet." body="Shadow setups will appear here when created." />
-        ) : (
-          <ul className="list">
-            {recent.map((s) => (
-              <li key={s.setupId}>
-                <Link to={`/setups/${s.setupId}`}>
-                  {s.direction ?? "—"} · {String(s.status).replace(/_/g, " ")}
-                </Link>
-                <div className="gm-meta">{formatCompactLocalTime(s.createdAt, tzPref)}</div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <p className="gm-meta" style={{ margin: 0 }}>
+          Manual sizing aid only. GoldMeta never places broker orders.
+        </p>
       </SectionCard>
     </div>
   );

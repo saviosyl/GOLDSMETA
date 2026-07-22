@@ -98,44 +98,4 @@ test.describe("V5.4 responsive viewport matrix", () => {
     await expect(page.getByTestId("brand-approved-note")).toBeVisible();
     await expect(page.getByAltText("GoldMeta full logo")).toBeVisible();
   });
-
-  test("V5.4.2 primary signal visible in first mobile viewport", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/ui-review/");
-    await expect(page.getByTestId("overview-page")).toBeVisible();
-    await expect(page.getByTestId("primary-signal-card")).toBeVisible();
-    await expect(page.getByTestId("primary-decision")).toBeVisible();
-    const inFirstViewport = await page.getByTestId("primary-decision").evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      return rect.top >= 0 && rect.bottom <= window.innerHeight;
-    });
-    expect(inFirstViewport).toBe(true);
-    await expect(page.getByTestId("market-story")).toBeVisible();
-    await expect(page.getByTestId("market-level-ladder")).toBeVisible();
-    await expect(page.getByTestId("current-plan")).toBeVisible();
-    // Email must stay behind account menu, not in Dashboard content
-    await expect(page.getByTestId("overview-page")).not.toContainText("review@goldmeta.preview");
-    await expect(page.getByTestId("account-menu-button")).toBeVisible();
-  });
-
-  test("V5.4.2 desktop dash grid uses available width", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/ui-review/");
-    await expect(page.getByTestId("market-story")).toBeVisible();
-    const grid = page.locator(".gm-dash-grid");
-    await expect(grid).toBeVisible();
-    const widths = await grid.evaluate((el) => {
-      const style = getComputedStyle(el);
-      const map = el.querySelector(".gm-dash-map") as HTMLElement | null;
-      const score = el.querySelector(".gm-dash-score") as HTMLElement | null;
-      return {
-        cols: style.gridTemplateColumns,
-        mapW: map?.getBoundingClientRect().width ?? 0,
-        scoreW: score?.getBoundingClientRect().width ?? 0,
-        total: el.getBoundingClientRect().width
-      };
-    });
-    expect(widths.total).toBeGreaterThan(900);
-    expect(widths.mapW).toBeGreaterThan(widths.scoreW);
-  });
 });

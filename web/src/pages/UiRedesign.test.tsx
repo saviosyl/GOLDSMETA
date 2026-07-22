@@ -15,7 +15,6 @@ import "../styles/redesign.css";
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     user: { email: "tester@example.com" },
-    signOut: vi.fn(),
     api: {
       latestDecision: vi.fn().mockResolvedValue({
         decisionId: "dec_hidden_id_abc123",
@@ -99,19 +98,6 @@ describe("AppShell navigation", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
   });
-  it("hides email behind account menu", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <AppShell>
-          <div>content</div>
-        </AppShell>
-      </MemoryRouter>
-    );
-    expect(screen.queryByTestId("account-email")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("account-menu-button"));
-    expect(screen.getByTestId("account-email")).toHaveTextContent("tester@example.com");
-  });
 });
 
 describe("OverviewPage redesign", () => {
@@ -119,7 +105,7 @@ describe("OverviewPage redesign", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
-  it("shows primary signal first without summary grid or email", async () => {
+  it("shows compact home content and hides technical IDs by default", async () => {
     render(
       <MemoryRouter>
         <OverviewPage />
@@ -127,14 +113,12 @@ describe("OverviewPage redesign", () => {
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
     expect(screen.getByTestId("primary-decision")).toHaveTextContent(/WAIT/i);
-    expect(screen.getAllByText(/another plan is still being tracked/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/another plan is still being tracked/i)).toBeInTheDocument();
     expect(screen.getAllByText(/New York/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     expect(screen.getByText("No validated shadow plan yet.")).toBeInTheDocument();
     expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
     expect(screen.getByTestId("market-level-ladder")).toBeInTheDocument();
-    expect(screen.getByTestId("market-story")).toBeInTheDocument();
-    expect(screen.queryByTestId("dashboard-summary")).not.toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
   });
 

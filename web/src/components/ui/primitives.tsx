@@ -35,7 +35,7 @@ export function StatusBadge({
   tone = "neutral",
   children
 }: {
-  tone?: "neutral" | "positive" | "warning" | "negative" | "gold" | "research";
+  tone?: "neutral" | "positive" | "warning" | "negative" | "gold";
   children: ReactNode;
 }) {
   return <span className={`gm-badge ${tone}`}>{children}</span>;
