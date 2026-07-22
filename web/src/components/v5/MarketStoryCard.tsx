@@ -4,7 +4,9 @@ import { buildMarketStory, type MarketStoryInput } from "../../lib/marketStory";
 /** Concise deterministic Market Story from verified data only. */
 export function MarketStoryCard(props: MarketStoryInput) {
   const [showEvidence, setShowEvidence] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const result = buildMarketStory(props);
+  const long = Boolean(result.story && result.story.split(/\s+/).length > 55);
 
   return (
     <section className="gm-section gm-market-story" data-testid="market-story">
@@ -16,9 +18,24 @@ export function MarketStoryCard(props: MarketStoryInput) {
           Insufficient verified data to create a market summary.
         </p>
       ) : (
-        <p className="gm-story-body" data-testid="market-story-body">
-          {result.story}
-        </p>
+        <>
+          <p
+            className={`gm-story-body${long && !expanded ? " is-clamped" : ""}`}
+            data-testid="market-story-body"
+          >
+            {result.story}
+          </p>
+          {long && (
+            <button
+              type="button"
+              className="gm-linkish gm-story-more"
+              data-testid="market-story-more"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? "Show less" : "Read more"}
+            </button>
+          )}
+        </>
       )}
       {result.evidence.length > 0 && (
         <button
