@@ -107,8 +107,11 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
   test("expanded colourful score reaches News row above bottom nav", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/ui-review/");
+    await expect(page.getByTestId("goldmeta-score")).toBeVisible();
     const toggle = page.getByTestId("score-toggle");
-    if (await toggle.count()) await toggle.click();
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    await expect(toggle).toHaveText(/Show less/i);
     const news = page.getByTestId("score-row-news");
     await expect(news).toBeVisible();
     await news.scrollIntoViewIfNeeded();
@@ -118,7 +121,7 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
     expect(box).toBeTruthy();
     expect(navBox).toBeTruthy();
     // Final score row bottom edge should sit above the fixed nav top
-    expect((box!.y + box!.height)).toBeLessThanOrEqual(navBox!.y + 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y + 1);
   });
 
   test("capture overflow measurements + frames", async ({ page }) => {
