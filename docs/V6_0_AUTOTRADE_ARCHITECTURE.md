@@ -2,7 +2,7 @@
 
 **Branch:** `cursor/goldmeta-v6-ig-autotrade-c2c2`  
 **Base commit (approved V5.4.3 production tree):** `4621156c146d6857205ea2f9d3256b6348227d89`  
-**Tip commit:** `1d79c430306089a74a1ea6c4706fa3dc6d63f94f`  
+**Tip commit:** `c0cc16ca004f09791e183fbf13767865c9d0e791`  
 **Draft PR:** https://github.com/saviosyl/GOLDSMETA/pull/21  
 **Preview:** https://preview-v6-autotrade.goldmeta-web.pages.dev  
 **UI review AutoTrade:** https://preview-v6-autotrade.goldmeta-web.pages.dev/ui-review/autotrade  
@@ -111,7 +111,7 @@ Mode OFF; €5 / trade; €100 margin; €10 daily; €30 weekly; 1 open; 1 trad
 
 See `docs/v6-autotrade/` and `/opt/cursor/artifacts/v6-autotrade-screenshots/`.
 
-## Test counts (tip `1d79c43`)
+## Test counts (tip `c0cc16c`)
 
 | Suite | Total |
 |-------|-------|
