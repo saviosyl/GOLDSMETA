@@ -82,9 +82,9 @@ export const onGoldMetaDecisionCreated = onDocumentCreated(
 );
 
 /**
- * Durable Stocks Intraday job processor.
+ * Durable Stocks Intraday job processor (create only).
  * Path: users/{userId}/stockIntraday/data/jobs/{jobId}
- * Survives request completion, cold starts, retries, and duplicate trigger delivery.
+ * Retries are handled by stockIntradayJobRetryTick (nextAttemptAt + backoff).
  */
 export const onStockIntradayJobCreated = onDocumentCreated(
   {
@@ -102,9 +102,7 @@ export const onStockIntradayJobCreated = onDocumentCreated(
 );
 
 /**
- * Coarse market-hours scheduler for SHADOW autonomous monitoring.
- * Every 5 minutes — respects provider rate limits and Firebase cost.
- * Does not place Paper/Live orders (submission flags remain false).
+ * Coarse market-hours scheduler — enqueue only (processing via Firestore trigger).
  */
 export const stockIntradaySchedulerTick = onSchedule(
   {
@@ -119,22 +117,34 @@ export const stockIntradaySchedulerTick = onSchedule(
       return;
     }
     for (const userId of userIds) {
-      const monitor = await enqueueEngineTick({
+      await enqueueEngineTick({
         store: defaultStockIntradayService.getStore(),
         userId,
         kind: "MONITOR_POSITIONS"
       });
-      if (monitor.enqueued && monitor.jobId) {
-        await defaultStockIntradayService.processDurableJobById(userId, monitor.jobId);
-      }
-      const scan = await enqueueEngineTick({
+      await enqueueEngineTick({
         store: defaultStockIntradayService.getStore(),
         userId,
         kind: "SCHEDULED_SCAN"
       });
-      if (scan.enqueued && scan.jobId) {
-        await defaultStockIntradayService.processDurableJobById(userId, scan.jobId);
-      }
+    }
+  }
+);
+
+/**
+ * Automatic job retries with exponential backoff (nextAttemptAt).
+ * Does not immediately re-process; only claims due QUEUED jobs.
+ */
+export const stockIntradayJobRetryTick = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: env.FIREBASE_REGION,
+    timeZone: "UTC"
+  },
+  async () => {
+    const results = await defaultStockIntradayService.runJobRetryPass();
+    if (results.length) {
+      logger.info("Stock intraday job retry pass", { count: results.length });
     }
   }
 );

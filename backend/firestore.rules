@@ -131,6 +131,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /stockIntradayRetryIndex/{docId} {
+      allow read, write: if false;
+    }
+
     match /processingJobs/{jobId} {
       allow read, write: if false;
     }

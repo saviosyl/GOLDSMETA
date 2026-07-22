@@ -19,12 +19,17 @@ import {
   type StockCashReservation,
   type StockReconciliationRecord,
   type StockRestartGate,
+  type StockDashboardSnapshot,
+  type AtomicEntryReservationInput,
+  type AtomicEntryReservationResult,
   type ReserveAlertResult,
   type ReserveIntentResult,
   defaultSettings,
   defaultRestartGate,
+  emptyDashboardSnapshot,
   createDefaultRisk,
   sanitizeDocId,
+  jobRetryBackoffMs,
   STOCK_JOB_LEASE_MS,
   STOCK_INTENT_LEASE_MS
 } from "./stockIntradayStore";
@@ -77,6 +82,14 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
 
   private restartGateRef(userId: string) {
     return this.col(userId, "restartGate").doc("current");
+  }
+
+  private dashboardRef(userId: string) {
+    return this.col(userId, "dashboard").doc("current");
+  }
+
+  private retryIndexRef(userId: string, jobId: string) {
+    return this.db.collection("stockIntradayRetryIndex").doc(sanitizeDocId(`${userId}_${jobId}`));
   }
 
   private intentRef(userId: string, intentId: string) {
@@ -346,6 +359,7 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       | "attemptCount"
       | "leaseOwner"
       | "leaseExpiresAt"
+      | "nextAttemptAt"
       | "lastError"
       | "state"
     > & { state?: StockJobState; maxAttempts?: number }
@@ -358,6 +372,7 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       attemptCount: 0,
       leaseOwner: null,
       leaseExpiresAt: null,
+      nextAttemptAt: null,
       lastError: null,
       createdAt: ts,
       updatedAt: ts,
@@ -387,6 +402,13 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       const job = snap.data() as StockIntradayJob;
       if (job.state === "COMPLETED") return null;
       if (
+        job.state === "QUEUED" &&
+        job.nextAttemptAt &&
+        Date.parse(job.nextAttemptAt) > Date.now()
+      ) {
+        return null;
+      }
+      if (
         job.state === "PROCESSING" &&
         job.leaseOwner &&
         job.leaseOwner !== ownerId &&
@@ -403,6 +425,7 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
         updatedAt: nowIso()
       };
       tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      tx.delete(this.retryIndexRef(userId, jobId));
       return next;
     });
   }
@@ -419,10 +442,12 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
         completedAt: nowIso(),
         leaseOwner: null,
         leaseExpiresAt: null,
+        nextAttemptAt: null,
         lastError: null,
         updatedAt: nowIso()
       };
       tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      tx.delete(this.retryIndexRef(userId, jobId));
       return next;
     });
   }
@@ -434,15 +459,30 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
       if (!snap.exists) return null;
       const job = snap.data() as StockIntradayJob;
       const exhausted = job.attemptCount >= job.maxAttempts;
+      const nextAttemptAt = exhausted
+        ? null
+        : new Date(Date.now() + jobRetryBackoffMs(job.attemptCount)).toISOString();
       const next: StockIntradayJob = {
         ...job,
         state: exhausted ? "DEAD_LETTER" : "QUEUED",
         lastError: error,
         leaseOwner: null,
         leaseExpiresAt: null,
+        nextAttemptAt,
         updatedAt: nowIso()
       };
       tx.set(ref, stripUndefined(next) as FirebaseFirestore.DocumentData, { merge: true });
+      const retryRef = this.retryIndexRef(userId, jobId);
+      if (!exhausted && nextAttemptAt) {
+        tx.set(retryRef, {
+          userId,
+          jobId,
+          nextAttemptAt,
+          state: "QUEUED"
+        });
+      } else {
+        tx.delete(retryRef);
+      }
       return next;
     });
   }
@@ -650,5 +690,161 @@ export class FirestoreStockIntradayStore implements StockIntradayStorePort {
   async listSchedulerUserIds(): Promise<string[]> {
     const snap = await this.db.collection("stockIntradaySchedulerUsers").get();
     return snap.docs.map((d) => d.id);
+  }
+
+  async reserveEntryAtomically(input: AtomicEntryReservationInput): Promise<AtomicEntryReservationResult> {
+    const {
+      userId,
+      idempotencyKey,
+      intent,
+      position,
+      cashAmount,
+      availableCashFromBroker,
+      limits,
+      openShadowPosition
+    } = input;
+
+    const idemRef = this.idempotencyRef(userId, idempotencyKey);
+    const intentRef = this.intentRef(userId, intent.intentId);
+    const cashRef = this.cashReservationRef(userId, intent.intentId);
+    const riskRef = this.riskRef(userId);
+    const positionsCol = this.col(userId, "positions");
+    const reservationsCol = this.col(userId, "reservations");
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const idemSnap = await tx.get(idemRef);
+      if (idemSnap.exists) {
+        return { ok: false as const, code: "DUPLICATE_INTENT" };
+      }
+
+      const positionsSnap = await tx.get(positionsCol);
+      const positions = positionsSnap.docs.map((d) => d.data() as StockManagedPosition);
+
+      if (positions.some((p) => p.symbol === intent.symbol)) {
+        return { ok: false as const, code: "SYMBOL_POSITION_EXISTS" };
+      }
+
+      if (positions.length >= limits.maxSimultaneousPositions) {
+        return { ok: false as const, code: "MAX_POSITIONS" };
+      }
+
+      const riskSnap = await tx.get(riskRef);
+      let risk = riskSnap.exists
+        ? refreshRiskPeriod(riskSnap.data() as StockIntradayRiskState)
+        : refreshRiskPeriod(createDefaultRisk(userId));
+
+      if (risk.tradesUsedToday >= limits.maxTradesPerDay) {
+        return { ok: false as const, code: "DAILY_TRADE_LIMIT" };
+      }
+
+      const dailyAllocationRemaining = limits.dailyCapitalAllocation - risk.dailyAllocationUsed;
+      if (dailyAllocationRemaining < cashAmount) {
+        return { ok: false as const, code: "DAILY_ALLOCATION_EXCEEDED" };
+      }
+
+      const reservationsSnap = await tx.get(reservationsCol.where("released", "==", false));
+      const currentReservedCash = reservationsSnap.docs.reduce(
+        (sum, d) => sum + Number((d.data() as StockCashReservation).amount ?? 0),
+        0
+      );
+      if (availableCashFromBroker - currentReservedCash - cashAmount < limits.minCashReserve) {
+        return { ok: false as const, code: "CASH_RESERVE" };
+      }
+
+      const portfolioExposure = positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      if (portfolioExposure + cashAmount > limits.maxPortfolioExposure) {
+        return { ok: false as const, code: "PORTFOLIO_EXPOSURE" };
+      }
+
+      const symbolExposure = positions
+        .filter((p) => p.symbol === intent.symbol)
+        .reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      if (symbolExposure + cashAmount > limits.maxExposurePerSymbol) {
+        return { ok: false as const, code: "SYMBOL_EXPOSURE" };
+      }
+
+      const shouldOpen = openShadowPosition && position != null;
+      if (shouldOpen && position) {
+        if (positions.some((p) => p.symbol === position.symbol)) {
+          return { ok: false as const, code: "POSITION_SLOT_TAKEN" };
+        }
+      }
+
+      const finalIntent: StockTradeIntent = {
+        ...intent,
+        state: shouldOpen ? "OPEN" : intent.state,
+        updatedAt: nowIso()
+      };
+
+      const leaseOwner = intent.leaseOwner;
+      const leaseExpiresAt =
+        intent.leaseExpiresAt ??
+        (leaseOwner ? leaseExpiresFromNow(STOCK_INTENT_LEASE_MS) : null);
+
+      tx.set(intentRef, stripUndefined(finalIntent) as FirebaseFirestore.DocumentData);
+      tx.set(idemRef, {
+        intentId: intent.intentId,
+        leaseOwner,
+        leaseExpiresAt,
+        updatedAt: nowIso()
+      });
+
+      const reservation: StockCashReservation = {
+        reservationId: intent.intentId,
+        userId,
+        intentId: intent.intentId,
+        amount: cashAmount,
+        released: false,
+        createdAt: nowIso()
+      };
+      tx.set(cashRef, stripUndefined(reservation) as FirebaseFirestore.DocumentData);
+
+      let savedPosition: StockManagedPosition | null = null;
+      if (shouldOpen && position) {
+        tx.set(
+          this.positionRef(userId, position.positionId),
+          stripUndefined(position) as FirebaseFirestore.DocumentData
+        );
+        savedPosition = position;
+
+        risk.tradesUsedToday += 1;
+        risk.dailyAllocationUsed += cashAmount;
+        risk.updatedAt = nowIso();
+        tx.set(riskRef, stripUndefined(risk) as FirebaseFirestore.DocumentData, { merge: true });
+      }
+
+      return { ok: true as const, intent: finalIntent, position: savedPosition };
+    });
+  }
+
+  async getDashboardSnapshot(userId: string): Promise<StockDashboardSnapshot> {
+    const snap = await this.dashboardRef(userId).get();
+    if (!snap.exists) {
+      const created = emptyDashboardSnapshot(userId);
+      await this.dashboardRef(userId).set(stripUndefined(created) as FirebaseFirestore.DocumentData);
+      return created;
+    }
+    return snap.data() as StockDashboardSnapshot;
+  }
+
+  async saveDashboardSnapshot(snapshot: StockDashboardSnapshot): Promise<void> {
+    const next = { ...snapshot, updatedAt: nowIso() };
+    await this.dashboardRef(snapshot.userId).set(
+      stripUndefined(next) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+  }
+
+  async listDueRetryJobs(nowMs = Date.now()): Promise<Array<{ userId: string; jobId: string }>> {
+    const nowIsoStr = new Date(nowMs).toISOString();
+    const snap = await this.db
+      .collection("stockIntradayRetryIndex")
+      .where("state", "==", "QUEUED")
+      .where("nextAttemptAt", "<=", nowIsoStr)
+      .get();
+    return snap.docs.map((d) => {
+      const data = d.data() as { userId: string; jobId: string };
+      return { userId: data.userId, jobId: data.jobId };
+    });
   }
 }

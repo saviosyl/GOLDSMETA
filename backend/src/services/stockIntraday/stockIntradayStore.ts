@@ -66,6 +66,7 @@ export interface StockIntradayJob {
   maxAttempts: number;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
+  nextAttemptAt: string | null;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
@@ -108,9 +109,35 @@ export interface StockRestartGate {
   userId: string;
   entriesPaused: boolean;
   lastReconciledAt: string | null;
-  processBootId: string | null;
+  deploymentGeneration: string | null;
+  reconciledGeneration: string | null;
   updatedAt: string;
 }
+
+export interface StockDashboardSnapshot {
+  userId: string;
+  lastTradingViewAlert: import("./types").StockTradingViewSignal | null;
+  lastRankedOpportunities: import("./types").RankedIntradayOpportunity[];
+  rejectedRecently: Array<{ symbol: string; reason: string; at: string }>;
+  lastMarketDataAt: string | null;
+  updatedAt: string;
+}
+
+export interface AtomicEntryReservationInput {
+  userId: string;
+  idempotencyKey: string;
+  intent: import("./types").StockTradeIntent;
+  position: import("./types").StockManagedPosition | null;
+  cashAmount: number;
+  availableCashFromBroker: number;
+  limits: typeof DEFAULT_STOCK_INTRADAY_LIMITS;
+  /** When true, also open position + increment daily counters and set intent OPEN */
+  openShadowPosition: boolean;
+}
+
+export type AtomicEntryReservationResult =
+  | { ok: true; intent: import("./types").StockTradeIntent; position: import("./types").StockManagedPosition | null }
+  | { ok: false; code: string };
 
 export type ReserveAlertResult = "reserved" | "duplicate";
 export type ReserveIntentResult = "reserved" | "duplicate" | "lease_held";
@@ -150,7 +177,7 @@ export interface StockIntradayStorePort {
   saveSignal(record: StockSignalRecord): Promise<void>;
   getSignalByAlertId(userId: string, alertId: string): Promise<StockSignalRecord | null>;
 
-  createJob(job: Omit<StockIntradayJob, "createdAt" | "updatedAt" | "completedAt" | "attemptCount" | "leaseOwner" | "leaseExpiresAt" | "lastError" | "state"> & {
+  createJob(job: Omit<StockIntradayJob, "createdAt" | "updatedAt" | "completedAt" | "attemptCount" | "leaseOwner" | "leaseExpiresAt" | "nextAttemptAt" | "lastError" | "state"> & {
     state?: StockJobState;
     maxAttempts?: number;
   }): Promise<StockIntradayJob>;
@@ -191,6 +218,11 @@ export interface StockIntradayStorePort {
 
   registerSchedulerUser(userId: string): Promise<void>;
   listSchedulerUserIds(): Promise<string[]>;
+
+  reserveEntryAtomically(input: AtomicEntryReservationInput): Promise<AtomicEntryReservationResult>;
+  getDashboardSnapshot(userId: string): Promise<StockDashboardSnapshot>;
+  saveDashboardSnapshot(snapshot: StockDashboardSnapshot): Promise<void>;
+  listDueRetryJobs(nowMs?: number): Promise<Array<{ userId: string; jobId: string }>>;
 }
 
 export function defaultSettings(userId: string): StockIntradaySettings {
@@ -208,9 +240,35 @@ export function defaultRestartGate(userId: string): StockRestartGate {
     userId,
     entriesPaused: true,
     lastReconciledAt: null,
-    processBootId: null,
+    deploymentGeneration: null,
+    reconciledGeneration: null,
     updatedAt: nowIso()
   };
+}
+
+export function emptyDashboardSnapshot(userId: string): StockDashboardSnapshot {
+  return {
+    userId,
+    lastTradingViewAlert: null,
+    lastRankedOpportunities: [],
+    rejectedRecently: [],
+    lastMarketDataAt: null,
+    updatedAt: nowIso()
+  };
+}
+
+export function currentDeploymentGeneration(): string {
+  return (
+    process.env.STOCK_INTRADAY_DEPLOYMENT_GENERATION?.trim() ||
+    process.env.K_REVISION?.trim() ||
+    "default"
+  );
+}
+
+export function jobRetryBackoffMs(attemptCount: number): number {
+  const base = 5_000;
+  const capped = Math.min(10 * 60_000, base * 2 ** Math.max(0, attemptCount - 1));
+  return capped;
 }
 
 export function hashWebhookSecret(secret: string): string {

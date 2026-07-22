@@ -93,25 +93,24 @@ Firestore transactions (or in-memory mutex) protect:
 
 ## TradingView webhook authentication
 
-**Do not** use Firebase user session routes for TradingView.
+TradingView official support: alerts POST to a URL with the message body only.
+Custom HTTP headers are **not** supported. Official guidance: do **not** put
+passwords or login credentials in the webhook body.
 
-1. Authenticated UI: `POST /v1/stock-intraday/webhook-connection` → returns `{ connectionId, secret, webhookPath }` once. Only **SHA-256 hash** is stored.
-2. TradingView calls the dedicated endpoint with the secret (header preferred).
+**Supported GoldMeta setup (capability URL):**
 
-### Webhook URL (placeholders)
+1. Authenticated UI: `POST /v1/stock-intraday/webhook-connection`
+2. Configure TradingView alert **Webhook URL** to:
 
 ```
 https://<CLOUD_FUNCTIONS_HOST>/webhooks/stock-intraday/<CONNECTION_ID>
 ```
 
-Headers:
+`<CONNECTION_ID>` is an unguessable opaque path token mapped server-side to the
+owner. Query-string tokens (`?token=`) are **rejected**.
 
-```
-Content-Type: application/json
-X-GoldMeta-Webhook-Token: <WEBHOOK_SECRET>
-```
-
-(Also accepts `Authorization: Bearer <WEBHOOK_SECRET>`.)
+3. Alert message = JSON signal fields only — **no** passwords, Trading 212 API
+   keys/secrets, or reusable auth secrets in the payload.
 
 ### JSON payload template (placeholders only)
 
@@ -128,22 +127,12 @@ X-GoldMeta-Webhook-Token: <WEBHOOK_SECRET>
   "barTime": "{{timenow}}",
   "barClosed": true,
   "volume": 1000000,
-  "ema21": 179.1,
-  "ema50": 175.0,
-  "ema200": 160.0,
-  "vwap": 179.5,
-  "rsi": 58,
-  "atr": 1.5,
-  "relativeVolume": 1.8,
-  "support": 178.0,
-  "resistance": 182.0,
-  "marketTrend": "BULL",
   "confidence": 85,
   "reasonCodes": ["BREAKOUT"]
 }
 ```
 
-Rejected: missing/invalid token, locked after repeated failures, Trading 212 credentials in payload, duplicate `alertId`, stale alerts.
+Rotate by creating a new connection and updating the TradingView URL; revoke the old connectionId.
 
 ## Durable asynchronous processing
 

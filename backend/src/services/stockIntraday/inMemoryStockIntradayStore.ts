@@ -22,12 +22,17 @@ import {
   type StockCashReservation,
   type StockReconciliationRecord,
   type StockRestartGate,
+  type StockDashboardSnapshot,
+  type AtomicEntryReservationInput,
+  type AtomicEntryReservationResult,
   type ReserveAlertResult,
   type ReserveIntentResult,
   defaultSettings,
   defaultRestartGate,
+  emptyDashboardSnapshot,
   createDefaultRisk,
   sanitizeDocId,
+  jobRetryBackoffMs,
   STOCK_JOB_LEASE_MS,
   STOCK_INTENT_LEASE_MS
 } from "./stockIntradayStore";
@@ -73,6 +78,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
     Array<{ id: string; symbol: string; side: "BUY" | "SELL"; quantity: number; at: string; note: string }>
   >();
   private restartGates = new Map<string, StockRestartGate>();
+  private dashboardSnapshots = new Map<string, StockDashboardSnapshot>();
   private reconciliation = new Map<string, StockReconciliationRecord[]>();
   private webhookConnections = new Map<string, StockWebhookConnection>();
   private schedulerUsers = new Set<string>();
@@ -302,6 +308,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       | "attemptCount"
       | "leaseOwner"
       | "leaseExpiresAt"
+      | "nextAttemptAt"
       | "lastError"
       | "state"
     > & { state?: StockJobState; maxAttempts?: number }
@@ -314,6 +321,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       attemptCount: 0,
       leaseOwner: null,
       leaseExpiresAt: null,
+      nextAttemptAt: null,
       lastError: null,
       createdAt: ts,
       updatedAt: ts,
@@ -352,6 +360,13 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       if (!job) return null;
       if (job.state === "COMPLETED") return null;
       if (
+        job.state === "QUEUED" &&
+        job.nextAttemptAt &&
+        Date.parse(job.nextAttemptAt) > Date.now()
+      ) {
+        return null;
+      }
+      if (
         job.state === "PROCESSING" &&
         job.leaseOwner &&
         job.leaseOwner !== ownerId &&
@@ -377,6 +392,7 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
         completedAt: nowIso(),
         leaseOwner: null,
         leaseExpiresAt: null,
+        nextAttemptAt: null,
         lastError: null
       });
     });
@@ -387,11 +403,15 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
       const job = await this.getJob(userId, jobId);
       if (!job) return null;
       const exhausted = job.attemptCount >= job.maxAttempts;
+      const nextAttemptAt = exhausted
+        ? null
+        : new Date(Date.now() + jobRetryBackoffMs(job.attemptCount)).toISOString();
       return this.updateJob(userId, jobId, {
         state: exhausted ? "DEAD_LETTER" : "QUEUED",
         lastError: error,
         leaseOwner: null,
-        leaseExpiresAt: null
+        leaseExpiresAt: null,
+        nextAttemptAt
       });
     });
   }
@@ -568,5 +588,148 @@ export class InMemoryStockIntradayStore implements StockIntradayStorePort {
 
   async listSchedulerUserIds(): Promise<string[]> {
     return [...this.schedulerUsers];
+  }
+
+  async reserveEntryAtomically(input: AtomicEntryReservationInput): Promise<AtomicEntryReservationResult> {
+    return this.runAtomic(async () => {
+      const {
+        userId,
+        idempotencyKey,
+        intent,
+        position,
+        cashAmount,
+        availableCashFromBroker,
+        limits,
+        openShadowPosition
+      } = input;
+
+      const idemKey = this.userKey(userId, sanitizeDocId(idempotencyKey));
+      if (this.idempotency.has(idemKey)) {
+        return { ok: false, code: "DUPLICATE_INTENT" };
+      }
+
+      const positions = this.positions.get(userId) ?? [];
+      if (positions.some((p) => p.symbol === intent.symbol)) {
+        return { ok: false, code: "SYMBOL_POSITION_EXISTS" };
+      }
+
+      if (positions.length >= limits.maxSimultaneousPositions) {
+        return { ok: false, code: "MAX_POSITIONS" };
+      }
+
+      let risk = refreshRiskPeriod(await this.getRiskState(userId));
+      if (risk.tradesUsedToday >= limits.maxTradesPerDay) {
+        return { ok: false, code: "DAILY_TRADE_LIMIT" };
+      }
+
+      const dailyAllocationRemaining = limits.dailyCapitalAllocation - risk.dailyAllocationUsed;
+      if (dailyAllocationRemaining < cashAmount) {
+        return { ok: false, code: "DAILY_ALLOCATION_EXCEEDED" };
+      }
+
+      const currentReservedCash = (this.cashReservations.get(userId) ?? [])
+        .filter((r) => !r.released)
+        .reduce((sum, r) => sum + r.amount, 0);
+      if (availableCashFromBroker - currentReservedCash - cashAmount < limits.minCashReserve) {
+        return { ok: false, code: "CASH_RESERVE" };
+      }
+
+      const portfolioExposure = positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      if (portfolioExposure + cashAmount > limits.maxPortfolioExposure) {
+        return { ok: false, code: "PORTFOLIO_EXPOSURE" };
+      }
+
+      const symbolExposure = positions
+        .filter((p) => p.symbol === intent.symbol)
+        .reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+      if (symbolExposure + cashAmount > limits.maxExposurePerSymbol) {
+        return { ok: false, code: "SYMBOL_EXPOSURE" };
+      }
+
+      const shouldOpen = openShadowPosition && position != null;
+      if (shouldOpen && position) {
+        const positionList = this.positions.get(userId) ?? [];
+        if (positionList.some((p) => p.symbol === position.symbol)) {
+          return { ok: false, code: "POSITION_SLOT_TAKEN" };
+        }
+      }
+
+      const finalIntent: StockTradeIntent = {
+        ...intent,
+        state: shouldOpen ? "OPEN" : intent.state,
+        updatedAt: nowIso()
+      };
+
+      const intentList = this.intents.get(userId) ?? [];
+      intentList.unshift(finalIntent);
+      this.intents.set(userId, intentList);
+
+      const leaseOwner = intent.leaseOwner;
+      const leaseExpiresAt =
+        intent.leaseExpiresAt ??
+        (leaseOwner ? leaseExpiresFromNow(STOCK_INTENT_LEASE_MS) : null);
+      this.idempotency.set(idemKey, {
+        intentId: intent.intentId,
+        leaseOwner,
+        leaseExpiresAt
+      });
+
+      const cashList = this.cashReservations.get(userId) ?? [];
+      cashList.push({
+        reservationId: randomUUID(),
+        userId,
+        intentId: intent.intentId,
+        amount: cashAmount,
+        released: false,
+        createdAt: nowIso()
+      });
+      this.cashReservations.set(userId, cashList);
+
+      let savedPosition: StockManagedPosition | null = null;
+      if (shouldOpen && position) {
+        const positionList = this.positions.get(userId) ?? [];
+        positionList.push(this.clone(position));
+        this.positions.set(userId, positionList);
+        savedPosition = this.clone(position);
+
+        risk.tradesUsedToday += 1;
+        risk.dailyAllocationUsed += cashAmount;
+        risk.updatedAt = nowIso();
+        this.risk.set(userId, risk);
+      }
+
+      return { ok: true, intent: this.clone(finalIntent), position: savedPosition };
+    });
+  }
+
+  async getDashboardSnapshot(userId: string): Promise<StockDashboardSnapshot> {
+    const existing = this.dashboardSnapshots.get(userId);
+    if (existing) return this.clone(existing);
+    const created = emptyDashboardSnapshot(userId);
+    this.dashboardSnapshots.set(userId, created);
+    return this.clone(created);
+  }
+
+  async saveDashboardSnapshot(snapshot: StockDashboardSnapshot): Promise<void> {
+    this.dashboardSnapshots.set(snapshot.userId, {
+      ...this.clone(snapshot),
+      updatedAt: nowIso()
+    });
+  }
+
+  async listDueRetryJobs(nowMs = Date.now()): Promise<Array<{ userId: string; jobId: string }>> {
+    const due: Array<{ userId: string; jobId: string }> = [];
+    for (const [userId, jobs] of this.jobs.entries()) {
+      for (const job of jobs) {
+        if (
+          job.state === "QUEUED" &&
+          job.nextAttemptAt &&
+          Date.parse(job.nextAttemptAt) <= nowMs
+        ) {
+          due.push({ userId, jobId: job.jobId });
+        }
+      }
+    }
+    return due;
   }
 }

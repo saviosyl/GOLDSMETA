@@ -5,10 +5,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { StockIntradayService } from "../../../src/services/stockIntraday/stockIntradayService";
 import { InMemoryStockIntradayStore } from "../../../src/services/stockIntraday/inMemoryStockIntradayStore";
-import {
-  hashWebhookSecret,
-  verifyWebhookSecret
-} from "../../../src/services/stockIntraday/stockIntradayStore";
 import { MockMarketDataProvider } from "../../../src/services/stockIntraday/marketData/mockMarketDataProvider";
 import { FakeT212BrokerAdapter } from "../../../src/services/stockIntraday/broker/fakeT212BrokerAdapter";
 import { T212HttpBrokerAdapter } from "../../../src/services/stockIntraday/broker/t212HttpAdapter";
@@ -582,7 +578,7 @@ describe("Stock Intraday hardening", () => {
     expect(await store.getReservedCashTotal("u1")).toBe(10);
   });
 
-  it("durable job retries and dead-letters after max attempts", async () => {
+  it("durable job automatic retries via retry pass reach DEAD_LETTER", async () => {
     const job = await store.createJob({
       jobId: "fail-job",
       userId: "u1",
@@ -592,11 +588,10 @@ describe("Stock Intraday hardening", () => {
       maxAttempts: 2,
       payload: {}
     });
-    const failingService = {
-      executeDurableJob: async () => {
-        throw new Error("boom");
-      }
-    } as unknown as StockIntradayService;
+    const failingService = new StockIntradayService(store, market, () => broker);
+    failingService.executeDurableJob = async () => {
+      throw new Error("boom");
+    };
 
     await processStockIntradayJob("u1", job.jobId, {
       store,
@@ -605,13 +600,23 @@ describe("Stock Intraday hardening", () => {
     });
     let current = await store.getJob("u1", job.jobId);
     expect(current?.state).toBe("QUEUED");
+    expect(current?.nextAttemptAt).toBeTruthy();
     expect(current?.attemptCount).toBe(1);
 
-    await processStockIntradayJob("u1", job.jobId, {
+    // Immediate reclaim blocked by backoff
+    const blocked = await processStockIntradayJob("u1", job.jobId, {
       store,
       service: failingService,
-      workerId: "w2"
+      workerId: "w-early"
     });
+    expect(blocked?.attemptCount).toBe(1);
+
+    // Advance nextAttemptAt and let automatic retry pass process it
+    const jobs = (store as unknown as { jobs: Map<string, Array<{ jobId: string; nextAttemptAt: string | null }>> }).jobs.get("u1")!;
+    jobs.find((j) => j.jobId === job.jobId)!.nextAttemptAt = new Date(Date.now() - 1).toISOString();
+
+    const pass = await failingService.runJobRetryPass(Date.now());
+    expect(pass.some((p) => p.jobId === job.jobId)).toBe(true);
     current = await store.getJob("u1", job.jobId);
     expect(current?.state).toBe("DEAD_LETTER");
     expect(current?.lastError).toMatch(/boom/);
@@ -630,43 +635,47 @@ describe("Stock Intraday hardening", () => {
     expect([a?.state, b?.state].filter((s) => s === "COMPLETED").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("webhook secret authentication rejects invalid tokens and rate-limits failures", async () => {
+  it("TradingView path-capability auth rejects query tokens and unknown connections", async () => {
     const created = await service.createWebhookConnection("u1", "test");
-    expect(verifyWebhookSecret(created.secret, hashWebhookSecret(created.secret))).toBe(true);
+    expect(created.connectionId.length).toBeGreaterThan(16);
+    expect("secret" in created).toBe(false);
 
-    const ok = await service.authenticateWebhook(created.connectionId, created.secret);
+    const ok = await service.authenticateWebhook(created.connectionId);
     expect(ok.ok).toBe(true);
 
-    for (let i = 0; i < 5; i += 1) {
-      const bad = await service.authenticateWebhook(created.connectionId, "wrong-secret");
-      expect(bad.ok).toBe(false);
+    const queryRejected = await service.authenticateWebhook(created.connectionId, {
+      queryTokenPresent: true
+    });
+    expect(queryRejected.ok).toBe(false);
+    if (!queryRejected.ok) {
+      expect(queryRejected.code).toBe("QUERY_TOKEN_REJECTED");
     }
-    const locked = await service.authenticateWebhook(created.connectionId, "wrong-secret");
-    expect(locked.ok).toBe(false);
-    if (!locked.ok) {
-      expect(locked.status).toBe(429);
-      expect(locked.code).toBe("WEBHOOK_AUTH_LOCKED");
-    }
+
+    const missing = await service.authenticateWebhook("totally-unknown-connection-id");
+    expect(missing.ok).toBe(false);
   });
 
-  it("webhook HTTP route returns 202 without requiring Firebase session", async () => {
+  it("webhook HTTP integration returns 202 using path connectionId only", async () => {
     const created = await service.createWebhookConnection("u1", "tv");
     const app = createApiApp({ stockIntradayService: service });
     const res = await request(app)
       .post(`/webhooks/stock-intraday/${created.connectionId}`)
-      .set("x-goldmeta-webhook-token", created.secret)
       .send(freshSignal({ alertId: "http-ack-1" }));
     expect(res.status).toBe(202);
     expect(res.body.accepted).toBe(true);
     expect(res.body.jobId).toBeTruthy();
-    // Processing is durable — job exists QUEUED (HTTP handler does not fire-and-forget process)
     const job = await store.getJob("u1", res.body.jobId);
     expect(job?.state).toBe("QUEUED");
+
+    const rejected = await request(app)
+      .post(`/webhooks/stock-intraday/${created.connectionId}?token=should-not-work`)
+      .send(freshSignal({ alertId: "http-ack-2" }));
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error.code).toBe("QUERY_TOKEN_REJECTED");
   });
 
   it("function termination after HTTP 202 leaves durable job for later processing", async () => {
     const ack = await service.acknowledgeStockSignal("u1", freshSignal({ alertId: "survive-term" }));
-    // Simulate process end: do not call processDurableJobById
     const job = await store.getJob("u1", ack.jobId!);
     expect(job?.state).toBe("QUEUED");
     await enableShadowReady(service);
@@ -675,35 +684,140 @@ describe("Stock Intraday hardening", () => {
     expect(done?.state).toBe("COMPLETED");
   });
 
-  it("scheduler entry scan and exit monitoring run in SHADOW", async () => {
+  it("scheduled scan creates SHADOW BUY then monitor closes with SHADOW SELL", async () => {
+    await enableShadowReady(service);
+    const before = await store.listPositions("u1");
+    expect(before).toHaveLength(0);
+
+    await service.runAutonomousScan("u1");
+    const afterBuy = await store.listPositions("u1");
+    expect(afterBuy.length).toBeGreaterThan(0);
+    expect(afterBuy[0]?.goldMetaManaged).toBe(true);
+    const shadowsBuy = await store.listShadowTrades("u1");
+    expect(shadowsBuy.some((t) => t.side === "BUY")).toBe(true);
+
+    // Force stop-loss on the scan-created position
+    const pos = afterBuy[0]!;
+    await store.savePosition({ ...pos, stop: 190 });
+    market.setOptions({ last: 185 });
+    await service.monitorOpenPositions("u1");
+    const afterSell = await store.listPositions("u1");
+    expect(afterSell.find((p) => p.positionId === pos.positionId)).toBeUndefined();
+    const shadows = await store.listShadowTrades("u1");
+    expect(shadows.some((t) => t.side === "SELL")).toBe(true);
+  });
+
+  it("scheduler enqueues only without double-processing", async () => {
     await enableShadowReady(service);
     await service.registerForScheduler("u1");
     const ticks = await runStockIntradaySchedulerForUser(service, store, "u1");
     expect(ticks.some((t) => t.kind === "SCHEDULED_SCAN" && t.enqueued)).toBe(true);
-    expect(ticks.some((t) => t.kind === "MONITOR_POSITIONS" && t.enqueued)).toBe(true);
+    const scan = ticks.find((t) => t.kind === "SCHEDULED_SCAN");
+    const job = await store.getJob("u1", scan!.jobId!);
+    expect(job?.state).toBe("QUEUED");
+  });
 
-    // Seed a managed position and force stop-loss via quote
-    await store.savePosition({
-      positionId: "pos-1",
-      userId: "u1",
-      intentId: "i-shadow",
-      symbol: "AAPL",
-      environment: "PAPER",
-      quantity: 1,
-      entryPrice: 180,
-      stop: 190,
-      takeProfit: 200,
-      currentExitRule: "HARD_STOP",
-      unrealisedPnl: 0,
-      openedAt: new Date().toISOString(),
-      goldMetaManaged: true
+  it("atomic entry reservation enforces limits across concurrent symbols", async () => {
+    await enableShadowReady(service);
+    await store.saveSettings({
+      ...(await store.getSettings("u1")),
+      limits: { ...DEFAULT_STOCK_INTRADAY_LIMITS, maxSimultaneousPositions: 1, maxTradesPerDay: 1 }
     });
-    market.setOptions({ last: 185 });
-    await service.monitorOpenPositions("u1");
-    const positions = await store.listPositions("u1");
-    expect(positions.find((p) => p.positionId === "pos-1")).toBeUndefined();
-    const shadows = await store.listShadowTrades("u1");
-    expect(shadows.some((t) => t.side === "SELL")).toBe(true);
+    const mk = (symbol: string, intentId: string) => ({
+      userId: "u1",
+      idempotencyKey: `key-${symbol}`,
+      intent: {
+        intentId,
+        userId: "u1",
+        symbol,
+        environment: "PAPER" as const,
+        strategy: "MOMENTUM_BREAKOUT" as const,
+        signalAlertId: symbol,
+        barTimestamp: "t",
+        side: "BUY" as const,
+        state: "ENTRY_RESERVED" as const,
+        quantity: 0.1,
+        estimatedEntry: 180,
+        stop: 178,
+        takeProfit: 185,
+        reservedCash: 18,
+        brokerOrderId: null,
+        filledQuantity: 0,
+        averageFillPrice: null,
+        outcome: null,
+        blockReason: null,
+        exitReason: null,
+        goldMetaManaged: true as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        leaseOwner: null,
+        leaseExpiresAt: null
+      },
+      position: {
+        positionId: `p-${symbol}`,
+        userId: "u1",
+        intentId,
+        symbol,
+        environment: "PAPER" as const,
+        quantity: 0.1,
+        entryPrice: 180,
+        stop: 178,
+        takeProfit: 185,
+        currentExitRule: "HARD_STOP",
+        unrealisedPnl: 0,
+        openedAt: new Date().toISOString(),
+        goldMetaManaged: true as const
+      },
+      cashAmount: 18,
+      availableCashFromBroker: 5000,
+      limits: { ...DEFAULT_STOCK_INTRADAY_LIMITS, maxSimultaneousPositions: 1, maxTradesPerDay: 1 },
+      openShadowPosition: true
+    });
+    const results = await Promise.all([
+      store.reserveEntryAtomically(mk("AAPL", "ia")),
+      store.reserveEntryAtomically(mk("MSFT", "ib"))
+    ]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toHaveLength(1);
+    expect((await store.listPositions("u1")).length).toBe(1);
+  });
+
+  it("cold-started PROCESS_SIGNAL resolves broker without UI Connect cache", async () => {
+    await enableShadowReady(service);
+    // New service instance = empty adapters Map (cold start)
+    const cold = new StockIntradayService(store, market, () => broker);
+    const result = await cold.evaluateEntryFromSignal(
+      "u1",
+      (parseStockTradingViewSignal(freshSignal({ alertId: "cold-1" })) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal }).signal
+    );
+    expect(result.outcome).toBe("BUY");
+  });
+
+  it("deployment generation gate does not re-pause reconciled SHADOW on new instance", async () => {
+    await enableShadowReady(service);
+    const gate1 = await store.getRestartGate("u1");
+    expect(gate1.reconciledGeneration).toBeTruthy();
+    expect(gate1.entriesPaused).toBe(false);
+
+    const otherInstance = new StockIntradayService(store, market, () => broker);
+    await otherInstance.getStatus("u1");
+    const gate2 = await store.getRestartGate("u1");
+    expect(gate2.entriesPaused).toBe(false);
+    expect(gate2.reconciledGeneration).toBe(gate1.reconciledGeneration);
+  });
+
+  it("persists dashboard ranked/rejected/signal across service instances", async () => {
+    await enableShadowReady(service);
+    await service.acknowledgeStockSignal("u1", freshSignal({ alertId: "persist-1" }));
+    await service.evaluateEntryFromSignal(
+      "u1",
+      (parseStockTradingViewSignal(freshSignal({ alertId: "persist-entry" })) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal }).signal
+    );
+    const cold = new StockIntradayService(store, market, () => broker);
+    const status = await cold.getStatus("u1");
+    expect(status.lastTradingViewAlert?.alertId).toBe("persist-1");
+    expect(status.rankedOpportunities.length).toBeGreaterThan(0);
+    expect(status.lastMarketDataAt).toBeTruthy();
   });
 
   it("market-close calculation fails closed without provider minutesToClose", () => {
@@ -715,19 +829,22 @@ describe("Stock Intraday hardening", () => {
 
   it("instrument validation unavailable returns BLOCKED", async () => {
     await service.setMode("u1", "SHADOW");
-    await service.getStatus("u1"); // establish restart gate boot id
+    await service.getStatus("u1");
     const gate = await store.getRestartGate("u1");
     await store.saveRestartGate({
       ...gate,
       entriesPaused: false,
+      reconciledGeneration: gate.deploymentGeneration,
       lastReconciledAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
     let risk = await store.getRiskState("u1");
     risk = { ...risk, paused: false };
     await store.saveRiskState(risk);
-    // No broker connected
-    const result = await service.evaluateEntryFromSignal(
+    const broken = new StockIntradayService(store, market, () => {
+      throw new Error("T212_CREDENTIALS_NOT_CONFIGURED");
+    });
+    const result = await broken.evaluateEntryFromSignal(
       "u1",
       (parseStockTradingViewSignal(freshSignal()) as { ok: true; signal: import("../../../src/services/stockIntraday/types").StockTradingViewSignal }).signal
     );
@@ -742,12 +859,12 @@ describe("Stock Intraday hardening", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("restart gate is persisted not process-local Set", async () => {
+  it("restart gate uses deployment generation not process-local Set", async () => {
     await service.connectPaper("u1");
     await service.setMode("u1", "SHADOW");
     await service.getStatus("u1");
     const gate = await store.getRestartGate("u1");
-    expect(gate.processBootId).toBeTruthy();
+    expect(gate.deploymentGeneration).toBeTruthy();
     expect(gate.entriesPaused).toBe(true);
   });
 
@@ -795,7 +912,6 @@ describe("Stock Intraday hardening", () => {
     const { createStockIntradayStore } = await import(
       "../../../src/services/stockIntraday/runtime"
     );
-    // APP_ENV=test in vitest → memory allowed explicitly
     const s = createStockIntradayStore();
     expect(s.constructor.name).toBe("InMemoryStockIntradayStore");
   });

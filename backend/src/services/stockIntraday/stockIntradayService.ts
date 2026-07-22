@@ -57,9 +57,10 @@ import {
 import { redactSecrets } from "./redact";
 import type { StockIntradayJob, StockIntradayStorePort } from "./stockIntradayStore";
 import {
+  currentDeploymentGeneration,
+  emptyDashboardSnapshot,
   generateWebhookSecret,
-  hashWebhookSecret,
-  verifyWebhookSecret
+  hashWebhookSecret
 } from "./stockIntradayStore";
 import {
   estimateMinutesToClose,
@@ -67,15 +68,9 @@ import {
 } from "./sessionClock";
 import { processStockIntradayJob } from "./processStockIntradayJob";
 
-/** Process-local boot id — restart gate persistence lives in the store. */
-const PROCESS_BOOT_ID = randomUUID();
-
 export class StockIntradayService {
+  /** Optional UI-session adapter cache — durable jobs never rely on this alone. */
   private adapters = new Map<string, T212BrokerAdapter>();
-  private lastSignal = new Map<string, StockTradingViewSignal | null>();
-  private lastMarketDataAt = new Map<string, string | null>();
-  private lastRanked = new Map<string, RankedIntradayOpportunity[]>();
-  private lastRejected = new Map<string, Array<{ symbol: string; reason: string; at: string }>>();
   private marketDataReady: boolean;
 
   constructor(
@@ -98,24 +93,60 @@ export class StockIntradayService {
       userId,
       entriesPaused: true,
       lastReconciledAt: null,
-      processBootId: null,
+      deploymentGeneration: currentDeploymentGeneration(),
+      reconciledGeneration: null,
       updatedAt: nowIso()
     });
+    await store.saveDashboardSnapshot(emptyDashboardSnapshot(userId));
   }
 
-  private async ensureRestartPolicy(userId: string): Promise<void> {
-    const gate = await this.store.getRestartGate(userId);
-    if (gate.processBootId === PROCESS_BOOT_ID) return;
+  /**
+   * Per-invocation Paper read-only adapter from server-side secrets/factory.
+   * Does not persist credentials. Works on cold starts without UI Connect.
+   */
+  async resolveBrokerAdapter(userId: string): Promise<T212BrokerAdapter> {
+    const cached = this.adapters.get(userId);
+    if (cached?.isConnected()) return cached;
+    const adapter = this.adapterFactory();
+    await adapter.connect(`server:durable:${userId}`);
+    this.adapters.set(userId, adapter);
+    return adapter;
+  }
 
+  /**
+   * Persistent deployment generation gate — safe across concurrent CF instances.
+   * Same generation + already-reconciled SHADOW does not re-pause.
+   * Paper/Live stay paused / reset on generation change.
+   */
+  private async ensureRestartPolicy(userId: string): Promise<void> {
+    const generation = currentDeploymentGeneration();
+    const gate = await this.store.getRestartGate(userId);
     let risk = await this.store.getRiskState(userId);
+
+    if (gate.deploymentGeneration === generation) {
+      // Same deploy generation — do not re-pause an already reconciled SHADOW engine.
+      if (
+        risk.mode === "SHADOW" &&
+        gate.reconciledGeneration === generation &&
+        !gate.entriesPaused
+      ) {
+        return;
+      }
+      if (gate.reconciledGeneration === generation) {
+        return;
+      }
+      // Generation matches but not yet reconciled for this deploy — keep paused.
+      return;
+    }
+
+    // New deployment generation: pause entries and require reconciliation.
     if (risk.mode !== "OFF" && risk.mode !== "SHADOW") {
-      // Paper/Live always reset to OFF on process boot; SHADOW keeps monitoring after reconcile.
       const previous = risk.mode;
       risk = resetModeAfterRestart(risk);
       await this.store.saveRiskState(risk);
       await this.activity(
         userId,
-        `Restart: mode reset to OFF (was ${previous}). New entries paused pending reconciliation.`,
+        `Deployment generation change: mode reset to OFF (was ${previous}). New entries paused.`,
         "warn"
       );
     } else if (risk.mode === "SHADOW") {
@@ -127,9 +158,37 @@ export class StockIntradayService {
       userId,
       entriesPaused: true,
       lastReconciledAt: gate.lastReconciledAt,
-      processBootId: PROCESS_BOOT_ID,
+      deploymentGeneration: generation,
+      reconciledGeneration: null,
       updatedAt: nowIso()
     });
+  }
+
+  private async persistDashboard(
+    userId: string,
+    patch: Partial<{
+      lastTradingViewAlert: StockTradingViewSignal | null;
+      lastRankedOpportunities: RankedIntradayOpportunity[];
+      rejectedRecently: Array<{ symbol: string; reason: string; at: string }>;
+      lastMarketDataAt: string | null;
+    }>
+  ): Promise<void> {
+    const current = await this.store.getDashboardSnapshot(userId);
+    await this.store.saveDashboardSnapshot({
+      ...current,
+      ...patch,
+      userId,
+      updatedAt: nowIso()
+    });
+  }
+
+  private async pushRejected(userId: string, symbol: string, reason: string): Promise<void> {
+    const current = await this.store.getDashboardSnapshot(userId);
+    const rejectedRecently = [
+      { symbol, reason, at: nowIso() },
+      ...current.rejectedRecently
+    ].slice(0, 20);
+    await this.persistDashboard(userId, { rejectedRecently });
   }
 
   async getStatus(userId: string): Promise<StockIntradayStatusPayload> {
@@ -140,7 +199,7 @@ export class StockIntradayService {
     const positions = await this.store.listPositions(userId);
     const activity = await this.store.listActivity(userId, 40);
     const shadowTrades = await this.store.listShadowTrades(userId);
-    const adapter = this.adapters.get(userId);
+    const dashboard = await this.store.getDashboardSnapshot(userId);
 
     let cash: number | null = null;
     let available: number | null = null;
@@ -149,8 +208,9 @@ export class StockIntradayService {
     let heartbeat: string | null = null;
     let connected = false;
 
-    if (adapter?.isConnected()) {
-      try {
+    try {
+      const adapter = await this.resolveBrokerAdapter(userId);
+      if (adapter.isConnected()) {
         const summary = await adapter.getAccountSummary();
         cash = summary.cash;
         available = summary.availableToTrade;
@@ -165,9 +225,9 @@ export class StockIntradayService {
         }));
         heartbeat = await adapter.heartbeat();
         connected = true;
-      } catch {
-        connected = false;
       }
+    } catch {
+      connected = false;
     }
 
     const limits = settings.limits;
@@ -188,9 +248,9 @@ export class StockIntradayService {
       marketSession: "UNKNOWN",
       connection: {
         connected,
-        environment: adapter?.environment ?? null,
+        environment: connected ? "PAPER" : null,
         environmentLabel:
-          adapter?.environment === "LIVE" ? "T212 LIVE — BLOCKED" : "T212 PAPER — ORDERS DISABLED",
+          "T212 PAPER — ORDERS DISABLED",
         cash,
         availableToTrade: available,
         totalValue: total,
@@ -210,14 +270,14 @@ export class StockIntradayService {
         cash,
         currency: limits.currency
       },
-      rankedOpportunities: this.lastRanked.get(userId) ?? [],
+      rankedOpportunities: dashboard.lastRankedOpportunities,
       positions,
       pendingOrders,
-      rejectedRecently: this.lastRejected.get(userId) ?? [],
+      rejectedRecently: dashboard.rejectedRecently,
       shadowTrades,
       activity,
-      lastTradingViewAlert: this.lastSignal.get(userId) ?? null,
-      lastMarketDataAt: this.lastMarketDataAt.get(userId) ?? null,
+      lastTradingViewAlert: dashboard.lastTradingViewAlert,
+      lastMarketDataAt: dashboard.lastMarketDataAt,
       strategyVersion: STOCK_INTRADAY_STRATEGY_VERSION,
       safetyStatement: SAFETY_STATEMENT
     };
@@ -404,7 +464,7 @@ export class StockIntradayService {
       return { accepted: false, code: "DUPLICATE_ALERT" };
     }
 
-    this.lastSignal.set(userId, signal);
+    await this.persistDashboard(userId, { lastTradingViewAlert: signal });
     const job = await this.store.createJob({
       jobId: `sig_${signal.alertId.slice(0, 48)}_${Date.now()}`,
       userId,
@@ -424,6 +484,20 @@ export class StockIntradayService {
       store: this.store,
       service: this
     });
+  }
+
+  /**
+   * Automatic retry pass used by the retry scheduler.
+   * Claims only due QUEUED jobs (nextAttemptAt <= now).
+   */
+  async runJobRetryPass(nowMs = Date.now()): Promise<Array<{ userId: string; jobId: string; state: string | null }>> {
+    const due = await this.store.listDueRetryJobs(nowMs);
+    const results: Array<{ userId: string; jobId: string; state: string | null }> = [];
+    for (const item of due) {
+      const job = await this.processDurableJobById(item.userId, item.jobId);
+      results.push({ userId: item.userId, jobId: item.jobId, state: job?.state ?? null });
+    }
+    return results;
   }
 
   /** Execute claimed durable job work. */
@@ -461,19 +535,19 @@ export class StockIntradayService {
   }
 
   /**
-   * Create a TradingView webhook connection. Returns plaintext secret once;
-   * only the hash is persisted.
+   * Create TradingView webhook capability URL.
+   * Auth is the unguessable path connectionId (TradingView cannot set custom headers;
+   * official docs forbid passwords/credentials in the alert body).
    */
   async createWebhookConnection(
     userId: string,
     label = "TradingView Stocks"
-  ): Promise<{ connectionId: string; secret: string; webhookPath: string }> {
-    const connectionId = randomUUID();
-    const secret = generateWebhookSecret();
+  ): Promise<{ connectionId: string; webhookPath: string; webhookUrlTemplate: string }> {
+    const connectionId = generateWebhookSecret().replace(/^gm_stock_/, "gm_si_");
     await this.store.saveWebhookConnection({
       connectionId,
       userId,
-      secretHash: hashWebhookSecret(secret),
+      secretHash: hashWebhookSecret(connectionId),
       label,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -481,33 +555,34 @@ export class StockIntradayService {
       lockedUntil: null
     });
     await this.audit(userId, "stock_webhook_created", { connectionId, label });
+    const webhookPath = `/webhooks/stock-intraday/${connectionId}`;
     return {
       connectionId,
-      secret,
-      webhookPath: `/webhooks/stock-intraday/${connectionId}`
+      webhookPath,
+      webhookUrlTemplate: `https://<CLOUD_FUNCTIONS_HOST>${webhookPath}`
     };
   }
 
   /**
-   * Authenticate TradingView webhook token → owner userId.
-   * Never logs the secret. Rate-limits repeated failures via store.
+   * Authenticate TradingView webhook via opaque connectionId path only.
+   * Rejects query-string tokens. Never expects secrets/passwords/T212 keys in body.
    */
   async authenticateWebhook(
     connectionId: string,
-    presentedSecret: string | undefined
+    options?: { queryTokenPresent?: boolean }
   ): Promise<{ ok: true; userId: string } | { ok: false; code: string; status: number }> {
+    if (options?.queryTokenPresent) {
+      return { ok: false, code: "QUERY_TOKEN_REJECTED", status: 400 };
+    }
+    if (!connectionId || connectionId.length < 16) {
+      return { ok: false, code: "WEBHOOK_NOT_FOUND", status: 401 };
+    }
     const conn = await this.store.getWebhookConnection(connectionId);
     if (!conn) {
       return { ok: false, code: "WEBHOOK_NOT_FOUND", status: 401 };
     }
     if (conn.lockedUntil && Date.parse(conn.lockedUntil) > Date.now()) {
       return { ok: false, code: "WEBHOOK_AUTH_LOCKED", status: 429 };
-    }
-    if (!presentedSecret || !verifyWebhookSecret(presentedSecret, conn.secretHash)) {
-      await this.store.recordWebhookAuthFailure(connectionId);
-      // Never log secret
-      await this.audit(conn.userId, "stock_webhook_auth_failed", { connectionId });
-      return { ok: false, code: "INVALID_WEBHOOK_TOKEN", status: 401 };
     }
     await this.store.clearWebhookAuthFailures(connectionId);
     return { ok: true, userId: conn.userId };
@@ -583,7 +658,7 @@ export class StockIntradayService {
     try {
       quote = await this.marketData.getQuote(signal.symbol);
       indicators = await this.marketData.getIndicators(signal.symbol);
-      this.lastMarketDataAt.set(userId, quote.asOf);
+      await this.persistDashboard(userId, { lastMarketDataAt: quote.asOf });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MARKET_DATA_FAILURE";
       await this.lock(userId, "market_data_failure");
@@ -591,24 +666,26 @@ export class StockIntradayService {
     }
 
     if (!this.marketData.isFresh(quote.asOf, 60_000)) {
-      this.pushRejected(userId, signal.symbol, "BLOCKED — stale data");
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — stale data");
       return { outcome: "BLOCKED", message: "BLOCKED — stale data" };
     }
 
     const closeEst = estimateMinutesToClose(indicators);
     if (closeEst.minutesToClose == null) {
-      this.pushRejected(userId, signal.symbol, "BLOCKED — minutes-to-close unavailable");
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — minutes-to-close unavailable");
       return { outcome: "BLOCKED", message: "BLOCKED — minutes-to-close unavailable" };
     }
 
     const estimatedSlippageBps = estimateSlippageBpsFromQuote(quote);
     if (estimatedSlippageBps == null) {
-      this.pushRejected(userId, signal.symbol, "BLOCKED — slippage estimate unavailable");
+      await this.pushRejected(userId, signal.symbol, "BLOCKED — slippage estimate unavailable");
       return { outcome: "BLOCKED", message: "BLOCKED — slippage estimate unavailable" };
     }
 
-    const adapter = this.adapters.get(userId);
-    if (!adapter?.isConnected()) {
+    let adapter: T212BrokerAdapter;
+    try {
+      adapter = await this.resolveBrokerAdapter(userId);
+    } catch {
       return {
         outcome: "BLOCKED",
         message: "BLOCKED — Trading 212 instrument validation unavailable"
@@ -649,7 +726,7 @@ export class StockIntradayService {
       signal,
       limits: settings.limits
     });
-    this.lastRanked.set(userId, [ranked]);
+    await this.persistDashboard(userId, { lastRankedOpportunities: [ranked] });
     const top = selectTopQualifyingOpportunity([ranked]);
 
     const cooldownUntil = await this.store.getSymbolCooldown(userId, signal.symbol);
@@ -672,7 +749,7 @@ export class StockIntradayService {
     });
 
     if (!gate.allow) {
-      this.pushRejected(userId, signal.symbol, gate.message ?? "BLOCKED");
+      await this.pushRejected(userId, signal.symbol, gate.message ?? "BLOCKED");
       await this.activity(userId, gate.message ?? "Blocked", "warn");
       return {
         outcome: gate.code === "DOES_NOT_QUALIFY" ? "WAIT" : "BLOCKED",
@@ -694,6 +771,10 @@ export class StockIntradayService {
 
     const reservedCashTotal = await this.store.getReservedCashTotal(userId);
     const availableCash = cash - reservedCashTotal;
+    const portfolioExposureUsed = positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
+    const symbolExposureUsed = positions
+      .filter((p) => p.symbol === signal.symbol)
+      .reduce((s, p) => s + p.quantity * p.entryPrice, 0);
 
     const sizing = calculateStockPositionSize({
       estimatedEntry: opportunity.estimatedEntry,
@@ -704,17 +785,25 @@ export class StockIntradayService {
         0,
         settings.limits.dailyCapitalAllocation - risk.dailyAllocationUsed
       ),
-      portfolioExposureUsed: positions.reduce((s, p) => s + p.quantity * p.entryPrice, 0),
-      symbolExposureUsed: 0,
+      portfolioExposureUsed,
+      symbolExposureUsed,
       minTradeQuantity: match.minTradeQuantity
     });
 
     if (!sizing.ok) {
-      this.pushRejected(userId, signal.symbol, sizing.reason ?? "Sizing failed");
+      await this.pushRejected(userId, signal.symbol, sizing.reason ?? "Sizing failed");
       return { outcome: "WAIT", message: `WAIT — ${sizing.reason}` };
     }
 
     const intent = this.buildIntent(userId, signal, opportunity, sizing.quantity, sizing.estimatedCost);
+    assertTransition("CANDIDATE", "VALIDATING");
+    intent.state = "VALIDATING";
+    assertTransition("VALIDATING", "APPROVED");
+    intent.state = "APPROVED";
+    assertTransition("APPROVED", "ENTRY_RESERVED");
+    intent.state = "ENTRY_RESERVED";
+    intent.updatedAt = nowIso();
+
     const idempotencyKey = buildIntentIdempotencyKey({
       userId,
       symbol: signal.symbol,
@@ -724,82 +813,80 @@ export class StockIntradayService {
       tradingDate: dayKeyUtc()
     });
 
-    const reserved = await this.store.reserveIntent(intent, idempotencyKey);
-    if (reserved !== "reserved") {
-      return {
-        outcome: "BLOCKED",
-        message:
-          reserved === "lease_held"
-            ? "BLOCKED — intent lease held"
-            : "BLOCKED — duplicate signal / intent"
-      };
-    }
-
-    const cashOk = await this.store.reserveCash(userId, intent.intentId, sizing.estimatedCost);
-    if (!cashOk) {
-      intent.state = "CANCELLED";
-      intent.blockReason = "CASH_RESERVATION_FAILED";
-      intent.updatedAt = nowIso();
-      await this.store.saveIntent(intent);
-      return { outcome: "BLOCKED", message: "BLOCKED — cash reservation failed" };
-    }
-
-    assertTransition("CANDIDATE", "VALIDATING");
-    intent.state = "VALIDATING";
-    assertTransition("VALIDATING", "APPROVED");
-    intent.state = "APPROVED";
-    assertTransition("APPROVED", "ENTRY_RESERVED");
-    intent.state = "ENTRY_RESERVED";
-    intent.updatedAt = nowIso();
-    await this.store.saveIntent(intent);
+    const position: StockManagedPosition = {
+      positionId: randomUUID(),
+      userId,
+      intentId: intent.intentId,
+      symbol: signal.symbol,
+      environment: "PAPER",
+      quantity: sizing.quantity,
+      entryPrice: opportunity.estimatedEntry,
+      stop: opportunity.stop,
+      takeProfit: opportunity.takeProfit,
+      currentExitRule: "HARD_STOP",
+      unrealisedPnl: 0,
+      openedAt: nowIso(),
+      goldMetaManaged: true
+    };
 
     if (risk.mode === "SHADOW") {
-      const position: StockManagedPosition = {
-        positionId: randomUUID(),
+      const reserved = await this.store.reserveEntryAtomically({
         userId,
-        intentId: intent.intentId,
-        symbol: signal.symbol,
-        environment: "PAPER",
-        quantity: sizing.quantity,
-        entryPrice: opportunity.estimatedEntry,
-        stop: opportunity.stop,
-        takeProfit: opportunity.takeProfit,
-        currentExitRule: "HARD_STOP",
-        unrealisedPnl: 0,
-        openedAt: nowIso(),
-        goldMetaManaged: true
-      };
-      await this.store.reservePositionSlot(position);
+        idempotencyKey,
+        intent,
+        position,
+        cashAmount: sizing.estimatedCost,
+        availableCashFromBroker: cash,
+        limits: settings.limits,
+        openShadowPosition: true
+      });
+      if (!reserved.ok) {
+        await this.pushRejected(userId, signal.symbol, `BLOCKED — ${reserved.code}`);
+        return { outcome: "BLOCKED", message: `BLOCKED — ${reserved.code}` };
+      }
       await this.store.appendShadowTrade(userId, {
         symbol: signal.symbol,
         side: "BUY",
         quantity: sizing.quantity,
         note: "SHADOW hypothetical entry — no broker order"
       });
-      await this.store.incrementDailyTradeCounters(userId, {
-        trades: 1,
-        allocationUsed: sizing.estimatedCost
-      });
-      intent.state = "OPEN";
-      intent.outcome = "BUY";
-      intent.updatedAt = nowIso();
-      await this.store.saveIntent(intent);
       await this.activity(
         userId,
         `SHADOW BUY ${sizing.quantity} ${signal.symbol} @ ~${opportunity.estimatedEntry}`,
         "success"
       );
-      return { outcome: "BUY", message: "SHADOW BUY recorded", intentId: intent.intentId };
+      return {
+        outcome: "BUY",
+        message: "SHADOW BUY recorded",
+        intentId: reserved.intent.intentId
+      };
     }
 
-    // PAPER / LIVE — submission flags false: do not place orders
+    // PAPER / LIVE — reserve intent+cash atomically, then cancel (submission flags false)
+    const reserved = await this.store.reserveEntryAtomically({
+      userId,
+      idempotencyKey,
+      intent,
+      position: null,
+      cashAmount: sizing.estimatedCost,
+      availableCashFromBroker: cash,
+      limits: settings.limits,
+      openShadowPosition: false
+    });
+    if (!reserved.ok) {
+      return { outcome: "BLOCKED", message: `BLOCKED — ${reserved.code}` };
+    }
+
     if (risk.mode === "T212_PAPER_AUTO") {
       if (!T212_PAPER_ORDER_SUBMISSION_ENABLED) {
-        await this.store.releaseCash(userId, intent.intentId);
-        intent.state = "CANCELLED";
-        intent.blockReason = "T212_PAPER_ORDER_SUBMISSION_DISABLED";
-        intent.updatedAt = nowIso();
-        await this.store.saveIntent(intent);
+        await this.store.releaseCash(userId, reserved.intent.intentId);
+        const cancelled = {
+          ...reserved.intent,
+          state: "CANCELLED" as const,
+          blockReason: "T212_PAPER_ORDER_SUBMISSION_DISABLED",
+          updatedAt: nowIso()
+        };
+        await this.store.saveIntent(cancelled);
         await this.activity(
           userId,
           "Paper Auto intent reserved then cancelled — submission flag is false.",
@@ -808,19 +895,24 @@ export class StockIntradayService {
         return {
           outcome: "BLOCKED",
           message: "BLOCKED — Paper order submission disabled",
-          intentId: intent.intentId
+          intentId: cancelled.intentId
         };
       }
     }
 
     if (risk.mode === "T212_LIVE_AUTO") {
-      await this.store.releaseCash(userId, intent.intentId);
-      intent.state = "LOCKED";
-      intent.blockReason = "T212_LIVE_EXECUTION_DISABLED";
-      await this.store.saveIntent(intent);
+      await this.store.releaseCash(userId, reserved.intent.intentId);
+      const locked = {
+        ...reserved.intent,
+        state: "LOCKED" as const,
+        blockReason: "T212_LIVE_EXECUTION_DISABLED",
+        updatedAt: nowIso()
+      };
+      await this.store.saveIntent(locked);
       return { outcome: "BLOCKED", message: "BLOCKED — Live execution disabled" };
     }
 
+    await this.store.releaseCash(userId, reserved.intent.intentId);
     return { outcome: "WAIT", message: "WAIT — no execution path" };
   }
 
@@ -890,6 +982,7 @@ export class StockIntradayService {
    * Matches only GoldMeta-managed records. Paper/Live execution remain disabled.
    */
   async reconcileOnStartup(userId: string): Promise<StockIntradayStatusPayload> {
+    const generation = currentDeploymentGeneration();
     let risk = await this.store.getRiskState(userId);
     risk = { ...risk, paused: true, updatedAt: nowIso() };
     await this.store.saveRiskState(risk);
@@ -897,11 +990,17 @@ export class StockIntradayService {
       userId,
       entriesPaused: true,
       lastReconciledAt: null,
-      processBootId: PROCESS_BOOT_ID,
+      deploymentGeneration: generation,
+      reconciledGeneration: null,
       updatedAt: nowIso()
     });
 
-    const adapter = this.adapters.get(userId);
+    let adapter: T212BrokerAdapter | null = null;
+    try {
+      adapter = await this.resolveBrokerAdapter(userId);
+    } catch {
+      adapter = null;
+    }
     const unresolved = await this.store.listUnresolvedIntents(userId);
     const managed = await this.store.listPositions(userId);
     const ambiguous: string[] = [];
@@ -933,11 +1032,9 @@ export class StockIntradayService {
         }
       }
 
-      // Never manage broker positions that are not GoldMeta-managed in our store.
       for (const bp of brokerPositions) {
         const ours = managed.find((m) => m.symbol === bp.ticker && m.goldMetaManaged);
         if (!ours) {
-          // Personal holding — leave untouched; record for audit only if symbol also has unresolved intent.
           continue;
         }
       }
@@ -949,8 +1046,6 @@ export class StockIntradayService {
 
     const ok = ambiguous.length === 0;
     if (ok) {
-      // Resume SHADOW monitoring only after successful reconciliation.
-      // Paper/Live stay paused and submission flags remain false.
       if (risk.mode === "SHADOW") {
         risk = { ...risk, paused: false, updatedAt: nowIso() };
         await this.store.saveRiskState(risk);
@@ -959,7 +1054,8 @@ export class StockIntradayService {
         userId,
         entriesPaused: risk.mode !== "SHADOW",
         lastReconciledAt: nowIso(),
-        processBootId: PROCESS_BOOT_ID,
+        deploymentGeneration: generation,
+        reconciledGeneration: generation,
         updatedAt: nowIso()
       });
     }
@@ -981,8 +1077,63 @@ export class StockIntradayService {
    */
   async runAutonomousScan(userId: string): Promise<StockIntradayStatusPayload> {
     const settings = await this.store.getSettings(userId);
-    const symbols = settings.universe.allowlist.slice(0, settings.universe.maxScannedCandidates);
-    return this.runShadowScan(userId, symbols);
+    let symbols = settings.universe.allowlist.slice(0, settings.universe.maxScannedCandidates);
+    try {
+      const adapter = await this.resolveBrokerAdapter(userId);
+      const instruments = await adapter.listInstruments();
+      const tradable = new Set(
+        instruments
+          .filter((i) => (i.type === "STOCK" || i.type === "ETF") && i.tradable && !i.suspended)
+          .map((i) => i.ticker.toUpperCase())
+      );
+      symbols = symbols.filter((s) => tradable.has(s.toUpperCase()));
+    } catch {
+      // Instrument list unavailable — evaluateEntry will fail closed per symbol.
+    }
+    // Persist ranked board for the dashboard (may not qualify without a TV signal).
+    await this.runShadowScan(userId, symbols);
+    const dashboard = await this.store.getDashboardSnapshot(userId);
+    const ordered = [...dashboard.lastRankedOpportunities].sort(
+      (a, b) => b.overallScore - a.overallScore
+    );
+    const trySymbols = ordered.length
+      ? ordered.map((o) => o.symbol)
+      : symbols;
+
+    // Same entry path as TradingView-triggered entries — no duplicated decision logic.
+    for (const symbol of trySymbols) {
+      const signal: StockTradingViewSignal = {
+        alertId: `scan_${symbol}_${dayKeyUtc()}_${Date.now()}`,
+        strategyId: "momentum_breakout",
+        symbol,
+        exchange: null,
+        timeframe: "5m",
+        action: "ENTRY_LONG",
+        price: null,
+        timestamp: nowIso(),
+        barTime: nowIso(),
+        barClosed: true,
+        volume: null,
+        ema21: null,
+        ema50: null,
+        ema200: null,
+        vwap: null,
+        rsi: null,
+        atr: null,
+        relativeVolume: null,
+        support: null,
+        resistance: null,
+        marketTrend: null,
+        confidence: 85,
+        reasonCodes: ["SCHEDULED_SCAN"],
+        receivedAt: nowIso()
+      };
+      const result = await this.evaluateEntryFromSignal(userId, signal);
+      if (result.outcome === "BUY") {
+        break;
+      }
+    }
+    return this.getStatus(userId);
   }
 
   /**
@@ -999,7 +1150,7 @@ export class StockIntradayService {
       try {
         const quote = await this.marketData.getQuote(position.symbol);
         const indicators = await this.marketData.getIndicators(position.symbol);
-        this.lastMarketDataAt.set(userId, quote.asOf);
+        await this.persistDashboard(userId, { lastMarketDataAt: quote.asOf });
 
         if (!this.marketData.isFresh(quote.asOf, 60_000)) {
           await this.lock(userId, "market_data_stale_monitor");
@@ -1076,7 +1227,7 @@ export class StockIntradayService {
       try {
         const quote = await this.marketData.getQuote(symbol);
         const indicators = await this.marketData.getIndicators(symbol);
-        this.lastMarketDataAt.set(userId, quote.asOf);
+        await this.persistDashboard(userId, { lastMarketDataAt: quote.asOf });
         ranked.push(
           rankIntradayOpportunity({
             symbol,
@@ -1089,11 +1240,11 @@ export class StockIntradayService {
           })
         );
       } catch {
-        this.pushRejected(userId, symbol, "Market data unavailable");
+        await this.pushRejected(userId, symbol, "Market data unavailable");
       }
     }
     ranked.sort((a, b) => b.overallScore - a.overallScore);
-    this.lastRanked.set(userId, ranked);
+    await this.persistDashboard(userId, { lastRankedOpportunities: ranked });
     const top = selectTopQualifyingOpportunity(ranked);
     await this.activity(
       userId,
@@ -1161,11 +1312,6 @@ export class StockIntradayService {
     };
   }
 
-  private pushRejected(userId: string, symbol: string, reason: string): void {
-    const list = this.lastRejected.get(userId) ?? [];
-    list.unshift({ symbol, reason, at: nowIso() });
-    this.lastRejected.set(userId, list.slice(0, 20));
-  }
 
   private async lock(userId: string, reason: string): Promise<void> {
     let risk = await this.store.getRiskState(userId);

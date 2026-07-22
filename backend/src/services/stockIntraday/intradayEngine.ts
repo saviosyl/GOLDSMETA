@@ -106,12 +106,14 @@ function mapKind(kind: EngineTickKind): StockJobKind {
 
 /**
  * High-level scheduler entry used by Cloud Scheduler / onSchedule.
- * Enqueues monitor + (when due) scan jobs for a single user.
+ * Enqueues monitor + scan jobs only — processing is via Firestore trigger / retry tick.
+ * Test helper `processEnqueued` optionally drains jobs in-process.
  */
 export async function runStockIntradaySchedulerForUser(
   service: StockIntradayService,
   store: StockIntradayStorePort,
-  userId: string
+  userId: string,
+  options?: { processEnqueued?: boolean }
 ): Promise<EngineTickResult[]> {
   const results: EngineTickResult[] = [];
   results.push(
@@ -123,10 +125,11 @@ export async function runStockIntradaySchedulerForUser(
   results.push(
     await enqueueEngineTick({ store, userId, kind: "MARKET_DATA_HEALTH" })
   );
-  // Process enqueued jobs immediately when invoked in-process (tests / local).
-  for (const r of results) {
-    if (r.enqueued && r.jobId) {
-      await service.processDurableJobById(userId, r.jobId);
+  if (options?.processEnqueued) {
+    for (const r of results) {
+      if (r.enqueued && r.jobId) {
+        await service.processDurableJobById(userId, r.jobId);
+      }
     }
   }
   return results;

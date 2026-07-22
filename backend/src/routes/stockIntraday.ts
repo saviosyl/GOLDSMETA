@@ -137,9 +137,12 @@ export const buildStockIntradayRouter = (service: StockIntradayService): Router 
     const created = await service.createWebhookConnection(getAuthenticatedUserId(req), label);
     res.status(201).json({
       connectionId: created.connectionId,
-      secret: created.secret,
       webhookPath: created.webhookPath,
-      note: "Store the secret securely. Only a hash is retained server-side. Secret is shown once."
+      webhookUrlTemplate: created.webhookUrlTemplate,
+      note:
+        "Configure TradingView alert webhook URL to this path only. " +
+        "Do not put passwords, Trading 212 credentials, or secrets in the alert message. " +
+        "Auth is the unguessable connectionId path segment."
     });
   });
 
