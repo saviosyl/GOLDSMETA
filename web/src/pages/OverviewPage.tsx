@@ -14,6 +14,7 @@ import {
 import { buildOvernightReview } from "../lib/overnight";
 import type { BuildSnapshotInput } from "../lib/promoSnapshot";
 import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
+import { useDashboardDecisionPoll } from "../lib/useDashboardDecisionPoll";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
@@ -107,6 +108,7 @@ export function OverviewPage() {
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
@@ -141,14 +143,31 @@ export function OverviewPage() {
         setCachedAt(cached.savedAt);
       }
       setError(formatClientError(err, "Unable to load market state"));
+      throw err;
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [api]);
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
+
+  const pollTick = useCallback(async () => {
+    await load();
+  }, [load]);
+
+  const { lastSuccessAt, pollError } = useDashboardDecisionPoll({
+    enabled: !loading,
+    intervalMs: 30_000,
+    onTick: pollTick
+  });
+
+  const refresh = () => {
+    setRefreshing(true);
+    void load().catch(() => undefined);
+  };
 
   const decisionCode = decision?.decision ?? "WAIT";
   const reason = plainLanguageReason(
@@ -207,11 +226,39 @@ export function OverviewPage() {
 
   return (
     <div data-testid="overview-page" className="gm-dashboard">
-      <PageHeader title="Dashboard" freshness={freshness} />
+      <div className="gm-page-header-row" style={{ display: "flex", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <PageHeader title="Dashboard" freshness={freshness} />
+        </div>
+        <button
+          type="button"
+          className="gm-btn-outline"
+          data-testid="dashboard-refresh"
+          onClick={refresh}
+          disabled={refreshing || loading}
+        >
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      <p className="gm-meta" data-testid="dashboard-last-refresh" style={{ marginTop: 0 }}>
+        Last refresh:{" "}
+        {lastSuccessAt
+          ? formatCompactLocalTime(lastSuccessAt, tzPref)
+          : loading
+            ? "…"
+            : "pending"}
+      </p>
 
       {error && (
         <div className="banner error" role="alert">
           {error}
+        </div>
+      )}
+      {pollError && (
+        <div className="banner stale" role="status" data-testid="dashboard-poll-stale">
+          Live refresh is temporarily unavailable. Showing the last loaded decision — use Refresh to
+          retry.
         </div>
       )}
       {loading && (
