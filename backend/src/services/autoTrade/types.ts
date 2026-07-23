@@ -11,9 +11,12 @@ export const LIVE_EXECUTION_FEATURE_FLAG = false;
 /** Demo order submission stays off during read-only IG Demo hardening. */
 export const DEMO_ORDER_SUBMISSION_ENABLED = false;
 
-/** T212 paper/live remain off — not part of this IG AutoTrade production release. */
+/** T212 paper/live remain off — dry-run proposals only in this release. */
 export const T212_PAPER_ORDER_SUBMISSION_ENABLED = false;
 export const T212_LIVE_EXECUTION_FEATURE_FLAG = false;
+
+/** Master broker execution kill switch — must stay false. */
+export const BROKER_EXECUTION_ENABLED = false;
 
 export type AutoTradeMode = "OFF" | "SHADOW" | "IG_DEMO_AUTO" | "IG_LIVE_AUTO";
 
@@ -229,8 +232,21 @@ export interface AutoTradeStatusPayload {
   liveExecutionFeatureEnabled: boolean;
   /** Hard false for this verification stage. */
   demoOrderSubmissionEnabled: boolean;
+  /** Master broker execution kill switch — always false in this release. */
+  brokerExecutionEnabled: false;
+  t212PaperOrderSubmissionEnabled: false;
+  t212LiveExecutionFeatureEnabled: false;
   readOnly: true;
   ordersEnabled: false;
+  selectedBroker: import("./t212/types").SelectedBrokerId;
+  brokerBadge: import("./t212/types").BrokerBadge;
+  igParked: boolean;
+  t212: import("./t212/types").T212ConnectionView | null;
+  t212RiskLimits: import("./t212/types").T212RiskLimits;
+  t212GoldCandidates: import("./t212/types").T212InstrumentCandidate[];
+  t212LastDiagnosticReport: import("./t212/types").T212DiagnosticReport | null;
+  t212PendingProposal: import("./t212/types").T212ExecutionProposal | null;
+  t212Disclaimer: string;
   connection: AutoTradeConnectionStatus;
   limits: AutoTradeRiskLimits;
   budget: AutoTradeBudgetView;

@@ -180,6 +180,264 @@ export const buildAutoTradeRouter = (
     }
   });
 
+  const brokerSelectSchema = z
+    .object({
+      broker: z.enum(["MANUAL", "T212_INVEST", "IG_DEMO"])
+    })
+    .strict();
+
+  router.post("/v1/autotrade/broker", requireAuth, async (req, res) => {
+    const parsed = brokerSelectSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_BROKER", message: "Invalid broker selection" }
+      });
+      return;
+    }
+    try {
+      const status = await service.selectBroker(
+        getAuthenticatedUserId(req),
+        parsed.data.broker
+      );
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "BROKER_SELECT_FAILED",
+          message: error instanceof Error ? error.message : "Broker select failed"
+        }
+      });
+    }
+  });
+
+  const t212ConnectSchema = z
+    .object({
+      environment: z.enum(["PRACTICE", "LIVE"]).default("PRACTICE")
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/connect", requireAuth, async (req, res) => {
+    const parsed = t212ConnectSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_T212_CONNECT", message: "Invalid Trading 212 connect payload" }
+      });
+      return;
+    }
+    try {
+      const status = await service.connectTrading212(
+        getAuthenticatedUserId(req),
+        parsed.data.environment
+      );
+      res.json({
+        status,
+        readOnly: true,
+        ordersEnabled: false,
+        paperOrderSubmissionEnabled: false,
+        liveExecutionFeatureEnabled: false
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_CONNECT_FAILED",
+          message: error instanceof Error ? error.message : "Trading 212 connect failed"
+        }
+      });
+    }
+  });
+
+  router.post("/v1/autotrade/t212/disconnect", requireAuth, async (req, res) => {
+    try {
+      const status = await service.disconnectTrading212(getAuthenticatedUserId(req));
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_DISCONNECT_FAILED",
+          message: error instanceof Error ? error.message : "Disconnect failed"
+        }
+      });
+    }
+  });
+
+  router.post("/v1/autotrade/t212/diagnostics", requireAuth, async (req, res) => {
+    try {
+      const status = await service.refreshT212Diagnostics(getAuthenticatedUserId(req));
+      res.json({
+        status,
+        report: status.t212LastDiagnosticReport,
+        readOnly: true,
+        ordersEnabled: false,
+        orderEndpointsCalled: false
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_DIAGNOSTICS_FAILED",
+          message: error instanceof Error ? error.message : "Diagnostics failed"
+        }
+      });
+    }
+  });
+
+  const t212SearchSchema = z
+    .object({
+      query: z.string().max(120).optional()
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/instruments/search", requireAuth, async (req, res) => {
+    const parsed = t212SearchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_SEARCH", message: "Invalid instrument search" }
+      });
+      return;
+    }
+    try {
+      const result = await service.searchT212GoldInstruments(
+        getAuthenticatedUserId(req),
+        parsed.data.query
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_SEARCH_FAILED",
+          message: error instanceof Error ? error.message : "Search failed"
+        }
+      });
+    }
+  });
+
+  const t212ConfirmInstrumentSchema = z
+    .object({
+      instrumentId: z.string().min(1).max(64),
+      ticker: z.string().min(1).max(64),
+      name: z.string().min(1).max(256),
+      currency: z.string().min(1).max(8),
+      isin: z.string().max(32).nullable().optional(),
+      exchange: z.string().max(64).nullable().optional(),
+      fractionalSupported: z.boolean().nullable().optional(),
+      minOrderQuantity: z.number().nullable().optional(),
+      minOrderValue: z.number().nullable().optional()
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/instruments/confirm", requireAuth, async (req, res) => {
+    const parsed = t212ConfirmInstrumentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: {
+          code: "INVALID_INSTRUMENT",
+          message: "Explicit gold instrument confirmation required"
+        }
+      });
+      return;
+    }
+    try {
+      const status = await service.confirmT212Instrument(
+        getAuthenticatedUserId(req),
+        parsed.data
+      );
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_INSTRUMENT_CONFIRM_FAILED",
+          message: error instanceof Error ? error.message : "Confirm failed"
+        }
+      });
+    }
+  });
+
+  const t212ProposalSchema = z
+    .object({
+      decisionId: z.string().min(4),
+      decision: z.string().min(1),
+      confidence: z.number().nullable().optional(),
+      score: z.number().nullable().optional(),
+      generatedAt: z.string().nullable().optional(),
+      marketOpen: z.boolean().nullable().optional(),
+      holdingQuantity: z.number().optional()
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/proposals", requireAuth, async (req, res) => {
+    const parsed = t212ProposalSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_PROPOSAL", message: "Invalid proposal payload" }
+      });
+      return;
+    }
+    try {
+      const result = await service.createT212ExecutionProposal(
+        getAuthenticatedUserId(req),
+        {
+          decisionId: parsed.data.decisionId,
+          decision: parsed.data.decision,
+          confidence: parsed.data.confidence,
+          score: parsed.data.score,
+          generatedAt: parsed.data.generatedAt
+        },
+        {
+          marketOpen: parsed.data.marketOpen,
+          holdingQuantity: parsed.data.holdingQuantity
+        }
+      );
+      res.json({
+        ...result,
+        orderSubmitted: false,
+        paperOrderSubmissionEnabled: false,
+        liveExecutionFeatureEnabled: false
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_PROPOSAL_FAILED",
+          message: error instanceof Error ? error.message : "Proposal failed"
+        }
+      });
+    }
+  });
+
+  const t212ApproveSchema = z
+    .object({
+      proposalId: z.string().min(4),
+      confirmMethod: z.enum(["manual", "biometric_future"]).optional()
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/proposals/approve-dry-run", requireAuth, async (req, res) => {
+    const parsed = t212ApproveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_APPROVAL", message: "Invalid dry-run approval payload" }
+      });
+      return;
+    }
+    try {
+      const result = await service.approveT212ProposalDryRun(
+        getAuthenticatedUserId(req),
+        parsed.data.proposalId,
+        { confirmMethod: parsed.data.confirmMethod }
+      );
+      res.json({
+        ...result,
+        orderSubmitted: false,
+        statusCode: "DRY_RUN_APPROVED"
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "T212_APPROVE_FAILED",
+          message: error instanceof Error ? error.message : "Approve failed"
+        }
+      });
+    }
+  });
+
   router.post("/v1/autotrade/emergency-stop", requireAuth, async (req, res) => {
     const status = await service.emergencyStop(getAuthenticatedUserId(req));
     res.json({

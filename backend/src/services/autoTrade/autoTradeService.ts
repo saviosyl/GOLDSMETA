@@ -28,8 +28,11 @@ import type { AutoTradeStorePort } from "./autoTradeStore";
 import { createExecutionOwnerId } from "./inMemoryAutoTradeStore";
 import {
   AUTOTRADE_STRATEGY_VERSION,
+  BROKER_EXECUTION_ENABLED,
   DEMO_ORDER_SUBMISSION_ENABLED,
   LIVE_EXECUTION_FEATURE_FLAG,
+  T212_LIVE_EXECUTION_FEATURE_FLAG,
+  T212_PAPER_ORDER_SUBMISSION_ENABLED,
   buildDealReference,
   displayStatusFor,
   maskAccountId,
@@ -41,6 +44,36 @@ import {
   type TradeIntentState,
   type TradingSessionId
 } from "./types";
+import {
+  badgeForBroker,
+  DEFAULT_T212_RISK_LIMITS,
+  T212_PROXY_DISCLAIMER,
+  type SelectedBrokerId,
+  type T212Environment,
+  type T212ExecutionProposal,
+  type T212InstrumentCandidate,
+  type T212SelectedInstrument
+} from "./t212/types";
+import {
+  assertOrderSubmissionDisabled,
+  buildDisconnectedT212View,
+  connectionViewFromReport,
+  defaultT212ClientFactory,
+  runT212ReadOnlyDiagnostics,
+  type T212ClientFactory
+} from "./t212/diagnostics";
+import {
+  buildDryRunPreview,
+  buildIdempotencyKey,
+  buildProposal,
+  translateXauusdToT212Invest,
+  type GoldMetaDecisionInput
+} from "./t212/executionRules";
+import { requireExplicitInstrumentSelection } from "./t212/instruments";
+import {
+  loadT212CredentialsFromServerEnv,
+  type T212Credentials
+} from "./t212/client";
 
 export interface DecisionSignalInput {
   decisionId: string;
@@ -133,15 +166,33 @@ export class AutoTradeService {
     string,
     Partial<AutoTradeStatusPayload["connection"]>
   >();
+  private t212ConnectedEnvByUser = new Map<string, T212Environment>();
+  private t212ViewByUser = new Map<string, AutoTradeStatusPayload["t212"]>();
+  private t212CandidatesByUser = new Map<string, T212InstrumentCandidate[]>();
+  private t212DiagnosticByUser = new Map<
+    string,
+    import("./t212/types").T212DiagnosticReport | null
+  >();
+  private t212ClientFactory: T212ClientFactory;
+  private t212CredentialLoader: (
+    environment: T212Environment
+  ) => T212Credentials | null;
   readonly ownerId: string;
 
   constructor(
     private readonly store: AutoTradeStorePort,
     private readonly adapterFactory: (env: BrokerEnvironment) => AutoTradeBrokerAdapter = (env) =>
       new FakeIgBrokerAdapter({ environment: env }),
-    options: { ownerId?: string } = {}
+    options: {
+      ownerId?: string;
+      t212ClientFactory?: T212ClientFactory;
+      t212CredentialLoader?: (environment: T212Environment) => T212Credentials | null;
+    } = {}
   ) {
     this.ownerId = options.ownerId ?? createExecutionOwnerId("svc");
+    this.t212ClientFactory = options.t212ClientFactory ?? defaultT212ClientFactory;
+    this.t212CredentialLoader =
+      options.t212CredentialLoader ?? ((env) => loadT212CredentialsFromServerEnv(env));
   }
 
   /** After process restart/deploy, mode must not restore — force OFF on first touch. */
@@ -190,13 +241,25 @@ export class AutoTradeService {
     const settings = await this.store.getSettings(userId);
     const connection = await this.store.getConnection(userId);
     const activity = await this.store.listActivity(userId, 40);
+    const brokerSelection = await this.store.getBrokerSelection(userId);
+    const selectedBroker = brokerSelection.selectedBroker;
+    const t212Instrument = await this.store.getT212SelectedInstrument(userId);
+    const t212Proposals = await this.store.listT212Proposals(userId, 10);
+    const pendingProposal =
+      t212Proposals.find(
+        (p) =>
+          p.status === "AWAITING_CONFIRMATION" ||
+          p.status === "CREATED" ||
+          p.status === "DRY_RUN_APPROVED"
+      ) ?? null;
     const adapter = this.adapters.get(userId);
     let positions: AutoTradeStatusPayload["positions"] = [];
     let marketFields: Partial<AutoTradeStatusPayload["connection"]> =
       this.marketExtrasByUser.get(userId) ?? {};
     const connError = this.connectionErrorByUser.get(userId) ?? null;
+    const igActive = selectedBroker === "IG_DEMO";
 
-    if (adapter?.isConnected()) {
+    if (igActive && adapter?.isConnected()) {
       try {
         const open = await adapter.getOpenPositions();
         const preferred =
@@ -276,12 +339,22 @@ export class AutoTradeService {
     }
 
     const limits = settings.limits;
-    const connected = Boolean(adapter?.isConnected() && connection.connected);
-    const connectionState: AutoTradeStatusPayload["connection"]["connectionState"] = connError
-      ? "Error"
-      : connected
-        ? "Connected"
-        : "Disconnected";
+    const connected = Boolean(igActive && adapter?.isConnected() && connection.connected);
+    const connectionState: AutoTradeStatusPayload["connection"]["connectionState"] = !igActive
+      ? "Disconnected"
+      : connError
+        ? "Error"
+        : connected
+          ? "Connected"
+          : "Disconnected";
+
+    const t212Env = this.t212ConnectedEnvByUser.get(userId) ?? null;
+    const t212View =
+      this.t212ViewByUser.get(userId) ??
+      buildDisconnectedT212View(t212Instrument);
+    if (t212View && t212Instrument && !t212View.selectedInstrument) {
+      t212View.selectedInstrument = t212Instrument;
+    }
 
     return {
       displayStatus: displayStatusFor(risk.mode, risk.locked || risk.emergencyStopActive),
@@ -291,35 +364,54 @@ export class AutoTradeService {
       emergencyStopActive: risk.emergencyStopActive,
       liveExecutionFeatureEnabled: LIVE_EXECUTION_FEATURE_FLAG,
       demoOrderSubmissionEnabled: DEMO_ORDER_SUBMISSION_ENABLED,
+      brokerExecutionEnabled: false,
+      t212PaperOrderSubmissionEnabled: false,
+      t212LiveExecutionFeatureEnabled: false,
       readOnly: true,
       ordersEnabled: false,
+      selectedBroker,
+      brokerBadge: badgeForBroker(selectedBroker, t212Env ?? t212View?.environment ?? null),
+      igParked: selectedBroker !== "IG_DEMO",
+      t212: selectedBroker === "T212_INVEST" ? t212View : t212View,
+      t212RiskLimits: DEFAULT_T212_RISK_LIMITS,
+      t212GoldCandidates: this.t212CandidatesByUser.get(userId) ?? [],
+      t212LastDiagnosticReport: this.t212DiagnosticByUser.get(userId) ?? null,
+      t212PendingProposal: pendingProposal,
+      t212Disclaimer: T212_PROXY_DISCLAIMER,
       connection: {
         connected,
-        environment: connection.environment,
-        environmentLabel: "IG DEMO — READ ONLY",
-        accountIdMasked: maskAccountId(connection.accountId),
-        accountName: connection.accountName,
-        currency: connection.currency ?? limits.currency,
-        balance: connection.balance,
-        available: connection.available,
-        marginUsed: connection.marginUsed,
-        marketStatus: marketFields.marketStatus ?? null,
-        marketEpic: marketFields.marketEpic ?? connection.marketEpic,
-        marketName: marketFields.marketName ?? connection.marketName,
-        instrumentType: marketFields.instrumentType ?? null,
-        expiry: marketFields.expiry ?? null,
-        bid: marketFields.bid ?? null,
-        ask: marketFields.ask ?? null,
-        spread: marketFields.spread ?? null,
-        minDealSize: marketFields.minDealSize ?? null,
-        sizeIncrement: marketFields.sizeIncrement ?? null,
-        valuePerPoint: marketFields.valuePerPoint ?? null,
-        minNormalStopDistance: marketFields.minNormalStopDistance ?? null,
-        minGuaranteedStopDistance: marketFields.minGuaranteedStopDistance ?? null,
-        guaranteedStopAvailable: marketFields.guaranteedStopAvailable ?? null,
-        marginRequirement: marketFields.marginRequirement ?? null,
-        lastHeartbeatAt: connection.lastHeartbeatAt,
-        accountMatch: this.accountMatchByUser.get(userId) ?? null,
+        environment: igActive ? connection.environment : null,
+        environmentLabel:
+          selectedBroker === "IG_DEMO"
+            ? "IG DEMO — PARKED"
+            : selectedBroker === "T212_INVEST"
+              ? badgeForBroker("T212_INVEST", t212Env ?? "PRACTICE")
+              : "MANUAL XAUUSD",
+        accountIdMasked: igActive ? maskAccountId(connection.accountId) : null,
+        accountName: igActive ? connection.accountName : null,
+        currency: igActive ? connection.currency ?? limits.currency : limits.currency,
+        balance: igActive ? connection.balance : null,
+        available: igActive ? connection.available : null,
+        marginUsed: igActive ? connection.marginUsed : null,
+        marketStatus: igActive ? marketFields.marketStatus ?? null : null,
+        marketEpic: igActive ? marketFields.marketEpic ?? connection.marketEpic : null,
+        marketName: igActive ? marketFields.marketName ?? connection.marketName : null,
+        instrumentType: igActive ? marketFields.instrumentType ?? null : null,
+        expiry: igActive ? marketFields.expiry ?? null : null,
+        bid: igActive ? marketFields.bid ?? null : null,
+        ask: igActive ? marketFields.ask ?? null : null,
+        spread: igActive ? marketFields.spread ?? null : null,
+        minDealSize: igActive ? marketFields.minDealSize ?? null : null,
+        sizeIncrement: igActive ? marketFields.sizeIncrement ?? null : null,
+        valuePerPoint: igActive ? marketFields.valuePerPoint ?? null : null,
+        minNormalStopDistance: igActive ? marketFields.minNormalStopDistance ?? null : null,
+        minGuaranteedStopDistance: igActive
+          ? marketFields.minGuaranteedStopDistance ?? null
+          : null,
+        guaranteedStopAvailable: igActive ? marketFields.guaranteedStopAvailable ?? null : null,
+        marginRequirement: igActive ? marketFields.marginRequirement ?? null : null,
+        lastHeartbeatAt: igActive ? connection.lastHeartbeatAt : null,
+        accountMatch: igActive ? this.accountMatchByUser.get(userId) ?? null : null,
         connectionState
       },
       limits,
@@ -337,13 +429,15 @@ export class AutoTradeService {
         tradesMax: limits.maxTradesPerDay,
         currency: limits.currency
       },
-      positions,
+      positions: igActive ? positions : [],
       activity,
       strategyVersion: AUTOTRADE_STRATEGY_VERSION,
-      goldCandidates: this.goldCandidatesByUser.get(userId) ?? [],
-      proposedEpic: this.proposedEpicByUser.get(userId) ?? connection.marketEpic,
-      selectionRequired: this.selectionRequiredByUser.get(userId) ?? false,
-      lastDiagnosticReport: this.lastDiagnosticByUser.get(userId) ?? null
+      goldCandidates: igActive ? this.goldCandidatesByUser.get(userId) ?? [] : [],
+      proposedEpic: igActive
+        ? this.proposedEpicByUser.get(userId) ?? connection.marketEpic
+        : null,
+      selectionRequired: igActive ? this.selectionRequiredByUser.get(userId) ?? false : false,
+      lastDiagnosticReport: igActive ? this.lastDiagnosticByUser.get(userId) ?? null : null
     };
   }
 
@@ -446,6 +540,13 @@ export class AutoTradeService {
     );
 
     if (mode === "IG_DEMO_AUTO" || mode === "IG_LIVE_AUTO") {
+      const selection = await this.store.getBrokerSelection(userId);
+      if (selection.selectedBroker !== "IG_DEMO") {
+        throw Object.assign(
+          new Error("IG Demo is parked. Select IG Demo as broker before enabling IG modes."),
+          { code: "IG_PARKED" }
+        );
+      }
       await this.connectBroker(userId, mode === "IG_LIVE_AUTO" ? "LIVE" : "DEMO");
     }
     if (mode === "OFF" || mode === "SHADOW") {
@@ -464,6 +565,13 @@ export class AutoTradeService {
     environment: BrokerEnvironment,
     credentialsRef = `server:${environment.toLowerCase()}`
   ): Promise<AutoTradeStatusPayload> {
+    const selection = await this.store.getBrokerSelection(userId);
+    if (selection.selectedBroker !== "IG_DEMO") {
+      throw Object.assign(
+        new Error("IG Demo is temporarily parked. Switch broker selection to IG Demo to reconnect."),
+        { code: "IG_PARKED" }
+      );
+    }
     if (environment === "LIVE") {
       throw Object.assign(new Error("LIVE broker connection is blocked for this release."), {
         code: "LIVE_ADAPTER_BLOCKED"
@@ -1392,6 +1500,443 @@ export class AutoTradeService {
       action,
       detail: redactSecrets(detail)
     });
+  }
+
+  /**
+   * Persist broker selection. Changing broker forces AutoTrade OFF, clears pending
+   * execution intents/proposals, disconnects adapters, and never places an order.
+   */
+  async selectBroker(
+    userId: string,
+    selectedBroker: SelectedBrokerId
+  ): Promise<AutoTradeStatusPayload> {
+    await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
+
+    const previous = await this.store.getBrokerSelection(userId);
+    await this.store.saveBrokerSelection({
+      userId,
+      selectedBroker,
+      updatedAt: nowIso()
+    });
+
+    let risk = await this.store.getRiskState(userId);
+    risk = { ...risk, mode: "OFF", updatedAt: nowIso() };
+    await this.store.saveRiskState(risk);
+
+    await this.store.clearAwaitingT212Proposals(userId);
+    // Clear IG pending intents by disconnecting + activity note (no order).
+    const adapter = this.adapters.get(userId);
+    if (adapter) {
+      try {
+        await adapter.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.adapters.delete(userId);
+    }
+    this.t212ConnectedEnvByUser.delete(userId);
+    this.t212ViewByUser.set(
+      userId,
+      buildDisconnectedT212View(await this.store.getT212SelectedInstrument(userId))
+    );
+    this.connectionErrorByUser.set(userId, null);
+    this.lastDiagnosticByUser.delete(userId);
+
+    const connection = await this.store.getConnection(userId);
+    await this.store.saveConnection({
+      ...connection,
+      connected: false,
+      lastHeartbeatAt: null,
+      updatedAt: nowIso()
+    });
+
+    await this.audit(userId, "broker_selected", {
+      from: previous.selectedBroker,
+      to: selectedBroker,
+      modeForcedOff: true,
+      ordersPlaced: false
+    });
+    await this.activity(
+      userId,
+      `Broker set to ${selectedBroker}. AutoTrade OFF — reconnect required. No order placed.`,
+      "warn"
+    );
+    return this.getStatus(userId);
+  }
+
+  async connectTrading212(
+    userId: string,
+    environment: T212Environment = "PRACTICE"
+  ): Promise<AutoTradeStatusPayload> {
+    await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
+    const selection = await this.store.getBrokerSelection(userId);
+    if (selection.selectedBroker !== "T212_INVEST") {
+      throw Object.assign(
+        new Error("Select Trading 212 Invest as broker before connecting."),
+        { code: "BROKER_NOT_T212" }
+      );
+    }
+    if (environment === "LIVE") {
+      // Connection metadata allowed for future, but live remains locked / read-only flag.
+      await this.activity(
+        userId,
+        "Trading 212 Live Invest is locked — read-only diagnostics only; order submission disabled.",
+        "warn"
+      );
+    }
+
+    const instrument = await this.store.getT212SelectedInstrument(userId);
+    const report = await runT212ReadOnlyDiagnostics({
+      environment: environment === "LIVE" ? "LIVE" : "PRACTICE",
+      selectedInstrument: instrument,
+      credentials: this.t212CredentialLoader(environment === "LIVE" ? "LIVE" : "PRACTICE"),
+      clientFactory: this.t212ClientFactory
+    });
+    this.t212DiagnosticByUser.set(userId, report);
+    this.t212CandidatesByUser.set(userId, report.goldCandidates);
+    const view = connectionViewFromReport(report);
+    this.t212ViewByUser.set(userId, view);
+    if (report.connected) {
+      this.t212ConnectedEnvByUser.set(userId, report.environment);
+    } else {
+      this.t212ConnectedEnvByUser.delete(userId);
+      throw Object.assign(
+        new Error(report.errors[0] ?? "T212_CONNECT_FAILED"),
+        { code: report.errors[0] ?? "T212_CONNECT_FAILED" }
+      );
+    }
+    await this.audit(userId, "t212_connected", {
+      environment: report.environment,
+      readOnly: true,
+      orderEndpointsCalled: false
+    });
+    await this.activity(
+      userId,
+      `Connected to Trading 212 ${report.environment} — READ ONLY. Order submission disabled.`,
+      "success"
+    );
+    return this.getStatus(userId);
+  }
+
+  async disconnectTrading212(userId: string): Promise<AutoTradeStatusPayload> {
+    this.t212ConnectedEnvByUser.delete(userId);
+    const instrument = await this.store.getT212SelectedInstrument(userId);
+    this.t212ViewByUser.set(userId, buildDisconnectedT212View(instrument));
+    await this.audit(userId, "t212_disconnected", {});
+    await this.activity(userId, "Disconnected from Trading 212 (server session cleared).", "info");
+    return this.getStatus(userId);
+  }
+
+  async refreshT212Diagnostics(
+    userId: string,
+    query?: string
+  ): Promise<AutoTradeStatusPayload> {
+    await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
+    const env = this.t212ConnectedEnvByUser.get(userId) ?? "PRACTICE";
+    const instrument = await this.store.getT212SelectedInstrument(userId);
+    const report = await runT212ReadOnlyDiagnostics({
+      environment: env,
+      selectedInstrument: instrument,
+      credentials: this.t212CredentialLoader(env),
+      clientFactory: this.t212ClientFactory,
+      query
+    });
+    this.t212DiagnosticByUser.set(userId, report);
+    this.t212CandidatesByUser.set(userId, report.goldCandidates);
+    this.t212ViewByUser.set(userId, connectionViewFromReport(report));
+    if (report.connected) this.t212ConnectedEnvByUser.set(userId, report.environment);
+    await this.audit(userId, "t212_diagnostics", {
+      ok: report.ok,
+      orderEndpointsCalled: false,
+      goldCandidates: report.goldCandidates.length
+    });
+    return this.getStatus(userId);
+  }
+
+  async searchT212GoldInstruments(
+    userId: string,
+    query?: string
+  ): Promise<{ candidates: T212InstrumentCandidate[]; status: AutoTradeStatusPayload }> {
+    await this.refreshT212Diagnostics(userId, query);
+    return {
+      candidates: this.t212CandidatesByUser.get(userId) ?? [],
+      status: await this.getStatus(userId)
+    };
+  }
+
+  async confirmT212Instrument(
+    userId: string,
+    candidate: {
+      instrumentId: string;
+      ticker: string;
+      name: string;
+      currency: string;
+      isin?: string | null;
+      exchange?: string | null;
+      fractionalSupported?: boolean | null;
+      minOrderQuantity?: number | null;
+      minOrderValue?: number | null;
+    }
+  ): Promise<AutoTradeStatusPayload> {
+    await this.ensureRestartPolicy(userId);
+    if (!candidate.instrumentId || !candidate.ticker || !candidate.name) {
+      throw Object.assign(new Error("Explicit instrument confirmation required."), {
+        code: "SELECTED_INSTRUMENT_REQUIRED"
+      });
+    }
+    const candidates = this.t212CandidatesByUser.get(userId) ?? [];
+    const check = requireExplicitInstrumentSelection(candidates, candidate.instrumentId);
+    if (!check.ok) {
+      throw Object.assign(new Error(check.reason), { code: check.reason });
+    }
+    // Never auto-pick: require the client-supplied ticker/id match a known candidate when list present.
+    if (candidates.length > 0) {
+      const found = candidates.find(
+        (c) =>
+          c.instrumentId === candidate.instrumentId || c.ticker === candidate.ticker
+      );
+      if (!found) {
+        throw Object.assign(new Error("INSTRUMENT_NOT_IN_CATALOGUE"), {
+          code: "INSTRUMENT_NOT_IN_CATALOGUE"
+        });
+      }
+    }
+
+    const selected: T212SelectedInstrument = {
+      instrumentId: candidate.instrumentId,
+      ticker: candidate.ticker,
+      name: candidate.name,
+      currency: candidate.currency,
+      isin: candidate.isin ?? null,
+      exchange: candidate.exchange ?? null,
+      fractionalSupported: candidate.fractionalSupported ?? null,
+      minOrderQuantity: candidate.minOrderQuantity ?? null,
+      minOrderValue: candidate.minOrderValue ?? null,
+      confirmedAt: nowIso(),
+      confirmedBy: userId
+    };
+    await this.store.saveT212SelectedInstrument(userId, selected);
+    const view = this.t212ViewByUser.get(userId) ?? buildDisconnectedT212View(selected);
+    this.t212ViewByUser.set(userId, { ...view, selectedInstrument: selected });
+    await this.audit(userId, "t212_instrument_confirmed", {
+      ticker: selected.ticker,
+      instrumentId: selected.instrumentId,
+      confirmedBy: userId
+    });
+    await this.activity(
+      userId,
+      `Gold execution instrument confirmed: ${selected.ticker} (${selected.name}).`,
+      "success"
+    );
+    return this.getStatus(userId);
+  }
+
+  /**
+   * Build a dry-run / confirm-mode proposal from a GoldMeta XAUUSD decision.
+   * Never submits a broker order.
+   */
+  async createT212ExecutionProposal(
+    userId: string,
+    decision: GoldMetaDecisionInput,
+    opts: { marketOpen?: boolean | null; holdingQuantity?: number } = {}
+  ): Promise<{ proposal: T212ExecutionProposal; preview: ReturnType<typeof buildDryRunPreview>; status: AutoTradeStatusPayload }> {
+    await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
+    if (!BROKER_EXECUTION_ENABLED && !T212_PAPER_ORDER_SUBMISSION_ENABLED) {
+      // expected path
+    }
+
+    const selection = await this.store.getBrokerSelection(userId);
+    if (selection.selectedBroker !== "T212_INVEST") {
+      throw Object.assign(new Error("Broker must be Trading 212 Invest."), {
+        code: "BROKER_NOT_T212"
+      });
+    }
+
+    const instrument = await this.store.getT212SelectedInstrument(userId);
+    const view = this.t212ViewByUser.get(userId) ?? buildDisconnectedT212View(instrument);
+    const environment = this.t212ConnectedEnvByUser.get(userId) ?? "PRACTICE";
+    const holdingQuantity =
+      opts.holdingQuantity ?? view.holdingQuantity ?? 0;
+
+    const translation = translateXauusdToT212Invest(decision, {
+      userId,
+      environment,
+      instrument,
+      holdingQuantity,
+      freeCash: view.freeCash,
+      totalValue: view.totalValue,
+      estimatedPrice: null,
+      marketOpen: opts.marketOpen ?? null,
+      limits: DEFAULT_T212_RISK_LIMITS
+    });
+
+    if (!instrument) {
+      const blocked = buildProposal({
+        proposalId: randomUUID(),
+        userId,
+        decision,
+        translation: {
+          ...translation,
+          status: "BLOCKED",
+          rejectionReason: translation.rejectionReason ?? "SELECTED_INSTRUMENT_REQUIRED",
+          action: "WAIT",
+          side: null
+        },
+        environment,
+        instrument: {
+          instrumentId: "UNSELECTED",
+          ticker: "UNSELECTED",
+          name: "UNSELECTED",
+          currency: "EUR",
+          isin: null,
+          exchange: null,
+          fractionalSupported: null,
+          minOrderQuantity: null,
+          minOrderValue: null,
+          confirmedAt: nowIso(),
+          confirmedBy: userId
+        },
+        accountCurrency: view.currency,
+        estimatedPrice: null,
+        createdAt: nowIso(),
+        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString()
+      });
+      blocked.status = "BLOCKED";
+      await this.store.saveT212Proposal(blocked);
+      return {
+        proposal: blocked,
+        preview: buildDryRunPreview({
+          decision,
+          translation,
+          environment,
+          instrument: null,
+          accountCurrency: view.currency
+        }),
+        status: await this.getStatus(userId)
+      };
+    }
+
+    const idempotencyKey = buildIdempotencyKey({
+      userId,
+      decisionId: decision.decisionId,
+      instrumentId: instrument.instrumentId,
+      action: translation.action,
+      environment
+    });
+    const existing = await this.store.getT212ProposalByIdempotencyKey(userId, idempotencyKey);
+    if (existing) {
+      return {
+        proposal: existing,
+        preview: buildDryRunPreview({
+          decision,
+          translation,
+          environment,
+          instrument,
+          accountCurrency: view.currency
+        }),
+        status: await this.getStatus(userId)
+      };
+    }
+
+    const proposal = buildProposal({
+      proposalId: randomUUID(),
+      userId,
+      decision,
+      translation,
+      environment,
+      instrument,
+      accountCurrency: view.currency,
+      estimatedPrice: null,
+      createdAt: nowIso(),
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString()
+    });
+    await this.store.saveT212Proposal(proposal);
+    await this.audit(userId, "t212_proposal_created", {
+      proposalId: proposal.proposalId,
+      decisionId: proposal.decisionId,
+      status: proposal.status,
+      action: proposal.action,
+      orderSubmitted: false
+    });
+    return {
+      proposal,
+      preview: buildDryRunPreview({
+        decision,
+        translation,
+        environment,
+        instrument,
+        accountCurrency: view.currency
+      }),
+      status: await this.getStatus(userId)
+    };
+  }
+
+  /**
+   * Confirm Mode approval — while order flags are false, yields DRY_RUN_APPROVED only.
+   * Preserves future biometric confirmation interface via optional confirmMethod.
+   */
+  async approveT212ProposalDryRun(
+    userId: string,
+    proposalId: string,
+    opts: { confirmMethod?: "manual" | "biometric_future" } = {}
+  ): Promise<{ proposal: T212ExecutionProposal; status: AutoTradeStatusPayload }> {
+    assertOrderSubmissionDisabled();
+    if (T212_PAPER_ORDER_SUBMISSION_ENABLED || T212_LIVE_EXECUTION_FEATURE_FLAG || BROKER_EXECUTION_ENABLED) {
+      throw Object.assign(new Error("T212_ORDER_FLAGS_MUST_REMAIN_FALSE"), {
+        code: "T212_ORDER_FLAGS_MUST_REMAIN_FALSE"
+      });
+    }
+
+    const list = await this.store.listT212Proposals(userId, 50);
+    const proposal = list.find((p) => p.proposalId === proposalId);
+    if (!proposal) {
+      throw Object.assign(new Error("PROPOSAL_NOT_FOUND"), { code: "PROPOSAL_NOT_FOUND" });
+    }
+    if (proposal.userId !== userId) {
+      throw Object.assign(new Error("PROPOSAL_OWNERSHIP_MISMATCH"), {
+        code: "PROPOSAL_OWNERSHIP_MISMATCH"
+      });
+    }
+    if (Date.parse(proposal.expiresAt) < Date.now()) {
+      const expired = {
+        ...proposal,
+        status: "REJECTED" as const,
+        rejectionReason: "PROPOSAL_EXPIRED",
+        updatedAt: nowIso()
+      };
+      await this.store.saveT212Proposal(expired);
+      throw Object.assign(new Error("PROPOSAL_EXPIRED"), { code: "PROPOSAL_EXPIRED" });
+    }
+
+    const approved: T212ExecutionProposal = {
+      ...proposal,
+      status: "DRY_RUN_APPROVED",
+      rejectionReason: "ORDER_SUBMISSION_DISABLED",
+      updatedAt: nowIso(),
+      riskEvaluation: {
+        ...proposal.riskEvaluation,
+        confirmMethod: opts.confirmMethod ?? "manual",
+        biometricInterfaceReserved: true,
+        orderSubmitted: false,
+        dryRunOnly: true
+      }
+    };
+    await this.store.saveT212Proposal(approved);
+    await this.audit(userId, "t212_dry_run_approved", {
+      proposalId,
+      confirmMethod: opts.confirmMethod ?? "manual",
+      orderSubmitted: false
+    });
+    await this.activity(
+      userId,
+      `Dry-run approved for proposal ${proposalId.slice(0, 8)}… — no broker order submitted.`,
+      "success"
+    );
+    return { proposal: approved, status: await this.getStatus(userId) };
   }
 }
 

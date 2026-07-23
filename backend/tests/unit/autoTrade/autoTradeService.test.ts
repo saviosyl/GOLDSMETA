@@ -32,6 +32,11 @@ function serviceWith(
   return { store: s, service, adapters };
 }
 
+async function selectIgDemo(service: AutoTradeService, userId = "user-a") {
+  await service.selectBroker(userId, "IG_DEMO");
+}
+
+
 const signal = {
   decisionId: "dec-001",
   decision: "BUY",
@@ -61,6 +66,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("executes a successful demo trade via FakeIg only", async () => {
     const { service } = serviceWith({ scenario: "happy" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.skipped).toBe(false);
@@ -70,6 +76,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("suppresses duplicate decision triggers via transactional claim", async () => {
     const { service } = serviceWith();
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const first = await service.evaluateAndMaybeExecute("user-a", signal);
     const second = await service.evaluateAndMaybeExecute("user-a", signal);
@@ -82,6 +89,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
     const shared = new InMemoryAutoTradeStore();
     const a = serviceWith({ scenario: "happy" }, shared, "owner-a");
     const b = serviceWith({ scenario: "happy" }, shared, "owner-b");
+    await selectIgDemo(a.service, "user-x");
     await a.service.setMode("user-x", "IG_DEMO_AUTO");
     // Share adapters map isn't shared — connect for B too via setMode path already connected on A.
     // Re-connect B by using same store connection and attaching adapter:
@@ -104,6 +112,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
   it("recovers expired execution leases", async () => {
     const store = new InMemoryAutoTradeStore();
     const { service } = serviceWith({}, store, "owner-1");
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const connection = await store.getConnection("user-a");
     const settings = await store.getSettings("user-a");
@@ -179,6 +188,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("locks for reconciliation when HTTP times out after accept", async () => {
     const { service } = serviceWith({ scenario: "timeout_after_accept" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(["OPEN", "RECONCILIATION_REQUIRED", "ACCEPTED"]).toContain(result.intent.state);
@@ -188,6 +198,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("records rejected orders", async () => {
     const { service } = serviceWith({ scenario: "reject_order" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.intent.state).toBe("REJECTED");
@@ -195,6 +206,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("locks when guaranteed stop rejected", async () => {
     const { service } = serviceWith({ scenario: "reject_stop" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.intent.state).toBe("REJECTED");
@@ -205,6 +217,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("skips when minimum size exceeds risk", async () => {
     const { service } = serviceWith({ scenario: "min_size_large" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.skipped).toBe(true);
@@ -213,6 +226,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("blocks stale price", async () => {
     const { service } = serviceWith({ scenario: "stale_quote" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.skipped).toBe(true);
@@ -221,6 +235,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("blocks closed market", async () => {
     const { service } = serviceWith({ scenario: "closed_market" });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.skipped).toBe(true);
@@ -233,6 +248,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
       ...settings,
       limits: { ...settings.limits, maxSpread: 0.5 }
     });
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     const result = await service.evaluateAndMaybeExecute("user-a", signal);
     expect(result.skipped).toBe(true);
@@ -251,6 +267,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
   it("daily loss lock prevents further trades", async () => {
     const { service, store } = serviceWith();
     await service.getStatus("user-a"); // consume restart gate at OFF
+    await selectIgDemo(service, "user-a");
     await store.saveRiskState({
       ...createDefaultRiskState("user-a"),
       mode: "IG_DEMO_AUTO",
@@ -268,6 +285,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
   it("weekly loss lock prevents further trades", async () => {
     const { service, store } = serviceWith();
     await service.getStatus("user-a");
+    await selectIgDemo(service, "user-a");
     const risk = {
       ...createDefaultRiskState("user-a"),
       mode: "IG_DEMO_AUTO" as const,
@@ -286,6 +304,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
   it("consecutive losses block eligibility", async () => {
     const { service, store } = serviceWith();
     await service.getStatus("user-a");
+    await selectIgDemo(service, "user-a");
     await store.saveRiskState({
       ...createDefaultRiskState("user-a"),
       mode: "IG_DEMO_AUTO",
@@ -352,6 +371,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("locks on account change", async () => {
     const { service, store } = serviceWith();
+    await selectIgDemo(service, "user-a");
     await service.connectBroker("user-a", "DEMO");
     const conn = await store.getConnection("user-a");
     await store.saveConnection({ ...conn, pinnedAccountId: "OTHER-ACCOUNT" });
@@ -414,6 +434,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("does not place real IG orders (fake adapter only in tests)", async () => {
     const { service, adapters } = serviceWith();
+    await selectIgDemo(service, "user-a");
     await service.setMode("user-a", "IG_DEMO_AUTO");
     expect(adapters[0]?.name).toBe("fake-ig");
     await service.evaluateAndMaybeExecute("user-a", signal);
@@ -422,6 +443,7 @@ describe("AutoTradeService + FakeIgBrokerAdapter", () => {
 
   it("DEMO read-only diagnostics refreshes market fields via FakeIg", async () => {
     const { service } = serviceWith();
+    await selectIgDemo(service, "user-diag");
     const status = await service.refreshDemoDiagnostics("user-diag");
     expect(status.connection.connected).toBe(true);
     expect(status.connection.environment).toBe("DEMO");
