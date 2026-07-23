@@ -304,6 +304,25 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
     return structuredClone(proposal);
   }
 
+  async createT212ProposalIfAbsent(
+    proposal: T212ExecutionProposal
+  ): Promise<{ proposal: T212ExecutionProposal; created: boolean }> {
+    const lock = await this.getLock(proposal.userId);
+    const risk = await this.getRiskState(proposal.userId);
+    if (lock.locked || risk.emergencyStopActive || risk.locked) {
+      throw Object.assign(new Error("AUTOTRADE_LOCKED"), { code: "AUTOTRADE_LOCKED" });
+    }
+    const existing = await this.getT212ProposalByIdempotencyKey(
+      proposal.userId,
+      proposal.idempotencyKey
+    );
+    if (existing) {
+      return { proposal: existing, created: false };
+    }
+    const saved = await this.saveT212Proposal(proposal);
+    return { proposal: saved, created: true };
+  }
+
   async listT212Proposals(userId: string, limit = 50): Promise<T212ExecutionProposal[]> {
     return structuredClone((this.t212Proposals.get(userId) ?? []).slice(0, limit));
   }
@@ -316,6 +335,17 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
         : p
     );
     this.t212Proposals.set(userId, next);
+  }
+
+  async saveT212SelectedInstrumentAndInvalidateAwaiting(
+    userId: string,
+    instrument: T212SelectedInstrument,
+    invalidateAwaiting: boolean
+  ): Promise<void> {
+    this.t212Instruments.set(userId, structuredClone(instrument));
+    if (invalidateAwaiting) {
+      await this.clearAwaitingT212Proposals(userId);
+    }
   }
 }
 

@@ -52,6 +52,9 @@ export const api = onRequest(
 /** Isolated V6 IG Demo read-only preview — deploy with --only functions:apiV6Preview */
 export { apiV6Preview } from "./previewApi";
 
+/** Isolated Trading 212 Practice read-only preview — deploy with --only functions:apiT212Preview */
+export { apiT212Preview } from "./t212PreviewApi";
+
 /**
  * Auth blocking: reject public account creation.
  * Requires Identity Platform blocking functions enabled for the project.

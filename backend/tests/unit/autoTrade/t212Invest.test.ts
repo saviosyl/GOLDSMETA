@@ -526,4 +526,117 @@ describe("Trading 212 Invest broker integration", () => {
     expect((service as unknown as Record<string, unknown>).createUser).toBeUndefined();
     expect((service as unknown as Record<string, unknown>).rotateWebhook).toBeUndefined();
   });
+
+  it("disconnect cancels all awaiting T212 proposals", async () => {
+    const { service, store } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await service.connectTrading212("u1", "PRACTICE");
+    await service.confirmT212Instrument("u1", {
+      instrumentId: "SGLD_EQ",
+      ticker: "SGLD_EQ",
+      name: "Physical Gold ETC",
+      currency: "EUR"
+    });
+    const created = await service.createT212ExecutionProposal(
+      "u1",
+      {
+        decisionId: "disc-1",
+        decision: "BUY",
+        confidence: 90,
+        generatedAt: new Date().toISOString()
+      },
+      { marketOpen: true }
+    );
+    expect(created.proposal.status).toBe("AWAITING_CONFIRMATION");
+    await service.disconnectTrading212("u1");
+    const proposals = await store.listT212Proposals("u1");
+    expect(proposals.find((p) => p.proposalId === created.proposal.proposalId)?.status).toBe(
+      "CANCELLED"
+    );
+  });
+
+  it("rejects cross-user proposal approval", async () => {
+    const { service } = serviceWithT212();
+    await service.selectBroker("owner", "T212_INVEST");
+    await service.connectTrading212("owner", "PRACTICE");
+    await service.confirmT212Instrument("owner", {
+      instrumentId: "SGLD_EQ",
+      ticker: "SGLD_EQ",
+      name: "Physical Gold ETC",
+      currency: "EUR"
+    });
+    const created = await service.createT212ExecutionProposal(
+      "owner",
+      {
+        decisionId: "xuser-1",
+        decision: "BUY",
+        confidence: 90,
+        generatedAt: new Date().toISOString()
+      },
+      { marketOpen: true }
+    );
+    await service.selectBroker("intruder", "T212_INVEST");
+    await expect(
+      service.approveT212ProposalDryRun("intruder", created.proposal.proposalId)
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_FOUND" });
+  });
+
+  it("blocks proposal creation after emergency STOP (concurrent-safe lock check)", async () => {
+    const { service } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await service.connectTrading212("u1", "PRACTICE");
+    await service.confirmT212Instrument("u1", {
+      instrumentId: "SGLD_EQ",
+      ticker: "SGLD_EQ",
+      name: "Physical Gold ETC",
+      currency: "EUR"
+    });
+    await service.emergencyStop("u1");
+    await expect(
+      service.createT212ExecutionProposal(
+        "u1",
+        {
+          decisionId: "after-stop",
+          decision: "BUY",
+          confidence: 90,
+          generatedAt: new Date().toISOString()
+        },
+        { marketOpen: true }
+      )
+    ).rejects.toMatchObject({ code: "AUTOTRADE_LOCKED" });
+  });
+
+  it("Practice credentials never load from Live env vars and Live never from Practice", () => {
+    expect(
+      loadT212CredentialsFromServerEnv("PRACTICE", {
+        T212_LIVE_API_KEY: "live-k",
+        T212_LIVE_API_SECRET: "live-s"
+      } as NodeJS.ProcessEnv)
+    ).toBeNull();
+    expect(
+      loadT212CredentialsFromServerEnv("LIVE", {
+        T212_DEMO_API_KEY: "demo-k",
+        T212_DEMO_API_SECRET: "demo-s"
+      } as NodeJS.ProcessEnv)
+    ).toBeNull();
+    expect(
+      loadT212CredentialsFromServerEnv("PRACTICE", {
+        T212_DEMO_API_KEY: "demo-k",
+        T212_DEMO_API_SECRET: "demo-s",
+        T212_LIVE_API_KEY: "live-k",
+        T212_LIVE_API_SECRET: "live-s"
+      } as NodeJS.ProcessEnv)
+    ).toEqual({ apiKey: "demo-k", apiSecret: "demo-s" });
+  });
+
+  it("excludes leveraged/inverse/miner instruments from gold catalogue", () => {
+    const candidates = searchGoldInstruments([
+      { ticker: "SGLD", name: "Physical Gold ETC", currencyCode: "EUR" },
+      { ticker: "NUGT", name: "Direxion Daily Gold Miners Bull 2X", currencyCode: "USD" },
+      { ticker: "DUST", name: "Direxion Daily Gold Miners Bear 2X", currencyCode: "USD" },
+      { ticker: "GLL", name: "ProShares UltraShort Gold", currencyCode: "USD" },
+      { ticker: "MINER", name: "Gold Mining Equity", currencyCode: "EUR" }
+    ]);
+    expect(candidates.map((c) => c.ticker)).toEqual(["SGLD"]);
+  });
 });

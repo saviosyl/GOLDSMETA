@@ -66,6 +66,7 @@ import {
   buildDryRunPreview,
   buildIdempotencyKey,
   buildProposal,
+  proposalIdFromIdempotencyKey,
   translateXauusdToT212Invest,
   type GoldMetaDecisionInput
 } from "./t212/executionRules";
@@ -1628,11 +1629,16 @@ export class AutoTradeService {
   }
 
   async disconnectTrading212(userId: string): Promise<AutoTradeStatusPayload> {
+    await this.store.clearAwaitingT212Proposals(userId);
     this.t212ConnectedEnvByUser.delete(userId);
     const instrument = await this.store.getT212SelectedInstrument(userId);
     this.t212ViewByUser.set(userId, buildDisconnectedT212View(instrument));
-    await this.audit(userId, "t212_disconnected", {});
-    await this.activity(userId, "Disconnected from Trading 212 (server session cleared).", "info");
+    await this.audit(userId, "t212_disconnected", { t212ProposalsCancelled: true });
+    await this.activity(
+      userId,
+      "Disconnected from Trading 212 — awaiting proposals cancelled (server session cleared).",
+      "info"
+    );
     return this.getStatus(userId);
   }
 
@@ -1730,19 +1736,22 @@ export class AutoTradeService {
       confirmedAt: nowIso(),
       confirmedBy: userId
     };
-    await this.store.saveT212SelectedInstrument(userId, selected);
-    if (
+    const instrumentChanged = Boolean(
       previous &&
-      (previous.instrumentId !== selected.instrumentId || previous.ticker !== selected.ticker)
-    ) {
-      await this.store.clearAwaitingT212Proposals(userId);
-    }
+        (previous.instrumentId !== selected.instrumentId || previous.ticker !== selected.ticker)
+    );
+    await this.store.saveT212SelectedInstrumentAndInvalidateAwaiting(
+      userId,
+      selected,
+      instrumentChanged
+    );
     const view = this.t212ViewByUser.get(userId) ?? buildDisconnectedT212View(selected);
     this.t212ViewByUser.set(userId, { ...view, selectedInstrument: selected });
     await this.audit(userId, "t212_instrument_confirmed", {
       ticker: selected.ticker,
       instrumentId: selected.instrumentId,
-      confirmedBy: userId
+      confirmedBy: userId,
+      awaitingProposalsInvalidated: instrumentChanged
     });
     await this.activity(
       userId,
@@ -1848,23 +1857,8 @@ export class AutoTradeService {
       action: translation.action,
       environment
     });
-    const existing = await this.store.getT212ProposalByIdempotencyKey(userId, idempotencyKey);
-    if (existing) {
-      return {
-        proposal: existing,
-        preview: buildDryRunPreview({
-          decision,
-          translation,
-          environment,
-          instrument,
-          accountCurrency: view.currency
-        }),
-        status: await this.getStatus(userId)
-      };
-    }
-
     const proposal = buildProposal({
-      proposalId: randomUUID(),
+      proposalId: proposalIdFromIdempotencyKey(idempotencyKey),
       userId,
       decision,
       translation,
@@ -1875,16 +1869,20 @@ export class AutoTradeService {
       createdAt: nowIso(),
       expiresAt: new Date(Date.now() + 15 * 60_000).toISOString()
     });
-    await this.store.saveT212Proposal(proposal);
-    await this.audit(userId, "t212_proposal_created", {
-      proposalId: proposal.proposalId,
-      decisionId: proposal.decisionId,
-      status: proposal.status,
-      action: proposal.action,
-      orderSubmitted: false
-    });
+    // Atomic create-if-absent + Emergency STOP lock re-check inside store write path.
+    const { proposal: saved, created } =
+      await this.store.createT212ProposalIfAbsent(proposal);
+    if (created) {
+      await this.audit(userId, "t212_proposal_created", {
+        proposalId: saved.proposalId,
+        decisionId: saved.decisionId,
+        status: saved.status,
+        action: saved.action,
+        orderSubmitted: false
+      });
+    }
     return {
-      proposal,
+      proposal: saved,
       preview: buildDryRunPreview({
         decision,
         translation,

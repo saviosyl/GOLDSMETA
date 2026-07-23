@@ -121,8 +121,21 @@ export interface AutoTradeStorePort {
     idempotencyKey: string
   ): Promise<T212ExecutionProposal | null>;
   saveT212Proposal(proposal: T212ExecutionProposal): Promise<T212ExecutionProposal>;
+  /**
+   * Atomic create-if-absent by idempotency key.
+   * Re-checks AutoTrade lock inside the write path so Emergency STOP wins races.
+   */
+  createT212ProposalIfAbsent(
+    proposal: T212ExecutionProposal
+  ): Promise<{ proposal: T212ExecutionProposal; created: boolean }>;
   listT212Proposals(userId: string, limit?: number): Promise<T212ExecutionProposal[]>;
   clearAwaitingT212Proposals(userId: string): Promise<void>;
+  /** Atomically persist instrument selection and cancel awaiting proposals when requested. */
+  saveT212SelectedInstrumentAndInvalidateAwaiting(
+    userId: string,
+    instrument: T212SelectedInstrument,
+    invalidateAwaiting: boolean
+  ): Promise<void>;
 }
 
 export function defaultBrokerSelection(userId: string): BrokerSelectionDoc {

@@ -86,6 +86,11 @@ export function buildIdempotencyKey(args: {
   return createHash("sha256").update(material).digest("hex");
 }
 
+/** Deterministic proposal document id — enables create-if-absent without races. */
+export function proposalIdFromIdempotencyKey(idempotencyKey: string): string {
+  return `t212_${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 28)}`;
+}
+
 export function translateXauusdToT212Invest(
   decision: GoldMetaDecisionInput,
   ctx: T212TranslationContext

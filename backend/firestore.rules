@@ -122,6 +122,11 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false;
       }
+      // Isolated Trading 212 Practice preview namespace (server Admin SDK only).
+      match /autoTradeT212Preview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
       match /tradeIntentDealRefs/{document=**} {
         allow read: if false;
         allow write: if false;

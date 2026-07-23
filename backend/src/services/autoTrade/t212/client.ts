@@ -210,7 +210,16 @@ export class T212InvestClient {
       }
 
       if (!res.ok) {
-        let code = `HTTP_${res.status}`;
+        let code =
+          res.status === 401
+            ? "UNAUTHORIZED"
+            : res.status === 403
+              ? "FORBIDDEN"
+              : res.status === 429
+                ? "RATE_LIMITED"
+                : res.status >= 500
+                  ? "SERVER_ERROR"
+                  : `HTTP_${res.status}`;
         try {
           const body = (await res.json()) as { code?: string; errorCode?: string };
           code = body.code ?? body.errorCode ?? code;
@@ -223,7 +232,11 @@ export class T212InvestClient {
       if (res.status === 204) {
         return undefined as T;
       }
-      return (await res.json()) as T;
+      try {
+        return (await res.json()) as T;
+      } catch {
+        throw new T212ApiError("T212_MALFORMED_RESPONSE", res.status, "MALFORMED_RESPONSE");
+      }
     } catch (error) {
       if (error instanceof T212ApiError) throw error;
       if (error instanceof Error && error.name === "AbortError") {

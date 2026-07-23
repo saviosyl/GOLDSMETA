@@ -9,8 +9,9 @@ import type { T212InstrumentCandidate } from "./types";
 const GOLD_NAME_RE =
   /\b(gold|physical\s+gold|gold\s+etc|gold\s+etf|gold\s+etp|bullion|xau)\b/i;
 
+/** Exclude miners, leveraged/inverse products, silver, and unrelated commodities. */
 const EXCLUDE_RE =
-  /\b(mining|miner|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin)\b/i;
+  /\b(mining|miner|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin|leveraged|leverage|inverse|ultrashort|ultralong|ultra\s*short|ultra\s*long|short\s+gold|long\s+gold\s+miners|3x|2x|-3x|-2x)\b|ultra(?=short|long)/i;
 
 export function isGoldInvestInstrument(instrument: T212InstrumentResponse): boolean {
   const name = `${instrument.name ?? ""} ${instrument.shortName ?? ""} ${instrument.ticker ?? ""}`;
