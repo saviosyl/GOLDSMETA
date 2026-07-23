@@ -87,13 +87,14 @@ describe("IG Demo read-only diagnostics", () => {
     const store = new InMemoryAutoTradeStore();
     const fake = new FakeIgBrokerAdapter({ environment: "DEMO" });
     const service = new AutoTradeService(store, () => fake);
+    await service.selectBroker("u1", "IG_DEMO");
     await expect(service.connectBroker("u1", "DEMO")).rejects.toMatchObject({
       code: "ACCOUNT_MISMATCH"
     });
     const status = await service.getStatus("u1");
     expect(status.locked).toBe(true);
     expect(status.lockReason).toBe("account_mismatch");
-    expect(status.connection.environmentLabel).toBe("IG DEMO — READ ONLY");
+    expect(status.connection.environmentLabel).toBe("IG DEMO — PARKED");
   });
 
   it("returns multiple Gold candidates without silent selection", async () => {
@@ -195,9 +196,11 @@ describe("IG Demo read-only diagnostics", () => {
       if (!creds) throw new Error("IG_DEMO_CREDENTIALS_NOT_CONFIGURED");
       return new FakeIgBrokerAdapter({ environment: env });
     });
-    return expect(service.connectBroker("u-missing", "DEMO")).rejects.toMatchObject({
-      code: "IG_CREDENTIALS_MISSING"
-    });
+    return service.selectBroker("u-missing", "IG_DEMO").then(() =>
+      expect(service.connectBroker("u-missing", "DEMO")).rejects.toMatchObject({
+        code: "IG_CREDENTIALS_MISSING"
+      })
+    );
   });
 
   it("resolves preview broker mode to ig_demo without silent fake when forced", () => {
@@ -209,12 +212,13 @@ describe("IG Demo read-only diagnostics", () => {
     const store = new InMemoryAutoTradeStore();
     const fake = new FakeIgBrokerAdapter({ environment: "DEMO" });
     const service = new AutoTradeService(store, () => fake);
+    await service.selectBroker("u-diag", "IG_DEMO");
     const status = await service.refreshDemoDiagnostics("u-diag");
     expect(status.readOnly).toBe(true);
     expect(status.ordersEnabled).toBe(false);
     expect(status.demoOrderSubmissionEnabled).toBe(false);
     expect(status.lastDiagnosticReport?.dealingEndpointsCalled).toBe(false);
-    expect(status.connection.environmentLabel).toBe("IG DEMO — READ ONLY");
+    expect(status.connection.environmentLabel).toBe("IG DEMO — PARKED");
     expect(status.goldCandidates.length).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(status)).not.toMatch(/password|CST|X-SECURITY/i);
   });

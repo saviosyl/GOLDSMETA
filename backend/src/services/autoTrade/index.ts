@@ -12,3 +12,8 @@ export * from "./firestoreAutoTradeStore";
 export * from "./autoTradeService";
 export * from "./runtime";
 export * from "./decisionTrigger";
+export * from "./t212/types";
+export * from "./t212/client";
+export * from "./t212/instruments";
+export * from "./t212/executionRules";
+export * from "./t212/diagnostics";

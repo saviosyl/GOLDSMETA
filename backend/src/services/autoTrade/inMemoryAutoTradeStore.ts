@@ -14,6 +14,11 @@ import type {
   BrokerExecutionRecord,
   TradeIntent
 } from "./types";
+import type {
+  BrokerSelectionDoc,
+  T212ExecutionProposal,
+  T212SelectedInstrument
+} from "./t212/types";
 import { nowIso } from "../../utils/time";
 import {
   type AutoTradeStorePort,
@@ -25,6 +30,7 @@ import {
   INTENT_LEASE_MS,
   applyLease,
   createDefaultRiskState,
+  defaultBrokerSelection,
   defaultConnection,
   defaultLock,
   defaultSettings,
@@ -44,6 +50,10 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
   private events = new Map<string, BrokerEventDoc[]>();
   private activity = new Map<string, AutoTradeActivityEntry[]>();
   private audit = new Map<string, AutoTradeAuditEntry[]>();
+  private brokerSelection = new Map<string, BrokerSelectionDoc>();
+  private t212Instruments = new Map<string, T212SelectedInstrument | null>();
+  private t212Proposals = new Map<string, T212ExecutionProposal[]>();
+  private t212Idempotency = new Map<string, string>(); // `${userId}:${key}` -> proposalId
   private claimChain: Promise<unknown> = Promise.resolve();
 
   async getRiskState(userId: string): Promise<AutoTradeRiskState> {
@@ -243,6 +253,99 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
 
   async listAudit(userId: string, limit = 50): Promise<AutoTradeAuditEntry[]> {
     return structuredClone((this.audit.get(userId) ?? []).slice(0, limit));
+  }
+
+  async getBrokerSelection(userId: string): Promise<BrokerSelectionDoc> {
+    const existing = this.brokerSelection.get(userId);
+    if (existing) return structuredClone(existing);
+    const created = defaultBrokerSelection(userId);
+    this.brokerSelection.set(userId, created);
+    return structuredClone(created);
+  }
+
+  async saveBrokerSelection(doc: BrokerSelectionDoc): Promise<BrokerSelectionDoc> {
+    this.brokerSelection.set(doc.userId, structuredClone(doc));
+    return structuredClone(doc);
+  }
+
+  async getT212SelectedInstrument(userId: string): Promise<T212SelectedInstrument | null> {
+    const value = this.t212Instruments.get(userId);
+    return value == null ? null : structuredClone(value);
+  }
+
+  async saveT212SelectedInstrument(
+    userId: string,
+    instrument: T212SelectedInstrument | null
+  ): Promise<void> {
+    this.t212Instruments.set(userId, instrument == null ? null : structuredClone(instrument));
+  }
+
+  async getT212ProposalByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string
+  ): Promise<T212ExecutionProposal | null> {
+    const proposalId = this.t212Idempotency.get(`${userId}:${idempotencyKey}`);
+    if (!proposalId) return null;
+    const list = this.t212Proposals.get(userId) ?? [];
+    const found = list.find((p) => p.proposalId === proposalId);
+    return found ? structuredClone(found) : null;
+  }
+
+  async saveT212Proposal(proposal: T212ExecutionProposal): Promise<T212ExecutionProposal> {
+    const list = this.t212Proposals.get(proposal.userId) ?? [];
+    const idx = list.findIndex((p) => p.proposalId === proposal.proposalId);
+    if (idx >= 0) list[idx] = structuredClone(proposal);
+    else list.unshift(structuredClone(proposal));
+    this.t212Proposals.set(proposal.userId, list);
+    this.t212Idempotency.set(
+      `${proposal.userId}:${proposal.idempotencyKey}`,
+      proposal.proposalId
+    );
+    return structuredClone(proposal);
+  }
+
+  async createT212ProposalIfAbsent(
+    proposal: T212ExecutionProposal
+  ): Promise<{ proposal: T212ExecutionProposal; created: boolean }> {
+    const lock = await this.getLock(proposal.userId);
+    const risk = await this.getRiskState(proposal.userId);
+    if (lock.locked || risk.emergencyStopActive || risk.locked) {
+      throw Object.assign(new Error("AUTOTRADE_LOCKED"), { code: "AUTOTRADE_LOCKED" });
+    }
+    const existing = await this.getT212ProposalByIdempotencyKey(
+      proposal.userId,
+      proposal.idempotencyKey
+    );
+    if (existing) {
+      return { proposal: existing, created: false };
+    }
+    const saved = await this.saveT212Proposal(proposal);
+    return { proposal: saved, created: true };
+  }
+
+  async listT212Proposals(userId: string, limit = 50): Promise<T212ExecutionProposal[]> {
+    return structuredClone((this.t212Proposals.get(userId) ?? []).slice(0, limit));
+  }
+
+  async clearAwaitingT212Proposals(userId: string): Promise<void> {
+    const list = this.t212Proposals.get(userId) ?? [];
+    const next = list.map((p) =>
+      p.status === "AWAITING_CONFIRMATION" || p.status === "CREATED"
+        ? { ...p, status: "CANCELLED" as const, updatedAt: nowIso() }
+        : p
+    );
+    this.t212Proposals.set(userId, next);
+  }
+
+  async saveT212SelectedInstrumentAndInvalidateAwaiting(
+    userId: string,
+    instrument: T212SelectedInstrument,
+    invalidateAwaiting: boolean
+  ): Promise<void> {
+    this.t212Instruments.set(userId, structuredClone(instrument));
+    if (invalidateAwaiting) {
+      await this.clearAwaitingT212Proposals(userId);
+    }
   }
 }
 

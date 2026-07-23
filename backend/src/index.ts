@@ -37,8 +37,13 @@ export const app = createApp();
 export const api = onRequest(
   {
     region: env.FIREBASE_REGION,
-    // Required for read-only GET /v1/admin/auth-integrity (server-only pinned UID).
-    secrets: ["GOLDMETA_PINNED_OWNER_UID"],
+    // Pinned owner UID for Auth integrity; T212 Practice DEMO secrets for
+    // read-only / dry-run Invest diagnostics only. Never bind T212_LIVE_*.
+    secrets: [
+      "GOLDMETA_PINNED_OWNER_UID",
+      "T212_DEMO_API_KEY",
+      "T212_DEMO_API_SECRET"
+    ],
     cors: [
       "https://goldmeta.metamechsolutions.com",
       "https://goldmeta-web.pages.dev",
@@ -51,6 +56,9 @@ export const api = onRequest(
 
 /** Isolated V6 IG Demo read-only preview — deploy with --only functions:apiV6Preview */
 export { apiV6Preview } from "./previewApi";
+
+/** Isolated Trading 212 Practice read-only preview — deploy with --only functions:apiT212Preview */
+export { apiT212Preview } from "./t212PreviewApi";
 
 /**
  * Auth blocking: reject public account creation.

@@ -700,12 +700,16 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
     );
     expect(preview).toContain("export const apiV6Preview");
 
-    // Production `api` may bind GOLDMETA_PINNED_OWNER_UID for Auth integrity only —
-    // never IG Demo secrets (those stay on apiV6Preview).
+    // Production `api` may bind pinned-owner UID + T212 Practice DEMO secrets for
+    // read-only / dry-run Invest diagnostics. Never IG Demo (apiV6Preview) or T212 Live.
     const apiBlock = index.slice(index.indexOf("export const api = onRequest"));
     const apiOpts = apiBlock.slice(0, apiBlock.indexOf("app\n);") + 10);
-    expect(apiOpts).toMatch(/secrets:\s*\[\s*"GOLDMETA_PINNED_OWNER_UID"\s*\]/);
-    expect(apiOpts).not.toMatch(/IG_DEMO_/);
+    expect(apiOpts).toMatch(/"GOLDMETA_PINNED_OWNER_UID"/);
+    expect(apiOpts).toMatch(/"T212_DEMO_API_KEY"/);
+    expect(apiOpts).toMatch(/"T212_DEMO_API_SECRET"/);
+    // Assert against quoted secret names so comments mentioning T212_LIVE_* are ignored.
+    expect(apiOpts).not.toMatch(/"T212_LIVE_/);
+    expect(apiOpts).not.toMatch(/"IG_DEMO_/);
     expect(apiOpts).not.toMatch(/igDemo/);
     expect(apiOpts).not.toMatch(/defineSecret/);
   });

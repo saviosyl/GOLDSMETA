@@ -97,12 +97,33 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false;
       }
+      match /brokerSelection/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212SelectedInstrument/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212Proposals/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212ProposalIdempotency/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
       match /autoTradeActivity/{document=**} {
         allow read: if isOwner(userId);
         allow write: if false;
       }
       // Isolated V6 preview AutoTrade namespace (server Admin SDK only).
       match /autoTradePreview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Isolated Trading 212 Practice preview namespace (server Admin SDK only).
+      match /autoTradeT212Preview/{document=**} {
         allow read: if isOwner(userId);
         allow write: if false;
       }

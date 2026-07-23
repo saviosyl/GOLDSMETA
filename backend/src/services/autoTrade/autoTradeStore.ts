@@ -15,6 +15,11 @@ import type {
   TradeIntentState
 } from "./types";
 import { FIRST_PILOT_LIMITS } from "./types";
+import type {
+  BrokerSelectionDoc,
+  T212ExecutionProposal,
+  T212SelectedInstrument
+} from "./t212/types";
 import { createDefaultRiskState } from "./riskEngine";
 import { nowIso } from "../../utils/time";
 
@@ -104,6 +109,41 @@ export interface AutoTradeStorePort {
   listActivity(userId: string, limit?: number): Promise<AutoTradeActivityEntry[]>;
   appendAudit(entry: AutoTradeAuditEntry): Promise<void>;
   listAudit(userId: string, limit?: number): Promise<AutoTradeAuditEntry[]>;
+  getBrokerSelection(userId: string): Promise<BrokerSelectionDoc>;
+  saveBrokerSelection(doc: BrokerSelectionDoc): Promise<BrokerSelectionDoc>;
+  getT212SelectedInstrument(userId: string): Promise<T212SelectedInstrument | null>;
+  saveT212SelectedInstrument(
+    userId: string,
+    instrument: T212SelectedInstrument | null
+  ): Promise<void>;
+  getT212ProposalByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string
+  ): Promise<T212ExecutionProposal | null>;
+  saveT212Proposal(proposal: T212ExecutionProposal): Promise<T212ExecutionProposal>;
+  /**
+   * Atomic create-if-absent by idempotency key.
+   * Re-checks AutoTrade lock inside the write path so Emergency STOP wins races.
+   */
+  createT212ProposalIfAbsent(
+    proposal: T212ExecutionProposal
+  ): Promise<{ proposal: T212ExecutionProposal; created: boolean }>;
+  listT212Proposals(userId: string, limit?: number): Promise<T212ExecutionProposal[]>;
+  clearAwaitingT212Proposals(userId: string): Promise<void>;
+  /** Atomically persist instrument selection and cancel awaiting proposals when requested. */
+  saveT212SelectedInstrumentAndInvalidateAwaiting(
+    userId: string,
+    instrument: T212SelectedInstrument,
+    invalidateAwaiting: boolean
+  ): Promise<void>;
+}
+
+export function defaultBrokerSelection(userId: string): BrokerSelectionDoc {
+  return {
+    userId,
+    selectedBroker: "MANUAL",
+    updatedAt: nowIso()
+  };
 }
 
 export function defaultConnection(userId: string): BrokerConnectionDoc {

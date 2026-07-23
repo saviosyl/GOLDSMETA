@@ -13,6 +13,11 @@ import type {
   BrokerExecutionRecord,
   TradeIntent
 } from "./types";
+import type {
+  BrokerSelectionDoc,
+  T212ExecutionProposal,
+  T212SelectedInstrument
+} from "./t212/types";
 import { nowIso } from "../../utils/time";
 import {
   type AutoTradeStorePort,
@@ -24,6 +29,7 @@ import {
   INTENT_LEASE_MS,
   applyLease,
   createDefaultRiskState,
+  defaultBrokerSelection,
   defaultConnection,
   defaultLock,
   defaultSettings,
@@ -78,6 +84,23 @@ export class FirestoreAutoTradeStore implements AutoTradeStorePort {
 
   private lockRef(userId: string) {
     return this.userCol(userId, "autoTradeLocks").doc("current");
+  }
+
+  private brokerSelectionRef(userId: string) {
+    return this.userCol(userId, "brokerSelection").doc("current");
+  }
+
+  private t212InstrumentRef(userId: string) {
+    return this.userCol(userId, "t212SelectedInstrument").doc("current");
+  }
+
+  private t212ProposalRef(userId: string, proposalId: string) {
+    return this.userCol(userId, "t212Proposals").doc(proposalId);
+  }
+
+  private t212IdempotencyRef(userId: string, idempotencyKey: string) {
+    const safe = idempotencyKey.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 700);
+    return this.userCol(userId, "t212ProposalIdempotency").doc(safe);
   }
 
   private intentRef(userId: string, intentId: string) {
@@ -350,5 +373,165 @@ export class FirestoreAutoTradeStore implements AutoTradeStorePort {
       .limit(limit)
       .get();
     return snap.docs.map((d) => d.data() as AutoTradeAuditEntry);
+  }
+
+  async getBrokerSelection(userId: string): Promise<BrokerSelectionDoc> {
+    const snap = await this.brokerSelectionRef(userId).get();
+    if (!snap.exists) {
+      const created = defaultBrokerSelection(userId);
+      await this.brokerSelectionRef(userId).set(
+        stripUndefined(created) as FirebaseFirestore.DocumentData
+      );
+      return created;
+    }
+    return snap.data() as BrokerSelectionDoc;
+  }
+
+  async saveBrokerSelection(doc: BrokerSelectionDoc): Promise<BrokerSelectionDoc> {
+    await this.brokerSelectionRef(doc.userId).set(
+      stripUndefined(doc) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    return doc;
+  }
+
+  async getT212SelectedInstrument(userId: string): Promise<T212SelectedInstrument | null> {
+    const snap = await this.t212InstrumentRef(userId).get();
+    if (!snap.exists) return null;
+    const data = snap.data() as T212SelectedInstrument & { cleared?: boolean };
+    if (data.cleared) return null;
+    return data as T212SelectedInstrument;
+  }
+
+  async saveT212SelectedInstrument(
+    userId: string,
+    instrument: T212SelectedInstrument | null
+  ): Promise<void> {
+    if (instrument == null) {
+      await this.t212InstrumentRef(userId).set({ cleared: true, updatedAt: nowIso() });
+      return;
+    }
+    await this.t212InstrumentRef(userId).set(
+      stripUndefined(instrument) as FirebaseFirestore.DocumentData
+    );
+  }
+
+  async getT212ProposalByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string
+  ): Promise<T212ExecutionProposal | null> {
+    const idx = await this.t212IdempotencyRef(userId, idempotencyKey).get();
+    if (!idx.exists) return null;
+    const proposalId = String((idx.data() as { proposalId?: string }).proposalId ?? "");
+    if (!proposalId) return null;
+    const snap = await this.t212ProposalRef(userId, proposalId).get();
+    return snap.exists ? (snap.data() as T212ExecutionProposal) : null;
+  }
+
+  async saveT212Proposal(proposal: T212ExecutionProposal): Promise<T212ExecutionProposal> {
+    await this.t212ProposalRef(proposal.userId, proposal.proposalId).set(
+      stripUndefined(proposal) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    await this.t212IdempotencyRef(proposal.userId, proposal.idempotencyKey).set(
+      {
+        proposalId: proposal.proposalId,
+        idempotencyKey: proposal.idempotencyKey,
+        decisionId: proposal.decisionId,
+        updatedAt: nowIso()
+      },
+      { merge: true }
+    );
+    return proposal;
+  }
+
+  async createT212ProposalIfAbsent(
+    proposal: T212ExecutionProposal
+  ): Promise<{ proposal: T212ExecutionProposal; created: boolean }> {
+    const indexRef = this.t212IdempotencyRef(proposal.userId, proposal.idempotencyKey);
+    const proposalRef = this.t212ProposalRef(proposal.userId, proposal.proposalId);
+    const lockRef = this.lockRef(proposal.userId);
+    const riskRef = this.riskRef(proposal.userId);
+
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const lockSnap = await tx.get(lockRef);
+      const riskSnap = await tx.get(riskRef);
+      const lock = lockSnap.exists
+        ? (lockSnap.data() as AutoTradeLockDoc)
+        : defaultLock(proposal.userId);
+      const risk = riskSnap.exists
+        ? (riskSnap.data() as AutoTradeRiskState)
+        : createDefaultRiskState(proposal.userId);
+      if (lock.locked || risk.emergencyStopActive || risk.locked) {
+        throw Object.assign(new Error("AUTOTRADE_LOCKED"), { code: "AUTOTRADE_LOCKED" });
+      }
+
+      const idxSnap = await tx.get(indexRef);
+      if (idxSnap.exists) {
+        const existingId = String((idxSnap.data() as { proposalId?: string }).proposalId ?? "");
+        if (existingId) {
+          const existingSnap = await tx.get(this.t212ProposalRef(proposal.userId, existingId));
+          if (existingSnap.exists) {
+            return {
+              proposal: existingSnap.data() as T212ExecutionProposal,
+              created: false
+            };
+          }
+        }
+      }
+
+      tx.set(proposalRef, stripUndefined(proposal) as FirebaseFirestore.DocumentData);
+      tx.set(indexRef, {
+        proposalId: proposal.proposalId,
+        idempotencyKey: proposal.idempotencyKey,
+        decisionId: proposal.decisionId,
+        updatedAt: nowIso()
+      });
+      return { proposal, created: true };
+    });
+  }
+
+  async listT212Proposals(userId: string, limit = 50): Promise<T212ExecutionProposal[]> {
+    const snap = await this.userCol(userId, "t212Proposals")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as T212ExecutionProposal);
+  }
+
+  async clearAwaitingT212Proposals(userId: string): Promise<void> {
+    const snap = await this.userCol(userId, "t212Proposals")
+      .where("status", "in", ["AWAITING_CONFIRMATION", "CREATED"])
+      .limit(100)
+      .get();
+    const batch = this.db.batch();
+    for (const doc of snap.docs) {
+      batch.set(doc.ref, { status: "CANCELLED", updatedAt: nowIso() }, { merge: true });
+    }
+    if (!snap.empty) await batch.commit();
+  }
+
+  async saveT212SelectedInstrumentAndInvalidateAwaiting(
+    userId: string,
+    instrument: T212SelectedInstrument,
+    invalidateAwaiting: boolean
+  ): Promise<void> {
+    const snap = invalidateAwaiting
+      ? await this.userCol(userId, "t212Proposals")
+          .where("status", "in", ["AWAITING_CONFIRMATION", "CREATED"])
+          .limit(100)
+          .get()
+      : null;
+    const batch = this.db.batch();
+    batch.set(
+      this.t212InstrumentRef(userId),
+      stripUndefined(instrument) as FirebaseFirestore.DocumentData
+    );
+    if (snap) {
+      for (const doc of snap.docs) {
+        batch.set(doc.ref, { status: "CANCELLED", updatedAt: nowIso() }, { merge: true });
+      }
+    }
+    await batch.commit();
   }
 }
