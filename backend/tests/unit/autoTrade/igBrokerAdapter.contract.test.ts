@@ -707,8 +707,9 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
     expect(apiOpts).toMatch(/"GOLDMETA_PINNED_OWNER_UID"/);
     expect(apiOpts).toMatch(/"T212_DEMO_API_KEY"/);
     expect(apiOpts).toMatch(/"T212_DEMO_API_SECRET"/);
-    expect(apiOpts).not.toMatch(/T212_LIVE_/);
-    expect(apiOpts).not.toMatch(/IG_DEMO_/);
+    // Assert against quoted secret names so comments mentioning T212_LIVE_* are ignored.
+    expect(apiOpts).not.toMatch(/"T212_LIVE_/);
+    expect(apiOpts).not.toMatch(/"IG_DEMO_/);
     expect(apiOpts).not.toMatch(/igDemo/);
     expect(apiOpts).not.toMatch(/defineSecret/);
   });
