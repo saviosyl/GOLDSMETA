@@ -70,11 +70,13 @@ export interface T212SelectedInstrument {
   currency: string;
   isin: string | null;
   exchange: string | null;
+  type?: string | null;
   fractionalSupported: boolean | null;
   minOrderQuantity: number | null;
   minOrderValue: number | null;
   confirmedAt: string;
   confirmedBy: string;
+  environment?: "PRACTICE" | "LIVE" | null;
 }
 
 export interface T212InstrumentCandidate {

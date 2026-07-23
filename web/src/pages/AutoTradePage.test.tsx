@@ -195,4 +195,74 @@ describe("AutoTradePage", () => {
     );
     expect(screen.getByTestId("autotrade-t212-confirm-instrument")).not.toBeDisabled();
   });
+
+  it("shows confirmed instrument identity and €50 eligibility limitation", async () => {
+    const t212Status = {
+      ...baseStatus,
+      selectedBroker: "T212_INVEST" as const,
+      brokerBadge: "T212 PRACTICE — READ ONLY",
+      displayStatus: "OFF" as const,
+      mode: "OFF" as const,
+      t212: {
+        ...baseStatus.t212,
+        connected: true,
+        environment: "PRACTICE" as const,
+        mode: "TRADING_212_PRACTICE_READ_ONLY",
+        currency: "EUR",
+        freeCash: 5000,
+        investedValue: 0,
+        totalValue: 5000,
+        selectedInstrument: {
+          instrumentId: "EGLNl_EQ",
+          ticker: "EGLNl_EQ",
+          name: "iShares Physical Gold",
+          currency: "EUR",
+          isin: "IE00B4ND3602",
+          exchange: null,
+          type: "ETF",
+          fractionalSupported: null,
+          minOrderQuantity: null,
+          minOrderValue: null,
+          confirmedAt: "2026-07-23T20:00:00.000Z",
+          confirmedBy: "owner",
+          environment: "PRACTICE" as const
+        },
+        connectionState: "Connected" as const
+      },
+      t212RiskLimits: {
+        ...baseStatus.t212RiskLimits,
+        maxOrderValue: 50,
+        currency: "EUR"
+      }
+    };
+    api.autoTradeStatus.mockResolvedValue(t212Status);
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-t212-instrument")).toHaveTextContent(/EGLNl_EQ/)
+    );
+    expect(screen.getByTestId("autotrade-t212-instrument")).toHaveTextContent(
+      /iShares Physical Gold/
+    );
+    expect(screen.getByTestId("autotrade-t212-instrument-currency")).toHaveTextContent("EUR");
+    expect(screen.getByTestId("autotrade-t212-instrument-isin")).toHaveTextContent("IE00B4ND3602");
+    expect(screen.getByTestId("autotrade-t212-instrument-type")).toHaveTextContent("ETF");
+    expect(screen.getByTestId("autotrade-broker-badge")).toHaveTextContent(/T212 PRACTICE/i);
+    expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("autotrade-t212-min-size-warning")).toHaveTextContent(
+      /Minimum\/fractional eligibility not yet verified/i
+    );
+    expect(screen.getByTestId("autotrade-t212-min-size-warning")).toHaveTextContent(
+      /No orders will be submitted/i
+    );
+    expect(screen.getByTestId("autotrade-t212-disclaimer")).toHaveTextContent(
+      /not direct XAUUSD trading/i
+    );
+    expect(screen.getByTestId("autotrade-emergency-stop")).toBeInTheDocument();
+  });
 });

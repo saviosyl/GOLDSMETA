@@ -146,7 +146,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     // Force mode to SHADOW then switch broker
     await store.saveRiskState({
@@ -242,7 +243,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     const created = await service.createT212ExecutionProposal(
       "u1",
@@ -273,7 +275,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     const created = await service.createT212ExecutionProposal(
       "u1",
@@ -289,7 +292,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "GLD_US",
       ticker: "GLD_US",
       name: "SPDR Gold Shares ETF",
-      currency: "USD"
+      currency: "USD",
+      isin: "US78463V1070"
     });
     await expect(
       service.approveT212ProposalDryRun("u1", created.proposal.proposalId)
@@ -297,17 +301,19 @@ describe("Trading 212 Invest broker integration", () => {
     // Prior awaiting proposal cancelled on instrument change; recreate path is separate.
   });
 
-  it("rejects arbitrary instrument confirmation without catalogue", async () => {
+  it("rejects arbitrary instrument confirmation not in live catalogue", async () => {
     const { service } = serviceWithT212();
     await service.selectBroker("u1", "T212_INVEST");
+    await service.connectTrading212("u1", "PRACTICE");
     await expect(
       service.confirmT212Instrument("u1", {
         instrumentId: "FAKE",
         ticker: "FAKE",
         name: "Fake Gold",
-        currency: "EUR"
+        currency: "EUR",
+        isin: "XX0000000000"
       })
-    ).rejects.toMatchObject({ code: "INSTRUMENT_CATALOGUE_REQUIRED" });
+    ).rejects.toMatchObject({ code: "INSTRUMENT_NOT_IN_CATALOGUE" });
   });
 
   it("instrument search does not auto-select", async () => {
@@ -414,7 +420,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
 
     const stale = await service.createT212ExecutionProposal(
@@ -507,7 +514,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     const first = await service.createT212ExecutionProposal(
       "u1",
@@ -565,7 +573,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     const created = await service.createT212ExecutionProposal(
       "u1",
@@ -593,7 +602,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     const created = await service.createT212ExecutionProposal(
       "owner",
@@ -619,7 +629,8 @@ describe("Trading 212 Invest broker integration", () => {
       instrumentId: "SGLD_EQ",
       ticker: "SGLD_EQ",
       name: "Physical Gold ETC",
-      currency: "EUR"
+      currency: "EUR",
+      isin: "JE00B1VS3770"
     });
     await service.emergencyStop("u1");
     await expect(

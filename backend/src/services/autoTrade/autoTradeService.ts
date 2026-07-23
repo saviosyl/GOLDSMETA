@@ -70,7 +70,10 @@ import {
   translateXauusdToT212Invest,
   type GoldMetaDecisionInput
 } from "./t212/executionRules";
-import { requireExplicitInstrumentSelection } from "./t212/instruments";
+import {
+  requireExplicitInstrumentSelection,
+  toGoldCandidate
+} from "./t212/instruments";
 import {
   loadT212CredentialsFromServerEnv,
   type T212Credentials
@@ -1695,46 +1698,78 @@ export class AutoTradeService {
     }
   ): Promise<AutoTradeStatusPayload> {
     await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
     if (!candidate.instrumentId || !candidate.ticker || !candidate.name) {
       throw Object.assign(new Error("Explicit instrument confirmation required."), {
         code: "SELECTED_INSTRUMENT_REQUIRED"
       });
     }
-    const candidates = this.t212CandidatesByUser.get(userId) ?? [];
-    const check = requireExplicitInstrumentSelection(candidates, candidate.instrumentId);
-    if (!check.ok) {
-      throw Object.assign(new Error(check.reason), { code: check.reason });
+
+    // Always re-validate against the live Practice catalogue. Do not trust
+    // client-supplied identity fields or stale in-memory candidate caches.
+    const env = this.t212ConnectedEnvByUser.get(userId) ?? "PRACTICE";
+    if (env !== "PRACTICE") {
+      throw Object.assign(new Error("T212_LIVE_LOCKED"), { code: "T212_LIVE_LOCKED" });
     }
-    // Never auto-pick: require the client-supplied ticker/id match a known candidate.
-    // Empty catalogue means no confirmation allowed (prevents arbitrary instrument IDs).
-    if (candidates.length === 0) {
-      throw Object.assign(new Error("INSTRUMENT_CATALOGUE_REQUIRED"), {
-        code: "INSTRUMENT_CATALOGUE_REQUIRED"
+    const creds = this.t212CredentialLoader("PRACTICE");
+    if (!creds) {
+      throw Object.assign(new Error("T212_CREDENTIALS_MISSING_SERVER_SIDE"), {
+        code: "T212_CREDENTIALS_MISSING_SERVER_SIDE"
       });
     }
-    const found = candidates.find(
-      (c) =>
-        c.instrumentId === candidate.instrumentId || c.ticker === candidate.ticker
-    );
-    if (!found) {
+    const factory = this.t212ClientFactory ?? defaultT212ClientFactory;
+    const client = factory("PRACTICE", creds);
+    // Exact ticker lookup in the full catalogue — never substitute another ISIN listing.
+    const instruments = await client.getInstruments();
+    const raw = instruments.find((i) => (i.ticker ?? "").trim() === candidate.ticker.trim());
+    const found = raw ? toGoldCandidate(raw) : null;
+    if (!found || found.instrumentId !== candidate.instrumentId) {
       throw Object.assign(new Error("INSTRUMENT_NOT_IN_CATALOGUE"), {
         code: "INSTRUMENT_NOT_IN_CATALOGUE"
       });
     }
+    this.t212CandidatesByUser.set(userId, [found]);
+    const check = requireExplicitInstrumentSelection([found], candidate.instrumentId);
+    if (!check.ok) {
+      throw Object.assign(new Error(check.reason), { code: check.reason });
+    }
+    if (found.ticker !== candidate.ticker) {
+      throw Object.assign(new Error("INSTRUMENT_TICKER_MISMATCH"), {
+        code: "INSTRUMENT_TICKER_MISMATCH"
+      });
+    }
+    if ((found.isin ?? null) !== (candidate.isin ?? null)) {
+      throw Object.assign(new Error("INSTRUMENT_ISIN_MISMATCH"), {
+        code: "INSTRUMENT_ISIN_MISMATCH"
+      });
+    }
+    if ((found.currency ?? "").toUpperCase() !== candidate.currency.toUpperCase()) {
+      throw Object.assign(new Error("INSTRUMENT_CURRENCY_MISMATCH"), {
+        code: "INSTRUMENT_CURRENCY_MISMATCH"
+      });
+    }
+    if (found.name.trim() !== candidate.name.trim()) {
+      throw Object.assign(new Error("INSTRUMENT_NAME_MISMATCH"), {
+        code: "INSTRUMENT_NAME_MISMATCH"
+      });
+    }
 
     const previous = await this.store.getT212SelectedInstrument(userId);
+    // Persist catalogue identity only — ignore client replacement fields.
     const selected: T212SelectedInstrument = {
       instrumentId: found.instrumentId,
       ticker: found.ticker,
       name: found.name,
-      currency: found.currency ?? candidate.currency,
-      isin: found.isin ?? candidate.isin ?? null,
-      exchange: found.exchange ?? candidate.exchange ?? null,
-      fractionalSupported: found.fractionalSupported ?? candidate.fractionalSupported ?? null,
-      minOrderQuantity: found.minOrderQuantity ?? candidate.minOrderQuantity ?? null,
-      minOrderValue: found.minOrderValue ?? candidate.minOrderValue ?? null,
+      currency: found.currency ?? "EUR",
+      isin: found.isin ?? null,
+      exchange: found.exchange ?? null,
+      type: found.type ?? null,
+      fractionalSupported: found.fractionalSupported ?? null,
+      minOrderQuantity: found.minOrderQuantity ?? null,
+      minOrderValue: found.minOrderValue ?? null,
       confirmedAt: nowIso(),
-      confirmedBy: userId
+      confirmedBy: userId,
+      environment: "PRACTICE"
     };
     const instrumentChanged = Boolean(
       previous &&
@@ -1750,12 +1785,17 @@ export class AutoTradeService {
     await this.audit(userId, "t212_instrument_confirmed", {
       ticker: selected.ticker,
       instrumentId: selected.instrumentId,
+      isin: selected.isin,
+      currency: selected.currency,
+      type: selected.type,
+      environment: "PRACTICE",
       confirmedBy: userId,
-      awaitingProposalsInvalidated: instrumentChanged
+      awaitingProposalsInvalidated: instrumentChanged,
+      orderEndpointsCalled: false
     });
     await this.activity(
       userId,
-      `Gold execution instrument confirmed: ${selected.ticker} (${selected.name}).`,
+      `Gold execution instrument confirmed: ${selected.ticker} (${selected.name}). Practice read-only — no orders submitted.`,
       "success"
     );
     return this.getStatus(userId);

@@ -329,7 +329,21 @@ export function AutoTradePage() {
               </div>
               <div>
                 <span className="gm-label">Instrument currency</span>
-                <strong>{t212?.selectedInstrument?.currency ?? "—"}</strong>
+                <strong data-testid="autotrade-t212-instrument-currency">
+                  {t212?.selectedInstrument?.currency ?? "—"}
+                </strong>
+              </div>
+              <div>
+                <span className="gm-label">ISIN</span>
+                <strong data-testid="autotrade-t212-instrument-isin">
+                  {t212?.selectedInstrument?.isin ?? "—"}
+                </strong>
+              </div>
+              <div>
+                <span className="gm-label">Type</span>
+                <strong data-testid="autotrade-t212-instrument-type">
+                  {t212?.selectedInstrument?.type ?? "—"}
+                </strong>
               </div>
               <div>
                 <span className="gm-label">Holding qty</span>
@@ -346,6 +360,17 @@ export function AutoTradePage() {
                 </strong>
               </div>
             </div>
+            {t212?.selectedInstrument ? (
+              <p
+                className="gm-autotrade-instrument-warning"
+                data-testid="autotrade-t212-min-size-warning"
+              >
+                Dry-run risk estimate uses max order {money(t212Limits?.maxOrderValue ?? 50, "EUR")}.
+                Minimum/fractional eligibility not yet verified — catalogue did not supply minimum
+                quantity, minimum order value, fractional support, exchange, or live tradability. No
+                orders will be submitted.
+              </p>
+            ) : null}
             <div className="gm-autotrade-actions">
               <button
                 type="button"
