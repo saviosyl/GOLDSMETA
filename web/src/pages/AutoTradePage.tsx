@@ -365,12 +365,21 @@ export function AutoTradePage() {
                 className="gm-autotrade-instrument-warning"
                 data-testid="autotrade-t212-min-size-warning"
               >
-                Dry-run risk estimate uses max order {money(t212Limits?.maxOrderValue ?? 50, "EUR")}.
-                Minimum/fractional eligibility not yet verified — catalogue did not supply minimum
-                quantity, minimum order value, fractional support, exchange, or live tradability. No
-                orders will be submitted.
+                Dry-run risk estimate uses max order {money(t212Limits?.maxOrderValue ?? 50, "EUR")}{" "}
+                only. Minimum/fractional eligibility not yet verified — catalogue did not supply
+                minimum quantity, minimum order value, fractional support, exchange, or live
+                tradability. No orders will be submitted. An EUR listing currency does not remove
+                economic USD gold exposure; FX can still affect returns versus an EUR cash balance.
               </p>
             ) : null}
+            <p
+              className="gm-autotrade-instrument-warning"
+              data-testid="autotrade-t212-practice-limitations"
+            >
+              Trading 212 Practice — Read Only. GoldMeta analyses XAUUSD and uses a confirmed gold
+              Invest instrument as a proxy (not direct XAUUSD trading). Long-only: SELL with no
+              holding is unsupported. No broker orders will be submitted.
+            </p>
             <div className="gm-autotrade-actions">
               <button
                 type="button"

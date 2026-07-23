@@ -1864,6 +1864,7 @@ export class AutoTradeService {
           currency: "EUR",
           isin: null,
           exchange: null,
+          type: null,
           fractionalSupported: null,
           minOrderQuantity: null,
           minOrderValue: null,
