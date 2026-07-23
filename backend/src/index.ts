@@ -50,6 +50,13 @@ export const api = onRequest(
 /** Isolated V6 IG Demo read-only preview — deploy with --only functions:apiV6Preview */
 export { apiV6Preview } from "./previewApi";
 
+/**
+ * Auth blocking: reject public account creation.
+ * Requires Identity Platform blocking functions enabled for the project.
+ * Deploy with functions that include beforeUserCreatedGuard.
+ */
+export { beforeUserCreatedGuard } from "./services/auth/beforeUserCreated";
+
 export const processProcessingJob = onDocumentCreated(
   { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
   async (event) => {

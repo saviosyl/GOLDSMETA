@@ -8,7 +8,7 @@ final class OnboardingViewModel: ObservableObject {
     @Published var settings: UserSettings
     @Published var email: String = ""
     @Published var password: String = ""
-    @Published var isCreatingAccount = false
+    @Published private(set) var isCreatingAccount = false
     @Published private(set) var authStatus: String = "Sign in with Firebase email/password."
     @Published private(set) var notificationStatus: String
     @Published private(set) var connection: TradingViewConnection?
@@ -120,7 +120,8 @@ final class OnboardingViewModel: ObservableObject {
         do {
             let user: AuthUser
             if isCreatingAccount {
-                user = try await environment.authService.signUp(email: email, password: password)
+                authStatus = AuthServiceError.registrationClosed.localizedDescription
+                return
             } else {
                 user = try await environment.authService.signIn(email: email, password: password)
             }

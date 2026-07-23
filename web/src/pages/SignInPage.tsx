@@ -2,15 +2,14 @@ import { useId, useState, type FormEvent } from "react";
 import { useAuth } from "../lib/auth";
 import { sendPasswordReset } from "../lib/firebase";
 
-/** V5.4 light premium sign-in — approved brand direction. */
+/** V5.4 light premium sign-in — approved brand direction. Registration closed. */
 export function SignInPage() {
-  const { signIn, signUp, configured } = useAuth();
+  const { signIn, configured } = useAuth();
   const emailId = useId();
   const passwordId = useId();
   const errorId = useId();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +22,7 @@ export function SignInPage() {
     setMessage(null);
     setBusy(true);
     try {
-      if (mode === "signin") await signIn(email.trim(), password);
-      else await signUp(email.trim(), password);
+      await signIn(email.trim(), password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
@@ -81,19 +79,9 @@ export function SignInPage() {
             />
           </div>
 
-          <h1 className="gm-auth-title">
-            {mode === "signin" ? "Welcome back" : "Create your account"}
-          </h1>
+          <h1 className="gm-auth-title">Welcome back</h1>
           <p className="gm-auth-support">
-            {mode === "signin" ? (
-              <>
-                Sign in to your <span className="brand-inline">GOLDMETA</span> account
-              </>
-            ) : (
-              <>
-                Create a <span className="brand-inline">GOLDMETA</span> account to continue
-              </>
-            )}
+            Sign in to your <span className="brand-inline">GOLDMETA</span> account
           </p>
 
           {error && (
@@ -132,7 +120,7 @@ export function SignInPage() {
                   id={passwordId}
                   name="password"
                   type={showPassword ? "text" : "password"}
-                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  autoComplete="current-password"
                   required
                   minLength={6}
                   placeholder="Enter your password"
@@ -153,27 +141,25 @@ export function SignInPage() {
               </div>
             </div>
 
-            {mode === "signin" && (
-              <div className="gm-auth-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(e) => setRemember(e.target.checked)}
-                  />
-                  Remember me
-                </label>
-                <button
-                  type="button"
-                  className="gm-auth-text-btn accent"
-                  data-testid="forgot-password"
-                  disabled={busy}
-                  onClick={() => void onForgot()}
-                >
-                  Forgot password?
-                </button>
-              </div>
-            )}
+            <div className="gm-auth-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Remember me
+              </label>
+              <button
+                type="button"
+                className="gm-auth-text-btn accent"
+                data-testid="forgot-password"
+                disabled={busy}
+                onClick={() => void onForgot()}
+              >
+                Forgot password?
+              </button>
+            </div>
 
             <button
               className="gm-auth-submit"
@@ -181,46 +167,12 @@ export function SignInPage() {
               disabled={busy}
               data-testid="signin-submit"
             >
-              {busy ? "Please wait…" : mode === "signin" ? "Sign In" : "Create account"}
+              {busy ? "Please wait…" : "Sign In"}
             </button>
           </form>
 
-          <div className="gm-auth-divider" role="presentation">
-            <span>or</span>
-          </div>
-
-          <p className="gm-auth-switch" data-testid="auth-switch">
-            {mode === "signin" ? (
-              <>
-                New to GoldMeta?{" "}
-                <button
-                  type="button"
-                  className="gm-auth-text-btn accent"
-                  onClick={() => {
-                    setMode("signup");
-                    setError(null);
-                    setMessage(null);
-                  }}
-                >
-                  Create an account
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{" "}
-                <button
-                  type="button"
-                  className="gm-auth-text-btn accent"
-                  onClick={() => {
-                    setMode("signin");
-                    setError(null);
-                    setMessage(null);
-                  }}
-                >
-                  Sign in
-                </button>
-              </>
-            )}
+          <p className="gm-auth-switch" data-testid="auth-registration-closed">
+            Account registration is currently closed.
           </p>
 
           <p className="gm-auth-trust">Your data is protected. Broker execution remains disabled.</p>

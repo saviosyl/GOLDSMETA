@@ -8,10 +8,11 @@ final class FirebaseAuthService: AuthService {
         Auth.auth().currentUser.map { AuthUser(uid: $0.uid, email: $0.email) }
     }
 
+    /// Public self-registration is permanently disabled.
     func signUp(email: String, password: String) async throws -> AuthUser {
-        guard FirebaseApp.app() != nil else { throw AuthServiceError.missingFirebaseConfiguration }
-        let result = try await Auth.auth().createUser(withEmail: email, password: password)
-        return AuthUser(uid: result.user.uid, email: result.user.email)
+        _ = email
+        _ = password
+        throw AuthServiceError.registrationClosed
     }
 
     func signIn(email: String, password: String) async throws -> AuthUser {

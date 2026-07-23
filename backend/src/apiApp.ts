@@ -21,6 +21,7 @@ import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
 import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
+import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -96,6 +97,7 @@ export const createApiApp = (
   app.use(buildSettingsRouter(store));
   app.use(buildTradingRouter(tradingService));
   app.use(buildAutoTradeRouter(autoTradeService, store));
+  app.use(buildAuthIntegrityRouter(store));
   app.use(buildSystemRouter());
   app.use(errorHandler);
 

@@ -25,8 +25,10 @@ interface AuthContextValue {
   configured: boolean;
   api: ApiClient;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Always rejects — public registration is closed. */
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  registrationEnabled: false;
   apiBaseUrl: string;
 }
 
@@ -92,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signOut,
+      registrationEnabled: false as const,
       apiBaseUrl
     }),
     [user, loading, configured, api, signIn, signUp, signOut, apiBaseUrl]

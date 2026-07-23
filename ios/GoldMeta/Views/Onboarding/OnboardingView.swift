@@ -70,12 +70,15 @@ struct OnboardingView: View {
                         .textContentType(.username)
                         .autocorrectionDisabled()
                     SecureField("Password", text: $viewModel.password)
-                        .textContentType(viewModel.isCreatingAccount ? .newPassword : .password)
-                    Toggle("Create a new account", isOn: $viewModel.isCreatingAccount)
+                        .textContentType(.password)
+                    Text("Account registration is currently closed.")
+                        .font(.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                        .accessibilityIdentifier("auth-registration-closed")
                     Button {
                         Task { await viewModel.submitAuth() }
                     } label: {
-                        Label(viewModel.isCreatingAccount ? "Create account" : "Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                        Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(GoldMetaColor.gold)

@@ -3,7 +3,6 @@ import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut as firebaseSignOut,
   type Auth,
@@ -72,10 +71,15 @@ export const signIn = async (email: string, password: string): Promise<User> => 
   return result.user;
 };
 
-export const signUp = async (email: string, password: string): Promise<User> => {
-  const result = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
-  return result.user;
+/**
+ * Public self-registration is permanently disabled for GoldMeta.
+ * Server-side Auth blocking functions also reject createUser attempts.
+ */
+export const signUp = async (_email: string, _password: string): Promise<User> => {
+  throw new Error("Account registration is currently closed.");
 };
+
+export const isPublicRegistrationEnabled = (): false => false;
 
 export const signOut = async (): Promise<void> => {
   if (!isFirebaseConfigured()) return;

@@ -518,7 +518,10 @@ function UiReviewApp() {
       configured: true,
       api: api as unknown as AuthContextValue["api"],
       signIn: async () => undefined,
-      signUp: async () => undefined,
+      signUp: async () => {
+        throw new Error("Account registration is currently closed.");
+      },
+      registrationEnabled: false as const,
       signOut: async () => undefined,
       apiBaseUrl: "review://local"
     };
