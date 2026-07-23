@@ -182,6 +182,10 @@ describe("API contract envelopes", () => {
         hasSecret: true
       })
     );
+    expect(connection.body.connection.webhookUrl).not.toMatch(
+      /cloudfunctions\.net\/webhooks\/tradingview\//
+    );
+    expect(connection.body.webhookUrl).toContain("/webhooks/tradingview/");
 
     const rotated = await request(app)
       .post(`/v1/tradingview/connections/${connection.body.connection.id}/rotate`)
