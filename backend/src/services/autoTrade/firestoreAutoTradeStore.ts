@@ -18,6 +18,13 @@ import type {
   T212ExecutionProposal,
   T212SelectedInstrument
 } from "./t212/types";
+import type {
+  PracticeAutoQualificationState,
+  T212AutomationMode,
+  T212OrderIntent
+} from "./t212/orderIntent";
+import { isUnresolvedIntentState } from "./t212/orderIntent";
+import { defaultQualificationState } from "./t212/qualification";
 import { nowIso } from "../../utils/time";
 import {
   type AutoTradeStorePort,
@@ -26,6 +33,8 @@ import {
   type BrokerEventDoc,
   type ClaimIntentInput,
   type ClaimIntentResult,
+  type ClaimT212OrderIntentInput,
+  type ClaimT212OrderIntentResult,
   INTENT_LEASE_MS,
   applyLease,
   createDefaultRiskState,
@@ -33,6 +42,7 @@ import {
   defaultConnection,
   defaultLock,
   defaultSettings,
+  defaultT212AutomationMode,
   isLeaseExpired,
   isTerminalIntentState
 } from "./autoTradeStore";
@@ -533,5 +543,168 @@ export class FirestoreAutoTradeStore implements AutoTradeStorePort {
       }
     }
     await batch.commit();
+  }
+
+  private t212AutomationModeRef(userId: string) {
+    return this.userCol(userId, "t212AutomationMode").doc("current");
+  }
+
+  private t212OrderIntentRef(userId: string, intentId: string) {
+    return this.userCol(userId, "t212OrderIntents").doc(intentId);
+  }
+
+  private t212OrderIntentKeyRef(userId: string, intentKey: string) {
+    return this.userCol(userId, "t212OrderIntentKeys").doc(intentKey);
+  }
+
+  private t212QualificationRef(userId: string) {
+    return this.userCol(userId, "t212PracticeAutoQualification").doc("current");
+  }
+
+  async getT212AutomationMode(userId: string): Promise<T212AutomationMode> {
+    const snap = await this.t212AutomationModeRef(userId).get();
+    if (!snap.exists) return defaultT212AutomationMode();
+    const mode = String((snap.data() as { mode?: string }).mode ?? "OFF");
+    return mode as T212AutomationMode;
+  }
+
+  async saveT212AutomationMode(
+    userId: string,
+    mode: T212AutomationMode
+  ): Promise<T212AutomationMode> {
+    await this.t212AutomationModeRef(userId).set(
+      { mode, updatedAt: nowIso() },
+      { merge: true }
+    );
+    return mode;
+  }
+
+  async getT212OrderIntent(
+    userId: string,
+    intentId: string
+  ): Promise<T212OrderIntent | null> {
+    const snap = await this.t212OrderIntentRef(userId, intentId).get();
+    return snap.exists ? (snap.data() as T212OrderIntent) : null;
+  }
+
+  async saveT212OrderIntent(intent: T212OrderIntent): Promise<T212OrderIntent> {
+    await this.t212OrderIntentRef(intent.userId, intent.intentId).set(
+      stripUndefined(intent) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    await this.t212OrderIntentKeyRef(intent.userId, intent.intentKey).set(
+      {
+        intentId: intent.intentId,
+        intentKey: intent.intentKey,
+        updatedAt: nowIso()
+      },
+      { merge: true }
+    );
+    return intent;
+  }
+
+  async listT212OrderIntents(userId: string, limit = 50): Promise<T212OrderIntent[]> {
+    const snap = await this.userCol(userId, "t212OrderIntents")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as T212OrderIntent);
+  }
+
+  async listUnresolvedT212OrderIntents(userId: string): Promise<T212OrderIntent[]> {
+    const list = await this.listT212OrderIntents(userId, 100);
+    return list.filter((i) => isUnresolvedIntentState(i.state));
+  }
+
+  async claimT212OrderIntent(
+    input: ClaimT212OrderIntentInput
+  ): Promise<ClaimT212OrderIntentResult> {
+    const keyRef = this.t212OrderIntentKeyRef(input.userId, input.intentKey);
+    return this.db.runTransaction(async (tx: Transaction) => {
+      const keySnap = await tx.get(keyRef);
+      if (keySnap.exists) {
+        const existingId = String(
+          (keySnap.data() as { intentId?: string }).intentId ?? ""
+        );
+        if (existingId) {
+          const existingSnap = await tx.get(
+            this.t212OrderIntentRef(input.userId, existingId)
+          );
+          if (existingSnap.exists) {
+            const existing = existingSnap.data() as T212OrderIntent;
+            if (
+              existing.leaseOwner &&
+              existing.leaseExpiresAt &&
+              Date.parse(existing.leaseExpiresAt) > Date.now() &&
+              existing.leaseOwner !== input.ownerId
+            ) {
+              return { status: "lease_held" as const, intent: existing };
+            }
+            return { status: "duplicate" as const, intent: existing };
+          }
+        }
+      }
+
+      const created = input.create();
+      const leased: T212OrderIntent = {
+        ...created,
+        leaseOwner: input.ownerId,
+        leaseExpiresAt: new Date(
+          Date.now() + (input.leaseMs ?? INTENT_LEASE_MS)
+        ).toISOString()
+      };
+      tx.set(
+        this.t212OrderIntentRef(input.userId, leased.intentId),
+        stripUndefined(leased) as FirebaseFirestore.DocumentData
+      );
+      tx.set(keyRef, {
+        intentId: leased.intentId,
+        intentKey: leased.intentKey,
+        updatedAt: nowIso()
+      });
+      return { status: "claimed" as const, intent: leased };
+    });
+  }
+
+  async releaseT212OrderIntentLease(
+    userId: string,
+    intentId: string,
+    ownerId: string
+  ): Promise<void> {
+    const ref = this.t212OrderIntentRef(userId, intentId);
+    await this.db.runTransaction(async (tx: Transaction) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return;
+      const intent = snap.data() as T212OrderIntent;
+      if (intent.leaseOwner && intent.leaseOwner !== ownerId) return;
+      tx.set(
+        ref,
+        {
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          updatedAt: nowIso()
+        },
+        { merge: true }
+      );
+    });
+  }
+
+  async getT212PracticeAutoQualification(
+    userId: string
+  ): Promise<PracticeAutoQualificationState> {
+    const snap = await this.t212QualificationRef(userId).get();
+    if (!snap.exists) return defaultQualificationState(userId, nowIso());
+    return snap.data() as PracticeAutoQualificationState;
+  }
+
+  async saveT212PracticeAutoQualification(
+    state: PracticeAutoQualificationState
+  ): Promise<PracticeAutoQualificationState> {
+    const next = { ...state, updatedAt: nowIso() };
+    await this.t212QualificationRef(state.userId).set(
+      stripUndefined(next) as FirebaseFirestore.DocumentData,
+      { merge: true }
+    );
+    return next;
   }
 }

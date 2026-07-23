@@ -56,16 +56,24 @@ describe("T212InvestClient HTTP mapping", () => {
     });
   });
 
-  it("blocks order-create paths without network I/O", async () => {
+  it("blocks order-create paths via allowlist without network I/O", async () => {
     let called = false;
     const client = clientWith(async () => {
       called = true;
       return new Response("{}", { status: 200 });
     });
     for (const path of T212_ORDER_CREATE_PATHS) {
+      await expect(client.placeMarketOrder({ ticker: "X", quantity: 1 })).rejects.toMatchObject({
+        status: 403
+      });
+      // Direct private request with explicit POST also blocked when mutations off
       await expect(
-        (client as unknown as { request: (p: string) => Promise<unknown> }).request(path)
-      ).rejects.toMatchObject({ code: "ORDER_ENDPOINT_BLOCKED", status: 403 });
+        (
+          client as unknown as {
+            request: (p: string, init?: RequestInit) => Promise<unknown>;
+          }
+        ).request(path, { method: "POST" })
+      ).rejects.toMatchObject({ status: 403 });
     }
     expect(called).toBe(false);
   });

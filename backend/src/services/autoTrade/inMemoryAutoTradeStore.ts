@@ -19,6 +19,12 @@ import type {
   T212ExecutionProposal,
   T212SelectedInstrument
 } from "./t212/types";
+import type {
+  PracticeAutoQualificationState,
+  T212AutomationMode,
+  T212OrderIntent
+} from "./t212/orderIntent";
+import { defaultQualificationState } from "./t212/qualification";
 import { nowIso } from "../../utils/time";
 import {
   type AutoTradeStorePort,
@@ -27,6 +33,8 @@ import {
   type BrokerEventDoc,
   type ClaimIntentInput,
   type ClaimIntentResult,
+  type ClaimT212OrderIntentInput,
+  type ClaimT212OrderIntentResult,
   INTENT_LEASE_MS,
   applyLease,
   createDefaultRiskState,
@@ -34,6 +42,8 @@ import {
   defaultConnection,
   defaultLock,
   defaultSettings,
+  defaultT212AutomationMode,
+  filterUnresolvedT212Intents,
   isLeaseExpired,
   isTerminalIntentState
 } from "./autoTradeStore";
@@ -54,6 +64,10 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
   private t212Instruments = new Map<string, T212SelectedInstrument | null>();
   private t212Proposals = new Map<string, T212ExecutionProposal[]>();
   private t212Idempotency = new Map<string, string>(); // `${userId}:${key}` -> proposalId
+  private t212AutomationMode = new Map<string, T212AutomationMode>();
+  private t212OrderIntents = new Map<string, T212OrderIntent[]>();
+  private t212IntentByKey = new Map<string, string>(); // `${userId}:${intentKey}` -> intentId
+  private t212Qualification = new Map<string, PracticeAutoQualificationState>();
   private claimChain: Promise<unknown> = Promise.resolve();
 
   async getRiskState(userId: string): Promise<AutoTradeRiskState> {
@@ -346,6 +360,124 @@ export class InMemoryAutoTradeStore implements AutoTradeStorePort {
     if (invalidateAwaiting) {
       await this.clearAwaitingT212Proposals(userId);
     }
+  }
+
+  async getT212AutomationMode(userId: string): Promise<T212AutomationMode> {
+    return this.t212AutomationMode.get(userId) ?? defaultT212AutomationMode();
+  }
+
+  async saveT212AutomationMode(
+    userId: string,
+    mode: T212AutomationMode
+  ): Promise<T212AutomationMode> {
+    if (mode === "LIVE_LOCKED") {
+      // Visible but impossible to activate as an executable mode.
+      this.t212AutomationMode.set(userId, "LIVE_LOCKED");
+      return "LIVE_LOCKED";
+    }
+    this.t212AutomationMode.set(userId, mode);
+    return mode;
+  }
+
+  async getT212OrderIntent(
+    userId: string,
+    intentId: string
+  ): Promise<T212OrderIntent | null> {
+    const list = this.t212OrderIntents.get(userId) ?? [];
+    const found = list.find((i) => i.intentId === intentId);
+    return found ? structuredClone(found) : null;
+  }
+
+  async saveT212OrderIntent(intent: T212OrderIntent): Promise<T212OrderIntent> {
+    const list = this.t212OrderIntents.get(intent.userId) ?? [];
+    const idx = list.findIndex((i) => i.intentId === intent.intentId);
+    if (idx >= 0) list[idx] = structuredClone(intent);
+    else list.unshift(structuredClone(intent));
+    this.t212OrderIntents.set(intent.userId, list);
+    this.t212IntentByKey.set(`${intent.userId}:${intent.intentKey}`, intent.intentId);
+    return structuredClone(intent);
+  }
+
+  async listT212OrderIntents(userId: string, limit = 50): Promise<T212OrderIntent[]> {
+    return structuredClone((this.t212OrderIntents.get(userId) ?? []).slice(0, limit));
+  }
+
+  async listUnresolvedT212OrderIntents(userId: string): Promise<T212OrderIntent[]> {
+    return structuredClone(
+      filterUnresolvedT212Intents(this.t212OrderIntents.get(userId) ?? [])
+    );
+  }
+
+  async claimT212OrderIntent(
+    input: ClaimT212OrderIntentInput
+  ): Promise<ClaimT212OrderIntentResult> {
+    const run = async (): Promise<ClaimT212OrderIntentResult> => {
+      const key = `${input.userId}:${input.intentKey}`;
+      const existingId = this.t212IntentByKey.get(key);
+      if (existingId) {
+        const existing = await this.getT212OrderIntent(input.userId, existingId);
+        if (existing) {
+          if (
+            existing.leaseOwner &&
+            existing.leaseExpiresAt &&
+            Date.parse(existing.leaseExpiresAt) > Date.now() &&
+            existing.leaseOwner !== input.ownerId
+          ) {
+            return { status: "lease_held", intent: existing };
+          }
+          return { status: "duplicate", intent: existing };
+        }
+      }
+      const created = input.create();
+      const leased = {
+        ...created,
+        leaseOwner: input.ownerId,
+        leaseExpiresAt: new Date(
+          Date.now() + (input.leaseMs ?? INTENT_LEASE_MS)
+        ).toISOString()
+      };
+      await this.saveT212OrderIntent(leased);
+      return { status: "claimed", intent: structuredClone(leased) };
+    };
+    const next = this.claimChain.then(run, run);
+    this.claimChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  }
+
+  async releaseT212OrderIntentLease(
+    userId: string,
+    intentId: string,
+    ownerId: string
+  ): Promise<void> {
+    const intent = await this.getT212OrderIntent(userId, intentId);
+    if (!intent) return;
+    if (intent.leaseOwner && intent.leaseOwner !== ownerId) return;
+    await this.saveT212OrderIntent({
+      ...intent,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: nowIso()
+    });
+  }
+
+  async getT212PracticeAutoQualification(
+    userId: string
+  ): Promise<PracticeAutoQualificationState> {
+    return (
+      this.t212Qualification.get(userId) ??
+      defaultQualificationState(userId, nowIso())
+    );
+  }
+
+  async saveT212PracticeAutoQualification(
+    state: PracticeAutoQualificationState
+  ): Promise<PracticeAutoQualificationState> {
+    const next = { ...state, updatedAt: nowIso() };
+    this.t212Qualification.set(state.userId, structuredClone(next));
+    return structuredClone(next);
   }
 }
 

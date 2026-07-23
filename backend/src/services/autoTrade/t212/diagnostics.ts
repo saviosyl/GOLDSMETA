@@ -21,10 +21,13 @@ import {
   type T212SelectedInstrument
 } from "./types";
 import {
-  BROKER_EXECUTION_ENABLED,
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED
-} from "../types";
+  assertLiveExecutionDisabled,
+  isBrokerExecutionEnabled,
+  isPracticeOrderSubmissionAllowed,
+  isT212LiveExecutionFeatureFlag,
+  isT212PaperOrderSubmissionEnabled
+} from "../executionFlags";
+// isPracticeOrderSubmissionAllowed used by assertOrderSubmissionDisabled
 import { maskAccountId } from "../types";
 
 export interface T212ClientFactory {
@@ -38,14 +41,27 @@ export function defaultT212ClientFactory(
   environment: T212Environment,
   credentials: T212Credentials
 ): T212InvestClient {
-  return new T212InvestClient(environment, credentials);
+  // Read-only clients never enable mutations unless practice submission is allowed
+  // AND caller explicitly uses the order factory. Default stays mutation-off for safety.
+  return new T212InvestClient(environment, credentials, {
+    mutationsEnabled: false
+  });
 }
 
+/**
+ * Blocks Live execution always. When Practice paper submission is intentionally
+ * enabled (apiT212OrderPreview only), read-only paths may proceed.
+ * Production keeps all flags false → still fail-closed for accidental submits.
+ */
 export function assertOrderSubmissionDisabled(): void {
+  assertLiveExecutionDisabled();
+  // Production / dry-run: paper+broker must remain false.
+  // Order preview enables them intentionally — submit paths use assertPracticeOrderSubmissionAllowed.
   if (
-    BROKER_EXECUTION_ENABLED ||
-    T212_PAPER_ORDER_SUBMISSION_ENABLED ||
-    T212_LIVE_EXECUTION_FEATURE_FLAG
+    !isPracticeOrderSubmissionAllowed() &&
+    (isBrokerExecutionEnabled() ||
+      isT212PaperOrderSubmissionEnabled() ||
+      isT212LiveExecutionFeatureFlag())
   ) {
     throw Object.assign(new Error("ORDER_SUBMISSION_DISABLED"), {
       code: "ORDER_SUBMISSION_DISABLED"
@@ -69,8 +85,8 @@ export function buildDisconnectedT212View(
     lastHeartbeatAt: null,
     connectionState: "Disconnected",
     ordersEnabled: false,
-    paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-    liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG
+    paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+    liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag()
   };
 }
 
@@ -97,8 +113,8 @@ export async function runT212ReadOnlyDiagnostics(args: {
       environment: args.environment,
       readOnly: true,
       ordersEnabled: false,
-      paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-      liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG,
+      paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+      liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag(),
       connected: false,
       account: null,
       holdingsCount: 0,
@@ -146,8 +162,8 @@ export async function runT212ReadOnlyDiagnostics(args: {
       environment: args.environment,
       readOnly: true,
       ordersEnabled: false,
-      paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-      liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG,
+      paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+      liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag(),
       connected: true,
       account: {
         environment: args.environment,
@@ -185,8 +201,8 @@ export async function runT212ReadOnlyDiagnostics(args: {
       environment: args.environment,
       readOnly: true,
       ordersEnabled: false,
-      paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-      liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG,
+      paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+      liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag(),
       connected: false,
       account: null,
       holdingsCount: 0,
@@ -265,7 +281,7 @@ export function connectionViewFromReport(
         ? "Error"
         : "Disconnected",
     ordersEnabled: false,
-    paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-    liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG
+    paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+    liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag()
   };
 }

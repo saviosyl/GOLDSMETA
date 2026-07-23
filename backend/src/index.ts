@@ -61,6 +61,12 @@ export { apiV6Preview } from "./previewApi";
 export { apiT212Preview } from "./t212PreviewApi";
 
 /**
+ * Isolated Trading 212 Practice ORDER preview — deploy with --only functions:apiT212OrderPreview.
+ * Never deploy order execution onto production `api`.
+ */
+export { apiT212OrderPreview } from "./t212OrderPreviewApi";
+
+/**
  * Auth blocking: reject public account creation.
  * Requires Identity Platform blocking functions enabled for the project.
  * Deploy with functions that include beforeUserCreatedGuard.

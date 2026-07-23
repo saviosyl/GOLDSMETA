@@ -5,6 +5,12 @@ export type AutoTradeDisplayStatus = "OFF" | "SHADOW" | "DEMO" | "LIVE" | "LOCKE
 
 export type SelectedBrokerId = "MANUAL" | "T212_INVEST" | "IG_DEMO";
 export type T212Environment = "PRACTICE" | "LIVE";
+export type T212AutomationMode =
+  | "OFF"
+  | "MANUAL"
+  | "CONFIRM"
+  | "PRACTICE_AUTO"
+  | "LIVE_LOCKED";
 export type T212ConnectionMode =
   | "TRADING_212_PRACTICE_READ_ONLY"
   | "TRADING_212_LIVE_LOCKED";

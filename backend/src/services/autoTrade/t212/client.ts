@@ -1,10 +1,16 @@
 /**
- * Trading 212 Invest Public API client — read-only equity/ETF surface.
+ * Trading 212 Invest Public API client — strict allowlist HTTP surface.
  * Endpoints aligned to official docs: https://docs.trading212.com/api
- * Never logs credentials. Order-creation endpoints are not implemented here.
+ * Never logs credentials. Never accepts caller base URL or Authorization.
  */
 
+import { isPracticeOrderSubmissionAllowed } from "../executionFlags";
 import { redactSecrets } from "../redactSecrets";
+import {
+  assertT212RequestAllowed,
+  normalizeT212Path,
+  type T212HttpMethod
+} from "./allowlist";
 import type { T212Environment } from "./types";
 
 export const T212_PRACTICE_BASE = "https://demo.trading212.com/api/v0";
@@ -20,7 +26,7 @@ export const T212_READ_PATHS = {
   historicalOrders: "/equity/history/orders"
 } as const;
 
-/** Explicitly NOT implemented — order placement surface. */
+/** Explicit create-order paths — only market POST is gated via mutationsEnabled. */
 export const T212_ORDER_CREATE_PATHS = [
   "/equity/orders/limit",
   "/equity/orders/market",
@@ -96,8 +102,35 @@ export interface T212InstrumentResponse {
   maxOpenQuantity?: number;
   minTradeQuantity?: number;
   addedOn?: string;
-  /** Present on some catalogue payloads; not guaranteed by docs summary. */
   workingScheduleId?: number;
+  /** Not guaranteed — treat null as unknown, never guess. */
+  extendedHours?: boolean;
+}
+
+export interface T212ExchangeResponse {
+  id?: number | string;
+  workingScheduleId?: number | string;
+  open?: boolean;
+  openFrom?: string;
+  openTo?: string;
+  name?: string;
+}
+
+export interface T212OrderResponse {
+  id?: number | string;
+  ticker?: string;
+  quantity?: number;
+  filledQuantity?: number;
+  status?: string;
+  averagePricePaid?: number;
+  type?: string;
+  currency?: string;
+}
+
+export interface T212PlaceMarketOrderInput {
+  ticker: string;
+  /** Positive for BUY, negative for SELL per T212 API. */
+  quantity: number;
 }
 
 export class T212ApiError extends Error {
@@ -140,7 +173,6 @@ function parseRetryAfterMs(res: Response, attempt: number): number {
   if (reset) {
     const resetSec = Number(reset);
     if (Number.isFinite(resetSec) && resetSec > 1_000_000_000) {
-      // Unix timestamp (seconds)
       return Math.min(Math.max(0, resetSec * 1000 - Date.now()), 15_000);
     }
     if (Number.isFinite(resetSec) && resetSec > 0 && resetSec < 120) {
@@ -154,14 +186,24 @@ export class T212InvestClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private lastHeartbeatAt: string | null = null;
+  /** When true, Practice mutations (market POST / owned DELETE) may pass allowlist. */
+  private readonly mutationsEnabled: boolean;
 
   constructor(
     private readonly environment: T212Environment,
     private readonly credentials: T212Credentials,
-    opts?: { fetchImpl?: typeof fetch; timeoutMs?: number }
+    opts?: {
+      fetchImpl?: typeof fetch;
+      timeoutMs?: number;
+      /** Override; defaults to runtime practice-order allowance. */
+      mutationsEnabled?: boolean;
+    }
   ) {
     this.fetchImpl = opts?.fetchImpl ?? fetch;
     this.timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.mutationsEnabled =
+      opts?.mutationsEnabled ??
+      (environment === "PRACTICE" && isPracticeOrderSubmissionAllowed());
   }
 
   getEnvironment(): T212Environment {
@@ -172,8 +214,15 @@ export class T212InvestClient {
     return this.lastHeartbeatAt;
   }
 
+  areMutationsEnabled(): boolean {
+    return this.mutationsEnabled;
+  }
+
   private url(path: string): string {
-    return `${t212BaseUrl(this.environment)}${path}`;
+    if (this.environment === "LIVE") {
+      throw new T212ApiError("T212_LIVE_HOST_LOCKED", 403, "T212_LIVE_HOST_LOCKED");
+    }
+    return `${T212_PRACTICE_BASE}${path}`;
   }
 
   private async request<T>(
@@ -181,31 +230,52 @@ export class T212InvestClient {
     init: RequestInit = {},
     attempt = 0
   ): Promise<T> {
-    // Fail closed: never allow order-create paths through this client.
-    if (T212_ORDER_CREATE_PATHS.some((p) => path.startsWith(p))) {
-      throw new T212ApiError("T212_ORDER_ENDPOINT_BLOCKED", 403, "ORDER_ENDPOINT_BLOCKED");
+    const method = String(init.method ?? "GET").toUpperCase() as T212HttpMethod;
+    const bare = normalizeT212Path(path);
+
+    // Reject caller-supplied auth/base if somehow present on init (defense in depth).
+    const headersIn = (init.headers ?? {}) as Record<string, string>;
+    const allow = assertT212RequestAllowed({
+      method,
+      path: bare,
+      environment: this.environment,
+      mutationsEnabled: this.mutationsEnabled,
+      requestedBaseUrl: null,
+      requestedAuthorization: headersIn.Authorization ?? headersIn.authorization ?? null
+    });
+    if (!allow.ok) {
+      throw new T212ApiError(allow.message, 403, allow.code);
     }
+
+    // Strip any caller Authorization — server secrets only.
+    const safeHeaders: Record<string, string> = { Accept: "application/json" };
+    for (const [k, v] of Object.entries(headersIn)) {
+      if (k.toLowerCase() === "authorization") continue;
+      if (k.toLowerCase() === "host") continue;
+      safeHeaders[k] = v;
+    }
+    safeHeaders.Authorization = authHeader(this.credentials);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const res = await this.fetchImpl(this.url(path), {
         ...init,
+        method,
         signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          Authorization: authHeader(this.credentials),
-          ...(init.headers ?? {})
-        }
+        headers: safeHeaders
       });
 
-      if (res.status === 429 && attempt < MAX_READ_RETRIES) {
-        await sleep(parseRetryAfterMs(res, attempt));
-        return this.request<T>(path, init, attempt + 1);
-      }
-
-      if (res.status >= 500 && attempt < MAX_READ_RETRIES) {
-        await sleep(300 * (attempt + 1));
+      const retryable =
+        method === "GET" &&
+        (res.status === 429 || res.status >= 500) &&
+        attempt < MAX_READ_RETRIES;
+      if (retryable) {
+        await sleep(
+          res.status === 429
+            ? parseRetryAfterMs(res, attempt)
+            : 300 * (attempt + 1)
+        );
         return this.request<T>(path, init, attempt + 1);
       }
 
@@ -217,9 +287,11 @@ export class T212InvestClient {
               ? "FORBIDDEN"
               : res.status === 429
                 ? "RATE_LIMITED"
-                : res.status >= 500
-                  ? "SERVER_ERROR"
-                  : `HTTP_${res.status}`;
+                : res.status === 408
+                  ? "TIMEOUT"
+                  : res.status >= 500
+                    ? "SERVER_ERROR"
+                    : `HTTP_${res.status}`;
         try {
           const body = (await res.json()) as { code?: string; errorCode?: string };
           code = body.code ?? body.errorCode ?? code;
@@ -252,21 +324,15 @@ export class T212InvestClient {
     }
   }
 
-  /** Authenticate by hitting the official account summary endpoint. */
   async authenticate(): Promise<void> {
     await this.getAccountSummary();
     this.lastHeartbeatAt = new Date().toISOString();
   }
 
-  /** Official: GET /equity/account/summary */
   async getAccountSummary(): Promise<T212AccountSummaryResponse> {
     return this.request<T212AccountSummaryResponse>(T212_READ_PATHS.accountSummary);
   }
 
-  /**
-   * Compatibility helper mapping official summary → cash-like shape used by diagnostics.
-   * Does not call undocumented /equity/account/cash.
-   */
   async getCash(): Promise<T212CashResponse> {
     const summary = await this.getAccountSummary();
     return {
@@ -278,10 +344,6 @@ export class T212InvestClient {
     };
   }
 
-  /**
-   * Compatibility helper for account id/currency from official summary.
-   * Does not call undocumented /equity/account/info.
-   */
   async getAccount(): Promise<T212AccountResponse> {
     const summary = await this.getAccountSummary();
     return {
@@ -290,7 +352,6 @@ export class T212InvestClient {
     };
   }
 
-  /** Official: GET /equity/positions */
   async getPositions(): Promise<T212PositionResponse[]> {
     const data = await this.request<T212PositionResponse[] | { items?: T212PositionResponse[] }>(
       T212_READ_PATHS.positions
@@ -299,10 +360,6 @@ export class T212InvestClient {
     return data.items ?? [];
   }
 
-  /**
-   * Alias used by existing diagnostics — maps to official positions endpoint.
-   * Does not call undocumented /equity/portfolio.
-   */
   async getPortfolio(): Promise<T212PositionResponse[]> {
     return this.getPositions();
   }
@@ -310,6 +367,14 @@ export class T212InvestClient {
   async getInstruments(): Promise<T212InstrumentResponse[]> {
     const data = await this.request<T212InstrumentResponse[] | { items?: T212InstrumentResponse[] }>(
       T212_READ_PATHS.instruments
+    );
+    if (Array.isArray(data)) return data;
+    return data.items ?? [];
+  }
+
+  async getExchanges(): Promise<T212ExchangeResponse[]> {
+    const data = await this.request<T212ExchangeResponse[] | { items?: T212ExchangeResponse[] }>(
+      T212_READ_PATHS.exchanges
     );
     if (Array.isArray(data)) return data;
     return data.items ?? [];
@@ -327,27 +392,66 @@ export class T212InvestClient {
       .slice(0, 50);
   }
 
-  async getOrders(): Promise<unknown[]> {
-    const data = await this.request<unknown[] | { items?: unknown[] }>(
+  async getOrders(): Promise<T212OrderResponse[]> {
+    const data = await this.request<T212OrderResponse[] | { items?: T212OrderResponse[] }>(
       T212_READ_PATHS.pendingOrders
     );
     if (Array.isArray(data)) return data;
     return data.items ?? [];
   }
 
-  /**
-   * Official historical orders — first page only (cursor pagination via nextPagePath
-   * is not fully walked in this read-only stage).
-   */
-  async getHistoricalOrders(): Promise<unknown[]> {
-    const data = await this.request<unknown[] | { items?: unknown[]; nextPagePath?: string | null }>(
-      `${T212_READ_PATHS.historicalOrders}?limit=20`
-    );
+  async getOrder(orderId: string): Promise<T212OrderResponse> {
+    const id = encodeURIComponent(String(orderId));
+    return this.request<T212OrderResponse>(`/equity/orders/${id}`);
+  }
+
+  async getHistoricalOrders(): Promise<T212OrderResponse[]> {
+    const data = await this.request<
+      T212OrderResponse[] | { items?: T212OrderResponse[]; nextPagePath?: string | null }
+    >(`${T212_READ_PATHS.historicalOrders}?limit=20`);
     if (Array.isArray(data)) return data;
     return data.items ?? [];
   }
 
-  /** Heartbeat is application-level: re-fetch official account summary and stamp time. */
+  /**
+   * Practice market order — only when mutationsEnabled (order preview runtime).
+   * Quantity must already be server-validated; SELL uses negative quantity.
+   */
+  async placeMarketOrder(input: T212PlaceMarketOrderInput): Promise<T212OrderResponse> {
+    if (this.environment !== "PRACTICE") {
+      throw new T212ApiError("T212_LIVE_HOST_LOCKED", 403, "T212_LIVE_HOST_LOCKED");
+    }
+    if (!this.mutationsEnabled) {
+      throw new T212ApiError("T212_MUTATION_DISABLED", 403, "T212_MUTATION_DISABLED");
+    }
+    if (!input.ticker || !Number.isFinite(input.quantity) || input.quantity === 0) {
+      throw new T212ApiError("INVALID_ORDER_QUANTITY", 400, "INVALID_ORDER_QUANTITY");
+    }
+    return this.request<T212OrderResponse>("/equity/orders/market", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker: input.ticker,
+        quantity: input.quantity
+      })
+    });
+  }
+
+  /**
+   * Cancel a GoldMeta-created Practice order by id only.
+   * Caller must verify ownership before invoking.
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    if (this.environment !== "PRACTICE") {
+      throw new T212ApiError("T212_LIVE_HOST_LOCKED", 403, "T212_LIVE_HOST_LOCKED");
+    }
+    if (!this.mutationsEnabled) {
+      throw new T212ApiError("T212_MUTATION_DISABLED", 403, "T212_MUTATION_DISABLED");
+    }
+    const id = encodeURIComponent(String(orderId));
+    await this.request<void>(`/equity/orders/${id}`, { method: "DELETE" });
+  }
+
   async heartbeat(): Promise<string> {
     await this.getAccountSummary();
     this.lastHeartbeatAt = new Date().toISOString();
