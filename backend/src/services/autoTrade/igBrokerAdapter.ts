@@ -52,6 +52,7 @@ const KNOWN_IG_LOGIN_UI_REASONS = new Set([
   "error.security.invalid-details",
   "error.security.api-key-invalid",
   "error.security.api-key-disabled",
+  "error.security.account-migrated",
   "error.public-api.failure.pending.agreements.required",
   "error.public-api.failure.kyc.required"
 ]);
