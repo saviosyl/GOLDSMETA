@@ -12,7 +12,8 @@
     "test:firestore-emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 GCLOUD_PROJECT=goldmeta-signal-outcome-test GOOGLE_CLOUD_PROJECT=goldmeta-signal-outcome-test firebase emulators:exec --only firestore --project goldmeta-signal-outcome-test \"npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts\"",
     "lint": "eslint src --ext .ts",
     "dev": "tsx watch src/index.ts",
-    "serve": "npm run build && firebase emulators:start --only functions,firestore"
+    "serve": "npm run build && firebase emulators:start --only functions,firestore",
+    "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts"
   },
   "dependencies": {
     "cors": "^2.8.6",

@@ -37,6 +37,8 @@ export const app = createApp();
 export const api = onRequest(
   {
     region: env.FIREBASE_REGION,
+    // Required for read-only GET /v1/admin/auth-integrity (server-only pinned UID).
+    secrets: ["GOLDMETA_PINNED_OWNER_UID"],
     cors: [
       "https://goldmeta.metamechsolutions.com",
       "https://goldmeta-web.pages.dev",
@@ -49,6 +51,13 @@ export const api = onRequest(
 
 /** Isolated V6 IG Demo read-only preview — deploy with --only functions:apiV6Preview */
 export { apiV6Preview } from "./previewApi";
+
+/**
+ * Auth blocking: reject public account creation.
+ * Requires Identity Platform blocking functions enabled for the project.
+ * Deploy with functions that include beforeUserCreatedGuard.
+ */
+export { beforeUserCreatedGuard } from "./services/auth/beforeUserCreated";
 
 export const processProcessingJob = onDocumentCreated(
   { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },

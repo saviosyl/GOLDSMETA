@@ -47,15 +47,18 @@ describe("V5.3.1 SignIn redesign", () => {
     expect(screen.queryByText(/iOS/i)).not.toBeInTheDocument();
   });
 
-  it("shows sign-up as a secondary text link, not a large secondary button", () => {
+  it("does not expose Create an account; registration is closed", () => {
     render(
       <MemoryRouter>
         <SignInPage />
       </MemoryRouter>
     );
-    expect(screen.getByTestId("auth-switch")).toHaveTextContent(/New to GoldMeta/i);
-    expect(screen.getByRole("button", { name: "Create an account" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Need an account\? Sign up/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create an account" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("auth-registration-closed")).toHaveTextContent(
+      /Account registration is currently closed/i
+    );
+    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
+    expect(screen.getByTestId("forgot-password")).toBeInTheDocument();
   });
 
   it("exposes forgot-password and password visibility controls", async () => {

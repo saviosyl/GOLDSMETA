@@ -35,6 +35,7 @@ enum AuthServiceError: LocalizedError, Equatable {
     case missingFirebaseConfiguration
     case notSignedIn
     case invalidCredentials
+    case registrationClosed
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +45,8 @@ enum AuthServiceError: LocalizedError, Equatable {
             return "Sign in to continue."
         case .invalidCredentials:
             return "Enter a valid email and password."
+        case .registrationClosed:
+            return "Account registration is currently closed."
         }
     }
 }
@@ -59,8 +62,9 @@ final class MockAuthService: AuthService {
     }
 
     func signUp(email: String, password: String) async throws -> AuthUser {
-        try validate(email: email, password: password)
-        return signInMockUser(email: email)
+        _ = email
+        _ = password
+        throw AuthServiceError.registrationClosed
     }
 
     func signIn(email: String, password: String) async throws -> AuthUser {

@@ -700,11 +700,13 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
     );
     expect(preview).toContain("export const apiV6Preview");
 
-    // Production `api` onRequest options must not declare secrets / IG Demo bindings.
+    // Production `api` may bind GOLDMETA_PINNED_OWNER_UID for Auth integrity only —
+    // never IG Demo secrets (those stay on apiV6Preview).
     const apiBlock = index.slice(index.indexOf("export const api = onRequest"));
     const apiOpts = apiBlock.slice(0, apiBlock.indexOf("app\n);") + 10);
-    expect(apiOpts).not.toMatch(/secrets\s*:/);
+    expect(apiOpts).toMatch(/secrets:\s*\[\s*"GOLDMETA_PINNED_OWNER_UID"\s*\]/);
     expect(apiOpts).not.toMatch(/IG_DEMO_/);
+    expect(apiOpts).not.toMatch(/igDemo/);
     expect(apiOpts).not.toMatch(/defineSecret/);
   });
 });
