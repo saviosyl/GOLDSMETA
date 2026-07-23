@@ -61,6 +61,12 @@ export { apiV6Preview } from "./previewApi";
 export { apiT212Preview } from "./t212PreviewApi";
 
 /**
+ * Isolated Pepperstone cTrader Demo preview — deploy with --only functions:apiCTraderPreview.
+ * Read/preview only; order submission flags forced false; no fabricated client secrets.
+ */
+export { apiCTraderPreview } from "./cTraderPreviewApi";
+
+/**
  * Auth blocking: reject public account creation.
  * Requires Identity Platform blocking functions enabled for the project.
  * Deploy with functions that include beforeUserCreatedGuard.

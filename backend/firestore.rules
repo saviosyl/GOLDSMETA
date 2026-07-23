@@ -127,6 +127,11 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false;
       }
+      // Isolated Pepperstone cTrader Demo preview namespace (server Admin SDK only).
+      match /autoTradeCTraderPreview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
       match /tradeIntentDealRefs/{document=**} {
         allow read: if false;
         allow write: if false;
