@@ -25,7 +25,7 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.4"
+const string SCRIPT_VERSION = "2.0.5"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -487,6 +487,8 @@ alertMessage = "{" +
   "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
   "\"timeframe\":" + f_json_string(timeframe.period) + "," +
   "\"eventType\":" + f_json_string(eventType) + "," +
+  // barTime = candle close time (market bar). sentAt = alert generation time (timenow).
+  // Backend skew validates sentAt only; delayed TradingView delivery may lag sentAt.
   "\"barTime\":" + f_json_time(time_close) + "," +
   "\"sentAt\":" + f_json_time(timenow) + "," +
   "\"isConfirmedBar\":" + f_json_bool(confirmedNow) + "," +

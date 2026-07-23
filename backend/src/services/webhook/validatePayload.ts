@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { env } from "../../config/env";
 import { tradingViewPayloadSchema, type TradingViewPayload } from "../../models/types";
-import { isWithinSkew } from "../../utils/time";
+import { isSentAtAcceptable } from "../../utils/time";
 import { logger } from "../logging/logger";
 import type { GoldMetaStore, WebhookConnection } from "../storage/types";
 import { buildStableEventId } from "./eventId";
@@ -61,11 +61,27 @@ export const validateWebhookPayload = async (
   }
 
   const payload = parsed.data;
-  if (!isWithinSkew(payload.sentAt, env.WEBHOOK_MAX_SKEW_MS, now)) {
+  // Validate sentAt only — barTime is the candle timestamp and may be older than skew.
+  const maxPastMs = env.WEBHOOK_MAX_SKEW_MS;
+  const maxFutureMs = env.WEBHOOK_MAX_FUTURE_SKEW_MS;
+  if (
+    !isSentAtAcceptable(
+      payload.sentAt,
+      {
+        maxPastMs,
+        maxFutureMs
+      },
+      now
+    )
+  ) {
+    const sentAtMs = new Date(payload.sentAt).getTime();
+    const ageMs = Number.isFinite(sentAtMs) ? now - sentAtMs : null;
     logger.warn("Webhook payload failed timestamp skew check", {
       webhookId,
       sentAt: payload.sentAt,
-      maxSkewMs: env.WEBHOOK_MAX_SKEW_MS
+      ageMs,
+      maxPastMs,
+      maxFutureMs
     });
     throw new WebhookValidationError("Webhook timestamp outside allowed skew", 400, "STALE_TIMESTAMP");
   }

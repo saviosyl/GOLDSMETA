@@ -45,7 +45,15 @@ const envSchema = z.object({
   WEBHOOK_ID: z.string().min(8).optional(),
   WEBHOOK_SECRET: z.string().min(1).optional(),
   WEBHOOK_PUBLIC_BASE_URL: z.string().url().optional(),
-  WEBHOOK_MAX_SKEW_MS: intFromString(5 * 60 * 1000),
+  /**
+   * Max age of payload.sentAt relative to server receipt.
+   * Default 30 minutes — covers observed TradingView webhook retry/delivery
+   * delays after Pine sets sentAt=timenow at bar close (evidence up to ~26m).
+   * Does not apply to barTime.
+   */
+  WEBHOOK_MAX_SKEW_MS: intFromString(30 * 60 * 1000),
+  /** Max future drift for sentAt (clock skew). Default 2 minutes. */
+  WEBHOOK_MAX_FUTURE_SKEW_MS: intFromString(2 * 60 * 1000),
   WEBHOOK_RATE_LIMIT_WINDOW_MS: intFromString(60 * 1000),
   WEBHOOK_RATE_LIMIT_MAX: intFromString(60),
   PAYLOAD_SIZE_LIMIT: z.string().default("128kb"),
