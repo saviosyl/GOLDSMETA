@@ -613,6 +613,17 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
       assertNoSecretsInLogs(logs);
     });
 
+    it("maps error.security.account-migrated without leaking body", async () => {
+      const { logs } = await connectExpecting(
+        401,
+        "error.security.account-migrated",
+        "error.security.account-migrated"
+      );
+      expect(logs.some((l) => /"errorCode":"error\.security\.account-migrated"/.test(l))).toBe(true);
+      expect(logs.some((l) => /"status":401/.test(l))).toBe(true);
+      assertNoSecretsInLogs(logs);
+    });
+
     it("keeps dealing endpoint count at zero on login failure", async () => {
       const { requests } = await connectExpecting(400, "invalid.input", "invalid.input");
       const dealing = requests.filter((r) =>
