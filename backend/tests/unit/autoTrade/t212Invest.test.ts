@@ -312,9 +312,27 @@ describe("Trading 212 Invest broker integration", () => {
 
   it("instrument search does not auto-select", async () => {
     const instruments = [
-      { ticker: "SGLD_EQ", name: "Physical Gold ETC", currencyCode: "EUR" },
-      { ticker: "GLD_US", name: "SPDR Gold Shares ETF", currencyCode: "USD" },
-      { ticker: "GOLDMINER", name: "Gold Mining Equity", currencyCode: "EUR" }
+      { ticker: "SGLD_EQ", name: "Physical Gold ETC", currencyCode: "EUR", type: "ETF" },
+      { ticker: "GLD_US", name: "SPDR Gold Shares ETF", currencyCode: "USD", type: "ETF" },
+      { ticker: "GOLDMINER", name: "Gold Mining Equity", currencyCode: "EUR", type: "STOCK" },
+      {
+        ticker: "SBUL",
+        name: "WisdomTree Gold 1x Daily Short",
+        currencyCode: "USD",
+        type: "ETF"
+      },
+      {
+        ticker: "ESGP",
+        name: "Gold Miners Screened (Acc)",
+        currencyCode: "GBX",
+        type: "ETF"
+      },
+      {
+        ticker: "YGLD",
+        name: "IncomeShares Gold+ Yield",
+        currencyCode: "EUR",
+        type: "ETF"
+      }
     ];
     const candidates = searchGoldInstruments(instruments);
     expect(candidates.map((c) => c.ticker)).toEqual(["SGLD_EQ", "GLD_US"]);

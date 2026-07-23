@@ -406,9 +406,17 @@ export function AutoTradePage() {
               <div className="gm-section-head">
                 <h2 className="gm-section-title">Select gold instrument</h2>
                 <p className="gm-meta">
-                  Explicit confirmation required — nothing is auto-selected.
+                  Select marks a candidate locally. Confirm is a separate action and still does not
+                  enable trading.
                 </p>
               </div>
+              <p
+                className="gm-autotrade-instrument-warning"
+                data-testid="autotrade-t212-confirm-warning"
+              >
+                Confirmation stores the catalogue identity for dry-run proposals only. No broker
+                orders are submitted. Trading 212 Invest is long-only — shorts are unsupported.
+              </p>
               <label className="gm-autotrade-field">
                 Search
                 <input
@@ -437,26 +445,71 @@ export function AutoTradePage() {
                     const selected = pendingCandidate?.instrumentId === c.instrumentId;
                     return (
                       <li key={c.instrumentId}>
-                        <button
-                          type="button"
+                        <div
                           className={`gm-autotrade-candidate${selected ? " is-active" : ""}`}
-                          disabled={busy}
-                          onClick={() => setPendingCandidate(c)}
                           data-testid={`autotrade-t212-candidate-${c.ticker}`}
                         >
-                          <strong>
-                            {c.ticker} · {c.name}
-                          </strong>
-                          <span>
-                            {[c.currency, c.exchange, c.isin].filter(Boolean).join(" · ") || "—"}
-                          </span>
-                          <span className="gm-meta">{c.goldMatchReason}</span>
-                        </button>
+                          <div className="gm-autotrade-candidate-copy">
+                            <strong className="gm-autotrade-candidate-name">
+                              {c.ticker}
+                              <span aria-hidden="true"> · </span>
+                              {c.name}
+                            </strong>
+                            <span className="gm-autotrade-candidate-meta">
+                              {[c.currency, c.exchange, c.isin].filter(Boolean).join(" · ") ||
+                                "Currency / ISIN / exchange not supplied"}
+                            </span>
+                            <span className="gm-meta">{c.goldMatchReason}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="gm-btn gm-autotrade-candidate-select"
+                            disabled={busy}
+                            aria-pressed={selected}
+                            data-testid={`autotrade-t212-select-${c.ticker}`}
+                            onClick={() => setPendingCandidate(c)}
+                          >
+                            {selected ? "Selected" : "Select"}
+                          </button>
+                        </div>
                       </li>
                     );
                   })}
                 </ul>
               )}
+              {pendingCandidate ? (
+                <div
+                  className="gm-autotrade-confirm-summary"
+                  data-testid="autotrade-t212-confirm-summary"
+                >
+                  <h3 className="gm-autotrade-confirm-title">Confirm instrument</h3>
+                  <dl className="gm-autotrade-confirm-dl">
+                    <div>
+                      <dt>Ticker</dt>
+                      <dd data-testid="autotrade-t212-confirm-ticker">{pendingCandidate.ticker}</dd>
+                    </div>
+                    <div>
+                      <dt>Full name</dt>
+                      <dd data-testid="autotrade-t212-confirm-name">{pendingCandidate.name}</dd>
+                    </div>
+                    <div>
+                      <dt>Currency</dt>
+                      <dd data-testid="autotrade-t212-confirm-currency">
+                        {pendingCandidate.currency ?? "Not supplied"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>ISIN</dt>
+                      <dd data-testid="autotrade-t212-confirm-isin">
+                        {pendingCandidate.isin ?? "Not supplied"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="gm-autotrade-confirm-flags">
+                    Trading 212 Practice — Read Only · No orders will be submitted
+                  </p>
+                </div>
+              ) : null}
               <div className="gm-autotrade-actions">
                 <button
                   type="button"

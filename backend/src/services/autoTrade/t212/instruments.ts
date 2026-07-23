@@ -9,11 +9,20 @@ import type { T212InstrumentCandidate } from "./types";
 const GOLD_NAME_RE =
   /\b(gold|physical\s+gold|gold\s+etc|gold\s+etf|gold\s+etp|bullion|xau)\b/i;
 
-/** Exclude miners, leveraged/inverse products, silver, and unrelated commodities. */
+/**
+ * Exclude equities/miners, leveraged/inverse products, yield overlays, silver,
+ * and unrelated commodities. Prefer physically backed gold ETC/ETP/ETF names.
+ */
 const EXCLUDE_RE =
-  /\b(mining|miner|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin|leveraged|leverage|inverse|ultrashort|ultralong|ultra\s*short|ultra\s*long|short\s+gold|long\s+gold\s+miners|3x|2x|-3x|-2x)\b|ultra(?=short|long)/i;
+  /\b(mining|miners?|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin|leveraged|leverage|inverse|ultrashort|ultralong|ultra\s*short|ultra\s*long|short\s+gold|daily\s+short|1x\s+daily\s+short|long\s+gold\s+miners|income|yield|covered\s+call|3x|2x|-3x|-2x)\b|ultra(?=short|long)/i;
+
+const ALLOWED_TYPES = new Set(["ETF", "ETC", "ETP"]);
 
 export function isGoldInvestInstrument(instrument: T212InstrumentResponse): boolean {
+  const type = (instrument.type ?? "").trim().toUpperCase();
+  if (type === "STOCK" || type === "EQUITY") return false;
+  if (type && !ALLOWED_TYPES.has(type)) return false;
+
   const name = `${instrument.name ?? ""} ${instrument.shortName ?? ""} ${instrument.ticker ?? ""}`;
   if (!GOLD_NAME_RE.test(name)) return false;
   if (EXCLUDE_RE.test(name)) return false;

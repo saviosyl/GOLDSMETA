@@ -120,4 +120,79 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-t212-connection")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-t212-connect")).toBeInTheDocument();
   });
+
+  it("keeps Select local until Confirm and shows Practice read-only summary", async () => {
+    const user = userEvent.setup();
+    const t212Status = {
+      ...baseStatus,
+      selectedBroker: "T212_INVEST" as const,
+      brokerBadge: "T212 PRACTICE — READ ONLY",
+      displayStatus: "OFF" as const,
+      mode: "OFF" as const,
+      t212: {
+        ...baseStatus.t212,
+        connected: true,
+        environment: "PRACTICE" as const,
+        mode: "TRADING_212_PRACTICE_READ_ONLY",
+        currency: "EUR",
+        freeCash: 5000,
+        investedValue: 0,
+        totalValue: 5000,
+        selectedInstrument: null,
+        connectionState: "Connected" as const
+      },
+      t212GoldCandidates: [
+        {
+          instrumentId: "EGLNl_EQ",
+          ticker: "EGLNl_EQ",
+          name: "iShares Physical Gold",
+          currency: "EUR",
+          isin: "IE00B4ND3602",
+          exchange: null,
+          type: "ETF",
+          fractionalSupported: null,
+          minOrderQuantity: null,
+          minOrderValue: null,
+          marketOpen: null,
+          goldMatchReason: "Physical gold product candidate"
+        }
+      ]
+    };
+    api.autoTradeStatus.mockResolvedValue(t212Status);
+    api.autoTradeSelectBroker.mockResolvedValue(t212Status);
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-broker-badge")).toHaveTextContent(/T212 PRACTICE/i)
+    );
+    expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("autotrade-emergency-stop")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-t212-candidates")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-t212-confirm-warning")).toHaveTextContent(
+      /does not|No broker orders|long-only/i
+    );
+    expect(screen.getByTestId("autotrade-t212-confirm-instrument")).toBeDisabled();
+
+    await user.click(screen.getByTestId("autotrade-t212-select-EGLNl_EQ"));
+    expect(api.autoTradeT212ConfirmInstrument).not.toHaveBeenCalled();
+    expect(screen.getByTestId("autotrade-t212-confirm-summary")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-t212-confirm-ticker")).toHaveTextContent("EGLNl_EQ");
+    expect(screen.getByTestId("autotrade-t212-confirm-name")).toHaveTextContent(
+      "iShares Physical Gold"
+    );
+    expect(screen.getByTestId("autotrade-t212-confirm-currency")).toHaveTextContent("EUR");
+    expect(screen.getByTestId("autotrade-t212-confirm-isin")).toHaveTextContent("IE00B4ND3602");
+    expect(screen.getByTestId("autotrade-t212-confirm-summary")).toHaveTextContent(
+      /Trading 212 Practice — Read Only/i
+    );
+    expect(screen.getByTestId("autotrade-t212-confirm-summary")).toHaveTextContent(
+      /No orders will be submitted/i
+    );
+    expect(screen.getByTestId("autotrade-t212-confirm-instrument")).not.toBeDisabled();
+  });
 });
