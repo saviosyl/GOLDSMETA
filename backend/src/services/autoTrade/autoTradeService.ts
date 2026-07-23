@@ -28,11 +28,8 @@ import type { AutoTradeStorePort } from "./autoTradeStore";
 import { createExecutionOwnerId } from "./inMemoryAutoTradeStore";
 import {
   AUTOTRADE_STRATEGY_VERSION,
-  BROKER_EXECUTION_ENABLED,
   DEMO_ORDER_SUBMISSION_ENABLED,
   LIVE_EXECUTION_FEATURE_FLAG,
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED,
   buildDealReference,
   displayStatusFor,
   maskAccountId,
