@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Production deployment guard — owner Auth integrity (read-only).
+ * Production deployment guard — owner Auth integrity (READ-ONLY).
  *
  * Usage (production ADC / service account):
  *   GOLDMETA_PINNED_OWNER_UID=... GOLDMETA_OWNER_EMAIL=saviosyl@gmail.com \
@@ -11,7 +11,17 @@
  *   2 = OWNER_UID_MISMATCH / OWNER_AUTH_MISSING / DUPLICATE_OWNER_EMAIL / CONFIGURATION_MISSING
  *   1 = unexpected error
  *
- * Never mutates Auth. Do not run against production from ordinary unit tests.
+ * HARD RULES — this script must NEVER:
+ *   - call deleteUser / createUser / updateUser / setCustomUserClaims for repair
+ *   - rotate passwords or call SetAccountInfo
+ *   - send password-reset / OOB emails
+ *   - migrate or rewrite Firestore owner documents
+ *
+ * Deleting and recreating the owner by email creates the WRONG UID.
+ * If STATUS != HEALTHY: stop deploy verification; use break-glass restore only
+ * with explicit approval (scripts/restorePinnedOwnerAuth.ts).
+ *
+ * Do not run mutating Auth operations against production from ordinary unit tests.
  */
 
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
