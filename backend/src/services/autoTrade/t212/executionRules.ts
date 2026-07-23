@@ -159,8 +159,10 @@ export function translateXauusdToT212Invest(
       return block(SHORT_UNSUPPORTED_REASON, ["NO_LONG_HOLDING"]);
     }
     // Eligible to reduce/close long only — still submission-disabled.
+    // Official T212 order API requires NEGATIVE quantity for sells when submission is enabled later.
     riskGates.push("SELL_CLOSE_LONG_ONLY");
     reasonCodes.push("SELL_CLOSES_EXISTING_LONG");
+    reasonCodes.push("FUTURE_T212_SELL_QUANTITY_MUST_BE_NEGATIVE");
     return {
       action: "SELL_CLOSE",
       side: "SELL",
@@ -173,6 +175,7 @@ export function translateXauusdToT212Invest(
       riskEvaluation: {
         ...riskEvaluation,
         holdingQuantity: ctx.holdingQuantity,
+        futureSignedQuantity: -Math.abs(ctx.holdingQuantity),
         submissionDisabled: true
       }
     };

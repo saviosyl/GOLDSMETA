@@ -97,6 +97,22 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow write: if false;
       }
+      match /brokerSelection/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212SelectedInstrument/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212Proposals/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212ProposalIdempotency/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
       match /autoTradeActivity/{document=**} {
         allow read: if isOwner(userId);
         allow write: if false;

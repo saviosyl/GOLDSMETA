@@ -358,8 +358,8 @@ export const buildAutoTradeRouter = (
       confidence: z.number().nullable().optional(),
       score: z.number().nullable().optional(),
       generatedAt: z.string().nullable().optional(),
-      marketOpen: z.boolean().nullable().optional(),
-      holdingQuantity: z.number().optional()
+      marketOpen: z.boolean().nullable().optional()
+      // holdingQuantity intentionally omitted — server uses portfolio holdings only
     })
     .strict();
 
@@ -382,8 +382,7 @@ export const buildAutoTradeRouter = (
           generatedAt: parsed.data.generatedAt
         },
         {
-          marketOpen: parsed.data.marketOpen,
-          holdingQuantity: parsed.data.holdingQuantity
+          marketOpen: parsed.data.marketOpen
         }
       );
       res.json({

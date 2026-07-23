@@ -116,26 +116,30 @@ export async function runT212ReadOnlyDiagnostics(args: {
   const client = factory(args.environment, creds);
 
   try {
-    await client.authenticate();
-    const [cash, account, portfolio, instruments] = await Promise.all([
-      client.getCash(),
-      client.getAccount().catch(() => ({})),
-      client.getPortfolio(),
+    // Single official summary call covers auth + cash/account fields; avoid hammering 1/5s limit.
+    const summary = await client.getAccountSummary();
+    const [positions, instruments] = await Promise.all([
+      client.getPositions(),
       client.getInstruments()
     ]);
-    const heartbeatAt = await client.heartbeat();
+    const heartbeatAt = new Date().toISOString();
 
     const goldCandidates = searchGoldInstruments(instruments, args.query);
     const holdingForSelected = findHolding(
-      portfolio,
+      positions,
       args.selectedInstrument?.ticker ?? null
     );
 
-    const accountInfo = account as { id?: number | string; currencyCode?: string };
-    const currency =
-      cash.currency ??
-      accountInfo.currencyCode ??
-      DEFAULT_T212_RISK_LIMITS.currency;
+    const currency = summary.currency ?? DEFAULT_T212_RISK_LIMITS.currency;
+    const freeCash =
+      typeof summary.cash?.availableToTrade === "number"
+        ? summary.cash.availableToTrade
+        : null;
+    const investedValue =
+      typeof summary.investments?.currentValue === "number"
+        ? summary.investments.currentValue
+        : null;
+    const totalValue = typeof summary.totalValue === "number" ? summary.totalValue : null;
 
     return {
       ok: true,
@@ -148,21 +152,25 @@ export async function runT212ReadOnlyDiagnostics(args: {
       account: {
         environment: args.environment,
         currency,
-        freeCash: typeof cash.free === "number" ? cash.free : null,
-        investedValue: typeof cash.invested === "number" ? cash.invested : null,
-        totalValue: typeof cash.total === "number" ? cash.total : null,
+        freeCash,
+        investedValue,
+        totalValue,
         accountIdMasked: maskAccountId(
-          accountInfo.id != null ? String(accountInfo.id) : null
+          summary.id != null ? String(summary.id) : null
         )
       },
-      holdingsCount: portfolio.length,
+      holdingsCount: positions.length,
       goldCandidates,
       selectedInstrument: args.selectedInstrument,
       holdingForSelected,
       heartbeatAt,
       orderEndpointsCalled: false,
       errors,
-      notes
+      notes: [
+        ...notes,
+        "Uses official GET /equity/account/summary and GET /equity/positions.",
+        "Heartbeat is application-level (summary timestamp), not a T212 heartbeat API."
+      ]
     };
   } catch (error) {
     const code =
@@ -197,24 +205,40 @@ export function findHolding(
   portfolio: Array<{
     ticker?: string;
     quantity?: number;
+    quantityAvailableForTrading?: number;
     averagePrice?: number;
+    averagePricePaid?: number;
     currentPrice?: number;
     currency?: string;
+    instrument?: { ticker?: string; currency?: string };
   }>,
   ticker: string | null
 ): T212HoldingView | null {
   if (!ticker) return null;
-  const row = portfolio.find(
-    (p) => (p.ticker ?? "").toUpperCase() === ticker.toUpperCase()
-  );
+  const row = portfolio.find((p) => {
+    const t = (p.instrument?.ticker ?? p.ticker ?? "").toUpperCase();
+    return t === ticker.toUpperCase();
+  });
   if (!row) return null;
+  const resolvedTicker = row.instrument?.ticker ?? row.ticker ?? ticker;
+  const qty =
+    typeof row.quantityAvailableForTrading === "number"
+      ? row.quantityAvailableForTrading
+      : typeof row.quantity === "number"
+        ? row.quantity
+        : 0;
   return {
-    instrumentId: row.ticker ?? ticker,
-    ticker: row.ticker ?? ticker,
-    quantity: typeof row.quantity === "number" ? row.quantity : 0,
-    averagePrice: typeof row.averagePrice === "number" ? row.averagePrice : null,
+    instrumentId: resolvedTicker,
+    ticker: resolvedTicker,
+    quantity: qty,
+    averagePrice:
+      typeof row.averagePricePaid === "number"
+        ? row.averagePricePaid
+        : typeof row.averagePrice === "number"
+          ? row.averagePrice
+          : null,
     currentPrice: typeof row.currentPrice === "number" ? row.currentPrice : null,
-    currency: row.currency ?? null
+    currency: row.instrument?.currency ?? row.currency ?? null
   };
 }
 

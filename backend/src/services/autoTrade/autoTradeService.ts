@@ -943,7 +943,14 @@ export class AutoTradeService {
       }
       this.adapters.delete(userId);
     }
-    await this.audit(userId, "emergency_stop", {});
+    // Invalidate T212 confirm-mode proposals and clear in-memory T212 session.
+    await this.store.clearAwaitingT212Proposals(userId);
+    this.t212ConnectedEnvByUser.delete(userId);
+    this.t212ViewByUser.set(
+      userId,
+      buildDisconnectedT212View(await this.store.getT212SelectedInstrument(userId))
+    );
+    await this.audit(userId, "emergency_stop", { t212ProposalsCancelled: true });
     await this.activity(userId, "EMERGENCY STOP — AutoTrade locked and set to OFF.", "error");
     return this.getStatus(userId);
   }
@@ -1579,19 +1586,19 @@ export class AutoTradeService {
       );
     }
     if (environment === "LIVE") {
-      // Connection metadata allowed for future, but live remains locked / read-only flag.
-      await this.activity(
-        userId,
-        "Trading 212 Live Invest is locked — read-only diagnostics only; order submission disabled.",
-        "warn"
+      throw Object.assign(
+        new Error(
+          "Trading 212 Live Invest is locked for this release. Use Practice/Demo read-only only."
+        ),
+        { code: "T212_LIVE_LOCKED" }
       );
     }
 
     const instrument = await this.store.getT212SelectedInstrument(userId);
     const report = await runT212ReadOnlyDiagnostics({
-      environment: environment === "LIVE" ? "LIVE" : "PRACTICE",
+      environment: "PRACTICE",
       selectedInstrument: instrument,
-      credentials: this.t212CredentialLoader(environment === "LIVE" ? "LIVE" : "PRACTICE"),
+      credentials: this.t212CredentialLoader("PRACTICE"),
       clientFactory: this.t212ClientFactory
     });
     this.t212DiagnosticByUser.set(userId, report);
@@ -1692,33 +1699,44 @@ export class AutoTradeService {
     if (!check.ok) {
       throw Object.assign(new Error(check.reason), { code: check.reason });
     }
-    // Never auto-pick: require the client-supplied ticker/id match a known candidate when list present.
-    if (candidates.length > 0) {
-      const found = candidates.find(
-        (c) =>
-          c.instrumentId === candidate.instrumentId || c.ticker === candidate.ticker
-      );
-      if (!found) {
-        throw Object.assign(new Error("INSTRUMENT_NOT_IN_CATALOGUE"), {
-          code: "INSTRUMENT_NOT_IN_CATALOGUE"
-        });
-      }
+    // Never auto-pick: require the client-supplied ticker/id match a known candidate.
+    // Empty catalogue means no confirmation allowed (prevents arbitrary instrument IDs).
+    if (candidates.length === 0) {
+      throw Object.assign(new Error("INSTRUMENT_CATALOGUE_REQUIRED"), {
+        code: "INSTRUMENT_CATALOGUE_REQUIRED"
+      });
+    }
+    const found = candidates.find(
+      (c) =>
+        c.instrumentId === candidate.instrumentId || c.ticker === candidate.ticker
+    );
+    if (!found) {
+      throw Object.assign(new Error("INSTRUMENT_NOT_IN_CATALOGUE"), {
+        code: "INSTRUMENT_NOT_IN_CATALOGUE"
+      });
     }
 
+    const previous = await this.store.getT212SelectedInstrument(userId);
     const selected: T212SelectedInstrument = {
-      instrumentId: candidate.instrumentId,
-      ticker: candidate.ticker,
-      name: candidate.name,
-      currency: candidate.currency,
-      isin: candidate.isin ?? null,
-      exchange: candidate.exchange ?? null,
-      fractionalSupported: candidate.fractionalSupported ?? null,
-      minOrderQuantity: candidate.minOrderQuantity ?? null,
-      minOrderValue: candidate.minOrderValue ?? null,
+      instrumentId: found.instrumentId,
+      ticker: found.ticker,
+      name: found.name,
+      currency: found.currency ?? candidate.currency,
+      isin: found.isin ?? candidate.isin ?? null,
+      exchange: found.exchange ?? candidate.exchange ?? null,
+      fractionalSupported: found.fractionalSupported ?? candidate.fractionalSupported ?? null,
+      minOrderQuantity: found.minOrderQuantity ?? candidate.minOrderQuantity ?? null,
+      minOrderValue: found.minOrderValue ?? candidate.minOrderValue ?? null,
       confirmedAt: nowIso(),
       confirmedBy: userId
     };
     await this.store.saveT212SelectedInstrument(userId, selected);
+    if (
+      previous &&
+      (previous.instrumentId !== selected.instrumentId || previous.ticker !== selected.ticker)
+    ) {
+      await this.store.clearAwaitingT212Proposals(userId);
+    }
     const view = this.t212ViewByUser.get(userId) ?? buildDisconnectedT212View(selected);
     this.t212ViewByUser.set(userId, { ...view, selectedInstrument: selected });
     await this.audit(userId, "t212_instrument_confirmed", {
@@ -1745,8 +1763,10 @@ export class AutoTradeService {
   ): Promise<{ proposal: T212ExecutionProposal; preview: ReturnType<typeof buildDryRunPreview>; status: AutoTradeStatusPayload }> {
     await this.ensureRestartPolicy(userId);
     assertOrderSubmissionDisabled();
-    if (!BROKER_EXECUTION_ENABLED && !T212_PAPER_ORDER_SUBMISSION_ENABLED) {
-      // expected path
+
+    const risk = await this.store.getRiskState(userId);
+    if (risk.emergencyStopActive || risk.locked) {
+      throw Object.assign(new Error("AUTOTRADE_LOCKED"), { code: "AUTOTRADE_LOCKED" });
     }
 
     const selection = await this.store.getBrokerSelection(userId);
@@ -1759,6 +1779,7 @@ export class AutoTradeService {
     const instrument = await this.store.getT212SelectedInstrument(userId);
     const view = this.t212ViewByUser.get(userId) ?? buildDisconnectedT212View(instrument);
     const environment = this.t212ConnectedEnvByUser.get(userId) ?? "PRACTICE";
+    // Prefer server-observed holding; optional override is test-only and never comes from browser payloads.
     const holdingQuantity =
       opts.holdingQuantity ?? view.holdingQuantity ?? 0;
 
@@ -1891,6 +1912,16 @@ export class AutoTradeService {
       });
     }
 
+    const risk = await this.store.getRiskState(userId);
+    if (risk.emergencyStopActive || risk.locked) {
+      throw Object.assign(new Error("AUTOTRADE_LOCKED"), { code: "AUTOTRADE_LOCKED" });
+    }
+
+    const selection = await this.store.getBrokerSelection(userId);
+    if (selection.selectedBroker !== "T212_INVEST") {
+      throw Object.assign(new Error("BROKER_NOT_T212"), { code: "BROKER_NOT_T212" });
+    }
+
     const list = await this.store.listT212Proposals(userId, 50);
     const proposal = list.find((p) => p.proposalId === proposalId);
     if (!proposal) {
@@ -1901,6 +1932,32 @@ export class AutoTradeService {
         code: "PROPOSAL_OWNERSHIP_MISMATCH"
       });
     }
+    if (
+      proposal.status !== "AWAITING_CONFIRMATION" &&
+      proposal.status !== "CREATED" &&
+      proposal.status !== "SUBMISSION_DISABLED"
+    ) {
+      throw Object.assign(new Error("PROPOSAL_NOT_CONFIRMABLE"), {
+        code: "PROPOSAL_NOT_CONFIRMABLE"
+      });
+    }
+
+    const selected = await this.store.getT212SelectedInstrument(userId);
+    if (
+      !selected ||
+      selected.instrumentId !== proposal.instrumentId ||
+      selected.ticker !== proposal.instrumentTicker
+    ) {
+      const rejected = {
+        ...proposal,
+        status: "REJECTED" as const,
+        rejectionReason: "INSTRUMENT_CHANGED",
+        updatedAt: nowIso()
+      };
+      await this.store.saveT212Proposal(rejected);
+      throw Object.assign(new Error("INSTRUMENT_CHANGED"), { code: "INSTRUMENT_CHANGED" });
+    }
+
     if (Date.parse(proposal.expiresAt) < Date.now()) {
       const expired = {
         ...proposal,

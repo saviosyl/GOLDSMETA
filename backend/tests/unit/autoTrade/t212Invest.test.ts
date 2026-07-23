@@ -45,18 +45,19 @@ function serviceWithT212(fetchImpl?: typeof fetch) {
             fetchImpl ??
             (async (url: RequestInfo | URL) => {
               const path = String(url);
-              if (path.includes("/equity/account/cash")) {
+              if (path.includes("/equity/account/summary")) {
                 return new Response(
-                  JSON.stringify({ free: 500, total: 1000, invested: 500, currency: "EUR" }),
+                  JSON.stringify({
+                    id: 12345,
+                    currency: "EUR",
+                    totalValue: 1000,
+                    cash: { availableToTrade: 500, inPies: 0, reservedForOrders: 0 },
+                    investments: { currentValue: 500, totalCost: 480 }
+                  }),
                   { status: 200 }
                 );
               }
-              if (path.includes("/equity/account/info")) {
-                return new Response(JSON.stringify({ id: 12345, currencyCode: "EUR" }), {
-                  status: 200
-                });
-              }
-              if (path.includes("/equity/portfolio")) {
+              if (path.includes("/equity/positions")) {
                 return new Response(JSON.stringify([]), { status: 200 });
               }
               if (path.includes("/equity/metadata/instruments")) {
@@ -88,9 +89,11 @@ function serviceWithT212(fetchImpl?: typeof fetch) {
                 );
               }
               if (path.includes("/equity/orders") || path.includes("/equity/history")) {
-                return new Response(JSON.stringify([]), { status: 200 });
+                return new Response(JSON.stringify({ items: [], nextPagePath: null }), {
+                  status: 200
+                });
               }
-              return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
+              return new Response(JSON.stringify({ error: "unexpected", path }), { status: 500 });
             }) as typeof fetch
         })
     }
@@ -184,24 +187,27 @@ describe("Trading 212 Invest broker integration", () => {
     const { service } = serviceWithT212(async (url) => {
       called.push(String(url));
       const path = String(url);
-      if (path.includes("/cash")) {
+      if (path.includes("/summary")) {
         return new Response(
-          JSON.stringify({ free: 100, total: 200, invested: 100, currency: "EUR" }),
+          JSON.stringify({
+            id: 1,
+            currency: "EUR",
+            totalValue: 200,
+            cash: { availableToTrade: 100 },
+            investments: { currentValue: 100 }
+          }),
           { status: 200 }
         );
       }
-      if (path.includes("/info")) {
-        return new Response(JSON.stringify({ id: 1, currencyCode: "EUR" }), { status: 200 });
-      }
-      if (path.includes("/portfolio")) return new Response(JSON.stringify([]), { status: 200 });
+      if (path.includes("/positions")) return new Response(JSON.stringify([]), { status: 200 });
       if (path.includes("/instruments")) {
         return new Response(
           JSON.stringify([{ ticker: "SGLD_EQ", name: "Physical Gold ETC", currencyCode: "EUR" }]),
           { status: 200 }
         );
       }
-      if (path.includes("/orders")) {
-        throw new Error("ORDER_ENDPOINT_SHOULD_NOT_BE_CALLED_IN_DIAGNOSTICS");
+      if (path.includes("/orders/market") || path.includes("/orders/limit")) {
+        throw new Error("ORDER_ENDPOINT_SHOULD_NOT_BE_CALLED");
       }
       return new Response("{}", { status: 200 });
     });
@@ -210,10 +216,98 @@ describe("Trading 212 Invest broker integration", () => {
     expect(status.t212?.connected).toBe(true);
     expect(status.t212?.ordersEnabled).toBe(false);
     expect(status.brokerBadge).toBe("T212 PRACTICE — READ ONLY");
-    expect(called.some((u) => /\/equity\/orders$/.test(u))).toBe(false);
+    expect(called.some((u) => /\/equity\/account\/summary/.test(u))).toBe(true);
+    expect(called.some((u) => /\/equity\/positions/.test(u))).toBe(true);
+    expect(called.some((u) => /\/equity\/account\/cash/.test(u))).toBe(false);
+    expect(called.some((u) => /\/equity\/portfolio/.test(u))).toBe(false);
+    expect(called.some((u) => /\/equity\/orders\/(market|limit)/.test(u))).toBe(false);
     const diag = await service.refreshT212Diagnostics("u1");
     expect(diag.t212LastDiagnosticReport?.orderEndpointsCalled).toBe(false);
     expect(diag.t212LastDiagnosticReport?.ordersEnabled).toBe(false);
+  });
+
+  it("hard-locks LIVE Trading 212 connect without loading live secrets", async () => {
+    const { service } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await expect(service.connectTrading212("u1", "LIVE")).rejects.toMatchObject({
+      code: "T212_LIVE_LOCKED"
+    });
+  });
+
+  it("emergency STOP cancels awaiting proposals and blocks dry-run approval", async () => {
+    const { service, store } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await service.connectTrading212("u1", "PRACTICE");
+    await service.confirmT212Instrument("u1", {
+      instrumentId: "SGLD_EQ",
+      ticker: "SGLD_EQ",
+      name: "Physical Gold ETC",
+      currency: "EUR"
+    });
+    const created = await service.createT212ExecutionProposal(
+      "u1",
+      {
+        decisionId: "stop-1",
+        decision: "BUY",
+        confidence: 90,
+        generatedAt: new Date().toISOString()
+      },
+      { marketOpen: true }
+    );
+    expect(created.proposal.status).toBe("AWAITING_CONFIRMATION");
+    await service.emergencyStop("u1");
+    const proposals = await store.listT212Proposals("u1");
+    expect(proposals.find((p) => p.proposalId === created.proposal.proposalId)?.status).toBe(
+      "CANCELLED"
+    );
+    await expect(
+      service.approveT212ProposalDryRun("u1", created.proposal.proposalId)
+    ).rejects.toMatchObject({ code: "AUTOTRADE_LOCKED" });
+  });
+
+  it("instrument change after proposal rejects dry-run approval", async () => {
+    const { service } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await service.connectTrading212("u1", "PRACTICE");
+    await service.confirmT212Instrument("u1", {
+      instrumentId: "SGLD_EQ",
+      ticker: "SGLD_EQ",
+      name: "Physical Gold ETC",
+      currency: "EUR"
+    });
+    const created = await service.createT212ExecutionProposal(
+      "u1",
+      {
+        decisionId: "inst-change",
+        decision: "BUY",
+        confidence: 90,
+        generatedAt: new Date().toISOString()
+      },
+      { marketOpen: true }
+    );
+    await service.confirmT212Instrument("u1", {
+      instrumentId: "GLD_US",
+      ticker: "GLD_US",
+      name: "SPDR Gold Shares ETF",
+      currency: "USD"
+    });
+    await expect(
+      service.approveT212ProposalDryRun("u1", created.proposal.proposalId)
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMABLE" });
+    // Prior awaiting proposal cancelled on instrument change; recreate path is separate.
+  });
+
+  it("rejects arbitrary instrument confirmation without catalogue", async () => {
+    const { service } = serviceWithT212();
+    await service.selectBroker("u1", "T212_INVEST");
+    await expect(
+      service.confirmT212Instrument("u1", {
+        instrumentId: "FAKE",
+        ticker: "FAKE",
+        name: "Fake Gold",
+        currency: "EUR"
+      })
+    ).rejects.toMatchObject({ code: "INSTRUMENT_CATALOGUE_REQUIRED" });
   });
 
   it("instrument search does not auto-select", async () => {
