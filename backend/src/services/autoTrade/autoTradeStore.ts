@@ -20,8 +20,27 @@ import type {
   T212ExecutionProposal,
   T212SelectedInstrument
 } from "./t212/types";
+import type {
+  PracticeAutoQualificationState,
+  T212AutomationMode,
+  T212OrderIntent
+} from "./t212/orderIntent";
+import { isUnresolvedIntentState } from "./t212/orderIntent";
 import { createDefaultRiskState } from "./riskEngine";
 import { nowIso } from "../../utils/time";
+
+export type ClaimT212OrderIntentResult =
+  | { status: "claimed"; intent: T212OrderIntent }
+  | { status: "duplicate"; intent: T212OrderIntent }
+  | { status: "lease_held"; intent: T212OrderIntent };
+
+export interface ClaimT212OrderIntentInput {
+  userId: string;
+  intentKey: string;
+  ownerId: string;
+  leaseMs?: number;
+  create: () => T212OrderIntent;
+}
 
 export const INTENT_LEASE_MS = 60_000;
 
@@ -136,6 +155,24 @@ export interface AutoTradeStorePort {
     instrument: T212SelectedInstrument,
     invalidateAwaiting: boolean
   ): Promise<void>;
+  getT212AutomationMode(userId: string): Promise<T212AutomationMode>;
+  saveT212AutomationMode(userId: string, mode: T212AutomationMode): Promise<T212AutomationMode>;
+  getT212OrderIntent(userId: string, intentId: string): Promise<T212OrderIntent | null>;
+  saveT212OrderIntent(intent: T212OrderIntent): Promise<T212OrderIntent>;
+  listT212OrderIntents(userId: string, limit?: number): Promise<T212OrderIntent[]>;
+  listUnresolvedT212OrderIntents(userId: string): Promise<T212OrderIntent[]>;
+  claimT212OrderIntent(input: ClaimT212OrderIntentInput): Promise<ClaimT212OrderIntentResult>;
+  releaseT212OrderIntentLease(
+    userId: string,
+    intentId: string,
+    ownerId: string
+  ): Promise<void>;
+  getT212PracticeAutoQualification(
+    userId: string
+  ): Promise<PracticeAutoQualificationState>;
+  saveT212PracticeAutoQualification(
+    state: PracticeAutoQualificationState
+  ): Promise<PracticeAutoQualificationState>;
 }
 
 export function defaultBrokerSelection(userId: string): BrokerSelectionDoc {
@@ -144,6 +181,17 @@ export function defaultBrokerSelection(userId: string): BrokerSelectionDoc {
     selectedBroker: "MANUAL",
     updatedAt: nowIso()
   };
+}
+
+export function defaultT212AutomationMode(): T212AutomationMode {
+  return "OFF";
+}
+
+/** Helper for store implementations. */
+export function filterUnresolvedT212Intents(
+  intents: T212OrderIntent[]
+): T212OrderIntent[] {
+  return intents.filter((i) => isUnresolvedIntentState(i.state));
 }
 
 export function defaultConnection(userId: string): BrokerConnectionDoc {

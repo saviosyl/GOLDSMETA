@@ -4,9 +4,9 @@
  */
 
 import {
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED
-} from "../types";
+  isT212LiveExecutionFeatureFlag,
+  isT212PaperOrderSubmissionEnabled
+} from "../executionFlags";
 
 export type SelectedBrokerId = "MANUAL" | "T212_INVEST" | "IG_DEMO";
 
@@ -219,7 +219,14 @@ export function badgeForBroker(
 }
 
 export function assertT212OrderFlagsDisabled(): void {
-  if (T212_PAPER_ORDER_SUBMISSION_ENABLED || T212_LIVE_EXECUTION_FEATURE_FLAG) {
+  // Live must never be enabled. Paper may be enabled only in apiT212OrderPreview.
+  if (isT212LiveExecutionFeatureFlag()) {
+    throw new Error("T212_LIVE_EXECUTION_FEATURE_DISABLED");
+  }
+  if (
+    isT212PaperOrderSubmissionEnabled() &&
+    process.env.T212_ORDER_PREVIEW !== "true"
+  ) {
     throw new Error("T212_ORDER_FLAGS_MUST_REMAIN_FALSE");
   }
 }

@@ -28,11 +28,8 @@ import type { AutoTradeStorePort } from "./autoTradeStore";
 import { createExecutionOwnerId } from "./inMemoryAutoTradeStore";
 import {
   AUTOTRADE_STRATEGY_VERSION,
-  BROKER_EXECUTION_ENABLED,
   DEMO_ORDER_SUBMISSION_ENABLED,
   LIVE_EXECUTION_FEATURE_FLAG,
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED,
   buildDealReference,
   displayStatusFor,
   maskAccountId,
@@ -44,6 +41,19 @@ import {
   type TradeIntentState,
   type TradingSessionId
 } from "./types";
+import { assertPracticeOrderSubmissionAllowed } from "./executionFlags";
+import type { T212AutomationMode } from "./t212/orderIntent";
+import { evaluatePracticeAutoQualification } from "./t212/qualification";
+import {
+  buildPracticeOrderReadiness,
+  prepareAndOptionallySubmitPracticeOrder,
+  recoverUnresolvedT212Intents
+} from "./t212/orderExecution";
+import {
+  loadT212CredentialsFromServerEnv,
+  T212InvestClient,
+  type T212Credentials
+} from "./t212/client";
 import {
   badgeForBroker,
   DEFAULT_T212_RISK_LIMITS,
@@ -74,10 +84,6 @@ import {
   requireExplicitInstrumentSelection,
   toGoldCandidate
 } from "./t212/instruments";
-import {
-  loadT212CredentialsFromServerEnv,
-  type T212Credentials
-} from "./t212/client";
 
 export interface DecisionSignalInput {
   decisionId: string;
@@ -1945,11 +1951,8 @@ export class AutoTradeService {
     opts: { confirmMethod?: "manual" | "biometric_future" } = {}
   ): Promise<{ proposal: T212ExecutionProposal; status: AutoTradeStatusPayload }> {
     assertOrderSubmissionDisabled();
-    if (T212_PAPER_ORDER_SUBMISSION_ENABLED || T212_LIVE_EXECUTION_FEATURE_FLAG || BROKER_EXECUTION_ENABLED) {
-      throw Object.assign(new Error("T212_ORDER_FLAGS_MUST_REMAIN_FALSE"), {
-        code: "T212_ORDER_FLAGS_MUST_REMAIN_FALSE"
-      });
-    }
+    // Dry-run approval never submits a broker order. Practice submission uses
+    // confirmAndSubmitT212PracticeOrder after separate owner approval.
 
     const risk = await this.store.getRiskState(userId);
     if (risk.emergencyStopActive || risk.locked) {
@@ -2033,6 +2036,117 @@ export class AutoTradeService {
       "success"
     );
     return { proposal: approved, status: await this.getStatus(userId) };
+  }
+
+  async getT212AutomationMode(userId: string) {
+    return this.store.getT212AutomationMode(userId);
+  }
+
+  async setT212AutomationMode(userId: string, mode: T212AutomationMode) {
+    await this.ensureRestartPolicy(userId);
+    assertOrderSubmissionDisabled();
+    if (mode === "LIVE_LOCKED") {
+      await this.store.saveT212AutomationMode(userId, "LIVE_LOCKED");
+      let risk = await this.store.getRiskState(userId);
+      risk = { ...risk, mode: "OFF", updatedAt: nowIso() };
+      await this.store.saveRiskState(risk);
+      await this.activity(userId, "T212 LIVE — LOCKED selected. AutoTrade OFF.", "warn");
+      return this.getStatus(userId);
+    }
+    if (mode === "PRACTICE_AUTO") {
+      const qual = await this.store.getT212PracticeAutoQualification(userId);
+      const gate = evaluatePracticeAutoQualification(qual);
+      if (!gate.unlocked) {
+        throw Object.assign(new Error("PRACTICE_AUTO_LOCKED"), {
+          code: "PRACTICE_AUTO_LOCKED",
+          failedGates: gate.failedGates
+        });
+      }
+    }
+    await this.store.saveT212AutomationMode(userId, mode);
+    let risk = await this.store.getRiskState(userId);
+    risk = { ...risk, mode: "OFF", updatedAt: nowIso() };
+    await this.store.saveRiskState(risk);
+    await this.store.clearAwaitingT212Proposals(userId);
+    await this.activity(
+      userId,
+      `T212 automation mode set to ${mode}. AutoTrade forced OFF. No order placed.`,
+      "warn"
+    );
+    return this.getStatus(userId);
+  }
+
+  async getT212PracticeOrderReadiness(userId: string) {
+    const mode = await this.store.getT212AutomationMode(userId);
+    return buildPracticeOrderReadiness({
+      userId,
+      store: this.store,
+      clientFactory: this.t212ClientFactory,
+      automationMode: mode
+    });
+  }
+
+  /**
+   * Prepare Practice order intent from a trusted stored decisionId only.
+   * Does not submit unless submit=true AND T212_ALLOW_PRACTICE_SUBMIT=true AND mode permits.
+   */
+  async prepareT212PracticeOrder(
+    userId: string,
+    decisionId: string,
+    opts: { proposalId?: string | null; submit?: boolean } = {}
+  ) {
+    const mode = await this.store.getT212AutomationMode(userId);
+    const submit =
+      Boolean(opts.submit) &&
+      process.env.T212_ALLOW_PRACTICE_SUBMIT === "true" &&
+      (mode === "CONFIRM" || mode === "PRACTICE_AUTO");
+    return prepareAndOptionallySubmitPracticeOrder({
+      userId,
+      decisionId,
+      proposalId: opts.proposalId,
+      store: this.store,
+      automationMode: mode,
+      submit,
+      ownerId: this.ownerId,
+      clientFactory: this.t212ClientFactory
+    });
+  }
+
+  async recoverT212PracticeOrders(userId: string) {
+    const intents = await recoverUnresolvedT212Intents({
+      userId,
+      store: this.store,
+      clientFactory: this.t212ClientFactory
+    });
+    return { intents, status: await this.getStatus(userId) };
+  }
+
+  async cancelGoldMetaPracticePendingOrder(userId: string, orderId: string) {
+    assertOrderSubmissionDisabled();
+    assertPracticeOrderSubmissionAllowed();
+    const intents = await this.store.listT212OrderIntents(userId, 100);
+    const owned = intents.find((i) => i.brokerOrderId === orderId);
+    if (!owned) {
+      throw Object.assign(new Error("ORDER_NOT_OWNED_BY_GOLDMETA"), {
+        code: "ORDER_NOT_OWNED_BY_GOLDMETA"
+      });
+    }
+    const creds = loadT212CredentialsFromServerEnv("PRACTICE");
+    if (!creds) {
+      throw Object.assign(new Error("T212_CREDENTIALS_MISSING_SERVER_SIDE"), {
+        code: "T212_CREDENTIALS_MISSING_SERVER_SIDE"
+      });
+    }
+    const client = new T212InvestClient("PRACTICE", creds, { mutationsEnabled: true });
+    await client.cancelOrder(orderId);
+    await this.store.saveT212OrderIntent({
+      ...owned,
+      state: "CANCELLED",
+      updatedAt: nowIso(),
+      brokerStatus: "CANCELLED"
+    });
+    await this.activity(userId, `Cancelled GoldMeta Practice order ${orderId.slice(0, 8)}…`, "warn");
+    return this.getStatus(userId);
   }
 }
 

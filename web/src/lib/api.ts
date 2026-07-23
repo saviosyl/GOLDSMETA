@@ -723,4 +723,40 @@ export class ApiClient {
     });
     return body;
   }
+
+  async autoTradeT212SetAutomationMode(
+    mode: import("./autoTradeTypes").T212AutomationMode
+  ): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>(
+      "/v1/autotrade/t212/automation-mode",
+      {
+        method: "POST",
+        body: JSON.stringify({ mode })
+      }
+    );
+    return body.status;
+  }
+
+  async autoTradeT212OrderReadiness(): Promise<{
+    readiness: Record<string, unknown>;
+    orderPlaced: false;
+    productionOrderDeployment: false;
+  }> {
+    return this.request("/v1/autotrade/t212/orders/readiness");
+  }
+
+  async autoTradeT212PrepareOrder(decisionId: string, proposalId?: string) {
+    return this.request<{
+      intent: Record<string, unknown>;
+      submitted: false;
+      orderPlaced: false;
+      readiness: Record<string, unknown>;
+    }>("/v1/autotrade/t212/orders/prepare", {
+      method: "POST",
+      body: JSON.stringify({
+        decisionId,
+        ...(proposalId ? { proposalId } : {})
+      })
+    });
+  }
 }

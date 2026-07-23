@@ -437,6 +437,142 @@ export const buildAutoTradeRouter = (
     }
   });
 
+  const t212AutomationModeSchema = z
+    .object({
+      mode: z.enum(["OFF", "MANUAL", "CONFIRM", "PRACTICE_AUTO", "LIVE_LOCKED"])
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/automation-mode", requireAuth, async (req, res) => {
+    const parsed = t212AutomationModeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_AUTOMATION_MODE", message: "Invalid T212 automation mode" }
+      });
+      return;
+    }
+    try {
+      const status = await service.setT212AutomationMode(
+        getAuthenticatedUserId(req),
+        parsed.data.mode
+      );
+      res.json({ status, mode: parsed.data.mode });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "AUTOMATION_MODE_FAILED",
+          message: error instanceof Error ? error.message : "Mode change failed",
+          failedGates: (error as { failedGates?: string[] }).failedGates
+        }
+      });
+    }
+  });
+
+  router.get("/v1/autotrade/t212/orders/readiness", requireAuth, async (req, res) => {
+    try {
+      const readiness = await service.getT212PracticeOrderReadiness(
+        getAuthenticatedUserId(req)
+      );
+      res.json({
+        readiness,
+        orderPlaced: false,
+        productionOrderDeployment: false
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "READINESS_FAILED",
+          message: error instanceof Error ? error.message : "Readiness failed"
+        }
+      });
+    }
+  });
+
+  const t212PrepareSchema = z
+    .object({
+      decisionId: z.string().min(4),
+      proposalId: z.string().min(4).optional()
+      // Browser must NOT send action/quantity/ticker/price/marketOpen/confidence
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/orders/prepare", requireAuth, async (req, res) => {
+    const parsed = t212PrepareSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: {
+          code: "INVALID_PREPARE",
+          message: "decisionId required; executable fields must not be client-supplied"
+        }
+      });
+      return;
+    }
+    try {
+      const result = await service.prepareT212PracticeOrder(
+        getAuthenticatedUserId(req),
+        parsed.data.decisionId,
+        { proposalId: parsed.data.proposalId, submit: false }
+      );
+      res.json({
+        intent: result.intent,
+        submitted: false,
+        orderPlaced: false,
+        readiness: result.readiness
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "PREPARE_FAILED",
+          message: error instanceof Error ? error.message : "Prepare failed"
+        }
+      });
+    }
+  });
+
+  router.post("/v1/autotrade/t212/orders/recover", requireAuth, async (req, res) => {
+    try {
+      const result = await service.recoverT212PracticeOrders(getAuthenticatedUserId(req));
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "RECOVER_FAILED",
+          message: error instanceof Error ? error.message : "Recover failed"
+        }
+      });
+    }
+  });
+
+  const t212CancelSchema = z
+    .object({
+      orderId: z.string().min(1).max(64)
+    })
+    .strict();
+
+  router.post("/v1/autotrade/t212/orders/cancel-pending", requireAuth, async (req, res) => {
+    const parsed = t212CancelSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: "INVALID_CANCEL", message: "orderId required" }
+      });
+      return;
+    }
+    try {
+      const status = await service.cancelGoldMetaPracticePendingOrder(
+        getAuthenticatedUserId(req),
+        parsed.data.orderId
+      );
+      res.json({ status, cancelled: true });
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: (error as { code?: string }).code ?? "CANCEL_FAILED",
+          message: error instanceof Error ? error.message : "Cancel failed"
+        }
+      });
+    }
+  });
+
   router.post("/v1/autotrade/emergency-stop", requireAuth, async (req, res) => {
     const status = await service.emergencyStop(getAuthenticatedUserId(req));
     res.json({

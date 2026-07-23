@@ -380,6 +380,38 @@ export function AutoTradePage() {
               Invest instrument as a proxy (not direct XAUUSD trading). Long-only: SELL with no
               holding is unsupported. No broker orders will be submitted.
             </p>
+            <div
+              className="gm-autotrade-actions"
+              data-testid="autotrade-t212-automation-modes"
+            >
+              {(
+                [
+                  ["OFF", "OFF"],
+                  ["MANUAL", "MANUAL"],
+                  ["CONFIRM", "CONFIRM"],
+                  ["PRACTICE_AUTO", "PRACTICE_AUTO (locked)"],
+                  ["LIVE_LOCKED", "T212 LIVE — LOCKED"]
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className="gm-btn"
+                  disabled={busy || status?.locked || mode === "LIVE_LOCKED"}
+                  data-testid={`autotrade-t212-mode-${mode.toLowerCase()}`}
+                  onClick={() =>
+                    void run(() => api.autoTradeT212SetAutomationMode(mode))
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="gm-autotrade-instrument-warning">
+              Default OFF/MANUAL. PRACTICE_AUTO stays locked until qualification gates pass and
+              the owner unlocks it. LIVE remains impossible. Production api does not submit
+              orders; order automation uses isolated order-preview only.
+            </p>
             <div className="gm-autotrade-actions">
               <button
                 type="button"

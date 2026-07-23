@@ -17,9 +17,10 @@ import {
   type T212Environment
 } from "./types";
 import {
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED
-} from "../types";
+  isPracticeOrderSubmissionAllowed,
+  isT212LiveExecutionFeatureFlag,
+  isT212PaperOrderSubmissionEnabled
+} from "../executionFlags";
 
 export interface GoldMetaDecisionInput {
   decisionId: string;
@@ -100,8 +101,9 @@ export function translateXauusdToT212Invest(
   const reasonCodes: string[] = [];
   const riskGates: string[] = [];
   const riskEvaluation: Record<string, unknown> = {
-    paperOrderSubmissionEnabled: T212_PAPER_ORDER_SUBMISSION_ENABLED,
-    liveExecutionFeatureEnabled: T212_LIVE_EXECUTION_FEATURE_FLAG,
+    paperOrderSubmissionEnabled: isT212PaperOrderSubmissionEnabled(),
+    liveExecutionFeatureEnabled: isT212LiveExecutionFeatureFlag(),
+    practiceOrderSubmissionAllowed: isPracticeOrderSubmissionAllowed(),
     disclaimer: T212_PROXY_DISCLAIMER
   };
 
@@ -117,9 +119,8 @@ export function translateXauusdToT212Invest(
     riskEvaluation: { ...riskEvaluation, blocked: true, reason }
   });
 
-  if (T212_PAPER_ORDER_SUBMISSION_ENABLED || T212_LIVE_EXECUTION_FEATURE_FLAG) {
-    // Fail closed even if someone flips constants incorrectly in a branch.
-    return block("T212_ORDER_FLAGS_MUST_REMAIN_FALSE");
+  if (isT212LiveExecutionFeatureFlag()) {
+    return block("T212_LIVE_LOCKED");
   }
 
   if (limits.requireSelectedInstrument && !ctx.instrument) {
