@@ -332,6 +332,18 @@ describe("Trading 212 Invest broker integration", () => {
         name: "IncomeShares Gold+ Yield",
         currencyCode: "EUR",
         type: "ETF"
+      },
+      {
+        ticker: "IAUP",
+        name: "iShares Gold Producers (Acc)",
+        currencyCode: "CHF",
+        type: "ETF"
+      },
+      {
+        ticker: "GLDU",
+        name: "UBS Bloomberg CMCI Components USD Total Return Gold Index",
+        currencyCode: "USD",
+        type: "ETF"
       }
     ];
     const candidates = searchGoldInstruments(instruments);

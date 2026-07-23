@@ -14,7 +14,7 @@ const GOLD_NAME_RE =
  * and unrelated commodities. Prefer physically backed gold ETC/ETP/ETF names.
  */
 const EXCLUDE_RE =
-  /\b(mining|miners?|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin|leveraged|leverage|inverse|ultrashort|ultralong|ultra\s*short|ultra\s*long|short\s+gold|daily\s+short|1x\s+daily\s+short|long\s+gold\s+miners|income|yield|covered\s+call|3x|2x|-3x|-2x)\b|ultra(?=short|long)/i;
+  /\b(mining|miners?|producers?|junior|explorer|royalty|silver|platinum|palladium|crypto|bitcoin|leveraged|leverage|inverse|ultrashort|ultralong|ultra\s*short|ultra\s*long|short\s+gold|daily\s+short|1x\s+daily\s+short|long\s+gold\s+miners|income|yield|covered\s+call|cmci|components?|3x|2x|-3x|-2x)\b|ultra(?=short|long)/i;
 
 const ALLOWED_TYPES = new Set(["ETF", "ETC", "ETP"]);
 
