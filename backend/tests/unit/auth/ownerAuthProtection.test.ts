@@ -122,3 +122,33 @@ describe("authIntegrity monitor", () => {
     expect(cfg.pinnedOwnerUid).toBeNull();
   });
 });
+
+describe("owner auth scripts hard rules", () => {
+  it("verifyOwnerAuthIntegrity source never mutates Auth", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../../../scripts/verifyOwnerAuthIntegrity.ts"),
+      "utf8"
+    );
+    expect(src).toMatch(/READ-ONLY|read-only/i);
+    expect(src).not.toMatch(/deleteUser\s*\(/);
+    expect(src).not.toMatch(/createUser\s*\(/);
+    expect(src).not.toMatch(/updateUser\s*\(/);
+    expect(src).not.toMatch(/generatePasswordResetLink/);
+    expect(src).not.toMatch(/sendOobCode/);
+  });
+
+  it("restorePinnedOwnerAuth requires explicit break-glass approval string", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../../../scripts/restorePinnedOwnerAuth.ts"),
+      "utf8"
+    );
+    expect(src).toContain("YES_I_APPROVE_PINNED_OWNER_RESTORE");
+    expect(src).toContain("createUser");
+    expect(src).toMatch(/uid:\s*pinned/);
+    expect(src).toMatch(/never prints|Never prints|never print/i);
+  });
+});
