@@ -3,6 +3,177 @@
 export type AutoTradeMode = "OFF" | "SHADOW" | "IG_DEMO_AUTO" | "IG_LIVE_AUTO";
 export type AutoTradeDisplayStatus = "OFF" | "SHADOW" | "DEMO" | "LIVE" | "LOCKED";
 
+export type SelectedBrokerId = "MANUAL" | "T212_INVEST" | "IG_DEMO";
+export type T212Environment = "PRACTICE" | "LIVE";
+export type T212ConnectionMode =
+  | "TRADING_212_PRACTICE_READ_ONLY"
+  | "TRADING_212_LIVE_LOCKED";
+
+export type BrokerBadge =
+  | "MANUAL"
+  | "T212 PRACTICE — READ ONLY"
+  | "T212 LIVE — LOCKED"
+  | "IG DEMO — PARKED";
+
+export type T212ProposalStatus =
+  | "CREATED"
+  | "BLOCKED"
+  | "AWAITING_CONFIRMATION"
+  | "DRY_RUN_APPROVED"
+  | "SUBMISSION_DISABLED"
+  | "SUBMITTED"
+  | "FILLED"
+  | "PARTIALLY_FILLED"
+  | "CANCELLED"
+  | "REJECTED"
+  | "FAILED";
+
+export type T212ProxyAction = "BUY" | "SELL_CLOSE" | "WAIT";
+
+export interface T212RiskLimits {
+  maxOrderValue: number;
+  maxDailyInvestedAmount: number;
+  maxOpenGoldAllocationPct: number;
+  minGoldMetaConfidence: number;
+  maxSignalAgeSeconds: number;
+  maxQuoteAgeSeconds: number;
+  maxTradesPerDay: number;
+  cooldownAfterOrderMinutes: number;
+  requireMarketHours: boolean;
+  requireSelectedInstrument: boolean;
+  requireSufficientCash: boolean;
+  currency: string;
+}
+
+export const DEFAULT_T212_RISK_LIMITS_CLIENT: T212RiskLimits = {
+  maxOrderValue: 50,
+  maxDailyInvestedAmount: 100,
+  maxOpenGoldAllocationPct: 20,
+  minGoldMetaConfidence: 85,
+  maxSignalAgeSeconds: 15 * 60,
+  maxQuoteAgeSeconds: 60,
+  maxTradesPerDay: 1,
+  cooldownAfterOrderMinutes: 60,
+  requireMarketHours: true,
+  requireSelectedInstrument: true,
+  requireSufficientCash: true,
+  currency: "EUR"
+};
+
+export const T212_PROXY_DISCLAIMER_CLIENT =
+  "GoldMeta analyses XAUUSD and executes through the selected Trading 212 Invest gold instrument. This is not direct XAUUSD trading.";
+
+export interface T212SelectedInstrument {
+  instrumentId: string;
+  ticker: string;
+  name: string;
+  currency: string;
+  isin: string | null;
+  exchange: string | null;
+  fractionalSupported: boolean | null;
+  minOrderQuantity: number | null;
+  minOrderValue: number | null;
+  confirmedAt: string;
+  confirmedBy: string;
+}
+
+export interface T212InstrumentCandidate {
+  instrumentId: string;
+  ticker: string;
+  name: string;
+  currency: string | null;
+  isin: string | null;
+  exchange: string | null;
+  type: string | null;
+  fractionalSupported: boolean | null;
+  minOrderQuantity: number | null;
+  minOrderValue: number | null;
+  marketOpen: boolean | null;
+  goldMatchReason: string;
+}
+
+export interface T212AccountSummary {
+  environment: T212Environment;
+  currency: string | null;
+  freeCash: number | null;
+  investedValue: number | null;
+  totalValue: number | null;
+  accountIdMasked: string | null;
+}
+
+export interface T212HoldingView {
+  instrumentId: string;
+  ticker: string;
+  quantity: number;
+  averagePrice: number | null;
+  currentPrice: number | null;
+  currency: string | null;
+}
+
+export interface T212ConnectionView {
+  connected: boolean;
+  environment: T212Environment | null;
+  mode: T212ConnectionMode | null;
+  currency: string | null;
+  freeCash: number | null;
+  investedValue: number | null;
+  totalValue: number | null;
+  selectedInstrument: T212SelectedInstrument | null;
+  holdingQuantity: number | null;
+  lastHeartbeatAt: string | null;
+  connectionState: "Connected" | "Disconnected" | "Error" | "Parked";
+  ordersEnabled: false;
+  paperOrderSubmissionEnabled: boolean;
+  liveExecutionFeatureEnabled: boolean;
+}
+
+export interface T212ExecutionProposal {
+  proposalId: string;
+  userId: string;
+  decisionId: string;
+  broker: "T212_INVEST";
+  environment: T212Environment;
+  instrumentId: string;
+  instrumentTicker: string;
+  instrumentName: string;
+  action: T212ProxyAction;
+  side: "BUY" | "SELL" | null;
+  quantity: number | null;
+  orderValue: number | null;
+  estimatedPrice: number | null;
+  accountCurrency: string | null;
+  fxConversionWarning: string | null;
+  confidence: number | null;
+  goldMetaDecision: string;
+  reasonCodes: string[];
+  rejectionReason: string | null;
+  idempotencyKey: string;
+  status: T212ProposalStatus;
+  riskEvaluation: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+  updatedAt: string;
+}
+
+export interface T212DiagnosticReport {
+  ok: boolean;
+  environment: T212Environment;
+  readOnly: true;
+  ordersEnabled: false;
+  paperOrderSubmissionEnabled: boolean;
+  liveExecutionFeatureEnabled: boolean;
+  connected: boolean;
+  account: T212AccountSummary | null;
+  holdingsCount: number;
+  goldCandidates: T212InstrumentCandidate[];
+  selectedInstrument: T212SelectedInstrument | null;
+  holdingForSelected: T212HoldingView | null;
+  heartbeatAt: string | null;
+  orderEndpointsCalled: false;
+  errors: string[];
+  notes: string[];
+}
+
 export interface IgGoldMarketCandidate {
   epic: string;
   instrumentName: string;
@@ -65,8 +236,20 @@ export interface AutoTradeStatus {
   emergencyStopActive: boolean;
   liveExecutionFeatureEnabled: boolean;
   demoOrderSubmissionEnabled?: boolean;
+  brokerExecutionEnabled?: false;
+  t212PaperOrderSubmissionEnabled?: false;
+  t212LiveExecutionFeatureEnabled?: false;
   readOnly?: true;
   ordersEnabled?: false;
+  selectedBroker: SelectedBrokerId;
+  brokerBadge: BrokerBadge | string;
+  igParked: boolean;
+  t212: T212ConnectionView | null;
+  t212RiskLimits: T212RiskLimits;
+  t212GoldCandidates: T212InstrumentCandidate[];
+  t212LastDiagnosticReport: T212DiagnosticReport | null;
+  t212PendingProposal: T212ExecutionProposal | null;
+  t212Disclaimer: string;
   connection: {
     connected: boolean;
     environment: "DEMO" | "LIVE" | null;
@@ -187,12 +370,24 @@ export function buildReviewAutoTradeStatus(
     emergencyStopActive: false,
     liveExecutionFeatureEnabled: false,
     demoOrderSubmissionEnabled: false,
+    brokerExecutionEnabled: false,
+    t212PaperOrderSubmissionEnabled: false,
+    t212LiveExecutionFeatureEnabled: false,
     readOnly: true,
     ordersEnabled: false,
+    selectedBroker: "MANUAL",
+    brokerBadge: "MANUAL",
+    igParked: true,
+    t212: null,
+    t212RiskLimits: { ...DEFAULT_T212_RISK_LIMITS_CLIENT },
+    t212GoldCandidates: [],
+    t212LastDiagnosticReport: null,
+    t212PendingProposal: null,
+    t212Disclaimer: T212_PROXY_DISCLAIMER_CLIENT,
     connection: {
       connected: false,
       environment: "DEMO",
-      environmentLabel: "IG DEMO — READ ONLY",
+      environmentLabel: "IG DEMO — PARKED",
       accountIdMasked: null,
       accountName: null,
       currency: "EUR",
@@ -238,7 +433,7 @@ export function buildReviewAutoTradeStatus(
       {
         id: "review-1",
         at: new Date().toISOString(),
-        message: "AutoTrade Control Centre ready. Mode OFF. IG DEMO — READ ONLY.",
+        message: "AutoTrade Control Centre ready. Mode OFF. Broker MANUAL.",
         level: "info"
       }
     ],

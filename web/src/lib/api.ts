@@ -14,7 +14,15 @@ import type {
   WebPushSubscriptionPayload
 } from "../types/models";
 import { ApiError } from "../types/models";
-import type { AutoTradeMode, AutoTradeStatus } from "./autoTradeTypes";
+import type {
+  AutoTradeMode,
+  AutoTradeStatus,
+  SelectedBrokerId,
+  T212Environment,
+  T212ExecutionProposal,
+  T212InstrumentCandidate,
+  T212SelectedInstrument
+} from "./autoTradeTypes";
 
 export type ManualExecutionPatch = {
   action: ManualExecutionAction;
@@ -609,5 +617,110 @@ export class ApiClient {
       method: "POST"
     });
     return body.status;
+  }
+
+  async autoTradeSelectBroker(broker: SelectedBrokerId): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/broker", {
+      method: "POST",
+      body: JSON.stringify({ broker })
+    });
+    return body.status;
+  }
+
+  async autoTradeT212Connect(
+    environment: T212Environment = "PRACTICE"
+  ): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>("/v1/autotrade/t212/connect", {
+      method: "POST",
+      body: JSON.stringify({ environment })
+    });
+    return body.status;
+  }
+
+  async autoTradeT212Disconnect(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>(
+      "/v1/autotrade/t212/disconnect",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async autoTradeT212Diagnostics(): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>(
+      "/v1/autotrade/t212/diagnostics",
+      { method: "POST" }
+    );
+    return body.status;
+  }
+
+  async autoTradeT212SearchInstruments(
+    query?: string
+  ): Promise<{ candidates: T212InstrumentCandidate[]; status: AutoTradeStatus }> {
+    const body = await this.request<{
+      candidates: T212InstrumentCandidate[];
+      status: AutoTradeStatus;
+    }>("/v1/autotrade/t212/instruments/search", {
+      method: "POST",
+      body: JSON.stringify(query ? { query } : {})
+    });
+    return body;
+  }
+
+  async autoTradeT212ConfirmInstrument(
+    payload: Omit<T212SelectedInstrument, "confirmedAt" | "confirmedBy"> & {
+      isin?: string | null;
+      exchange?: string | null;
+      fractionalSupported?: boolean | null;
+      minOrderQuantity?: number | null;
+      minOrderValue?: number | null;
+    }
+  ): Promise<AutoTradeStatus> {
+    const body = await this.request<{ status: AutoTradeStatus }>(
+      "/v1/autotrade/t212/instruments/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }
+    );
+    return body.status;
+  }
+
+  async autoTradeT212CreateProposal(payload: {
+    decisionId: string;
+    decision: string;
+    confidence?: number | null;
+    score?: number | null;
+    generatedAt?: string | null;
+    marketOpen?: boolean | null;
+    holdingQuantity?: number;
+  }): Promise<{
+    proposal: T212ExecutionProposal;
+    status: AutoTradeStatus;
+  }> {
+    const body = await this.request<{
+      proposal: T212ExecutionProposal;
+      status: AutoTradeStatus;
+    }>("/v1/autotrade/t212/proposals", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    return body;
+  }
+
+  async autoTradeT212ApproveDryRun(
+    proposalId: string,
+    confirmMethod?: "manual" | "biometric_future"
+  ): Promise<{ proposal: T212ExecutionProposal; status: AutoTradeStatus }> {
+    const body = await this.request<{
+      proposal: T212ExecutionProposal;
+      status: AutoTradeStatus;
+    }>("/v1/autotrade/t212/proposals/approve-dry-run", {
+      method: "POST",
+      body: JSON.stringify({
+        proposalId,
+        ...(confirmMethod ? { confirmMethod } : {})
+      })
+    });
+    return body;
   }
 }

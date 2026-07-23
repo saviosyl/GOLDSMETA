@@ -1729,6 +1729,100 @@ a {
   border-color: var(--navy);
 }
 
+.gm-autotrade-broker-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+.gm-autotrade-broker-card {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  cursor: pointer;
+  min-height: 72px;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.gm-autotrade-broker-card strong {
+  font: 700 0.98rem/1.25 var(--font-sans);
+  color: var(--navy);
+}
+
+.gm-autotrade-broker-card span {
+  font: 500 0.86rem/1.35 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+.gm-autotrade-broker-card em {
+  font: 700 0.72rem/1.2 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.gm-autotrade-broker-card.is-active {
+  border-color: var(--navy);
+  background: linear-gradient(180deg, rgba(29, 53, 87, 0.08), var(--surface));
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-autotrade-broker-card.is-parked:not(.is-active) {
+  opacity: 0.78;
+}
+
+.gm-autotrade-broker-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.gm-autotrade-disclaimer {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-left: 3px solid #1d3557;
+  background: linear-gradient(90deg, rgba(29, 53, 87, 0.08), transparent);
+  border-radius: 0 12px 12px 0;
+  font: 500 0.92rem/1.45 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+.gm-autotrade-candidate-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.gm-autotrade-candidate {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.gm-autotrade-candidate.is-active {
+  border-color: var(--navy);
+  background: rgba(29, 53, 87, 0.06);
+}
+
+.gm-autotrade-candidate strong {
+  font: 650 0.92rem/1.3 var(--font-sans);
+  color: var(--navy);
+}
+
 .gm-autotrade-limits-list {
   margin: 0;
   padding-left: 1.1rem;
@@ -1828,6 +1922,10 @@ a {
   }
 
   .gm-autotrade-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .gm-autotrade-broker-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

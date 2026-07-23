@@ -109,6 +109,8 @@ export function OverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  /** Set on successful load (including empty/404 decision) so Last refresh is never stuck on pending. */
+  const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
@@ -135,6 +137,8 @@ export function OverviewPage() {
       } else {
         setSetup(active[0] ?? null);
       }
+      // Empty decision (404→null) still counts as a completed refresh.
+      setLastLoadSuccessAt(new Date().toISOString());
     } catch (err) {
       const cached = loadCache<Decision>(cacheKeys.decision);
       if (cached) {
@@ -158,11 +162,13 @@ export function OverviewPage() {
     await load();
   }, [load]);
 
-  const { lastSuccessAt, pollError } = useDashboardDecisionPoll({
+  const { lastSuccessAt: lastPollSuccessAt, pollError } = useDashboardDecisionPoll({
     enabled: !loading,
     intervalMs: 30_000,
     onTick: pollTick
   });
+
+  const lastSuccessAt = lastPollSuccessAt ?? lastLoadSuccessAt;
 
   const refresh = () => {
     setRefreshing(true);
