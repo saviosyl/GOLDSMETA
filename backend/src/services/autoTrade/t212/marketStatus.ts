@@ -1,17 +1,35 @@
 /**
  * Server-side market status derivation for T212 Invest instruments.
  * Never trusts client-supplied marketOpen.
+ *
+ * T212 /equity/metadata/exchanges shape:
+ *   [{ id, name, workingSchedules: [{ id, timeEvents: [{ date, type: OPEN|CLOSE }] }] }]
+ * Instrument.workingScheduleId matches workingSchedules[].id (not exchange.id).
  */
 
 export type MarketStatus = "OPEN" | "CLOSED" | "UNKNOWN";
+
+export interface ExchangeTimeEventLike {
+  date?: string;
+  type?: string;
+}
+
+export interface WorkingScheduleLike {
+  id?: number | string;
+  timeEvents?: ExchangeTimeEventLike[];
+  open?: boolean;
+  openFrom?: string;
+  openTo?: string;
+}
 
 export interface ExchangeScheduleLike {
   id?: number | string;
   workingScheduleId?: number | string;
   open?: boolean;
-  /** Optional ISO timestamps if present on payload */
   openFrom?: string;
   openTo?: string;
+  name?: string;
+  workingSchedules?: WorkingScheduleLike[];
 }
 
 export interface InstrumentMarketContext {
@@ -27,6 +45,85 @@ export interface MarketStatusResult {
   source: string;
   rejectionReason: string | null;
   notes: string[];
+}
+
+function findWorkingSchedule(
+  exchanges: ExchangeScheduleLike[],
+  scheduleId: string
+): WorkingScheduleLike | null {
+  for (const exchange of exchanges) {
+    // Flat legacy shape: schedule fields on the exchange row itself
+    if (
+      String(exchange.id ?? "") === scheduleId ||
+      String(exchange.workingScheduleId ?? "") === scheduleId
+    ) {
+      if (Array.isArray(exchange.workingSchedules) && exchange.workingSchedules.length > 0) {
+        const nested = exchange.workingSchedules.find(
+          (ws) => String(ws.id ?? "") === scheduleId
+        );
+        if (nested) return nested;
+      }
+      return {
+        id: exchange.id ?? exchange.workingScheduleId,
+        open: exchange.open,
+        openFrom: exchange.openFrom,
+        openTo: exchange.openTo,
+        timeEvents: undefined
+      };
+    }
+
+    const nested = (exchange.workingSchedules ?? []).find(
+      (ws) => String(ws.id ?? "") === scheduleId
+    );
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function statusFromTimeEvents(
+  timeEvents: ExchangeTimeEventLike[],
+  now: Date
+): MarketStatusResult | null {
+  const events = timeEvents
+    .filter((e) => e.date && (e.type === "OPEN" || e.type === "CLOSE"))
+    .map((e) => ({
+      at: Date.parse(String(e.date)),
+      type: String(e.type)
+    }))
+    .filter((e) => !Number.isNaN(e.at))
+    .sort((a, b) => a.at - b.at);
+
+  if (events.length === 0) return null;
+
+  const nowMs = now.getTime();
+  let last: "OPEN" | "CLOSE" | null = null;
+  for (const ev of events) {
+    if (ev.at <= nowMs) {
+      last = ev.type === "OPEN" ? "OPEN" : "CLOSE";
+    }
+  }
+
+  if (last === "OPEN") {
+    return {
+      status: "OPEN",
+      marketOpen: true,
+      source: "working_schedule_time_events",
+      rejectionReason: null,
+      notes: ["Derived OPEN from last OPEN/CLOSE timeEvents before now."]
+    };
+  }
+  if (last === "CLOSE") {
+    return {
+      status: "CLOSED",
+      marketOpen: false,
+      source: "working_schedule_time_events",
+      rejectionReason: "MARKET_CLOSED",
+      notes: ["Derived CLOSED from last OPEN/CLOSE timeEvents before now."]
+    };
+  }
+
+  // Before the first known event — indeterminate
+  return null;
 }
 
 /**
@@ -45,6 +142,7 @@ export function deriveT212MarketStatus(args: {
 }): MarketStatusResult {
   const notes: string[] = [];
   const exchanges = args.exchanges ?? [];
+  const now = args.now ?? new Date();
 
   if (!args.instrument.ticker) {
     return {
@@ -68,10 +166,7 @@ export function deriveT212MarketStatus(args: {
     };
   }
 
-  const match = exchanges.find(
-    (e) =>
-      String(e.id ?? e.workingScheduleId ?? "") === String(scheduleId)
-  );
+  const match = findWorkingSchedule(exchanges, String(scheduleId));
 
   if (!match) {
     notes.push(`No exchange schedule match for workingScheduleId=${scheduleId}.`);
@@ -105,9 +200,15 @@ export function deriveT212MarketStatus(args: {
     };
   }
 
+  if (Array.isArray(match.timeEvents) && match.timeEvents.length > 0) {
+    const fromEvents = statusFromTimeEvents(match.timeEvents, now);
+    if (fromEvents) {
+      return { ...fromEvents, notes: [...notes, ...fromEvents.notes] };
+    }
+  }
+
   // Time window fallback when open flag absent
   if (match.openFrom && match.openTo) {
-    const now = args.now ?? new Date();
     const from = Date.parse(match.openFrom);
     const to = Date.parse(match.openTo);
     if (!Number.isNaN(from) && !Number.isNaN(to)) {

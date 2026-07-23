@@ -243,6 +243,42 @@ describe("T212 market status", () => {
     });
     expect(requireMarketOpenForSubmission(closed).code).toBe("MARKET_CLOSED");
   });
+
+  it("derives CLOSED/OPEN from nested workingSchedules.timeEvents", () => {
+    const exchanges = [
+      {
+        id: 42,
+        name: "London Stock Exchange",
+        workingSchedules: [
+          {
+            id: 153,
+            timeEvents: [
+              { date: "2026-07-23T07:00:00.000Z", type: "OPEN" },
+              { date: "2026-07-23T15:30:00.000Z", type: "CLOSE" },
+              { date: "2026-07-24T07:00:00.000Z", type: "OPEN" },
+              { date: "2026-07-24T15:30:00.000Z", type: "CLOSE" }
+            ]
+          }
+        ]
+      }
+    ];
+
+    const afterClose = deriveT212MarketStatus({
+      instrument: { ticker: "EGLNl_EQ", workingScheduleId: 153 },
+      exchanges,
+      now: new Date("2026-07-23T21:00:00.000Z")
+    });
+    expect(afterClose.status).toBe("CLOSED");
+    expect(requireMarketOpenForSubmission(afterClose).code).toBe("MARKET_CLOSED");
+
+    const duringOpen = deriveT212MarketStatus({
+      instrument: { ticker: "EGLNl_EQ", workingScheduleId: 153 },
+      exchanges,
+      now: new Date("2026-07-23T12:00:00.000Z")
+    });
+    expect(duringOpen.status).toBe("OPEN");
+    expect(requireMarketOpenForSubmission(duringOpen).ok).toBe(true);
+  });
 });
 
 describe("T212 idempotency + reconcile", () => {

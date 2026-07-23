@@ -107,6 +107,19 @@ export interface T212InstrumentResponse {
   extendedHours?: boolean;
 }
 
+export interface T212ExchangeTimeEvent {
+  date?: string;
+  type?: string;
+}
+
+export interface T212WorkingSchedule {
+  id?: number | string;
+  timeEvents?: T212ExchangeTimeEvent[];
+  open?: boolean;
+  openFrom?: string;
+  openTo?: string;
+}
+
 export interface T212ExchangeResponse {
   id?: number | string;
   workingScheduleId?: number | string;
@@ -114,6 +127,8 @@ export interface T212ExchangeResponse {
   openFrom?: string;
   openTo?: string;
   name?: string;
+  /** Nested schedules — instrument.workingScheduleId matches workingSchedules[].id */
+  workingSchedules?: T212WorkingSchedule[];
 }
 
 export interface T212OrderResponse {
