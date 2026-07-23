@@ -5,8 +5,8 @@ import type { TradingViewPayload } from "../models/types";
 import type { GoldMetaStore, WebhookConnection } from "../services/storage/types";
 import { buildStableEventId } from "../services/webhook/eventId";
 import { enqueueWebhookEvent } from "../services/webhook/enqueueWebhookEvent";
+import { buildTradingViewWebhookUrl } from "../services/webhook/publicWebhookUrl";
 import { AiExplainer } from "../services/ai/explainer";
-import { env } from "../config/env";
 
 type PublicWebhookConnection = Omit<WebhookConnection, "secret"> & {
   id: string;
@@ -18,11 +18,8 @@ type PublicWebhookConnection = Omit<WebhookConnection, "secret"> & {
 
 const randomToken = (bytes: number): string => randomBytes(bytes).toString("base64url");
 
-const webhookUrlFor = (req: Request, webhookId: string): string => {
-  const baseUrl =
-    env.WEBHOOK_PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host") ?? "localhost"}`;
-  return `${baseUrl.replace(/\/$/, "")}/webhooks/tradingview/${webhookId}`;
-};
+const webhookUrlFor = (req: Request, webhookId: string): string =>
+  buildTradingViewWebhookUrl(webhookId, req);
 
 const redactConnection = (
   req: Request,

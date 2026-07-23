@@ -157,5 +157,6 @@ describe("DashboardPage Stage 3", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByTestId("brand-header")).toBeInTheDocument();
     expect(screen.getByTestId("daily-risk-status")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-last-refresh")).toBeInTheDocument();
   });
 });

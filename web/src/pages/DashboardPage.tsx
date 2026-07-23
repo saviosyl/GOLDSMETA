@@ -20,6 +20,7 @@ import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 import { formatClientError } from "../lib/errors";
 import { formatWhen } from "../lib/format";
 import { computeDailyManualRiskStatus } from "../lib/manualRisk";
+import { useDashboardDecisionPoll } from "../lib/useDashboardDecisionPoll";
 
 const DEFAULT_RISK: ManualRiskSettings = {
   currency: "EUR",
@@ -98,6 +99,7 @@ export function DashboardPage() {
         setDecision(null);
       }
       setError(formatClientError(err, "Unable to load decision"));
+      throw err;
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -105,21 +107,31 @@ export function DashboardPage() {
   }, [api]);
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   useEffect(() => {
     const onOnline = () => {
       setRefreshing(true);
-      void load();
+      void load().catch(() => undefined);
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, [load]);
 
+  const pollTick = useCallback(async () => {
+    await load();
+  }, [load]);
+
+  const { lastSuccessAt, pollError } = useDashboardDecisionPoll({
+    enabled: !loading,
+    intervalMs: 30_000,
+    onTick: pollTick
+  });
+
   const refresh = () => {
     setRefreshing(true);
-    void load();
+    void load().catch(() => undefined);
   };
 
   const acknowledgeLive = async () => {
@@ -171,7 +183,17 @@ export function DashboardPage() {
           </strong>{" "}
           · Analysis only
         </p>
+        <p className="muted" data-testid="dashboard-last-refresh">
+          Last refresh: {lastSuccessAt ? formatWhen(lastSuccessAt) : loading ? "…" : "pending"}
+        </p>
       </section>
+
+      {pollError && (
+        <div className="banner stale" role="status" data-testid="dashboard-poll-stale">
+          Live refresh is temporarily unavailable. Showing the last loaded decision — use Refresh to
+          retry.
+        </div>
+      )}
 
       {status && (
         <section className="card system-status" aria-label="Live pipeline status" data-testid="system-status">
