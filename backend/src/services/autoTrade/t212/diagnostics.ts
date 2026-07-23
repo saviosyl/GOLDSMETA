@@ -131,9 +131,10 @@ export async function runT212ReadOnlyDiagnostics(args: {
       args.selectedInstrument?.ticker ?? null
     );
 
+    const accountInfo = account as { id?: number | string; currencyCode?: string };
     const currency =
       cash.currency ??
-      (account as { currencyCode?: string }).currencyCode ??
+      accountInfo.currencyCode ??
       DEFAULT_T212_RISK_LIMITS.currency;
 
     return {
@@ -151,7 +152,7 @@ export async function runT212ReadOnlyDiagnostics(args: {
         investedValue: typeof cash.invested === "number" ? cash.invested : null,
         totalValue: typeof cash.total === "number" ? cash.total : null,
         accountIdMasked: maskAccountId(
-          account.id != null ? String(account.id) : null
+          accountInfo.id != null ? String(accountInfo.id) : null
         )
       },
       holdingsCount: portfolio.length,

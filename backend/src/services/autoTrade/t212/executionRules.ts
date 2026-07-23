@@ -23,7 +23,7 @@ import {
 
 export interface GoldMetaDecisionInput {
   decisionId: string;
-  decision: "BUY" | "SELL" | "WAIT" | string;
+  decision: string;
   confidence?: number | null;
   score?: number | null;
   generatedAt?: string | null;
