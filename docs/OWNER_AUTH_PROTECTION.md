@@ -6,14 +6,11 @@ The required Auth UID is stored only as server secret `GOLDMETA_PINNED_OWNER_UID
 
 ## Critical operational warning
 
-<<<<<<< HEAD
 **Never delete `saviosyl@gmail.com` in Firebase Console.**
 
 Recreating the same email creates a **different random UID** and disconnects existing
 GoldMeta Firestore data and TradingView webhooks that remain bound to the pinned UID.
 
-Also never:
-=======
 Public registration is available via `/register` and `POST /v1/auth/register`
 (see `docs/USER_REGISTRATION.md`). The protected owner email is always rejected
 with an account-exists message and never creates a replacement UID.
@@ -21,18 +18,20 @@ with an account-exists message and never creates a replacement UID.
 Sign-in and password reset remain available. Password reset for the owner email
 targets the existing pinned UID only (Firebase Auth); registration never falls
 back for that email.
->>>>>>> 932bba2 (feat(auth): safe user registration with approval and owner protection)
+
+Also never:
 
 - use Admin SDK `deleteUser` / Identity Toolkit `DeleteAccount` against the pinned UID
 - use owner email for test registration or cleanup loops
 - rotate the owner password automatically during deploy verification
 - “fix” Auth drift with Console SignUp
+- invoke `restorePinnedOwnerAuth.ts` from CI/CD or normal deployments
 
-<<<<<<< HEAD
 If Auth integrity is not `HEALTHY`, **stop** and use the break-glass restore path below.
+Do **not** auto-restore from deploy pipelines.
 
-## Root-cause note (2026-07-24)
-=======
+## Identity blocking / registration
+
 `beforeUserCreatedGuard` (Firebase Functions v2 Identity blocking):
 
 - allows pinned owner UID restore only for the owner email
@@ -41,7 +40,8 @@ If Auth integrity is not `HEALTHY`, **stop** and use the break-glass restore pat
 
 Admin SDK registration does **not** trigger blocking functions and is the
 preferred server path for validated, rate-limited signup.
->>>>>>> 932bba2 (feat(auth): safe user registration with approval and owner protection)
+
+## Root-cause note (2026-07-24)
 
 Cloud Audit Logs show the pinned owner was deleted via **Firebase Console**
 (browser Chrome user-agent) by principal `saviosyl@gmail.com`, then a replacement
@@ -74,7 +74,9 @@ See `docs/OWNER_AUTH_ALERTING.md`.
 
 - Admin-only `GET /v1/admin/auth-integrity`
 - `npm run verify:owner-auth` (`backend/scripts/verifyOwnerAuthIntegrity.ts`)
+- `npm run gate:owner-auth-deploy` (`backend/scripts/preDeployOwnerAuthHealthGate.ts`) — **stop deploy** on failure
 - GitHub workflow `.github/workflows/owner-auth-integrity.yml` (manual + scheduled)
+- Pre-deploy gate job in Backend / Web PWA workflows (fails closed when secrets present)
 
 The monitor must **never** repair, delete, or recreate users automatically.
 
@@ -83,11 +85,13 @@ Statuses: `HEALTHY` | `OWNER_UID_MISMATCH` | `OWNER_AUTH_MISSING` | `DUPLICATE_O
 ## Application / script protections
 
 - `assertPinnedOwnerMutationAllowed` (`pinnedOwnerMutationGuard.ts`) before any delete/disable/email-rename/anonymise/bulk cleanup
-- Requires both:
+- `ownerCleanupGuard.ts` excludes pinned UID, owner email, `OWNER` role, and `owner=true` claim from disposable cleanup
+- Requires both for break-glass mutation:
   - `GOLDMETA_BREAK_GLASS_OWNER_AUTH_MUTATION=1`
   - `GOLDMETA_BREAK_GLASS_OWNER_AUTH_CONFIRM=I_UNDERSTAND_PINNED_OWNER_MUTATION`
 - Registration and verification scripts must refuse owner-email cleanup and fail closed if pinned UID is missing
 - Never auto-promote or recreate owner by email alone
+- Normal deployments must never invoke `restorePinnedOwnerAuth.ts`
 
 ## Break-glass restore (explicit approval only)
 
@@ -113,7 +117,15 @@ Behaviour:
 
 Pre-check (read-only): `backend/scripts/preRestoreOwnerAuthCheck.ts`
 
+## Password reset
+
+- Web Forgot Password uses Firebase client `sendPasswordResetEmail` (delivers mail).
+- API `POST /v1/auth/password-reset` uses Identity Toolkit `sendOobCode` (not Admin
+  `generatePasswordResetLink`, which does not send email).
+- Owner password reset keeps the exact pinned UID, claims, Firestore profile, and webhook.
+- Never print reset links or temporary passwords in logs/reports.
+
 ## Client registration note
 
-Public registration (when enabled via a separate approved release) must always reject the
-protected owner email before `createUser` and must never be used to restore the owner.
+Public registration must always reject the protected owner email before `createUser`
+and must never be used to restore the owner.

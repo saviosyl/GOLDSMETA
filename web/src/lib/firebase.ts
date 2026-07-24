@@ -123,14 +123,44 @@ export const signOut = async (): Promise<void> => {
   await firebaseSignOut(getFirebaseAuth());
 };
 
+/**
+ * Client-side password reset — actually dispatches Firebase email
+ * (unlike Admin generatePasswordResetLink which only builds a URL).
+ * continueUrl returns users to GoldMeta Sign In on the current origin.
+ */
 export const sendPasswordReset = async (email: string): Promise<void> => {
+  const normalized = email.trim().toLowerCase();
+  const continueUrl =
+    typeof window !== "undefined" && window.location?.origin
+      ? `${window.location.origin}/login`
+      : "https://goldmeta.metamechsolutions.com/login";
   try {
-    await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+    await sendPasswordResetEmail(getFirebaseAuth(), normalized, {
+      url: continueUrl,
+      handleCodeInApp: false
+    });
   } catch (error) {
-    // Generic success path is handled by UI; still avoid raw codes if surfaced.
+    const code =
+      typeof error === "object" &&
+      error &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : "";
+    // Enumeration-safe: missing accounts still look like success to the UI.
+    if (
+      code === "auth/user-not-found" ||
+      code === "auth/invalid-email" ||
+      /user-not-found|invalid-email/i.test(String((error as Error)?.message ?? ""))
+    ) {
+      return;
+    }
     throw new Error(friendlyAuthError(error), { cause: error });
   }
 };
+
+/** Exposed for tests / diagnostics — never log secrets. */
+export const getFirebaseProjectId = (): string | null => readConfig()?.projectId ?? null;
 
 export const getIdToken = async (forceRefresh = false): Promise<string | null> => {
   if (!isFirebaseConfigured()) return null;

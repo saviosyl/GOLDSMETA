@@ -94,7 +94,7 @@
 
   --scroll-hotfix: 1;
   --ui-redesign: 1;
-  --ui-redesign-patch: 5.4.3-auth-layout;
+  --ui-redesign-patch: 5.4.3-password-reset;
 
   font-family: var(--font-sans);
   line-height: 1.5;

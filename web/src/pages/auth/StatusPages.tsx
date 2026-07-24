@@ -144,11 +144,16 @@ export function AccountSuspendedPage() {
 export function PasswordResetSentPage() {
   return (
     <AuthStatusCard testId="password-reset-sent" title="Password reset sent">
-      <p className="gm-auth-support">
-        If an account exists for that email, a reset link has been sent. Check your inbox and spam
-        folder.
+      <p className="gm-auth-support" data-testid="password-reset-sent-message">
+        If an account exists for this email, a password-reset message has been sent. Please check
+        your inbox and spam folder.
       </p>
-      <Link className="gm-auth-submit" to="/" style={{ display: "inline-block", textAlign: "center" }}>
+      <Link
+        className="gm-auth-submit"
+        to="/login"
+        style={{ display: "inline-block", textAlign: "center" }}
+        data-testid="password-reset-back-signin"
+      >
         Back to Sign In
       </Link>
     </AuthStatusCard>
