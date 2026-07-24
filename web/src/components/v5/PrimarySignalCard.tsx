@@ -55,7 +55,7 @@ function decisionHint(code: string): string {
 }
 
 function fmt(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return "—";
+  if (n == null || Number.isNaN(n)) return "Not available";
   return String(n);
 }
 
@@ -126,6 +126,7 @@ export function PrimarySignalCard({
         {confidencePct != null && (
           <span className="gm-decision-score" data-testid="primary-confidence">
             Confidence {confidencePct}%
+            <span className="gm-meta"> (quality score, not certainty)</span>
           </span>
         )}
       </div>
@@ -136,21 +137,33 @@ export function PrimarySignalCard({
       <p className="gm-primary-reason" data-testid="primary-reason">
         {reason}
       </p>
+      <p className="gm-meta" data-testid="analysis-disclaimer">
+        GoldMeta provides trading analysis, not guaranteed results.
+      </p>
 
       <div className="gm-metrics-grid gm-primary-plan" data-testid="primary-plan-levels">
-        <MetricCard label="Market trend" value={marketTrend?.replace(/_/g, " ") ?? "—"} />
+        <MetricCard
+          label="Market trend"
+          value={marketTrend?.replace(/_/g, " ") ?? "Not available"}
+        />
         <MetricCard label="Entry" value={fmt(planEntry)} />
         <MetricCard label="Stop loss" value={fmt(planStop)} />
         <MetricCard label="TP1" value={fmt(planTp1)} />
         <MetricCard label="TP2" value={fmt(planTp2)} />
         <MetricCard label="TP3" value={fmt(planTp3)} />
-        <MetricCard label="Estimated risk" value={estimatedRisk ?? "—"} />
+        <MetricCard
+          label="Estimated risk"
+          value={estimatedRisk ?? "Not available"}
+          hint="Distance to stop — not guaranteed profit or loss"
+        />
       </div>
 
       {!hasPlan ? (
         <div className="gm-empty" data-testid="no-shadow-plan" role="status">
           <strong>No validated plan yet.</strong>
-          <p className="gm-meta">GoldMeta is watching. It does not place trades while you WAIT.</p>
+          <p className="gm-meta">
+            GoldMeta is watching. WAIT means stay flat — it is not a trade signal to buy or sell.
+          </p>
         </div>
       ) : null}
 
@@ -173,9 +186,9 @@ export function PrimarySignalCard({
         <summary>Advanced market levels</summary>
         <div className="gm-disclosure-body">
           <div className="gm-metrics-grid gm-primary-levels">
-            <MetricCard label={structureLevelLabel("poc")} value={poc ?? "—"} hint="POC" />
-            <MetricCard label={structureLevelLabel("vah")} value={vah ?? "—"} hint="VAH" />
-            <MetricCard label={structureLevelLabel("val")} value={val ?? "—"} hint="VAL" />
+            <MetricCard label={structureLevelLabel("poc")} value={poc ?? "Not available"} hint="POC" />
+            <MetricCard label={structureLevelLabel("vah")} value={vah ?? "Not available"} hint="VAH" />
+            <MetricCard label={structureLevelLabel("val")} value={val ?? "Not available"} hint="VAL" />
             <MetricCard
               label="Plan status"
               value={setup ? String(setup.status).replace(/_/g, " ") : "No plan"}

@@ -34,7 +34,28 @@ export const GLOSSARY: GlossaryTerm[] = [
     term: "Confidence",
     short: "How strong the current setup quality looks (0–100%).",
     detail:
-      "Confidence is a rules-based quality score, not a promise of profit. Higher is clearer structure — never a guarantee."
+      "Confidence is a rules-based quality score, not a promise of profit and not certainty. Higher means clearer structure — never a guarantee."
+  },
+  {
+    id: "trend",
+    term: "Trend",
+    short: "The broad market direction GoldMeta currently sees (up, down, or range).",
+    detail:
+      "Trend describes the recent directional bias. It can change quickly. It is analysis context, not a guaranteed outcome."
+  },
+  {
+    id: "entry",
+    term: "Entry",
+    short: "The proposed price area where a plan would start.",
+    detail:
+      "Entry is a suggested starting zone for a manual plan. Markets can gap past it. GoldMeta does not place the order for you while trading is locked."
+  },
+  {
+    id: "risk",
+    term: "Risk",
+    short: "How far price can move against the plan before the stop loss.",
+    detail:
+      "Estimated risk is a distance or sizing aid, not a guaranteed loss or profit figure. Never risk money you cannot afford to lose."
   },
   {
     id: "poc",

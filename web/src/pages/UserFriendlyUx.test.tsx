@@ -68,6 +68,12 @@ describe("HelpPage", () => {
     expect(screen.getByTestId("first-use-guide")).toHaveTextContent(/Check the market decision/i);
     expect(screen.getByTestId("glossary-autotrade")).toBeInTheDocument();
     expect(screen.getByTestId("glossary-poc")).toBeInTheDocument();
+    expect(screen.getByTestId("glossary-trend")).toBeInTheDocument();
+    expect(screen.getByTestId("glossary-entry")).toBeInTheDocument();
+    expect(screen.getByTestId("glossary-risk")).toBeInTheDocument();
+    expect(screen.getByTestId("help-analysis-disclaimer")).toHaveTextContent(
+      /not guaranteed results/i
+    );
   });
 });
 

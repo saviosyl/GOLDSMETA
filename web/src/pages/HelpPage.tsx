@@ -17,6 +17,9 @@ export function HelpPage() {
           <li>Connect a Demo broker only when ready.</li>
           <li>Never risk money you cannot afford to lose.</li>
         </ol>
+        <p className="gm-meta" data-testid="help-analysis-disclaimer">
+          GoldMeta provides trading analysis, not guaranteed results.
+        </p>
         <p className="gm-meta" style={{ marginBottom: 0 }}>
           GoldMeta is analysis-first. Broker trading stays locked until a separate, approved setup is
           complete. AutoTrade remains OFF.

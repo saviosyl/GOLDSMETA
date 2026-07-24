@@ -200,8 +200,8 @@ export function OverviewPage() {
     decision?.takeProfits?.find((t) => t.label === "TP3")?.price ?? setup?.levels?.tp3 ?? null;
   const estimatedRisk =
     planEntry != null && planStop != null
-      ? `About ${Math.abs(planEntry - planStop).toFixed(2)} points to stop`
-      : "Open Risk planner to size position";
+      ? `About ${Math.abs(planEntry - planStop).toFixed(2)} points to stop (not guaranteed)`
+      : "Not available — open Risk planner to size a position";
 
   const stampIso = decision?.generatedAt ?? briefing?.dataTimestamp ?? cachedAt;
   const localTs = formatLocalTimestamp(stampIso, tzPref);
