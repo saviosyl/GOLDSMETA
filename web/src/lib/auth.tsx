@@ -12,12 +12,38 @@ import { ApiClient } from "./api";
 import {
   getIdToken,
   isFirebaseConfigured,
+  isPublicRegistrationEnabled,
   signIn as firebaseSignIn,
   signOut as firebaseSignOut,
   signUp as firebaseSignUp,
   subscribeAuth
 } from "./firebase";
 import { clearUserCaches } from "./offlineCache";
+import { friendlyAuthError } from "./authErrors";
+
+export type AccountAccess =
+  | "APP"
+  | "VERIFY_EMAIL"
+  | "AWAITING_APPROVAL"
+  | "SUSPENDED"
+  | "FORBIDDEN"
+  | "UNKNOWN";
+
+export type AuthMeResponse = {
+  uidMasked: string | null;
+  role: string;
+  approvalStatus: string;
+  emailVerified: boolean;
+  access: AccountAccess;
+  profile: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    brokerAccess?: boolean;
+    autoTrade?: boolean;
+    brokerMessage?: string | null;
+  } | null;
+};
 
 interface AuthContextValue {
   user: User | null;
@@ -25,11 +51,12 @@ interface AuthContextValue {
   configured: boolean;
   api: ApiClient;
   signIn: (email: string, password: string) => Promise<void>;
-  /** Always rejects — public registration is closed. */
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  registrationEnabled: false;
+  registrationEnabled: boolean;
   apiBaseUrl: string;
+  account: AuthMeResponse | null;
+  refreshAccount: () => Promise<AuthMeResponse | null>;
 }
 
 export type { AuthContextValue };
@@ -37,11 +64,8 @@ export type { AuthContextValue };
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const resolveApiBase = (): string => {
-  // production API base resolved from VITE_API_BASE_URL at build time
-
   const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (fromEnv && fromEnv.length > 0) return fromEnv.replace(/\/$/, "");
-  // Local dev convenience only — never bake localhost into production builds.
   if (import.meta.env.DEV) return "http://127.0.0.1:8080";
   return "";
 };
@@ -49,8 +73,34 @@ const resolveApiBase = (): string => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [account, setAccount] = useState<AuthMeResponse | null>(null);
   const configured = isFirebaseConfigured();
   const apiBaseUrl = resolveApiBase();
+  const registrationEnabled = isPublicRegistrationEnabled();
+
+  const api = useMemo(
+    () =>
+      new ApiClient({
+        baseUrl: apiBaseUrl,
+        getIdToken
+      }),
+    [apiBaseUrl]
+  );
+
+  const refreshAccount = useCallback(async () => {
+    if (!user) {
+      setAccount(null);
+      return null;
+    }
+    try {
+      const me = await api.getAuthMe();
+      setAccount(me);
+      return me;
+    } catch {
+      setAccount(null);
+      return null;
+    }
+  }, [api, user]);
 
   useEffect(() => {
     if (!configured) {
@@ -63,17 +113,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [configured]);
 
-  const api = useMemo(
-    () =>
-      new ApiClient({
-        baseUrl: apiBaseUrl,
-        getIdToken
-      }),
-    [apiBaseUrl]
-  );
+  useEffect(() => {
+    void refreshAccount();
+  }, [refreshAccount]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    await firebaseSignIn(email, password);
+    try {
+      await firebaseSignIn(email, password);
+    } catch (error) {
+      throw new Error(friendlyAuthError(error), { cause: error });
+    }
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -82,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     clearUserCaches();
+    setAccount(null);
     await firebaseSignOut();
   }, []);
 
@@ -94,10 +144,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signOut,
-      registrationEnabled: false as const,
-      apiBaseUrl
+      registrationEnabled,
+      apiBaseUrl,
+      account,
+      refreshAccount
     }),
-    [user, loading, configured, api, signIn, signUp, signOut, apiBaseUrl]
+    [
+      user,
+      loading,
+      configured,
+      api,
+      signIn,
+      signUp,
+      signOut,
+      registrationEnabled,
+      apiBaseUrl,
+      account,
+      refreshAccount
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

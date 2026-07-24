@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import { Router, type Request } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { brokerGate } from "../middleware/accountAccess";
 import type { TradingViewPayload } from "../models/types";
 import type { GoldMetaStore, WebhookConnection } from "../services/storage/types";
 import { buildStableEventId } from "../services/webhook/eventId";
@@ -104,7 +105,7 @@ export const buildTradingViewRouter = (
 ): Router => {
   const router = Router();
 
-  router.post("/v1/tradingview/connections", requireAuth, async (req, res) => {
+  router.post("/v1/tradingview/connections", requireAuth, ...brokerGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const connection = await createConnection(store, userId);
     res.status(201).json({
@@ -122,7 +123,7 @@ export const buildTradingViewRouter = (
     });
   });
 
-  router.post("/v1/tradingview/connections/:webhookId/rotate", requireAuth, async (req, res) => {
+  router.post("/v1/tradingview/connections/:webhookId/rotate", requireAuth, ...brokerGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const webhookId = firstParam(req.params.webhookId);
     const secret = randomToken(24);
@@ -142,7 +143,7 @@ export const buildTradingViewRouter = (
     });
   });
 
-  router.delete("/v1/tradingview/connections/:webhookId", requireAuth, async (req, res) => {
+  router.delete("/v1/tradingview/connections/:webhookId", requireAuth, ...brokerGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const webhookId = firstParam(req.params.webhookId);
     const connection = webhookId
@@ -157,7 +158,7 @@ export const buildTradingViewRouter = (
     res.json({ connection: redactConnection(req, connection) });
   });
 
-  router.post("/v1/tradingview/test", requireAuth, async (req, res) => {
+  router.post("/v1/tradingview/test", requireAuth, ...brokerGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const requestedWebhookId =
       optionalStringField(req.body as unknown, "webhookId") ??

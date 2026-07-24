@@ -1,10 +1,13 @@
 import { useId, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { sendPasswordReset } from "../lib/firebase";
+import { friendlyAuthError } from "../lib/authErrors";
 
-/** V5.4 light premium sign-in — approved brand direction. Registration closed. */
+/** V5.4 light premium sign-in — registration open via Create account. */
 export function SignInPage() {
-  const { signIn, configured } = useAuth();
+  const { signIn, configured, registrationEnabled } = useAuth();
+  const navigate = useNavigate();
   const emailId = useId();
   const passwordId = useId();
   const errorId = useId();
@@ -24,7 +27,7 @@ export function SignInPage() {
     try {
       await signIn(email.trim(), password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
+      setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -41,9 +44,12 @@ export function SignInPage() {
     setBusy(true);
     try {
       await sendPasswordReset(trimmed);
-      setMessage("If an account exists for that email, a reset link has been sent.");
+      navigate("/password-reset-sent");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start password reset");
+      // Still show generic success-style navigation avoidance of enumeration:
+      setMessage("If an account exists for that email, a reset link has been sent.");
+      setError(null);
+      void err;
     } finally {
       setBusy(false);
     }
@@ -171,9 +177,18 @@ export function SignInPage() {
             </button>
           </form>
 
-          <p className="gm-auth-switch" data-testid="auth-registration-closed">
-            Account registration is currently closed.
-          </p>
+          {registrationEnabled ? (
+            <p className="gm-auth-switch" data-testid="auth-create-account">
+              New here?{" "}
+              <Link className="gm-auth-text-btn accent" to="/register" data-testid="create-account-link">
+                Create account
+              </Link>
+            </p>
+          ) : (
+            <p className="gm-auth-switch" data-testid="auth-registration-closed">
+              Account registration is currently closed.
+            </p>
+          )}
 
           <p className="gm-auth-trust">Your data is protected. Broker execution remains disabled.</p>
         </div>

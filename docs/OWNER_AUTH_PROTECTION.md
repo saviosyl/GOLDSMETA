@@ -6,21 +6,42 @@ The required Auth UID is stored only as server secret `GOLDMETA_PINNED_OWNER_UID
 
 ## Critical operational warning
 
+<<<<<<< HEAD
 **Never delete `saviosyl@gmail.com` in Firebase Console.**
 
 Recreating the same email creates a **different random UID** and disconnects existing
 GoldMeta Firestore data and TradingView webhooks that remain bound to the pinned UID.
 
 Also never:
+=======
+Public registration is available via `/register` and `POST /v1/auth/register`
+(see `docs/USER_REGISTRATION.md`). The protected owner email is always rejected
+with an account-exists message and never creates a replacement UID.
+
+Sign-in and password reset remain available. Password reset for the owner email
+targets the existing pinned UID only (Firebase Auth); registration never falls
+back for that email.
+>>>>>>> 932bba2 (feat(auth): safe user registration with approval and owner protection)
 
 - use Admin SDK `deleteUser` / Identity Toolkit `DeleteAccount` against the pinned UID
 - use owner email for test registration or cleanup loops
 - rotate the owner password automatically during deploy verification
 - “fix” Auth drift with Console SignUp
 
+<<<<<<< HEAD
 If Auth integrity is not `HEALTHY`, **stop** and use the break-glass restore path below.
 
 ## Root-cause note (2026-07-24)
+=======
+`beforeUserCreatedGuard` (Firebase Functions v2 Identity blocking):
+
+- allows pinned owner UID restore only for the owner email
+- rejects any other UID for the owner email (`OWNER_EXISTS` message)
+- allows non-owner emails when `PUBLIC_REGISTRATION_ENABLED` is not `false`
+
+Admin SDK registration does **not** trigger blocking functions and is the
+preferred server path for validated, rate-limited signup.
+>>>>>>> 932bba2 (feat(auth): safe user registration with approval and owner protection)
 
 Cloud Audit Logs show the pinned owner was deleted via **Firebase Console**
 (browser Chrome user-agent) by principal `saviosyl@gmail.com`, then a replacement

@@ -23,6 +23,9 @@ import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
 import { buildCTraderRouter } from "./routes/ctrader";
+import { buildRegistrationRouter } from "./routes/registration";
+import { buildAuthSessionRouter } from "./routes/authSession";
+import { buildAdminUsersRouter } from "./routes/adminUsers";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -85,6 +88,9 @@ export const createApiApp = (
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
 
   app.use(buildHealthRouter());
+  app.use(buildRegistrationRouter());
+  app.use(buildAuthSessionRouter());
+  app.use(buildAdminUsersRouter());
   app.use(buildWebhooksRouter(store, aiExplainer));
   app.use(buildTradingViewRouter(store, aiExplainer));
   app.use(buildDevicesRouter(store));

@@ -4,13 +4,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  evaluateUserCreation
+  evaluateUserCreation,
+  isPublicRegistrationEnabled
 } from "../../../src/services/auth/registrationGuard";
 import {
   checkOwnerAuthIntegrity,
   type AuthLookupPort
 } from "../../../src/services/auth/authIntegrity";
 import { loadOwnerAuthConfig, maskUid } from "../../../src/services/auth/ownerAuthConfig";
+import { OWNER_EXISTS_MESSAGE } from "../../../src/services/auth/roles";
 
 const PINNED = "IwlS1UKACOUoYhm9TkcoQk6Ow4C2";
 const OWNER = "saviosyl@gmail.com";
@@ -26,24 +28,38 @@ describe("registrationGuard", () => {
     if (!decision.allow) expect(decision.code).toBe("CONFIGURATION_MISSING");
   });
 
-  it("rejects non-owner registration", () => {
+  it("allows non-owner registration when public registration is enabled", () => {
     const decision = evaluateUserCreation({
       email: "other@example.com",
       uid: "abc",
-      config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED }
+      config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED },
+      publicRegistrationEnabled: true
+    });
+    expect(decision).toEqual({ allow: true, reason: "PUBLIC_REGISTRATION" });
+  });
+
+  it("rejects non-owner registration when public registration is disabled", () => {
+    const decision = evaluateUserCreation({
+      email: "other@example.com",
+      uid: "abc",
+      config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED },
+      publicRegistrationEnabled: false
     });
     expect(decision.allow).toBe(false);
     if (!decision.allow) expect(decision.code).toBe("REGISTRATION_CLOSED");
   });
 
-  it("rejects owner email with random UID", () => {
+  it("rejects owner email with random UID using account-exists message", () => {
     const decision = evaluateUserCreation({
       email: OWNER,
       uid: "i5XxuO5q00MlqidzSaishveXTMj1",
       config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED }
     });
     expect(decision.allow).toBe(false);
-    if (!decision.allow) expect(decision.code).toBe("OWNER_UID_MISMATCH");
+    if (!decision.allow) {
+      expect(decision.code).toBe("OWNER_UID_MISMATCH");
+      expect(decision.message).toBe(OWNER_EXISTS_MESSAGE);
+    }
   });
 
   it("allows owner email only with pinned original UID", () => {
@@ -53,6 +69,21 @@ describe("registrationGuard", () => {
       config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED }
     });
     expect(decision).toEqual({ allow: true, reason: "PINNED_OWNER_RESTORE" });
+  });
+
+  it("never binds a non-owner email to the pinned owner UID", () => {
+    const decision = evaluateUserCreation({
+      email: "newuser@example.com",
+      uid: PINNED,
+      config: { ownerEmail: OWNER, pinnedOwnerUid: PINNED },
+      publicRegistrationEnabled: true
+    });
+    expect(decision.allow).toBe(false);
+  });
+
+  it("defaults public registration enabled", () => {
+    expect(isPublicRegistrationEnabled({})).toBe(true);
+    expect(isPublicRegistrationEnabled({ PUBLIC_REGISTRATION_ENABLED: "false" })).toBe(false);
   });
 });
 
