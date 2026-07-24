@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { AppShell } from "./components/layout/AppShell";
+import { PublicPageShell } from "./components/layout/PublicPageShell";
 import { AccountAccessGate } from "./components/AccountAccessGate";
 import { SignInPage } from "./pages/SignInPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -84,49 +85,70 @@ function PublicAuthRoutes() {
       <Route
         path="/brand"
         element={
-          <div className="gm-shell" data-testid="public-brand-shell">
+          <PublicPageShell testId="public-brand-shell">
             <div className="gm-main">
               <div className="gm-main-inner">
                 <BrandConceptsPage />
               </div>
             </div>
-          </div>
+          </PublicPageShell>
         }
       />
       <Route path="/ui-review/*" element={<UiReviewGate />} />
       <Route
         path="/register"
         element={
-          <div className="gm-shell" data-testid="register-shell">
+          <PublicPageShell testId="register-shell">
             <RegisterPage />
-          </div>
+          </PublicPageShell>
         }
       />
-      <Route path="/legal/terms" element={<div className="gm-shell"><TermsPage /></div>} />
-      <Route path="/legal/privacy" element={<div className="gm-shell"><PrivacyPage /></div>} />
-      <Route path="/legal/risk" element={<div className="gm-shell"><RiskDisclosurePage /></div>} />
+      <Route
+        path="/legal/terms"
+        element={
+          <PublicPageShell testId="legal-terms-shell">
+            <TermsPage />
+          </PublicPageShell>
+        }
+      />
+      <Route
+        path="/legal/privacy"
+        element={
+          <PublicPageShell testId="legal-privacy-shell">
+            <PrivacyPage />
+          </PublicPageShell>
+        }
+      />
+      <Route
+        path="/legal/risk"
+        element={
+          <PublicPageShell testId="legal-risk-shell">
+            <RiskDisclosurePage />
+          </PublicPageShell>
+        }
+      />
       <Route
         path="/registration-complete"
         element={
-          <div className="gm-shell">
+          <PublicPageShell testId="registration-complete-shell">
             <RegistrationCompletePage />
-          </div>
+          </PublicPageShell>
         }
       />
       <Route
         path="/password-reset-sent"
         element={
-          <div className="gm-shell">
+          <PublicPageShell testId="password-reset-sent-shell">
             <PasswordResetSentPage />
-          </div>
+          </PublicPageShell>
         }
       />
       <Route
         path="*"
         element={
-          <div className="gm-shell" data-testid="signed-out-shell">
+          <PublicPageShell testId="signed-out-shell">
             <SignInPage />
-          </div>
+          </PublicPageShell>
         }
       />
     </Routes>
@@ -138,7 +160,7 @@ function ProtectedApp() {
 
   if (loading) {
     return (
-      <div className="gm-shell" data-testid="session-loading">
+      <PublicPageShell testId="session-loading">
         <div className="gm-main">
           <div className="gm-main-inner">
             <div className="gm-section brand-loading" role="status">
@@ -147,7 +169,7 @@ function ProtectedApp() {
             </div>
           </div>
         </div>
-      </div>
+      </PublicPageShell>
     );
   }
 

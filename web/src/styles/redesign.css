@@ -545,18 +545,22 @@ a {
   color: var(--text);
 }
 
-/* Auth — light premium centred card */
+/* Auth — light premium centred card (full-bleed; never inherit sidebar column) */
 .gm-auth-layout {
   min-height: 100dvh;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 24px 16px calc(24px + var(--safe-bottom));
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+    calc(24px + var(--safe-bottom)) max(16px, env(safe-area-inset-left, 0px));
   background:
     radial-gradient(80% 50% at 50% 0%, rgba(216, 163, 61, 0.08), transparent 60%),
     linear-gradient(180deg, #f7f8fa 0%, #f7f8fa 72%, #11284a 72%, #11284a 100%);
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .gm-auth-layout::before {
@@ -582,18 +586,33 @@ a {
 
 .gm-auth-form-panel {
   width: 100%;
+  max-width: 100%;
   display: flex;
   justify-content: center;
   z-index: 1;
+  box-sizing: border-box;
 }
 
 .gm-auth-card {
   width: min(100%, var(--auth-card-w));
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 28px 22px;
   box-shadow: var(--shadow);
+}
+
+.gm-auth-card input,
+.gm-auth-card select,
+.gm-auth-card textarea,
+.gm-auth-field input,
+.gm-auth-field select,
+.gm-auth-field textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .gm-auth-card-brand {
@@ -713,6 +732,8 @@ a {
 .gm-auth-submit {
   appearance: none;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   height: var(--control-h);
   border: 0;
   border-radius: var(--radius-sm);
@@ -777,13 +798,16 @@ a {
 }
 
 .gm-auth-card-wide {
-  width: min(100%, 520px);
+  width: min(100%, 640px);
 }
 
 .gm-auth-field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .gm-auth-check {
@@ -793,6 +817,23 @@ a {
   font-size: 0.92rem;
   margin: 8px 0;
   color: var(--gm-ink-muted, #5c574e);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.gm-auth-check input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.gm-auth-check span,
+.gm-auth-check a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .gm-field-error {
@@ -1012,16 +1053,40 @@ a {
 .gm-shell[data-testid="signed-out-shell"],
 .gm-shell[data-testid="public-brand-shell"],
 .gm-shell[data-testid="session-loading"],
+.gm-shell[data-testid="register-shell"],
+.gm-shell[data-testid="legal-terms-shell"],
+.gm-shell[data-testid="legal-privacy-shell"],
+.gm-shell[data-testid="legal-risk-shell"],
+.gm-shell[data-testid="registration-complete-shell"],
+.gm-shell[data-testid="password-reset-sent-shell"],
+.gm-shell.gm-public-shell,
+.gm-shell[data-layout="public-fullwidth"],
+/* Defense in depth: any shell whose only content is an auth layout */
+.gm-shell:has(> .gm-auth-layout),
 [data-testid="signed-out-shell"],
 [data-testid="public-brand-shell"],
-[data-testid="session-loading"] {
+[data-testid="session-loading"],
+[data-testid="register-shell"] {
   width: 100%;
-  grid-template-columns: 1fr !important;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.gm-shell.gm-public-shell > .gm-auth-layout,
+.gm-shell[data-layout="public-fullwidth"] > .gm-auth-layout,
+[data-testid="register-shell"] > .gm-auth-layout,
+[data-testid="signed-out-shell"] > .gm-auth-layout {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 [data-testid="signed-out-shell"] .gm-main,
 [data-testid="signed-out-shell"] .gm-main-inner,
-[data-testid="public-brand-shell"] .gm-main-inner {
+[data-testid="public-brand-shell"] .gm-main-inner,
+[data-testid="session-loading"] .gm-main,
+[data-testid="session-loading"] .gm-main-inner {
   max-width: none;
   width: 100%;
   margin: 0;
@@ -1032,6 +1097,15 @@ a {
   width: min(100%, var(--content-max));
   margin: 0 auto;
   padding: 28px 24px 48px;
+}
+
+/* Auth status cards inside the authenticated AppShell still need full main width */
+.gm-main .gm-auth-layout {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
