@@ -50,6 +50,6 @@ export function loadCTraderConfig(
     missing,
     notes: configured
       ? notes
-      : [...notes, "CTRADER_SETUP_REQUIRED — register Open API app and set secrets."]
+      : [...notes, "Pepperstone connection required — register Open API app and set secrets in Secret Manager."]
   };
 }

@@ -47,6 +47,9 @@ const V4ResearchPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage }))
 );
+const HelpPage = lazy(() =>
+  import("./pages/HelpPage").then((m) => ({ default: m.HelpPage }))
+);
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
 );
@@ -240,11 +243,19 @@ function ProtectedApp() {
             }
           />
           <Route
+            path="/help"
+            element={
+              <LazyRoute label="Help">
+                <HelpPage />
+              </LazyRoute>
+            }
+          />
+          <Route
             path="*"
             element={
               <div className="gm-section" data-testid="not-found">
                 <h2 className="gm-section-title">Page not found</h2>
-                <p className="gm-meta">That route is not part of GoldMeta.</p>
+                <p className="gm-meta">That page is not part of GoldMeta.</p>
                 <Navigate to="/" replace />
               </div>
             }

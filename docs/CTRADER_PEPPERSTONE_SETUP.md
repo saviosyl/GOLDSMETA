@@ -49,8 +49,8 @@ Environment for this phase: `CTRADER_ENVIRONMENT=DEMO` only.
 5. Server exchanges code for tokens, encrypts them server-side, and never
    returns tokens to the browser.
 
-If Auth is unhealthy, the UI shows **AUTH SETUP REQUIRED** and OAuth stays
-disabled.
+If Auth is unhealthy, the UI shows **Connection setup required** and OAuth stays
+disabled. Technical codes remain available under “Technical details” for owners.
 
 ## How GoldMeta stores tokens
 

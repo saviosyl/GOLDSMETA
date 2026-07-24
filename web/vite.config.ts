@@ -113,6 +113,10 @@ export default defineConfig({
     setupFiles: "./src/test/setup.ts",
     globals: true,
     css: true,
-    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"]
+    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
+    // React 19 only exports act() from the development build.
+    env: {
+      NODE_ENV: "test"
+    }
   }
 });

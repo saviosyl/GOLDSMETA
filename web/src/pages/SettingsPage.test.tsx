@@ -104,12 +104,12 @@ describe("SettingsPage TradingView create connection", () => {
     await user.click(screen.getByRole("button", { name: "Create connection" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /Could not reach the GoldMeta API from this browser/i
+      /Could not reach GoldMeta/i
     );
     expect(screen.queryByText(/^Load failed$/)).not.toBeInTheDocument();
   });
 
-  it("surfaces API error codes for create failures", async () => {
+  it("shows friendly API errors for create failures without raw codes", async () => {
     createTradingViewConnection.mockRejectedValue(
       new ApiError(503, "AUTH_UNAVAILABLE", "Auth service unavailable")
     );
@@ -120,9 +120,9 @@ describe("SettingsPage TradingView create connection", () => {
     await screen.findByText("No connections yet.");
     await user.click(screen.getByRole("button", { name: "Create connection" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "AUTH_UNAVAILABLE: Auth service unavailable"
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Auth service unavailable|Something went wrong/i);
+    expect(alert).not.toHaveTextContent(/^AUTH_UNAVAILABLE:/);
   });
 });
 

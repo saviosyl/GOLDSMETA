@@ -87,8 +87,8 @@ export function buildAuthHealthSnapshot(
     brokerSetupEnabled,
     notes: partial?.notes ?? [
       status === "HEALTHY"
-        ? "Auth integrity HEALTHY — broker OAuth may proceed when secrets exist."
-        : "AUTH SETUP REQUIRED — broker connection disabled for unverified identity."
+        ? "Account security verified — broker OAuth may proceed when secrets exist."
+        : "Connection setup required — broker connection disabled until account security is verified."
     ]
   };
 }
@@ -121,40 +121,56 @@ export function buildCTraderReadiness(args?: {
       title: "Register cTrader Open API application",
       status: config.configured ? "COMPLETE" : "SETUP_REQUIRED",
       detail: config.configured
-        ? "Client credentials configured server-side."
-        : `Missing: ${config.missing.join(", ") || "secrets"}`
+        ? "Open API application registered; server redirect URI configured."
+        : "Create a Demo Open API app and set the GoldMeta redirect URI."
     },
     {
       step: 3,
-      title: "Connect cTrader ID (OAuth)",
+      title: "Add secure credentials",
+      status: config.configured ? "COMPLETE" : "SETUP_REQUIRED",
+      detail: config.configured
+        ? "Client credentials present in Secret Manager."
+        : `Secure credentials still needed (${config.missing.join(", ") || "client id/secret/redirect"}). Store only in Secret Manager.`
+    },
+    {
+      step: 4,
+      title: "Connect account",
       status: authSetupRequired
         ? "BLOCKED"
         : config.configured
           ? "AVAILABLE"
           : "SETUP_REQUIRED",
       detail: authSetupRequired
-        ? "AUTH SETUP REQUIRED — OAuth callback disabled until pinned owner integrity is restored."
+        ? "Connection setup required — OAuth stays disabled until account security is verified."
         : config.configured
-          ? "OAuth helpers present (state/PKCE/allowlisted redirect); OAuth start not enabled until owner app approval."
-          : "OAuth helpers present; configure CTRADER_CLIENT_* secrets to continue."
-    },
-    {
-      step: 4,
-      title: "Select authorised Demo account",
-      status: "SETUP_REQUIRED",
-      detail: "Connect a Pepperstone cTrader Demo account to continue."
+          ? "OAuth helpers ready (state/PKCE/allowlisted redirect). Start connection only after owner approval."
+          : "Add secure credentials before starting OAuth. GoldMeta never asks for your broker password."
     },
     {
       step: 5,
       title: "Verify XAUUSD",
       status: "SETUP_REQUIRED",
-      detail: "Symbol metadata and live bid/ask required from Open API."
+      detail:
+        "After connect: confirm Demo account, Pepperstone broker name, and XAUUSD symbol metadata."
     },
     {
       step: 6,
-      title: "Readiness",
+      title: "Run read-only checks",
+      status: "SETUP_REQUIRED",
+      detail:
+        "Confirm live bid/ask, spread, volume minimum/step, contract size, margin and market-open state."
+    },
+    {
+      step: 7,
+      title: "Run trade previews",
+      status: "SETUP_REQUIRED",
+      detail: "Preview BUY/SELL sizing only. No Demo or Live order is submitted."
+    },
+    {
+      step: 8,
+      title: "Request Demo trading approval",
       status: "BLOCKED",
-      detail: "Execution disabled. AutoTrade locked. No order submission."
+      detail: "Execution disabled. AutoTrade off. Demo trading stays locked until separate approval."
     }
   ];
 
@@ -173,7 +189,7 @@ export function buildCTraderReadiness(args?: {
     auth,
     qualification,
     wizardSteps,
-    label: "CTRADER_SETUP_REQUIRED — TRADING DISABLED — AUTO TRADE OFF"
+    label: "Pepperstone connection required — Trading locked — AutoTrade OFF"
   };
 }
 
@@ -273,30 +289,32 @@ export function getBrokerControlCentreSnapshot(auth?: AuthHealthSnapshot) {
     brokers: [
       {
         id: "manual",
-        name: "MANUAL",
+        name: "Manual",
         status: "Available",
-        detail: "No broker execution",
+        detail: "Analysis only — no broker execution",
         badge: "MANUAL"
       },
       {
         id: "trading212_invest",
-        name: "TRADING 212 INVEST",
-        status: "Practice Read Only",
-        detail: "Long-only gold ETF proxy — order automation unmerged",
+        name: "Trading 212 Practice",
+        status: "Read only",
+        detail: "Practice / read-only gold proxy — order automation not enabled",
         badge: "READ_ONLY"
       },
       {
         id: "pepperstone_ctrader",
-        name: "PEPPERSTONE cTRADER CFD",
-        status: readiness.authSetupRequired ? "Auth Setup Required" : "Setup Required",
-        detail: "Demo Preview architecture — AutoTrade Locked — Live Locked",
+        name: "Pepperstone cTrader Demo",
+        status: readiness.authSetupRequired
+          ? "Connection setup required"
+          : "Pepperstone connection required",
+        detail: "Demo setup — AutoTrade off — Live locked",
         badge: "DEMO_PREVIEW"
       },
       {
         id: "ig",
-        name: "IG",
-        status: "Parked",
-        detail: "Not active",
+        name: "IG — Coming later",
+        status: "Coming later",
+        detail: "Not active yet",
         badge: "PARKED"
       }
     ],

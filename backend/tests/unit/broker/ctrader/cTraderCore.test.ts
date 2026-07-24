@@ -350,9 +350,14 @@ describe("mutation guard + service", () => {
     expect(readiness.connected).toBe(false);
     expect(readiness.autoTrade).toBe("OFF");
     expect(readiness.orderSubmissionEnabled).toBe(false);
+    expect(readiness.wizardSteps).toHaveLength(8);
+    expect(readiness.wizardSteps[0]?.title).toMatch(/Create Pepperstone/i);
+    expect(readiness.wizardSteps[7]?.title).toMatch(/Demo trading approval/i);
+    expect(readiness.label).toMatch(/Pepperstone connection required/i);
     const centre = getBrokerControlCentreSnapshot();
     expect(centre.autoTrade).toBe("OFF");
     expect(centre.brokers.some((b) => b.id === "pepperstone_ctrader")).toBe(true);
+    expect(centre.brokers.find((b) => b.id === "pepperstone_ctrader")?.name).toMatch(/Pepperstone/i);
     const demo = buildDemonstrationBundle();
     expect(demo.banner).toBe(FIXTURE_BANNER);
   });

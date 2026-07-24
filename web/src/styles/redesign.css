@@ -2280,3 +2280,113 @@ a {
   .gm-broker-card { min-height: 0; }
   .gm-wizard-steps li { grid-template-columns: 1fr; }
 }
+
+/* ===== UX: friendly status / help / admin cards ===== */
+.gm-broker-top-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 14px;
+}
+.gm-broker-status-cell {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #d8dee6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.gm-broker-status-cell .gm-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.gm-broker-status-cell strong {
+  display: block;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.gm-trading-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.gm-friendly-error-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+.gm-friendly-error-list {
+  margin: 0 0 10px;
+  padding-left: 1.1rem;
+}
+.gm-friendly-error-list li {
+  margin-bottom: 4px;
+}
+.gm-help-steps {
+  margin: 0 0 12px;
+  padding-left: 1.2rem;
+}
+.gm-help-steps li {
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.gm-glossary {
+  display: grid;
+  gap: 8px;
+}
+.gm-glossary-term {
+  font-weight: 700;
+}
+.gm-password-rules {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+  color: var(--text-secondary, #5b6573);
+  font-size: 0.85rem;
+}
+.gm-password-rules li {
+  margin-bottom: 2px;
+}
+.gm-subsection-title {
+  margin: 16px 0 8px;
+  font-size: 1rem;
+}
+.gm-admin-cards {
+  display: none;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  gap: 10px;
+}
+.gm-admin-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border, #d8dee6);
+  border-radius: 10px;
+}
+.gm-primary-plan {
+  margin-top: 8px;
+}
+@media (min-width: 900px) {
+  .gm-broker-top-status {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .gm-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .gm-admin-cards {
+    display: grid;
+  }
+  .gm-admin-users-page .gm-table,
+  [data-testid="admin-users-page"] .gm-table-wrap table {
+    min-width: 720px;
+  }
+  .gm-decision-label {
+    font-size: clamp(2rem, 12vw, 2.75rem);
+  }
+}
+
