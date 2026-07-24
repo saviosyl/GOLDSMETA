@@ -723,4 +723,31 @@ export class ApiClient {
     });
     return body;
   }
+
+  async getBrokerControlCentre(): Promise<
+    import("./broker/ctraderTypes").BrokerControlCentreResponse
+  > {
+    return this.request("/v1/brokers/control-centre");
+  }
+
+  async getCTraderStatus(): Promise<unknown> {
+    return this.request("/v1/ctrader/status");
+  }
+
+  async getCTraderDemonstration(): Promise<
+    import("./broker/ctraderTypes").CTraderDemonstrationBundle
+  > {
+    return this.request("/v1/ctrader/demonstration");
+  }
+
+  async startCTraderOAuth(): Promise<unknown> {
+    return this.request("/v1/ctrader/oauth/start", { method: "POST", body: "{}" });
+  }
+
+  async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {
+    return this.request("/v1/ctrader/preview", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
 }

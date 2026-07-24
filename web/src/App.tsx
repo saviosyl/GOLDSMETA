@@ -35,6 +35,11 @@ const SettingsPage = lazy(() =>
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
 );
+const BrokerControlCentrePage = lazy(() =>
+  import("./pages/broker/BrokerControlCentrePage").then((m) => ({
+    default: m.BrokerControlCentrePage
+  }))
+);
 
 function RouteFallback({ label }: { label: string }) {
   return (
@@ -150,6 +155,14 @@ function ProtectedApp() {
           element={
             <LazyRoute label="AutoTrade">
               <AutoTradePage />
+            </LazyRoute>
+          }
+        />
+        <Route
+          path="/brokers"
+          element={
+            <LazyRoute label="Brokers">
+              <BrokerControlCentrePage />
             </LazyRoute>
           }
         />

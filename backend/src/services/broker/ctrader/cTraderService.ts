@@ -1,0 +1,335 @@
+/**
+ * Pepperstone cTrader Demo orchestration — read/preview only.
+ * AutoTrade remains OFF. Order submission impossible.
+ */
+
+import type { AutomationMode, BrokerHealthStatus, TradePreview } from "../domain";
+import { loadCTraderConfig } from "./config";
+import { snapshotCTraderFlags, CTRADER_DEMO_SERVER_LIMITS } from "./flags";
+import {
+  FIXTURE_BANNER,
+  fixtureDemoAccount,
+  fixtureLongPosition,
+  fixtureQuote,
+  fixtureXauUsdSymbol
+} from "./fixtures";
+import { DISABLED_ORDER_METHODS } from "./mutationGuard";
+import { approveTradePreview, buildTradePreview } from "./preview";
+import {
+  evaluateDemoAutoQualification,
+  type DemoAutoQualificationState
+} from "./qualification";
+import { resolveXauUsdFromCatalogue } from "./symbolResolver";
+
+export interface AuthHealthSnapshot {
+  status: "HEALTHY" | "NOT_HEALTHY" | "UNKNOWN";
+  pinnedOwnerExists: boolean | null;
+  emailMapsToPinned: boolean | null;
+  emailVerified: boolean | null;
+  disabled: boolean | null;
+  webhookOwnedByOriginal: boolean | null;
+  brokerSetupEnabled: boolean;
+  notes: string[];
+}
+
+export interface CTraderReadinessReport {
+  setupRequired: boolean;
+  authSetupRequired: boolean;
+  oauthConfigured: boolean;
+  connected: false;
+  demonstrationAvailable: true;
+  automationMode: AutomationMode;
+  autoTrade: "OFF";
+  orderSubmissionEnabled: false;
+  liveEnabled: false;
+  flags: ReturnType<typeof snapshotCTraderFlags>;
+  config: ReturnType<typeof loadCTraderConfig>;
+  auth: AuthHealthSnapshot;
+  qualification: ReturnType<typeof evaluateDemoAutoQualification>;
+  wizardSteps: Array<{
+    step: number;
+    title: string;
+    status: "COMPLETE" | "AVAILABLE" | "BLOCKED" | "SETUP_REQUIRED";
+    detail: string;
+  }>;
+  label: string;
+}
+
+const DEFAULT_QUAL: DemoAutoQualificationState = {
+  authHealthy: false,
+  pinnedOwnerVerified: false,
+  oauthHealthy: false,
+  pepperstoneDemoConfirmed: false,
+  xauusdMetadataComplete: false,
+  completedPreviews: 0,
+  approvedControlledDemoTrades: 0,
+  firstDemoTradeAt: null,
+  unresolvedUnknownOrders: 0,
+  duplicateOrders: 0,
+  restartRecoveryTested: false,
+  emergencyStopTested: false,
+  dailyLossLockTested: false,
+  ownerUnlockedDemoAuto: false
+};
+
+export function buildAuthHealthSnapshot(
+  partial?: Partial<AuthHealthSnapshot>
+): AuthHealthSnapshot {
+  const status = partial?.status ?? "UNKNOWN";
+  const brokerSetupEnabled = status === "HEALTHY";
+  return {
+    status,
+    pinnedOwnerExists: partial?.pinnedOwnerExists ?? null,
+    emailMapsToPinned: partial?.emailMapsToPinned ?? null,
+    emailVerified: partial?.emailVerified ?? null,
+    disabled: partial?.disabled ?? null,
+    webhookOwnedByOriginal: partial?.webhookOwnedByOriginal ?? null,
+    brokerSetupEnabled,
+    notes: partial?.notes ?? [
+      status === "HEALTHY"
+        ? "Auth integrity HEALTHY — broker OAuth may proceed when secrets exist."
+        : "AUTH SETUP REQUIRED — broker connection disabled for unverified identity."
+    ]
+  };
+}
+
+export function buildCTraderReadiness(args?: {
+  auth?: AuthHealthSnapshot;
+  qualification?: Partial<DemoAutoQualificationState>;
+}): CTraderReadinessReport {
+  const config = loadCTraderConfig();
+  const auth = args?.auth ?? buildAuthHealthSnapshot({ status: "UNKNOWN" });
+  const qualState: DemoAutoQualificationState = {
+    ...DEFAULT_QUAL,
+    ...args?.qualification,
+    authHealthy: auth.status === "HEALTHY",
+    pinnedOwnerVerified: Boolean(auth.pinnedOwnerExists && auth.emailMapsToPinned)
+  };
+  const qualification = evaluateDemoAutoQualification(qualState);
+  const authSetupRequired = auth.status !== "HEALTHY";
+
+  const wizardSteps: CTraderReadinessReport["wizardSteps"] = [
+    {
+      step: 1,
+      title: "Create Pepperstone cTrader Demo account",
+      status: "AVAILABLE",
+      detail:
+        "TradingView-linked Pepperstone access is not automatically a cTrader Open API account."
+    },
+    {
+      step: 2,
+      title: "Register cTrader Open API application",
+      status: config.configured ? "COMPLETE" : "SETUP_REQUIRED",
+      detail: config.configured
+        ? "Client credentials configured server-side."
+        : `Missing: ${config.missing.join(", ") || "secrets"}`
+    },
+    {
+      step: 3,
+      title: "Connect cTrader ID (OAuth)",
+      status: authSetupRequired
+        ? "BLOCKED"
+        : config.configured
+          ? "AVAILABLE"
+          : "SETUP_REQUIRED",
+      detail: authSetupRequired
+        ? "AUTH SETUP REQUIRED — OAuth callback disabled until pinned owner integrity is restored."
+        : config.configured
+          ? "OAuth helpers present (state/PKCE/allowlisted redirect); OAuth start not enabled until owner app approval."
+          : "OAuth helpers present; configure CTRADER_CLIENT_* secrets to continue."
+    },
+    {
+      step: 4,
+      title: "Select authorised Demo account",
+      status: "SETUP_REQUIRED",
+      detail: "Connect a Pepperstone cTrader Demo account to continue."
+    },
+    {
+      step: 5,
+      title: "Verify XAUUSD",
+      status: "SETUP_REQUIRED",
+      detail: "Symbol metadata and live bid/ask required from Open API."
+    },
+    {
+      step: 6,
+      title: "Readiness",
+      status: "BLOCKED",
+      detail: "Execution disabled. AutoTrade locked. No order submission."
+    }
+  ];
+
+  return {
+    setupRequired: true,
+    authSetupRequired,
+    oauthConfigured: config.configured,
+    connected: false,
+    demonstrationAvailable: true,
+    automationMode: "OFF",
+    autoTrade: "OFF",
+    orderSubmissionEnabled: false,
+    liveEnabled: false,
+    flags: snapshotCTraderFlags(),
+    config,
+    auth,
+    qualification,
+    wizardSteps,
+    label: "CTRADER_SETUP_REQUIRED — TRADING DISABLED — AUTO TRADE OFF"
+  };
+}
+
+export function buildDemonstrationBundle(): {
+  banner: string;
+  account: ReturnType<typeof fixtureDemoAccount>;
+  symbol: ReturnType<typeof fixtureXauUsdSymbol>;
+  quote: ReturnType<typeof fixtureQuote>;
+  buyPreview: TradePreview;
+  sellPreview: TradePreview;
+  blockedPreview: TradePreview;
+  position: ReturnType<typeof fixtureLongPosition>;
+} {
+  const account = fixtureDemoAccount();
+  const symbol = fixtureXauUsdSymbol();
+  const quote = fixtureQuote("OPEN");
+  const buyPreview = buildTradePreview({
+    decisionId: "demo-buy-1",
+    decision: "BUY",
+    confidence: 86,
+    generatedAt: new Date().toISOString(),
+    candleConfirmed: true,
+    stopLoss: 2340,
+    takeProfits: [2365, 2380],
+    symbol,
+    quote,
+    position: null,
+    pendingOrdersCount: 0,
+    equity: account.equity,
+    freeMargin: account.freeMargin,
+    accountCurrency: "EUR",
+    riskAmountEur: 20,
+    maxSpread: 1,
+    demonstration: true,
+    eurToAccountRate: 1,
+    marginPerLot: 200
+  });
+  const sellPreview = buildTradePreview({
+    decisionId: "demo-sell-1",
+    decision: "SELL",
+    confidence: 84,
+    generatedAt: new Date().toISOString(),
+    candleConfirmed: true,
+    stopLoss: 2360,
+    takeProfits: [2330],
+    symbol,
+    quote,
+    position: null,
+    pendingOrdersCount: 0,
+    equity: account.equity,
+    freeMargin: account.freeMargin,
+    accountCurrency: "EUR",
+    riskAmountEur: 20,
+    maxSpread: 1,
+    demonstration: true,
+    eurToAccountRate: 1,
+    marginPerLot: 200
+  });
+  const blockedPreview = buildTradePreview({
+    decisionId: "demo-blocked-1",
+    decision: "BUY",
+    confidence: 55,
+    generatedAt: new Date(Date.now() - 600_000).toISOString(),
+    candleConfirmed: false,
+    stopLoss: null,
+    takeProfits: [],
+    symbol,
+    quote,
+    position: null,
+    pendingOrdersCount: 0,
+    equity: account.equity,
+    freeMargin: account.freeMargin,
+    accountCurrency: "EUR",
+    riskAmountEur: 20,
+    maxSpread: 0.1,
+    demonstration: true,
+    eurToAccountRate: 1
+  });
+  return {
+    banner: FIXTURE_BANNER,
+    account,
+    symbol,
+    quote,
+    buyPreview,
+    sellPreview,
+    blockedPreview,
+    position: fixtureLongPosition()
+  };
+}
+
+export function getBrokerControlCentreSnapshot(auth?: AuthHealthSnapshot) {
+  const readiness = buildCTraderReadiness({ auth });
+  return {
+    defaultBroker: "manual" as const,
+    autoTrade: "OFF" as const,
+    orderSubmission: false,
+    brokers: [
+      {
+        id: "manual",
+        name: "MANUAL",
+        status: "Available",
+        detail: "No broker execution",
+        badge: "MANUAL"
+      },
+      {
+        id: "trading212_invest",
+        name: "TRADING 212 INVEST",
+        status: "Practice Read Only",
+        detail: "Long-only gold ETF proxy — order automation unmerged",
+        badge: "READ_ONLY"
+      },
+      {
+        id: "pepperstone_ctrader",
+        name: "PEPPERSTONE cTRADER CFD",
+        status: readiness.authSetupRequired ? "Auth Setup Required" : "Setup Required",
+        detail: "Demo Preview architecture — AutoTrade Locked — Live Locked",
+        badge: "DEMO_PREVIEW"
+      },
+      {
+        id: "ig",
+        name: "IG",
+        status: "Parked",
+        detail: "Not active",
+        badge: "PARKED"
+      }
+    ],
+    automationModes: [
+      { id: "OFF", available: true },
+      { id: "MANUAL", available: true },
+      { id: "CONFIRM", available: true, note: "Preview only — stops at PREVIEW_APPROVED" },
+      { id: "DEMO_AUTO_LOCKED", available: false, note: "Visible but locked" },
+      { id: "DEMO_AUTO", available: false, note: "Impossible to activate" },
+      { id: "LIVE_LOCKED", available: false, note: "Impossible to activate" }
+    ],
+    limits: CTRADER_DEMO_SERVER_LIMITS,
+    readiness,
+    health: {
+      brokerId: "pepperstone_ctrader",
+      environment: "DEMO",
+      connectionState: readiness.authSetupRequired
+        ? "AUTH_SETUP_REQUIRED"
+        : "SETUP_REQUIRED",
+      automationMode: "OFF",
+      oauthHealthy: null,
+      authIntegrityHealthy: auth?.status === "HEALTHY",
+      executionEnabled: false,
+      liveEnabled: false,
+      lastErrorCode: null,
+      notes: ["No broker order may be submitted."]
+    } satisfies BrokerHealthStatus
+  };
+}
+
+export const cTraderOrderApi = {
+  ...DISABLED_ORDER_METHODS,
+  approvePreview: approveTradePreview,
+  buildPreview: buildTradePreview,
+  resolveSymbol: resolveXauUsdFromCatalogue
+};
