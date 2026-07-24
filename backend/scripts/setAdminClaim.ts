@@ -2,25 +2,22 @@
 /**
  * One-time secure script: grant Firebase custom claim admin=true.
  *
- * Prerequisites:
- *   - GOOGLE_APPLICATION_CREDENTIALS pointing at a service account with
- *     Firebase Auth Admin privileges (or Application Default Credentials
- *     that can call identitytoolkit + IAM).
- *   - FIREBASE_PROJECT_ID / GOLDMETA_PROJECT_ID = goldmeta-web
+ * Never prints full UIDs. Never deletes/disables/renames Auth users.
+ * Owner email/UID claim changes that are not admin-flag toggles still require
+ * break-glass only when combined with dangerous mutations (see mutation guard).
  *
- * Usage (do not commit tokens or passwords):
- *   cd backend
- *   export GOLDMETA_PROJECT_ID=goldmeta-web
- *   npx tsx scripts/setAdminClaim.ts --uid iuayfBpUkZYEAlYlsTFxulSC4Ye2
- *
- *   # or by email:
+ * Usage:
  *   npx tsx scripts/setAdminClaim.ts --email saviosyl@gmail.com
- *
- * After running, the user must refresh their ID token (sign out/in or
- * getIdToken(true)) before /v1/admin/diagnostics succeeds.
+ *   npx tsx scripts/setAdminClaim.ts --uid <uid>
  */
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { maskUid } from "../src/services/auth/ownerAuthConfig";
+import {
+  assertPinnedOwnerMutationAllowed,
+  isPinnedOwnerEmail,
+  isPinnedOwnerUid
+} from "../src/services/auth/pinnedOwnerMutationGuard";
 
 const args = process.argv.slice(2);
 const getArg = (name: string): string | undefined => {
@@ -38,6 +35,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Refuse dangerous flags if someone extends this script later.
+  if (args.includes("--delete") || args.includes("--disable") || args.includes("--anonymise")) {
+    assertPinnedOwnerMutationAllowed({
+      mutation: args.includes("--delete")
+        ? "DELETE"
+        : args.includes("--disable")
+          ? "DISABLE"
+          : "ANONYMISE",
+      targetUid: uidArg,
+      targetEmail: emailArg
+    });
+    console.error("Dangerous Auth mutation flags are not supported by this script.");
+    process.exit(2);
+  }
+
   const projectId =
     process.env.GOLDMETA_PROJECT_ID ||
     process.env.FIREBASE_PROJECT_ID ||
@@ -49,6 +61,12 @@ async function main(): Promise<void> {
   }
   const auth = getAuth();
   const user = uidArg ? await auth.getUser(uidArg) : await auth.getUserByEmail(emailArg!);
+
+  if (isPinnedOwnerUid(user.uid) || isPinnedOwnerEmail(user.email)) {
+    // Admin claim toggle on owner is allowed; never rotate password / delete here.
+    console.log("TARGET=pinned-owner (admin claim toggle only; no delete/disable/password)");
+  }
+
   const nextClaims = { ...(user.customClaims ?? {}) };
   if (revoke) {
     delete nextClaims.admin;
@@ -59,8 +77,8 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify(
       {
-        uid: user.uid,
-        email: user.email ?? null,
+        uidMasked: maskUid(user.uid),
+        emailPresent: Boolean(user.email),
         admin: revoke ? false : true,
         note: "User must refresh ID token before claim is visible."
       },

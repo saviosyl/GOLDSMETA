@@ -13,7 +13,8 @@
     "lint": "eslint src --ext .ts",
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
-    "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts"
+    "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts",
+    "precheck:owner-auth-restore": "tsx scripts/preRestoreOwnerAuthCheck.ts"
   },
   "dependencies": {
     "cors": "^2.8.6",

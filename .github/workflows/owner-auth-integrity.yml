@@ -1,7 +1,7 @@
 name: Owner Auth Integrity Guard
 
-# Manual / pre-production only. Does NOT run on ordinary PRs against production.
-# Requires repository secrets GOLDMETA_PINNED_OWNER_UID (never print full value).
+# Read-only. Never deletes/creates Auth users.
+# Requires repository secret GOLDMETA_PINNED_OWNER_UID (never print full value).
 
 on:
   workflow_dispatch:
@@ -11,6 +11,9 @@ on:
         required: true
         default: "true"
         type: boolean
+  schedule:
+    # Twice daily integrity probe (UTC).
+    - cron: "17 6,18 * * *"
 
 jobs:
   owner-auth-integrity:
@@ -50,5 +53,6 @@ jobs:
             echo "Pinned owner UID secret is not configured in GitHub Actions."
             exit 2
           fi
-          npx tsx scripts/verifyOwnerAuthIntegrity.ts
-        continue-on-error: ${{ inputs.fail_on_mismatch != true }}
+          # Redact accidental full UID echoes from tooling.
+          npx tsx scripts/verifyOwnerAuthIntegrity.ts | sed -E 's/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{12,}([A-Za-z0-9_-]{4})/\1…\2/g'
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_mismatch != true }}
