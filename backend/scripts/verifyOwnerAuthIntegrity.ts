@@ -82,6 +82,7 @@ async function main(): Promise<void> {
   console.log(`PINNED_UID=${result.pinnedUidRedacted ?? maskUid(config.pinnedOwnerUid)}`);
   console.log(`ORIGINAL_EXISTS=${result.originalOwnerExists}`);
   console.log(`WEBHOOK_OWNED_BY_ORIGINAL=${result.webhookOwnedByOriginal}`);
+  console.log(`ACTIVE_WEBHOOK=${result.activeWebhookIdRedacted ?? "null"}`);
   console.log(`MUTATED_AUTH=${result.mutatedAuth}`);
   for (const note of result.notes) {
     console.log(`NOTE=${note}`);

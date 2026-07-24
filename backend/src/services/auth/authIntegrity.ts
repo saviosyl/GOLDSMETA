@@ -4,6 +4,10 @@
  */
 
 import { maskUid, normalizeEmail, type OwnerAuthConfig } from "./ownerAuthConfig";
+import {
+  evaluateOwnerWebhookHealth,
+  type WebhookConnectionRef
+} from "./ownerWebhookHealth";
 
 export type AuthIntegrityStatus =
   | "HEALTHY"
@@ -19,6 +23,8 @@ export interface AuthIntegrityResult {
   pinnedUidRedacted: string | null;
   originalOwnerExists: boolean;
   webhookOwnedByOriginal: boolean | null;
+  /** Redacted active webhook id when available. */
+  activeWebhookIdRedacted: string | null;
   notes: string[];
   mutatedAuth: false;
 }
@@ -28,21 +34,31 @@ export interface AuthLookupPort {
   getUser(uid: string): Promise<{ uid: string; email?: string | null } | null>;
   listWebhookConnectionsForUser?(
     userId: string
-  ): Promise<Array<{ webhookId: string; status?: string }>>;
+  ): Promise<Array<{ webhookId: string; status?: string; userId?: string }>>;
+  /** Optional canonical current webhook id from owner profile/config. */
+  getCanonicalOwnerWebhookId?(pinnedOwnerUid: string): Promise<string | null>;
+  /**
+   * Optional: ACTIVE webhooks that appear to be owner webhooks but are owned
+   * by a different UID (replacement drift).
+   */
+  listForeignActiveOwnerWebhooks?(
+    pinnedOwnerUid: string
+  ): Promise<WebhookConnectionRef[]>;
 }
 
 export async function checkOwnerAuthIntegrity(args: {
   config: OwnerAuthConfig;
   auth: AuthLookupPort;
+  /** @deprecated Ignored — gate no longer uses display suffixes. */
   expectedWebhookSuffix?: string;
 }): Promise<AuthIntegrityResult> {
   const notes: string[] = [];
-  const expectedSuffix = args.expectedWebhookSuffix ?? "wbuu";
   const { ownerEmail, pinnedOwnerUid } = args.config;
 
   const base = {
     ownerEmail,
-    mutatedAuth: false as const
+    mutatedAuth: false as const,
+    activeWebhookIdRedacted: null as string | null
   };
 
   if (!ownerEmail || !pinnedOwnerUid) {
@@ -65,16 +81,27 @@ export async function checkOwnerAuthIntegrity(args: {
   const pinnedEmail = normalizeEmail(pinnedUser?.email ?? null);
 
   let webhookOwnedByOriginal: boolean | null = null;
+  let activeWebhookIdRedacted: string | null = null;
+
   if (args.auth.listWebhookConnectionsForUser && originalOwnerExists) {
     const hooks = await args.auth.listWebhookConnectionsForUser(pinnedOwnerUid);
-    webhookOwnedByOriginal = hooks.some(
-      (h) =>
-        h.webhookId.includes(expectedSuffix) &&
-        String(h.status ?? "ACTIVE").toUpperCase() !== "REVOKED"
-    );
-    if (!webhookOwnedByOriginal) {
-      notes.push("Pinned owner UID has no active webhook matching expected suffix.");
-    }
+    const canonical =
+      (await args.auth.getCanonicalOwnerWebhookId?.(pinnedOwnerUid)) ?? null;
+    const foreign =
+      (await args.auth.listForeignActiveOwnerWebhooks?.(pinnedOwnerUid)) ?? [];
+    const webhookHealth = evaluateOwnerWebhookHealth({
+      pinnedOwnerUid,
+      pinnedWebhooks: hooks.map((h) => ({
+        webhookId: h.webhookId,
+        status: h.status,
+        userId: h.userId ?? pinnedOwnerUid
+      })),
+      canonicalWebhookId: canonical,
+      foreignActiveOwnerWebhooks: foreign
+    });
+    webhookOwnedByOriginal = webhookHealth.ok;
+    activeWebhookIdRedacted = webhookHealth.activeWebhookIdRedacted;
+    notes.push(...webhookHealth.notes);
   }
 
   if (!originalOwnerExists) {
@@ -85,6 +112,7 @@ export async function checkOwnerAuthIntegrity(args: {
       pinnedUidRedacted: maskUid(pinnedOwnerUid),
       originalOwnerExists: false,
       webhookOwnedByOriginal,
+      activeWebhookIdRedacted,
       notes: [...notes, "Pinned owner UID is missing from Firebase Auth."]
     };
   }
@@ -97,6 +125,7 @@ export async function checkOwnerAuthIntegrity(args: {
       pinnedUidRedacted: maskUid(pinnedOwnerUid),
       originalOwnerExists: true,
       webhookOwnedByOriginal,
+      activeWebhookIdRedacted,
       notes: [
         ...notes,
         "Owner email is not currently assigned to any Auth user.",
@@ -108,8 +137,6 @@ export async function checkOwnerAuthIntegrity(args: {
   }
 
   if (emailUid !== pinnedOwnerUid) {
-    // Firebase Auth enforces unique emails, so "duplicate" usually means mismatch
-    // after rename/recreate drift rather than two simultaneous accounts.
     return {
       ...base,
       status: "OWNER_UID_MISMATCH",
@@ -117,6 +144,7 @@ export async function checkOwnerAuthIntegrity(args: {
       pinnedUidRedacted: maskUid(pinnedOwnerUid),
       originalOwnerExists: true,
       webhookOwnedByOriginal,
+      activeWebhookIdRedacted,
       notes: [
         ...notes,
         "Owner email resolves to a different UID than the pinned production owner.",
@@ -133,10 +161,8 @@ export async function checkOwnerAuthIntegrity(args: {
       pinnedUidRedacted: maskUid(pinnedOwnerUid),
       originalOwnerExists: true,
       webhookOwnedByOriginal,
-      notes: [
-        ...notes,
-        "Unexpected email binding inconsistency on pinned UID."
-      ]
+      activeWebhookIdRedacted,
+      notes: [...notes, "Unexpected email binding inconsistency on pinned UID."]
     };
   }
 
@@ -147,6 +173,7 @@ export async function checkOwnerAuthIntegrity(args: {
     pinnedUidRedacted: maskUid(pinnedOwnerUid),
     originalOwnerExists: true,
     webhookOwnedByOriginal,
+    activeWebhookIdRedacted,
     notes: notes.length ? notes : ["Owner email maps to pinned UID."]
   };
 }

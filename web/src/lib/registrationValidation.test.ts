@@ -22,10 +22,13 @@ describe("registrationValidation (web)", () => {
     expect(validateRegistrationForm(base).ok).toBe(true);
   });
 
-  it("rejects owner email", () => {
+  it("rejects owner email with a single primary message", () => {
     const result = validateRegistrationForm({ ...base, email: "saviosyl@gmail.com" });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).toBe(OWNER_EXISTS_MESSAGE);
+    if (!result.ok) {
+      expect(result.message).toBe(OWNER_EXISTS_MESSAGE);
+      expect(result.fieldErrors).toEqual({});
+    }
   });
 
   it("rejects weak password and mismatch and missing terms", () => {

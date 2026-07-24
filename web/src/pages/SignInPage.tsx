@@ -1,12 +1,19 @@
-import { useId, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { sendPasswordReset } from "../lib/firebase";
+import { getFirebaseProjectId, sendPasswordReset } from "../lib/firebase";
 import { friendlyAuthError } from "../lib/authErrors";
+
+const GENERIC_RESET_SENT =
+  "If an account exists for this email, a password-reset message has been sent. Please check your inbox and spam folder.";
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
 
 /** V5.4 light premium sign-in — registration open via Create account. */
 export function SignInPage() {
-  const { signIn, configured, registrationEnabled, apiBaseUrl } = useAuth();
+  const { signIn, configured, registrationEnabled } = useAuth();
   const navigate = useNavigate();
   const emailId = useId();
   const passwordId = useId();
@@ -18,6 +25,7 @@ export function SignInPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const resetInFlight = useRef(false);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -34,35 +42,47 @@ export function SignInPage() {
   };
 
   const onForgot = async () => {
+    if (resetInFlight.current || busy) return;
     setError(null);
     setMessage(null);
-    const trimmed = email.trim();
+    const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setError("Enter your email address first, then tap Forgot password.");
       return;
     }
+    if (!isValidEmail(trimmed)) {
+      setError("Enter a valid email address, then tap Forgot password.");
+      return;
+    }
+
+    const projectId = getFirebaseProjectId();
+    if (projectId && projectId !== "goldmeta-web" && import.meta.env.PROD) {
+      setError("Sign-in is misconfigured for this environment. Please try again later.");
+      return;
+    }
+
+    resetInFlight.current = true;
     setBusy(true);
     try {
-      // Prefer server rate-limited path when API is configured.
-      if (apiBaseUrl) {
-        try {
-          await fetch(`${apiBaseUrl}/v1/auth/password-reset`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({ email: trimmed })
-          });
-        } catch {
-          await sendPasswordReset(trimmed);
-        }
-      } else {
-        await sendPasswordReset(trimmed);
-      }
+      // Client SDK sendPasswordResetEmail actually delivers mail (same family as
+      // Firebase Console). Do NOT also POST /v1/auth/password-reset here — that
+      // would double-send once the API sendOobCode fix is deployed.
+      // Server rate limits still apply to direct API callers; UI uses in-flight lock.
+      await sendPasswordReset(trimmed);
       navigate("/password-reset-sent");
     } catch (err) {
-      setMessage("If an account exists for that email, a reset link has been sent.");
-      setError(null);
-      void err;
+      const friendly = friendlyAuthError(err);
+      if (/too many/i.test(friendly)) {
+        setError(friendly);
+      } else if (/network/i.test(friendly)) {
+        setError(friendly);
+      } else {
+        // Enumeration-safe generic confirmation.
+        setMessage(GENERIC_RESET_SENT);
+        setError(null);
+      }
     } finally {
+      resetInFlight.current = false;
       setBusy(false);
     }
   };
@@ -107,7 +127,7 @@ export function SignInPage() {
               {error}
             </div>
           )}
-          {message && (
+          {message && !error && (
             <div className="banner" role="status" data-testid="signin-message">
               {message}
             </div>

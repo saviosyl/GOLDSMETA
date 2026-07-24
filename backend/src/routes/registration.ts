@@ -14,8 +14,10 @@ import {
 import { loadRegistrationConfig } from "../services/auth/registrationConfig";
 import { validateRegistrationInput } from "../services/auth/registrationValidation";
 import { checkPasswordResetRateLimit } from "../services/auth/registrationRateLimit";
-import { getFirebaseApp } from "../services/firebaseAdmin";
-import { getAuth } from "firebase-admin/auth";
+import {
+  dispatchPasswordResetEmail,
+  GENERIC_PASSWORD_RESET_MESSAGE
+} from "../services/auth/passwordResetSend";
 
 export const buildRegistrationRouter = (): Router => {
   const router = Router();
@@ -125,6 +127,9 @@ export const buildRegistrationRouter = (): Router => {
    * Rate-limited password reset trigger. Always returns a generic message.
    * Does not reveal whether ordinary emails exist. Owner email is allowed
    * (targets existing Auth account only — never creates a user).
+   *
+   * Sends via Identity Toolkit sendOobCode (same path as Firebase Console).
+   * Admin generatePasswordResetLink alone does NOT deliver email.
    */
   router.post(
     "/v1/auth/password-reset",
@@ -133,9 +138,7 @@ export const buildRegistrationRouter = (): Router => {
     async (req, res) => {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const email = normalizeEmail(typeof body.email === "string" ? body.email : null);
-      const generic = {
-        message: "If an account exists for that email, a reset link has been sent."
-      };
+      const generic = { message: GENERIC_PASSWORD_RESET_MESSAGE };
       if (!email) {
         res.status(200).json(generic);
         return;
@@ -148,14 +151,12 @@ export const buildRegistrationRouter = (): Router => {
         res.status(429).json({ error: { code: rate.code, message: rate.message } });
         return;
       }
-      const app = getFirebaseApp();
-      if (app) {
-        try {
-          await getAuth(app).generatePasswordResetLink(email);
-        } catch {
-          // Generic response — no enumeration.
-        }
+      const sent = await dispatchPasswordResetEmail({ email });
+      if (!sent.ok && sent.status === 429) {
+        res.status(429).json({ error: { code: sent.code, message: sent.message } });
+        return;
       }
+      // Always generic 200 for clients (enumeration-safe), even if send skipped.
       res.status(200).json(generic);
     }
   );

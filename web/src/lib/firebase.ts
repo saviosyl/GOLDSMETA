@@ -123,14 +123,44 @@ export const signOut = async (): Promise<void> => {
   await firebaseSignOut(getFirebaseAuth());
 };
 
+/** Approved production Sign In return URL for password-reset emails. */
+export const PASSWORD_RESET_CONTINUE_URL =
+  "https://goldmeta.metamechsolutions.com/login";
+
+/**
+ * Client-side password reset — actually dispatches Firebase email
+ * (unlike Admin generatePasswordResetLink which only builds a URL).
+ * Always uses the approved production continue URL (not preview hosts).
+ */
 export const sendPasswordReset = async (email: string): Promise<void> => {
+  const normalized = email.trim().toLowerCase();
   try {
-    await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+    await sendPasswordResetEmail(getFirebaseAuth(), normalized, {
+      url: PASSWORD_RESET_CONTINUE_URL,
+      handleCodeInApp: false
+    });
   } catch (error) {
-    // Generic success path is handled by UI; still avoid raw codes if surfaced.
+    const code =
+      typeof error === "object" &&
+      error &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : "";
+    // Enumeration-safe: missing accounts still look like success to the UI.
+    if (
+      code === "auth/user-not-found" ||
+      code === "auth/invalid-email" ||
+      /user-not-found|invalid-email/i.test(String((error as Error)?.message ?? ""))
+    ) {
+      return;
+    }
     throw new Error(friendlyAuthError(error), { cause: error });
   }
 };
+
+/** Exposed for tests / diagnostics — never log secrets. */
+export const getFirebaseProjectId = (): string | null => readConfig()?.projectId ?? null;
 
 export const getIdToken = async (forceRefresh = false): Promise<string | null> => {
   if (!isFirebaseConfigured()) return null;

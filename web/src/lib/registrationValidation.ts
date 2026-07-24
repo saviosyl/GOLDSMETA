@@ -44,9 +44,10 @@ export function validateRegistrationForm(
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     fieldErrors.email = "Enter a valid email address";
   } else if (email === OWNER_EMAIL) {
+    // Single primary message only — avoid duplicate banner + field copy.
     return {
       ok: false,
-      fieldErrors: { email: OWNER_EXISTS_HINT },
+      fieldErrors: {},
       message: OWNER_EXISTS_MESSAGE
     };
   }

@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../types/models";
 import {
-  OWNER_EXISTS_HINT,
   OWNER_EXISTS_MESSAGE,
   normalizeEmail,
   validateRegistrationForm,
@@ -29,7 +28,7 @@ export function RegisterPage() {
 
   const ownerHint = useMemo(() => {
     const n = normalizeEmail(email);
-    return n === "saviosyl@gmail.com" ? OWNER_EXISTS_HINT : null;
+    return n === "saviosyl@gmail.com" ? OWNER_EXISTS_MESSAGE : null;
   }, [email]);
 
   const onSubmit = async (event: FormEvent) => {
@@ -70,10 +69,11 @@ export function RegisterPage() {
       navigate("/registration-complete", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
-        if (err.message.includes("already exists")) {
-          setFieldErrors({ email: OWNER_EXISTS_HINT });
-        }
+        // One primary banner only — do not also set a duplicate field error.
+        setError(
+          err.message.includes("already exists") ? OWNER_EXISTS_MESSAGE : err.message
+        );
+        setFieldErrors({});
       } else {
         setError(err instanceof Error ? err.message : "Registration failed");
       }
@@ -122,12 +122,12 @@ export function RegisterPage() {
 
           {error && (
             <div className="banner error" role="alert" data-testid="register-error">
-              {error === OWNER_EXISTS_MESSAGE ? OWNER_EXISTS_MESSAGE : error}
+              {error}
             </div>
           )}
-          {ownerHint && (
+          {!error && ownerHint && (
             <div className="banner" role="status" data-testid="register-owner-hint">
-              {ownerHint}
+              {OWNER_EXISTS_MESSAGE}
             </div>
           )}
 
