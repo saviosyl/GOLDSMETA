@@ -2,11 +2,12 @@
 /**
  * Pre-deploy OWNER Auth health gate (read-only).
  *
- * Exit 0 = HEALTHY and safety flags ok.
+ * Exit 0 = OWNER_AUTH_HEALTHY (identity + ACTIVE webhook ownership).
  * Exit 2 = OWNER_AUTH_HEALTH_GATE_FAILED (stop deploy; do not auto-restore).
  * Exit 1 = unexpected error.
  *
  * Never mutates Auth. Never calls restorePinnedOwnerAuth.
+ * Never creates/deletes/revokes webhooks.
  */
 
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
@@ -14,6 +15,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { loadOwnerAuthConfig, maskUid } from "../src/services/auth/ownerAuthConfig";
 import { checkOwnerAuthIntegrity } from "../src/services/auth/authIntegrity";
+import { maskWebhookId } from "../src/services/auth/ownerWebhookHealth";
 
 function fail(code: string, detail?: string): never {
   console.error("OWNER_AUTH_HEALTH_GATE_FAILED");
@@ -38,6 +40,7 @@ async function main(): Promise<void> {
 
   const auth = getAuth();
   const db = getFirestore();
+  const pinned = config.pinnedOwnerUid!;
 
   const integrity = await checkOwnerAuthIntegrity({
     config,
@@ -67,9 +70,59 @@ async function main(): Promise<void> {
           .limit(50)
           .get();
         return snap.docs.map((d) => {
-          const data = d.data() as { webhookId?: string; status?: string };
-          return { webhookId: data.webhookId ?? d.id, status: data.status };
+          const data = d.data() as { webhookId?: string; status?: string; userId?: string };
+          return {
+            webhookId: data.webhookId ?? d.id,
+            status: data.status,
+            userId: data.userId ?? userId
+          };
         });
+      },
+      async getCanonicalOwnerWebhookId(ownerUid) {
+        // Prefer a stored canonical reference when present; otherwise null
+        // (gate falls back to any ACTIVE webhook owned by pinned UID).
+        const profile = await db.doc(`users/${ownerUid}/profile/main`).get();
+        const data = profile.data() as Record<string, unknown> | undefined;
+        const candidates = [
+          data?.activeWebhookId,
+          data?.webhookId,
+          data?.tradingViewWebhookId,
+          data?.canonicalWebhookId
+        ];
+        for (const c of candidates) {
+          if (typeof c === "string" && c.trim()) return c.trim();
+        }
+        return null;
+      },
+      async listForeignActiveOwnerWebhooks(ownerUid) {
+        // If a canonical id is stored, check it is not ACTIVE under another UID.
+        const canonical = await (async () => {
+          const profile = await db.doc(`users/${ownerUid}/profile/main`).get();
+          const data = profile.data() as Record<string, unknown> | undefined;
+          for (const key of [
+            "activeWebhookId",
+            "webhookId",
+            "tradingViewWebhookId",
+            "canonicalWebhookId"
+          ] as const) {
+            const v = data?.[key];
+            if (typeof v === "string" && v.trim()) return v.trim();
+          }
+          return null;
+        })();
+        if (!canonical) return [];
+        const doc = await db.collection("webhookConnections").doc(canonical).get();
+        if (!doc.exists) return [];
+        const data = doc.data() as { webhookId?: string; status?: string; userId?: string };
+        const userId = data.userId ?? "";
+        if (!userId || userId === ownerUid) return [];
+        return [
+          {
+            webhookId: data.webhookId ?? doc.id,
+            status: data.status,
+            userId
+          }
+        ];
       }
     }
   });
@@ -78,12 +131,12 @@ async function main(): Promise<void> {
   console.log(`PINNED_UID=${integrity.pinnedUidRedacted}`);
   console.log(`EMAIL_UID=${integrity.emailUidRedacted}`);
   console.log(`WEBHOOK_OWNED_BY_ORIGINAL=${integrity.webhookOwnedByOriginal}`);
+  console.log(`ACTIVE_WEBHOOK=${integrity.activeWebhookIdRedacted ?? "null"}`);
 
   if (integrity.status !== "HEALTHY") {
     fail(integrity.status, integrity.notes.join("; "));
   }
 
-  const pinned = config.pinnedOwnerUid!;
   const user = await auth.getUser(pinned);
   if (!user.emailVerified) fail("EMAIL_NOT_VERIFIED");
   if (user.disabled) fail("USER_DISABLED");
@@ -114,19 +167,32 @@ async function main(): Promise<void> {
   }
 
   if (integrity.webhookOwnedByOriginal !== true) {
-    fail("WEBHOOK_NOT_ON_PINNED");
+    fail(
+      "WEBHOOK_NOT_ON_PINNED",
+      integrity.notes.join("; ") || "No ACTIVE webhook owned by pinned UID"
+    );
   }
 
+  // Extra redaction sanity — never print full webhook ids from notes accidentally.
+  for (const note of integrity.notes) {
+    console.log(`NOTE=${note}`);
+  }
+
+  console.log("OWNER_AUTH_HEALTHY");
   console.log("OWNER_AUTH_HEALTH_GATE=PASS");
   console.log(`OWNER_EMAIL=${config.ownerEmail}`);
   console.log(`PINNED_MASK=${maskUid(pinned)}`);
+  console.log(`ACTIVE_WEBHOOK_MASK=${integrity.activeWebhookIdRedacted ?? maskWebhookId(null)}`);
   console.log("MUTATED_AUTH=false");
+  console.log("MUTATED_WEBHOOK=false");
   console.log("RESTORE_INVOKED=false");
 }
 
 main().catch((error) => {
   console.error("OWNER_AUTH_HEALTH_GATE_FAILED");
   console.error(`GATE_CODE=UNEXPECTED`);
-  console.error(`GATE_DETAIL=${String(error instanceof Error ? error.message : error).slice(0, 200)}`);
+  console.error(
+    `GATE_DETAIL=${String(error instanceof Error ? error.message : error).slice(0, 200)}`
+  );
   process.exit(1);
 });

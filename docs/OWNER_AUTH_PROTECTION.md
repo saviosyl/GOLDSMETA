@@ -76,7 +76,16 @@ See `docs/OWNER_AUTH_ALERTING.md`.
 - `npm run verify:owner-auth` (`backend/scripts/verifyOwnerAuthIntegrity.ts`)
 - `npm run gate:owner-auth-deploy` (`backend/scripts/preDeployOwnerAuthHealthGate.ts`) — **stop deploy** on failure
 - GitHub workflow `.github/workflows/owner-auth-integrity.yml` (manual + scheduled)
-- Pre-deploy gate job in Backend / Web PWA workflows (fails closed when secrets present)
+- Optional live gate job in Backend workflow (skipped without secrets; required unit CI always runs)
+
+Webhook ownership in the deploy gate:
+
+- Requires at least one **ACTIVE** webhook owned by `GOLDMETA_PINNED_OWNER_UID`
+- Prefers a canonical webhook id from the owner profile when present
+- **Ignores** REVOKED historical webhooks (including legacy `…wbuu`)
+- Does **not** use display-suffix matching
+- Redacts webhook ids in logs (`maskWebhookId`)
+- Never creates, deletes, revokes, or reassigns webhooks
 
 The monitor must **never** repair, delete, or recreate users automatically.
 
