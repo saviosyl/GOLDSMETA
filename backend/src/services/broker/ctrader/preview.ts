@@ -21,6 +21,10 @@ export interface PreviewInput {
   quote: BrokerQuote | null;
   position: BrokerPosition | null;
   pendingOrdersCount: number;
+  /** Server-side open XAUUSD position count (not client-supplied for real previews). */
+  openPositionsCount?: number;
+  /** Server-side trades submitted today (Demo). */
+  tradesToday?: number;
   equity: number | null;
   freeMargin: number | null;
   accountCurrency: string;
@@ -108,6 +112,35 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
 
   if (input.pendingOrdersCount > 0) failed.push("PENDING_ORDER_CONFLICT");
   else passed.push("NO_PENDING_ORDERS");
+
+  const openCount =
+    input.openPositionsCount ?? (input.position != null ? 1 : 0);
+  if (
+    (mapped.brokerMutation === "OPEN_LONG" ||
+      mapped.brokerMutation === "OPEN_SHORT") &&
+    openCount >= CTRADER_DEMO_SERVER_LIMITS.maxOpenPositions
+  ) {
+    failed.push("MAX_OPEN_POSITIONS");
+  } else if (
+    mapped.brokerMutation === "OPEN_LONG" ||
+    mapped.brokerMutation === "OPEN_SHORT"
+  ) {
+    passed.push("OPEN_POSITION_LIMIT_OK");
+  }
+
+  const tradesToday = input.tradesToday ?? 0;
+  if (
+    (mapped.brokerMutation === "OPEN_LONG" ||
+      mapped.brokerMutation === "OPEN_SHORT") &&
+    tradesToday >= CTRADER_DEMO_SERVER_LIMITS.maxTradesPerDay
+  ) {
+    failed.push("DAILY_TRADE_LIMIT");
+  } else if (
+    mapped.brokerMutation === "OPEN_LONG" ||
+    mapped.brokerMutation === "OPEN_SHORT"
+  ) {
+    passed.push("DAILY_TRADE_LIMIT_OK");
+  }
 
   const direction =
     mapped.brokerMutation === "OPEN_LONG" || mapped.brokerMutation === "CLOSE_SHORT"

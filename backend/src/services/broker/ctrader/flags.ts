@@ -1,6 +1,6 @@
 /**
  * cTrader / Pepperstone execution flags.
- * Production and preview must keep mutation flags false.
+ * Mutation / Live flags are HARD-FALSE in this phase — env cannot enable them.
  */
 
 function envTrue(name: string, source: NodeJS.ProcessEnv = process.env): boolean {
@@ -19,30 +19,44 @@ export function isCTraderDemoOrderPreviewEnabled(source?: NodeJS.ProcessEnv): bo
   return envTrue("CTRADER_DEMO_ORDER_PREVIEW_ENABLED", source);
 }
 
-/** Always false in this phase — hard fail-closed. */
+/**
+ * HARD FALSE — ignore process.env until an explicitly approved future release.
+ * Env cannot enable Demo order submission in this phase.
+ */
 export function isCTraderDemoOrderSubmissionEnabled(
-  source?: NodeJS.ProcessEnv
+  _source?: NodeJS.ProcessEnv
 ): boolean {
-  return envTrue("CTRADER_DEMO_ORDER_SUBMISSION_ENABLED", source);
+  return false;
 }
 
-export function isCTraderLiveEnabled(source?: NodeJS.ProcessEnv): boolean {
-  return envTrue("CTRADER_LIVE_ENABLED", source);
+/** HARD FALSE — Live cTrader is impossible to activate in this phase. */
+export function isCTraderLiveEnabled(_source?: NodeJS.ProcessEnv): boolean {
+  return false;
 }
 
-export function isBrokerExecutionEnabled(source?: NodeJS.ProcessEnv): boolean {
-  return envTrue("BROKER_EXECUTION_ENABLED", source);
+/** HARD FALSE for cTrader mutation phase — broker execution remains disabled. */
+export function isBrokerExecutionEnabled(_source?: NodeJS.ProcessEnv): boolean {
+  return false;
 }
 
-export function assertCTraderMutationsDisabled(source?: NodeJS.ProcessEnv): void {
-  if (isCTraderDemoOrderSubmissionEnabled(source)) {
+/**
+ * Fail closed if any *source* env attempts to enable mutation/Live.
+ * Runtime getters remain hard-false; this catches misconfiguration early.
+ */
+export function assertCTraderMutationsDisabled(
+  source: NodeJS.ProcessEnv = process.env
+): void {
+  if (envTrue("CTRADER_DEMO_ORDER_SUBMISSION_ENABLED", source)) {
     throw new Error("CTRADER_DEMO_ORDER_SUBMISSION_MUST_REMAIN_FALSE");
   }
-  if (isCTraderLiveEnabled(source)) {
+  if (envTrue("CTRADER_LIVE_ENABLED", source)) {
     throw new Error("CTRADER_LIVE_MUST_REMAIN_FALSE");
   }
-  if (isBrokerExecutionEnabled(source)) {
+  if (envTrue("BROKER_EXECUTION_ENABLED", source)) {
     throw new Error("BROKER_EXECUTION_MUST_REMAIN_FALSE");
+  }
+  if (isCTraderDemoOrderSubmissionEnabled(source) || isCTraderLiveEnabled(source)) {
+    throw new Error("CTRADER_MUTATION_FLAGS_CORRUPT");
   }
 }
 
@@ -53,7 +67,8 @@ export function snapshotCTraderFlags(source?: NodeJS.ProcessEnv) {
     CTRADER_DEMO_ORDER_PREVIEW_ENABLED: isCTraderDemoOrderPreviewEnabled(source),
     CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: isCTraderDemoOrderSubmissionEnabled(source),
     CTRADER_LIVE_ENABLED: isCTraderLiveEnabled(source),
-    BROKER_EXECUTION_ENABLED: isBrokerExecutionEnabled(source)
+    BROKER_EXECUTION_ENABLED: isBrokerExecutionEnabled(source),
+    mutationFlagsHardFalse: true as const
   };
 }
 

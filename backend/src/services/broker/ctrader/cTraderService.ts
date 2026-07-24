@@ -134,7 +134,9 @@ export function buildCTraderReadiness(args?: {
           : "SETUP_REQUIRED",
       detail: authSetupRequired
         ? "AUTH SETUP REQUIRED — OAuth callback disabled until pinned owner integrity is restored."
-        : "PKCE + state validation ready; no password collection."
+        : config.configured
+          ? "OAuth helpers present (state/PKCE/allowlisted redirect); OAuth start not enabled until owner app approval."
+          : "OAuth helpers present; configure CTRADER_CLIENT_* secrets to continue."
     },
     {
       step: 4,

@@ -40,15 +40,20 @@ import { createPaperSimulator, PAPER_LABEL } from "../../../../src/services/brok
 import { CTraderMutationDisabledError } from "../../../../src/services/broker/ctrader/mutationGuard";
 
 describe("cTrader flags", () => {
-  it("keeps mutation flags false by default", () => {
-    const flags = snapshotCTraderFlags({});
+  it("keeps mutation flags hard-false even if env tries to enable", () => {
+    const flags = snapshotCTraderFlags({
+      CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: "true",
+      CTRADER_LIVE_ENABLED: "true",
+      BROKER_EXECUTION_ENABLED: "true"
+    });
     expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
     expect(flags.CTRADER_LIVE_ENABLED).toBe(false);
     expect(flags.BROKER_EXECUTION_ENABLED).toBe(false);
+    expect(flags.mutationFlagsHardFalse).toBe(true);
     expect(() => assertCTraderMutationsDisabled({})).not.toThrow();
   });
 
-  it("fails closed when submission flag is true", () => {
+  it("fails closed when source env attempts mutation enablement", () => {
     expect(() =>
       assertCTraderMutationsDisabled({
         CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: "true"
@@ -72,37 +77,69 @@ describe("cTrader config", () => {
 });
 
 describe("OAuth state + PKCE", () => {
-  it("validates matching state and rejects mismatch/expiry", () => {
-    const rec = createOAuthState("owner-uid-1", "https://example.test/cb");
-    expect(
-      validateOAuthState({
-        stored: rec,
-        providedState: rec.state,
-        ownerUid: "owner-uid-1"
-      }).ok
-    ).toBe(true);
-    expect(
-      validateOAuthState({
-        stored: rec,
-        providedState: "wrong",
-        ownerUid: "owner-uid-1"
-      })
-    ).toEqual({ ok: false, code: "OAUTH_STATE_MISMATCH" });
-    expect(
-      validateOAuthState({
-        stored: rec,
-        providedState: rec.state,
-        ownerUid: "other-owner"
-      })
-    ).toEqual({ ok: false, code: "OAUTH_STATE_OWNER_MISMATCH" });
-    expect(
-      validateOAuthState({
-        stored: { ...rec, expiresAt: new Date(Date.now() - 1000).toISOString() },
-        providedState: rec.state,
-        ownerUid: "owner-uid-1"
-      })
-    ).toEqual({ ok: false, code: "OAUTH_STATE_EXPIRED" });
-    expect(hashOwnerUid("owner-uid-1")).toHaveLength(16);
+  it("validates matching state and rejects mismatch/expiry/replay/bad redirect", () => {
+    const prev = {
+      CTRADER_REDIRECT_URI: process.env.CTRADER_REDIRECT_URI,
+      CTRADER_CLIENT_ID: process.env.CTRADER_CLIENT_ID,
+      CTRADER_CLIENT_SECRET: process.env.CTRADER_CLIENT_SECRET,
+      CTRADER_ENVIRONMENT: process.env.CTRADER_ENVIRONMENT
+    };
+    process.env.CTRADER_REDIRECT_URI = "https://example.test/cb";
+    process.env.CTRADER_CLIENT_ID = "test-client";
+    process.env.CTRADER_CLIENT_SECRET = "test-secret";
+    process.env.CTRADER_ENVIRONMENT = "DEMO";
+    try {
+      const rec = createOAuthState("owner-uid-1");
+      expect(
+        validateOAuthState({
+          stored: rec,
+          providedState: rec.state,
+          ownerUid: "owner-uid-1"
+        }).ok
+      ).toBe(true);
+      expect(
+        validateOAuthState({
+          stored: rec,
+          providedState: "wrong",
+          ownerUid: "owner-uid-1"
+        })
+      ).toEqual({ ok: false, code: "OAUTH_STATE_MISMATCH" });
+      expect(
+        validateOAuthState({
+          stored: rec,
+          providedState: rec.state,
+          ownerUid: "other-owner"
+        })
+      ).toEqual({ ok: false, code: "OAUTH_STATE_OWNER_MISMATCH" });
+      expect(
+        validateOAuthState({
+          stored: { ...rec, expiresAt: new Date(Date.now() - 1000).toISOString() },
+          providedState: rec.state,
+          ownerUid: "owner-uid-1"
+        })
+      ).toEqual({ ok: false, code: "OAUTH_STATE_EXPIRED" });
+      expect(
+        validateOAuthState({
+          stored: rec,
+          providedState: rec.state,
+          ownerUid: "owner-uid-1",
+          alreadyConsumed: true
+        })
+      ).toEqual({ ok: false, code: "OAUTH_STATE_REPLAY" });
+      expect(
+        validateOAuthState({
+          stored: { ...rec, redirectUri: "https://evil.test/cb" },
+          providedState: rec.state,
+          ownerUid: "owner-uid-1"
+        })
+      ).toEqual({ ok: false, code: "OAUTH_REDIRECT_NOT_ALLOWLISTED" });
+      expect(hashOwnerUid("owner-uid-1")).toHaveLength(16);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });
 

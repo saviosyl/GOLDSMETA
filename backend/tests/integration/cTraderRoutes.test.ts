@@ -67,19 +67,28 @@ describe("cTrader HTTP routes — mutation safety", () => {
     expect(res.body.orderSubmissionEnabled).toBe(false);
   });
 
-  it("preview approve does not submit", async () => {
+  it("preview approve rebuilds server-side and never submits", async () => {
     const previewRes = await request(app)
       .post("/v1/ctrader/preview")
       .set("x-test-user-id", "ctrader-route-user")
       .send({ useDemonstrationFixture: true, decision: "BUY" });
     expect(previewRes.status).toBe(200);
     expect(previewRes.body.orderSubmissionEnabled).toBe(false);
-    const approve = await request(app)
+
+    const rejectClient = await request(app)
       .post("/v1/ctrader/preview/approve")
       .set("x-test-user-id", "ctrader-route-user")
       .send({ preview: previewRes.body.preview });
+    expect(rejectClient.status).toBe(400);
+    expect(rejectClient.body.error).toBe("SERVER_PREVIEW_REQUIRED");
+
+    const approve = await request(app)
+      .post("/v1/ctrader/preview/approve")
+      .set("x-test-user-id", "ctrader-route-user")
+      .send({ useDemonstrationFixture: true, decision: "BUY" });
     expect(approve.status).toBe(200);
     expect(approve.body.submitted).toBe(false);
+    expect(approve.body.submitting).toBe(false);
     expect(approve.body.preview.state).toBe("PREVIEW_APPROVED");
     expect(approve.body.orderSubmissionEnabled).toBe(false);
   });

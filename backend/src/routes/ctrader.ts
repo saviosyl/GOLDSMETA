@@ -205,17 +205,60 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.post("/v1/ctrader/preview/approve", requireAuth, async (req, res) => {
-    const body = (req.body ?? {}) as { preview?: Parameters<typeof approveTradePreview>[0] };
-    if (!body.preview) {
-      res.status(400).json({ error: "PREVIEW_REQUIRED" });
+    const body = (req.body ?? {}) as {
+      previewId?: string;
+      useDemonstrationFixture?: boolean;
+      decision?: string;
+    };
+    // Never trust a client-supplied preview object for approval.
+    // Rebuild server-side (demonstration fixture only in this phase).
+    if (!body.useDemonstrationFixture && !body.previewId) {
+      res.status(400).json({
+        error: "SERVER_PREVIEW_REQUIRED",
+        message:
+          "Approval requires server-side preview rebuild. Client preview payloads are rejected."
+      });
       return;
     }
-    const approved = approveTradePreview(body.preview);
+    const rebuilt = buildTradePreview({
+      decisionId: String(body.previewId ?? "fixture-decision-approve"),
+      decision: String(body.decision ?? "BUY"),
+      confidence: 85,
+      generatedAt: new Date().toISOString(),
+      candleConfirmed: true,
+      stopLoss: 2340,
+      takeProfits: [2365],
+      symbol: fixtureXauUsdSymbol(),
+      quote: fixtureQuote("OPEN"),
+      position: null,
+      pendingOrdersCount: 0,
+      openPositionsCount: 0,
+      tradesToday: 0,
+      equity: 10000,
+      freeMargin: 9500,
+      accountCurrency: "EUR",
+      riskAmountEur: 20,
+      maxSpread: 1,
+      demonstration: true,
+      eurToAccountRate: 1,
+      marginPerLot: 200
+    });
+    if (rebuilt.state === "BLOCKED") {
+      res.status(409).json({
+        error: "PREVIEW_BLOCKED",
+        preview: rebuilt,
+        submitted: false,
+        orderSubmissionEnabled: false
+      });
+      return;
+    }
+    const approved = approveTradePreview(rebuilt);
     res.json({
       preview: approved,
       orderSubmissionEnabled: false,
       submitted: false,
-      message: "PREVIEW_APPROVED does not submit an order."
+      submitting: false,
+      message: "PREVIEW_APPROVED does not submit an order and cannot transition to SUBMITTING."
     });
   });
 

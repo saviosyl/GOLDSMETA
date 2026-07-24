@@ -26,7 +26,11 @@ export function createPkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-export function createOAuthState(ownerUid: string, redirectUri: string): OAuthStateRecord {
+export function createOAuthState(ownerUid: string): OAuthStateRecord {
+  const conf = loadCTraderConfig();
+  if (!conf.redirectUri) {
+    throw new Error("CTRADER_REDIRECT_URI_MISSING");
+  }
   const { verifier, challenge } = createPkcePair();
   const now = Date.now();
   return {
@@ -36,7 +40,7 @@ export function createOAuthState(ownerUid: string, redirectUri: string): OAuthSt
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
     ownerUidHash: hashOwnerUid(ownerUid),
-    redirectUri
+    redirectUri: conf.redirectUri
   };
 }
 
@@ -45,8 +49,11 @@ export function validateOAuthState(args: {
   providedState: string;
   ownerUid: string;
   now?: Date;
+  /** When true, stored record was already consumed — reject replay. */
+  alreadyConsumed?: boolean;
 }): { ok: true } | { ok: false; code: string } {
   if (!args.stored) return { ok: false, code: "OAUTH_STATE_MISSING" };
+  if (args.alreadyConsumed) return { ok: false, code: "OAUTH_STATE_REPLAY" };
   if (args.stored.state !== args.providedState) {
     return { ok: false, code: "OAUTH_STATE_MISMATCH" };
   }
@@ -57,19 +64,42 @@ export function validateOAuthState(args: {
   if (Date.parse(args.stored.expiresAt) < now.getTime()) {
     return { ok: false, code: "OAUTH_STATE_EXPIRED" };
   }
+  const conf = loadCTraderConfig();
+  if (!conf.redirectUri || args.stored.redirectUri !== conf.redirectUri) {
+    return { ok: false, code: "OAUTH_REDIRECT_NOT_ALLOWLISTED" };
+  }
   return { ok: true };
+}
+
+/** Mark state consumed — callers must persist this atomically before token exchange. */
+export function consumeOAuthState(
+  stored: OAuthStateRecord
+): OAuthStateRecord & { consumedAt: string } {
+  return { ...stored, consumedAt: new Date().toISOString() };
+}
+
+export function assertRedirectAllowlisted(redirectUri: string): void {
+  const conf = loadCTraderConfig();
+  if (!conf.redirectUri || redirectUri !== conf.redirectUri) {
+    throw new Error("OAUTH_REDIRECT_NOT_ALLOWLISTED");
+  }
 }
 
 export function buildAuthorizationUrl(args: {
   state: string;
   codeChallenge: string;
-  redirectUri: string;
   clientId: string;
 }): string {
   const conf = loadCTraderConfig();
+  if (!conf.redirectUri) {
+    throw new Error("CTRADER_REDIRECT_URI_MISSING");
+  }
+  // Never accept caller-supplied redirect — server config only.
+  const redirectUri = conf.redirectUri;
   const url = new URL(conf.authUrl);
   url.searchParams.set("client_id", args.clientId);
-  url.searchParams.set("redirect_uri", args.redirectUri);
+  url.searchParams.set("redirect_uri", redirectUri);
+  // Minimal trading scope for future Demo; still no submission in this phase.
   url.searchParams.set("scope", "trading");
   url.searchParams.set("product", "web");
   url.searchParams.set("state", args.state);
