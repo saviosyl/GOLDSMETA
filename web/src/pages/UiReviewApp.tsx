@@ -11,6 +11,9 @@ import { BrandConceptsPage } from "./BrandConceptsPage";
 import { HistoryPage } from "./HistoryPage";
 import { SignalPerformancePage } from "./SignalPerformancePage";
 import { AutoTradePage } from "./AutoTradePage";
+import { BrokerControlCentrePage } from "./broker/BrokerControlCentrePage";
+import { HelpPage } from "./HelpPage";
+import { AdminUsersPage } from "./admin/AdminUsersPage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
@@ -497,7 +500,192 @@ function buildReviewApi() {
         }
       };
       return { ...autoTrade };
-    }
+    },
+    getBrokerControlCentre: async () => ({
+      defaultBroker: "manual",
+      autoTrade: "OFF",
+      orderSubmissionEnabled: false,
+      brokers: [
+        {
+          id: "manual",
+          name: "Manual",
+          status: "Available",
+          detail: "Analysis only — no broker execution",
+          badge: "MANUAL"
+        },
+        {
+          id: "trading212_invest",
+          name: "Trading 212 Practice",
+          status: "Read only",
+          detail: "Practice / read-only gold proxy",
+          badge: "READ_ONLY"
+        },
+        {
+          id: "pepperstone_ctrader",
+          name: "Pepperstone cTrader Demo",
+          status: "Pepperstone connection required",
+          detail: "Demo setup — AutoTrade off — Live locked",
+          badge: "DEMO_PREVIEW"
+        },
+        {
+          id: "ig",
+          name: "IG — Coming later",
+          status: "Coming later",
+          detail: "Not active yet",
+          badge: "PARKED"
+        }
+      ],
+      automationModes: [],
+      readiness: {
+        setupRequired: true,
+        authSetupRequired: false,
+        oauthConfigured: false,
+        connected: false,
+        demonstrationAvailable: true,
+        automationMode: "OFF",
+        autoTrade: "OFF",
+        orderSubmissionEnabled: false,
+        liveEnabled: false,
+        wizardSteps: [
+          {
+            step: 1,
+            title: "Create Pepperstone cTrader Demo account",
+            status: "AVAILABLE",
+            detail: "TradingView alone is not enough."
+          },
+          {
+            step: 2,
+            title: "Register cTrader Open API application",
+            status: "SETUP_REQUIRED",
+            detail: "Create a Demo Open API app."
+          },
+          {
+            step: 3,
+            title: "Add secure credentials",
+            status: "SETUP_REQUIRED",
+            detail: "Store secrets in Secret Manager only."
+          },
+          {
+            step: 4,
+            title: "Connect account",
+            status: "SETUP_REQUIRED",
+            detail: "OAuth connect — no broker password."
+          },
+          {
+            step: 5,
+            title: "Verify XAUUSD",
+            status: "SETUP_REQUIRED",
+            detail: "Symbol metadata checks."
+          },
+          {
+            step: 6,
+            title: "Run read-only checks",
+            status: "SETUP_REQUIRED",
+            detail: "Bid/ask, spread, market-open."
+          },
+          {
+            step: 7,
+            title: "Run trade previews",
+            status: "SETUP_REQUIRED",
+            detail: "Preview only — no orders."
+          },
+          {
+            step: 8,
+            title: "Request Demo trading approval",
+            status: "BLOCKED",
+            detail: "Demo trading stays locked."
+          }
+        ],
+        label: "Pepperstone connection required — Trading locked — AutoTrade OFF",
+        auth: { status: "HEALTHY", brokerSetupEnabled: true, notes: [] },
+        qualification: {
+          unlocked: false,
+          canActivate: false,
+          failed: ["OAUTH_HEALTHY"],
+          progress: {
+            completedPreviews: 0,
+            requiredPreviews: 20,
+            approvedControlledDemoTrades: 0,
+            requiredTrades: 5,
+            daysSinceFirstTrade: null,
+            requiredDays: 7
+          }
+        }
+      }
+    }),
+    getCTraderDemonstration: async () => ({
+      banner: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",
+      notice: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",
+      autoTrade: "OFF",
+      orderSubmissionEnabled: false,
+      account: {
+        accountIdMasked: "DE…01",
+        currency: "EUR",
+        balance: 10000,
+        equity: 10000,
+        freeMargin: 9500,
+        leverage: 100,
+        brokerName: "Pepperstone",
+        brokerNameSource: "FIXTURE"
+      },
+      symbol: {
+        symbolName: "XAUUSD",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        minVolume: 0.01,
+        volumeStep: 0.01,
+        lotSize: 100,
+        metadataComplete: true
+      },
+      quote: {
+        bid: 2350,
+        ask: 2350.3,
+        spread: 0.3,
+        marketStatus: "OPEN",
+        source: "FIXTURE"
+      },
+      buyPreview: {
+        state: "READY_FOR_CONFIRMATION",
+        action: "BUY",
+        proposedVolume: 0.02,
+        riskAmount: 20,
+        failedGates: [],
+        passedGates: [],
+        label: "DEMONSTRATION DATA"
+      },
+      sellPreview: {
+        state: "READY_FOR_CONFIRMATION",
+        action: "SELL",
+        proposedVolume: 0.02,
+        label: "DEMONSTRATION DATA"
+      },
+      blockedPreview: {
+        state: "BLOCKED",
+        failedGates: ["CONFIDENCE_TOO_LOW"],
+        label: "DEMONSTRATION DATA"
+      }
+    }),
+    startCTraderOAuth: async () => {
+      throw new ApiError(403, "CTRADER_SETUP_REQUIRED", "Secure credentials not added yet");
+    },
+    listAdminUsers: async () => ({
+      users: [
+        {
+          userId: "review_u1",
+          userIdMasked: "re…u1",
+          firstName: "Ada",
+          lastName: "Review",
+          email: "ada.review@example.com",
+          registeredAt: "2026-07-20T00:00:00.000Z",
+          emailVerified: true,
+          approvalStatus: "USER_PENDING",
+          role: "USER",
+          lastSignInAt: null,
+          suspended: false
+        }
+      ]
+    }),
+    adminUserAction: async () => ({ ok: true })
   };
 }
 
@@ -522,7 +710,10 @@ function UiReviewApp() {
         throw new Error("Account registration is currently closed.");
       },
       registrationEnabled: false,
-      account: null,
+      account: {
+        role: "OWNER",
+        profile: { brokerMessage: "Broker access is separate from account approval." }
+      } as AuthContextValue["account"],
       refreshAccount: async () => null,
       signOut: async () => undefined,
       apiBaseUrl: "review://local"
@@ -554,6 +745,9 @@ function UiReviewApp() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
             <Route path="autotrade" element={<AutoTradePage />} />
+            <Route path="brokers" element={<BrokerControlCentrePage />} />
+            <Route path="help" element={<HelpPage />} />
+            <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="signal-performance" element={<SignalPerformancePage />} />
