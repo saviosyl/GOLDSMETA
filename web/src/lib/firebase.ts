@@ -123,20 +123,20 @@ export const signOut = async (): Promise<void> => {
   await firebaseSignOut(getFirebaseAuth());
 };
 
+/** Approved production Sign In return URL for password-reset emails. */
+export const PASSWORD_RESET_CONTINUE_URL =
+  "https://goldmeta.metamechsolutions.com/login";
+
 /**
  * Client-side password reset — actually dispatches Firebase email
  * (unlike Admin generatePasswordResetLink which only builds a URL).
- * continueUrl returns users to GoldMeta Sign In on the current origin.
+ * Always uses the approved production continue URL (not preview hosts).
  */
 export const sendPasswordReset = async (email: string): Promise<void> => {
   const normalized = email.trim().toLowerCase();
-  const continueUrl =
-    typeof window !== "undefined" && window.location?.origin
-      ? `${window.location.origin}/login`
-      : "https://goldmeta.metamechsolutions.com/login";
   try {
     await sendPasswordResetEmail(getFirebaseAuth(), normalized, {
-      url: continueUrl,
+      url: PASSWORD_RESET_CONTINUE_URL,
       handleCodeInApp: false
     });
   } catch (error) {
