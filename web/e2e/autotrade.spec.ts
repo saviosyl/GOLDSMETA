@@ -6,14 +6,13 @@ test.describe("AutoTrade Control Centre", () => {
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("autotrade-page")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("autotrade-mode-pill")).toHaveText("OFF");
-    await expect(page.getByTestId("autotrade-env-pill")).toHaveText("IG DEMO — READ ONLY");
-    await expect(page.getByTestId("autotrade-readonly-banner")).toContainText(
-      "Demo order submission is disabled"
-    );
+    // Manual is the default selected broker in this phase; IG Demo remains parked.
+    await expect(page.getByText("AUTOTRADE OFF")).toBeVisible();
+    await expect(page.getByText(/Broker order submission is disabled/i)).toBeVisible();
     await expect(page.getByTestId("autotrade-emergency-stop")).toBeVisible();
     await expect(page.getByTestId("autotrade-budget")).toBeVisible();
-    await expect(page.getByTestId("autotrade-live-activation")).toBeVisible();
     await expect(page.getByTestId("autotrade-mode-IG_DEMO_AUTO")).toBeDisabled();
+    await expect(page.getByTestId("autotrade-mode-IG_LIVE_AUTO")).toBeDisabled();
   });
 
   test("AutoTrade emergency STOP locks mode", async ({ page }) => {
