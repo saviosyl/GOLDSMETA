@@ -18,6 +18,7 @@
     "gate:owner-auth-deploy": "tsx scripts/preDeployOwnerAuthHealthGate.ts"
   },
   "dependencies": {
+    "@reiryoku/ctrader-layer": "^2.2.0",
     "cors": "^2.8.6",
     "dotenv": "latest",
     "express": "latest",
