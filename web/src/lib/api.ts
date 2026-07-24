@@ -751,6 +751,83 @@ export class ApiClient {
     });
   }
 
+  /** Trading 212 General Invest — owner-only read-only + paper (no real orders). */
+  async t212InvestFlags(): Promise<{ flags: Record<string, unknown> }> {
+    return this.request("/v1/t212/invest/flags");
+  }
+
+  async t212InvestPortfolio(): Promise<{ portfolio: Record<string, unknown> }> {
+    return this.request("/v1/t212/invest/portfolio");
+  }
+
+  async t212InvestSearch(q: string): Promise<{
+    query: string;
+    candidates: Array<Record<string, unknown>>;
+  }> {
+    const encoded = encodeURIComponent(q);
+    return this.request(`/v1/t212/invest/instruments/search?q=${encoded}`);
+  }
+
+  async t212InvestWatchlist(): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request("/v1/t212/invest/watchlist");
+  }
+
+  async t212InvestWatchlistAdd(item: {
+    ticker: string;
+    name?: string;
+    currency?: string | null;
+    exchange?: string | null;
+  }): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request("/v1/t212/invest/watchlist", {
+      method: "POST",
+      body: JSON.stringify(item)
+    });
+  }
+
+  async t212InvestWatchlistRemove(
+    ticker: string
+  ): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/v1/t212/invest/watchlist/${encodeURIComponent(ticker)}`, {
+      method: "DELETE"
+    });
+  }
+
+  async t212InvestPaper(): Promise<{ paper: Record<string, unknown> }> {
+    return this.request("/v1/t212/invest/paper");
+  }
+
+  async t212InvestPaperBuy(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/v1/t212/invest/paper/buy", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async t212InvestPaperSellOwned(
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return this.request("/v1/t212/invest/paper/sell-owned", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async t212InvestPaperEmergencyStop(): Promise<{ paper: Record<string, unknown> }> {
+    return this.request("/v1/t212/invest/paper/emergency-stop", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async t212InvestPreview(
+    payload: Record<string, unknown>
+  ): Promise<{ preview: Record<string, unknown> }> {
+    return this.request("/v1/t212/invest/preview", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   getRegistrationStatus(): Promise<{
     registrationEnabled: boolean;
     emailVerificationRequired: boolean;

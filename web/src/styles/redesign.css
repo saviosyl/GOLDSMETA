@@ -2447,6 +2447,32 @@ a {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+.gm-t212-invest .gm-t212-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+.gm-t212-invest .gm-t212-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.gm-t212-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: end;
+  margin: 0.75rem 0;
+}
+.gm-t212-search input {
+  min-width: min(100%, 16rem);
+  flex: 1;
+}
 @media (max-width: 720px) {
   .gm-table-wrap {
     overflow-x: auto;

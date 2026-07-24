@@ -296,9 +296,9 @@ export function getBrokerControlCentreSnapshot(auth?: AuthHealthSnapshot) {
       },
       {
         id: "trading212_invest",
-        name: "Trading 212 Practice",
-        status: "Read only",
-        detail: "Practice / read-only gold proxy — order automation not enabled",
+        name: "Trading 212 General Invest",
+        status: "Read only + paper",
+        detail: "Stocks & ETFs — owner-only read-only — paper trading only — AutoTrade off",
         badge: "READ_ONLY"
       },
       {
