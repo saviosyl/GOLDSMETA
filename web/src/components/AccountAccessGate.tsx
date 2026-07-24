@@ -12,7 +12,11 @@ const PENDING_ALLOWED = new Set([
   "/awaiting-approval",
   "/account-suspended",
   "/settings",
-  "/registration-complete"
+  "/registration-complete",
+  "/account/delete-request",
+  "/legal/terms",
+  "/legal/privacy",
+  "/legal/risk"
 ]);
 
 export function AccountAccessGate({ children }: { children: ReactNode }) {

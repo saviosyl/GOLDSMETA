@@ -13,6 +13,12 @@ import {
   RegistrationCompletePage,
   VerifyEmailPage
 } from "./pages/auth/StatusPages";
+import {
+  PrivacyPage,
+  RequestDeletionPage,
+  RiskDisclosurePage,
+  TermsPage
+} from "./pages/legal/LegalPages";
 import { OverviewPage } from "./pages/OverviewPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -93,6 +99,9 @@ function PublicAuthRoutes() {
           </div>
         }
       />
+      <Route path="/legal/terms" element={<div className="gm-shell"><TermsPage /></div>} />
+      <Route path="/legal/privacy" element={<div className="gm-shell"><PrivacyPage /></div>} />
+      <Route path="/legal/risk" element={<div className="gm-shell"><RiskDisclosurePage /></div>} />
       <Route
         path="/registration-complete"
         element={
@@ -151,6 +160,10 @@ function ProtectedApp() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/awaiting-approval" element={<AwaitingApprovalPage />} />
           <Route path="/account-suspended" element={<AccountSuspendedPage />} />
+          <Route path="/account/delete-request" element={<RequestDeletionPage />} />
+          <Route path="/legal/terms" element={<TermsPage />} />
+          <Route path="/legal/privacy" element={<PrivacyPage />} />
+          <Route path="/legal/risk" element={<RiskDisclosurePage />} />
           <Route path="/" element={<OverviewPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/history" element={<HistoryPage />} />

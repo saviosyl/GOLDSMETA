@@ -183,6 +183,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Rate-limit + registration reservation docs — Admin SDK only.
+    match /rateLimits/{docId} {
+      allow read, write: if false;
+    }
+    match /registrationReservations/{docId} {
+      allow read, write: if false;
+    }
+
     match /processingJobs/{jobId} {
       allow read, write: if false;
     }

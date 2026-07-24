@@ -18,6 +18,10 @@ export type UserProfileRecord = {
   acceptedTermsAt: string;
   acceptedPrivacyAt: string;
   acceptedRiskWarningAt: string;
+  termsVersion: string;
+  privacyVersion: string;
+  riskVersion: string;
+  registrationSource: string;
   createdAt: string;
   updatedAt: string;
   lastSignInAt: string | null;
@@ -25,6 +29,8 @@ export type UserProfileRecord = {
   rejectedAt: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  registrationIncomplete?: boolean;
+  idempotencyKey?: string | null;
 };
 
 export type AdminAuditEvent = {
@@ -45,6 +51,12 @@ export function buildPendingProfile(input: {
   countryOfResidence: string;
   emailVerified?: boolean;
   now?: string;
+  termsVersion?: string;
+  privacyVersion?: string;
+  riskVersion?: string;
+  registrationSource?: string;
+  idempotencyKey?: string | null;
+  incomplete?: boolean;
 }): UserProfileRecord {
   const now = input.now ?? new Date().toISOString();
   const flags = defaultBrokerFlags();
@@ -55,19 +67,25 @@ export function buildPendingProfile(input: {
     lastName: input.lastName,
     countryOfResidence: input.countryOfResidence,
     role: "USER_PENDING",
-    approvalStatus: "PENDING",
+    approvalStatus: input.incomplete ? "REGISTRATION_INCOMPLETE" : "PENDING",
     emailVerified: Boolean(input.emailVerified),
     ...flags,
     acceptedTermsAt: now,
     acceptedPrivacyAt: now,
     acceptedRiskWarningAt: now,
+    termsVersion: input.termsVersion ?? "2026-07-24",
+    privacyVersion: input.privacyVersion ?? "2026-07-24",
+    riskVersion: input.riskVersion ?? "2026-07-24",
+    registrationSource: input.registrationSource ?? "web_register",
     createdAt: now,
     updatedAt: now,
     lastSignInAt: null,
     suspendedAt: null,
     rejectedAt: null,
     approvedAt: null,
-    approvedBy: null
+    approvedBy: null,
+    registrationIncomplete: Boolean(input.incomplete),
+    idempotencyKey: input.idempotencyKey ?? null
   };
 }
 
@@ -88,8 +106,13 @@ export function publicProfileView(profile: UserProfileRecord) {
     brokerMessage: profile.brokerAccess
       ? null
       : "Broker access has not been enabled for this account.",
+    tradingDisclaimer:
+      "Registration does not enable trading. Financial results are not guaranteed. GoldMeta is not an investment adviser and does not claim regulatory approval for brokerage services.",
     createdAt: profile.createdAt,
-    lastSignInAt: profile.lastSignInAt
+    lastSignInAt: profile.lastSignInAt,
+    termsVersion: profile.termsVersion,
+    privacyVersion: profile.privacyVersion,
+    riskVersion: profile.riskVersion
   };
 }
 
@@ -98,7 +121,6 @@ export function adminUserListItem(
   maskUid: (uid: string) => string
 ) {
   return {
-    /** Full UID for staff actions only — UI must display masked form. */
     userId: profile.uid,
     userIdMasked: maskUid(profile.uid),
     firstName: profile.firstName,
@@ -109,6 +131,7 @@ export function adminUserListItem(
     approvalStatus: profile.approvalStatus,
     role: profile.role,
     lastSignInAt: profile.lastSignInAt,
-    suspended: profile.approvalStatus === "SUSPENDED" || profile.role === "USER_SUSPENDED"
+    suspended: profile.approvalStatus === "SUSPENDED" || profile.role === "USER_SUSPENDED",
+    registrationIncomplete: Boolean(profile.registrationIncomplete)
   };
 }

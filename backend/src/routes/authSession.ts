@@ -8,10 +8,9 @@ import {
   approvalStatusForRole,
   canAccessApprovedApp,
   defaultBrokerFlags,
-  roleFromClaims,
   type AccountRole
 } from "../services/auth/roles";
-import { publicProfileView } from "../services/auth/userProfile";
+import { publicProfileView, type UserProfileRecord } from "../services/auth/userProfile";
 import { getUserProfileStore } from "../services/auth/userProfileStore";
 
 export const buildAuthSessionRouter = (): Router => {
@@ -20,12 +19,7 @@ export const buildAuthSessionRouter = (): Router => {
   router.get("/v1/auth/me", requireAuth, async (req, res) => {
     const uid = req.userId!;
     const owner = loadOwnerAuthConfig();
-    let role = roleFromClaims({
-      role: req.accountRole,
-      admin: req.isAdmin,
-      uid,
-      pinnedOwnerUid: owner.pinnedOwnerUid
-    });
+    let role: AccountRole = req.accountRole ?? "USER_PENDING";
 
     const profiles = getUserProfileStore();
     let profile = await profiles.getProfile(uid);
@@ -54,7 +48,11 @@ export const buildAuthSessionRouter = (): Router => {
           suspendedAt: null,
           rejectedAt: null,
           approvedAt: new Date().toISOString(),
-          approvedBy: "system"
+          approvedBy: "system",
+          termsVersion: "1.0",
+          privacyVersion: "1.0",
+          riskVersion: "1.0",
+          registrationSource: "owner-bootstrap"
         };
         // Do not persist synthetic owner profile in production unless already present —
         // read-only synthesis for access decisions. Persist only in memory/test store.
@@ -74,14 +72,18 @@ export const buildAuthSessionRouter = (): Router => {
     }
 
     if (profile) {
-      role = profile.role === "OWNER" || (owner.pinnedOwnerUid === uid) ? "OWNER" : profile.role;
-      profile = {
+      role = profile.role === "OWNER" || owner.pinnedOwnerUid === uid ? "OWNER" : profile.role;
+      const nextProfile: UserProfileRecord = {
         ...profile,
         emailVerified: req.emailVerified ?? profile.emailVerified,
         lastSignInAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-      await profiles.upsertProfile(profile);
+      profile = nextProfile;
+      await profiles.upsertProfile(nextProfile);
+    } else if (req.legacyUnclaimed && role === "USER_PENDING") {
+      // Pre-registration production users: analysis access without approval gate.
+      role = "USER_APPROVED";
     }
 
     const emailVerified =
@@ -102,10 +104,10 @@ export const buildAuthSessionRouter = (): Router => {
     res.status(200).json({
       uidMasked: maskUid(uid),
       role,
-      approvalStatus: profile?.approvalStatus ?? approvalStatusForRole(role as AccountRole),
+      approvalStatus: profile?.approvalStatus ?? approvalStatusForRole(role),
       emailVerified,
       access,
-      profile: profile ? publicProfileView({ ...profile, role: role as AccountRole, emailVerified }) : null,
+      profile: profile ? publicProfileView({ ...profile, role, emailVerified }) : null,
       registration: {
         brokerEnabledByRegistration: false,
         autoTradeDefault: "OFF"
@@ -115,7 +117,7 @@ export const buildAuthSessionRouter = (): Router => {
 
   router.post("/v1/auth/resend-verification", requireAuth, async (req, res) => {
     const uid = req.userId!;
-    const rate = checkVerificationResendRateLimit({ uid });
+    const rate = await checkVerificationResendRateLimit({ uid });
     if (!rate.allowed) {
       res.status(429).json({ error: { code: rate.code, message: rate.message } });
       return;

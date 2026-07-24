@@ -219,7 +219,10 @@ export function RegisterPage() {
                 checked={acceptTerms}
                 onChange={(e) => setAcceptTerms(e.target.checked)}
               />
-              I accept the Terms of use
+              I accept the{" "}
+              <a href="/legal/terms" target="_blank" rel="noreferrer">
+                Terms of Service
+              </a>
             </label>
             <label className="gm-auth-check">
               <input
@@ -227,7 +230,10 @@ export function RegisterPage() {
                 checked={acceptPrivacy}
                 onChange={(e) => setAcceptPrivacy(e.target.checked)}
               />
-              I accept the Privacy Policy
+              I accept the{" "}
+              <a href="/legal/privacy" target="_blank" rel="noreferrer">
+                Privacy Policy
+              </a>
             </label>
             <label className="gm-auth-check">
               <input
@@ -235,7 +241,12 @@ export function RegisterPage() {
                 checked={acceptRiskWarning}
                 onChange={(e) => setAcceptRisk(e.target.checked)}
               />
-              I understand CFDs / leveraged products are high risk and I may lose money
+              I understand the{" "}
+              <a href="/legal/risk" target="_blank" rel="noreferrer">
+                CFD / high-risk disclosure
+              </a>{" "}
+              — leveraged products are high risk and I may lose money. Registration does not enable
+              trading. Financial results are not guaranteed.
             </label>
 
             <button className="gm-auth-submit" type="submit" disabled={busy} data-testid="register-submit">

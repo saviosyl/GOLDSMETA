@@ -107,7 +107,7 @@ describe("adminUserService", () => {
       env
     });
     const audit = await store.listAudit();
-    expect(audit[0]?.action).toBe("USER_REJECT");
+    expect(audit[0]?.action).toBe("USER_REJECT_COMPLETED");
     expect(audit[0]?.targetUidMasked).toContain("…");
     expect(JSON.stringify(audit)).not.toContain(PINNED);
   });

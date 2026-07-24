@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { verifyFirebaseIdToken } from "../services/firebaseAdmin";
 import { loadOwnerAuthConfig } from "../services/auth/ownerAuthConfig";
 import {
+  effectiveRequestRole,
   isAccountRole,
   isStaffRole,
   roleFromClaims,
@@ -16,26 +17,39 @@ declare global {
       /** True when Firebase custom claim `admin: true` or staff role. */
       isAdmin?: boolean;
       accountRole?: AccountRole;
+      /** True when token had no role/admin claim (pre-registration legacy user). */
+      legacyUnclaimed?: boolean;
       emailVerified?: boolean;
+      /** Firebase token auth_time (seconds). */
+      authTimeSeconds?: number;
     }
   }
 }
 
 function applyRoleToRequest(
   req: Request,
-  args: { uid: string; roleHint?: unknown; adminClaim?: boolean; emailVerified?: boolean }
+  args: {
+    uid: string;
+    roleHint?: unknown;
+    adminClaim?: boolean;
+    emailVerified?: boolean;
+    authTimeSeconds?: number;
+  }
 ): void {
   const owner = loadOwnerAuthConfig();
-  const role = roleFromClaims({
+  const claimsRole = roleFromClaims({
     role: args.roleHint,
     admin: args.adminClaim,
     uid: args.uid,
     pinnedOwnerUid: owner.pinnedOwnerUid
   });
+  const role = effectiveRequestRole(claimsRole);
   req.userId = args.uid;
   req.accountRole = role;
+  req.legacyUnclaimed = claimsRole === null;
   req.isAdmin = args.adminClaim === true || isStaffRole(role);
   req.emailVerified = args.emailVerified ?? true;
+  req.authTimeSeconds = args.authTimeSeconds;
 }
 
 export const requireAuth: RequestHandler = async (
@@ -47,16 +61,22 @@ export const requireAuth: RequestHandler = async (
     const testUserId = req.header("x-test-user-id");
     if (testUserId) {
       const roleHeader = req.header("x-test-role");
-      const roleHint = isAccountRole(roleHeader)
-        ? roleHeader
-        : req.header("x-test-admin") === "true"
-          ? "ADMIN"
-          : "USER_APPROVED";
+      const legacy = req.header("x-test-legacy") === "true";
+      const roleHint = legacy
+        ? undefined
+        : isAccountRole(roleHeader)
+          ? roleHeader
+          : req.header("x-test-admin") === "true"
+            ? "ADMIN"
+            : "USER_APPROVED";
       applyRoleToRequest(req, {
         uid: testUserId,
         roleHint,
-        adminClaim: req.header("x-test-admin") === "true" || roleHint === "ADMIN" || roleHint === "OWNER",
-        emailVerified: req.header("x-test-email-verified") !== "false"
+        adminClaim:
+          !legacy &&
+          (req.header("x-test-admin") === "true" || roleHint === "ADMIN" || roleHint === "OWNER"),
+        emailVerified: req.header("x-test-email-verified") !== "false",
+        authTimeSeconds: Math.floor(Date.now() / 1000)
       });
       next();
       return;
@@ -80,7 +100,11 @@ export const requireAuth: RequestHandler = async (
       uid: decoded.uid,
       roleHint: (decoded as { role?: unknown }).role,
       adminClaim: decoded.admin === true,
-      emailVerified: decoded.email_verified === true
+      emailVerified: decoded.email_verified === true,
+      authTimeSeconds:
+        typeof (decoded as { auth_time?: unknown }).auth_time === "number"
+          ? (decoded as { auth_time: number }).auth_time
+          : undefined
     });
     next();
   } catch {

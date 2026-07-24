@@ -43,22 +43,69 @@ export const rejectSuspended: RequestHandler = (req, res, next) => {
   next();
 };
 
-/** Full app surfaces — pending users blocked. */
-export const requireApprovedAccount: RequestHandler = (req, res, next) => {
+/**
+ * Full app surfaces — pending users blocked.
+ * Legacy authenticated users (no role claim, no registration profile) retain
+ * analysis access. Explicit USER_PENDING profiles/claims remain gated.
+ */
+export const requireApprovedAccount: RequestHandler = async (req, res, next) => {
   const role = roleOf(req);
-  if (!canAccessApprovedApp(role)) {
+  if (canAccessApprovedApp(role)) {
+    next();
+    return;
+  }
+  if (role === "USER_SUSPENDED") {
     res.status(403).json({
       error: {
-        code: role === "USER_PENDING" ? "AWAITING_APPROVAL" : "FORBIDDEN",
-        message:
-          role === "USER_PENDING"
-            ? "Your account is awaiting approval."
-            : "Access denied."
+        code: "ACCOUNT_SUSPENDED",
+        message: "This account has been suspended."
       }
     });
     return;
   }
-  next();
+
+  const uid = req.userId;
+  if (uid) {
+    try {
+      const profile = await getUserProfileStore().getProfile(uid);
+      if (profile) {
+        if (canAccessApprovedApp(profile.role)) {
+          next();
+          return;
+        }
+        res.status(403).json({
+          error: {
+            code:
+              profile.role === "USER_PENDING" || profile.approvalStatus === "PENDING"
+                ? "AWAITING_APPROVAL"
+                : "FORBIDDEN",
+            message:
+              profile.role === "USER_PENDING"
+                ? "Your account is awaiting approval."
+                : "Access denied."
+          }
+        });
+        return;
+      }
+      // No registration profile: legacy pre-registration user.
+      if (req.legacyUnclaimed) {
+        next();
+        return;
+      }
+    } catch {
+      // Fail closed on store errors for pending-looking tokens.
+    }
+  }
+
+  res.status(403).json({
+    error: {
+      code: role === "USER_PENDING" ? "AWAITING_APPROVAL" : "FORBIDDEN",
+      message:
+        role === "USER_PENDING"
+          ? "Your account is awaiting approval."
+          : "Access denied."
+    }
+  });
 };
 
 /**
@@ -75,7 +122,17 @@ export const requireBrokerEligible: RequestHandler = async (req, res, next) => {
     next();
     return;
   }
-  if (role === "USER_PENDING" || role === "USER_SUSPENDED") {
+  if (role === "USER_SUSPENDED") {
+    res.status(403).json({
+      error: {
+        code: "BROKER_ACCESS_DISABLED",
+        message: BROKER_ACCESS_DISABLED_MESSAGE
+      }
+    });
+    return;
+  }
+  // Explicit pending (has role claim or registration profile) — not legacy unclaimed.
+  if (role === "USER_PENDING" && !req.legacyUnclaimed) {
     res.status(403).json({
       error: {
         code: "BROKER_ACCESS_DISABLED",
@@ -91,15 +148,27 @@ export const requireBrokerEligible: RequestHandler = async (req, res, next) => {
   }
   try {
     const profile = await getUserProfileStore().getProfile(uid);
-    if (profile && profile.brokerAccess !== true) {
-      res.status(403).json({
-        error: {
-          code: "BROKER_ACCESS_DISABLED",
-          message: BROKER_ACCESS_DISABLED_MESSAGE
-        }
-      });
-      return;
+    if (profile) {
+      if (profile.role === "USER_PENDING" || profile.role === "USER_SUSPENDED") {
+        res.status(403).json({
+          error: {
+            code: "BROKER_ACCESS_DISABLED",
+            message: BROKER_ACCESS_DISABLED_MESSAGE
+          }
+        });
+        return;
+      }
+      if (profile.brokerAccess !== true) {
+        res.status(403).json({
+          error: {
+            code: "BROKER_ACCESS_DISABLED",
+            message: BROKER_ACCESS_DISABLED_MESSAGE
+          }
+        });
+        return;
+      }
     }
+    // No profile → legacy: allow broker *routes* but execution flags stay false.
   } catch {
     res.status(403).json({
       error: {

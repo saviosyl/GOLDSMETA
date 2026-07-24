@@ -115,7 +115,7 @@ export const buildTradingViewRouter = (
     });
   });
 
-  router.get("/v1/tradingview/connections", requireAuth, async (req, res) => {
+  router.get("/v1/tradingview/connections", requireAuth, ...brokerGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const connections = await store.listWebhookConnections(userId);
     res.json({

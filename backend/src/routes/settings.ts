@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { approvedAccountGate } from "../middleware/accountAccess";
 import { settingsPatchSchema, type UserSettings } from "../models/types";
 import { DEFAULT_MANUAL_RISK } from "../models/manualRisk";
 import type { GoldMetaStore } from "../services/storage/types";
@@ -19,7 +20,7 @@ const mergeManualRisk = (
 export const buildSettingsRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
-  router.get("/v1/settings", requireAuth, async (req, res) => {
+  router.get("/v1/settings", requireAuth, ...approvedAccountGate, async (req, res) => {
     const settings = await store.getSettings(getAuthenticatedUserId(req));
     // Ensure Stage 3 defaults for older documents.
     if (!settings.manualRisk) {
@@ -30,7 +31,7 @@ export const buildSettingsRouter = (store: GoldMetaStore): Router => {
     res.json({ settings });
   });
 
-  router.patch("/v1/settings", requireAuth, async (req, res) => {
+  router.patch("/v1/settings", requireAuth, ...approvedAccountGate, async (req, res) => {
     const parsed = settingsPatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: "INVALID_SETTINGS", message: "Invalid settings payload" } });

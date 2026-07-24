@@ -6,7 +6,7 @@ import { friendlyAuthError } from "../lib/authErrors";
 
 /** V5.4 light premium sign-in — registration open via Create account. */
 export function SignInPage() {
-  const { signIn, configured, registrationEnabled } = useAuth();
+  const { signIn, configured, registrationEnabled, apiBaseUrl } = useAuth();
   const navigate = useNavigate();
   const emailId = useId();
   const passwordId = useId();
@@ -43,10 +43,22 @@ export function SignInPage() {
     }
     setBusy(true);
     try {
-      await sendPasswordReset(trimmed);
+      // Prefer server rate-limited path when API is configured.
+      if (apiBaseUrl) {
+        try {
+          await fetch(`${apiBaseUrl}/v1/auth/password-reset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ email: trimmed })
+          });
+        } catch {
+          await sendPasswordReset(trimmed);
+        }
+      } else {
+        await sendPasswordReset(trimmed);
+      }
       navigate("/password-reset-sent");
     } catch (err) {
-      // Still show generic success-style navigation avoidance of enumeration:
       setMessage("If an account exists for that email, a reset link has been sent.");
       setError(null);
       void err;

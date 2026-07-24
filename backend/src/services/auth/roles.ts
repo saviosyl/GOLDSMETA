@@ -17,7 +17,8 @@ export type ApprovalStatus =
   | "PENDING"
   | "APPROVED"
   | "REJECTED"
-  | "SUSPENDED";
+  | "SUSPENDED"
+  | "REGISTRATION_INCOMPLETE";
 
 export const OWNER_EXISTS_MESSAGE =
   "This account already exists. Please use Sign In or Forgot Password.";
@@ -35,12 +36,17 @@ export function isAccountRole(value: unknown): value is AccountRole {
   return typeof value === "string" && (ACCOUNT_ROLES as readonly string[]).includes(value);
 }
 
+/**
+ * Resolve role from token claims only.
+ * Returns null when no trusted role claim is present — callers must distinguish
+ * legacy pre-registration users (allow analysis) from explicit USER_PENDING.
+ */
 export function roleFromClaims(claims: {
   role?: unknown;
   admin?: unknown;
   uid?: string;
   pinnedOwnerUid?: string | null;
-}): AccountRole {
+}): AccountRole | null {
   const pinned = (claims.pinnedOwnerUid ?? "").trim();
   const uid = (claims.uid ?? "").trim();
   if (pinned && uid && uid === pinned) {
@@ -53,8 +59,17 @@ export function roleFromClaims(claims: {
   if (claims.admin === true) {
     return "ADMIN";
   }
-  // Existing production owner may not yet have role claim; pinned UID wins above.
-  return "USER_PENDING";
+  return null;
+}
+
+/**
+ * Effective request role:
+ * - explicit claims / pinned owner win
+ * - otherwise USER_PENDING (fail-closed for gated surfaces unless a gate
+ *   confirms legacy: no registration profile).
+ */
+export function effectiveRequestRole(claimsRole: AccountRole | null): AccountRole {
+  return claimsRole ?? "USER_PENDING";
 }
 
 export function isStaffRole(role: AccountRole): boolean {

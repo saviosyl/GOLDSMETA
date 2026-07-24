@@ -55,7 +55,8 @@ export const buildAdminUsersRouter = (): Router => {
         actorUid: req.userId!,
         actorRole: (req.accountRole ?? "ADMIN") as AccountRole,
         targetUid,
-        action
+        action,
+        authTimeSeconds: req.authTimeSeconds ?? null
       });
       if (!result.ok) {
         res.status(result.status).json({

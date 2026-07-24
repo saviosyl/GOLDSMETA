@@ -21,11 +21,12 @@ export type RegistrationDecision =
       message: string;
     };
 
+import { loadRegistrationConfig } from "./registrationConfig";
+
 export function isPublicRegistrationEnabled(
   source: NodeJS.ProcessEnv = process.env
 ): boolean {
-  const raw = (source.PUBLIC_REGISTRATION_ENABLED ?? "true").trim().toLowerCase();
-  return raw !== "false" && raw !== "0" && raw !== "off";
+  return loadRegistrationConfig(source).registrationEnabled;
 }
 
 export function evaluateUserCreation(args: {

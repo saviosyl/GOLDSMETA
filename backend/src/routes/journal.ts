@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { approvedAccountGate } from "../middleware/accountAccess";
 import { journalCreateSchema, journalPatchSchema } from "../models/types";
 import { calculateJournalStatistics } from "../services/journal/statistics";
 import type { GoldMetaStore } from "../services/storage/types";
@@ -10,7 +11,7 @@ const firstParam = (value: string | string[] | undefined): string | undefined =>
 export const buildJournalRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
-  router.post("/v1/journal", requireAuth, async (req, res) => {
+  router.post("/v1/journal", requireAuth, ...approvedAccountGate, async (req, res) => {
     const parsed = journalCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: "INVALID_JOURNAL", message: "Invalid journal payload" } });
@@ -20,12 +21,12 @@ export const buildJournalRouter = (store: GoldMetaStore): Router => {
     res.status(201).json({ entry });
   });
 
-  router.get("/v1/journal", requireAuth, async (req, res) => {
+  router.get("/v1/journal", requireAuth, ...approvedAccountGate, async (req, res) => {
     const entries = await store.listJournalEntries(getAuthenticatedUserId(req));
     res.json({ entries });
   });
 
-  router.patch("/v1/journal/:journalId", requireAuth, async (req, res) => {
+  router.patch("/v1/journal/:journalId", requireAuth, ...approvedAccountGate, async (req, res) => {
     const journalId = firstParam(req.params.journalId);
     const parsed = journalPatchSchema.safeParse(req.body);
     if (!journalId || !parsed.success) {
@@ -40,7 +41,7 @@ export const buildJournalRouter = (store: GoldMetaStore): Router => {
     res.json({ entry: updated });
   });
 
-  router.get("/v1/journal/statistics", requireAuth, async (req, res) => {
+  router.get("/v1/journal/statistics", requireAuth, ...approvedAccountGate, async (req, res) => {
     const entries = await store.listJournalEntries(getAuthenticatedUserId(req));
     res.json({ statistics: calculateJournalStatistics(entries) });
   });

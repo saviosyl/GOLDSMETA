@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { env } from "../config/env";
 import { getAuthenticatedUserId, requireAuth, requireAdmin } from "../middleware/auth";
+import { approvedAccountGate, brokerGate } from "../middleware/accountAccess";
 import type { AutoTradeService } from "../services/autoTrade/autoTradeService";
 import { FIRST_PILOT_LIMITS } from "../services/autoTrade/types";
 import type { GoldMetaStore } from "../services/storage/types";
@@ -67,12 +68,12 @@ export const buildAutoTradeRouter = (
 ): Router => {
   const router = Router();
 
-  router.get("/v1/autotrade/status", requireAuth, async (req, res) => {
+  router.get("/v1/autotrade/status", requireAuth, ...approvedAccountGate, async (req, res) => {
     const status = await service.getStatus(getAuthenticatedUserId(req));
     res.json({ status, defaults: FIRST_PILOT_LIMITS });
   });
 
-  router.patch("/v1/autotrade/limits", requireAuth, async (req, res) => {
+  router.patch("/v1/autotrade/limits", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = limitsSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: "INVALID_LIMITS", message: "Invalid risk limits" } });
@@ -97,7 +98,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/mode", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/mode", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = setModeSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: "INVALID_MODE", message: "Invalid mode payload" } });
@@ -121,7 +122,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/connect", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/connect", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = connectSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { code: "INVALID_CONNECT", message: "Invalid connect payload" } });
@@ -144,7 +145,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/demo/diagnostics", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/demo/diagnostics", requireAuth, ...brokerGate, async (req, res) => {
     try {
       const status = await service.refreshDemoDiagnostics(getAuthenticatedUserId(req));
       res.json({
@@ -166,7 +167,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/disconnect", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/disconnect", requireAuth, ...brokerGate, async (req, res) => {
     try {
       const status = await service.disconnectBroker(getAuthenticatedUserId(req));
       res.json({ status });
@@ -186,7 +187,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/broker", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/broker", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = brokerSelectSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -216,7 +217,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/t212/connect", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/connect", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = t212ConnectSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({
@@ -246,7 +247,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/t212/disconnect", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/disconnect", requireAuth, ...brokerGate, async (req, res) => {
     try {
       const status = await service.disconnectTrading212(getAuthenticatedUserId(req));
       res.json({ status });
@@ -260,7 +261,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/t212/diagnostics", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/diagnostics", requireAuth, ...brokerGate, async (req, res) => {
     try {
       const status = await service.refreshT212Diagnostics(getAuthenticatedUserId(req));
       res.json({
@@ -286,7 +287,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/t212/instruments/search", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/instruments/search", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = t212SearchSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({
@@ -324,7 +325,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/t212/instruments/confirm", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/instruments/confirm", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = t212ConfirmInstrumentSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -363,7 +364,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/t212/proposals", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/proposals", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = t212ProposalSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -408,7 +409,7 @@ export const buildAutoTradeRouter = (
     })
     .strict();
 
-  router.post("/v1/autotrade/t212/proposals/approve-dry-run", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/t212/proposals/approve-dry-run", requireAuth, ...brokerGate, async (req, res) => {
     const parsed = t212ApproveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -437,7 +438,7 @@ export const buildAutoTradeRouter = (
     }
   });
 
-  router.post("/v1/autotrade/emergency-stop", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/emergency-stop", requireAuth, ...brokerGate, async (req, res) => {
     const status = await service.emergencyStop(getAuthenticatedUserId(req));
     res.json({
       ok: true,
@@ -446,7 +447,7 @@ export const buildAutoTradeRouter = (
     });
   });
 
-  router.post("/v1/autotrade/unlock", requireAuth, async (req, res) => {
+  router.post("/v1/autotrade/unlock", requireAuth, ...brokerGate, async (req, res) => {
     const status = await service.unlock(getAuthenticatedUserId(req));
     res.json({ status });
   });

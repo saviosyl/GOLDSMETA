@@ -85,6 +85,31 @@ export const createApiApp = (
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
   app.use(buildCorsMiddleware());
+  // Registration / password-reset must reject non-JSON before body parsing.
+  app.use((req, res, next) => {
+    const path = req.path || "";
+    const strictJson =
+      req.method === "POST" &&
+      (path === "/v1/auth/register" ||
+        path === "/v1/auth/register/preflight" ||
+        path === "/v1/auth/register/finalize" ||
+        path === "/v1/auth/password-reset");
+    if (!strictJson) {
+      next();
+      return;
+    }
+    const raw = (req.header("content-type") ?? "").toLowerCase();
+    if (!raw.includes("application/json")) {
+      res.status(415).json({
+        error: {
+          code: "UNSUPPORTED_MEDIA_TYPE",
+          message: "Content-Type must be application/json."
+        }
+      });
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
 
   app.use(buildHealthRouter());
