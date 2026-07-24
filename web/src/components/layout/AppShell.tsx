@@ -16,6 +16,7 @@ const DESKTOP_SECONDARY = [
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
+  { to: "/admin/users", label: "Users", staffOnly: true },
   { to: "/settings", label: "Settings" }
 ];
 
@@ -33,6 +34,7 @@ const MOBILE_MORE = [
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
+  { to: "/admin/users", label: "Users", staffOnly: true },
   { to: "/settings", label: "Settings" }
 ];
 
@@ -51,11 +53,12 @@ export function AppShell({
   children?: ReactNode;
   linkPrefix?: string;
 }) {
-  const { user } = useAuth();
+  const { user, account } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const email = user?.email ?? "Account";
   const prefix = linkPrefix.replace(/\/$/, "");
+  const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
 
   const withPrefix = (to: string) => {
     if (!prefix) return to;
@@ -63,13 +66,22 @@ export function AppShell({
     return `${prefix}${to}`;
   };
 
+  const desktopSecondary = useMemo(
+    () => DESKTOP_SECONDARY.filter((l) => !("staffOnly" in l && l.staffOnly) || isStaff),
+    [isStaff]
+  );
+  const mobileMore = useMemo(
+    () => MOBILE_MORE.filter((l) => !("staffOnly" in l && l.staffOnly) || isStaff),
+    [isStaff]
+  );
+
   const moreActive = useMemo(
     () =>
-      MOBILE_MORE.some((l) => {
+      mobileMore.some((l) => {
         const target = withPrefix(l.to);
         return location.pathname === target || location.pathname.startsWith(`${target}/`);
       }),
-    [location.pathname, prefix]
+    [location.pathname, prefix, mobileMore]
   );
 
   return (
@@ -96,7 +108,7 @@ export function AppShell({
           <p className="gm-meta" style={{ margin: "16px 8px 6px" }}>
             More
           </p>
-          {DESKTOP_SECONDARY.map((link) => (
+          {desktopSecondary.map((link) => (
             <NavLink
               key={link.to}
               to={withPrefix(link.to)}
@@ -171,7 +183,7 @@ export function AppShell({
               </button>
             </div>
             <div className="gm-more-links">
-              {MOBILE_MORE.map((link) => (
+              {mobileMore.map((link) => (
                 <NavLink key={link.to} to={withPrefix(link.to)} onClick={() => setMoreOpen(false)}>
                   {link.label}
                 </NavLink>

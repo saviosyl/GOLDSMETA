@@ -3,11 +3,15 @@ import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signOut as firebaseSignOut,
   type Auth,
   type User
 } from "firebase/auth";
+import { OWNER_EMAIL, OWNER_EXISTS_MESSAGE } from "./registrationValidation";
+import { friendlyAuthError } from "./authErrors";
 
 export interface FirebaseWebConfig {
   apiKey: string;
@@ -67,19 +71,52 @@ export const subscribeAuth = (listener: (user: User | null) => void): (() => voi
 };
 
 export const signIn = async (email: string, password: string): Promise<User> => {
-  const result = await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
-  return result.user;
+  try {
+    const result = await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+    return result.user;
+  } catch (error) {
+    throw new Error(friendlyAuthError(error), { cause: error });
+  }
 };
 
 /**
- * Public self-registration is permanently disabled for GoldMeta.
- * Server-side Auth blocking functions also reject createUser attempts.
+ * Client Firebase registration path (email/password).
+ * Protected owner email is rejected before any Auth call.
+ * Prefer server `/v1/auth/register` when available; this remains for finalize flows.
  */
-export const signUp = async (_email: string, _password: string): Promise<User> => {
-  throw new Error("Account registration is currently closed.");
+export const signUp = async (email: string, password: string): Promise<User> => {
+  const normalized = email.trim().toLowerCase();
+  if (normalized === OWNER_EMAIL) {
+    throw new Error(OWNER_EXISTS_MESSAGE);
+  }
+  try {
+    const result = await createUserWithEmailAndPassword(
+      getFirebaseAuth(),
+      normalized,
+      password
+    );
+    await sendEmailVerification(result.user);
+    return result.user;
+  } catch (error) {
+    throw new Error(friendlyAuthError(error), { cause: error });
+  }
 };
 
-export const isPublicRegistrationEnabled = (): false => false;
+export const isPublicRegistrationEnabled = (): boolean => {
+  const raw = (import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED as string | undefined)?.trim();
+  if (raw === "false" || raw === "0") return false;
+  return true;
+};
+
+export const sendVerificationEmail = async (): Promise<void> => {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error("Sign in required to resend verification.");
+  try {
+    await sendEmailVerification(user);
+  } catch (error) {
+    throw new Error(friendlyAuthError(error), { cause: error });
+  }
+};
 
 export const signOut = async (): Promise<void> => {
   if (!isFirebaseConfigured()) return;
@@ -87,7 +124,12 @@ export const signOut = async (): Promise<void> => {
 };
 
 export const sendPasswordReset = async (email: string): Promise<void> => {
-  await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+  try {
+    await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+  } catch (error) {
+    // Generic success path is handled by UI; still avoid raw codes if surfaced.
+    throw new Error(friendlyAuthError(error), { cause: error });
+  }
 };
 
 export const getIdToken = async (forceRefresh = false): Promise<string | null> => {

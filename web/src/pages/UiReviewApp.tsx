@@ -521,7 +521,9 @@ function UiReviewApp() {
       signUp: async () => {
         throw new Error("Account registration is currently closed.");
       },
-      registrationEnabled: false as const,
+      registrationEnabled: false,
+      account: null,
+      refreshAccount: async () => null,
       signOut: async () => undefined,
       apiBaseUrl: "review://local"
     };

@@ -354,6 +354,11 @@ export function SettingsPage() {
           <button type="button" className="btn danger block" onClick={() => void signOut()}>
             Sign out
           </button>
+          <p className="settings-meta" style={{ marginTop: 12 }}>
+            <a href="/account/delete-request" data-testid="request-deletion-link">
+              Request account deletion
+            </a>
+          </p>
         </div>
       )}
 

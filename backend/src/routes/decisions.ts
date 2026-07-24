@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { approvedAccountGate } from "../middleware/accountAccess";
 import type { GoldMetaStore } from "../services/storage/types";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
@@ -8,7 +9,7 @@ const firstParam = (value: string | string[] | undefined): string | undefined =>
 export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
-  router.get("/v1/decisions/latest", requireAuth, async (req, res) => {
+  router.get("/v1/decisions/latest", requireAuth, ...approvedAccountGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const latest = await store.latestDecision(userId);
     if (!latest) {
@@ -18,7 +19,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
     res.json({ decision: latest });
   });
 
-  router.get("/v1/decisions", requireAuth, async (req, res) => {
+  router.get("/v1/decisions", requireAuth, ...approvedAccountGate, async (req, res) => {
     const rawLimit = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
     const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 50;
     const userId = getAuthenticatedUserId(req);
@@ -27,7 +28,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.get("/v1/decisions/:decisionId", requireAuth, async (req, res) => {
+  router.get("/v1/decisions/:decisionId", requireAuth, ...approvedAccountGate, async (req, res) => {
     const decisionId = firstParam(req.params.decisionId);
     const userId = getAuthenticatedUserId(req);
     const decision = decisionId ? await store.getDecision(userId, decisionId) : undefined;

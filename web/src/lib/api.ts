@@ -750,4 +750,87 @@ export class ApiClient {
       body: JSON.stringify(payload)
     });
   }
+
+  getRegistrationStatus(): Promise<{
+    registrationEnabled: boolean;
+    emailVerificationRequired: boolean;
+    approvalRequired: boolean;
+    brokerEnabledByRegistration: boolean;
+    autoTradeDefault: string;
+    messages: Record<string, string>;
+  }> {
+    return this.request("/v1/auth/registration-status", {}, false);
+  }
+
+  registerAccount(payload: Record<string, unknown>): Promise<{
+    message: string;
+    uidMasked: string;
+    role: string;
+    emailVerificationSent: boolean;
+    brokerAccess: boolean;
+    autoTrade: boolean;
+  }> {
+    return this.request("/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }, false);
+  }
+
+  registrationPreflight(payload: Record<string, unknown>): Promise<{ ok: boolean }> {
+    return this.request(
+      "/v1/auth/register/preflight",
+      { method: "POST", body: JSON.stringify(payload) },
+      false
+    );
+  }
+
+  getAuthMe(): Promise<{
+    uidMasked: string | null;
+    role: string;
+    approvalStatus: string;
+    emailVerified: boolean;
+    access: "APP" | "VERIFY_EMAIL" | "AWAITING_APPROVAL" | "SUSPENDED" | "FORBIDDEN" | "UNKNOWN";
+    profile: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      brokerAccess?: boolean;
+      autoTrade?: boolean;
+      brokerMessage?: string | null;
+    } | null;
+  }> {
+    return this.request("/v1/auth/me");
+  }
+
+  resendVerification(): Promise<{ message: string }> {
+    return this.request("/v1/auth/resend-verification", { method: "POST", body: "{}" });
+  }
+
+  listAdminUsers(): Promise<{
+    users: Array<{
+      userId: string;
+      userIdMasked: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      registeredAt: string;
+      emailVerified: boolean;
+      approvalStatus: string;
+      role: string;
+      lastSignInAt: string | null;
+      suspended: boolean;
+    }>;
+  }> {
+    return this.request("/v1/admin/users");
+  }
+
+  adminUserAction(
+    uid: string,
+    action: "approve" | "reject" | "suspend" | "restore"
+  ): Promise<{ user: Record<string, unknown> }> {
+    return this.request(`/v1/admin/users/${encodeURIComponent(uid)}/${action}`, {
+      method: "POST",
+      body: "{}"
+    });
+  }
 }

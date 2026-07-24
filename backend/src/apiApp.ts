@@ -23,6 +23,9 @@ import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
 import { buildCTraderRouter } from "./routes/ctrader";
+import { buildRegistrationRouter } from "./routes/registration";
+import { buildAuthSessionRouter } from "./routes/authSession";
+import { buildAdminUsersRouter } from "./routes/adminUsers";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -82,9 +85,37 @@ export const createApiApp = (
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
   app.use(buildCorsMiddleware());
+  // Registration / password-reset must reject non-JSON before body parsing.
+  app.use((req, res, next) => {
+    const path = req.path || "";
+    const strictJson =
+      req.method === "POST" &&
+      (path === "/v1/auth/register" ||
+        path === "/v1/auth/register/preflight" ||
+        path === "/v1/auth/register/finalize" ||
+        path === "/v1/auth/password-reset");
+    if (!strictJson) {
+      next();
+      return;
+    }
+    const raw = (req.header("content-type") ?? "").toLowerCase();
+    if (!raw.includes("application/json")) {
+      res.status(415).json({
+        error: {
+          code: "UNSUPPORTED_MEDIA_TYPE",
+          message: "Content-Type must be application/json."
+        }
+      });
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
 
   app.use(buildHealthRouter());
+  app.use(buildRegistrationRouter());
+  app.use(buildAuthSessionRouter());
+  app.use(buildAdminUsersRouter());
   app.use(buildWebhooksRouter(store, aiExplainer));
   app.use(buildTradingViewRouter(store, aiExplainer));
   app.use(buildDevicesRouter(store));

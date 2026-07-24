@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth, getAuthenticatedUserId } from "../middleware/auth";
+import { approvedAccountGate } from "../middleware/accountAccess";
 import { computeSignalPerformance } from "../services/signalOutcome/analytics";
 import { getSignalOutcomeStore } from "../services/signalOutcome/monitor";
 import { SignalOutcomeStorageUnavailableError } from "../services/signalOutcome/storagePolicy";
@@ -24,7 +25,7 @@ export const buildSignalOutcomesRouter = (): Router => {
     return false;
   };
 
-  router.get("/v1/signal-outcomes", requireAuth, async (req, res) => {
+  router.get("/v1/signal-outcomes", requireAuth, ...approvedAccountGate, async (req, res) => {
     try {
       const userId = getAuthenticatedUserId(req);
       const limit = Math.min(Number(req.query.limit ?? 100) || 100, 500);
@@ -42,7 +43,7 @@ export const buildSignalOutcomesRouter = (): Router => {
     }
   });
 
-  router.get("/v1/signal-outcomes/performance", requireAuth, async (req, res) => {
+  router.get("/v1/signal-outcomes/performance", requireAuth, ...approvedAccountGate, async (req, res) => {
     try {
       const userId = getAuthenticatedUserId(req);
       const store = getSignalOutcomeStore();
@@ -59,7 +60,7 @@ export const buildSignalOutcomesRouter = (): Router => {
     }
   });
 
-  router.get("/v1/signal-outcomes/by-decision/:decisionId", requireAuth, async (req, res) => {
+  router.get("/v1/signal-outcomes/by-decision/:decisionId", requireAuth, ...approvedAccountGate, async (req, res) => {
     try {
       const userId = getAuthenticatedUserId(req);
       const store = getSignalOutcomeStore();
@@ -75,7 +76,7 @@ export const buildSignalOutcomesRouter = (): Router => {
     }
   });
 
-  router.get("/v1/signal-outcomes/:signalId", requireAuth, async (req, res) => {
+  router.get("/v1/signal-outcomes/:signalId", requireAuth, ...approvedAccountGate, async (req, res) => {
     try {
       const userId = getAuthenticatedUserId(req);
       const store = getSignalOutcomeStore();

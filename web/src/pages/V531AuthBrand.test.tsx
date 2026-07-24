@@ -15,7 +15,10 @@ vi.mock("../lib/auth", () => ({
     signIn: vi.fn(),
     signUp: vi.fn(),
     configured: true,
-    apiBaseUrl: "https://example.invalid"
+    registrationEnabled: true,
+    apiBaseUrl: "https://example.invalid",
+    account: null,
+    refreshAccount: vi.fn()
   })
 }));
 
@@ -47,16 +50,14 @@ describe("V5.3.1 SignIn redesign", () => {
     expect(screen.queryByText(/iOS/i)).not.toBeInTheDocument();
   });
 
-  it("does not expose Create an account; registration is closed", () => {
+  it("exposes Create account and Forgot password alongside Sign In", () => {
     render(
       <MemoryRouter>
         <SignInPage />
       </MemoryRouter>
     );
-    expect(screen.queryByRole("button", { name: "Create an account" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("auth-registration-closed")).toHaveTextContent(
-      /Account registration is currently closed/i
-    );
+    expect(screen.getByTestId("create-account-link")).toHaveTextContent(/Create account/i);
+    expect(screen.queryByTestId("auth-registration-closed")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
     expect(screen.getByTestId("forgot-password")).toBeInTheDocument();
   });

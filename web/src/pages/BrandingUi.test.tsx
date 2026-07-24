@@ -11,7 +11,10 @@ vi.mock("../lib/auth", () => ({
     signIn: vi.fn(),
     signUp: vi.fn(),
     configured: true,
-    apiBaseUrl: "https://us-central1-goldmeta-web.cloudfunctions.net/api"
+    registrationEnabled: true,
+    apiBaseUrl: "https://us-central1-goldmeta-web.cloudfunctions.net/api",
+    account: null,
+    refreshAccount: vi.fn()
   })
 }));
 
@@ -29,7 +32,11 @@ describe("GoldMeta V5.2 branding UI", () => {
   });
 
   it("renders GoldMeta mark on sign-in", () => {
-    render(<SignInPage />);
+    render(
+      <MemoryRouter>
+        <SignInPage />
+      </MemoryRouter>
+    );
     expect(screen.getByTestId("signin-logo")).toBeInTheDocument();
     const logo = screen.getByAltText(/^GoldMeta$/i);
     expect(logo.getAttribute("src")).toMatch(/logo-full-official|logo-official|mark-official/);

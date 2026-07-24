@@ -5,6 +5,7 @@
 
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
+import { brokerGate } from "../middleware/accountAccess";
 import { loadOwnerAuthConfig } from "../services/auth/ownerAuthConfig";
 import { checkOwnerAuthIntegrity } from "../services/auth/authIntegrity";
 import { getAuth } from "firebase-admin/auth";
@@ -78,7 +79,7 @@ async function resolveAuthHealth(store: GoldMetaStore) {
 export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
-  router.get("/v1/brokers/control-centre", requireAuth, async (_req, res) => {
+  router.get("/v1/brokers/control-centre", requireAuth, ...brokerGate, async (_req, res) => {
     const auth = await resolveAuthHealth(store);
     res.json({
       ...getBrokerControlCentreSnapshot(auth),
@@ -87,12 +88,12 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.get("/v1/ctrader/status", requireAuth, async (_req, res) => {
+  router.get("/v1/ctrader/status", requireAuth, ...brokerGate, async (_req, res) => {
     const auth = await resolveAuthHealth(store);
     res.json(buildCTraderReadiness({ auth }));
   });
 
-  router.get("/v1/ctrader/config", requireAuth, async (_req, res) => {
+  router.get("/v1/ctrader/config", requireAuth, ...brokerGate, async (_req, res) => {
     const config = loadCTraderConfig();
     res.json({
       ...config,
@@ -103,7 +104,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.get("/v1/ctrader/auth-health", requireAuth, async (_req, res) => {
+  router.get("/v1/ctrader/auth-health", requireAuth, ...brokerGate, async (_req, res) => {
     const auth = await resolveAuthHealth(store);
     res.json({
       auth,
@@ -112,7 +113,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.get("/v1/ctrader/demonstration", requireAuth, async (_req, res) => {
+  router.get("/v1/ctrader/demonstration", requireAuth, ...brokerGate, async (_req, res) => {
     res.json({
       ...buildDemonstrationBundle(),
       notice: FIXTURE_BANNER,
@@ -121,7 +122,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.post("/v1/ctrader/oauth/start", requireAuth, async (req, res) => {
+  router.post("/v1/ctrader/oauth/start", requireAuth, ...brokerGate, async (req, res) => {
     const auth = await resolveAuthHealth(store);
     const config = loadCTraderConfig();
     if (auth.status !== "HEALTHY") {
@@ -151,7 +152,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.post("/v1/ctrader/oauth/callback", requireAuth, async (_req, res) => {
+  router.post("/v1/ctrader/oauth/callback", requireAuth, ...brokerGate, async (_req, res) => {
     const auth = await resolveAuthHealth(store);
     if (auth.status !== "HEALTHY") {
       res.status(403).json({ error: "AUTH_SETUP_REQUIRED" });
@@ -164,7 +165,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     });
   });
 
-  router.post("/v1/ctrader/preview", requireAuth, async (req, res) => {
+  router.post("/v1/ctrader/preview", requireAuth, ...brokerGate, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const useFixture = Boolean(body.useDemonstrationFixture);
     const symbol = useFixture ? fixtureXauUsdSymbol() : null;
@@ -204,7 +205,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     res.json({ preview, orderSubmissionEnabled: false, autoTrade: "OFF" });
   });
 
-  router.post("/v1/ctrader/preview/approve", requireAuth, async (req, res) => {
+  router.post("/v1/ctrader/preview/approve", requireAuth, ...brokerGate, async (req, res) => {
     const body = (req.body ?? {}) as {
       previewId?: string;
       useDemonstrationFixture?: boolean;
@@ -278,12 +279,12 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
   };
 
-  router.post("/v1/ctrader/orders/market", requireAuth, deny("market"));
-  router.post("/v1/ctrader/orders/close", requireAuth, deny("close"));
-  router.post("/v1/ctrader/orders/cancel", requireAuth, deny("cancel"));
-  router.post("/v1/ctrader/positions/close", requireAuth, deny("closePosition"));
+  router.post("/v1/ctrader/orders/market", requireAuth, ...brokerGate, deny("market"));
+  router.post("/v1/ctrader/orders/close", requireAuth, ...brokerGate, deny("close"));
+  router.post("/v1/ctrader/orders/cancel", requireAuth, ...brokerGate, deny("cancel"));
+  router.post("/v1/ctrader/positions/close", requireAuth, ...brokerGate, deny("closePosition"));
 
-  router.post("/v1/ctrader/automation/mode", requireAuth, async (req, res) => {
+  router.post("/v1/ctrader/automation/mode", requireAuth, ...brokerGate, async (req, res) => {
     const mode = String((req.body as { mode?: string })?.mode ?? "OFF").toUpperCase();
     if (mode === "DEMO_AUTO" || mode === "LIVE_LOCKED" || mode === "DEMO_AUTO_LOCKED") {
       res.status(403).json({
