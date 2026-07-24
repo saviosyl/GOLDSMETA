@@ -8,9 +8,9 @@
  * Forbidden: order submission, close, cancel, Live environment.
  *
  * Does NOT fabricate CTRADER_CLIENT_* secrets.
- * When the owner creates Secret Manager entries, bind them to this function and
- * redeploy so process.env receives CTRADER_CLIENT_ID / SECRET / REDIRECT_URI /
- * CTRADER_TOKEN_ENCRYPTION_KEY. Until then → CTRADER_SETUP_REQUIRED.
+ * Create genuine Secret Manager entries BEFORE deploy (Firebase refuses
+ * missing secrets listed below). Until secrets exist → do not deploy this
+ * revision; keep CTRADER_SETUP_REQUIRED on older revisions.
  */
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -24,6 +24,12 @@ import {
 } from "./services/broker/ctrader/flags";
 
 const pinnedOwnerUid = defineSecret("GOLDMETA_PINNED_OWNER_UID");
+const ctraderClientId = defineSecret("CTRADER_CLIENT_ID");
+const ctraderClientSecret = defineSecret("CTRADER_CLIENT_SECRET");
+const ctraderRedirectUri = defineSecret("CTRADER_REDIRECT_URI");
+const ctraderTokenEncryptionKey = defineSecret("CTRADER_TOKEN_ENCRYPTION_KEY");
+/** Non-secret policy pin — kept in Secret Manager for uniform binding. */
+const ctraderEnvironment = defineSecret("CTRADER_ENVIRONMENT");
 
 function applyCTraderPreviewRuntimeEnv(): void {
   // Shared app fail-closed (mirror apiT212Preview / apiV6Preview)
@@ -42,11 +48,17 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED = "true";
   process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
   process.env.CTRADER_LIVE_ENABLED = "false";
-  process.env.CTRADER_ENVIRONMENT = "DEMO";
   process.env.GOLDMETA_PINNED_OWNER_UID = pinnedOwnerUid.value();
 
-  // Preserve owner-supplied CTRADER_* from Secret Manager binding when present.
-  // Do not invent or delete valid injected values — only clear Live T212 keys.
+  // Inject owner-supplied Open API secrets (never invent placeholders)
+  process.env.CTRADER_CLIENT_ID = ctraderClientId.value();
+  process.env.CTRADER_CLIENT_SECRET = ctraderClientSecret.value();
+  process.env.CTRADER_REDIRECT_URI = ctraderRedirectUri.value();
+  process.env.CTRADER_TOKEN_ENCRYPTION_KEY = ctraderTokenEncryptionKey.value();
+  // Force DEMO even if mis-set — Live remains impossible
+  const envPin = (ctraderEnvironment.value() || "DEMO").trim().toUpperCase();
+  process.env.CTRADER_ENVIRONMENT = envPin === "DEMO" ? "DEMO" : "DEMO";
+
   delete process.env.T212_LIVE_API_KEY;
   delete process.env.T212_LIVE_API_SECRET;
 
@@ -68,9 +80,8 @@ function getCTraderPreviewApp(): Express {
 }
 
 /**
- * Bind CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_REDIRECT_URI,
- * CTRADER_TOKEN_ENCRYPTION_KEY here after the owner creates them in Secret Manager.
- * Listing missing secrets breaks deploy — keep them out until they exist.
+ * Secrets are bound only to apiCTraderPreview — not production `api`.
+ * Create all five CTRADER_* secrets in Secret Manager before this deploy.
  */
 export const apiCTraderPreview = onRequest(
   {
@@ -82,7 +93,14 @@ export const apiCTraderPreview = onRequest(
       "http://localhost:5173"
     ],
     invoker: "public",
-    secrets: [pinnedOwnerUid],
+    secrets: [
+      pinnedOwnerUid,
+      ctraderClientId,
+      ctraderClientSecret,
+      ctraderRedirectUri,
+      ctraderTokenEncryptionKey,
+      ctraderEnvironment
+    ],
     timeoutSeconds: 120,
     memory: "512MiB"
   },
