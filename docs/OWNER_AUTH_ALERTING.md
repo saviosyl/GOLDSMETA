@@ -42,11 +42,20 @@ and alert on `STATUS!=HEALTHY` (still redacting UID fields).
 Ensure Identity Toolkit **DATA_WRITE** / Admin Read audit logs remain enabled so
 DeleteAccount / SignUp remain attributable (principal + user-agent).
 
-## Notification text template
+## Cloud Monitoring status (goldmeta-web)
 
-```
-GoldMeta Auth alert: <metric>
-Project: goldmeta-web
-Action: inspect integrity (read-only) — do not Console-delete owner email
-Docs: docs/OWNER_AUTH_PROTECTION.md
-```
+Log-based metrics created:
+
+- `goldmeta_auth_delete_account`
+- `goldmeta_auth_owner_email_signup`
+
+Alert policies created (incident-capable; attach a notification channel if not already linked):
+
+- `GoldMeta Auth DeleteAccount`
+- `GoldMeta Auth Owner Email SignUp`
+
+Integrity-monitor NOT_HEALTHY alerting continues via GitHub Actions schedule failure
+notifications on `.github/workflows/owner-auth-integrity.yml`.
+
+If email/SMS/Slack notification channels are missing, complete channel attachment in
+Cloud Console → Monitoring → Alerting (ALERT_SETUP_REQUIRED for delivery only).
