@@ -92,6 +92,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Bump on layout-critical deploys so outdated precaches are cleaned.
+        cacheId: "goldmeta-v543-auth-layout",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses

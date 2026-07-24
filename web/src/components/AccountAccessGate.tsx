@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { PublicPageShell } from "./layout/PublicPageShell";
 import {
   AccountSuspendedPage,
   AwaitingApprovalPage,
@@ -25,7 +26,7 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div className="gm-shell" data-testid="session-loading">
+      <PublicPageShell testId="session-loading">
         <div className="gm-main">
           <div className="gm-main-inner">
             <div className="gm-section brand-loading" role="status">
@@ -34,7 +35,7 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
-      </div>
+      </PublicPageShell>
     );
   }
 

@@ -89,12 +89,12 @@
   --sidebar-w: 248px;
   --header-h: 64px;
   --content-max: 1280px;
-  --auth-card-w: 440px;
+  --auth-card-w: 480px;
   --dash-summary-max: 180px;
 
   --scroll-hotfix: 1;
   --ui-redesign: 1;
-  --ui-redesign-patch: 5.4.1;
+  --ui-redesign-patch: 5.4.3-auth-layout;
 
   font-family: var(--font-sans);
   line-height: 1.5;
