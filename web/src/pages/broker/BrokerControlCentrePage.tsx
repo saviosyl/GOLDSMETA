@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import type {
   BrokerControlCentreResponse,
-  CTraderDemonstrationBundle
+  CTraderDemonstrationBundle,
+  CTraderDemoAccountOption,
+  CTraderDiagnosticsReport
 } from "../../lib/broker/ctraderTypes";
 import { describeClientError } from "../../lib/errors";
 import {
   brokerBadgeLabel,
   brokerDisplayName,
   connectionStatusLabel,
+  formatUserTimestamp,
   wizardStatusLabel,
   wizardStatusTone
 } from "../../lib/plainLanguage";
 import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
 import { StatusBadge } from "../../components/ui/primitives";
+import { ApiError } from "../../types/models";
 
 const FALLBACK_WIZARD = [
   {
@@ -67,21 +71,36 @@ const FALLBACK_WIZARD = [
   }
 ];
 
+function diagTone(ok: boolean): "positive" | "warning" | "negative" {
+  return ok ? "positive" : "warning";
+}
+
 /**
  * Broker Control Centre — MANUAL / T212 / Pepperstone cTrader / IG parked.
  * AutoTrade remains OFF. No order submission. Demonstration data clearly labelled.
  */
 export function BrokerControlCentrePage() {
   const { api, account } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [centre, setCentre] = useState<BrokerControlCentreResponse | null>(null);
   const [demo, setDemo] = useState<CTraderDemonstrationBundle | null>(null);
+  const [diagnostics, setDiagnostics] = useState<CTraderDiagnosticsReport | null>(null);
+  const [accounts, setAccounts] = useState<CTraderDemoAccountOption[]>([]);
+  const [previewResult, setPreviewResult] = useState<{
+    notice?: string;
+    preview?: { action?: string; state?: string; proposedVolume?: number | null; riskAmount?: number | null };
+    quote?: { bid?: number | null; ask?: number | null; spread?: number | null };
+  } | null>(null);
   const [errorDetail, setErrorDetail] = useState<ReturnType<typeof describeClientError> | null>(
     null
   );
+  const [infoBanner, setInfoBanner] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDemo, setShowDemo] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [selected, setSelected] = useState<string>("manual");
   const selectionTouchedRef = useRef(false);
+  const oauthHandledRef = useRef(false);
   const isOwner = account?.role === "OWNER";
 
   const load = useCallback(async () => {
@@ -93,16 +112,57 @@ export function BrokerControlCentrePage() {
       if (!selectionTouchedRef.current) {
         setSelected(data.defaultBroker ?? "manual");
       }
+      if (isOwner && data.readiness?.connected) {
+        try {
+          const diag = await api.getCTraderDiagnostics();
+          setDiagnostics(diag);
+        } catch {
+          /* diagnostics optional until account selected */
+        }
+      }
     } catch (e) {
       setErrorDetail(describeClientError(e, "Could not load broker options."));
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, isOwner]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (oauthHandledRef.current) return;
+    const ctrader = searchParams.get("ctrader");
+    if (!ctrader) return;
+    oauthHandledRef.current = true;
+    const reason = searchParams.get("reason");
+    if (ctrader === "oauth_ok") {
+      setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
+      setSelected("pepperstone_ctrader");
+      selectionTouchedRef.current = true;
+      if (isOwner) {
+        void api
+          .listCTraderDemoAccounts()
+          .then((r) => setAccounts(r.accounts ?? []))
+          .catch((e: unknown) =>
+            setErrorDetail(describeClientError(e, "Could not list Demo accounts."))
+          );
+      }
+      void load();
+    } else if (ctrader === "oauth_error") {
+      setErrorDetail(
+        describeClientError(
+          new ApiError(400, reason ?? "OAUTH_CANCELLED", "OAuth failed"),
+          "Pepperstone connection could not be completed."
+        )
+      );
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("ctrader");
+    next.delete("reason");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, api, isOwner, load]);
 
   const loadDemo = async () => {
     setShowDemo(true);
@@ -114,6 +174,91 @@ export function BrokerControlCentrePage() {
     }
   };
 
+  const startOAuth = async () => {
+    if (!isOwner) {
+      setErrorDetail(
+        describeClientError(
+          new ApiError(403, "CTRADER_OWNER_ONLY", "Owner only"),
+          "Only the owner can start Pepperstone OAuth."
+        )
+      );
+      return;
+    }
+    setConnecting(true);
+    setErrorDetail(null);
+    try {
+      const started = await api.startCTraderOAuth();
+      if (started.authorizationUrl) {
+        window.location.assign(started.authorizationUrl);
+        return;
+      }
+      setErrorDetail(
+        describeClientError(
+          new ApiError(503, "CTRADER_SETUP_REQUIRED", "No authorization URL"),
+          "Pepperstone connection could not be started."
+        )
+      );
+    } catch (e) {
+      setErrorDetail(
+        describeClientError(
+          e,
+          "Pepperstone connection could not be started. Please try again from Broker Control Centre."
+        )
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const selectAccount = async (id: string) => {
+    try {
+      await api.selectCTraderDemoAccount({
+        ctidTraderAccountId: id,
+        confirmPepperstone: true
+      });
+      setInfoBanner("Demo account selected — read-only checks can run.");
+      const diag = await api.getCTraderDiagnostics();
+      setDiagnostics(diag);
+      await load();
+    } catch (e) {
+      setErrorDetail(describeClientError(e, "Could not select Demo account."));
+    }
+  };
+
+  const runPreview = async () => {
+    try {
+      const result = (await api.createCTraderPreview({
+        decision: "BUY",
+        confidence: 85
+      })) as {
+        notice?: string;
+        preview?: {
+          action?: string;
+          state?: string;
+          proposedVolume?: number | null;
+          riskAmount?: number | null;
+        };
+        quote?: { bid?: number | null; ask?: number | null; spread?: number | null };
+      };
+      setPreviewResult(result);
+    } catch (e) {
+      setErrorDetail(describeClientError(e, "Could not build preview."));
+    }
+  };
+
+  const disconnect = async () => {
+    try {
+      await api.disconnectCTrader();
+      setDiagnostics(null);
+      setAccounts([]);
+      setPreviewResult(null);
+      setInfoBanner("Pepperstone Demo disconnected.");
+      await load();
+    } catch (e) {
+      setErrorDetail(describeClientError(e, "Could not disconnect."));
+    }
+  };
+
   const readiness = centre?.readiness;
   const authBlocked = Boolean(readiness?.authSetupRequired);
   const setupRequired = Boolean(readiness?.setupRequired ?? true);
@@ -122,6 +267,7 @@ export function BrokerControlCentrePage() {
     readiness?.wizardSteps && readiness.wizardSteps.length >= 6
       ? readiness.wizardSteps
       : FALLBACK_WIZARD;
+  const summary = readiness?.connectionSummary;
 
   const selectedBroker = (centre?.brokers ?? []).find((b) => b.id === selected);
   const connectionLabel = connected
@@ -129,6 +275,23 @@ export function BrokerControlCentrePage() {
     : authBlocked || setupRequired
       ? "Setup required"
       : connectionStatusLabel(selectedBroker?.status);
+
+  const diagRows: Array<{ key: string; label: string; ok: boolean }> = diagnostics
+    ? [
+        { key: "cred", label: "Credentials configured", ok: diagnostics.credentialsConfigured },
+        { key: "oauth", label: "OAuth connected", ok: diagnostics.oauthConnected },
+        { key: "demo", label: "Demo account selected", ok: diagnostics.demoAccountSelected },
+        { key: "pep", label: "Pepperstone confirmed", ok: diagnostics.pepperstoneConfirmed },
+        { key: "gold", label: "Gold symbol found", ok: diagnostics.goldSymbolFound },
+        { key: "quote", label: "Live quote received", ok: diagnostics.liveQuoteReceived },
+        { key: "spread", label: "Spread available", ok: diagnostics.spreadAvailable },
+        { key: "vol", label: "Volume rules available", ok: diagnostics.volumeRulesAvailable },
+        { key: "margin", label: "Margin metadata available", ok: diagnostics.marginMetadataAvailable },
+        { key: "mkt", label: "Market status available", ok: diagnostics.marketStatusAvailable },
+        { key: "lock", label: "Trading safely locked", ok: diagnostics.tradingSafelyLocked },
+        { key: "at", label: "AutoTrade OFF", ok: diagnostics.autoTrade === "OFF" }
+      ]
+    : [];
 
   return (
     <div className="gm-broker-centre" data-testid="broker-control-centre">
@@ -183,6 +346,12 @@ export function BrokerControlCentrePage() {
         </div>
       ) : null}
 
+      {infoBanner ? (
+        <div className="gm-section" role="status" data-testid="broker-info-banner">
+          <p>{infoBanner}</p>
+        </div>
+      ) : null}
+
       {errorDetail ? (
         <FriendlyErrorBanner
           detail={errorDetail}
@@ -213,7 +382,9 @@ export function BrokerControlCentrePage() {
                   b.id === "ig"
                     ? "neutral"
                     : b.id === "pepperstone_ctrader"
-                      ? "warning"
+                      ? connected
+                        ? "positive"
+                        : "warning"
                       : b.id === "trading212_invest"
                         ? "gold"
                         : "positive"
@@ -254,26 +425,40 @@ export function BrokerControlCentrePage() {
             Pepperstone cTrader Demo
           </h2>
           <p className="gm-broker-lead">
-            Connection setup required until secure credentials and OAuth are complete. TradingView
-            alone cannot authorise GoldMeta for cTrader.
+            {connected
+              ? "Demo OAuth connected — read-only. Trading stays locked."
+              : "Connection setup required until secure credentials and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
           </p>
 
-          <div
-            className="gm-auth-setup-required"
-            data-testid="ctrader-setup-required"
-            role="status"
-          >
-            <strong data-testid="auth-setup-required">
-              {authBlocked
-                ? "Connection setup required"
-                : "Pepperstone connection required"}
-            </strong>
-            <p>
-              {authBlocked
-                ? "Broker connect stays disabled until account security checks pass. Dashboard and analysis still work."
-                : "Add secure server credentials, then connect with OAuth. No broker password is collected here."}
-            </p>
-          </div>
+          {!connected ? (
+            <div
+              className="gm-auth-setup-required"
+              data-testid="ctrader-setup-required"
+              role="status"
+            >
+              <strong data-testid="auth-setup-required">
+                {authBlocked
+                  ? "Connection setup required"
+                  : "Pepperstone connection required"}
+              </strong>
+              <p>
+                {authBlocked
+                  ? "Broker connect stays disabled until account security checks pass. Dashboard and analysis still work."
+                  : "Add secure server credentials, then connect with OAuth. No broker password is collected here."}
+              </p>
+            </div>
+          ) : (
+            <div className="gm-risk-box" data-testid="ctrader-connected-summary" role="status">
+              <strong>Connected (Demo read-only)</strong>
+              <p className="gm-meta" style={{ marginBottom: 0 }}>
+                Account {summary?.accountMasked ?? "—"} · {summary?.brokerName ?? "Broker pending"}
+                {summary?.symbolName ? ` · ${summary.symbolName}` : ""}
+                {summary?.lastSyncAt
+                  ? ` · last sync ${formatUserTimestamp(summary.lastSyncAt)}`
+                  : ""}
+              </p>
+            </div>
+          )}
 
           <h3 className="gm-subsection-title">Setup checklist</h3>
           <ol className="gm-wizard-steps" data-testid="ctrader-wizard">
@@ -300,12 +485,11 @@ export function BrokerControlCentrePage() {
           </ol>
 
           <div className="gm-broker-actions">
-            {/* Connect only when not blocked — still no order buttons while disconnected */}
-            {!connected ? (
+            {!connected && isOwner ? (
               <button
                 type="button"
                 className="gm-btn"
-                disabled={authBlocked || !readiness?.oauthConfigured}
+                disabled={authBlocked || !readiness?.oauthConfigured || connecting}
                 data-testid="ctrader-connect-btn"
                 title={
                   authBlocked
@@ -314,21 +498,69 @@ export function BrokerControlCentrePage() {
                       ? "Secure credentials not added yet"
                       : "Start Pepperstone connection"
                 }
-                onClick={() => {
-                  void api.startCTraderOAuth().catch((e: unknown) => {
-                    setErrorDetail(
-                      describeClientError(
-                        e,
-                        "Pepperstone connection could not be started. Please try again from Broker Control Centre."
-                      )
-                    );
-                  });
-                }}
+                onClick={() => void startOAuth()}
               >
-                {authBlocked || !readiness?.oauthConfigured
-                  ? "Connect unavailable"
-                  : "Connect Pepperstone"}
+                {connecting
+                  ? "Starting…"
+                  : authBlocked || !readiness?.oauthConfigured
+                    ? "Connect unavailable"
+                    : "Connect Pepperstone"}
               </button>
+            ) : null}
+            {!connected && !isOwner ? (
+              <p className="gm-meta" data-testid="ctrader-owner-only-note">
+                Only the owner can start Pepperstone OAuth.
+              </p>
+            ) : null}
+            {connected && isOwner ? (
+              <>
+                <button
+                  type="button"
+                  className="gm-btn"
+                  data-testid="ctrader-refresh-accounts-btn"
+                  onClick={() => {
+                    void api
+                      .listCTraderDemoAccounts()
+                      .then((r) => setAccounts(r.accounts ?? []))
+                      .catch((e: unknown) =>
+                        setErrorDetail(describeClientError(e, "Could not list Demo accounts."))
+                      );
+                  }}
+                >
+                  Refresh Demo accounts
+                </button>
+                <button
+                  type="button"
+                  className="gm-btn gm-btn-secondary"
+                  data-testid="ctrader-diagnostics-btn"
+                  onClick={() => {
+                    void api
+                      .getCTraderDiagnostics()
+                      .then(setDiagnostics)
+                      .catch((e: unknown) =>
+                        setErrorDetail(describeClientError(e, "Could not load diagnostics."))
+                      );
+                  }}
+                >
+                  Refresh diagnostics
+                </button>
+                <button
+                  type="button"
+                  className="gm-btn gm-btn-secondary"
+                  data-testid="ctrader-live-preview-btn"
+                  onClick={() => void runPreview()}
+                >
+                  Trade preview only
+                </button>
+                <button
+                  type="button"
+                  className="gm-btn gm-btn-danger"
+                  data-testid="ctrader-disconnect-btn"
+                  onClick={() => void disconnect()}
+                >
+                  Disconnect
+                </button>
+              </>
             ) : null}
             <button
               type="button"
@@ -343,9 +575,118 @@ export function BrokerControlCentrePage() {
             </Link>
           </div>
           <p className="gm-meta" data-testid="no-order-controls">
-            Order buttons stay hidden while disconnected. No Demo or Live order can be sent from
-            this page.
+            Order buttons stay hidden. No Demo or Live order can be sent from this page.
           </p>
+
+          {accounts.length > 0 && isOwner ? (
+            <section
+              className="gm-risk-box"
+              data-testid="ctrader-account-selector"
+              aria-labelledby="account-select-heading"
+            >
+              <h3 id="account-select-heading">Select Demo account</h3>
+              <ul className="gm-qual-list">
+                {accounts.map((a) => (
+                  <li key={a.ctidTraderAccountId}>
+                    <button
+                      type="button"
+                      className="gm-btn gm-btn-secondary"
+                      data-testid={`ctrader-account-${a.accountIdMasked}`}
+                      onClick={() => void selectAccount(a.ctidTraderAccountId)}
+                    >
+                      {a.accountIdMasked} · {a.brokerNameTitle ?? "Broker"} ·{" "}
+                      {a.depositCurrency ?? "—"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {diagnostics && isOwner ? (
+            <section
+              className="gm-section"
+              data-testid="ctrader-diagnostics"
+              aria-labelledby="diag-heading"
+            >
+              <h3 id="diag-heading" className="gm-subsection-title">
+                Connection diagnostics
+              </h3>
+              <ul className="gm-qual-list" data-testid="ctrader-diagnostics-list">
+                {diagRows.map((row) => (
+                  <li key={row.key}>
+                    <StatusBadge tone={diagTone(row.ok)}>
+                      {row.ok ? "Ready" : "Pending"}
+                    </StatusBadge>{" "}
+                    {row.label}
+                  </li>
+                ))}
+              </ul>
+              {diagnostics.quote ? (
+                <div className="gm-risk-box" data-testid="ctrader-live-quote">
+                  <strong>Live Demo data</strong>
+                  <p className="gm-meta">
+                    Bid {diagnostics.quote.bid ?? "—"} / Ask {diagnostics.quote.ask ?? "—"} ·
+                    spread {diagnostics.quote.spread ?? "—"}
+                    {diagnostics.quote.stale ? " · stale warning" : ""}
+                    {diagnostics.quote.timestamp
+                      ? ` · updated ${formatUserTimestamp(diagnostics.quote.timestamp)}`
+                      : ""}
+                  </p>
+                </div>
+              ) : null}
+              {diagnostics.account ? (
+                <div className="gm-risk-box" data-testid="ctrader-account-snapshot">
+                  <strong>Demo account (masked)</strong>
+                  <p className="gm-meta" style={{ marginBottom: 0 }}>
+                    {diagnostics.account.accountIdMasked} · {diagnostics.connection.currency ?? "—"}{" "}
+                    · equity {diagnostics.account.equity ?? "—"} · free{" "}
+                    {diagnostics.account.freeMargin ?? "—"} · used{" "}
+                    {diagnostics.account.usedMargin ?? "—"}
+                    {diagnostics.account.leverage != null
+                      ? ` · leverage ${diagnostics.account.leverage}`
+                      : ""}
+                  </p>
+                </div>
+              ) : null}
+              <details className="gm-disclosure">
+                <summary>Technical details</summary>
+                <div className="gm-disclosure-body">
+                  <p className="gm-meta" style={{ margin: 0 }}>
+                    Symbol: {diagnostics.symbol?.symbolName ?? "—"}
+                    <br />
+                    Token refresh healthy:{" "}
+                    {String(diagnostics.connection.tokenRefreshHealthy)}
+                    <br />
+                    Environment: DEMO · AutoTrade OFF · mutations disabled
+                  </p>
+                </div>
+              </details>
+            </section>
+          ) : null}
+
+          {previewResult ? (
+            <section
+              className="gm-section gm-demo-fixture"
+              data-testid="ctrader-preview-only"
+              aria-labelledby="preview-heading"
+            >
+              <p className="gm-demo-banner" data-testid="preview-only-banner">
+                {previewResult.notice ?? "Preview only — no order will be submitted."}
+              </p>
+              <h3 id="preview-heading">Trade preview</h3>
+              <p>
+                {previewResult.preview?.action ?? "—"} ·{" "}
+                {previewResult.preview?.state?.replace(/_/g, " ") ?? "—"} · vol{" "}
+                {previewResult.preview?.proposedVolume ?? "—"} · risk €
+                {previewResult.preview?.riskAmount ?? "—"}
+              </p>
+              <p className="gm-meta">
+                Bid {previewResult.quote?.bid ?? "—"} / Ask {previewResult.quote?.ask ?? "—"} ·
+                spread {previewResult.quote?.spread ?? "—"}
+              </p>
+            </section>
+          ) : null}
 
           <section aria-labelledby="readonly-heading" className="gm-risk-box">
             <h3 id="readonly-heading">Read-only checks (when connected)</h3>
@@ -423,8 +764,8 @@ export function BrokerControlCentrePage() {
                   function URL).
                 </li>
                 <li>
-                  Store client ID, client secret and redirect URI in Secret Manager — never commit
-                  them to GitHub.
+                  Store client ID, client secret, redirect URI and token encryption key in Secret
+                  Manager — never commit them to GitHub.
                 </li>
                 <li>OAuth will connect the account without pasting a broker password into GoldMeta.</li>
                 <li>Run read-only verification before requesting any Demo trading approval.</li>

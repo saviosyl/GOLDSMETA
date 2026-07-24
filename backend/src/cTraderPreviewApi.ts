@@ -4,11 +4,13 @@
  * Deploy ONLY this function (never replace production `api`):
  *   firebase deploy --only functions:apiCTraderPreview
  *
- * Allowed: config validation, readiness, demonstration fixtures, preview.
+ * Allowed: OAuth (Demo), account discovery, symbol/quote read, preview.
  * Forbidden: order submission, close, cancel, Live environment.
  *
  * Does NOT fabricate CTRADER_CLIENT_* secrets.
- * Mirrors T212 preview fail-closed env hardening for the shared Express app.
+ * When the owner creates Secret Manager entries, bind them to this function and
+ * redeploy so process.env receives CTRADER_CLIENT_ID / SECRET / REDIRECT_URI /
+ * CTRADER_TOKEN_ENCRYPTION_KEY. Until then → CTRADER_SETUP_REQUIRED.
  */
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -34,7 +36,7 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.AUTOTRADE_STORE = "firestore";
   process.env.AUTOTRADE_FIRESTORE_ROOT = "autoTradeCTraderPreview";
 
-  // cTrader preview capabilities
+  // cTrader preview capabilities — mutations hard-false
   process.env.CTRADER_CONNECTOR_ENABLED = "true";
   process.env.CTRADER_DEMO_READ_ENABLED = "true";
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED = "true";
@@ -43,11 +45,15 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.CTRADER_ENVIRONMENT = "DEMO";
   process.env.GOLDMETA_PINNED_OWNER_UID = pinnedOwnerUid.value();
 
-  // Never invent client secrets — leave unset → CTRADER_SETUP_REQUIRED
-  delete process.env.CTRADER_CLIENT_ID;
-  delete process.env.CTRADER_CLIENT_SECRET;
+  // Preserve owner-supplied CTRADER_* from Secret Manager binding when present.
+  // Do not invent or delete valid injected values — only clear Live T212 keys.
   delete process.env.T212_LIVE_API_KEY;
   delete process.env.T212_LIVE_API_SECRET;
+
+  if (!process.env.GOLDMETA_WEB_ORIGIN) {
+    process.env.GOLDMETA_WEB_ORIGIN =
+      process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
+  }
 }
 
 let previewApp: Express | null = null;
@@ -61,6 +67,11 @@ function getCTraderPreviewApp(): Express {
   return previewApp;
 }
 
+/**
+ * Bind CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_REDIRECT_URI,
+ * CTRADER_TOKEN_ENCRYPTION_KEY here after the owner creates them in Secret Manager.
+ * Listing missing secrets breaks deploy — keep them out until they exist.
+ */
 export const apiCTraderPreview = onRequest(
   {
     region: "us-central1",

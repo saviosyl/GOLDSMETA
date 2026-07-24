@@ -26,7 +26,7 @@ export interface BrokerControlCentreResponse {
     setupRequired: boolean;
     authSetupRequired: boolean;
     oauthConfigured: boolean;
-    connected: false;
+    connected: boolean;
     demonstrationAvailable: true;
     automationMode: string;
     autoTrade: "OFF";
@@ -39,6 +39,14 @@ export interface BrokerControlCentreResponse {
       detail: string;
     }>;
     label: string;
+    connectionSummary?: {
+      accountMasked: string | null;
+      brokerName: string | null;
+      pepperstoneConfirmed: boolean;
+      symbolName: string | null;
+      lastSyncAt: string | null;
+      lastQuoteAt: string | null;
+    };
     auth: {
       status: string;
       brokerSetupEnabled: boolean;
@@ -58,6 +66,72 @@ export interface BrokerControlCentreResponse {
       };
     };
   };
+}
+
+export interface CTraderDiagnosticsReport {
+  credentialsConfigured: boolean;
+  oauthConnected: boolean;
+  demoAccountSelected: boolean;
+  pepperstoneConfirmed: boolean;
+  goldSymbolFound: boolean;
+  liveQuoteReceived: boolean;
+  spreadAvailable: boolean;
+  volumeRulesAvailable: boolean;
+  marginMetadataAvailable: boolean;
+  marketStatusAvailable: boolean;
+  tradingSafelyLocked: true;
+  autoTrade: "OFF";
+  environment: "DEMO";
+  connection: {
+    accountMasked: string | null;
+    brokerName: string | null;
+    currency: string | null;
+    symbolName: string | null;
+    lastSyncAt: string | null;
+    lastQuoteAt: string | null;
+    tokenRefreshHealthy: boolean | null;
+  };
+  quote: {
+    bid: number | null;
+    ask: number | null;
+    spread: number | null;
+    timestamp?: string;
+    marketStatus?: string;
+    stale?: boolean;
+    source?: string;
+  } | null;
+  account: {
+    accountIdMasked: string;
+    currency: string;
+    balance: number | null;
+    equity: number | null;
+    freeMargin: number | null;
+    usedMargin: number | null;
+    leverage: number | null;
+    brokerName: string | null;
+  } | null;
+  symbol: {
+    symbolId?: string;
+    symbolName: string;
+    description?: string | null;
+    digits?: number | null;
+    minVolume?: number | null;
+    maxVolume?: number | null;
+    volumeStep?: number | null;
+    lotSize?: number | null;
+  } | null;
+  technical?: Record<string, unknown>;
+  orderSubmissionEnabled?: false;
+  label?: string;
+}
+
+export interface CTraderDemoAccountOption {
+  ctidTraderAccountId: string;
+  accountIdMasked: string;
+  brokerNameTitle: string | null;
+  depositCurrency: string | null;
+  leverage: number | null;
+  isLive: false;
 }
 
 export interface CTraderDemonstrationBundle {

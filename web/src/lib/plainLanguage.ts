@@ -214,6 +214,33 @@ export function friendlyApiCode(
     };
   }
 
+  if (c.includes("LIVE_ACCOUNT") || c.includes("CTRADER_LIVE")) {
+    return {
+      message: "Live cTrader accounts cannot be connected in this phase.",
+      whatHappened: "A Live account was rejected.",
+      impact: "Only Demo accounts are allowed. Trading stays locked.",
+      nextStep: "Select a genuine Pepperstone cTrader Demo account."
+    };
+  }
+
+  if (c.includes("QUOTE_STALE") || c.includes("STALE")) {
+    return {
+      message: "Market quote is stale.",
+      whatHappened: "The last bid/ask is older than the safety window.",
+      impact: "Trade previews are blocked until a fresh quote arrives.",
+      nextStep: "Wait for a live Demo quote refresh, then try again."
+    };
+  }
+
+  if (c.includes("OWNER_ONLY") || c.includes("CTRADER_OWNER")) {
+    return {
+      message: "Only the GoldMeta owner can manage the Pepperstone connection.",
+      whatHappened: "This broker action is restricted to the owner.",
+      impact: "Your analysis access is unchanged.",
+      nextStep: "Ask the owner to complete connection setup."
+    };
+  }
+
   if (status === 403 || c === "FORBIDDEN" || /403/.test(msg)) {
     return {
       message: "You do not have access to this feature yet.",

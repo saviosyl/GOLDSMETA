@@ -14,7 +14,13 @@ vi.mock("../../lib/auth", () => ({
     api: {
       getBrokerControlCentre,
       getCTraderDemonstration,
-      startCTraderOAuth
+      startCTraderOAuth,
+      listCTraderDemoAccounts: vi.fn(),
+      selectCTraderDemoAccount: vi.fn(),
+      disconnectCTrader: vi.fn(),
+      getCTraderDiagnostics: vi.fn(),
+      getCTraderQuote: vi.fn(),
+      createCTraderPreview: vi.fn()
     }
   })
 }));
