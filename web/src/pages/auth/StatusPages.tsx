@@ -30,9 +30,14 @@ export function RegistrationCompletePage() {
   return (
     <AuthStatusCard testId="registration-complete" title="Registration complete">
       <p className="gm-auth-support" data-testid="registration-complete-message">
-        Account created. Please verify your email. Your account will then be reviewed before full
-        access is enabled.
+        Your account was created. Next: verify your email, then wait for approval before full access
+        is enabled.
       </p>
+      <ol className="gm-help-steps">
+        <li>Open the verification email we sent.</li>
+        <li>Return here and sign in after verifying.</li>
+        <li>An administrator will review your account.</li>
+      </ol>
       <p className="gm-auth-trust">
         Broker trading is not enabled by registration. AutoTrade remains OFF.
       </p>
@@ -55,7 +60,7 @@ export function VerifyEmailPage() {
       const res = await api.resendVerification();
       setMessage(res.message);
     } catch {
-      setMessage("If verification is required, an email will be sent shortly.");
+      setMessage("If verification is required, an email will be sent shortly. Please wait before trying again.");
     } finally {
       setBusy(false);
     }
@@ -64,8 +69,11 @@ export function VerifyEmailPage() {
   return (
     <AuthStatusCard testId="verify-email-page" title="Verify your email">
       <p className="gm-auth-support">
-        We sent a verification link{user?.email ? ` toward ${user.email}` : ""}. Verify your email
-        before using GoldMeta.
+        We sent a verification link{user?.email ? ` to ${user.email}` : ""}. Open that email and tap
+        the link before using GoldMeta.
+      </p>
+      <p className="gm-meta">
+        Cannot find it? Check spam, then use Resend. Resend is rate-limited to protect your inbox.
       </p>
       {message && (
         <div className="banner" role="status">
@@ -91,17 +99,22 @@ export function VerifyEmailPage() {
 export function AwaitingApprovalPage() {
   const { signOut, account } = useAuth();
   return (
-    <AuthStatusCard testId="awaiting-approval-page" title="Awaiting approval">
-      <p className="gm-auth-support">
-        Your email is verified. An administrator must approve your account before full access is
-        enabled.
+    <AuthStatusCard testId="awaiting-approval-page" title="Waiting for approval">
+      <p className="gm-auth-support" data-testid="awaiting-approval-message">
+        Your email is verified. An administrator must approve your account before Dashboard and
+        analysis features unlock.
       </p>
+      <ol className="gm-help-steps">
+        <li>We notify the owner that your account is ready for review.</li>
+        <li>When approved, sign in again to access GoldMeta.</li>
+        <li>Broker connection is separate and stays locked until a Demo setup is completed later.</li>
+      </ol>
       <p className="gm-auth-trust">
         {account?.profile?.brokerMessage ??
-          "Broker access has not been enabled for this account."}
+          "Broker access is not enabled by account approval alone."}
       </p>
-      <Link className="gm-auth-text-btn accent" to="/settings">
-        Account / help
+      <Link className="gm-auth-text-btn accent" to="/help">
+        Open help
       </Link>
       <button type="button" className="gm-auth-text-btn" onClick={() => void signOut()}>
         Sign out
@@ -113,9 +126,13 @@ export function AwaitingApprovalPage() {
 export function AccountSuspendedPage() {
   const { signOut } = useAuth();
   return (
-    <AuthStatusCard testId="account-suspended-page" title="Account suspended">
-      <p className="gm-auth-support">
-        This account has been suspended. Contact support if you believe this is a mistake.
+    <AuthStatusCard testId="account-suspended-page" title="Account paused">
+      <p className="gm-auth-support" data-testid="suspended-message">
+        This account has been paused. You cannot use GoldMeta until an administrator restores access.
+      </p>
+      <p className="gm-meta">
+        If you believe this is a mistake, contact support with the email you used to register. We
+        will review calmly and reply as soon as possible.
       </p>
       <button type="button" className="gm-auth-submit" onClick={() => void signOut()}>
         Sign out

@@ -180,7 +180,17 @@ export function RegisterPage() {
                 autoComplete="new-password"
                 minLength={10}
                 required
+                aria-describedby={`${formId}-password-rules`}
               />
+              <ul
+                className="gm-password-rules"
+                id={`${formId}-password-rules`}
+                data-testid="password-rules"
+              >
+                <li>At least 10 characters</li>
+                <li>One uppercase and one lowercase letter</li>
+                <li>One number and one special character</li>
+              </ul>
               {fieldErrors.password && <span className="gm-field-error">{fieldErrors.password}</span>}
             </div>
 

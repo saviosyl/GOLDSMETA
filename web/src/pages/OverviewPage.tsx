@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
-import { formatClientError } from "../lib/errors";
+import { describeClientError } from "../lib/errors";
 import { formatSession, humanDecisionState, plainLanguageReason } from "../lib/plainLanguage";
+import { FriendlyErrorBanner } from "../components/FriendlyErrorBanner";
 import {
   formatCompactLocalTime,
   formatLocalTimestamp,
@@ -106,7 +107,9 @@ export function OverviewPage() {
   const [score, setScore] = useState<Score | null>(null);
   const [source, setSource] = useState<"live" | "cached" | "offline">("live");
   const [cachedAt, setCachedAt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<ReturnType<typeof describeClientError> | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   /** Set on successful load (including empty/404 decision) so Last refresh is never stuck on pending. */
@@ -114,7 +117,7 @@ export function OverviewPage() {
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
-    setError(null);
+    setErrorDetail(null);
     try {
       const [latest, active, recentSetups, overnight, b, s] = await Promise.all([
         api.latestDecision(),
@@ -146,7 +149,7 @@ export function OverviewPage() {
         setSource(navigator.onLine ? "cached" : "offline");
         setCachedAt(cached.savedAt);
       }
-      setError(formatClientError(err, "Unable to load market state"));
+      setErrorDetail(describeClientError(err, "Unable to load market state"));
       throw err;
     } finally {
       setLoading(false);
@@ -181,6 +184,24 @@ export function OverviewPage() {
       (Array.isArray(decision?.reasonSummary) ? decision.reasonSummary : undefined),
     undefined
   );
+  const confidence =
+    typeof decision?.confidence === "number"
+      ? decision.confidence
+      : typeof score?.total === "number"
+        ? score.total
+        : null;
+  const planEntry = decision?.entry?.price ?? setup?.levels?.entryPrice ?? null;
+  const planStop = decision?.stopLoss?.price ?? setup?.levels?.stopLoss ?? null;
+  const planTp1 =
+    decision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? setup?.levels?.tp1 ?? null;
+  const planTp2 =
+    decision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? setup?.levels?.tp2 ?? null;
+  const planTp3 =
+    decision?.takeProfits?.find((t) => t.label === "TP3")?.price ?? setup?.levels?.tp3 ?? null;
+  const estimatedRisk =
+    planEntry != null && planStop != null
+      ? `About ${Math.abs(planEntry - planStop).toFixed(2)} points to stop (not guaranteed)`
+      : "Not available — open Risk planner to size a position";
 
   const stampIso = decision?.generatedAt ?? briefing?.dataTimestamp ?? cachedAt;
   const localTs = formatLocalTimestamp(stampIso, tzPref);
@@ -256,15 +277,19 @@ export function OverviewPage() {
             : "pending"}
       </p>
 
-      {error && (
-        <div className="banner error" role="alert">
-          {error}
-        </div>
+      {errorDetail && (
+        <FriendlyErrorBanner detail={errorDetail} onRetry={refresh} testId="dashboard-error" />
       )}
       {pollError && (
         <div className="banner stale" role="status" data-testid="dashboard-poll-stale">
           Live refresh is temporarily unavailable. Showing the last loaded decision — use Refresh to
           retry.
+        </div>
+      )}
+      {(source === "cached" || source === "offline") && (
+        <div className="banner stale" role="status" data-testid="stale-data-warning">
+          Showing stored data{cachedAt ? ` from ${formatCompactLocalTime(cachedAt, tzPref)}` : ""}.
+          Tap Refresh when you are back online.
         </div>
       )}
       {loading && (
@@ -299,6 +324,8 @@ export function OverviewPage() {
         sessionLabel={sessionLabel}
         reason={reason}
         scoreTotal={score?.total}
+        confidence={confidence}
+        marketTrend={briefing?.marketRegime ?? decision?.marketRegime ?? decision?.marketStructure?.trend}
         localPrimary={localTs.primary}
         localZone={localTs.timeZone}
         utcSecondary={localTs.secondaryUtc}
@@ -306,10 +333,35 @@ export function OverviewPage() {
         vah={vah}
         val={val}
         setup={setup}
+        entry={planEntry}
+        stopLoss={planStop}
+        tp1={planTp1}
+        tp2={planTp2}
+        tp3={planTp3}
+        estimatedRisk={estimatedRisk}
         source={source}
         technicalId={decision?.decisionId}
         reasonCodes={decision?.reasonCodes}
+        brokerConnected={false}
+        autoTradeOff
       />
+
+      <SectionCard title="Safety">
+        <div className="gm-trading-status-row" data-testid="dashboard-safety">
+          <span className="gm-badge warning">Trading locked</span>
+          <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
+            AutoTrade OFF
+          </span>
+          <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
+            Emergency STOP ready
+          </span>
+        </div>
+        <p className="gm-meta" style={{ marginBottom: 0 }}>
+          Broker execution stays disabled.{" "}
+          <Link to="/help">Open the first-use guide</Link> ·{" "}
+          <Link to="/brokers">Broker setup</Link>
+        </p>
+      </SectionCard>
 
       <div className="gm-snapshot-actions-row">
         <PromoSnapshotButton

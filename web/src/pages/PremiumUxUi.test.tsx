@@ -80,7 +80,7 @@ describe("PrimarySignalCard semantics", () => {
     const hero = screen.getByTestId("primary-decision");
     expect(hero).toHaveTextContent("WAIT");
     expect(hero.className).toMatch(/tone-wait/);
-    expect(screen.getByTestId("no-shadow-plan")).toHaveTextContent(/No validated shadow plan yet/i);
+    expect(screen.getByTestId("no-shadow-plan")).toHaveTextContent(/No validated plan yet/i);
     expect(screen.getByTestId("primary-local-time")).toHaveTextContent(/Europe\/Dublin/);
     expect(screen.getByTestId("primary-local-time")).toHaveTextContent(/05:15 UTC/);
   });

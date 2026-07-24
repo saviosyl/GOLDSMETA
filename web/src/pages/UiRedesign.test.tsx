@@ -118,10 +118,15 @@ describe("OverviewPage redesign", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText(/New York/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
-    expect(screen.getByText("No validated shadow plan yet.")).toBeInTheDocument();
+    expect(screen.getByText("No validated plan yet.")).toBeInTheDocument();
     expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
     expect(screen.getByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
+    expect(screen.getByTestId("primary-confidence")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
+    expect(screen.queryByText("SHADOW")).not.toBeInTheDocument();
+    expect(screen.getByTestId("advanced-levels")).toBeInTheDocument();
   });
 
   it("reveals technical details on demand", async () => {
@@ -135,5 +140,18 @@ describe("OverviewPage redesign", () => {
     await user.click(screen.getByText("Technical details"));
     expect(screen.getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
     expect(screen.getAllByText(/42\s*\/\s*100/).length).toBeGreaterThan(0);
+  });
+
+  it("includes Help in mobile navigation", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </MemoryRouter>
+    );
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
   });
 });

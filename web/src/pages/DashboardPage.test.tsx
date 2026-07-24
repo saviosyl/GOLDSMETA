@@ -137,8 +137,9 @@ describe("DashboardPage Stage 3", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("INTERNAL: Server error");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Server error|Something went wrong/i);
     expect(screen.getByRole("heading", { name: "No decision yet" })).toBeInTheDocument();
+    expect(screen.queryByText(/^INTERNAL:/)).not.toBeInTheDocument();
   });
 
   it("renders a live decision card when a decision exists", async () => {

@@ -17,6 +17,7 @@ const DESKTOP_SECONDARY = [
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
+  { to: "/help", label: "Help" },
   { to: "/settings", label: "Settings" }
 ];
 
@@ -35,6 +36,7 @@ const MOBILE_MORE = [
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
+  { to: "/help", label: "Help" },
   { to: "/settings", label: "Settings" }
 ];
 

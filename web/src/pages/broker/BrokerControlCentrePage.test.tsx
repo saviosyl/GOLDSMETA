@@ -10,6 +10,7 @@ const startCTraderOAuth = vi.fn();
 
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({
+    account: { role: "OWNER" },
     api: {
       getBrokerControlCentre,
       getCTraderDemonstration,
@@ -25,29 +26,29 @@ const centreFixture = {
   brokers: [
     {
       id: "manual",
-      name: "MANUAL",
+      name: "Manual",
       status: "Available",
       detail: "No broker execution",
       badge: "MANUAL"
     },
     {
       id: "trading212_invest",
-      name: "TRADING 212 INVEST",
-      status: "Practice Read Only",
-      detail: "Long-only gold ETF proxy",
+      name: "Trading 212 Practice",
+      status: "Read only",
+      detail: "Practice read-only",
       badge: "READ_ONLY"
     },
     {
       id: "pepperstone_ctrader",
-      name: "PEPPERSTONE cTRADER CFD",
-      status: "Auth Setup Required",
-      detail: "Demo Preview",
+      name: "Pepperstone cTrader Demo",
+      status: "Connection setup required",
+      detail: "Demo setup",
       badge: "DEMO_PREVIEW"
     },
     {
       id: "ig",
-      name: "IG",
-      status: "Parked",
+      name: "IG — Coming later",
+      status: "Coming later",
       detail: "Not active",
       badge: "PARKED"
     }
@@ -72,9 +73,21 @@ const centreFixture = {
       },
       {
         step: 3,
-        title: "Connect cTrader ID (OAuth)",
+        title: "Add secure credentials",
+        status: "SETUP_REQUIRED",
+        detail: "Missing CTRADER_CLIENT_SECRET"
+      },
+      {
+        step: 4,
+        title: "Connect account",
         status: "BLOCKED",
         detail: "AUTH SETUP REQUIRED"
+      },
+      {
+        step: 8,
+        title: "Request Demo trading approval",
+        status: "BLOCKED",
+        detail: "Locked"
       }
     ],
     label: "CTRADER_SETUP_REQUIRED",
@@ -116,12 +129,13 @@ describe("BrokerControlCentrePage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("AUTO TRADE OFF");
-    expect(screen.getByTestId("no-order-badge")).toHaveTextContent("NO ORDER SUBMISSION");
+    expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("no-order-badge")).toHaveTextContent(/No order submission/i);
     expect(screen.getByTestId("broker-card-pepperstone_ctrader")).toBeInTheDocument();
+    expect(screen.getByTestId("broker-top-status")).toBeInTheDocument();
   });
 
-  it("shows AUTH SETUP REQUIRED and disables connect for cTrader", async () => {
+  it("shows Connection setup required and disables connect for cTrader", async () => {
     render(
       <MemoryRouter>
         <BrokerControlCentrePage />
@@ -130,8 +144,26 @@ describe("BrokerControlCentrePage", () => {
     await waitFor(() => screen.getByTestId("broker-card-pepperstone_ctrader"));
     fireEvent.click(screen.getByTestId("broker-card-pepperstone_ctrader"));
     expect(await screen.findByTestId("ctrader-setup-panel")).toBeInTheDocument();
-    expect(await screen.findByTestId("auth-setup-required")).toBeInTheDocument();
+    expect(await screen.findByTestId("auth-setup-required")).toHaveTextContent(
+      /Connection setup required|Pepperstone connection required/i
+    );
     expect(screen.getByTestId("ctrader-connect-btn")).toBeDisabled();
+    expect(screen.getByTestId("no-order-controls")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /place|submit order/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("owner-setup-guide")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-status-1")).toHaveTextContent(/Action required/i);
+  });
+
+  it("keeps technical codes out of the main wizard copy", async () => {
+    render(
+      <MemoryRouter>
+        <BrokerControlCentrePage />
+      </MemoryRouter>
+    );
+    fireEvent.click(await screen.findByTestId("broker-card-pepperstone_ctrader"));
+    const panel = await screen.findByTestId("ctrader-setup-panel");
+    expect(panel.textContent).not.toMatch(/AUTH SETUP REQUIRED/);
+    expect(panel.textContent).not.toMatch(/CTRADER_CLIENT_SECRET/);
   });
 
   it("loads labelled demonstration data", async () => {
