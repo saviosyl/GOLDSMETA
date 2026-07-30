@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { PublicPageShell } from "./layout/PublicPageShell";
 import {
+  AccountReadyPage,
   AccountSuspendedPage,
   AwaitingApprovalPage,
   VerifyEmailPage
@@ -11,6 +12,7 @@ import {
 const PENDING_ALLOWED = new Set([
   "/verify-email",
   "/awaiting-approval",
+  "/account-ready",
   "/account-suspended",
   "/settings",
   "/registration-complete",
@@ -18,6 +20,12 @@ const PENDING_ALLOWED = new Set([
   "/legal/terms",
   "/legal/privacy",
   "/legal/risk"
+]);
+
+const READY_HANDOFF_PATHS = new Set([
+  "/verify-email",
+  "/awaiting-approval",
+  "/registration-complete"
 ]);
 
 export function AccountAccessGate({ children }: { children: ReactNode }) {
@@ -54,7 +62,10 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
     return <AccountSuspendedPage />;
   }
 
-  if (access === "VERIFY_EMAIL" || (!user.emailVerified && account?.role !== "OWNER" && account?.role !== "ADMIN")) {
+  if (
+    access === "VERIFY_EMAIL" ||
+    (!user.emailVerified && account?.role !== "OWNER" && account?.role !== "ADMIN")
+  ) {
     if (path === "/verify-email" || PENDING_ALLOWED.has(path)) {
       if (path === "/verify-email") return <>{children}</>;
     }
@@ -64,6 +75,15 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
   if (access === "AWAITING_APPROVAL" || account?.role === "USER_PENDING") {
     if (PENDING_ALLOWED.has(path)) return <>{children}</>;
     return <AwaitingApprovalPage />;
+  }
+
+  // After verification + automatic activation, show the success handoff once.
+  if (access === "APP" && READY_HANDOFF_PATHS.has(path)) {
+    return <AccountReadyPage />;
+  }
+
+  if (path === "/account-ready") {
+    return <AccountReadyPage />;
   }
 
   if (path === "/admin/users" && account && account.role !== "OWNER" && account.role !== "ADMIN") {

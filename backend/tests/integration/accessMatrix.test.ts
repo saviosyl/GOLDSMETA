@@ -69,17 +69,52 @@ describe("registration access matrix", () => {
     await request(app).post("/v1/tradingview/connections").expect(401);
   });
 
-  it("USER_PENDING blocked from decisions, brokers, webhooks, admin", async () => {
-    const h = { "x-test-user-id": "pending-1", "x-test-role": "USER_PENDING" };
+  it("unverified USER_PENDING cannot access Dashboard APIs", async () => {
+    const h = {
+      "x-test-user-id": "pending-1",
+      "x-test-role": "USER_PENDING",
+      "x-test-email-verified": "false"
+    };
     await request(app).get("/v1/decisions/latest").set(h).expect(403);
     await request(app).get("/v1/signal-outcomes").set(h).expect(403);
+    const me = await request(app).get("/v1/auth/me").set(h).expect(200);
+    expect(me.body.access).toBe("VERIFY_EMAIL");
+    expect(me.body.role).toBe("USER_PENDING");
+  });
+
+  it("verified USER_PENDING auto-activates analysis access but not broker/admin", async () => {
+    const h = { "x-test-user-id": "pending-1", "x-test-role": "USER_PENDING" };
+    const me = await request(app).get("/v1/auth/me").set(h).expect(200);
+    expect(me.body.access).toBe("APP");
+    expect(me.body.role).toBe("USER_APPROVED");
+    expect(me.body.profile.brokerAccess).toBe(false);
+    expect(me.body.profile.autoTrade).toBe(false);
+
+    const d = await request(app).get("/v1/decisions/latest").set(h);
+    expect([200, 404]).toContain(d.status);
+    // Analysis AutoTrade status may be readable (shows OFF) but broker mutations stay locked.
+    const at = await request(app).get("/v1/autotrade/status").set(h);
+    expect([200, 403]).toContain(at.status);
+    if (at.status === 200) {
+      expect(String(at.body.mode ?? at.body.displayStatus ?? "OFF").toUpperCase()).toMatch(
+        /OFF|LOCKED|SHADOW/
+      );
+    }
     await request(app).get("/v1/brokers/control-centre").set(h).expect(403);
     await request(app).post("/v1/tradingview/connections").set(h).expect(403);
     await request(app).post("/v1/ctrader/oauth/start").set(h).expect(403);
-    await request(app).get("/v1/autotrade/status").set(h).expect(403);
+    await request(app).post("/v1/autotrade/connect").set(h).expect(403);
     await request(app).get("/v1/admin/users").set(h).expect(403);
-    // auth/me allowed
-    await request(app).get("/v1/auth/me").set(h).expect(200);
+  });
+
+  it("manual approval mode keeps verified pending awaiting approval", async () => {
+    process.env.REGISTRATION_APPROVAL_REQUIRED = "true";
+    const h = { "x-test-user-id": "pending-1", "x-test-role": "USER_PENDING" };
+    await request(app).get("/v1/decisions/latest").set(h).expect(403);
+    const me = await request(app).get("/v1/auth/me").set(h).expect(200);
+    expect(me.body.access).toBe("AWAITING_APPROVAL");
+    expect(me.body.role).toBe("USER_PENDING");
+    delete process.env.REGISTRATION_APPROVAL_REQUIRED;
   });
 
   it("USER_APPROVED can read analysis but not broker surfaces without brokerAccess", async () => {

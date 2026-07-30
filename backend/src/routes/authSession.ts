@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getAuth } from "firebase-admin/auth";
 import { requireAuth } from "../middleware/auth";
 import { getFirebaseApp } from "../services/firebaseAdmin";
+import { tryActivateVerifiedPendingUser } from "../services/auth/activateVerifiedUser";
 import { loadOwnerAuthConfig, maskUid } from "../services/auth/ownerAuthConfig";
 import { checkVerificationResendRateLimit } from "../services/auth/registrationRateLimit";
 import {
@@ -73,14 +74,31 @@ export const buildAuthSessionRouter = (): Router => {
 
     if (profile) {
       role = profile.role === "OWNER" || owner.pinnedOwnerUid === uid ? "OWNER" : profile.role;
+      const emailVerifiedHint =
+        role === "OWNER" || role === "ADMIN"
+          ? true
+          : (req.emailVerified ?? profile.emailVerified);
       const nextProfile: UserProfileRecord = {
         ...profile,
-        emailVerified: req.emailVerified ?? profile.emailVerified,
+        emailVerified: emailVerifiedHint,
         lastSignInAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       profile = nextProfile;
       await profiles.upsertProfile(nextProfile);
+
+      // Auto-activate basic app access after email verification (open mode).
+      if (role === "USER_PENDING" && emailVerifiedHint) {
+        const activation = await tryActivateVerifiedPendingUser({
+          uid,
+          emailVerified: true,
+          profiles
+        });
+        if (activation.profile) {
+          profile = activation.profile;
+          role = activation.role;
+        }
+      }
     } else if (req.legacyUnclaimed && role === "USER_PENDING") {
       // Pre-registration production users: analysis access without approval gate.
       role = "USER_APPROVED";

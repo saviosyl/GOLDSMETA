@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import { tryActivateVerifiedPendingUser } from "../services/auth/activateVerifiedUser";
 import {
   BROKER_ACCESS_DISABLED_MESSAGE,
   canAccessApprovedApp,
@@ -67,6 +68,20 @@ export const requireApprovedAccount: RequestHandler = async (req, res, next) => 
   const uid = req.userId;
   if (uid) {
     try {
+      // Open registration: verified pending users activate on first gated request.
+      const emailVerified = req.emailVerified !== false;
+      if (role === "USER_PENDING" && emailVerified) {
+        const activation = await tryActivateVerifiedPendingUser({
+          uid,
+          emailVerified
+        });
+        if (activation.activated || activation.alreadyApproved) {
+          req.accountRole = "USER_APPROVED";
+          next();
+          return;
+        }
+      }
+
       const profile = await getUserProfileStore().getProfile(uid);
       if (profile) {
         if (canAccessApprovedApp(profile.role)) {
