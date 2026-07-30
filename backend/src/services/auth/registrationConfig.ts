@@ -35,7 +35,9 @@ export function loadRegistrationConfig(
   // Invite-only keeps the feature code path but closes public registration
   // until invite tokens are implemented.
   const registrationEnabled = baseEnabled && !inviteOnly;
-  const approvalRequired = envFlag(source, "REGISTRATION_APPROVAL_REQUIRED", true);
+  // Default OPEN: verified users auto-activate basic app access (not broker).
+  // Set REGISTRATION_APPROVAL_REQUIRED=true to restore manual approval.
+  const approvalRequired = envFlag(source, "REGISTRATION_APPROVAL_REQUIRED", false);
 
   const continueRaw = (
     source.REGISTRATION_VERIFICATION_CONTINUE_URL ??

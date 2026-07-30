@@ -19,6 +19,7 @@ import {
 } from "./registrationValidation";
 import {
   OWNER_EXISTS_MESSAGE,
+  REGISTRATION_COMPLETE_APPROVAL_MESSAGE,
   REGISTRATION_COMPLETE_MESSAGE,
   defaultBrokerFlags
 } from "./roles";
@@ -110,6 +111,12 @@ function idempotencyKeyFor(email: string, ip: string | null | undefined): string
     .update(`${email}|${(ip ?? "").trim()}`)
     .digest("hex")
     .slice(0, 40);
+}
+
+function registrationCompleteMessage(approvalRequired: boolean): string {
+  return approvalRequired
+    ? REGISTRATION_COMPLETE_APPROVAL_MESSAGE
+    : REGISTRATION_COMPLETE_MESSAGE;
 }
 
 const memoryReservations = new Map<string, { uid?: string; at: number }>();
@@ -264,7 +271,7 @@ export async function registerUser(args: {
       ok: true,
       status: 201,
       body: {
-        message: REGISTRATION_COMPLETE_MESSAGE,
+        message: registrationCompleteMessage(regConfig.approvalRequired),
         uidMasked: maskUid(reserved.existingUid) ?? "unknown",
         role: "USER_PENDING",
         emailVerificationSent: true,
@@ -422,7 +429,7 @@ export async function registerUser(args: {
     ok: true,
     status: 201,
     body: {
-      message: REGISTRATION_COMPLETE_MESSAGE,
+      message: registrationCompleteMessage(regConfig.approvalRequired),
       uidMasked: maskUid(uid) ?? "unknown",
       role: "USER_PENDING",
       emailVerificationSent,
@@ -488,7 +495,7 @@ export async function finalizeClientRegistration(args: {
       ok: true,
       status: 201,
       body: {
-        message: REGISTRATION_COMPLETE_MESSAGE,
+        message: registrationCompleteMessage(regConfig.approvalRequired),
         uidMasked: maskUid(args.uid) ?? "unknown",
         role: "USER_PENDING",
         emailVerificationSent: true,
@@ -525,7 +532,7 @@ export async function finalizeClientRegistration(args: {
     ok: true,
     status: 201,
     body: {
-      message: REGISTRATION_COMPLETE_MESSAGE,
+      message: registrationCompleteMessage(regConfig.approvalRequired),
       uidMasked: maskUid(args.uid) ?? "unknown",
       role: "USER_PENDING",
       emailVerificationSent: true,

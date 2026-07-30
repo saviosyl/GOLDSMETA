@@ -5,7 +5,9 @@ import { optionalAppCheck } from "../middleware/optionalAppCheck";
 import { loadOwnerAuthConfig, normalizeEmail } from "../services/auth/ownerAuthConfig";
 import {
   OWNER_EXISTS_MESSAGE,
-  OWNER_EXISTS_REGISTER_HINT
+  OWNER_EXISTS_REGISTER_HINT,
+  REGISTRATION_COMPLETE_APPROVAL_MESSAGE,
+  REGISTRATION_COMPLETE_MESSAGE
 } from "../services/auth/roles";
 import {
   finalizeClientRegistration,
@@ -35,8 +37,9 @@ export const buildRegistrationRouter = (): Router => {
       autoTradeDefault: "OFF",
       policyVersions: cfg.policyVersions,
       messages: {
-        complete:
-          "Account created. Please verify your email. Your account will then be reviewed before full access is enabled.",
+        complete: cfg.approvalRequired
+          ? REGISTRATION_COMPLETE_APPROVAL_MESSAGE
+          : REGISTRATION_COMPLETE_MESSAGE,
         ownerExists: OWNER_EXISTS_MESSAGE,
         ownerExistsHint: OWNER_EXISTS_REGISTER_HINT,
         broker:

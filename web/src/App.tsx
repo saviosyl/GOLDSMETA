@@ -8,6 +8,7 @@ import { AccountAccessGate } from "./components/AccountAccessGate";
 import { SignInPage } from "./pages/SignInPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import {
+  AccountReadyPage,
   AccountSuspendedPage,
   AwaitingApprovalPage,
   PasswordResetSentPage,
@@ -183,6 +184,7 @@ function ProtectedApp() {
         <Routes>
           <Route path="/ui-review/*" element={<UiReviewGate />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/account-ready" element={<AccountReadyPage />} />
           <Route path="/awaiting-approval" element={<AwaitingApprovalPage />} />
           <Route path="/account-suspended" element={<AccountSuspendedPage />} />
           <Route path="/account/delete-request" element={<RequestDeletionPage />} />

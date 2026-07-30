@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { reportEligiblePendingActivations } from "../services/auth/activateVerifiedUser";
 import {
   applyAdminUserAction,
   listUsersForAdmin,
@@ -17,6 +18,20 @@ export const buildAdminUsersRouter = (): Router => {
     const users = await listUsersForAdmin();
     res.status(200).json({ users });
   });
+
+  /**
+   * Dry-run report for one-time backfill of verified USER_PENDING accounts.
+   * Never mutates. migrationExecuted is always false.
+   */
+  router.get(
+    "/v1/admin/users/pending-activation-report",
+    requireAuth,
+    requireAdmin,
+    async (_req, res) => {
+      const report = await reportEligiblePendingActivations();
+      res.status(200).json(report);
+    }
+  );
 
   router.get("/v1/admin/users/audit", requireAuth, requireAdmin, async (req, res) => {
     const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);

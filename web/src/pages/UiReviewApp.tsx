@@ -753,6 +753,28 @@ function UiReviewApp() {
             <Route path="signal-performance" element={<SignalPerformancePage />} />
             <Route path="journal" element={<OverviewPage />} />
             <Route path="v4" element={<OverviewPage />} />
+            <Route
+              path="account-ready"
+              element={
+                <div className="gm-auth-layout" data-testid="account-ready-page">
+                  <div className="gm-auth-form-panel">
+                    <div className="gm-auth-card">
+                      <h1 className="gm-auth-title">Your account is ready</h1>
+                      <p className="gm-auth-support" data-testid="account-ready-message">
+                        Your email has been verified and your GoldMeta account is now active.
+                      </p>
+                      <a
+                        className="gm-auth-submit"
+                        href="/ui-review"
+                        data-testid="account-ready-open-dashboard"
+                      >
+                        Open Dashboard
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              }
+            />
             <Route path="*" element={<OverviewPage />} />
           </Routes>
         </AppShell>

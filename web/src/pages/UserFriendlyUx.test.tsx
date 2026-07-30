@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { HelpPage } from "./HelpPage";
 import {
+  AccountReadyPage,
   AwaitingApprovalPage,
   AccountSuspendedPage,
   VerifyEmailPage
@@ -78,6 +79,19 @@ describe("HelpPage", () => {
 });
 
 describe("auth status pages", () => {
+  it("shows account ready activation screen without raw roles", () => {
+    render(
+      <MemoryRouter>
+        <AccountReadyPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("account-ready-page")).toHaveTextContent(/Your account is ready/i);
+    expect(screen.getByTestId("account-ready-message")).toHaveTextContent(/now active/i);
+    expect(screen.getByTestId("account-ready-open-dashboard")).toHaveTextContent(/Open Dashboard/i);
+    expect(screen.queryByText("USER_APPROVED")).not.toBeInTheDocument();
+    expect(screen.queryByText("USER_PENDING")).not.toBeInTheDocument();
+  });
+
   it("explains awaiting approval without raw roles", () => {
     render(
       <MemoryRouter>

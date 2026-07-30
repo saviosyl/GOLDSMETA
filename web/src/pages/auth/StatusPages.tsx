@@ -30,13 +30,13 @@ export function RegistrationCompletePage() {
   return (
     <AuthStatusCard testId="registration-complete" title="Registration complete">
       <p className="gm-auth-support" data-testid="registration-complete-message">
-        Your account was created. Next: verify your email, then wait for approval before full access
-        is enabled.
+        Your account was created. Next: verify your email. After verification, your GoldMeta account
+        activates automatically for Dashboard and analysis.
       </p>
       <ol className="gm-help-steps">
         <li>Open the verification email we sent.</li>
         <li>Return here and sign in after verifying.</li>
-        <li>An administrator will review your account.</li>
+        <li>Open the Dashboard — broker trading stays locked separately.</li>
       </ol>
       <p className="gm-auth-trust">
         Broker trading is not enabled by registration. AutoTrade remains OFF.
@@ -96,16 +96,42 @@ export function VerifyEmailPage() {
   );
 }
 
+export function AccountReadyPage() {
+  return (
+    <AuthStatusCard testId="account-ready-page" title="Your account is ready">
+      <p className="gm-auth-support" data-testid="account-ready-message">
+        Your email has been verified and your GoldMeta account is now active.
+      </p>
+      <ol className="gm-help-steps">
+        <li>Dashboard and market analysis are available.</li>
+        <li>Broker connection and trading stay locked until separately enabled.</li>
+        <li>AutoTrade remains OFF.</li>
+      </ol>
+      <p className="gm-auth-trust">
+        Registration never enables broker orders, Demo trading, or Live trading.
+      </p>
+      <Link
+        className="gm-auth-submit"
+        to="/"
+        style={{ display: "inline-block", textAlign: "center" }}
+        data-testid="account-ready-open-dashboard"
+      >
+        Open Dashboard
+      </Link>
+    </AuthStatusCard>
+  );
+}
+
 export function AwaitingApprovalPage() {
   const { signOut, account } = useAuth();
   return (
     <AuthStatusCard testId="awaiting-approval-page" title="Waiting for approval">
       <p className="gm-auth-support" data-testid="awaiting-approval-message">
-        Your email is verified. An administrator must approve your account before Dashboard and
-        analysis features unlock.
+        Your email is verified. This account still needs a manual review before Dashboard access
+        unlocks.
       </p>
       <ol className="gm-help-steps">
-        <li>We notify the owner that your account is ready for review.</li>
+        <li>This screen is for accounts that require exceptional review.</li>
         <li>When approved, sign in again to access GoldMeta.</li>
         <li>Broker connection is separate and stays locked until a Demo setup is completed later.</li>
       </ol>

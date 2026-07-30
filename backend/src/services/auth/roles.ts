@@ -27,7 +27,13 @@ export const OWNER_EXISTS_REGISTER_HINT =
   "This account already exists. Use Forgot Password to recover access.";
 
 export const REGISTRATION_COMPLETE_MESSAGE =
+  "Account created. Please verify your email. Your account activates automatically after verification.";
+
+export const REGISTRATION_COMPLETE_APPROVAL_MESSAGE =
   "Account created. Please verify your email. Your account will then be reviewed before full access is enabled.";
+
+export const ACCOUNT_READY_MESSAGE =
+  "Your email has been verified and your GoldMeta account is now active.";
 
 export const BROKER_ACCESS_DISABLED_MESSAGE =
   "Broker access has not been enabled for this account.";

@@ -109,7 +109,7 @@ export function roleLabel(role: string | null | undefined): string {
   const r = (role ?? "").toUpperCase();
   if (r === "OWNER") return "Owner";
   if (r === "ADMIN") return "Admin";
-  if (r === "USER" || r === "MEMBER") return "Member";
+  if (r === "USER" || r === "MEMBER" || r === "USER_APPROVED") return "Member";
   if (r === "USER_PENDING") return "Waiting for approval";
   return role?.replace(/_/g, " ") ?? "Member";
 }

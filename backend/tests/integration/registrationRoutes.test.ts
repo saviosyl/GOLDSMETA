@@ -34,8 +34,11 @@ describe("registration + approval routes", () => {
   it("exposes registration status", async () => {
     const res = await request(app).get("/v1/auth/registration-status").expect(200);
     expect(res.body.registrationEnabled).toBe(true);
+    expect(res.body.emailVerificationRequired).toBe(true);
+    expect(res.body.approvalRequired).toBe(false);
     expect(res.body.brokerEnabledByRegistration).toBe(false);
     expect(res.body.autoTradeDefault).toBe("OFF");
+    expect(res.body.mode).toBe("OPEN");
   });
 
   it("preflight rejects owner email", async () => {
@@ -66,7 +69,8 @@ describe("registration + approval routes", () => {
         role: "USER_PENDING",
         emailVerificationSent: true,
         brokerAccess: false,
-        autoTrade: false
+        autoTrade: false,
+        approvalRequired: false
       }
     });
     const res = await request(app)
@@ -88,18 +92,53 @@ describe("registration + approval routes", () => {
     vi.restoreAllMocks();
   });
 
-  it("blocks pending users from decisions and webhook creation", async () => {
+  it("blocks unverified pending users from decisions and webhook creation", async () => {
+    await profiles.upsertProfile(
+      buildPendingProfile({
+        uid: "pending-user",
+        email: "pending-user@example.com",
+        firstName: "Pen",
+        lastName: "Ding",
+        countryOfResidence: "IE",
+        emailVerified: false
+      })
+    );
     await request(app)
       .get("/v1/decisions/latest")
       .set("x-test-user-id", "pending-user")
       .set("x-test-role", "USER_PENDING")
+      .set("x-test-email-verified", "false")
       .expect(403);
 
     await request(app)
       .post("/v1/tradingview/connections")
       .set("x-test-user-id", "pending-user")
       .set("x-test-role", "USER_PENDING")
+      .set("x-test-email-verified", "false")
       .expect(403);
+  });
+
+  it("reports eligible pending activations without migrating", async () => {
+    await profiles.upsertProfile(
+      buildPendingProfile({
+        uid: "eligible-pending",
+        email: "eligible@example.com",
+        firstName: "Eli",
+        lastName: "Gible",
+        countryOfResidence: "IE",
+        emailVerified: true
+      })
+    );
+    const res = await request(app)
+      .get("/v1/admin/users/pending-activation-report")
+      .set("x-test-user-id", "admin-1")
+      .set("x-test-role", "ADMIN")
+      .set("x-test-admin", "true")
+      .expect(200);
+    expect(res.body.migrationExecuted).toBe(false);
+    expect(res.body.eligibleCount).toBeGreaterThanOrEqual(1);
+    const still = await profiles.getProfile("eligible-pending");
+    expect(still?.role).toBe("USER_PENDING");
   });
 
   it("blocks unverified users", async () => {
