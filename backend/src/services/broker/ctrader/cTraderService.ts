@@ -347,37 +347,30 @@ export function getBrokerControlCentreSnapshot(
       ? "Connection setup required"
       : "Pepperstone connection required";
   return {
-    defaultBroker: "manual" as const,
+    defaultBroker: "pepperstone_ctrader" as const,
     autoTrade: "OFF" as const,
     orderSubmission: false,
     brokers: [
+      {
+        id: "pepperstone_ctrader",
+        name: "Pepperstone cTrader Demo",
+        status: pepperstoneStatus,
+        detail: "Demo read-only — AutoTrade OFF — Live locked",
+        badge: readiness.connected ? "CONNECTED" : "DEMO_PREVIEW"
+      },
+      {
+        id: "trading212_invest",
+        name: "Trading 212 Practice",
+        status: "Read only",
+        detail: "Separate gold-proxy path — not part of the cTrader Demo workflow",
+        badge: "READ_ONLY"
+      },
       {
         id: "manual",
         name: "Manual",
         status: "Available",
         detail: "Analysis only — no broker execution",
         badge: "MANUAL"
-      },
-      {
-        id: "trading212_invest",
-        name: "Trading 212 Practice",
-        status: "Read only",
-        detail: "Practice / read-only gold proxy — order automation not enabled",
-        badge: "READ_ONLY"
-      },
-      {
-        id: "pepperstone_ctrader",
-        name: "Pepperstone cTrader Demo",
-        status: pepperstoneStatus,
-        detail: "Demo setup — AutoTrade off — Live locked",
-        badge: readiness.connected ? "CONNECTED" : "DEMO_PREVIEW"
-      },
-      {
-        id: "ig",
-        name: "IG — Coming later",
-        status: "Coming later",
-        detail: "Not active yet",
-        badge: "PARKED"
       }
     ],
     automationModes: [

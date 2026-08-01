@@ -3,7 +3,12 @@
 export type AutoTradeMode = "OFF" | "SHADOW" | "IG_DEMO_AUTO" | "IG_LIVE_AUTO";
 export type AutoTradeDisplayStatus = "OFF" | "SHADOW" | "DEMO" | "LIVE" | "LOCKED";
 
-export type SelectedBrokerId = "MANUAL" | "T212_INVEST" | "IG_DEMO";
+export type SelectedBrokerId =
+  | "MANUAL"
+  | "T212_INVEST"
+  | "PEPPERSTONE_CTRADER"
+  /** @deprecated Not offered in UI — parked historical value only. */
+  | "IG_DEMO";
 export type T212Environment = "PRACTICE" | "LIVE";
 export type T212ConnectionMode =
   | "TRADING_212_PRACTICE_READ_ONLY"
@@ -13,7 +18,16 @@ export type BrokerBadge =
   | "MANUAL"
   | "T212 PRACTICE — READ ONLY"
   | "T212 LIVE — LOCKED"
+  | "PEPPERSTONE CTRADER DEMO — READ ONLY"
   | "IG DEMO — PARKED";
+
+export type SetupStepStatus =
+  | "Complete"
+  | "Current"
+  | "Locked"
+  | "Error"
+  | "Waiting for owner"
+  | "Action required";
 
 export type T212ProposalStatus =
   | "CREATED"
@@ -377,8 +391,8 @@ export function buildReviewAutoTradeStatus(
     t212LiveExecutionFeatureEnabled: false,
     readOnly: true,
     ordersEnabled: false,
-    selectedBroker: "MANUAL",
-    brokerBadge: "MANUAL",
+    selectedBroker: "PEPPERSTONE_CTRADER",
+    brokerBadge: "PEPPERSTONE CTRADER DEMO — READ ONLY",
     igParked: true,
     t212: null,
     t212RiskLimits: { ...DEFAULT_T212_RISK_LIMITS_CLIENT },
@@ -389,7 +403,7 @@ export function buildReviewAutoTradeStatus(
     connection: {
       connected: false,
       environment: "DEMO",
-      environmentLabel: "IG DEMO — PARKED",
+      environmentLabel: "PEPPERSTONE CTRADER DEMO — READ ONLY",
       accountIdMasked: null,
       accountName: null,
       currency: "EUR",
@@ -398,7 +412,7 @@ export function buildReviewAutoTradeStatus(
       marginUsed: null,
       marketStatus: null,
       marketEpic: null,
-      marketName: "Spot Gold",
+      marketName: "XAUUSD",
       instrumentType: null,
       expiry: null,
       bid: null,
@@ -435,7 +449,8 @@ export function buildReviewAutoTradeStatus(
       {
         id: "review-1",
         at: new Date().toISOString(),
-        message: "AutoTrade Control Centre ready. Mode OFF. Broker MANUAL.",
+        message:
+          "Broker & AutoTrade dashboard ready. Pepperstone cTrader Demo selected. AutoTrade OFF.",
         level: "info"
       }
     ],

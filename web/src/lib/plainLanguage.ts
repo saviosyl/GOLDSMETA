@@ -119,15 +119,16 @@ export function brokerDisplayName(id: string | null | undefined, fallbackName?: 
     manual: "Manual",
     trading212_invest: "Trading 212 Practice",
     pepperstone_ctrader: "Pepperstone cTrader Demo",
-    ig: "IG — Coming later"
+    PEPPERSTONE_CTRADER: "Pepperstone cTrader Demo",
+    T212_INVEST: "Trading 212 Practice",
+    MANUAL: "Manual"
   };
   if (id && map[id]) return map[id];
   return (
     fallbackName
       ?.replace(/PEPPERSTONE\s*cTRADER\s*CFD/i, "Pepperstone cTrader Demo")
       .replace(/TRADING\s*212\s*INVEST/i, "Trading 212 Practice")
-      .replace(/\bMANUAL\b/i, "Manual")
-      .replace(/\bIG\b/i, "IG — Coming later") ?? "Broker"
+      .replace(/\bMANUAL\b/i, "Manual") ?? "Broker"
   );
 }
 

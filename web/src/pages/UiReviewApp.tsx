@@ -502,37 +502,30 @@ function buildReviewApi() {
       return { ...autoTrade };
     },
     getBrokerControlCentre: async () => ({
-      defaultBroker: "manual",
+      defaultBroker: "pepperstone_ctrader",
       autoTrade: "OFF",
       orderSubmissionEnabled: false,
       brokers: [
+        {
+          id: "pepperstone_ctrader",
+          name: "Pepperstone cTrader Demo",
+          status: "Pepperstone connection required",
+          detail: "Demo read-only — AutoTrade OFF — Live locked",
+          badge: "DEMO_PREVIEW"
+        },
+        {
+          id: "trading212_invest",
+          name: "Trading 212 Practice",
+          status: "Read only",
+          detail: "Separate gold-proxy path — not part of the cTrader Demo workflow",
+          badge: "READ_ONLY"
+        },
         {
           id: "manual",
           name: "Manual",
           status: "Available",
           detail: "Analysis only — no broker execution",
           badge: "MANUAL"
-        },
-        {
-          id: "trading212_invest",
-          name: "Trading 212 Practice",
-          status: "Read only",
-          detail: "Practice / read-only gold proxy",
-          badge: "READ_ONLY"
-        },
-        {
-          id: "pepperstone_ctrader",
-          name: "Pepperstone cTrader Demo",
-          status: "Pepperstone connection required",
-          detail: "Demo setup — AutoTrade off — Live locked",
-          badge: "DEMO_PREVIEW"
-        },
-        {
-          id: "ig",
-          name: "IG — Coming later",
-          status: "Coming later",
-          detail: "Not active yet",
-          badge: "PARKED"
         }
       ],
       automationModes: [],
@@ -613,6 +606,9 @@ function buildReviewApi() {
         }
       }
     }),
+    getCTraderDiagnostics: async () => {
+      throw new ApiError(403, "OWNER_REQUIRED", "Owner only");
+    },
     getCTraderDemonstration: async () => ({
       banner: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",
       notice: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",

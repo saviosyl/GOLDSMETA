@@ -3,8 +3,7 @@
 export type BrokerOptionId =
   | "manual"
   | "trading212_invest"
-  | "pepperstone_ctrader"
-  | "ig";
+  | "pepperstone_ctrader";
 
 export interface BrokerControlCentreResponse {
   defaultBroker: BrokerOptionId;

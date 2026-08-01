@@ -26,16 +26,16 @@ vi.mock("../../lib/auth", () => ({
 }));
 
 const centreFixture = {
-  defaultBroker: "manual",
+  defaultBroker: "pepperstone_ctrader",
   autoTrade: "OFF",
   orderSubmissionEnabled: false,
   brokers: [
     {
-      id: "manual",
-      name: "Manual",
-      status: "Available",
-      detail: "No broker execution",
-      badge: "MANUAL"
+      id: "pepperstone_ctrader",
+      name: "Pepperstone cTrader Demo",
+      status: "Connection setup required",
+      detail: "Demo setup",
+      badge: "DEMO_PREVIEW"
     },
     {
       id: "trading212_invest",
@@ -45,18 +45,11 @@ const centreFixture = {
       badge: "READ_ONLY"
     },
     {
-      id: "pepperstone_ctrader",
-      name: "Pepperstone cTrader Demo",
-      status: "Connection setup required",
-      detail: "Demo setup",
-      badge: "DEMO_PREVIEW"
-    },
-    {
-      id: "ig",
-      name: "IG — Coming later",
-      status: "Coming later",
-      detail: "Not active",
-      badge: "PARKED"
+      id: "manual",
+      name: "Manual",
+      status: "Available",
+      detail: "No broker execution",
+      badge: "MANUAL"
     }
   ],
   automationModes: [],

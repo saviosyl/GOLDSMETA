@@ -2464,3 +2464,214 @@ a {
   }
 }
 
+
+/* —— Broker & AutoTrade daily dashboard —— */
+.gm-at-dashboard .gm-autotrade-hero {
+  margin-bottom: 1rem;
+}
+
+.gm-at-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.1rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(212, 175, 55, 0.08), transparent 55%),
+    var(--surface);
+}
+
+.gm-at-summary .gm-label {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.gm-at-summary strong {
+  font: 650 0.95rem/1.3 var(--font-sans);
+  color: var(--navy);
+  overflow-wrap: anywhere;
+}
+
+.gm-at-journey-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.gm-at-step {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.gm-at-step-index {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  font: 700 0.85rem/1 var(--font-sans);
+  background: var(--surface-alt);
+  color: var(--navy);
+}
+
+.gm-at-step strong {
+  display: block;
+  color: var(--navy);
+}
+
+.gm-at-step em {
+  display: inline-block;
+  margin: 0.2rem 0 0.35rem;
+  font: 650 0.72rem/1.2 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gm-at-step--complete {
+  border-color: rgba(46, 125, 50, 0.35);
+}
+.gm-at-step--complete .gm-at-step-index {
+  background: rgba(46, 125, 50, 0.15);
+  color: #1b5e20;
+}
+.gm-at-step--current {
+  border-color: rgba(212, 175, 55, 0.55);
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.2);
+}
+.gm-at-step--current .gm-at-step-index {
+  background: rgba(212, 175, 55, 0.22);
+}
+.gm-at-step--action .gm-at-step-index,
+.gm-at-step--waiting .gm-at-step-index {
+  background: rgba(198, 120, 40, 0.18);
+  color: #8a4b00;
+}
+.gm-at-step--error {
+  border-color: rgba(180, 40, 40, 0.4);
+}
+.gm-at-step--locked {
+  opacity: 0.72;
+}
+
+.gm-at-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.gm-at-locked-note {
+  margin: 0 0 1.25rem;
+}
+
+.gm-at-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.85rem;
+  margin: 0 0 1.25rem;
+}
+
+.gm-at-card {
+  min-width: 0;
+  padding: 0.95rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gm-at-card h3 {
+  margin: 0 0 0.75rem;
+  font: 700 0.95rem/1.3 var(--font-sans);
+  color: var(--navy);
+}
+
+.gm-at-card dl {
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.gm-at-card dl div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.gm-at-card dt {
+  color: var(--muted);
+  font: 600 0.72rem/1.2 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gm-at-card dd {
+  margin: 0;
+  text-align: right;
+  font: 650 0.9rem/1.3 var(--font-sans);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.gm-at-advanced,
+.gm-at-other-brokers {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.gm-at-advanced summary,
+.gm-at-other-brokers summary {
+  cursor: pointer;
+  font: 650 0.95rem/1.3 var(--font-sans);
+  color: var(--navy);
+}
+
+.gm-at-advanced-body {
+  margin-top: 0.85rem;
+}
+
+.gm-autotrade-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.gm-autotrade-activity li {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.gm-autotrade-activity time {
+  font: 600 0.72rem/1.2 var(--font-sans);
+  color: var(--muted);
+}
+
+@media (max-width: 430px) {
+  .gm-at-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gm-at-actions .gm-btn {
+    flex: 1 1 100%;
+  }
+}

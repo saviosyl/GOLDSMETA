@@ -358,6 +358,8 @@ describe("mutation guard + service", () => {
     expect(centre.autoTrade).toBe("OFF");
     expect(centre.brokers.some((b) => b.id === "pepperstone_ctrader")).toBe(true);
     expect(centre.brokers.find((b) => b.id === "pepperstone_ctrader")?.name).toMatch(/Pepperstone/i);
+    expect(centre.defaultBroker).toBe("pepperstone_ctrader");
+    expect(centre.brokers.some((b) => b.id === "ig")).toBe(false);
     const demo = buildDemonstrationBundle();
     expect(demo.banner).toBe(FIXTURE_BANNER);
   });

@@ -379,15 +379,13 @@ export function BrokerControlCentrePage() {
             >
               <StatusBadge
                 tone={
-                  b.id === "ig"
-                    ? "neutral"
-                    : b.id === "pepperstone_ctrader"
-                      ? connected
-                        ? "positive"
-                        : "warning"
-                      : b.id === "trading212_invest"
-                        ? "gold"
-                        : "positive"
+                  b.id === "pepperstone_ctrader"
+                    ? connected
+                      ? "positive"
+                      : "warning"
+                    : b.id === "trading212_invest"
+                      ? "gold"
+                      : "positive"
                 }
               >
                 {brokerBadgeLabel(b.badge)}
@@ -813,13 +811,6 @@ export function BrokerControlCentrePage() {
           <Link className="gm-btn" to="/autotrade">
             Open practice view
           </Link>
-        </section>
-      ) : null}
-
-      {selected === "ig" ? (
-        <section className="gm-section" data-testid="ig-broker-panel">
-          <h2 className="gm-section-title">IG — Coming later</h2>
-          <p>IG is not active yet. Existing Demo preview tooling remains isolated.</p>
         </section>
       ) : null}
 
