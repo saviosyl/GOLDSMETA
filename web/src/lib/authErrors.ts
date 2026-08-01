@@ -21,9 +21,11 @@ export function friendlyAuthError(error: unknown): string {
   }
   if (
     code === "auth/too-many-requests" ||
-    /too-many-requests|PASSWORD_RESET_RATE_LIMIT|Too many password-reset/i.test(message)
+    /too-many-requests|TOO_MANY_ATTEMPTS_TRY_LATER|PASSWORD_RESET_RATE_LIMIT|Too many password-reset/i.test(
+      message
+    )
   ) {
-    return "Too many attempts. Please wait and try again.";
+    return "Too many verification attempts. Please wait a few minutes, then try Resend again.";
   }
   if (code === "auth/network-request-failed" || /network unavailable|Network error/i.test(message)) {
     return "Network unavailable. Check your connection and try again.";

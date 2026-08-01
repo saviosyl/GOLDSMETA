@@ -1,6 +1,14 @@
-import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
+import { sendVerificationEmail } from "../../lib/firebase";
+import {
+  VERIFICATION_SENT_MESSAGE,
+  formatResendCountdown,
+  getVerificationCooldownRemainingMs,
+  isVerificationResendAllowed,
+  markVerificationEmailSent
+} from "../../lib/verificationEmail";
 
 function AuthStatusCard({
   testId,
@@ -49,18 +57,55 @@ export function RegistrationCompletePage() {
 }
 
 export function VerifyEmailPage() {
-  const { api, signOut, user } = useAuth();
-  const [message, setMessage] = useState<string | null>(null);
+  const { signOut, user, refreshAccount } = useAuth();
+  const location = useLocation();
+  const noticeFromNav =
+    typeof (location.state as { verificationNotice?: unknown } | null)?.verificationNotice ===
+    "string"
+      ? String((location.state as { verificationNotice: string }).verificationNotice)
+      : null;
+  const [message, setMessage] = useState<string | null>(noticeFromNav ?? VERIFICATION_SENT_MESSAGE);
   const [busy, setBusy] = useState(false);
+  const [remainingMs, setRemainingMs] = useState(() => getVerificationCooldownRemainingMs());
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setRemainingMs(getVerificationCooldownRemainingMs());
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // If Firebase already shows verified (e.g. returning from action URL), refresh token + /me.
+  useEffect(() => {
+    if (!user?.emailVerified) return;
+    void (async () => {
+      await refreshAccount();
+    })();
+  }, [user?.emailVerified, refreshAccount]);
+
+  const resendAllowed = isVerificationResendAllowed() && !busy;
 
   const resend = async () => {
+    if (!isVerificationResendAllowed()) {
+      setMessage(formatResendCountdown(getVerificationCooldownRemainingMs()));
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
-      const res = await api.resendVerification();
-      setMessage(res.message);
-    } catch {
-      setMessage("If verification is required, an email will be sent shortly. Please wait before trying again.");
+      await sendVerificationEmail(user);
+      markVerificationEmailSent(user?.uid);
+      setRemainingMs(getVerificationCooldownRemainingMs());
+      setMessage(VERIFICATION_SENT_MESSAGE);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Too many verification attempts. Please wait a few minutes, then try Resend again."
+      );
+      // Still arm cooldown so rapid clicks cannot flood Identity Toolkit.
+      markVerificationEmailSent(user?.uid);
+      setRemainingMs(getVerificationCooldownRemainingMs());
     } finally {
       setBusy(false);
     }
@@ -69,14 +114,15 @@ export function VerifyEmailPage() {
   return (
     <AuthStatusCard testId="verify-email-page" title="Verify your email">
       <p className="gm-auth-support">
-        We sent a verification link{user?.email ? ` to ${user.email}` : ""}. Open that email and tap
-        the link before using GoldMeta.
+        {VERIFICATION_SENT_MESSAGE}
+        {user?.email ? ` (${user.email})` : ""}
       </p>
       <p className="gm-meta">
-        Cannot find it? Check spam, then use Resend. Resend is rate-limited to protect your inbox.
+        Cannot find it? Check spam, then use Resend. Resend waits 60 seconds between sends to protect
+        your inbox.
       </p>
       {message && (
-        <div className="banner" role="status">
+        <div className="banner" role="status" data-testid="verify-email-status">
           {message}
         </div>
       )}
@@ -84,10 +130,14 @@ export function VerifyEmailPage() {
         type="button"
         className="gm-auth-submit"
         data-testid="resend-verification"
-        disabled={busy}
+        disabled={!resendAllowed}
         onClick={() => void resend()}
       >
-        {busy ? "Sending…" : "Resend verification email"}
+        {busy
+          ? "Sending…"
+          : remainingMs > 0
+            ? formatResendCountdown(remainingMs)
+            : "Resend verification email"}
       </button>
       <button type="button" className="gm-auth-text-btn" onClick={() => void signOut()}>
         Sign out
