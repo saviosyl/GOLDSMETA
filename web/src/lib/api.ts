@@ -740,8 +740,54 @@ export class ApiClient {
     return this.request("/v1/ctrader/demonstration");
   }
 
-  async startCTraderOAuth(): Promise<unknown> {
+  async startCTraderOAuth(): Promise<{
+    authorizationUrl: string;
+    state: string;
+    expiresAt: string;
+    environment: "DEMO";
+  }> {
     return this.request("/v1/ctrader/oauth/start", { method: "POST", body: "{}" });
+  }
+
+  async listCTraderDemoAccounts(): Promise<{
+    environment: "DEMO";
+    accounts: import("./broker/ctraderTypes").CTraderDemoAccountOption[];
+  }> {
+    return this.request("/v1/ctrader/accounts");
+  }
+
+  async selectCTraderDemoAccount(payload: {
+    ctidTraderAccountId: string;
+    confirmPepperstone?: boolean;
+  }): Promise<unknown> {
+    return this.request("/v1/ctrader/accounts/select", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async disconnectCTrader(): Promise<{ disconnected: boolean }> {
+    return this.request("/v1/ctrader/disconnect", { method: "POST", body: "{}" });
+  }
+
+  async getCTraderDiagnostics(): Promise<
+    import("./broker/ctraderTypes").CTraderDiagnosticsReport
+  > {
+    return this.request("/v1/ctrader/diagnostics");
+  }
+
+  async getCTraderQuote(): Promise<{
+    quote: {
+      bid: number | null;
+      ask: number | null;
+      spread: number | null;
+      timestamp?: string;
+      marketStatus?: string;
+      stale?: boolean;
+    };
+    label: string;
+  }> {
+    return this.request("/v1/ctrader/quote");
   }
 
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {

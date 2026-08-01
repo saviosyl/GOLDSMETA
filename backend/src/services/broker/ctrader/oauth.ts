@@ -154,3 +154,59 @@ export async function exchangeAuthorizationCode(args: {
   }
   return { accessToken, refreshToken, expiresIn };
 }
+
+/**
+ * Refresh-token rotation — never logs tokens.
+ * Spotware may return a new refresh token; callers must persist both.
+ */
+export async function refreshAccessToken(args: {
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const fetchFn = args.fetchImpl ?? fetch;
+  const conf = loadCTraderConfig();
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: args.refreshToken,
+    client_id: args.clientId,
+    client_secret: args.clientSecret
+  });
+  const res = await fetchFn(conf.tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  if (!res.ok) {
+    throw new Error(`CTRADER_TOKEN_REFRESH_FAILED status=${res.status}`);
+  }
+  const json = (await res.json()) as {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresIn?: number;
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+  const accessToken = json.accessToken ?? json.access_token;
+  const refreshToken = json.refreshToken ?? json.refresh_token ?? args.refreshToken;
+  const expiresIn = json.expiresIn ?? json.expires_in ?? 0;
+  if (!accessToken) {
+    throw new Error("CTRADER_TOKEN_REFRESH_MALFORMED");
+  }
+  return { accessToken, refreshToken, expiresIn };
+}
+
+/** Safe post-OAuth frontend redirect — never includes tokens. */
+export function buildOAuthFrontendRedirect(args: {
+  webOrigin: string;
+  status: "ok" | "error";
+  code?: string;
+}): string {
+  const base = args.webOrigin.replace(/\/$/, "");
+  const url = new URL(`${base}/brokers`);
+  url.searchParams.set("ctrader", args.status === "ok" ? "oauth_ok" : "oauth_error");
+  if (args.code) url.searchParams.set("reason", args.code);
+  return url.toString();
+}

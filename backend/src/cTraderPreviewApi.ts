@@ -4,11 +4,13 @@
  * Deploy ONLY this function (never replace production `api`):
  *   firebase deploy --only functions:apiCTraderPreview
  *
- * Allowed: config validation, readiness, demonstration fixtures, preview.
+ * Allowed: OAuth (Demo), account discovery, symbol/quote read, preview.
  * Forbidden: order submission, close, cancel, Live environment.
  *
  * Does NOT fabricate CTRADER_CLIENT_* secrets.
- * Mirrors T212 preview fail-closed env hardening for the shared Express app.
+ * Create genuine Secret Manager entries BEFORE deploy (Firebase refuses
+ * missing secrets listed below). Until secrets exist → do not deploy this
+ * revision; keep CTRADER_SETUP_REQUIRED on older revisions.
  */
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -22,6 +24,12 @@ import {
 } from "./services/broker/ctrader/flags";
 
 const pinnedOwnerUid = defineSecret("GOLDMETA_PINNED_OWNER_UID");
+const ctraderClientId = defineSecret("CTRADER_CLIENT_ID");
+const ctraderClientSecret = defineSecret("CTRADER_CLIENT_SECRET");
+const ctraderRedirectUri = defineSecret("CTRADER_REDIRECT_URI");
+const ctraderTokenEncryptionKey = defineSecret("CTRADER_TOKEN_ENCRYPTION_KEY");
+/** Non-secret policy pin — kept in Secret Manager for uniform binding. */
+const ctraderEnvironment = defineSecret("CTRADER_ENVIRONMENT");
 
 function applyCTraderPreviewRuntimeEnv(): void {
   // Shared app fail-closed (mirror apiT212Preview / apiV6Preview)
@@ -34,20 +42,30 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.AUTOTRADE_STORE = "firestore";
   process.env.AUTOTRADE_FIRESTORE_ROOT = "autoTradeCTraderPreview";
 
-  // cTrader preview capabilities
+  // cTrader preview capabilities — mutations hard-false
   process.env.CTRADER_CONNECTOR_ENABLED = "true";
   process.env.CTRADER_DEMO_READ_ENABLED = "true";
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED = "true";
   process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
   process.env.CTRADER_LIVE_ENABLED = "false";
-  process.env.CTRADER_ENVIRONMENT = "DEMO";
   process.env.GOLDMETA_PINNED_OWNER_UID = pinnedOwnerUid.value();
 
-  // Never invent client secrets — leave unset → CTRADER_SETUP_REQUIRED
-  delete process.env.CTRADER_CLIENT_ID;
-  delete process.env.CTRADER_CLIENT_SECRET;
+  // Inject owner-supplied Open API secrets (never invent placeholders)
+  process.env.CTRADER_CLIENT_ID = ctraderClientId.value();
+  process.env.CTRADER_CLIENT_SECRET = ctraderClientSecret.value();
+  process.env.CTRADER_REDIRECT_URI = ctraderRedirectUri.value();
+  process.env.CTRADER_TOKEN_ENCRYPTION_KEY = ctraderTokenEncryptionKey.value();
+  // Force DEMO even if mis-set — Live remains impossible
+  const envPin = (ctraderEnvironment.value() || "DEMO").trim().toUpperCase();
+  process.env.CTRADER_ENVIRONMENT = envPin === "DEMO" ? "DEMO" : "DEMO";
+
   delete process.env.T212_LIVE_API_KEY;
   delete process.env.T212_LIVE_API_SECRET;
+
+  if (!process.env.GOLDMETA_WEB_ORIGIN) {
+    process.env.GOLDMETA_WEB_ORIGIN =
+      process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
+  }
 }
 
 let previewApp: Express | null = null;
@@ -61,6 +79,10 @@ function getCTraderPreviewApp(): Express {
   return previewApp;
 }
 
+/**
+ * Secrets are bound only to apiCTraderPreview — not production `api`.
+ * Create all five CTRADER_* secrets in Secret Manager before this deploy.
+ */
 export const apiCTraderPreview = onRequest(
   {
     region: "us-central1",
@@ -71,7 +93,14 @@ export const apiCTraderPreview = onRequest(
       "http://localhost:5173"
     ],
     invoker: "public",
-    secrets: [pinnedOwnerUid],
+    secrets: [
+      pinnedOwnerUid,
+      ctraderClientId,
+      ctraderClientSecret,
+      ctraderRedirectUri,
+      ctraderTokenEncryptionKey,
+      ctraderEnvironment
+    ],
     timeoutSeconds: 120,
     memory: "512MiB"
   },
