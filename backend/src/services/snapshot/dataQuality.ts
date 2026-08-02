@@ -1,6 +1,7 @@
 import { decisionConfig } from "../../config/decisionConfig";
 import type { DataQualityResult, MarketSnapshot } from "../../models/types";
 import { isPositivePrice } from "../../utils/money";
+import { evaluatePriceConsistency } from "./priceConsistency";
 
 const hasImpossiblePrice = (snapshot: MarketSnapshot): boolean => {
   const prices = [
@@ -62,6 +63,52 @@ export const evaluateDataQuality = (
     return {
       quality: "INVALID",
       warnings: ["Payload contains impossible prices"],
+      missingInputs
+    };
+  }
+
+  const exchange = snapshot.exchange?.toUpperCase() ?? null;
+  const fixtureExchange =
+    exchange === "TEST_FIXTURE" || exchange === "MOCK" || exchange === "UI_REVIEW";
+  const fixtureMeta =
+    typeof snapshot.metadata?.fixtureLabel === "string" ||
+    snapshot.metadata?.source === "goldmeta-api-test-fixture";
+  const eventType =
+    typeof snapshot.metadata?.eventType === "string"
+      ? String(snapshot.metadata.eventType).toUpperCase()
+      : null;
+  const isTestEvent = eventType === "TEST";
+  // Flag fixture provenance so LIVE consumers never treat it as broker live.
+  if (fixtureExchange || fixtureMeta) {
+    warnings.push("TEST_FIXTURE_EXCHANGE");
+  }
+  // Fixture OHLC/levels on a non-TEST alert is a production leak — conflict.
+  if ((fixtureExchange || fixtureMeta) && !isTestEvent) {
+    return {
+      quality: "CONFLICTED",
+      warnings: [
+        "Fallback/test fixture values must not appear as LIVE market data.",
+        "PRICE_SOURCE_MISMATCH",
+        "TEST_FIXTURE_LEAK"
+      ],
+      missingInputs
+    };
+  }
+
+  const profileForConsistency = resolveVolumeProfile(snapshot);
+  const priceConsistency = evaluatePriceConsistency({
+    symbol: snapshot.symbol,
+    alertClose: snapshot.price,
+    ohlc: snapshot.ohlcv,
+    poc: profileForConsistency.poc,
+    vah: profileForConsistency.vah,
+    val: profileForConsistency.val,
+    tolerance: decisionConfig.priceConsistencyTolerance
+  });
+  if (!priceConsistency.ok && priceConsistency.code === "PRICE_SOURCE_MISMATCH") {
+    return {
+      quality: "CONFLICTED",
+      warnings: [priceConsistency.message, "PRICE_SOURCE_MISMATCH"],
       missingInputs
     };
   }

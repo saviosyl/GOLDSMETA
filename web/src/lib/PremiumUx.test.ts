@@ -96,13 +96,13 @@ describe("market level ladder", () => {
   it("finds nearest resistance and support", () => {
     const rows = buildMarketLevelLadder({
       livePrice: 100,
-      poc: 98,
-      vah: 105,
-      val: 90
+      poc: 99,
+      vah: 101.5,
+      val: 98.5
     });
     const near = nearestLevels(rows);
-    expect(near.resistance?.price).toBe(105);
-    expect(near.support?.price).toBe(98);
+    expect(near.resistance?.price).toBe(101.5);
+    expect(near.support?.price).toBe(99);
   });
 });
 

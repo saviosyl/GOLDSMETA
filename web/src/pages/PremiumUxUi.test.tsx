@@ -148,12 +148,41 @@ describe("MarketLevelLadder", () => {
   it("renders live price marker", () => {
     render(
       <MarketLevelLadder
-        input={{ livePrice: 100, poc: 98, vah: 105, val: 90 }}
+        input={{
+          livePrice: 100,
+          poc: 99,
+          vah: 101.5,
+          val: 98.5,
+          dataSourceLabel: "LIVE",
+          marketDataTime: "2026-07-21T21:45:00.000Z",
+          brokerQuoteVerified: true
+        }}
         dataTimestamp="2026-07-21T21:45:00.000Z"
       />
     );
     expect(screen.getByTestId("ladder-live-price")).toBeInTheDocument();
     expect(screen.getByTestId("market-level-ladder")).toHaveTextContent(/verified stored market data/i);
+  });
+
+  it("renders market data mismatch when price regimes disagree", () => {
+    render(
+      <MarketLevelLadder
+        input={{
+          livePrice: 2408,
+          alertClose: 4045.165,
+          poc: 4050.951,
+          vah: 4052.975,
+          val: 4047.193,
+          barHigh: 2412,
+          barLow: 2396
+        }}
+      />
+    );
+    expect(screen.getByTestId("market-data-mismatch-title")).toHaveTextContent(
+      "Market data mismatch"
+    );
+    expect(screen.getByTestId("market-data-mismatch-alert")).toHaveTextContent(/4045\.1[67]/);
+    expect(screen.getByTestId("market-data-mismatch-broker")).toHaveTextContent("2408.00");
   });
 });
 

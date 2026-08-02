@@ -1,7 +1,14 @@
 /**
  * Build Market Structure Map rows from verified decision/briefing fields only.
  * Never fabricates support/resistance — only uses stored POC/VAH/VAL/price/OHLC.
+ * Never labels a price LIVE unless the caller marks it as a verified live source.
  */
+
+import {
+  detectLadderPriceMismatch,
+  livePriceLabel,
+  type PriceMismatchState
+} from "./priceConsistency";
 
 export type LevelKind =
   | "live"
@@ -31,6 +38,7 @@ export type MarketLevelRow = {
   distance: number | null;
   position: "above" | "below" | "at" | null;
   verified: boolean;
+  source?: string | null;
 };
 
 function num(v: unknown): number | null {
@@ -51,11 +59,47 @@ export type LadderInput = {
   tp1?: number | null;
   tp2?: number | null;
   tp3?: number | null;
+  /** Explicit TradingView alert close for mismatch copy. */
+  alertClose?: number | null;
+  /** Only set when price is from a verified fresh LIVE broker/market source. */
+  dataSourceLabel?: string | null;
+  isTestDecision?: boolean | null;
+  marketDataTime?: string | null;
+  priceSource?: string | null;
+  isUiReviewFixture?: boolean | null;
+  brokerQuoteVerified?: boolean | null;
+  marketStatus?: "OPEN" | "CLOSED" | "UNKNOWN" | null;
+};
+
+export type LadderBuildResult = {
+  rows: MarketLevelRow[];
+  mismatch: PriceMismatchState | null;
+  liveLabel: ReturnType<typeof livePriceLabel>;
 };
 
 export function buildMarketLevelLadder(input: LadderInput): MarketLevelRow[] {
+  return buildMarketLevelLadderDetailed(input).rows;
+}
+
+export function buildMarketLevelLadderDetailed(input: LadderInput): LadderBuildResult {
+  const mismatch = detectLadderPriceMismatch(input);
+  const liveLabel = livePriceLabel({
+    dataSourceLabel: input.dataSourceLabel,
+    isTestDecision: input.isTestDecision,
+    marketDataTime: input.marketDataTime,
+    isUiReviewFixture: input.isUiReviewFixture,
+    brokerQuoteVerified: input.brokerQuoteVerified,
+    marketStatus: input.marketStatus
+  });
+
+  // On mismatch, do not render a combined ladder — caller shows the error state.
+  if (mismatch) {
+    return { rows: [], mismatch, liveLabel };
+  }
+
   const live = num(input.livePrice);
   const rows: MarketLevelRow[] = [];
+  const source = input.priceSource ?? input.dataSourceLabel ?? null;
 
   const push = (
     id: string,
@@ -83,11 +127,27 @@ export function buildMarketLevelLadder(input: LadderInput): MarketLevelRow[] {
       tone,
       distance,
       position,
-      verified
+      verified,
+      source
     });
   };
 
-  push("live", live, "live", "LIVE PRICE", "Current verified last price", "live");
+  if (live != null) {
+    push(
+      "live",
+      live,
+      "live",
+      liveLabel,
+      liveLabel === "LIVE PRICE"
+        ? "Verified fresh market/broker last price"
+        : liveLabel === "Test fixture price"
+          ? "TEST FIXTURE — NOT LIVE BROKER DATA"
+          : "Stored price — not labelled as live",
+      liveLabel === "LIVE PRICE" ? "live" : "neutral",
+      liveLabel === "LIVE PRICE"
+    );
+  }
+
   push("poc", num(input.poc), "poc", "Session POC", "Point of control", "poc");
   push("vah", num(input.vah), "vah", "VAH", "Value area high", "vah-val");
   push("val", num(input.val), "val", "VAL", "Value area low", "vah-val");
@@ -111,9 +171,8 @@ export function buildMarketLevelLadder(input: LadderInput): MarketLevelRow[] {
   push("tp2", num(input.tp2), "tp", "TP2", "Shadow plan take-profit 2", "plan");
   push("tp3", num(input.tp3), "tp", "TP3", "Shadow plan take-profit 3", "plan");
 
-  // Sort highest price at top; stable by id for ties
   rows.sort((a, b) => b.price - a.price || a.id.localeCompare(b.id));
-  return rows;
+  return { rows, mismatch: null, liveLabel };
 }
 
 export function nearestLevels(rows: MarketLevelRow[]): {

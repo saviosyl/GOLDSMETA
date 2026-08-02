@@ -161,6 +161,9 @@ export const explainReasonCode = (code: string): string => {
     MISSING_TREND: "Trend direction is missing",
     MISSING_CONFIRMATION: "Confirmation candle is missing",
     CONFLICTING_TREND: "Trend conflicts with value-area structure",
+    CONFLICTED_DATA: "Market data sources conflict",
+    PRICE_SOURCE_MISMATCH:
+      "TradingView alert price and broker/stored price disagree — signal blocked",
     LOW_CONFIDENCE: "Confidence is too low for a trade",
     POOR_RISK_REWARD: "Risk/reward is below the minimum threshold",
     MIN_RR_TO_TP2_NOT_MET: "Risk/reward to TP2 is below the minimum",

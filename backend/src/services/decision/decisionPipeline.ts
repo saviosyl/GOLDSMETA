@@ -2,10 +2,12 @@ import { createHash } from "crypto";
 import { BACKEND_VERSION, decisionConfig, RULE_CONFIG_VERSION } from "../../config/decisionConfig";
 import type {
   AiExplanation,
+  CanonicalSymbolIdentity,
   DecisionDirection,
   DecisionMarketStructure,
   DecisionRecord,
   MarketSnapshot,
+  PricePointMeta,
   TradingViewPayload,
   TrendDirection
 } from "../../models/types";
@@ -92,6 +94,48 @@ const marketStructureFor = (snapshot: MarketSnapshot): DecisionMarketStructure =
     confirmationDirection: snapshot.confirmationCandle?.direction ?? null,
     confirmationCandleType: snapshot.confirmationCandle?.candleType ?? null
   };
+};
+
+const quoteAgeSeconds = (timestamp: string | null, receivedAt: string): number | null => {
+  if (!timestamp) return null;
+  const ageMs = Date.parse(receivedAt) - Date.parse(timestamp);
+  return Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs / 1000)) : null;
+};
+
+const pricePoint = (
+  value: number | null | undefined,
+  snapshot: MarketSnapshot,
+  source: string
+): PricePointMeta | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return {
+    source,
+    symbol: snapshot.symbol,
+    exchangeOrBroker: snapshot.exchange,
+    timeframe: snapshot.timeframe,
+    timestamp: snapshot.marketDataTime,
+    receivedAt: snapshot.receivedAt,
+    quoteAgeSeconds: quoteAgeSeconds(snapshot.marketDataTime, snapshot.receivedAt),
+    value
+  };
+};
+
+const symbolIdentityFor = (snapshot: MarketSnapshot): CanonicalSymbolIdentity => ({
+  tradingViewSymbol: snapshot.symbol,
+  exchange: snapshot.exchange,
+  ctraderSymbolId: null,
+  canonicalSymbol: "XAUUSD"
+});
+
+const dataSourceLabelFor = (
+  environment: DecisionEnvironment,
+  isTestDecision: boolean,
+  dataQuality: { quality: string }
+): DecisionRecord["dataSourceLabel"] => {
+  if (environment === "TEST" || isTestDecision) return "TEST";
+  if (dataQuality.quality === "STALE") return "STALE";
+  if (dataQuality.quality === "CONFLICTED" || dataQuality.quality === "INVALID") return "STALE";
+  return "LIVE";
 };
 
 export const processDecisionPipeline = async (
@@ -221,9 +265,30 @@ export const processDecisionPipeline = async (
     lastKnownPrice: snapshot.price,
     ohlcv: snapshot.ohlcv ?? null,
     marketStructure: marketStructureFor(snapshot),
-    dataSourceLabel: environment === "TEST" || isTestDecision ? "TEST" : dataQuality.quality === "STALE" ? "STALE" : "LIVE",
+    dataSourceLabel: dataSourceLabelFor(environment, isTestDecision, dataQuality),
     environment,
-    isTestDecision
+    isTestDecision,
+    symbolIdentity: symbolIdentityFor(snapshot),
+    priceSources: {
+      alertClose: pricePoint(snapshot.price, snapshot, isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_ALERT"),
+      barHigh: pricePoint(snapshot.ohlcv?.high ?? null, snapshot, isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_OHLC"),
+      barLow: pricePoint(snapshot.ohlcv?.low ?? null, snapshot, isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_OHLC"),
+      poc: pricePoint(
+        snapshot.levels?.pocAll ?? snapshot.sessionVolumeProfile?.poc ?? null,
+        snapshot,
+        isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_VOLUME_PROFILE"
+      ),
+      vah: pricePoint(
+        snapshot.levels?.vahAll ?? snapshot.sessionVolumeProfile?.vah ?? null,
+        snapshot,
+        isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_VOLUME_PROFILE"
+      ),
+      val: pricePoint(
+        snapshot.levels?.valAll ?? snapshot.sessionVolumeProfile?.val ?? null,
+        snapshot,
+        isTestDecision ? "TEST_FIXTURE" : "TRADINGVIEW_VOLUME_PROFILE"
+      )
+    }
   };
 
   decision.notificationSent = await sendDecisionPushIfMeaningful(

@@ -28,5 +28,10 @@ export const decisionConfig = {
     provisionalAllowed: false,
     safetyLock: false
   },
+  /**
+   * Max relative divergence between alert close, OHLC, POC/VAH/VAL, and optional broker mid.
+   * 0.02 = 2%. Blocks BUY/SELL when exceeded (e.g. 2408 fixture vs 4045 live).
+   */
+  priceConsistencyTolerance: 0.02,
   decisionTtlMs: 15 * 60 * 1000
 } as const;

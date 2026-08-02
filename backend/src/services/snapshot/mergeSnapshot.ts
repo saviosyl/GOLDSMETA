@@ -14,6 +14,7 @@ export const mergeSnapshot = (
     id: snapshotId,
     sourceEventId: stableEventId,
     symbol: payload.symbol,
+    exchange: payload.exchange ?? null,
     timeframe: payload.timeframe,
     marketDataTime: payload.barTime,
     receivedAt: nowIso(),
@@ -25,6 +26,11 @@ export const mergeSnapshot = (
     trend: payload.trend ?? null,
     confirmationCandle: payload.confirmationCandle ?? null,
     isConfirmedBar: payload.isConfirmedBar,
-    metadata: payload.metadata ?? null
+    metadata: {
+      ...(payload.metadata ?? {}),
+      eventType: payload.eventType,
+      payloadSource: payload.source,
+      exchange: payload.exchange ?? null
+    }
   };
 };

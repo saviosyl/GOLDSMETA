@@ -72,6 +72,10 @@ export interface DailyBriefing {
     vah: number | null;
     val: number | null;
   };
+  /** TradingView/V4 alert close when known — used for mismatch copy even if levels are omitted. */
+  tradingViewAlertClose: number | null;
+  /** V3 decision / stored close for comparison when sources disagree. */
+  decisionClose: number | null;
   bias: string | null;
   news: string;
   currentState: "WAIT" | "BUY" | "SELL" | "SHADOW_ONLY" | "UNKNOWN";

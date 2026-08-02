@@ -117,6 +117,36 @@ describe("V5 learning / analytics / coach", () => {
     expect(briefing.levels.poc).toBe(2650);
   });
 
+  it("omits levels when V4 ~4050 analysis disagrees with V3 ~2408 decision close", () => {
+    const briefing = buildDailyBriefing({
+      latestAnalysis: analysis({
+        ohlc: { open: 4044, high: 4048, low: 4042, close: 4045.165 },
+        xauPoc: 4050.951,
+        vah: 4052.975,
+        val: 4047.193
+      }),
+      latestDecision: {
+        decision: "WAIT",
+        generatedAt: "2026-07-31T21:00:00.000Z",
+        lastKnownPrice: 2408,
+        ohlcv: { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 },
+        marketStructure: { poc: 2408, vah: 2415, val: 2400 },
+        currentSession: "NEWYORK",
+        marketRegime: "RANGING",
+        timeframe: "15",
+        environment: "TEST",
+        backendVersion: "test"
+      } as never
+    });
+    expect(briefing.levels.poc).toBeNull();
+    expect(briefing.levels.vah).toBeNull();
+    expect(briefing.levels.val).toBeNull();
+    expect(briefing.tradingViewAlertClose).toBeCloseTo(4045.165, 3);
+    expect(briefing.decisionClose).toBe(2408);
+    expect(briefing.explanations.some((e) => /mismatch/i.test(e))).toBe(true);
+    expect(briefing.actionable).toBe(false);
+  });
+
   it("weekly coach refuses to fabricate when empty", () => {
     const report = buildWeeklyCoachReport({ plans: [], analyses: [], journal: [] });
     expect(report.insufficientData).toBe(true);

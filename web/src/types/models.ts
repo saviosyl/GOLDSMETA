@@ -95,6 +95,20 @@ export interface Decision {
   recommendedActions?: string[] | null;
   scenarioName?: string | null;
   safetyFlags?: string[] | null;
+  symbolIdentity?: {
+    tradingViewSymbol: string;
+    exchange: string | null;
+    ctraderSymbolId: string | null;
+    canonicalSymbol: "XAUUSD";
+  } | null;
+  priceSources?: {
+    alertClose?: { source: string; value: number | null; exchangeOrBroker?: string | null };
+    barHigh?: { source: string; value: number | null };
+    barLow?: { source: string; value: number | null };
+    poc?: { source: string; value: number | null };
+    vah?: { source: string; value: number | null };
+    val?: { source: string; value: number | null };
+  } | null;
 }
 
 export type ManualRiskCurrency = "EUR" | "USD" | "GBP";

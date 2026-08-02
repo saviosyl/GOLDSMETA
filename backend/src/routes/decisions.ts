@@ -11,7 +11,11 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/decisions/latest", requireAuth, ...approvedAccountGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const latest = await store.latestDecision(userId);
+    // Prefer non-test decisions so TradingView TEST fixture OHLC (~2408) cannot
+    // become the LIVE dashboard "live price" next to a real ~4050 alert profile.
+    const recent = await store.listDecisions(userId, 30);
+    const latest =
+      recent.find((d) => !d.isTestDecision && d.environment !== "TEST") ?? recent[0];
     if (!latest) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: "No decisions found" } });
       return;
