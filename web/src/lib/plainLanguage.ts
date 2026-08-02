@@ -137,11 +137,12 @@ export function brokerBadgeLabel(badge: string | null | undefined): string {
   const map: Record<string, string> = {
     MANUAL: "Manual",
     READ_ONLY: "Read only",
-    DEMO_PREVIEW: "Setup required",
+    PREVIEW: "Preview",
+    DEMO_PREVIEW: "Preview",
     DEMO: "Demo",
     PARKED: "Coming later",
     CONNECTED: "Connected",
-    LIVE_LOCKED: "Live locked"
+    LIVE_LOCKED: "Temporarily locked"
   };
   return map[b] ?? (badge ? badge.replace(/_/g, " ") : "Status");
 }

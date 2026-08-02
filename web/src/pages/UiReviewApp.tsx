@@ -508,10 +508,11 @@ function buildReviewApi() {
       brokers: [
         {
           id: "pepperstone_ctrader",
-          name: "Pepperstone cTrader Demo",
+          name: "Pepperstone cTrader",
           status: "Pepperstone connection required",
-          detail: "Demo read-only — AutoTrade OFF — Live locked",
-          badge: "DEMO_PREVIEW"
+          detail:
+            "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
+          badge: "PREVIEW"
         },
         {
           id: "trading212_invest",
