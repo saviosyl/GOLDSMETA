@@ -14,7 +14,6 @@ const {
   disconnectCTrader,
   getCTraderDiagnostics,
   createCTraderPreview,
-  mockApi,
   mockAuth
 } = vi.hoisted(() => {
   const getBrokerControlCentre = vi.fn();
@@ -48,7 +47,6 @@ const {
     disconnectCTrader,
     getCTraderDiagnostics,
     createCTraderPreview,
-    mockApi,
     mockAuth
   };
 });

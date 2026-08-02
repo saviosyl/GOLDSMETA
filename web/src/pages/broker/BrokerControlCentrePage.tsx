@@ -313,8 +313,6 @@ export function BrokerControlCentrePage() {
         setLoading(false);
       }
     }
-    // begin/finish helpers close over setters only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
   const handleAuthOrConflict = async (err: unknown): Promise<boolean> => {
@@ -338,37 +336,6 @@ export function BrokerControlCentrePage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (oauthHandledRef.current) return;
-    const ctrader = searchParams.get("ctrader");
-    if (!ctrader) return;
-    oauthHandledRef.current = true;
-    const reason = searchParams.get("reason");
-    if (ctrader === "oauth_ok") {
-      setActionBanner({
-        tone: "info",
-        message: "cTrader OAuth completed. Loading authorised accounts…"
-      });
-      setSelected("pepperstone_ctrader");
-      selectionTouchedRef.current = true;
-      setReconnectRequiredSafe(false);
-      void refreshAccounts("connect");
-    } else if (ctrader === "oauth_error") {
-      setErrorDetail(
-        describeClientError(
-          new ApiError(400, reason ?? "OAUTH_CANCELLED", "OAuth failed"),
-          "Pepperstone connection could not be completed."
-        )
-      );
-      setLastFailedAction("connect");
-    }
-    const next = new URLSearchParams(searchParams);
-    next.delete("ctrader");
-    next.delete("reason");
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams, api]);
 
   const refreshAccounts = async (fromAction: BrokerAction = "refresh_accounts") => {
     const action: BrokerAction =
@@ -400,6 +367,36 @@ export function BrokerControlCentrePage() {
       }
     }
   };
+
+  useEffect(() => {
+    if (oauthHandledRef.current) return;
+    const ctrader = searchParams.get("ctrader");
+    if (!ctrader) return;
+    oauthHandledRef.current = true;
+    const reason = searchParams.get("reason");
+    if (ctrader === "oauth_ok") {
+      setActionBanner({
+        tone: "info",
+        message: "cTrader OAuth completed. Loading authorised accounts…"
+      });
+      setSelected("pepperstone_ctrader");
+      selectionTouchedRef.current = true;
+      setReconnectRequiredSafe(false);
+      void refreshAccounts("connect");
+    } else if (ctrader === "oauth_error") {
+      setErrorDetail(
+        describeClientError(
+          new ApiError(400, reason ?? "OAUTH_CANCELLED", "OAuth failed"),
+          "Pepperstone connection could not be completed."
+        )
+      );
+      setLastFailedAction("connect");
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("ctrader");
+    next.delete("reason");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, api]);
 
   const refreshDiagnostics = async () => {
     if (!guardAction("refresh_diagnostics")) return;

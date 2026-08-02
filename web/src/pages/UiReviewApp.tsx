@@ -829,7 +829,6 @@ function buildReviewApi() {
       },
       quote: { bid: 2350.1, ask: 2350.4, spread: 0.3 }
     }),
-    selectCTraderAccount: async () => ({ ok: true }),
     disconnectCTrader: async () => ({ disconnected: true }),
     setCTraderEmergencyStop: async () => ({ ok: true }),
     getAdminTradingViewTemplate: async () => ({
