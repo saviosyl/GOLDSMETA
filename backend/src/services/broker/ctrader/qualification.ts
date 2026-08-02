@@ -1,5 +1,10 @@
 /**
- * DEMO_AUTO qualification gates — locked; do not reduce.
+ * Recommended Demo Auto qualification defaults.
+ *
+ * These are NOT permanent product hard caps for ordinary risk settings.
+ * They are recommended qualification thresholds for a future Demo Auto approval
+ * flow. Values are visible to operators; reducing them requires an explicit
+ * product decision (do not silently lower for convenience).
  */
 
 export interface DemoAutoQualificationState {
@@ -31,14 +36,21 @@ export interface DemoAutoQualificationResult {
     requiredTrades: 5;
     daysSinceFirstTrade: number | null;
     requiredDays: 7;
+    /** Explains that thresholds are recommended defaults, not user risk caps. */
+    source: "recommended_qualification_defaults";
+    sourceLabel: string;
   };
 }
 
+/** Recommended qualification defaults for future Demo Auto approval. */
 export const DEMO_AUTO_GATES = {
   requiredPreviews: 20,
   requiredTrades: 5,
   requiredDays: 7
 } as const;
+
+export const QUALIFICATION_SOURCE_LABEL =
+  "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits.";
 
 export function evaluateDemoAutoQualification(
   state: DemoAutoQualificationState,
@@ -82,7 +94,8 @@ export function evaluateDemoAutoQualification(
 
   return {
     unlocked: failed.length === 0,
-    canActivate: false, // impossible to activate in this phase
+    // Temporary preview lock — Demo Auto activation stays disabled.
+    canActivate: false,
     passed,
     failed,
     progress: {
@@ -91,7 +104,9 @@ export function evaluateDemoAutoQualification(
       approvedControlledDemoTrades: state.approvedControlledDemoTrades,
       requiredTrades: DEMO_AUTO_GATES.requiredTrades,
       daysSinceFirstTrade,
-      requiredDays: DEMO_AUTO_GATES.requiredDays
+      requiredDays: DEMO_AUTO_GATES.requiredDays,
+      source: "recommended_qualification_defaults",
+      sourceLabel: QUALIFICATION_SOURCE_LABEL
     }
   };
 }

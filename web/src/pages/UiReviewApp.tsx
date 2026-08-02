@@ -528,7 +528,7 @@ function buildReviewApi() {
           id: "trading212_invest",
           name: "Trading 212 Practice",
           status: "Read only",
-          detail: "Separate gold-proxy path — not part of the cTrader Demo workflow",
+          detail: "Separate gold-proxy path — not part of the cTrader AutoTrade workflow",
           badge: "READ_ONLY"
         },
         {
@@ -612,7 +612,10 @@ function buildReviewApi() {
             approvedControlledDemoTrades: 0,
             requiredTrades: 5,
             daysSinceFirstTrade: null,
-            requiredDays: 7
+            requiredDays: 7,
+            source: "recommended_qualification_defaults",
+            sourceLabel:
+              "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."
           }
         }
       }

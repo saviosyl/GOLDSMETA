@@ -62,6 +62,8 @@ export interface BrokerControlCentreResponse {
         requiredTrades: number;
         daysSinceFirstTrade: number | null;
         requiredDays: number;
+        source?: "recommended_qualification_defaults";
+        sourceLabel?: string;
       };
     };
   };

@@ -2991,3 +2991,107 @@ a {
     flex: 1 1 100%;
   }
 }
+
+.gm-quote-meta {
+  margin: 0.5rem 0 0.75rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.gm-quote-meta div {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.gm-quote-meta dt {
+  margin: 0;
+  color: var(--muted);
+  font: 600 0.72rem/1.2 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gm-quote-meta dd {
+  margin: 0;
+  font: 650 0.9rem/1.3 var(--font-sans);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* —— Print / PDF-safe layout —— */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  /* Hide app chrome that collides with printed content */
+  .gm-mobile-bottom-nav,
+  [data-testid="mobile-bottom-nav"],
+  .gm-desktop-sidebar,
+  [data-testid="desktop-sidebar"],
+  .gm-topbar,
+  .gm-app-header,
+  nav,
+  .gm-btn-danger,
+  .gm-demo-watermark {
+    display: none !important;
+  }
+
+  .gm-main,
+  .gm-main-inner,
+  .gm-broker-centre,
+  .gm-autotrade,
+  .gm-tv-setup {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .gm-owner-setup-guide,
+  .gm-help-steps,
+  .gm-wizard-steps,
+  .gm-risk-box,
+  .gm-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .gm-owner-setup-guide h3,
+  .gm-section-title,
+  .gm-subsection-title,
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .gm-wizard-steps > li,
+  .gm-help-steps > li,
+  .gm-qual-list > li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: none !important;
+  }
+
+.gm-broker-actions:not(.gm-broker-primary-actions) {
+    display: none !important;
+  }
+
+  .gm-broker-primary-actions {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

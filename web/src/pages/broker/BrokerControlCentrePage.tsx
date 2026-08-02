@@ -55,24 +55,51 @@ const FALLBACK_WIZARD = [
     step: 6,
     title: "Run read-only checks",
     status: "SETUP_REQUIRED",
-    detail: "Confirm live bid/ask, spread and market-open state without placing orders."
+    detail:
+      "Confirm bid/ask, spread, volume rules, margin metadata and market-open state without placing orders."
   },
   {
     step: 7,
     title: "Run trade previews",
     status: "SETUP_REQUIRED",
-    detail: "Preview BUY / SELL sizing only. No Demo or Live order is submitted."
+    detail:
+      "Preview BUY / SELL sizing only. Order submission is currently disabled in this preview."
   },
   {
     step: 8,
     title: "Request Demo trading approval",
     status: "BLOCKED",
-    detail: "Demo trading stays locked until readiness checks and separate approval are complete."
+    detail:
+      "Demo Auto stays OFF in this preview until a separate approved activation."
   }
 ];
 
 function diagTone(ok: boolean): "positive" | "warning" | "negative" {
   return ok ? "positive" : "warning";
+}
+
+function formatQuoteAge(iso: string | null | undefined): string {
+  if (!iso) return "unknown";
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms < 0) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "under 1 minute";
+  if (mins === 1) return "1 minute";
+  if (mins < 60) return `${mins} minutes`;
+  const hours = Math.floor(mins / 60);
+  if (hours === 1) return "1 hour";
+  if (hours < 48) return `${hours} hours`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+function marketStatusLabel(raw: string | null | undefined): string {
+  const s = (raw ?? "").toUpperCase();
+  if (!s) return "Unknown";
+  if (s === "OPEN" || s.includes("TRADEABLE")) return "Market open";
+  if (s === "CLOSED" || s.includes("CLOSE")) return "Market closed";
+  return raw!.replace(/_/g, " ");
 }
 
 /**
@@ -251,7 +278,7 @@ export function BrokerControlCentrePage() {
       setDiagnostics(null);
       setAccounts([]);
       setPreviewResult(null);
-      setInfoBanner("Pepperstone Demo disconnected.");
+      setInfoBanner("Pepperstone disconnected.");
       await load();
     } catch (e) {
       setErrorDetail(describeClientError(e, "Could not disconnect."));
@@ -262,11 +289,55 @@ export function BrokerControlCentrePage() {
   const authBlocked = Boolean(readiness?.authSetupRequired);
   const setupRequired = Boolean(readiness?.setupRequired ?? true);
   const connected = Boolean(readiness?.connected);
-  const wizardSteps =
+  const baseWizardSteps =
     readiness?.wizardSteps && readiness.wizardSteps.length >= 6
       ? readiness.wizardSteps
       : FALLBACK_WIZARD;
+  /** Do not show step 6 as Complete when margin metadata is still pending. */
+  const wizardSteps = baseWizardSteps.map((step) => {
+    if (step.step !== 6 || !diagnostics) return step;
+    const quoteOk = Boolean(diagnostics.liveQuoteReceived || diagnostics.quote);
+    const marginOk = Boolean(diagnostics.marginMetadataAvailable);
+    if (quoteOk && !marginOk) {
+      return {
+        ...step,
+        status: "IN_PROGRESS",
+        detail:
+          "Market-data checks complete for quote/spread/volume. Margin metadata still pending — not fully complete."
+      };
+    }
+    if (quoteOk && marginOk && step.status !== "COMPLETE") {
+      return {
+        ...step,
+        status: "COMPLETE",
+        detail:
+          "Market-data checks complete (quote, spread, volume rules). Margin metadata available."
+      };
+    }
+    return step;
+  });
   const summary = readiness?.connectionSummary;
+  const accountTypeLabel = diagnostics?.selectedAccountIsLive
+    ? "Live account selected"
+    : diagnostics?.demoAccountSelected || diagnostics?.accountSelected
+      ? "Demo account selected"
+      : selected === "manual"
+        ? "Analysis only"
+        : connected
+          ? "Account pending"
+          : "—";
+  const quoteTimestamp =
+    diagnostics?.quote?.timestamp ??
+    diagnostics?.connection?.lastQuoteAt ??
+    summary?.lastQuoteAt ??
+    null;
+  const quoteMarketStatus = marketStatusLabel(
+    diagnostics?.quote?.marketStatus ?? null
+  );
+  const marketOpen =
+    (diagnostics?.quote?.marketStatus ?? "").toUpperCase() === "OPEN" ||
+    (diagnostics?.quote?.marketStatus ?? "").toUpperCase().includes("TRADEABLE");
+  const quoteEligibleForExecution = false; // preview hard lock — never imply executable
 
   const selectedBroker = (centre?.brokers ?? []).find((b) => b.id === selected);
   const connectionLabel = connected
@@ -279,15 +350,33 @@ export function BrokerControlCentrePage() {
     ? [
         { key: "cred", label: "Credentials configured", ok: diagnostics.credentialsConfigured },
         { key: "oauth", label: "OAuth connected", ok: diagnostics.oauthConnected },
-        { key: "demo", label: "Demo account selected", ok: diagnostics.demoAccountSelected },
+        {
+          key: "demo",
+          label: diagnostics.selectedAccountIsLive
+            ? "Live account selected"
+            : "Demo account selected",
+          ok: Boolean(diagnostics.accountSelected || diagnostics.demoAccountSelected)
+        },
         { key: "pep", label: "Pepperstone confirmed", ok: diagnostics.pepperstoneConfirmed },
         { key: "gold", label: "Gold symbol found", ok: diagnostics.goldSymbolFound },
-        { key: "quote", label: "Live quote received", ok: diagnostics.liveQuoteReceived },
+        {
+          key: "quote",
+          label: "Last market quote available",
+          ok: diagnostics.liveQuoteReceived
+        },
         { key: "spread", label: "Spread available", ok: diagnostics.spreadAvailable },
         { key: "vol", label: "Volume rules available", ok: diagnostics.volumeRulesAvailable },
         { key: "margin", label: "Margin metadata available", ok: diagnostics.marginMetadataAvailable },
-        { key: "mkt", label: "Market status available", ok: diagnostics.marketStatusAvailable },
-        { key: "lock", label: "Trading safely locked", ok: diagnostics.tradingSafelyLocked },
+        {
+          key: "mkt",
+          label: marketOpen ? "Market open" : "Market closed / status known",
+          ok: diagnostics.marketStatusAvailable
+        },
+        {
+          key: "lock",
+          label: "Order submission disabled in this preview",
+          ok: diagnostics.tradingSafelyLocked
+        },
         { key: "at", label: "AutoTrade OFF", ok: diagnostics.autoTrade === "OFF" }
       ]
     : [];
@@ -313,11 +402,11 @@ export function BrokerControlCentrePage() {
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Account type</span>
-            <strong>{selected === "manual" ? "Analysis only" : "Demo"}</strong>
+            <strong data-testid="broker-account-type">{accountTypeLabel}</strong>
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Trading mode</span>
-            <strong>Trading locked</strong>
+            <strong>Preview mode</strong>
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">AutoTrade</span>
@@ -325,16 +414,31 @@ export function BrokerControlCentrePage() {
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Emergency STOP</span>
-            <strong data-testid="emergency-stop-status">Armed (no live automation)</strong>
+            <strong data-testid="emergency-stop-status">Armed (automation OFF)</strong>
           </div>
         </div>
 
         <div className="gm-broker-status-row">
           <span className="gm-badge gm-badge-off" data-testid="no-order-badge">
-            No order submission
+            Order submission disabled in this preview
           </span>
-          <span className="gm-badge gm-badge-demo">Demo setup only</span>
-          <span className="gm-badge gm-badge-warn">Live locked</span>
+          <span className="gm-badge gm-badge-demo">Preview mode</span>
+          <span className="gm-badge gm-badge-warn">
+            Live activation available through a separate future flow
+          </span>
+        </div>
+        <div className="gm-broker-actions gm-broker-primary-actions">
+          <Link
+            className="gm-btn gm-btn-primary"
+            to="/autotrade"
+            data-testid="broker-edit-autotrade-settings"
+          >
+            Edit AutoTrade settings
+          </Link>
+          <p className="gm-meta" style={{ margin: 0 }}>
+            Opens your Demo or Live settings for risk, lot sizing, daily loss, trade count,
+            confidence, risk/reward, spread, sessions and filters.
+          </p>
         </div>
       </header>
 
@@ -397,8 +501,11 @@ export function BrokerControlCentrePage() {
               </span>
               <span className="gm-meta">
                 {b.detail
-                  .replace(/AutoTrade Locked/gi, "AutoTrade off")
-                  .replace(/Live Locked/gi, "Live locked")
+                  .replace(/AutoTrade Locked/gi, "AutoTrade OFF")
+                  .replace(/Live Locked/gi, "Live not active in preview")
+                  .replace(/cTrader Demo workflow/gi, "cTrader AutoTrade workflow")
+                  .replace(/Demo read-only/gi, "preview — order submission disabled")
+                  .replace(/Demo setup only/gi, "Preview mode")
                   .replace(/order automation unmerged/gi, "practice read-only")}
               </span>
             </button>
@@ -416,14 +523,14 @@ export function BrokerControlCentrePage() {
           aria-labelledby="ctrader-heading"
         >
           <div className="gm-demo-watermark" aria-hidden="true">
-            DEMO
+            PREVIEW
           </div>
           <h2 id="ctrader-heading" className="gm-section-title">
-            Pepperstone cTrader Demo
+            Pepperstone cTrader
           </h2>
           <p className="gm-broker-lead">
             {connected
-              ? "Demo OAuth connected — read-only. Trading stays locked."
+              ? "Connected in preview mode. Order submission is currently disabled in this preview. AutoTrade stays OFF."
               : "Connection setup required until secure credentials and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
           </p>
 
@@ -540,7 +647,7 @@ export function BrokerControlCentrePage() {
                   data-testid="ctrader-live-preview-btn"
                   onClick={() => void runPreview()}
                 >
-                  Trade preview only
+                  Preview next trade
                 </button>
                 <button
                   type="button"
@@ -565,7 +672,8 @@ export function BrokerControlCentrePage() {
             </Link>
           </div>
           <p className="gm-meta" data-testid="no-order-controls">
-            Order buttons stay hidden. No Demo or Live order can be sent from this page.
+            Order submission is currently disabled in this preview. No Demo or Live order can be
+            sent from this page.
           </p>
 
           {accounts.length > 0 ? (
@@ -616,20 +724,54 @@ export function BrokerControlCentrePage() {
               </ul>
               {diagnostics.quote ? (
                 <div className="gm-risk-box" data-testid="ctrader-live-quote">
-                  <strong>Live Demo data</strong>
-                  <p className="gm-meta">
-                    Bid {diagnostics.quote.bid ?? "—"} / Ask {diagnostics.quote.ask ?? "—"} ·
-                    spread {diagnostics.quote.spread ?? "—"}
-                    {diagnostics.quote.stale ? " · stale warning" : ""}
-                    {diagnostics.quote.timestamp
-                      ? ` · updated ${formatUserTimestamp(diagnostics.quote.timestamp)}`
-                      : ""}
+                  <strong>Last market quote available</strong>
+                  <dl className="gm-quote-meta" data-testid="ctrader-quote-eligibility">
+                    <div>
+                      <dt>Bid / Ask</dt>
+                      <dd>
+                        {diagnostics.quote.bid ?? "—"} / {diagnostics.quote.ask ?? "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Spread</dt>
+                      <dd>{diagnostics.quote.spread ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Quote timestamp</dt>
+                      <dd>
+                        {quoteTimestamp ? formatUserTimestamp(quoteTimestamp) : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Quote age</dt>
+                      <dd>{formatQuoteAge(quoteTimestamp)}</dd>
+                    </div>
+                    <div>
+                      <dt>Market status</dt>
+                      <dd data-testid="ctrader-market-status">{quoteMarketStatus}</dd>
+                    </div>
+                    <div>
+                      <dt>Execution eligibility</dt>
+                      <dd data-testid="ctrader-execution-eligibility">
+                        {quoteEligibleForExecution
+                          ? "Eligible"
+                          : "Quote not eligible for execution"}
+                        {!marketOpen ? " · Market closed" : ""}
+                        {diagnostics.quote.stale ? " · Quote stale" : ""}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="gm-meta" style={{ marginBottom: 0 }}>
+                    Previous-session quotes may still display while the market is closed. That does
+                    not mean a live executable price is available.
                   </p>
                 </div>
               ) : null}
               {diagnostics.account ? (
                 <div className="gm-risk-box" data-testid="ctrader-account-snapshot">
-                  <strong>Demo account (masked)</strong>
+                  <strong>
+                    {diagnostics.selectedAccountIsLive ? "Live" : "Demo"} account (masked)
+                  </strong>
                   <p className="gm-meta" style={{ marginBottom: 0 }}>
                     {diagnostics.account.accountIdMasked} · {diagnostics.connection.currency ?? "—"}{" "}
                     · equity {diagnostics.account.equity ?? "—"} · free{" "}
@@ -688,8 +830,8 @@ export function BrokerControlCentrePage() {
               <li>OAuth connection and Demo/Live account selection</li>
               <li>Pepperstone account confirmation</li>
               <li>XAUUSD symbol discovery</li>
-              <li>Live bid / ask, spread, volume minimum &amp; step</li>
-              <li>Contract size, margin requirements, market-open state</li>
+              <li>Last market quote (bid / ask), spread, volume minimum &amp; step</li>
+              <li>Contract size, margin requirements, market-open state (shown separately)</li>
             </ul>
             <p className="gm-meta" style={{ marginBottom: 0 }}>
               Secrets are never stored in browser storage or shown in logs.
@@ -714,19 +856,56 @@ export function BrokerControlCentrePage() {
             </ul>
           </section>
 
-          <section aria-labelledby="qual-heading">
+          <section aria-labelledby="qual-heading" data-testid="demo-qualification">
             <h3 id="qual-heading">Demo trading approval</h3>
             <p className="gm-meta">
-              Progress is visible only — Demo Auto remains temporarily locked until
-              explicit owner approval (not a permanent product limitation).
+              Progress is visible only. Demo Auto remains OFF in this preview until a separate
+              approved activation (temporary lock — not a permanent product limitation).
             </p>
+            {readiness?.qualification.progress ? (
+              <div className="gm-risk-box" data-testid="qualification-defaults">
+                <strong>Recommended qualification defaults</strong>
+                <p className="gm-meta">
+                  Source:{" "}
+                  {readiness.qualification.progress.sourceLabel ??
+                    "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."}
+                </p>
+                <ul className="gm-meta">
+                  <li>
+                    Previews: {readiness.qualification.progress.completedPreviews} /{" "}
+                    {readiness.qualification.progress.requiredPreviews} (recommended default)
+                  </li>
+                  <li>
+                    Controlled trades:{" "}
+                    {readiness.qualification.progress.approvedControlledDemoTrades} /{" "}
+                    {readiness.qualification.progress.requiredTrades} (recommended default)
+                  </li>
+                  <li>
+                    Days since first trade:{" "}
+                    {readiness.qualification.progress.daysSinceFirstTrade ?? "—"} /{" "}
+                    {readiness.qualification.progress.requiredDays} (recommended default)
+                  </li>
+                </ul>
+                <p className="gm-meta" style={{ marginBottom: 0 }}>
+                  These thresholds are recommended qualification defaults for a future Demo Auto
+                  approval flow. They are not ordinary per-user risk settings. Changing them
+                  requires an explicit product decision.
+                </p>
+              </div>
+            ) : null}
             <ul className="gm-qual-list">
               {(readiness?.qualification.failed ?? []).slice(0, 8).map((g) => (
                 <li key={g}>
-                  <StatusBadge tone="warning">Locked</StatusBadge>{" "}
+                  <StatusBadge tone="warning">Pending</StatusBadge>{" "}
                   {g
                     .replace(/AUTH_HEALTHY/g, "Account security verified")
                     .replace(/OAUTH_HEALTHY/g, "Pepperstone connection verified")
+                    .replace(/PREVIEWS_20/g, "Recommended preview count not yet met")
+                    .replace(/CONTROLLED_TRADES_5/g, "Recommended controlled-trade count not yet met")
+                    .replace(
+                      /SEVEN_DAYS_SINCE_FIRST_TRADE/g,
+                      "Recommended days-since-first-trade not yet met"
+                    )
                     .replace(/_/g, " ")
                     .toLowerCase()
                     .replace(/^\w/, (c) => c.toUpperCase())}
@@ -739,7 +918,7 @@ export function BrokerControlCentrePage() {
             <h3 id="emergency-heading">Emergency STOP</h3>
             <p className="gm-meta">
               Emergency STOP will disable new automated entries when automation exists. It does not
-              silently close positions. Trading is already locked today.
+              silently close positions. Order submission is already disabled in this preview.
             </p>
             <div className="gm-broker-actions">
               <button type="button" className="gm-btn gm-btn-danger" disabled data-testid="emergency-stop-btn">
@@ -756,8 +935,8 @@ export function BrokerControlCentrePage() {
               <h3 id="owner-guide-heading">Broker setup guide</h3>
               <ol className="gm-help-steps">
                 <li>TradingView connection alone is not enough for API-authorised trading.</li>
-                <li>Create a Pepperstone cTrader Demo account (not just a chart login).</li>
-                <li>Register a cTrader Open API Demo application.</li>
+                <li>Create a Pepperstone cTrader account (Demo and/or Live — not just a chart login).</li>
+                <li>Register a cTrader Open API application for the preview environment.</li>
                 <li>
                   Set the redirect URI to the GoldMeta OAuth callback provided by ops (server
                   function URL).
@@ -781,7 +960,8 @@ export function BrokerControlCentrePage() {
                     <br />
                     OAuth configured: {readiness?.oauthConfigured ? "yes" : "no"}
                     <br />
-                    Flags remain hard-disabled: broker execution, Demo orders, Live trading.
+                    Temporary preview locks: broker execution, Demo orders, Live order
+                    submission — not permanent product design.
                   </p>
                 </div>
               </details>
@@ -886,9 +1066,12 @@ export function BrokerControlCentrePage() {
         </h2>
         <ul className="gm-help-list">
           <li>TradingView alone cannot place API-authorised cTrader orders.</li>
-          <li>Create a Pepperstone cTrader Demo account, then register an Open API app.</li>
+          <li>Create a Pepperstone cTrader account, then register an Open API app.</li>
           <li>GoldMeta never collects your cTrader password.</li>
-          <li>Live trading is locked and cannot be activated here.</li>
+          <li>
+            Live trading is not active in this preview. It can be configured later through the
+            separate Live activation process.
+          </li>
         </ul>
         <p className="gm-meta">
           <Link to="/help">Open the GoldMeta help guide</Link>

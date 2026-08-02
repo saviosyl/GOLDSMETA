@@ -66,7 +66,9 @@ export function wizardStatusLabel(status: string | null | undefined): string {
     SETUP_REQUIRED: "Action required",
     AVAILABLE: "Action required",
     ACTION_REQUIRED: "Action required",
-    IN_PROGRESS: "In progress",
+    IN_PROGRESS: "Partially complete",
+    PARTIAL: "Partially complete",
+    PARTIALLY_COMPLETE: "Partially complete",
     COMPLETE: "Complete",
     COMPLETED: "Complete",
     BLOCKED: "Blocked",
@@ -79,9 +81,9 @@ export function wizardStatusTone(
   status: string | null | undefined
 ): "neutral" | "positive" | "warning" | "negative" | "gold" {
   const s = (status ?? "").toUpperCase();
+  if (s.includes("PARTIAL") || s.includes("IN_PROGRESS") || s.includes("PROGRESS")) return "gold";
   if (s.includes("COMPLETE")) return "positive";
   if (s.includes("BLOCK") || s.includes("LOCK") || s.includes("ERROR")) return "negative";
-  if (s.includes("PROGRESS")) return "gold";
   if (s.includes("AVAILABLE") || s.includes("SETUP") || s.includes("ACTION") || s.includes("REQUIRED")) {
     return "warning";
   }
@@ -142,7 +144,7 @@ export function brokerBadgeLabel(badge: string | null | undefined): string {
     DEMO: "Demo",
     PARKED: "Coming later",
     CONNECTED: "Connected",
-    LIVE_LOCKED: "Temporarily locked"
+    LIVE_LOCKED: "Preview — Live not active"
   };
   return map[b] ?? (badge ? badge.replace(/_/g, " ") : "Status");
 }
@@ -160,7 +162,7 @@ export function connectionStatusLabel(raw: string | null | undefined): string {
     TRADING_LOCKED: "Trading locked",
     READ_ONLY: "Read only",
     DEMO: "Demo",
-    LIVE_LOCKED: "Live locked",
+    LIVE_LOCKED: "Live not active in preview",
     ERROR: "Error",
     ACTION_REQUIRED: "Action required",
     NOT_HEALTHY: "Action required",

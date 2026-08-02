@@ -105,7 +105,10 @@ const centreFixture = {
         approvedControlledDemoTrades: 0,
         requiredTrades: 5,
         daysSinceFirstTrade: null,
-        requiredDays: 7
+        requiredDays: 7,
+        source: "recommended_qualification_defaults",
+        sourceLabel:
+          "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."
       }
     }
   }
@@ -129,7 +132,13 @@ describe("BrokerControlCentrePage", () => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
     expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("OFF");
-    expect(screen.getByTestId("no-order-badge")).toHaveTextContent(/No order submission/i);
+    expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
+      /Order submission disabled in this preview/i
+    );
+    expect(screen.getByTestId("broker-edit-autotrade-settings")).toHaveAttribute(
+      "href",
+      "/autotrade"
+    );
     expect(screen.getByTestId("broker-card-pepperstone_ctrader")).toBeInTheDocument();
     expect(screen.getByTestId("broker-top-status")).toBeInTheDocument();
   });

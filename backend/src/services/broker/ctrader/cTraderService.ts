@@ -52,7 +52,7 @@ export interface CTraderReadinessReport {
   wizardSteps: Array<{
     step: number;
     title: string;
-    status: "COMPLETE" | "AVAILABLE" | "BLOCKED" | "SETUP_REQUIRED";
+    status: "COMPLETE" | "AVAILABLE" | "BLOCKED" | "SETUP_REQUIRED" | "IN_PROGRESS";
     detail: string;
   }>;
   label: string;
@@ -113,6 +113,7 @@ export function buildCTraderReadiness(args?: {
     pepperstoneConfirmed?: boolean;
     goldSymbolFound?: boolean;
     liveQuoteReceived?: boolean;
+    marginMetadataAvailable?: boolean;
     accountMasked?: string | null;
     brokerName?: string | null;
     symbolName?: string | null;
@@ -128,6 +129,7 @@ export function buildCTraderReadiness(args?: {
   const pepperstone = Boolean(conn?.pepperstoneConfirmed);
   const goldFound = Boolean(conn?.goldSymbolFound);
   const quoteOk = Boolean(conn?.liveQuoteReceived);
+  const marginOk = Boolean(conn?.marginMetadataAvailable);
 
   const qualState: DemoAutoQualificationState = {
     ...DEFAULT_QUAL,
@@ -197,29 +199,39 @@ export function buildCTraderReadiness(args?: {
     {
       step: 6,
       title: "Run read-only checks",
-      status: quoteOk ? "COMPLETE" : goldFound ? "AVAILABLE" : "SETUP_REQUIRED",
+      status: quoteOk
+        ? marginOk
+          ? "COMPLETE"
+          : "IN_PROGRESS"
+        : goldFound
+          ? "AVAILABLE"
+          : "SETUP_REQUIRED",
       detail: quoteOk
-        ? "Live Demo bid/ask received."
-        : "Confirm live bid/ask, spread, volume minimum/step, contract size, margin and market-open state."
+        ? marginOk
+          ? "Market-data checks complete (quote, spread, volume rules). Margin metadata available."
+          : "Market-data checks complete for quote/spread/volume. Margin metadata still pending — step not fully complete."
+        : "Confirm bid/ask, spread, volume minimum/step, contract size, margin and market-open state."
     },
     {
       step: 7,
       title: "Run trade previews",
       status: quoteOk ? "AVAILABLE" : "SETUP_REQUIRED",
-      detail: "Preview BUY/SELL sizing only. No Demo or Live order is submitted."
+      detail:
+        "Preview BUY/SELL sizing only. Order submission is currently disabled in this preview."
     },
     {
       step: 8,
       title: "Request Demo trading approval",
       status: "BLOCKED",
-      detail: "Execution disabled. AutoTrade off. Demo trading stays locked until separate approval."
+      detail:
+        "Order submission disabled in this preview. Demo Auto stays OFF until a separate approved activation."
     }
   ];
 
   const setupRequired = !(oauthConnected && demoSelected && goldFound);
   const label = oauthConnected
-    ? "Pepperstone Demo connected — Trading locked — AutoTrade OFF"
-    : "Pepperstone connection required — Trading locked — AutoTrade OFF";
+    ? "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
+    : "Pepperstone connection required — preview mode — AutoTrade OFF";
 
   return {
     setupRequired,
@@ -359,7 +371,7 @@ export function getBrokerControlCentreSnapshot(
         name: "Pepperstone cTrader",
         status: pepperstoneStatus,
         detail:
-          "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
+          "Multi-user Demo/Live accounts — preview mode — order submission disabled — AutoTrade OFF",
         badge: readiness.connected ? "CONNECTED" : "PREVIEW"
       },
       {
