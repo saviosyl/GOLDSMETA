@@ -154,7 +154,7 @@ export function buildOnboardingSteps(args: {
   let sawOpen = false;
   return steps.map((step) => {
     if (step.status === "Complete" || step.status === "Locked") return step;
-    if (step.id >= 7 && step.id <= 9 && s.accountSelected && s.goldOk) {
+    if (step.id >= 7 && step.id <= 10 && s.accountSelected && s.goldOk) {
       return step;
     }
     if (!sawOpen) {
