@@ -37,13 +37,19 @@ let singleton: SignalOutcomeStore | null = null;
 
 export function getSignalOutcomeStore(): SignalOutcomeStore {
   if (singleton) return singleton;
+  // Prefer in-memory when allowed before probing Firestore (avoids ADC hangs).
+  if (allowInMemorySignalOutcomeStore()) {
+    const db = getFirestoreDb();
+    if (db != null && process.env.STORAGE_BACKEND !== "memory") {
+      singleton = new FirestoreSignalOutcomeStore(db);
+      return singleton;
+    }
+    singleton = new InMemorySignalOutcomeStore();
+    return singleton;
+  }
   const db = getFirestoreDb();
   if (db != null) {
     singleton = new FirestoreSignalOutcomeStore(db);
-    return singleton;
-  }
-  if (allowInMemorySignalOutcomeStore()) {
-    singleton = new InMemorySignalOutcomeStore();
     return singleton;
   }
   logger.error("Signal outcome storage unavailable — fail closed", {

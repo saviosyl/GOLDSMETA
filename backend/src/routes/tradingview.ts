@@ -47,7 +47,10 @@ const redactConnection = (
   connection: WebhookConnection,
   payloadSecret?: string | null
 ): PublicWebhookConnection => {
-  const { secret: _s, secretHash: _h, ...publicConnection } = connection;
+  const publicConnection = { ...connection } as Partial<WebhookConnection> &
+    Omit<WebhookConnection, "secret" | "secretHash">;
+  delete publicConnection.secret;
+  delete publicConnection.secretHash;
   return {
     ...publicConnection,
     id: connection.webhookId,
@@ -97,7 +100,7 @@ const createConnection = async (
   return { connection, plaintextSecret };
 };
 
-const buildTestPayload = (connection: WebhookConnection): TradingViewPayload => {
+const buildTestPayload = (_connection: WebhookConnection): TradingViewPayload => {
   const timestamp = new Date().toISOString();
   const indicatorName = `goldmeta-test-${randomUUID()}`;
   return {

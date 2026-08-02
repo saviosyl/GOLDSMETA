@@ -18,6 +18,13 @@ export const getFirebaseApp = (): App | null => {
     return cachedApp;
   }
 
+  // Explicit memory backend must not initialize Admin SDK — shells often set
+  // GCLOUD_PROJECT, which would otherwise trigger ADC/metadata hangs in tests.
+  if (env.STORAGE_BACKEND === "memory") {
+    cachedApp = null;
+    return cachedApp;
+  }
+
   if (!env.FIREBASE_PROJECT_ID && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     cachedApp = null;
     return cachedApp;
