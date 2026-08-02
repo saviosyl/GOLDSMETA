@@ -65,7 +65,14 @@ describe("buildPromoSnapshotModel", () => {
     compactTime: "07:15",
     timeZone: "Europe/Dublin",
     utcSecondary: "06:15 UTC",
-    ladder: { livePrice: 2385.4, poc: 2380, vah: 2390, val: 2370 }
+    ladder: {
+      livePrice: 2385.4,
+      poc: 2380,
+      vah: 2390,
+      val: 2370,
+      dataSourceLabel: "LIVE",
+      isUiReviewFixture: true
+    }
   };
 
   it("renders POC / VAH / VAL / live price from verified data", () => {
@@ -82,7 +89,7 @@ describe("buildPromoSnapshotModel", () => {
   it("omits missing levels cleanly", () => {
     const model = buildPromoSnapshotModel({
       ...base,
-      ladder: { livePrice: 100 }
+      ladder: { livePrice: 100, dataSourceLabel: "LIVE", isUiReviewFixture: true }
     });
     expect(model.levels.every((l) => Number.isFinite(l.price))).toBe(true);
     expect(model.levels.some((l) => l.isLive)).toBe(true);
@@ -300,7 +307,14 @@ describe("renderPromoSnapshotPng dimensions", () => {
       compactTime: "07:15",
       timeZone: "UTC",
       utcSecondary: "07:15 UTC",
-      ladder: { livePrice: 2385.4, poc: 2380, vah: 2390, val: 2370 }
+      ladder: {
+        livePrice: 2385.4,
+        poc: 2380,
+        vah: 2390,
+        val: 2370,
+        dataSourceLabel: "LIVE",
+        isUiReviewFixture: true
+      }
     });
     for (const id of ["social", "story", "square", "compact"] as const) {
       const blob = await renderPromoSnapshotPng(model, { ...DEFAULT_SNAPSHOT_OPTIONS, formatId: id });

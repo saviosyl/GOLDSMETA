@@ -100,6 +100,10 @@ const createConnection = async (
   return { connection, plaintextSecret };
 };
 
+/**
+ * TEST-only webhook body. OHLC ~2408 is a labelled fixture regime — never treat as LIVE.
+ * Production Market Structure Map must not mix these with live ~4050 alert levels.
+ */
 const buildTestPayload = (_connection: WebhookConnection): TradingViewPayload => {
   const timestamp = new Date().toISOString();
   const indicatorName = `goldmeta-test-${randomUUID()}`;
@@ -109,7 +113,7 @@ const buildTestPayload = (_connection: WebhookConnection): TradingViewPayload =>
     eventId: `test-${randomUUID()}`,
     webhookSecret: null,
     symbol: "XAUUSD",
-    exchange: "TEST",
+    exchange: "TEST_FIXTURE",
     timeframe: "15",
     eventType: "TEST",
     barTime: timestamp,
@@ -123,7 +127,11 @@ const buildTestPayload = (_connection: WebhookConnection): TradingViewPayload =>
       close: 2408,
       volume: 1
     },
-    levels: null,
+    levels: {
+      pocAll: 2408,
+      vahAll: 2415,
+      valAll: 2400
+    },
     sessionVolumeProfile: null,
     marketProfile: null,
     trend: {
@@ -134,9 +142,10 @@ const buildTestPayload = (_connection: WebhookConnection): TradingViewPayload =>
     confirmationCandle: null,
     optionalIndicators: null,
     metadata: {
-      source: "goldmeta-api-test",
+      source: "goldmeta-api-test-fixture",
       templateId: STANDARD_TEMPLATE_ID,
-      templateVersion: getActiveStandardTemplate().version
+      templateVersion: getActiveStandardTemplate().version,
+      fixtureLabel: "TEST FIXTURE — NOT LIVE BROKER DATA"
     }
   };
 };

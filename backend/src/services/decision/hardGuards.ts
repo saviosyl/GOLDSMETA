@@ -121,6 +121,9 @@ export const evaluateHardGuards = (
   }
   if (dataQuality.quality === "CONFLICTED") {
     reasonCodes.push("CONFLICTED_DATA");
+    if (dataQuality.warnings.some((w) => /PRICE_SOURCE_MISMATCH/i.test(w))) {
+      reasonCodes.push("PRICE_SOURCE_MISMATCH");
+    }
   }
   if (dataQuality.quality === "PARTIAL") {
     reasonCodes.push("INCOMPLETE_DATA");
@@ -156,6 +159,10 @@ export const evaluateHardGuards = (
     const stopLoss = plan.stopLoss.price;
     const profile = resolveVolumeProfile(snapshot);
     const candle = snapshot.confirmationCandle;
+
+    if (reasonCodes.includes("PRICE_SOURCE_MISMATCH")) {
+      // Already conflicted — keep BUY/SELL blocked via failed guards.
+    }
 
     if (profile.poc === null || profile.vah === null || profile.val === null) {
       reasonCodes.push("MISSING_VOLUME_PROFILE");

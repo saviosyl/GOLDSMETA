@@ -85,11 +85,16 @@ function buildSnapshotFromPage(args: {
     },
     ladder: {
       livePrice: args.livePrice,
+      alertClose: decision?.ohlcv?.close ?? decision?.lastKnownPrice ?? null,
       poc: args.poc,
       vah: args.vah,
       val: args.val,
       barHigh: decision?.ohlcv?.high ?? null,
-      barLow: decision?.ohlcv?.low ?? null
+      barLow: decision?.ohlcv?.low ?? null,
+      dataSourceLabel: decision?.dataSourceLabel ?? null,
+      isTestDecision: decision?.isTestDecision ?? null,
+      marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
+      isUiReviewFixture: true
     },
     plan: args.setup,
     scoreComponents: args.score?.components
@@ -215,10 +220,12 @@ export function OverviewPage() {
         : `Updated ${compactTime} local time`;
 
   const sessionLabel = formatSession(briefing?.session ?? decision?.currentSession);
+  // Prefer same-source decision OHLC + structure. Briefing levels are only used when
+  // they agree with the decision close (server also omits mismatched V4 levels).
+  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
   const poc = briefing?.levels?.poc ?? decision?.marketStructure?.poc ?? null;
   const vah = briefing?.levels?.vah ?? decision?.marketStructure?.vah ?? null;
   const val = briefing?.levels?.val ?? decision?.marketStructure?.val ?? null;
-  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
   const hasPlan = Boolean(
     setup &&
       (setup.levels?.entryPrice != null ||
@@ -385,7 +392,8 @@ export function OverviewPage() {
       <SectionCard title="Market Structure Map">
         <MarketLevelLadder
           input={{
-            livePrice: decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null,
+            livePrice,
+            alertClose: decision?.ohlcv?.close ?? decision?.lastKnownPrice ?? null,
             poc,
             vah,
             val,
@@ -395,7 +403,19 @@ export function OverviewPage() {
             stop: setup?.levels?.stopLoss ?? null,
             tp1: setup?.levels?.tp1 ?? null,
             tp2: setup?.levels?.tp2 ?? null,
-            tp3: setup?.levels?.tp3 ?? null
+            tp3: setup?.levels?.tp3 ?? null,
+            dataSourceLabel: decision?.dataSourceLabel ?? null,
+            isTestDecision: decision?.isTestDecision ?? null,
+            marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
+            // LIVE label only when decision is verified LIVE and not a test fixture.
+            brokerQuoteVerified:
+              decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
+            marketStatus: "UNKNOWN",
+            priceSource: decision?.isTestDecision
+              ? "TEST_FIXTURE"
+              : decision?.symbolIdentity?.exchange ??
+                decision?.dataSourceLabel ??
+                "DECISION"
           }}
           dataTimestamp={stampIso}
         />

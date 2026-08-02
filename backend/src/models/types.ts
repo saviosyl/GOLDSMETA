@@ -137,6 +137,7 @@ export interface MarketSnapshot {
   id: string;
   sourceEventId: string;
   symbol: "XAUUSD";
+  exchange: string | null;
   timeframe: TradingViewPayload["timeframe"];
   marketDataTime: string;
   receivedAt: string;
@@ -239,6 +240,26 @@ export interface DecisionMarketStructure {
   confirmationCandleType: string | null;
 }
 
+/** Provenance for a single numeric market value. */
+export interface PricePointMeta {
+  source: string;
+  symbol: string;
+  exchangeOrBroker: string | null;
+  timeframe: string | null;
+  timestamp: string | null;
+  receivedAt: string;
+  quoteAgeSeconds: number | null;
+  value: number | null;
+}
+
+/** One canonical gold identity across TradingView / cTrader / GoldMeta. */
+export interface CanonicalSymbolIdentity {
+  tradingViewSymbol: string;
+  exchange: string | null;
+  ctraderSymbolId: string | null;
+  canonicalSymbol: "XAUUSD";
+}
+
 export interface DecisionRecord {
   schemaVersion: "1.0";
   decisionId: string;
@@ -289,6 +310,17 @@ export interface DecisionRecord {
   dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE" | "TEST";
   environment: "LIVE" | "TEST";
   isTestDecision: boolean;
+  /** Canonical XAUUSD identity for this decision's price sources. */
+  symbolIdentity?: CanonicalSymbolIdentity;
+  /** Provenance for key prices — never mix incompatible regimes without checking these. */
+  priceSources?: {
+    alertClose?: PricePointMeta;
+    barHigh?: PricePointMeta;
+    barLow?: PricePointMeta;
+    poc?: PricePointMeta;
+    vah?: PricePointMeta;
+    val?: PricePointMeta;
+  };
 }
 
 export const deviceRegistrationSchema = z

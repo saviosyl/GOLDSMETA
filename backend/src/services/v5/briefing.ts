@@ -1,5 +1,6 @@
 import type { DecisionRecord } from "../../models/types";
 import type { V4ShadowAnalysisRecord } from "../v4/shadowTypes";
+import { pricesAreConsistent } from "../snapshot/priceConsistency";
 import type { DailyBriefing } from "./types";
 
 export function buildDailyBriefing(input: {
@@ -12,8 +13,35 @@ export function buildDailyBriefing(input: {
   const a = input.latestAnalysis ?? null;
   const d = input.latestDecision ?? null;
 
-  const close = a?.ohlc.close ?? d?.lastKnownPrice ?? null;
-  const poc = a?.xauPoc ?? null;
+  // Prefer a single source family. Never combine V4 profile levels (~4050) with a
+  // stale/test V3 close (~2408) — that produces an invalid Market Structure Map.
+  const analysisClose = a?.ohlc?.close ?? null;
+  const decisionClose = d?.lastKnownPrice ?? d?.ohlcv?.close ?? null;
+  const sourcesConsistent = pricesAreConsistent(analysisClose, decisionClose);
+  // When TV analysis and V3 decision disagree, do not publish either close as a
+  // combined "live" reference and omit all levels (UI shows mismatch state).
+  const close = sourcesConsistent ? analysisClose ?? decisionClose : null;
+
+  const pickLevel = (
+    analysisLevel: number | null | undefined,
+    decisionLevel: number | null | undefined
+  ): number | null => {
+    if (!sourcesConsistent || close == null) return null;
+    if (pricesAreConsistent(close, analysisLevel)) return analysisLevel ?? null;
+    if (pricesAreConsistent(close, decisionLevel)) return decisionLevel ?? null;
+    return null;
+  };
+  const poc = pickLevel(a?.xauPoc, d?.marketStructure?.poc);
+  const vah = pickLevel(a?.vah, d?.marketStructure?.vah);
+  const val = pickLevel(a?.val, d?.marketStructure?.val);
+  const levelsConsistentWithClose =
+    sourcesConsistent &&
+    ((a?.xauPoc == null && a?.vah == null && a?.val == null) ||
+      (pricesAreConsistent(close, poc) &&
+        pricesAreConsistent(close, vah) &&
+        pricesAreConsistent(close, val) &&
+        (poc != null || vah != null || val != null)));
+
   let positionVsPoc: DailyBriefing["positionVsPoc"] = "UNKNOWN";
   if (close != null && poc != null) {
     if (Math.abs(close - poc) < 0.5) positionVsPoc = "AT_POC";
@@ -37,11 +65,22 @@ export function buildDailyBriefing(input: {
     verifiedFacts.push(
       `V4 shadow analysis bar=${a.barTime}, session=${a.session}, regime=${a.regime}, bias=${a.bias}.`
     );
-    verifiedFacts.push(
-      `Levels POC=${a.xauPoc ?? "null"} VAH=${a.vah ?? "null"} VAL=${a.val ?? "null"} (stored).`
-    );
+    if (levelsConsistentWithClose) {
+      verifiedFacts.push(
+        `Levels POC=${a.xauPoc ?? "null"} VAH=${a.vah ?? "null"} VAL=${a.val ?? "null"} (stored).`
+      );
+    } else {
+      explanations.push(
+        "V4 profile levels were omitted due to a price-source mismatch with the decision/alert close."
+      );
+    }
   } else {
     explanations.push("No verified V4 analysis yet for today — briefing is partial.");
+  }
+  if (!sourcesConsistent && analysisClose != null && decisionClose != null) {
+    explanations.push(
+      `Market data mismatch: V4 close ${analysisClose} vs decision close ${decisionClose}. Levels not combined.`
+    );
   }
   explanations.push("Briefing does not create a trade. V4 remains SHADOW only.");
 
@@ -61,9 +100,9 @@ export function buildDailyBriefing(input: {
     atrLabel,
     atrValue: atr,
     levels: {
-      poc: a?.xauPoc ?? null,
-      vah: a?.vah ?? null,
-      val: a?.val ?? null
+      poc,
+      vah,
+      val
     },
     bias: a?.bias ?? null,
     news:

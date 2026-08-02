@@ -1,4 +1,8 @@
-import { buildMarketLevelLadder, nearestLevels, type LadderInput } from "../../lib/marketLadder";
+import {
+  buildMarketLevelLadderDetailed,
+  nearestLevels,
+  type LadderInput
+} from "../../lib/marketLadder";
 import { formatLocalTimestamp } from "../../lib/timezone";
 
 export type MarketLevelLadderProps = {
@@ -9,9 +13,33 @@ export type MarketLevelLadderProps = {
 
 /** Market Structure Map — verified levels only; highest price at top. */
 export function MarketLevelLadder({ input, dataTimestamp, className = "" }: MarketLevelLadderProps) {
-  const rows = buildMarketLevelLadder(input);
+  const { rows, mismatch, liveLabel } = buildMarketLevelLadderDetailed(input);
   const { resistance, support } = nearestLevels(rows);
   const ts = formatLocalTimestamp(dataTimestamp);
+
+  if (mismatch) {
+    return (
+      <div
+        className={`gm-ladder gm-ladder-mismatch ${className}`.trim()}
+        data-testid="market-level-ladder"
+        role="alert"
+      >
+        <h3 className="gm-subsection-title" data-testid="market-data-mismatch-title">
+          Market data mismatch
+        </h3>
+        <p data-testid="market-data-mismatch-alert">
+          TradingView alert price: {mismatch.alertClose.toFixed(2)}
+        </p>
+        <p data-testid="market-data-mismatch-broker">
+          Broker/live price: {mismatch.comparisonPrice.toFixed(2)}
+        </p>
+        <p className="gm-meta" data-testid="market-data-mismatch-detail">
+          Signal blocked until the price sources match. GoldMeta will not combine incompatible
+          price regimes (for example a ~2400 test fixture with a ~4050 live alert).
+        </p>
+      </div>
+    );
+  }
 
   if (rows.length === 0) {
     return (
@@ -34,6 +62,7 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
         <span className="gm-meta">
           Updated {ts.primary}
           {ts.timeZone !== "UTC" ? ` · ${ts.timeZone}` : ""} · {ts.secondaryUtc}
+          {liveLabel !== "LIVE PRICE" ? ` · ${liveLabel}` : ""}
         </span>
         {(resistance || support) && (
           <span className="gm-meta">
@@ -76,7 +105,7 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
       </ol>
       <p className="gm-meta" style={{ marginTop: 10 }}>
         Levels shown are from verified stored market data only. Missing levels are omitted — never
-        fabricated.
+        fabricated. “LIVE PRICE” is shown only for a verified fresh non-test source.
       </p>
     </div>
   );
