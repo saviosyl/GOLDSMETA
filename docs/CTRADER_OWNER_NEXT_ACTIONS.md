@@ -1,7 +1,9 @@
-# Pepperstone cTrader Demo — owner next actions
+# Pepperstone cTrader — owner next actions
 
-Branch: `cursor/ctrader-demo-autotrade-ux-c2c2`  
-Scope: Demo only. AutoTrade OFF. No Live. No orders until separate approval.
+Branch: `cursor/ctrader-demo-autotrade-ux-c2c2` (PR #43)  
+Canonical architecture: [`MULTI_USER_AUTOTRADE_ARCHITECTURE.md`](./MULTI_USER_AUTOTRADE_ARCHITECTURE.md)
+
+**Temporary preview locks (not permanent product design):** AutoTrade OFF, `scope=accounts` only, Demo/Live order submission disabled. Production unchanged.
 
 ## Checkpoint A — Owner OAuth (accounts scope only)
 
@@ -14,26 +16,34 @@ Do **not** open the cTrader consent page until:
    - `CTRADER_CLIENT_SECRET`
    - `CTRADER_REDIRECT_URI`
    - `CTRADER_TOKEN_ENCRYPTION_KEY`
-   - `CTRADER_ENVIRONMENT` = `DEMO`
+   - `CTRADER_ENVIRONMENT` = `DEMO` (Open API host for this preview function — not a permanent product-wide Demo-only mode)
 2. Exact redirect URI:
    `https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/v1/ctrader/oauth/callback`
 3. Isolated preview web is serving this branch.
-4. Owner presses **Connect cTrader** on Broker Control Centre / AutoTrade dashboard.
+4. Owner (or any verified active user on preview) presses **Connect cTrader** on Broker Control Centre / AutoTrade dashboard.
 
 Initial OAuth scope must be **`accounts`** only. Do not request `trading`.
 
-## Later checkpoints (not started)
+## Product architecture (already implemented)
+
+- Multi-user per-UID encrypted broker connections
+- Demo **and** Live account listing/selection (Live requires typed confirmation)
+- Separate Demo/Live AutoTrade settings per user
+- Per-user TradingView webhooks + GoldMeta Standard template
+- Emergency STOP scoped by user and environment
+
+## Later checkpoints (not started — temporary locks)
 
 - **B** — trading scope (`scope=trading`) after read-only diagnostics pass  
 - **C** — first controlled Demo BUY/SELL  
 - **D** — enable Demo Auto  
-- **E** — merge + production deploy  
+- **E** — Live Auto / Live order execution (separate explicit approvals)  
+- **F** — merge + production deploy  
 
-## Hard locks
+## Temporary hard locks (preview)
 
-- `CTRADER_LIVE_ENABLED=false`
-- `LIVE_EXECUTION_FEATURE_FLAG=false`
-- `TRADING212_ORDER_SUBMISSION_ENABLED=false`
-- AutoTrade OFF / brokerExecution false / demoOrderSubmission false
-- Live accounts rejected
+- `CTRADER_LIVE_ENABLED=false` / `LIVE_EXECUTION_FEATURE_FLAG=false` — temporary
+- Order submission / broker execution flags hard-disabled — temporary
+- AutoTrade runtime OFF — temporary
+- Do **not** treat “Live accounts rejected” as product design; Live selection is implemented but execution stays locked
 - PR #42 (verification email) stays separate and untouched

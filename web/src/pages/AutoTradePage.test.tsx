@@ -67,7 +67,7 @@ const api = {
         name: "Pepperstone cTrader Demo",
         status: "Pepperstone connection required",
         detail: "Demo read-only",
-        badge: "DEMO_PREVIEW"
+        badge: "PREVIEW"
       }
     ],
     automationModes: [],

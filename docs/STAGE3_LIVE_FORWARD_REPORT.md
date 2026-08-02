@@ -1,5 +1,9 @@
 # Phase 3 Stage 3 — LIVE forward testing & PWA polish
 
+> **Historical document** (2026-07-21). Describes an earlier Stage 3 forward-test phase.
+> Current multi-user AutoTrade / TradingView architecture: [`MULTI_USER_AUTOTRADE_ARCHITECTURE.md`](./MULTI_USER_AUTOTRADE_ARCHITECTURE.md).
+> €20 risk figures below are historical test intent / recommended defaults, not permanent product hard caps.
+
 **Date:** 2026-07-21  
 **Branch:** `cursor/phase3-stage3-live-forward-c2c2` (`59be940`+)  
 **PR:** https://github.com/saviosyl/GOLDSMETA/pull/9 (draft)  

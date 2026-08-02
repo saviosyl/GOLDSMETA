@@ -1,5 +1,8 @@
 # GoldMeta V4 Stage B — LIVE Shadow Validation Checkpoint
 
+> **Historical document** (2026-07-21). V4 Stage B shadow validation only.
+> Current AutoTrade architecture: [`MULTI_USER_AUTOTRADE_ARCHITECTURE.md`](./MULTI_USER_AUTOTRADE_ARCHITECTURE.md).
+
 **Date:** 2026-07-21  
 **Branch:** `cursor/goldmeta-v4-stage-b-c2c2`  
 **Production-compatible base:** `95775dc` (`cursor/phase3-stage3-live-forward-c2c2`)  

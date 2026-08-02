@@ -625,7 +625,12 @@ export async function buildLiveDemoPreview(args: {
     eurToAccountRate: 1,
     marginPerLot: 200,
     sizingMode: settings.sizingMode,
-    manualLotSize: settings.manualLotSize
+    manualLotSize: settings.manualLotSize,
+    minConfidence: settings.minConfidence,
+    maxQuoteAgeSeconds: settings.maxQuoteAgeSeconds,
+    maxOpenPositions: settings.maxOpenPositions,
+    maxTradesPerDay: settings.maxTradesPerDay,
+    confirmationCandleRequired: settings.confirmationCandleRequired
   };
   const preview = buildTradePreview(input);
   return {

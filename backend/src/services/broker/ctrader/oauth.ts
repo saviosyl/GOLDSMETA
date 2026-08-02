@@ -1,6 +1,7 @@
 /**
- * cTrader OAuth 2.0 helpers — state, PKCE, Demo-only authorization.
- * Callback remains disabled until Auth integrity is HEALTHY.
+ * cTrader OAuth 2.0 helpers — state, PKCE, authorization URL builders.
+ * Preview OAuth uses accounts scope only (temporary lock — do not request trading).
+ * Callback remains disabled until Auth integrity is HEALTHY where gated.
  */
 
 import { createHash, randomBytes } from "node:crypto";

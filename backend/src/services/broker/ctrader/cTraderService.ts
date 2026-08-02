@@ -5,7 +5,10 @@
 
 import type { AutomationMode, BrokerHealthStatus, TradePreview } from "../domain";
 import { loadCTraderConfig } from "./config";
-import { snapshotCTraderFlags, CTRADER_DEMO_SERVER_LIMITS } from "./flags";
+import {
+  snapshotCTraderFlags,
+  CTRADER_RECOMMENDED_DEFAULTS
+} from "./flags";
 import {
   FIXTURE_BANNER,
   fixtureDemoAccount,
@@ -342,7 +345,7 @@ export function getBrokerControlCentreSnapshot(
 ) {
   const readiness = buildCTraderReadiness({ auth, connection });
   const pepperstoneStatus = readiness.connected
-    ? "Connected (Demo read-only)"
+    ? "Connected (preview — execution disabled)"
     : readiness.authSetupRequired
       ? "Connection setup required"
       : "Pepperstone connection required";
@@ -353,16 +356,17 @@ export function getBrokerControlCentreSnapshot(
     brokers: [
       {
         id: "pepperstone_ctrader",
-        name: "Pepperstone cTrader Demo",
+        name: "Pepperstone cTrader",
         status: pepperstoneStatus,
-        detail: "Demo read-only — AutoTrade OFF — Live locked",
-        badge: readiness.connected ? "CONNECTED" : "DEMO_PREVIEW"
+        detail:
+          "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
+        badge: readiness.connected ? "CONNECTED" : "PREVIEW"
       },
       {
         id: "trading212_invest",
         name: "Trading 212 Practice",
         status: "Read only",
-        detail: "Separate gold-proxy path — not part of the cTrader Demo workflow",
+        detail: "Separate gold-proxy path — not part of the cTrader AutoTrade workflow",
         badge: "READ_ONLY"
       },
       {
@@ -377,11 +381,23 @@ export function getBrokerControlCentreSnapshot(
       { id: "OFF", available: true },
       { id: "MANUAL", available: true },
       { id: "CONFIRM", available: true, note: "Preview only — stops at PREVIEW_APPROVED" },
-      { id: "DEMO_AUTO_LOCKED", available: false, note: "Visible but locked" },
-      { id: "DEMO_AUTO", available: false, note: "Impossible to activate" },
-      { id: "LIVE_LOCKED", available: false, note: "Impossible to activate" }
+      {
+        id: "DEMO_AUTO_LOCKED",
+        available: false,
+        note: "Temporarily locked — not a permanent product limitation"
+      },
+      {
+        id: "DEMO_AUTO",
+        available: false,
+        note: "Temporarily locked pending owner approval"
+      },
+      {
+        id: "LIVE_LOCKED",
+        available: false,
+        note: "Temporarily locked — Live selection exists; execution disabled"
+      }
     ],
-    limits: CTRADER_DEMO_SERVER_LIMITS,
+    limits: CTRADER_RECOMMENDED_DEFAULTS,
     readiness,
     health: {
       brokerId: "pepperstone_ctrader",

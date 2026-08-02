@@ -446,7 +446,7 @@ export function BrokerControlCentrePage() {
             </div>
           ) : (
             <div className="gm-risk-box" data-testid="ctrader-connected-summary" role="status">
-              <strong>Connected (Demo read-only)</strong>
+              <strong>Connected (preview — execution disabled)</strong>
               <p className="gm-meta" style={{ marginBottom: 0 }}>
                 Account {summary?.accountMasked ?? "—"} · {summary?.brokerName ?? "Broker pending"}
                 {summary?.symbolName ? ` · ${summary.symbolName}` : ""}
@@ -685,7 +685,7 @@ export function BrokerControlCentrePage() {
             <h3 id="readonly-heading">Read-only checks (when connected)</h3>
             <ul>
               <li>Client ID / secret / redirect URI present on the server</li>
-              <li>OAuth connection and Demo account selection</li>
+              <li>OAuth connection and Demo/Live account selection</li>
               <li>Pepperstone account confirmation</li>
               <li>XAUUSD symbol discovery</li>
               <li>Live bid / ask, spread, volume minimum &amp; step</li>
@@ -697,21 +697,28 @@ export function BrokerControlCentrePage() {
           </section>
 
           <section aria-labelledby="risk-heading" className="gm-risk-box">
-            <h3 id="risk-heading">Demo safety caps (server)</h3>
+            <h3 id="risk-heading">Risk &amp; execution (per user)</h3>
             <ul>
-              <li>Max risk per trade €20</li>
-              <li>Max one open XAUUSD position</li>
-              <li>Max three trades per day</li>
-              <li>Confidence ≥ 80% · signal age ≤ 90s</li>
-              <li>Stop loss required · confirmed candle required</li>
-              <li>No martingale / averaging / grid / pyramiding / blind retry</li>
+              <li>
+                Risk, lot sizing, daily loss, trade caps, confidence, sessions, and
+                filters are configured per user (Demo and Live settings are separate)
+              </li>
+              <li>Recommended defaults apply only until the user saves settings</li>
+              <li>Broker volume min/step from Open API still apply</li>
+              <li>Stop loss required · no martingale / averaging / grid / pyramiding / blind retry</li>
+              <li>
+                <strong>Temporary preview locks:</strong> AutoTrade OFF · order
+                submission disabled · <code>scope=accounts</code> only — not permanent
+                product limitations
+              </li>
             </ul>
           </section>
 
           <section aria-labelledby="qual-heading">
             <h3 id="qual-heading">Demo trading approval</h3>
             <p className="gm-meta">
-              Progress is visible only — Demo Auto cannot be activated in this phase.
+              Progress is visible only — Demo Auto remains temporarily locked until
+              explicit owner approval (not a permanent product limitation).
             </p>
             <ul className="gm-qual-list">
               {(readiness?.qualification.failed ?? []).slice(0, 8).map((g) => (

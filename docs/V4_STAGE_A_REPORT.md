@@ -1,5 +1,8 @@
 # GoldMeta V4 — Stage A Research Report
 
+> **Historical document** (2026-07-21). V4 research / stage gates only.
+> Current AutoTrade architecture: [`MULTI_USER_AUTOTRADE_ARCHITECTURE.md`](./MULTI_USER_AUTOTRADE_ARCHITECTURE.md).
+
 **Date:** 2026-07-21  
 **Branch:** `cursor/goldmeta-v4-engine-c2c2`  
 **Engine:** `1.0.0-v4-stage-a` / `strategyVersion=4` / `v4-config-1.0.0`  

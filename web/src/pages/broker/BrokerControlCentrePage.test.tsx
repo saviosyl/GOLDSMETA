@@ -35,7 +35,7 @@ const centreFixture = {
       name: "Pepperstone cTrader Demo",
       status: "Connection setup required",
       detail: "Demo setup",
-      badge: "DEMO_PREVIEW"
+      badge: "PREVIEW"
     },
     {
       id: "trading212_invest",
