@@ -65,10 +65,14 @@ const parseError = async (response: Response): Promise<ApiError> => {
 
 export class ApiClient {
   private readonly baseUrl: string;
+  /** Optional dedicated cTrader backend (apiCTraderPreview). Falls back to baseUrl. */
+  private readonly ctraderBaseUrl: string;
   private readonly getIdToken: TokenProvider;
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    const ctraderEnv = (import.meta.env.VITE_CTRADER_API_BASE_URL as string | undefined)?.trim();
+    this.ctraderBaseUrl = (ctraderEnv || this.baseUrl).replace(/\/$/, "");
     this.getIdToken = options.getIdToken;
   }
 
@@ -76,7 +80,8 @@ export class ApiClient {
     path: string,
     init: RequestInit = {},
     auth = true,
-    retried = false
+    retried = false,
+    baseUrl: string = this.baseUrl
   ): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
@@ -92,13 +97,13 @@ export class ApiClient {
       headers.set("Authorization", `Bearer ${token}`);
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl}${path}`, {
       ...init,
       headers
     });
 
     if (response.status === 401 && auth && !retried) {
-      return this.request<T>(path, init, auth, true);
+      return this.request<T>(path, init, auth, true, baseUrl);
     }
 
     if (response.status === 204) {
@@ -110,6 +115,15 @@ export class ApiClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  /** cTrader / Pepperstone routes — may target isolated apiCTraderPreview. */
+  private requestCTrader<T>(
+    path: string,
+    init: RequestInit = {},
+    auth = true
+  ): Promise<T> {
+    return this.request<T>(path, init, auth, false, this.ctraderBaseUrl);
   }
 
   health(): Promise<HealthResponse> {
@@ -774,17 +788,17 @@ export class ApiClient {
   async getBrokerControlCentre(): Promise<
     import("./broker/ctraderTypes").BrokerControlCentreResponse
   > {
-    return this.request("/v1/brokers/control-centre");
+    return this.requestCTrader("/v1/brokers/control-centre");
   }
 
   async getCTraderStatus(): Promise<unknown> {
-    return this.request("/v1/ctrader/status");
+    return this.requestCTrader("/v1/ctrader/status");
   }
 
   async getCTraderDemonstration(): Promise<
     import("./broker/ctraderTypes").CTraderDemonstrationBundle
   > {
-    return this.request("/v1/ctrader/demonstration");
+    return this.requestCTrader("/v1/ctrader/demonstration");
   }
 
   async startCTraderOAuth(): Promise<{
@@ -792,8 +806,36 @@ export class ApiClient {
     state: string;
     expiresAt: string;
     environment: "DEMO" | "LIVE";
+    scope?: "accounts" | "trading";
   }> {
-    return this.request("/v1/ctrader/oauth/start", { method: "POST", body: "{}" });
+    return this.requestCTrader("/v1/ctrader/oauth/start", { method: "POST", body: "{}" });
+  }
+
+  /** Authorise Demo Trading — opens cTrader consent with scope=trading. */
+  async authoriseCTraderDemoTrading(): Promise<{
+    authorizationUrl: string;
+    state: string;
+    expiresAt: string;
+    scope: "trading";
+    purpose: string;
+    warning?: string;
+    message?: string;
+  }> {
+    return this.requestCTrader("/v1/ctrader/oauth/authorise-demo-trading", {
+      method: "POST",
+      body: JSON.stringify({ confirmTradingPermission: true })
+    });
+  }
+
+  async getFirstDemoOrderCheckpoint(params?: {
+    decision?: "BUY" | "SELL" | "WAIT";
+    confidence?: number;
+  }): Promise<Record<string, unknown>> {
+    const q = new URLSearchParams();
+    if (params?.decision) q.set("decision", params.decision);
+    if (params?.confidence != null) q.set("confidence", String(params.confidence));
+    const suffix = q.toString() ? `?${q}` : "";
+    return this.requestCTrader(`/v1/ctrader/demo-orders/first-checkpoint${suffix}`);
   }
 
   async listCTraderDemoAccounts(): Promise<{
@@ -804,7 +846,7 @@ export class ApiClient {
       accountType?: "Demo" | "Live";
     } | null;
   }> {
-    return this.request("/v1/ctrader/accounts");
+    return this.requestCTrader("/v1/ctrader/accounts");
   }
 
   /** Alias — lists Demo and Live accounts authorised for the signed-in user. */
@@ -824,7 +866,7 @@ export class ApiClient {
     confirmPepperstone?: boolean;
     confirmLiveSelection?: boolean;
   }): Promise<unknown> {
-    return this.request("/v1/ctrader/accounts/select", {
+    return this.requestCTrader("/v1/ctrader/accounts/select", {
       method: "POST",
       body: JSON.stringify(payload)
     });
@@ -842,21 +884,21 @@ export class ApiClient {
     settings: import("./broker/ctraderTypes").UserAutoTradeSettingsDto;
     recommended: Record<string, unknown>;
   }> {
-    return this.request(`/v1/ctrader/autotrade-settings/${environment}`);
+    return this.requestCTrader(`/v1/ctrader/autotrade-settings/${environment}`);
   }
 
   async saveAutoTradeSettings(
     environment: "demo" | "live",
     patch: Record<string, unknown>
   ): Promise<{ settings: import("./broker/ctraderTypes").UserAutoTradeSettingsDto }> {
-    return this.request(`/v1/ctrader/autotrade-settings/${environment}`, {
+    return this.requestCTrader(`/v1/ctrader/autotrade-settings/${environment}`, {
       method: "PUT",
       body: JSON.stringify(patch)
     });
   }
 
   async confirmLiveAutoTradeActivation(phrase: string): Promise<unknown> {
-    return this.request("/v1/ctrader/live-activation/confirm", {
+    return this.requestCTrader("/v1/ctrader/live-activation/confirm", {
       method: "POST",
       body: JSON.stringify({ phrase })
     });
@@ -866,20 +908,20 @@ export class ApiClient {
     environment: "demo" | "live";
     active?: boolean;
   }): Promise<unknown> {
-    return this.request("/v1/ctrader/emergency-stop", {
+    return this.requestCTrader("/v1/ctrader/emergency-stop", {
       method: "POST",
       body: JSON.stringify(payload)
     });
   }
 
   async disconnectCTrader(): Promise<{ disconnected: boolean }> {
-    return this.request("/v1/ctrader/disconnect", { method: "POST", body: "{}" });
+    return this.requestCTrader("/v1/ctrader/disconnect", { method: "POST", body: "{}" });
   }
 
   async getCTraderDiagnostics(): Promise<
     import("./broker/ctraderTypes").CTraderDiagnosticsReport
   > {
-    return this.request("/v1/ctrader/diagnostics");
+    return this.requestCTrader("/v1/ctrader/diagnostics");
   }
 
   async getCTraderQuote(): Promise<{
@@ -893,11 +935,11 @@ export class ApiClient {
     };
     label: string;
   }> {
-    return this.request("/v1/ctrader/quote");
+    return this.requestCTrader("/v1/ctrader/quote");
   }
 
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {
-    return this.request("/v1/ctrader/preview", {
+    return this.requestCTrader("/v1/ctrader/preview", {
       method: "POST",
       body: JSON.stringify(payload)
     });

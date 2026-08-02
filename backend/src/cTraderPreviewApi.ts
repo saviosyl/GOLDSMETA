@@ -66,7 +66,7 @@ function applyCTraderPreviewRuntimeEnv(): void {
   if (!process.env.GOLDMETA_WEB_ORIGIN) {
     process.env.GOLDMETA_WEB_ORIGIN =
       process.env.WEB_ORIGIN ??
-      "https://preview-ctrader-demo-autotra.goldmeta-web.pages.dev";
+      "https://goldmeta.metamechsolutions.com";
   }
 }
 

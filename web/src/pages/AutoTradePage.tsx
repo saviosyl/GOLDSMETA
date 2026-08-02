@@ -252,7 +252,7 @@ export function AutoTradePage() {
         settingsSaved,
         checksOk: sync.checksOk,
         previewOk,
-        tradingAuthorised: false,
+        tradingAuthorised: diagnostics?.connection?.oauthScope === "trading",
         autoTradeOn: false
       }),
     [
@@ -263,7 +263,8 @@ export function AutoTradePage() {
       sync.checksOk,
       mode,
       settingsSaved,
-      previewOk
+      previewOk,
+      diagnostics?.connection?.oauthScope
     ]
   );
 

@@ -136,8 +136,10 @@ export function buildOnboardingSteps(args: {
     {
       id: 10,
       title: "Authorise trading",
-      status: "Locked",
-      detail: "Trading authorisation stays locked while order submission is disabled."
+      status: s.tradingAuthorised ? "Complete" : s.goldOk ? "Current" : "Locked",
+      detail: s.tradingAuthorised
+        ? "Demo trading permission granted (scope=trading). AutoTrade still OFF until enabled."
+        : "Use Authorise Demo Trading on Broker Control Centre to grant scope=trading for your Demo account."
     },
     {
       id: 11,

@@ -380,7 +380,7 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-step-4-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-5-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-6-status")).toHaveTextContent("Complete");
-    expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Locked");
+    expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Current");
     expect(screen.getByTestId("autotrade-step-11-status")).toHaveTextContent("Locked");
     const activity = screen.getByTestId("autotrade-activity");
     expect(activity.textContent).toMatch(/Demo account \*\*\*\*4810 connected\. AutoTrade OFF/);

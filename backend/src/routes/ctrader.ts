@@ -35,6 +35,7 @@ import {
   listAuthorisedAccountsForUser,
   readQuoteForOwner,
   selectBrokerAccountForUser,
+  startDemoTradingOAuth,
   startOAuthForOwner
 } from "../services/broker/ctrader/connectionService";
 import { getConnection } from "../services/broker/ctrader/connectionStore";
@@ -43,6 +44,7 @@ import {
 } from "../services/broker/ctrader/oauth";
 import { sendFriendlyError } from "../services/broker/ctrader/friendlyErrors";
 import { loadTokenEncryptionSecret } from "../services/broker/ctrader/connectionStore";
+import { buildFirstDemoOrderCheckpoint } from "../services/broker/ctrader/firstDemoOrderCheckpoint";
 import {
   confirmLiveActivation,
   getUserAutoTradeSettings,
@@ -275,22 +277,106 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const uid = requireUid(req, res);
     if (!uid) return;
     try {
-      const started = await startOAuthForOwner(uid);
+      const started = await startOAuthForOwner(uid, { scope: "accounts" });
       res.json({
         authorizationUrl: started.authorizationUrl,
         state: started.state,
         expiresAt: started.expiresAt,
+        scope: started.scope,
+        purpose: started.purpose,
         // App credentials may still target Demo Open API hosts in preview —
         // selected account type is resolved from OAuth-returned accounts.
         environment: started.environment,
         clientIdPresent: true,
         message:
-          "Open the authorization URL to connect your cTrader broker account. You can then choose Demo or Live."
+          "Open the authorization URL to connect your cTrader broker account. You can then choose Demo or Live. This connect flow uses read-only accounts scope."
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
     }
   });
+
+  /**
+   * Authorise Demo Trading — fresh OAuth with scope=trading.
+   * Owner/user must complete cTrader consent personally.
+   * AutoTrade stays OFF. Order submission stays OFF until a later checkpoint.
+   */
+  router.post(
+    "/v1/ctrader/oauth/authorise-demo-trading",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      if (!loadCTraderConfig().configured || !loadTokenEncryptionSecret()) {
+        sendFriendlyError(res, 503, "CTRADER_SETUP_REQUIRED");
+        return;
+      }
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      const confirm = Boolean(
+        (req.body as { confirmTradingPermission?: boolean } | undefined)
+          ?.confirmTradingPermission
+      );
+      if (!confirm) {
+        res.status(400).json({
+          error: {
+            code: "CTRADER_TRADING_CONFIRMATION_REQUIRED",
+            message:
+              "Confirm that you are granting Pepperstone/cTrader trading permission for your own Demo account."
+          }
+        });
+        return;
+      }
+      try {
+        const conn = await getConnection(uid);
+        if (conn?.selectedAccountIsLive) {
+          sendFriendlyError(res, 409, "CTRADER_DEMO_TRADING_LIVE_ACCOUNT_FORBIDDEN");
+          return;
+        }
+        const started = await startDemoTradingOAuth(uid);
+        res.json({
+          authorizationUrl: started.authorizationUrl,
+          state: started.state,
+          expiresAt: started.expiresAt,
+          scope: "trading",
+          purpose: "authorise_demo_trading",
+          environment: "DEMO",
+          autoTrade: "OFF",
+          orderSubmissionEnabled: false,
+          warning:
+            "You are about to grant trading permission on cTrader. Confirm Demo account only after return. Live accounts must not be selected. AutoTrade stays OFF.",
+          message:
+            "Complete cTrader consent personally. GoldMeta will encrypt and store the returned token pair under your user id only."
+        });
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
+  /** First Demo order checkpoint — prepare only; never submit. */
+  router.get(
+    "/v1/ctrader/demo-orders/first-checkpoint",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      try {
+        const decisionRaw = String(req.query.decision ?? "BUY").toUpperCase();
+        const decision =
+          decisionRaw === "SELL" || decisionRaw === "WAIT" ? decisionRaw : "BUY";
+        const confidence = Number(req.query.confidence ?? 85);
+        const checkpoint = await buildFirstDemoOrderCheckpoint({
+          ownerUid: uid,
+          decision: decision as "BUY" | "SELL" | "WAIT",
+          confidence: Number.isFinite(confidence) ? confidence : 85
+        });
+        res.json(checkpoint);
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
 
   /**
    * Browser redirect callback from Spotware — NO Bearer auth.

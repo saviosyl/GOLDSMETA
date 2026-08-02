@@ -1,11 +1,13 @@
 /**
  * cTrader OAuth 2.0 helpers — state, PKCE, authorization URL builders.
- * Preview OAuth uses accounts scope only (temporary lock — do not request trading).
- * Callback remains disabled until Auth integrity is HEALTHY where gated.
+ * Default connect uses scope=accounts (read-only).
+ * Authorise Demo Trading uses scope=trading after explicit owner/user action.
  */
 
 import { createHash, randomBytes } from "node:crypto";
 import { loadCTraderConfig } from "./config";
+
+export type CTraderOAuthScope = "accounts" | "trading";
 
 export interface OAuthStateRecord {
   state: string;
@@ -15,6 +17,8 @@ export interface OAuthStateRecord {
   expiresAt: string;
   ownerUidHash: string;
   redirectUri: string;
+  /** Requested Open API scope for this consent. */
+  requestedScope: CTraderOAuthScope;
 }
 
 export function hashOwnerUid(uid: string): string {
@@ -27,10 +31,16 @@ export function createPkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-export function createOAuthState(ownerUid: string): OAuthStateRecord {
+export function createOAuthState(
+  ownerUid: string,
+  requestedScope: CTraderOAuthScope = "accounts"
+): OAuthStateRecord {
   const conf = loadCTraderConfig();
   if (!conf.redirectUri) {
     throw new Error("CTRADER_REDIRECT_URI_MISSING");
+  }
+  if (requestedScope !== "accounts" && requestedScope !== "trading") {
+    throw new Error("CTRADER_OAUTH_SCOPE_INVALID");
   }
   const { verifier, challenge } = createPkcePair();
   const now = Date.now();
@@ -41,7 +51,8 @@ export function createOAuthState(ownerUid: string): OAuthStateRecord {
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
     ownerUidHash: hashOwnerUid(ownerUid),
-    redirectUri: conf.redirectUri
+    redirectUri: conf.redirectUri,
+    requestedScope
   };
 }
 
@@ -90,19 +101,23 @@ export function buildAuthorizationUrl(args: {
   state: string;
   codeChallenge: string;
   clientId: string;
+  scope?: CTraderOAuthScope;
 }): string {
   const conf = loadCTraderConfig();
   if (!conf.redirectUri) {
     throw new Error("CTRADER_REDIRECT_URI_MISSING");
+  }
+  const scope: CTraderOAuthScope = args.scope ?? "accounts";
+  if (scope !== "accounts" && scope !== "trading") {
+    throw new Error("CTRADER_OAUTH_SCOPE_INVALID");
   }
   // Never accept caller-supplied redirect — server config only.
   const redirectUri = conf.redirectUri;
   const url = new URL(conf.authUrl);
   url.searchParams.set("client_id", args.clientId);
   url.searchParams.set("redirect_uri", redirectUri);
-  // Checkpoint A: accounts (read-only) only. Never request trading here.
-  // Trading scope requires separate Checkpoint B owner approval.
-  url.searchParams.set("scope", "accounts");
+  // accounts = read-only connect; trading = Authorise Demo Trading (explicit).
+  url.searchParams.set("scope", scope);
   url.searchParams.set("product", "web");
   url.searchParams.set("state", args.state);
   url.searchParams.set("code_challenge", args.codeChallenge);

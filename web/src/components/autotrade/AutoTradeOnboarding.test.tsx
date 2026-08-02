@@ -23,7 +23,7 @@ describe("buildOnboardingSteps", () => {
     expect(byId[7].status).toBe("Complete");
     expect(byId[8].status).toBe("Complete");
     expect(byId[9].status).toBe("Current");
-    expect(byId[10].status).toBe("Locked");
+    expect(byId[10].status).toBe("Current");
     expect(byId[11].status).toBe("Locked");
   });
 

@@ -154,6 +154,7 @@ export function BrokerControlCentrePage() {
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<BrokerAction | null>(null);
+  const [firstCheckpoint, setFirstCheckpoint] = useState<Record<string, unknown> | null>(null);
 
   const selectionTouchedRef = useRef(false);
   const oauthHandledRef = useRef(false);
@@ -472,6 +473,56 @@ export function BrokerControlCentrePage() {
         e,
         "Pepperstone connection could not be started. Please try again from Broker Control Centre."
       );
+    }
+  };
+
+  const authoriseDemoTrading = async () => {
+    if (!guardAction("authorise_demo_trading")) return;
+    if (
+      !window.confirm(
+        "Authorise Demo Trading will open cTrader and request trading permission (scope=trading) for your own Pepperstone Demo account.\n\nLive accounts must not be selected.\nAutoTrade stays OFF.\nNo order will be submitted in this step.\n\nContinue?"
+      )
+    ) {
+      return;
+    }
+    beginAction("authorise_demo_trading");
+    try {
+      const started = await api.authoriseCTraderDemoTrading();
+      if (started.authorizationUrl) {
+        setActionBanner({
+          tone: "warning",
+          message:
+            "Opening cTrader trading consent… grant permission only for your Demo account. AutoTrade stays OFF."
+        });
+        window.location.assign(started.authorizationUrl);
+        return;
+      }
+      finishActionError(
+        "authorise_demo_trading",
+        new ApiError(503, "CTRADER_SETUP_REQUIRED", "No authorization URL"),
+        "Demo trading authorisation could not be started."
+      );
+    } catch (e) {
+      finishActionError(
+        "authorise_demo_trading",
+        e,
+        "Demo trading authorisation could not be started."
+      );
+    }
+  };
+
+  const loadFirstCheckpoint = async () => {
+    if (!guardAction("first_checkpoint")) return;
+    beginAction("first_checkpoint");
+    try {
+      const checkpoint = await api.getFirstDemoOrderCheckpoint({ decision: "BUY", confidence: 85 });
+      setFirstCheckpoint(checkpoint);
+      finishActionSuccess(
+        "first_checkpoint",
+        String(checkpoint.notice ?? "First Demo order checkpoint loaded. No order submitted.")
+      );
+    } catch (e) {
+      finishActionError("first_checkpoint", e, "Could not prepare the first Demo order checkpoint.");
     }
   };
 
@@ -1034,6 +1085,36 @@ export function BrokerControlCentrePage() {
                 </button>
                 <button
                   type="button"
+                  className={actionBtnClass("authorise_demo_trading")}
+                  data-testid="ctrader-authorise-demo-trading-btn"
+                  disabled={anyActionBusy || !readiness?.oauthConfigured}
+                  aria-busy={isBusy("authorise_demo_trading")}
+                  title="Request cTrader trading permission for your Demo account (scope=trading). AutoTrade stays OFF."
+                  onClick={() => void authoriseDemoTrading()}
+                >
+                  {actionButtonLabel(
+                    "authorise_demo_trading",
+                    phaseOf("authorise_demo_trading"),
+                    "Authorise Demo Trading"
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className={`gm-btn-secondary ${actionBtnClass("first_checkpoint")}`}
+                  data-testid="ctrader-first-demo-checkpoint-btn"
+                  disabled={anyActionBusy}
+                  aria-busy={isBusy("first_checkpoint")}
+                  title="Prepare the first Demo order preview — does not submit"
+                  onClick={() => void loadFirstCheckpoint()}
+                >
+                  {actionButtonLabel(
+                    "first_checkpoint",
+                    phaseOf("first_checkpoint"),
+                    "Prepare first Demo order"
+                  )}
+                </button>
+                <button
+                  type="button"
                   className="gm-btn gm-btn-secondary gm-action-btn"
                   data-testid="ctrader-view-diagnostics-btn"
                   disabled={anyActionBusy || !diagnostics}
@@ -1105,6 +1186,30 @@ export function BrokerControlCentrePage() {
             sent from this page.
           </p>
 
+          {firstCheckpoint ? (
+            <section
+              className="gm-risk-box"
+              data-testid="ctrader-first-demo-checkpoint"
+              aria-labelledby="first-demo-checkpoint-heading"
+            >
+              <h3 id="first-demo-checkpoint-heading">First Demo order checkpoint</h3>
+              <p className="gm-meta" data-testid="first-demo-checkpoint-status">
+                Status: {String(firstCheckpoint.status ?? "—")} · AutoTrade OFF · No order submitted
+              </p>
+              <p className="gm-meta">
+                Reply <strong>APPROVE FIRST DEMO ORDER</strong> in chat only after reviewing this
+                preview. Live orders stay forbidden.
+              </p>
+              <pre
+                className="gm-meta"
+                style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: "24rem" }}
+                data-testid="first-demo-checkpoint-json"
+              >
+                {JSON.stringify(firstCheckpoint, null, 2)}
+              </pre>
+            </section>
+          ) : null}
+
           {accounts.length > 0 ? (
             <section
               className="gm-risk-box"
@@ -1113,7 +1218,8 @@ export function BrokerControlCentrePage() {
             >
               <h3 id="account-select-heading">Select broker account</h3>
               <p className="gm-meta">
-                Demo and Live accounts from your OAuth connection. Live needs confirmation.
+                Demo and Live accounts from your OAuth connection. Live needs confirmation. For Demo
+                trading authorisation, select Demo only.
               </p>
               <ul className="gm-qual-list">
                 {accounts.map((a) => (

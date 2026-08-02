@@ -88,6 +88,9 @@ export type DiagnosticsReport = {
     lastSyncAt: string | null;
     lastQuoteAt: string | null;
     tokenRefreshHealthy: boolean | null;
+    oauthScope?: "accounts" | "trading" | null;
+    tradingScopeGrantedAt?: string | null;
+    oauthScopeVersion?: string | null;
   };
   quote: BrokerQuote | null;
   account: ReturnType<typeof toSafeBrokerAccount> | null;
@@ -119,11 +122,16 @@ export function assertPinnedOwner(ownerUid: string): void {
   assertBrokerUser(ownerUid);
 }
 
-export async function startOAuthForOwner(ownerUid: string): Promise<{
+export async function startOAuthForOwner(
+  ownerUid: string,
+  opts?: { scope?: "accounts" | "trading"; purpose?: string }
+): Promise<{
   authorizationUrl: string;
   state: string;
   expiresAt: string;
   environment: "DEMO";
+  scope: "accounts" | "trading";
+  purpose: string;
 }> {
   assertBrokerUser(ownerUid);
   const config = loadCTraderConfig();
@@ -138,7 +146,11 @@ export async function startOAuthForOwner(ownerUid: string): Promise<{
     (err as Error & { code: string }).code = "CTRADER_TOKEN_ENCRYPTION_KEY_MISSING";
     throw err;
   }
-  const stateRec = createOAuthState(ownerUid);
+  const scope = opts?.scope ?? "accounts";
+  const purpose =
+    opts?.purpose ??
+    (scope === "trading" ? "authorise_demo_trading" : "connect_accounts");
+  const stateRec = createOAuthState(ownerUid, scope);
   await saveOAuthState({
     ...stateRec,
     ownerUid,
@@ -148,14 +160,25 @@ export async function startOAuthForOwner(ownerUid: string): Promise<{
   const authorizationUrl = buildAuthorizationUrl({
     state: stateRec.state,
     codeChallenge: stateRec.codeChallenge,
-    clientId
+    clientId,
+    scope
   });
   return {
     authorizationUrl,
     state: stateRec.state,
     expiresAt: stateRec.expiresAt,
-    environment: "DEMO"
+    environment: "DEMO",
+    scope,
+    purpose
   };
+}
+
+/** Explicit trading-scope OAuth for Demo trading authorisation. */
+export async function startDemoTradingOAuth(ownerUid: string) {
+  return startOAuthForOwner(ownerUid, {
+    scope: "trading",
+    purpose: "authorise_demo_trading"
+  });
 }
 
 export async function completeOAuthCallback(args: {
@@ -209,10 +232,13 @@ export async function completeOAuthCallback(args: {
     enc
   );
   const now = new Date().toISOString();
+  const requestedScope =
+    record.requestedScope === "trading" ? "trading" : "accounts";
+  const prior = await getConnection(record.ownerUid);
   const connection: CTraderConnectionRecord = {
     ownerUid: record.ownerUid,
-    environment: "DEMO",
-    connectedAt: now,
+    environment: prior?.environment === "LIVE" ? "LIVE" : "DEMO",
+    connectedAt: prior?.connectedAt ?? now,
     updatedAt: now,
     tokens: {
       ciphertext,
@@ -220,24 +246,44 @@ export async function completeOAuthCallback(args: {
         Date.now() + Math.max(60, tokens.expiresIn) * 1000
       ).toISOString(),
       refreshedAt: null,
-      tokenVersion: 1
+      tokenVersion: (prior?.tokens.tokenVersion ?? 0) + 1
     },
-    selectedAccountId: null,
-    selectedAccountMasked: null,
-    selectedAccountKeyHash: null,
-    selectedAccountIsLive: false,
-    brokerName: null,
-    brokerConfirmedPepperstone: false,
-    currency: null,
-    leverage: null,
-    balance: null,
-    symbolId: null,
-    symbolName: null,
+    // Preserve prior Demo selection across re-auth; never inherit a Live selection
+    // when this consent is for Demo trading authorisation.
+    selectedAccountId:
+      requestedScope === "trading" && prior?.selectedAccountIsLive
+        ? null
+        : prior?.selectedAccountId ?? null,
+    selectedAccountMasked:
+      requestedScope === "trading" && prior?.selectedAccountIsLive
+        ? null
+        : prior?.selectedAccountMasked ?? null,
+    selectedAccountKeyHash:
+      requestedScope === "trading" && prior?.selectedAccountIsLive
+        ? null
+        : prior?.selectedAccountKeyHash ?? null,
+    selectedAccountIsLive:
+      requestedScope === "trading" ? false : Boolean(prior?.selectedAccountIsLive),
+    brokerName: prior?.brokerName ?? null,
+    brokerConfirmedPepperstone: prior?.brokerConfirmedPepperstone ?? false,
+    currency: prior?.currency ?? null,
+    leverage: prior?.leverage ?? null,
+    balance: prior?.balance ?? null,
+    symbolId: prior?.symbolId ?? null,
+    symbolName: prior?.symbolName ?? null,
     lastSyncAt: now,
-    lastQuoteAt: null,
+    lastQuoteAt: prior?.lastQuoteAt ?? null,
     lastErrorCode: null,
     disconnectedAt: null,
-    liveSelectionConfirmedAt: null
+    liveSelectionConfirmedAt:
+      requestedScope === "trading" ? null : prior?.liveSelectionConfirmedAt ?? null,
+    oauthScope: requestedScope,
+    tradingScopeGrantedAt:
+      requestedScope === "trading" ? now : prior?.tradingScopeGrantedAt ?? null,
+    oauthScopeVersion:
+      requestedScope === "trading"
+        ? `trading-v1-${now}`
+        : prior?.oauthScopeVersion ?? `accounts-v1-${now}`
   };
   await saveConnection(connection);
 
@@ -450,6 +496,12 @@ export async function selectBrokerAccountForUser(args: {
       code: "CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED"
     });
   }
+  // Demo trading authorisation path must never select a Live account.
+  if (match.isLive && freshConn.oauthScope === "trading") {
+    throw Object.assign(new Error("CTRADER_DEMO_TRADING_LIVE_ACCOUNT_FORBIDDEN"), {
+      code: "CTRADER_DEMO_TRADING_LIVE_ACCOUNT_FORBIDDEN"
+    });
+  }
 
   const { clientId, clientSecret } = clientCreds();
   const snap = await api.fetchAccountSnapshot({
@@ -654,7 +706,10 @@ export async function buildDiagnostics(
       symbolName: connection?.symbolName ?? null,
       lastSyncAt: connection?.lastSyncAt ?? null,
       lastQuoteAt: connection?.lastQuoteAt ?? null,
-      tokenRefreshHealthy
+      tokenRefreshHealthy,
+      oauthScope: connection?.oauthScope ?? "accounts",
+      tradingScopeGrantedAt: connection?.tradingScopeGrantedAt ?? null,
+      oauthScopeVersion: connection?.oauthScopeVersion ?? null
     },
     quote,
     account,

@@ -13,7 +13,9 @@ export type BrokerAction =
   | "select_account"
   | "preview"
   | "demo"
-  | "retry";
+  | "retry"
+  | "authorise_demo_trading"
+  | "first_checkpoint";
 
 export type ActionPhase = "idle" | "pending" | "success" | "error";
 

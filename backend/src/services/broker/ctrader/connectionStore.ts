@@ -49,6 +49,12 @@ export type CTraderConnectionRecord = {
   disconnectedAt: string | null;
   /** Live selection requires explicit user confirmation (not Demo inheritance). */
   liveSelectionConfirmedAt: string | null;
+  /** Last OAuth consent scope (accounts | trading). */
+  oauthScope?: "accounts" | "trading" | null;
+  /** ISO time when trading scope was granted. */
+  tradingScopeGrantedAt?: string | null;
+  /** Opaque scope/version marker for audits (not a secret). */
+  oauthScopeVersion?: string | null;
 };
 
 const STATE_COL = "ctraderOAuthStates";

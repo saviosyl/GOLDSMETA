@@ -93,6 +93,9 @@ export interface CTraderDiagnosticsReport {
     lastSyncAt: string | null;
     lastQuoteAt: string | null;
     tokenRefreshHealthy: boolean | null;
+    oauthScope?: "accounts" | "trading" | null;
+    tradingScopeGrantedAt?: string | null;
+    oauthScopeVersion?: string | null;
   };
   quote: {
     bid: number | null;

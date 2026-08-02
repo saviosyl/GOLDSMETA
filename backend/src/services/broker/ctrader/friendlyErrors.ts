@@ -47,6 +47,18 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     impact: "The Live account was not selected. Demo settings are unchanged.",
     nextStep: "Review the Live confirmation screen, then confirm the Live account."
   },
+  CTRADER_DEMO_TRADING_LIVE_ACCOUNT_FORBIDDEN: {
+    message: "Demo trading authorisation cannot use a Live account.",
+    whatHappened: "A Live account was selected while authorising Demo trading.",
+    impact: "No Live account was selected. AutoTrade stays OFF. No order was placed.",
+    nextStep: "Select your Pepperstone Demo account only, then continue Demo trading checks."
+  },
+  CTRADER_TRADING_CONFIRMATION_REQUIRED: {
+    message: "Confirm trading permission before continuing.",
+    whatHappened: "Authorise Demo Trading was started without the confirmation flag.",
+    impact: "No OAuth consent was opened. Tokens were not changed.",
+    nextStep: "Confirm that you are granting trading permission for your Demo account, then retry."
+  },
   CTRADER_ACCOUNT_TYPE_MISMATCH: {
     message: "That account does not match the selected Demo or Live mode.",
     whatHappened: "A Demo account was used with Live settings, or a Live account with Demo settings.",
