@@ -519,7 +519,7 @@ function buildReviewApi() {
         {
           id: "pepperstone_ctrader",
           name: "Pepperstone cTrader",
-          status: "Pepperstone connection required",
+          status: "Connected",
           detail:
             "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
           badge: "PREVIEW"
@@ -541,15 +541,22 @@ function buildReviewApi() {
       ],
       automationModes: [],
       readiness: {
-        setupRequired: true,
+        setupRequired: false,
         authSetupRequired: false,
-        oauthConfigured: false,
-        connected: false,
+        oauthConfigured: true,
+        connected: true,
         demonstrationAvailable: true,
         automationMode: "OFF",
         autoTrade: "OFF",
         orderSubmissionEnabled: false,
         liveEnabled: false,
+        connectionSummary: {
+          accountMasked: "****4821",
+          brokerName: "Pepperstone",
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        },
         wizardSteps: [
           {
             step: 1,
@@ -814,8 +821,16 @@ function buildReviewApi() {
     }),
     createCTraderPreview: async () => ({
       notice: "Order submission is currently disabled in this preview.",
-      preview: { action: "BUY", state: "READY_FOR_CONFIRMATION" }
+      preview: {
+        action: "BUY",
+        state: "READY_FOR_CONFIRMATION",
+        proposedVolume: 0.02,
+        riskAmount: 20
+      },
+      quote: { bid: 2350.1, ask: 2350.4, spread: 0.3 }
     }),
+    selectCTraderAccount: async () => ({ ok: true }),
+    disconnectCTrader: async () => ({ disconnected: true }),
     setCTraderEmergencyStop: async () => ({ ok: true }),
     getAdminTradingViewTemplate: async () => ({
       active: {

@@ -209,6 +209,29 @@ export function friendlyApiCode(
     };
   }
 
+  if (
+    c === "ACCESS_DENIED" ||
+    c.includes("TOKEN_REFRESH_FAILED") ||
+    c.includes("TOKEN_EXPIRED") ||
+    c.includes("CTRADER_TOKEN_EXPIRED")
+  ) {
+    return {
+      message: "Pepperstone session expired. Please reconnect from Broker Control Centre.",
+      whatHappened: "The stored Pepperstone session could not be refreshed or was denied.",
+      impact: "Read-only broker data pauses until you reconnect. AutoTrade stays OFF. No orders are submitted.",
+      nextStep: "Tap Reconnect cTrader, complete OAuth again, then refresh accounts."
+    };
+  }
+
+  if (c.includes("VERSION_CONFLICT") || c.includes("TOKEN_VERSION_CONFLICT")) {
+    return {
+      message: "Broker connection was updated elsewhere. Reloading the latest state.",
+      whatHappened: "A concurrent token refresh won compare-and-set; the previous write was discarded safely.",
+      impact: "No tokens were partially overwritten. AutoTrade stays OFF.",
+      nextStep: "Wait for the page to reload the winning connection state, then continue."
+    };
+  }
+
   if (c.includes("OAUTH") || /OAuth/i.test(msg)) {
     return {
       message: "Pepperstone connection could not be completed. Please restart the connection from the Broker Control Centre.",

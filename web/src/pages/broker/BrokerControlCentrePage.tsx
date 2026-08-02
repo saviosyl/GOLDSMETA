@@ -7,6 +7,19 @@ import type {
   CTraderDemoAccountOption,
   CTraderDiagnosticsReport
 } from "../../lib/broker/ctraderTypes";
+import {
+  actionButtonLabel,
+  deriveCanonicalBrokerView,
+  errorCodeOf,
+  isAuthReconnectCode,
+  isVersionConflictCode,
+  nextGeneration,
+  shouldApplyResponse,
+  successBannerFor,
+  type ActionBanner,
+  type ActionPhase,
+  type BrokerAction
+} from "../../lib/broker/brokerPageState";
 import { describeClientError } from "../../lib/errors";
 import {
   brokerBadgeLabel,
@@ -74,6 +87,8 @@ const FALLBACK_WIZARD = [
   }
 ];
 
+const SUCCESS_FLASH_MS = 2200;
+
 function diagTone(ok: boolean): "positive" | "warning" | "negative" {
   return ok ? "positive" : "warning";
 }
@@ -102,6 +117,11 @@ function marketStatusLabel(raw: string | null | undefined): string {
   return raw!.replace(/_/g, " ");
 }
 
+type ActionUiState = {
+  busy: BrokerAction | null;
+  phaseByAction: Partial<Record<BrokerAction, ActionPhase>>;
+};
+
 /**
  * Broker Control Centre — MANUAL / T212 / Pepperstone cTrader / IG parked.
  * AutoTrade remains OFF. No order submission. Demonstration data clearly labelled.
@@ -121,36 +141,199 @@ export function BrokerControlCentrePage() {
   const [errorDetail, setErrorDetail] = useState<ReturnType<typeof describeClientError> | null>(
     null
   );
-  const [infoBanner, setInfoBanner] = useState<string | null>(null);
+  const [actionBanner, setActionBanner] = useState<ActionBanner | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDemo, setShowDemo] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [selected, setSelected] = useState<string>("manual");
+  const [reconnectRequired, setReconnectRequired] = useState(false);
+  const [actionUi, setActionUi] = useState<ActionUiState>({
+    busy: null,
+    phaseByAction: {}
+  });
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
+  const [lastFailedAction, setLastFailedAction] = useState<BrokerAction | null>(null);
+
   const selectionTouchedRef = useRef(false);
   const oauthHandledRef = useRef(false);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const accountsGenRef = useRef(0);
+  const diagnosticsGenRef = useRef(0);
+  const loadGenRef = useRef(0);
+  const reconnectRequiredRef = useRef(false);
+  const successTimersRef = useRef<Partial<Record<BrokerAction, ReturnType<typeof setTimeout>>>>({});
+
+  const setReconnectRequiredSafe = (value: boolean) => {
+    reconnectRequiredRef.current = value;
+    setReconnectRequired(value);
+  };
+
+  const clearSuccessTimer = (action: BrokerAction) => {
+    const t = successTimersRef.current[action];
+    if (t) {
+      clearTimeout(t);
+      delete successTimersRef.current[action];
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      for (const t of Object.values(successTimersRef.current)) {
+        if (t) clearTimeout(t);
+      }
+    };
+  }, []);
+
+  const beginAction = (action: BrokerAction) => {
+    clearSuccessTimer(action);
+    setActionUi({
+      busy: action,
+      phaseByAction: { [action]: "pending" }
+    });
     setErrorDetail(null);
+  };
+
+  const finishActionSuccess = (action: BrokerAction, message?: string) => {
+    setActionUi({
+      busy: null,
+      phaseByAction: { [action]: "success" }
+    });
+    setActionBanner({
+      tone: "success",
+      message: message ?? successBannerFor(action),
+      action
+    });
+    setLastFailedAction(null);
+    clearSuccessTimer(action);
+    successTimersRef.current[action] = setTimeout(() => {
+      setActionUi((prev) => {
+        if (prev.phaseByAction[action] !== "success") return prev;
+        const next = { ...prev.phaseByAction };
+        delete next[action];
+        return { busy: prev.busy, phaseByAction: next };
+      });
+    }, SUCCESS_FLASH_MS);
+  };
+
+  const finishActionError = (action: BrokerAction, err: unknown, fallback: string) => {
+    const code = errorCodeOf(err);
+    if (isAuthReconnectCode(code)) {
+      setReconnectRequiredSafe(true);
+      setActionBanner({
+        tone: "warning",
+        message:
+          "Pepperstone session expired or was denied. Reconnect to continue — AutoTrade stays OFF.",
+        action
+      });
+    } else if (isVersionConflictCode(code)) {
+      setActionBanner({
+        tone: "info",
+        message: "Connection state was updated elsewhere. Reloading the latest result…",
+        action
+      });
+    }
+    setErrorDetail(describeClientError(err, fallback));
+    setLastFailedAction(action);
+    setActionUi({
+      busy: null,
+      phaseByAction: { [action]: "error" }
+    });
+  };
+
+  const phaseOf = (action: BrokerAction): ActionPhase =>
+    actionUi.phaseByAction[action] ?? "idle";
+
+  const isBusy = (action?: BrokerAction) =>
+    action ? actionUi.busy === action : actionUi.busy != null;
+
+  const anyActionBusy = actionUi.busy != null;
+
+  /** Guard duplicate clicks; allow retry to re-enter the target action. */
+  const guardAction = (action: BrokerAction): boolean => {
+    if (actionUi.busy == null) return true;
+    return actionUi.busy === "retry" || actionUi.busy === action;
+  };
+
+  const load = useCallback(async (opts?: { asRetry?: boolean }) => {
+    const loadGen = nextGeneration(loadGenRef.current);
+    loadGenRef.current = loadGen;
+    setLoading(true);
+    if (opts?.asRetry) {
+      setErrorDetail(null);
+      beginAction("retry");
+    }
     try {
       const data = await api.getBrokerControlCentre();
+      if (!shouldApplyResponse(loadGenRef.current, loadGen)) return;
       setCentre(data);
       if (!selectionTouchedRef.current) {
         setSelected(data.defaultBroker ?? "manual");
       }
       if (data.readiness?.connected) {
+        const gen = nextGeneration(diagnosticsGenRef.current);
+        diagnosticsGenRef.current = gen;
         try {
           const diag = await api.getCTraderDiagnostics();
+          if (!shouldApplyResponse(diagnosticsGenRef.current, gen)) return;
+          if (!shouldApplyResponse(loadGenRef.current, loadGen)) return;
           setDiagnostics(diag);
-        } catch {
+          setShowDiagnostics(true);
+          if (diag.connection?.tokenRefreshHealthy === false) {
+            setReconnectRequiredSafe(true);
+          } else if (!reconnectRequiredRef.current) {
+            // Do not clear an auth-denied reconnect latch with a stale healthy diagnostic.
+            setReconnectRequiredSafe(false);
+          }
+        } catch (e) {
+          const code = errorCodeOf(e);
+          if (isAuthReconnectCode(code)) {
+            setReconnectRequiredSafe(true);
+          }
           /* diagnostics optional until account selected */
         }
+      } else if (!reconnectRequiredRef.current) {
+        setReconnectRequiredSafe(false);
+      }
+      if (opts?.asRetry) {
+        finishActionSuccess("retry", "Broker options reloaded.");
+      } else {
+        setActionUi((prev) =>
+          prev.busy === "load" || prev.busy === "retry"
+            ? { busy: null, phaseByAction: {} }
+            : prev
+        );
       }
     } catch (e) {
+      if (!shouldApplyResponse(loadGenRef.current, loadGen)) return;
+      setLastFailedAction("load");
       setErrorDetail(describeClientError(e, "Could not load broker options."));
+      setActionUi({ busy: null, phaseByAction: { load: "error" } });
     } finally {
-      setLoading(false);
+      if (shouldApplyResponse(loadGenRef.current, loadGen)) {
+        setLoading(false);
+      }
     }
+    // begin/finish helpers close over setters only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
+
+  const handleAuthOrConflict = async (err: unknown): Promise<boolean> => {
+    const code = errorCodeOf(err);
+    if (isVersionConflictCode(code)) {
+      setActionBanner({
+        tone: "info",
+        message: "Connection state was updated elsewhere. Reloading the latest result…",
+        action: "load"
+      });
+      await load();
+      return true;
+    }
+    if (isAuthReconnectCode(code)) {
+      setReconnectRequiredSafe(true);
+      return false;
+    }
+    return false;
+  };
 
   useEffect(() => {
     void load();
@@ -163,23 +346,14 @@ export function BrokerControlCentrePage() {
     oauthHandledRef.current = true;
     const reason = searchParams.get("reason");
     if (ctrader === "oauth_ok") {
-      setInfoBanner("cTrader OAuth completed. Loading authorised accounts…");
+      setActionBanner({
+        tone: "info",
+        message: "cTrader OAuth completed. Loading authorised accounts…"
+      });
       setSelected("pepperstone_ctrader");
       selectionTouchedRef.current = true;
-      void api
-        .listCTraderAccounts()
-        .then((r) => {
-          setAccounts(r.accounts ?? []);
-          if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
-            setInfoBanner("Pepperstone Demo account selected — read-only.");
-          } else {
-            setInfoBanner("OAuth completed. Select a Demo or Live account below.");
-          }
-          void load();
-        })
-        .catch((e: unknown) =>
-          setErrorDetail(describeClientError(e, "Could not list broker accounts."))
-        );
+      setReconnectRequiredSafe(false);
+      void refreshAccounts("connect");
     } else if (ctrader === "oauth_error") {
       setErrorDetail(
         describeClientError(
@@ -187,71 +361,171 @@ export function BrokerControlCentrePage() {
           "Pepperstone connection could not be completed."
         )
       );
+      setLastFailedAction("connect");
     }
     const next = new URLSearchParams(searchParams);
     next.delete("ctrader");
     next.delete("reason");
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, api, load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, api]);
+
+  const refreshAccounts = async (fromAction: BrokerAction = "refresh_accounts") => {
+    const action: BrokerAction =
+      fromAction === "connect" || fromAction === "reconnect" ? fromAction : "refresh_accounts";
+    if (!guardAction(action) && fromAction === "refresh_accounts") return;
+    beginAction(action);
+    const gen = nextGeneration(accountsGenRef.current);
+    accountsGenRef.current = gen;
+    try {
+      const r = await api.listCTraderAccounts();
+      if (!shouldApplyResponse(accountsGenRef.current, gen)) return;
+      setAccounts(r.accounts ?? []);
+      setReconnectRequiredSafe(false);
+      if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
+        finishActionSuccess(action, "Pepperstone Demo account selected — read-only.");
+      } else if (action === "refresh_accounts") {
+        finishActionSuccess("refresh_accounts");
+      } else {
+        finishActionSuccess(action, "OAuth completed. Select a Demo or Live account below.");
+      }
+      void load();
+    } catch (e) {
+      if (!shouldApplyResponse(accountsGenRef.current, gen)) return;
+      const handled = await handleAuthOrConflict(e);
+      if (!handled) {
+        finishActionError(action, e, "Could not list broker accounts.");
+      } else {
+        setActionUi({ busy: null, phaseByAction: {} });
+      }
+    }
+  };
+
+  const refreshDiagnostics = async () => {
+    if (!guardAction("refresh_diagnostics")) return;
+    beginAction("refresh_diagnostics");
+    const gen = nextGeneration(diagnosticsGenRef.current);
+    diagnosticsGenRef.current = gen;
+    try {
+      const diag = await api.getCTraderDiagnostics();
+      if (!shouldApplyResponse(diagnosticsGenRef.current, gen)) return;
+      setDiagnostics(diag);
+      setShowDiagnostics(true);
+      if (diag.connection?.tokenRefreshHealthy === false) {
+        setReconnectRequiredSafe(true);
+        setActionBanner({
+          tone: "warning",
+          message:
+            "Pepperstone session needs reconnect. Refresh used the central token path — no parallel refresh.",
+          action: "refresh_diagnostics"
+        });
+        setActionUi({ busy: null, phaseByAction: { refresh_diagnostics: "error" } });
+        return;
+      }
+      setReconnectRequiredSafe(false);
+      finishActionSuccess("refresh_diagnostics");
+    } catch (e) {
+      if (!shouldApplyResponse(diagnosticsGenRef.current, gen)) return;
+      const handled = await handleAuthOrConflict(e);
+      if (!handled) {
+        finishActionError("refresh_diagnostics", e, "Could not load diagnostics.");
+      } else {
+        setActionUi({ busy: null, phaseByAction: {} });
+      }
+    }
+  };
 
   const loadDemo = async () => {
+    if (!guardAction("demo")) return;
+    beginAction("demo");
     setShowDemo(true);
     try {
       const data = await api.getCTraderDemonstration();
       setDemo(data);
+      finishActionSuccess("demo");
     } catch (e) {
-      setErrorDetail(describeClientError(e, "Could not load the labelled demonstration."));
+      finishActionError("demo", e, "Could not load the labelled demonstration.");
     }
   };
 
-  const startOAuth = async () => {
-    setConnecting(true);
-    setErrorDetail(null);
+  const startOAuth = async (mode: "connect" | "reconnect" = "connect") => {
+    if (!guardAction(mode)) return;
+    beginAction(mode);
     try {
       const started = await api.startCTraderOAuth();
       if (started.authorizationUrl) {
+        setActionBanner({
+          tone: "info",
+          message:
+            mode === "reconnect"
+              ? "Reconnecting Pepperstone… you will leave this page briefly."
+              : "Opening Pepperstone connection…"
+        });
         window.location.assign(started.authorizationUrl);
         return;
       }
-      setErrorDetail(
-        describeClientError(
-          new ApiError(503, "CTRADER_SETUP_REQUIRED", "No authorization URL"),
-          "Pepperstone connection could not be started."
-        )
+      finishActionError(
+        mode,
+        new ApiError(503, "CTRADER_SETUP_REQUIRED", "No authorization URL"),
+        "Pepperstone connection could not be started."
       );
     } catch (e) {
-      setErrorDetail(
-        describeClientError(
-          e,
-          "Pepperstone connection could not be started. Please try again from Broker Control Centre."
-        )
+      finishActionError(
+        mode,
+        e,
+        "Pepperstone connection could not be started. Please try again from Broker Control Centre."
       );
-    } finally {
-      setConnecting(false);
     }
   };
 
   const selectAccount = async (id: string, isLive = false) => {
+    if (!guardAction("select_account")) return;
+    if (isLive && pendingLiveAccountId !== id) {
+      setPendingLiveAccountId(id);
+      setActionBanner({
+        tone: "warning",
+        message:
+          "Confirm Live account selection. Order submission stays disabled; AutoTrade stays OFF."
+      });
+      return;
+    }
+    beginAction("select_account");
+    setPendingLiveAccountId(null);
     try {
       await api.selectCTraderAccount({
         ctidTraderAccountId: id,
         confirmPepperstone: true,
         confirmLiveSelection: isLive
       });
-      setInfoBanner(
-        isLive
-          ? "Live account selected — confirmation stored; order submission stays disabled."
-          : "Demo account selected — read-only checks can run."
-      );
-      const diag = await api.getCTraderDiagnostics();
-      setDiagnostics(diag);
+      const message = isLive
+        ? "Live account selected — confirmation stored; order submission stays disabled."
+        : "Demo account selected — read-only checks can run.";
+      const gen = nextGeneration(diagnosticsGenRef.current);
+      diagnosticsGenRef.current = gen;
+      try {
+        const diag = await api.getCTraderDiagnostics();
+        if (shouldApplyResponse(diagnosticsGenRef.current, gen)) {
+          setDiagnostics(diag);
+          setShowDiagnostics(true);
+        }
+      } catch {
+        /* optional */
+      }
+      finishActionSuccess("select_account", message);
       await load();
     } catch (e) {
-      setErrorDetail(describeClientError(e, "Could not select broker account."));
+      const handled = await handleAuthOrConflict(e);
+      if (!handled) {
+        finishActionError("select_account", e, "Could not select broker account.");
+      } else {
+        setActionUi({ busy: null, phaseByAction: {} });
+      }
     }
   };
 
   const runPreview = async () => {
+    if (!guardAction("preview")) return;
+    beginAction("preview");
     try {
       const result = (await api.createCTraderPreview({
         decision: "BUY",
@@ -267,21 +541,71 @@ export function BrokerControlCentrePage() {
         quote?: { bid?: number | null; ask?: number | null; spread?: number | null };
       };
       setPreviewResult(result);
+      finishActionSuccess("preview");
     } catch (e) {
-      setErrorDetail(describeClientError(e, "Could not build preview."));
+      const handled = await handleAuthOrConflict(e);
+      if (!handled) {
+        finishActionError("preview", e, "Could not build preview.");
+      } else {
+        setActionUi({ busy: null, phaseByAction: {} });
+      }
     }
   };
 
   const disconnect = async () => {
+    if (!guardAction("disconnect")) return;
+    if (!confirmDisconnect) {
+      setConfirmDisconnect(true);
+      setActionBanner({
+        tone: "warning",
+        message: "Confirm disconnect? You can reconnect later. AutoTrade stays OFF."
+      });
+      return;
+    }
+    beginAction("disconnect");
+    setConfirmDisconnect(false);
     try {
       await api.disconnectCTrader();
       setDiagnostics(null);
       setAccounts([]);
       setPreviewResult(null);
-      setInfoBanner("Pepperstone disconnected.");
+      setReconnectRequiredSafe(false);
+      setShowDiagnostics(false);
+      finishActionSuccess("disconnect");
       await load();
     } catch (e) {
-      setErrorDetail(describeClientError(e, "Could not disconnect."));
+      finishActionError("disconnect", e, "Could not disconnect.");
+    }
+  };
+
+  const retryLast = async () => {
+    if (anyActionBusy && actionUi.busy !== "retry") return;
+    const target = lastFailedAction ?? "load";
+    setActionUi({ busy: "retry", phaseByAction: { retry: "pending" } });
+    setErrorDetail(null);
+    switch (target) {
+      case "refresh_accounts":
+        await refreshAccounts();
+        break;
+      case "refresh_diagnostics":
+        await refreshDiagnostics();
+        break;
+      case "preview":
+        await runPreview();
+        break;
+      case "disconnect":
+        setConfirmDisconnect(true);
+        await disconnect();
+        break;
+      case "demo":
+        await loadDemo();
+        break;
+      case "connect":
+      case "reconnect":
+        await startOAuth(target);
+        break;
+      default:
+        await load({ asRetry: true });
     }
   };
 
@@ -317,34 +641,46 @@ export function BrokerControlCentrePage() {
     return step;
   });
   const summary = readiness?.connectionSummary;
-  const accountTypeLabel = diagnostics?.selectedAccountIsLive
-    ? "Live account selected"
-    : diagnostics?.demoAccountSelected || diagnostics?.accountSelected
-      ? "Demo account selected"
-      : selected === "manual"
-        ? "Analysis only"
-        : connected
-          ? "Account pending"
-          : "—";
+  const selectedFromAccounts = accounts.some((a) => a.selected);
+  const accountSelected = Boolean(
+    diagnostics?.accountSelected ||
+      diagnostics?.demoAccountSelected ||
+      diagnostics?.selectedAccountIsLive ||
+      selectedFromAccounts ||
+      summary?.accountMasked
+  );
+  const selectedBroker = (centre?.brokers ?? []).find((b) => b.id === selected);
+  const canonical = deriveCanonicalBrokerView({
+    pageLoading: loading,
+    hasCentre: Boolean(centre),
+    selectedBrokerId: selected,
+    readinessConnected: connected,
+    authSetupRequired: authBlocked,
+    setupRequired,
+    reconnectRequired,
+    tokenRefreshHealthy:
+      diagnostics?.connection?.tokenRefreshHealthy === undefined
+        ? null
+        : Boolean(diagnostics.connection.tokenRefreshHealthy),
+    accountSelected,
+    selectedAccountIsLive: Boolean(diagnostics?.selectedAccountIsLive),
+    demoAccountSelected: Boolean(
+      diagnostics?.demoAccountSelected ||
+        (accountSelected && !diagnostics?.selectedAccountIsLive)
+    ),
+    brokerStatusLabel: connectionStatusLabel(selectedBroker?.status)
+  });
+
   const quoteTimestamp =
     diagnostics?.quote?.timestamp ??
     diagnostics?.connection?.lastQuoteAt ??
     summary?.lastQuoteAt ??
     null;
-  const quoteMarketStatus = marketStatusLabel(
-    diagnostics?.quote?.marketStatus ?? null
-  );
+  const quoteMarketStatus = marketStatusLabel(diagnostics?.quote?.marketStatus ?? null);
   const marketOpen =
     (diagnostics?.quote?.marketStatus ?? "").toUpperCase() === "OPEN" ||
     (diagnostics?.quote?.marketStatus ?? "").toUpperCase().includes("TRADEABLE");
   const quoteEligibleForExecution = false; // preview hard lock — never imply executable
-
-  const selectedBroker = (centre?.brokers ?? []).find((b) => b.id === selected);
-  const connectionLabel = connected
-    ? "Connected"
-    : authBlocked || setupRequired
-      ? "Setup required"
-      : connectionStatusLabel(selectedBroker?.status);
 
   const diagRows: Array<{ key: string; label: string; ok: boolean }> = diagnostics
     ? [
@@ -381,6 +717,15 @@ export function BrokerControlCentrePage() {
       ]
     : [];
 
+  const actionBtnClass = (action: BrokerAction) => {
+    const phase = phaseOf(action);
+    const classes = ["gm-btn", "gm-action-btn"];
+    if (phase === "pending") classes.push("is-loading");
+    if (phase === "success") classes.push("is-success");
+    if (phase === "error") classes.push("is-error");
+    return classes.join(" ");
+  };
+
   return (
     <div className="gm-broker-centre" data-testid="broker-control-centre">
       <header className="gm-broker-hero">
@@ -398,11 +743,11 @@ export function BrokerControlCentrePage() {
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Connection</span>
-            <strong data-testid="broker-connection-status">{connectionLabel}</strong>
+            <strong data-testid="broker-connection-status">{canonical.connectionLabel}</strong>
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Account type</span>
-            <strong data-testid="broker-account-type">{accountTypeLabel}</strong>
+            <strong data-testid="broker-account-type">{canonical.accountTypeLabel}</strong>
           </div>
           <div className="gm-broker-status-cell">
             <span className="gm-label">Trading mode</span>
@@ -442,25 +787,58 @@ export function BrokerControlCentrePage() {
         </div>
       </header>
 
-      {loading ? (
+      {loading && !centre ? (
         <div className="gm-section" role="status" data-testid="broker-centre-loading">
           <div className="gm-skeleton" />
           <p>Loading broker options…</p>
         </div>
       ) : null}
 
-      {infoBanner ? (
-        <div className="gm-section" role="status" data-testid="broker-info-banner">
-          <p>{infoBanner}</p>
+      {actionBanner ? (
+        <div
+          className={`gm-section gm-action-banner gm-action-banner-${actionBanner.tone}`}
+          role="status"
+          aria-live="polite"
+          data-testid="broker-action-banner"
+        >
+          <p>{actionBanner.message}</p>
         </div>
       ) : null}
 
       {errorDetail ? (
         <FriendlyErrorBanner
           detail={errorDetail}
-          onRetry={() => void load()}
+          onRetry={() => void retryLast()}
           testId="broker-centre-error"
         />
+      ) : null}
+
+      {canonical.reconnectRequired ? (
+        <div
+          className="gm-section gm-action-banner gm-action-banner-warning"
+          role="status"
+          data-testid="broker-reconnect-required"
+        >
+          <p>
+            Pepperstone authentication expired or was denied. Reconnect to restore read-only
+            access. AutoTrade stays OFF. No orders can be submitted.
+          </p>
+          <button
+            type="button"
+            className={actionBtnClass("reconnect")}
+            data-testid="ctrader-reconnect-btn"
+            disabled={anyActionBusy || !readiness?.oauthConfigured}
+            aria-busy={isBusy("reconnect")}
+            title={
+              !readiness?.oauthConfigured
+                ? "Secure credentials not added yet"
+                : "Reconnect Pepperstone cTrader"
+            }
+            onClick={() => void startOAuth("reconnect")}
+          >
+            {actionButtonLabel("reconnect", phaseOf("reconnect"), "Reconnect cTrader")}
+          </button>
+        </div>
       ) : null}
 
       <section className="gm-section" aria-labelledby="broker-options-heading">
@@ -475,6 +853,7 @@ export function BrokerControlCentrePage() {
               className={`gm-broker-card${selected === b.id ? " is-selected" : ""}`}
               data-testid={`broker-card-${b.id}`}
               aria-pressed={selected === b.id}
+              disabled={anyActionBusy}
               onClick={() => {
                 selectionTouchedRef.current = true;
                 setSelected(b.id);
@@ -483,7 +862,7 @@ export function BrokerControlCentrePage() {
               <StatusBadge
                 tone={
                   b.id === "pepperstone_ctrader"
-                    ? connected
+                    ? canonical.connectionPhase === "connected"
                       ? "positive"
                       : "warning"
                     : b.id === "trading212_invest"
@@ -529,12 +908,14 @@ export function BrokerControlCentrePage() {
             Pepperstone cTrader
           </h2>
           <p className="gm-broker-lead">
-            {connected
+            {canonical.connectionPhase === "connected"
               ? "Connected in preview mode. Order submission is currently disabled in this preview. AutoTrade stays OFF."
-              : "Connection setup required until secure credentials and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
+              : canonical.reconnectRequired
+                ? "Session needs reconnect. TradingView alone cannot authorise GoldMeta for cTrader."
+                : "Connection setup required until secure credentials and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
           </p>
 
-          {!connected ? (
+          {canonical.connectionPhase !== "connected" && !canonical.reconnectRequired ? (
             <div
               className="gm-auth-setup-required"
               data-testid="ctrader-setup-required"
@@ -551,7 +932,9 @@ export function BrokerControlCentrePage() {
                   : "Add secure server credentials, then connect with OAuth. No broker password is collected here."}
               </p>
             </div>
-          ) : (
+          ) : null}
+
+          {canonical.connectionPhase === "connected" ? (
             <div className="gm-risk-box" data-testid="ctrader-connected-summary" role="status">
               <strong>Connected (preview — execution disabled)</strong>
               <p className="gm-meta" style={{ marginBottom: 0 }}>
@@ -562,7 +945,7 @@ export function BrokerControlCentrePage() {
                   : ""}
               </p>
             </div>
-          )}
+          ) : null}
 
           <h3 className="gm-subsection-title">Setup checklist</h3>
           <ol className="gm-wizard-steps" data-testid="ctrader-wizard">
@@ -588,86 +971,135 @@ export function BrokerControlCentrePage() {
             ))}
           </ol>
 
-          <div className="gm-broker-actions">
-            {!connected ? (
+          <div className="gm-broker-actions" data-testid="ctrader-action-bar">
+            {!connected || canonical.reconnectRequired ? (
               <button
                 type="button"
-                className="gm-btn"
-                disabled={!readiness?.oauthConfigured || connecting}
-                data-testid="ctrader-connect-btn"
+                className={actionBtnClass(canonical.reconnectRequired ? "reconnect" : "connect")}
+                disabled={!readiness?.oauthConfigured || anyActionBusy}
+                data-testid={
+                  canonical.reconnectRequired ? "ctrader-reconnect-btn-main" : "ctrader-connect-btn"
+                }
+                aria-busy={isBusy(canonical.reconnectRequired ? "reconnect" : "connect")}
                 title={
                   !readiness?.oauthConfigured
                     ? "Secure credentials not added yet"
-                    : "Start cTrader connection for your account"
+                    : canonical.reconnectRequired
+                      ? "Reconnect Pepperstone cTrader"
+                      : "Start cTrader connection for your account"
                 }
-                onClick={() => void startOAuth()}
+                onClick={() =>
+                  void startOAuth(canonical.reconnectRequired ? "reconnect" : "connect")
+                }
               >
-                {connecting
-                  ? "Starting…"
-                  : !readiness?.oauthConfigured
+                {actionButtonLabel(
+                  canonical.reconnectRequired ? "reconnect" : "connect",
+                  phaseOf(canonical.reconnectRequired ? "reconnect" : "connect"),
+                  !readiness?.oauthConfigured
                     ? "Connect unavailable"
-                    : "Connect cTrader"}
+                    : canonical.reconnectRequired
+                      ? "Reconnect cTrader"
+                      : "Connect cTrader"
+                )}
               </button>
             ) : null}
-            {connected ? (
+            {connected && !canonical.reconnectRequired ? (
               <>
                 <button
                   type="button"
-                  className="gm-btn"
+                  className={actionBtnClass("refresh_accounts")}
                   data-testid="ctrader-refresh-accounts-btn"
-                  onClick={() => {
-                    void api
-                      .listCTraderAccounts()
-                      .then((r) => setAccounts(r.accounts ?? []))
-                      .catch((e: unknown) =>
-                        setErrorDetail(describeClientError(e, "Could not list broker accounts."))
-                      );
-                  }}
+                  disabled={anyActionBusy}
+                  aria-busy={isBusy("refresh_accounts")}
+                  title="Refresh authorised accounts (does not force token rotation)"
+                  onClick={() => void refreshAccounts()}
                 >
-                  Refresh accounts
+                  {actionButtonLabel(
+                    "refresh_accounts",
+                    phaseOf("refresh_accounts"),
+                    "Refresh accounts"
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="gm-btn gm-btn-secondary"
+                  className={`gm-btn-secondary ${actionBtnClass("refresh_diagnostics")}`}
                   data-testid="ctrader-diagnostics-btn"
-                  onClick={() => {
-                    void api
-                      .getCTraderDiagnostics()
-                      .then(setDiagnostics)
-                      .catch((e: unknown) =>
-                        setErrorDetail(describeClientError(e, "Could not load diagnostics."))
-                      );
-                  }}
+                  disabled={anyActionBusy}
+                  aria-busy={isBusy("refresh_diagnostics")}
+                  title="Refresh diagnostics via central token refresh lock"
+                  onClick={() => void refreshDiagnostics()}
                 >
-                  Refresh diagnostics
+                  {actionButtonLabel(
+                    "refresh_diagnostics",
+                    phaseOf("refresh_diagnostics"),
+                    "Refresh diagnostics"
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="gm-btn gm-btn-secondary"
+                  className="gm-btn gm-btn-secondary gm-action-btn"
+                  data-testid="ctrader-view-diagnostics-btn"
+                  disabled={anyActionBusy || !diagnostics}
+                  aria-expanded={showDiagnostics}
+                  onClick={() => setShowDiagnostics((v) => !v)}
+                >
+                  {showDiagnostics ? "Hide diagnostics" : "View diagnostics"}
+                </button>
+                <button
+                  type="button"
+                  className={`gm-btn-secondary ${actionBtnClass("preview")}`}
                   data-testid="ctrader-live-preview-btn"
+                  disabled={anyActionBusy}
+                  aria-busy={isBusy("preview")}
+                  title="Build a trade preview only — no order submission"
                   onClick={() => void runPreview()}
                 >
-                  Preview next trade
+                  {actionButtonLabel("preview", phaseOf("preview"), "Preview next trade")}
                 </button>
                 <button
                   type="button"
-                  className="gm-btn gm-btn-danger"
+                  className={`gm-btn-danger ${actionBtnClass("disconnect")}`}
                   data-testid="ctrader-disconnect-btn"
+                  disabled={anyActionBusy}
+                  aria-busy={isBusy("disconnect")}
+                  title={
+                    confirmDisconnect
+                      ? "Click again to confirm disconnect"
+                      : "Disconnect Pepperstone"
+                  }
                   onClick={() => void disconnect()}
                 >
-                  Disconnect
+                  {confirmDisconnect
+                    ? "Confirm disconnect"
+                    : actionButtonLabel("disconnect", phaseOf("disconnect"), "Disconnect")}
                 </button>
+                {confirmDisconnect ? (
+                  <button
+                    type="button"
+                    className="gm-btn gm-btn-secondary"
+                    data-testid="ctrader-disconnect-cancel-btn"
+                    disabled={anyActionBusy}
+                    onClick={() => {
+                      setConfirmDisconnect(false);
+                      setActionBanner(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
               </>
             ) : null}
             <button
               type="button"
-              className="gm-btn gm-btn-secondary"
+              className={`gm-btn-secondary ${actionBtnClass("demo")}`}
               data-testid="ctrader-demo-btn"
+              disabled={anyActionBusy}
+              aria-busy={isBusy("demo")}
               onClick={() => void loadDemo()}
             >
-              View labelled demonstration
+              {actionButtonLabel("demo", phaseOf("demo"), "View labelled demonstration")}
             </button>
-            <Link className="gm-btn gm-btn-secondary" to="/help">
+            <Link className="gm-btn gm-btn-secondary" to="/help" data-testid="ctrader-setup-help">
               Open setup help
             </Link>
           </div>
@@ -683,19 +1115,29 @@ export function BrokerControlCentrePage() {
               aria-labelledby="account-select-heading"
             >
               <h3 id="account-select-heading">Select broker account</h3>
-              <p className="gm-meta">Demo and Live accounts from your OAuth connection. Live needs confirmation.</p>
+              <p className="gm-meta">
+                Demo and Live accounts from your OAuth connection. Live needs confirmation.
+              </p>
               <ul className="gm-qual-list">
                 {accounts.map((a) => (
                   <li key={a.ctidTraderAccountId}>
                     <button
                       type="button"
-                      className="gm-btn gm-btn-secondary"
+                      className={`gm-btn gm-btn-secondary gm-action-btn${
+                        pendingLiveAccountId === a.ctidTraderAccountId ? " is-confirm" : ""
+                      }${phaseOf("select_account") === "pending" ? " is-loading" : ""}`}
                       data-testid={`ctrader-account-${a.accountIdMasked}`}
-                      onClick={() => void selectAccount(a.ctidTraderAccountId, Boolean(a.isLive))}
+                      disabled={anyActionBusy}
+                      aria-busy={isBusy("select_account")}
+                      onClick={() =>
+                        void selectAccount(a.ctidTraderAccountId, Boolean(a.isLive))
+                      }
                     >
-                      {a.brokerNameTitle ?? "Broker"} · {a.isLive ? "Live" : "Demo"} ·{" "}
-                      {a.accountIdMasked} · {a.depositCurrency ?? "—"}
-                      {a.selected ? " · Selected" : ""}
+                      {pendingLiveAccountId === a.ctidTraderAccountId
+                        ? `Confirm Live · ${a.accountIdMasked}`
+                        : phaseOf("select_account") === "pending"
+                          ? "Selecting…"
+                          : `${a.brokerNameTitle ?? "Broker"} · ${a.isLive ? "Live" : "Demo"} · ${a.accountIdMasked} · ${a.depositCurrency ?? "—"}${a.selected ? " · Selected" : ""}`}
                     </button>
                   </li>
                 ))}
@@ -703,7 +1145,7 @@ export function BrokerControlCentrePage() {
             </section>
           ) : null}
 
-          {diagnostics ? (
+          {diagnostics && showDiagnostics ? (
             <section
               className="gm-section"
               data-testid="ctrader-diagnostics"
@@ -798,6 +1240,12 @@ export function BrokerControlCentrePage() {
                 </div>
               </details>
             </section>
+          ) : null}
+
+          {isBusy("preview") ? (
+            <div className="gm-section" role="status" data-testid="ctrader-preview-loading">
+              <p>Building trade preview…</p>
+            </div>
           ) : null}
 
           {previewResult ? (
@@ -928,44 +1376,44 @@ export function BrokerControlCentrePage() {
           </section>
 
           <section
-              className="gm-section gm-owner-setup-guide"
-              data-testid="owner-setup-guide"
-              aria-labelledby="owner-guide-heading"
-            >
-              <h3 id="owner-guide-heading">Broker setup guide</h3>
-              <ol className="gm-help-steps">
-                <li>TradingView connection alone is not enough for API-authorised trading.</li>
-                <li>Create a Pepperstone cTrader account (Demo and/or Live — not just a chart login).</li>
-                <li>Register a cTrader Open API application for the preview environment.</li>
-                <li>
-                  Set the redirect URI to the GoldMeta OAuth callback provided by ops (server
-                  function URL).
-                </li>
-                <li>
-                  Store client ID, client secret, redirect URI and token encryption key in Secret
-                  Manager — never commit them to GitHub.
-                </li>
-                <li>OAuth will connect the account without pasting a broker password into GoldMeta.</li>
-                <li>Run read-only verification before requesting any Demo trading approval.</li>
-              </ol>
-              <p className="gm-meta">
-                Do not paste broker passwords here. Do not enable Demo or Live order submission from
-                this screen.
-              </p>
-              <details className="gm-disclosure">
-                <summary>Technical details</summary>
-                <div className="gm-disclosure-body">
-                  <p className="gm-meta" style={{ margin: 0 }}>
-                    Server label: {readiness?.label ?? "Pepperstone connection required"}
-                    <br />
-                    OAuth configured: {readiness?.oauthConfigured ? "yes" : "no"}
-                    <br />
-                    Temporary preview locks: broker execution, Demo orders, Live order
-                    submission — not permanent product design.
-                  </p>
-                </div>
-              </details>
-            </section>
+            className="gm-section gm-owner-setup-guide"
+            data-testid="owner-setup-guide"
+            aria-labelledby="owner-guide-heading"
+          >
+            <h3 id="owner-guide-heading">Broker setup guide</h3>
+            <ol className="gm-help-steps">
+              <li>TradingView connection alone is not enough for API-authorised trading.</li>
+              <li>Create a Pepperstone cTrader account (Demo and/or Live — not just a chart login).</li>
+              <li>Register a cTrader Open API application for the preview environment.</li>
+              <li>
+                Set the redirect URI to the GoldMeta OAuth callback provided by ops (server
+                function URL).
+              </li>
+              <li>
+                Store client ID, client secret, redirect URI and token encryption key in Secret
+                Manager — never commit them to GitHub.
+              </li>
+              <li>OAuth will connect the account without pasting a broker password into GoldMeta.</li>
+              <li>Run read-only verification before requesting any Demo trading approval.</li>
+            </ol>
+            <p className="gm-meta">
+              Do not paste broker passwords here. Do not enable Demo or Live order submission from
+              this screen.
+            </p>
+            <details className="gm-disclosure">
+              <summary>Technical details</summary>
+              <div className="gm-disclosure-body">
+                <p className="gm-meta" style={{ margin: 0 }}>
+                  Server label: {readiness?.label ?? "Pepperstone connection required"}
+                  <br />
+                  OAuth configured: {readiness?.oauthConfigured ? "yes" : "no"}
+                  <br />
+                  Temporary preview locks: broker execution, Demo orders, Live order
+                  submission — not permanent product design.
+                </p>
+              </div>
+            </details>
+          </section>
         </section>
       ) : null}
 
