@@ -11,7 +11,8 @@ import "../styles/redesign.css";
 
 const baseStatus = buildReviewAutoTradeStatus();
 
-const api = {
+// Loose mock API — return shapes vary per test (Broker sync vs disconnected).
+const api: Record<string, ReturnType<typeof vi.fn>> = {
   autoTradeStatus: vi.fn(async () => baseStatus),
   autoTradeSetMode: vi.fn(async (mode: string) => ({
     ...baseStatus,
@@ -108,7 +109,7 @@ const api = {
       uid: "u",
       environment: "demo",
       updatedAt: new Date().toISOString(),
-      selectedAccountId: null,
+      selectedAccountId: null as string | null,
       sizingMode: "automatic_risk",
       fixedRiskAmount: 20,
       percentageRisk: 0.5,
@@ -217,5 +218,174 @@ describe("AutoTradePage", () => {
     await waitFor(() => expect(screen.getByTestId("autotrade-page")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /IG Demo/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("autotrade-connect-ctrader")).toHaveAttribute("href", "/brokers");
+  });
+
+  it("shows Broker-selected Demo account on AutoTrade summary and advances wizard", async () => {
+    api.autoTradeStatus.mockResolvedValue({
+      ...baseStatus,
+      activity: [
+        {
+          id: "stale",
+          at: "2026-08-01T00:00:00.000Z",
+          message: "Broker set to PEPPERSTONE_CTRADER. AutoTrade OFF — reconnect required.",
+          level: "warn"
+        }
+      ]
+    });
+    api.getBrokerControlCentre.mockResolvedValue({
+      defaultBroker: "pepperstone_ctrader",
+      autoTrade: "OFF",
+      brokers: [],
+      automationModes: [],
+      readiness: {
+        setupRequired: false,
+        authSetupRequired: false,
+        oauthConfigured: true,
+        connected: true,
+        demonstrationAvailable: true,
+        automationMode: "OFF",
+        autoTrade: "OFF",
+        orderSubmissionEnabled: false,
+        liveEnabled: false,
+        wizardSteps: [],
+        label: "Connected",
+        connectionSummary: {
+          accountMasked: "****4810",
+          brokerName: "Pepperstone",
+          pepperstoneConfirmed: true,
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        },
+        auth: { status: "HEALTHY", brokerSetupEnabled: true, notes: [] },
+        qualification: {
+          unlocked: false,
+          canActivate: false,
+          failed: [],
+          progress: {
+            completedPreviews: 0,
+            requiredPreviews: 20,
+            approvedControlledDemoTrades: 0,
+            requiredTrades: 5,
+            daysSinceFirstTrade: null,
+            requiredDays: 7
+          }
+        }
+      }
+    });
+    api.getCTraderDiagnostics.mockResolvedValue({
+      oauthConnected: true,
+      accountSelected: true,
+      demoAccountSelected: true,
+      selectedAccountIsLive: false,
+      credentialsConfigured: true,
+      pepperstoneConfirmed: true,
+      goldSymbolFound: true,
+      liveQuoteReceived: true,
+      spreadAvailable: true,
+      volumeRulesAvailable: true,
+      marginMetadataAvailable: false,
+      marketStatusAvailable: true,
+      tradingSafelyLocked: true,
+      autoTrade: "OFF",
+      environment: "DEMO",
+      connection: {
+        accountMasked: "****4810",
+        brokerName: "Pepperstone",
+        currency: "EUR",
+        symbolName: "XAUUSD",
+        tokenRefreshHealthy: true
+      },
+      symbol: { symbolName: "XAUUSD", minVolume: 0.01, volumeStep: 0.01 },
+      quote: {
+        bid: 4046.35,
+        ask: 4046.64,
+        spread: 0.29,
+        marketStatus: "CLOSED",
+        stale: true,
+        timestamp: new Date().toISOString()
+      }
+    });
+    api.listCTraderAccounts.mockResolvedValue({
+      accounts: [
+        {
+          ctidTraderAccountId: "demo-4810",
+          accountIdMasked: "****4810",
+          isLive: false,
+          selected: true,
+          brokerNameTitle: "Pepperstone",
+          depositCurrency: "EUR"
+        }
+      ]
+    });
+    api.getAutoTradeSettings.mockResolvedValue({
+      settings: {
+        uid: "u",
+        environment: "demo",
+        updatedAt: new Date().toISOString(),
+        selectedAccountId: "demo-4810",
+        sizingMode: "automatic_risk",
+        fixedRiskAmount: 20,
+        percentageRisk: 0.5,
+        manualLotSize: 0.01,
+        maxDailyLoss: 50,
+        maxTradesPerDay: 3,
+        maxOpenPositions: 1,
+        minConfidence: 80,
+        minRiskReward: 1.5,
+        maxSpread: 2,
+        maxQuoteAgeSeconds: 15,
+        stopLossDistance: null,
+        takeProfitMethod: "fixed_rr",
+        tradeCooldownMinutes: 30,
+        pauseAfterConsecutiveLosses: 3,
+        allowedSessions: ["London", "NewYork"],
+        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        newsFilterEnabled: true,
+        confirmationCandleRequired: true,
+        trendConfirmationRequired: false,
+        volumeConfirmationRequired: false,
+        breakEvenEnabled: false,
+        trailingStopEnabled: false,
+        partialTakeProfitEnabled: false,
+        liveActivationConfirmedAt: null,
+        liveActivationPhraseConfirmed: false,
+        autoTradeEnabledIntent: false,
+        emergencyStopActive: false
+      },
+      recommended: {}
+    });
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-broker-badge")).toHaveTextContent(
+        /Pepperstone Demo · \*\*\*\*4810/
+      )
+    );
+    expect(screen.getByTestId("autotrade-connection-label")).toHaveTextContent("Connected");
+    expect(screen.getByTestId("autotrade-market-label")).toHaveTextContent(
+      /XAUUSD · Market closed/i
+    );
+    expect(screen.getByTestId("autotrade-mode-label")).toHaveTextContent("Demo AutoTrade");
+    expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("autotrade-market-status")).toHaveTextContent(/Market closed/i);
+    expect(screen.getByTestId("autotrade-quote-label")).toHaveTextContent(/Previous-session quote/i);
+    expect(screen.getByTestId("autotrade-execution-label")).toHaveTextContent(/market closed/i);
+    expect(screen.getByTestId("autotrade-step-3-status")).toHaveTextContent("Complete");
+    expect(screen.getByTestId("autotrade-step-4-status")).toHaveTextContent("Complete");
+    expect(screen.getByTestId("autotrade-step-5-status")).toHaveTextContent("Complete");
+    expect(screen.getByTestId("autotrade-step-6-status")).toHaveTextContent("Complete");
+    expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Locked");
+    expect(screen.getByTestId("autotrade-step-11-status")).toHaveTextContent("Locked");
+    const activity = screen.getByTestId("autotrade-activity");
+    expect(activity.textContent).toMatch(/Demo account \*\*\*\*4810 connected\. AutoTrade OFF/);
+    expect(activity.textContent?.indexOf("connected. AutoTrade OFF")).toBeLessThan(
+      activity.textContent?.indexOf("reconnect required") ?? Number.MAX_SAFE_INTEGER
+    );
   });
 });

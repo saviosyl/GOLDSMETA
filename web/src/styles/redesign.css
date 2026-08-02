@@ -3169,9 +3169,22 @@ a {
   .gm-broker-status-row,
   [data-testid="ctrader-connected-summary"],
   [data-testid="ctrader-diagnostics"],
-  [data-testid="no-order-badge"] {
+  [data-testid="no-order-badge"],
+  [data-testid="autotrade-status"],
+  [data-testid="autotrade-setup-journey"],
+  [data-testid="autotrade-card-market"],
+  [data-testid="autotrade-readonly-banner"] {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* AutoTrade print: keep resolved summary; hide transient controls */
+  .gm-at-mode-tabs,
+  .gm-autotrade-actions,
+  .gm-at-advanced,
+  [data-testid="autotrade-stale-prompt"],
+  .banner.stale {
+    display: none !important;
   }
 
   .gm-broker-top-status {
