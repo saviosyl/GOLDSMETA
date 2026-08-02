@@ -235,9 +235,33 @@ function buildReviewApi() {
     }
   };
 
+  if (marketMismatch) {
+    // No trade plan while price sources conflict — avoid mixing ~2400 plan with ~4050 alert.
+    setup.status = "REJECTED";
+    (setup as { levels: Record<string, number | string | null> }).levels = {
+      entryPrice: null,
+      entryType: null,
+      stopLoss: null,
+      tp1: null,
+      tp2: null,
+      tp3: null
+    };
+  } else if (marketMatch) {
+    // Same ~4050 regime as the alert / structure ladder.
+    setup.levels = {
+      entryPrice: 4044.5,
+      entryType: "LIMIT",
+      stopLoss: 4038.0,
+      tp1: 4055,
+      tp2: 4062,
+      tp3: 4070
+    };
+    setup.initialRisk = 6.5;
+  }
+
   return {
     latestDecision: async () => (empty ? null : decision),
-    listActiveSetups: async () => (empty ? [] : [setup]),
+    listActiveSetups: async () => (empty ? [] : marketMismatch ? [] : [setup]),
     listSetups: async () =>
       empty
         ? []
