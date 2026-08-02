@@ -163,7 +163,7 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
     expect(screen.getByTestId("autotrade-broker-badge")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-readonly-banner")).toHaveTextContent(
-      /Broker order submission is disabled/i
+      /Order submission is currently disabled/i
     );
     expect(screen.getByTestId("autotrade-tab-demo")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-tab-live")).toBeInTheDocument();
@@ -174,10 +174,21 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-card-risk")).toBeInTheDocument();
     expect(screen.queryByText(/IG Demo/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Parked — temporarily unavailable/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-view-diagnostics")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-enable-demo-auto")).toBeDisabled();
+  });
+
+  it("keeps technical modes behind View diagnostics", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByTestId("autotrade-page")).toBeInTheDocument());
+    await user.click(screen.getByTestId("autotrade-view-diagnostics"));
     expect(screen.getByTestId("autotrade-mode-IG_DEMO_AUTO")).toBeDisabled();
     expect(screen.getByTestId("autotrade-mode-IG_LIVE_AUTO")).toBeDisabled();
-    expect(screen.getByTestId("autotrade-authorise-demo-trading")).toBeDisabled();
-    expect(screen.getByTestId("autotrade-enable-demo-auto")).toBeDisabled();
   });
 
   it("locks mode after Emergency STOP", async () => {

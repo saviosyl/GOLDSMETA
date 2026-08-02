@@ -118,8 +118,8 @@ export function brokerDisplayName(id: string | null | undefined, fallbackName?: 
   const map: Record<string, string> = {
     manual: "Manual",
     trading212_invest: "Trading 212 Practice",
-    pepperstone_ctrader: "Pepperstone cTrader Demo",
-    PEPPERSTONE_CTRADER: "Pepperstone cTrader Demo",
+    pepperstone_ctrader: "Pepperstone cTrader",
+    PEPPERSTONE_CTRADER: "Pepperstone cTrader",
     T212_INVEST: "Trading 212 Practice",
     MANUAL: "Manual"
   };
@@ -216,12 +216,21 @@ export function friendlyApiCode(
     };
   }
 
-  if (c.includes("LIVE_ACCOUNT") || c.includes("CTRADER_LIVE")) {
+  if (c.includes("LIVE_SELECTION_CONFIRMATION") || c.includes("LIVE_ACTIVATION")) {
     return {
-      message: "Live cTrader accounts cannot be connected in this phase.",
-      whatHappened: "A Live account was rejected.",
-      impact: "Only Demo accounts are allowed. Trading stays locked.",
-      nextStep: "Select a genuine Pepperstone cTrader Demo account."
+      message: "Live AutoTrade needs an explicit confirmation.",
+      whatHappened: "A Live (real money) action was requested without confirmation.",
+      impact: "Live AutoTrade stays OFF. Demo settings are unchanged.",
+      nextStep: "Review the Live confirmation screen and type ENABLE LIVE."
+    };
+  }
+
+  if (c.includes("LIVE_ACCOUNT") || (c.includes("CTRADER_LIVE") && c.includes("REJECT"))) {
+    return {
+      message: "Live account selection needs confirmation. Order execution stays disabled in this preview.",
+      whatHappened: "A Live (real money) account action was blocked or needs confirmation.",
+      impact: "Demo settings are unchanged. No orders are submitted.",
+      nextStep: "Select the account again and complete the Live confirmation if prompted."
     };
   }
 
@@ -243,12 +252,40 @@ export function friendlyApiCode(
     };
   }
 
-  if (c.includes("LIVE_SELECTION_CONFIRMATION") || c.includes("LIVE_ACTIVATION")) {
+  if (
+    c.includes("MARGIN_ELIGIBILITY_UNKNOWN") ||
+    (c.includes("MARGIN") && c.includes("UNKNOWN"))
+  ) {
     return {
-      message: "Live AutoTrade needs an explicit confirmation.",
-      whatHappened: "A Live (real money) action was requested without confirmation.",
-      impact: "Live AutoTrade stays OFF. Demo settings are unchanged.",
-      nextStep: "Review the Live confirmation screen and type ENABLE LIVE."
+      message: "Margin information is not available yet. Trading remains locked.",
+      whatHappened: "The broker has not returned complete margin metadata.",
+      impact: "Previews and automation stay locked until margin data is available.",
+      nextStep: "Refresh diagnostics after the broker connection is healthy."
+    };
+  }
+
+  if (
+    c.includes("VOLUME_BELOW_MINIMUM") ||
+    c.includes("VOLUME_BELOW_MINIMUM_AFTER_ROUNDING")
+  ) {
+    return {
+      message: "Your selected risk is too low for the broker’s minimum trade size.",
+      whatHappened: "Calculated size is below the broker minimum after rounding.",
+      impact: "No order is submitted. Your saved risk setting is unchanged.",
+      nextStep: "Increase risk, switch to manual lots that meet the minimum, or choose another account."
+    };
+  }
+
+  if (
+    c.includes("BROKER_EXECUTION") ||
+    c.includes("ORDER_SUBMISSION") ||
+    /BROKER_EXECUTION_ENABLED\s*=\s*false/i.test(msg)
+  ) {
+    return {
+      message: "Order submission is currently disabled in this preview.",
+      whatHappened: "Preview locks prevent Demo and Live order submission.",
+      impact: "AutoTrade stays OFF. Settings and previews still work.",
+      nextStep: "Continue configuration. Execution will require a later approved phase."
     };
   }
 

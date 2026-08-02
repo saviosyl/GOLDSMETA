@@ -2571,6 +2571,63 @@ a {
   margin: 1rem 0;
 }
 
+.gm-at-actions .gm-btn {
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+}
+
+.gm-at-live-warn {
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 60, 40, 0.35);
+  background: rgba(180, 60, 40, 0.08);
+  color: var(--navy);
+  font: 500 0.9rem/1.4 var(--font-sans);
+}
+
+.gm-at-settings {
+  max-height: min(70vh, 40rem);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.gm-at-settings-grid label {
+  min-width: 0;
+}
+
+.gm-at-settings-grid input,
+.gm-at-settings-grid select {
+  min-height: 2.5rem;
+  width: 100%;
+}
+
+.gm-tv-url,
+.gm-tv-alert-editor {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.gm-tv-badge-recommended {
+  color: #6a4a00 !important;
+}
+
+@media (max-width: 430px) {
+  .gm-at-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gm-at-actions .gm-btn {
+    flex: 1 1 calc(50% - 0.65rem);
+  }
+  .gm-at-mode-tabs .gm-btn {
+    flex: 1;
+    min-height: 2.75rem;
+  }
+}
+
 .gm-at-locked-note {
   margin: 0 0 1.25rem;
 }

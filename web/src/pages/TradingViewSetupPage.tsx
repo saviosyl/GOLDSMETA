@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { friendlyBrokerReason } from "../lib/brokerFriendlyCopy";
 
 type SetupMode = "standard" | "custom";
 
@@ -278,7 +279,7 @@ export function TradingViewSetupPage() {
             {data?.setup.lastValidSignalAt
               ? "Accepted"
               : data?.setup.lastRejectReason
-                ? `Rejected · ${data.setup.lastRejectReason.replace(/_/g, " ")}`
+                ? `Rejected · ${friendlyBrokerReason(data.setup.lastRejectReason)}`
                 : "—"}
           </strong>
         </div>
@@ -313,8 +314,13 @@ export function TradingViewSetupPage() {
         <button type="button" className="gm-btn" disabled={busy} onClick={() => void sendTest()}>
           Test connection
         </button>
-        <button type="button" className="gm-btn" onClick={() => setShowAdvanced((v) => !v)}>
-          Change setup
+        <button
+          type="button"
+          className="gm-btn"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          Advanced setup
         </button>
         <Link className="gm-btn" to="/history">
           View signal history
@@ -336,8 +342,13 @@ export function TradingViewSetupPage() {
               />
               <span>
                 <strong>GoldMeta Standard Setup</strong>
-                <em>Recommended</em>
-                <p className="gm-meta">{data?.template.description}</p>
+                <em className="gm-tv-badge-recommended" data-testid="tv-recommended-badge">
+                  Recommended
+                </em>
+                <p className="gm-meta">
+                  {data?.template.description ??
+                    "Use the shared GoldMeta alert format. Fastest way to get started."}
+                </p>
               </span>
             </label>
             <label className={`gm-tv-choice${mode === "custom" ? " is-active" : ""}`}>
@@ -345,12 +356,18 @@ export function TradingViewSetupPage() {
                 type="radio"
                 name="mode"
                 checked={mode === "custom"}
-                onChange={() => setMode("custom")}
+                onChange={() => {
+                  setMode("custom");
+                  setShowAdvanced(true);
+                }}
               />
               <span>
                 <strong>Custom TradingView Setup</strong>
-                <em>Advanced</em>
-                <p className="gm-meta">Map your own field names. Cannot bypass server validation.</p>
+                <em data-testid="tv-advanced-badge">Advanced</em>
+                <p className="gm-meta">
+                  Map your own field names. Server validation still applies. Restoring Standard
+                  keeps your private webhook.
+                </p>
               </span>
             </label>
             <button type="button" className="gm-btn gm-btn-primary" onClick={() => setStep(2)}>
@@ -563,7 +580,7 @@ export function TradingViewSetupPage() {
                 {data?.setup.lastValidSignalAt
                   ? "Accepted"
                   : data?.setup.lastRejectReason
-                    ? `Rejected — ${data.setup.lastRejectReason.replace(/_/g, " ")}`
+                    ? `Rejected — ${friendlyBrokerReason(data.setup.lastRejectReason)}`
                     : "Waiting for TradingView alert"}
               </li>
             </ul>
@@ -576,10 +593,10 @@ export function TradingViewSetupPage() {
 
       {showAdvanced || mode === "custom" ? (
         <section className="gm-tv-advanced" data-testid="tv-advanced-mapping">
-          <h2 className="gm-section-title">Advanced payload and mapping</h2>
+          <h2 className="gm-section-title">Advanced · custom mapping</h2>
           <p className="gm-meta">
-            Template: {data?.template.id} · v{data?.setup.templateVersion}. Template upgrades never
-            overwrite a custom setup.
+            For experienced users. Restoring Standard does not delete your private webhook.
+            Template upgrades never overwrite a custom setup.
           </p>
           <div className="gm-tv-map-row">
             <label>
