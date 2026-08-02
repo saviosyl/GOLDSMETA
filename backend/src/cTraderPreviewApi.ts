@@ -62,9 +62,11 @@ function applyCTraderPreviewRuntimeEnv(): void {
   delete process.env.T212_LIVE_API_KEY;
   delete process.env.T212_LIVE_API_SECRET;
 
+  // Isolated preview OAuth return host (Checkpoint A). Not production Pages.
   if (!process.env.GOLDMETA_WEB_ORIGIN) {
     process.env.GOLDMETA_WEB_ORIGIN =
-      process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
+      process.env.WEB_ORIGIN ??
+      "https://preview-ctrader-demo-autotra.goldmeta-web.pages.dev";
   }
 }
 
@@ -89,6 +91,8 @@ export const apiCTraderPreview = onRequest(
     cors: [
       "https://goldmeta.metamechsolutions.com",
       "https://goldmeta-web.pages.dev",
+      "https://preview-ctrader-demo-autotra.goldmeta-web.pages.dev",
+      "https://preview-verification-email-d.goldmeta-web.pages.dev",
       "http://127.0.0.1:5173",
       "http://localhost:5173"
     ],

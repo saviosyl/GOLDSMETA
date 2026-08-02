@@ -99,8 +99,9 @@ export function buildAuthorizationUrl(args: {
   const url = new URL(conf.authUrl);
   url.searchParams.set("client_id", args.clientId);
   url.searchParams.set("redirect_uri", redirectUri);
-  // Minimal trading scope for future Demo; still no submission in this phase.
-  url.searchParams.set("scope", "trading");
+  // Checkpoint A: accounts (read-only) only. Never request trading here.
+  // Trading scope requires separate Checkpoint B owner approval.
+  url.searchParams.set("scope", "accounts");
   url.searchParams.set("product", "web");
   url.searchParams.set("state", args.state);
   url.searchParams.set("code_challenge", args.codeChallenge);

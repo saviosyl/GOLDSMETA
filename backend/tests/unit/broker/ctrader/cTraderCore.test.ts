@@ -76,6 +76,42 @@ describe("cTrader config", () => {
   });
 });
 
+describe("OAuth authorization URL", () => {
+  it("requests scope=accounts only (Checkpoint A — never trading)", async () => {
+    const prev = {
+      CTRADER_CLIENT_ID: process.env.CTRADER_CLIENT_ID,
+      CTRADER_REDIRECT_URI: process.env.CTRADER_REDIRECT_URI,
+      CTRADER_ENVIRONMENT: process.env.CTRADER_ENVIRONMENT
+    };
+    process.env.CTRADER_CLIENT_ID = "demo-client";
+    process.env.CTRADER_REDIRECT_URI =
+      "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/v1/ctrader/oauth/callback";
+    process.env.CTRADER_ENVIRONMENT = "DEMO";
+    try {
+      const { buildAuthorizationUrl } = await import(
+        "../../../../src/services/broker/ctrader/oauth"
+      );
+      const url = buildAuthorizationUrl({
+        state: "st",
+        codeChallenge: "ch",
+        clientId: "demo-client"
+      });
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("scope")).toBe("accounts");
+      expect(parsed.searchParams.get("scope")).not.toBe("trading");
+      expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(parsed.searchParams.get("redirect_uri")).toBe(
+        process.env.CTRADER_REDIRECT_URI
+      );
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+});
+
 describe("OAuth state + PKCE", () => {
   it("validates matching state and rejects mismatch/expiry/replay/bad redirect", () => {
     const prev = {
