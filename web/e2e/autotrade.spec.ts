@@ -6,13 +6,15 @@ test.describe("AutoTrade Control Centre", () => {
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("autotrade-page")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("autotrade-mode-pill")).toHaveText("OFF");
-    await expect(page.getByTestId("autotrade-broker-badge")).toContainText(
-      "Pepperstone cTrader Demo"
-    );
-    await expect(page.getByText(/Broker order submission is disabled/i)).toBeVisible();
+    await expect(page.getByTestId("autotrade-broker-badge")).toContainText(/Pepperstone/i);
+    await expect(
+      page.getByText(/Order submission is currently disabled in this preview/i)
+    ).toBeVisible();
     await expect(page.getByTestId("autotrade-emergency-stop")).toBeVisible();
     await expect(page.getByTestId("autotrade-budget")).toBeVisible();
     await expect(page.getByTestId("autotrade-setup-journey")).toBeVisible();
+    await expect(page.getByTestId("autotrade-view-diagnostics")).toBeVisible();
+    await page.getByTestId("autotrade-view-diagnostics").click();
     await expect(page.getByTestId("autotrade-mode-IG_DEMO_AUTO")).toBeDisabled();
     await expect(page.getByTestId("autotrade-mode-IG_LIVE_AUTO")).toBeDisabled();
     await expect(page.getByText(/IG Demo/i)).toHaveCount(0);
