@@ -120,13 +120,17 @@ export function buildOnboardingSteps(args: {
     {
       id: 8,
       title: "Run connection checks",
-      status: !s.settingsSaved ? "Locked" : s.checksOk ? "Complete" : "Current",
-      detail: "Confirm quotes, spread and market status (read-only)."
+      // Available once gold is resolved — do not stay locked behind unsaved settings.
+      status: !s.goldOk ? "Locked" : s.checksOk ? "Complete" : "Current",
+      detail: s.checksOk
+        ? "Quotes, spread and market status confirmed (read-only)."
+        : "Confirm quotes, spread and market status (read-only)."
     },
     {
       id: 9,
       title: "Preview a trade",
-      status: !s.checksOk ? "Locked" : s.previewOk ? "Complete" : "Current",
+      // Available once gold is resolved so stale account state cannot lock previews.
+      status: !s.goldOk ? "Locked" : s.previewOk ? "Complete" : "Current",
       detail: "Preview BUY / SELL / WAIT sizing — no order is submitted in this phase."
     },
     {
@@ -143,9 +147,14 @@ export function buildOnboardingSteps(args: {
     }
   ];
 
+  // Cascade-lock only early incomplete steps. Steps 7–9 stay independently
+  // available once account + gold are resolved so stale locks cannot freeze them.
   let sawOpen = false;
   return steps.map((step) => {
     if (step.status === "Complete" || step.status === "Locked") return step;
+    if (step.id >= 7 && step.id <= 9 && s.accountSelected && s.goldOk) {
+      return step;
+    }
     if (!sawOpen) {
       sawOpen = true;
       return { ...step, status: step.status === "Action required" ? "Action required" : "Current" };

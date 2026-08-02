@@ -68,18 +68,32 @@ vi.mock("firebase-admin/firestore", () => {
       },
       async runTransaction<T>(
         fn: (tx: {
-          get: (ref: ReturnType<typeof oauthDoc>) => Promise<{
+          get: (ref: { get: () => Promise<{ exists: boolean; data: () => unknown }> }) => Promise<{
             exists: boolean;
             data: () => unknown;
           }>;
-          update: (ref: ReturnType<typeof oauthDoc>, data: DocData) => void;
+          update: (ref: { id?: string; update?: (data: DocData) => Promise<void> }, data: DocData) => void;
+          set: (
+            ref: { set: (data: DocData, opts?: { merge?: boolean }) => Promise<void> },
+            data: DocData,
+            opts?: { merge?: boolean }
+          ) => void;
         }) => Promise<T>
       ) {
         return fn({
           get: async (ref) => ref.get(),
           update: (ref, data) => {
-            const prev = store.oauthStates.get(ref.id) ?? {};
-            store.oauthStates.set(ref.id, { ...prev, ...data });
+            if (typeof ref.update === "function") {
+              void ref.update(data);
+              return;
+            }
+            if (ref.id) {
+              const prev = store.oauthStates.get(ref.id) ?? {};
+              store.oauthStates.set(ref.id, { ...prev, ...data });
+            }
+          },
+          set: (ref, data, opts) => {
+            void ref.set(data, opts);
           }
         });
       }

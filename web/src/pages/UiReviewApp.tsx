@@ -45,7 +45,23 @@ function buildReviewApi() {
   const signalOutcomes = params.get("scenario") === "signal-outcomes";
   const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
 
-  let autoTrade = buildReviewAutoTradeStatus();
+  let autoTrade = buildReviewAutoTradeStatus({
+    activity: [
+      {
+        id: "stale-reconnect",
+        at: "2026-08-01T00:00:00.000Z",
+        message: "Broker set to PEPPERSTONE_CTRADER. AutoTrade OFF — reconnect required.",
+        level: "warn"
+      },
+      {
+        id: "review-1",
+        at: new Date().toISOString(),
+        message:
+          "Broker & AutoTrade dashboard ready. Pepperstone cTrader Demo selected. AutoTrade OFF.",
+        level: "info"
+      }
+    ]
+  });
 
   const decision = {
     schemaVersion: "3",
@@ -519,7 +535,7 @@ function buildReviewApi() {
         {
           id: "pepperstone_ctrader",
           name: "Pepperstone cTrader",
-          status: "Pepperstone connection required",
+          status: "Connected",
           detail:
             "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
           badge: "PREVIEW"
@@ -541,15 +557,22 @@ function buildReviewApi() {
       ],
       automationModes: [],
       readiness: {
-        setupRequired: true,
+        setupRequired: false,
         authSetupRequired: false,
-        oauthConfigured: false,
-        connected: false,
+        oauthConfigured: true,
+        connected: true,
         demonstrationAvailable: true,
         automationMode: "OFF",
         autoTrade: "OFF",
         orderSubmissionEnabled: false,
         liveEnabled: false,
+        connectionSummary: {
+          accountMasked: "****4821",
+          brokerName: "Pepperstone",
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        },
         wizardSteps: [
           {
             step: 1,
@@ -638,8 +661,9 @@ function buildReviewApi() {
       selectedAccountIsLive: false,
       connection: {
         accountMasked: "****4821",
-        brokerName: "Pepperstone cTrader",
+        brokerName: "Pepperstone",
         currency: "EUR",
+        symbolName: "XAUUSD",
         tokenRefreshHealthy: true
       },
       account: {
@@ -657,11 +681,11 @@ function buildReviewApi() {
         volumeStep: 0.01
       },
       quote: {
-        bid: 2350.1,
-        ask: 2350.4,
-        spread: 0.3,
-        marketStatus: "OPEN",
-        stale: false,
+        bid: 4046.35,
+        ask: 4046.64,
+        spread: 0.29,
+        marketStatus: "CLOSED",
+        stale: true,
         timestamp: new Date().toISOString()
       }
     }),
@@ -814,8 +838,15 @@ function buildReviewApi() {
     }),
     createCTraderPreview: async () => ({
       notice: "Order submission is currently disabled in this preview.",
-      preview: { action: "BUY", state: "READY_FOR_CONFIRMATION" }
+      preview: {
+        action: "BUY",
+        state: "READY_FOR_CONFIRMATION",
+        proposedVolume: 0.02,
+        riskAmount: 20
+      },
+      quote: { bid: 2350.1, ask: 2350.4, spread: 0.3 }
     }),
+    disconnectCTrader: async () => ({ disconnected: true }),
     setCTraderEmergencyStop: async () => ({ ok: true }),
     getAdminTradingViewTemplate: async () => ({
       active: {

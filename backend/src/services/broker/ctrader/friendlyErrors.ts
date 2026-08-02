@@ -161,6 +161,24 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     impact: "Quotes and account sync pause until reconnect.",
     nextStep: "Reconnect Pepperstone from Broker Control Centre."
   },
+  ACCESS_DENIED: {
+    message: "Pepperstone denied this session.",
+    whatHappened: "cTrader returned ACCESS_DENIED for the stored OAuth tokens.",
+    impact: "Read-only broker data pauses until you reconnect. AutoTrade stays OFF.",
+    nextStep: "Reconnect Pepperstone from Broker Control Centre with scope=accounts only."
+  },
+  CTRADER_TOKEN_VERSION_CONFLICT: {
+    message: "Broker connection was updated elsewhere.",
+    whatHappened: "A concurrent token refresh won compare-and-set; the stale write was discarded.",
+    impact: "No partial token overwrite occurred. The winning persisted session is used.",
+    nextStep: "Reload diagnostics to adopt the latest connection state."
+  },
+  VERSION_CONFLICT: {
+    message: "Broker connection was updated elsewhere.",
+    whatHappened: "A concurrent token refresh won compare-and-set; the stale write was discarded.",
+    impact: "No partial token overwrite occurred. The winning persisted session is used.",
+    nextStep: "Reload diagnostics to adopt the latest connection state."
+  },
   CTRADER_RATE_LIMITED: {
     message: "cTrader rate limit reached.",
     whatHappened: "Too many Open API requests were sent in a short period.",

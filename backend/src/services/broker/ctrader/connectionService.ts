@@ -9,6 +9,7 @@ import {
   disconnectConnection,
   getConnection,
   loadTokenEncryptionSecret,
+  persistRotatedTokensAtomic,
   saveConnection,
   saveOAuthState,
   type CTraderConnectionRecord
@@ -33,6 +34,31 @@ import type { BrokerQuote, BrokerSymbol, TradePreview } from "../domain";
 import { getUserAutoTradeSettings } from "./userAutoTradeSettings";
 
 const STALE_QUOTE_MS = 15_000;
+
+/** Serialize refresh-token rotations per user connection (in-process). */
+const refreshLocks = new Map<string, Promise<unknown>>();
+
+async function withConnectionRefreshLock<T>(
+  ownerUid: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const previous = refreshLocks.get(ownerUid) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chained = previous.catch(() => undefined).then(() => gate);
+  refreshLocks.set(ownerUid, chained);
+  await previous.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (refreshLocks.get(ownerUid) === chained) {
+      refreshLocks.delete(ownerUid);
+    }
+  }
+}
 
 export type DiagnosticsReport = {
   credentialsConfigured: boolean;
@@ -193,7 +219,8 @@ export async function completeOAuthCallback(args: {
       accessExpiresAt: new Date(
         Date.now() + Math.max(60, tokens.expiresIn) * 1000
       ).toISOString(),
-      refreshedAt: null
+      refreshedAt: null,
+      tokenVersion: 1
     },
     selectedAccountId: null,
     selectedAccountMasked: null,
@@ -234,61 +261,128 @@ function decryptTokens(connection: CTraderConnectionRecord): {
   return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
 }
 
-/** Refresh when access token expires within 60s; persist rotated refresh token. */
+/**
+ * Refresh when access token expires within 60s (or when force=true).
+ *
+ * Failure-mode guards:
+ * - never use rotated tokens until encrypted persistence is confirmed
+ * - never overwrite a valid record with a partial refresh response
+ * - compare-and-set on ciphertext + tokenVersion
+ * - serialize concurrent refresh attempts per ownerUid
+ * - on version conflict, adopt the already-persisted winner (no stale write)
+ */
 async function ensureFreshAccessToken(
   connection: CTraderConnectionRecord,
-  fetchImpl?: typeof fetch
+  fetchImpl?: typeof fetch,
+  opts?: { force?: boolean }
 ): Promise<{ accessToken: string; connection: CTraderConnectionRecord }> {
   const expiresAt = Date.parse(connection.tokens.accessExpiresAt);
-  if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+  if (
+    !opts?.force &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > Date.now() + 60_000
+  ) {
     const { accessToken } = decryptTokens(connection);
     return { accessToken, connection };
   }
-  const { refreshToken } = decryptTokens(connection);
-  const { clientId, clientSecret } = clientCreds();
-  let tokens;
-  try {
-    tokens = await refreshAccessToken({
-      refreshToken,
-      clientId,
-      clientSecret,
-      fetchImpl
+
+  return withConnectionRefreshLock(connection.ownerUid, async () => {
+    // Re-read under the lock — another request may have already rotated.
+    const latest = (await getConnection(connection.ownerUid)) ?? connection;
+    const latestExpires = Date.parse(latest.tokens.accessExpiresAt);
+    if (
+      !opts?.force &&
+      Number.isFinite(latestExpires) &&
+      latestExpires > Date.now() + 60_000
+    ) {
+      const { accessToken } = decryptTokens(latest);
+      return { accessToken, connection: latest };
+    }
+
+    const expectedCiphertext = latest.tokens.ciphertext;
+    const expectedTokenVersion = latest.tokens.tokenVersion ?? 0;
+    const { refreshToken } = decryptTokens(latest);
+    const { clientId, clientSecret } = clientCreds();
+
+    let tokens: { accessToken: string; refreshToken: string; expiresIn: number };
+    try {
+      tokens = await refreshAccessToken({
+        refreshToken,
+        clientId,
+        clientSecret,
+        fetchImpl
+      });
+    } catch (e) {
+      throw Object.assign(new Error("CTRADER_TOKEN_REFRESH_FAILED"), {
+        code: "CTRADER_TOKEN_REFRESH_FAILED",
+        cause: e
+      });
+    }
+
+    if (
+      !tokens.accessToken ||
+      !tokens.refreshToken ||
+      typeof tokens.accessToken !== "string" ||
+      typeof tokens.refreshToken !== "string" ||
+      tokens.accessToken.length < 8 ||
+      tokens.refreshToken.length < 8
+    ) {
+      throw Object.assign(new Error("CTRADER_TOKEN_REFRESH_PARTIAL"), {
+        code: "CTRADER_TOKEN_REFRESH_PARTIAL"
+      });
+    }
+
+    const enc = loadTokenEncryptionSecret();
+    if (!enc) {
+      throw Object.assign(new Error("CTRADER_TOKEN_ENCRYPTION_KEY_MISSING"), {
+        code: "CTRADER_TOKEN_ENCRYPTION_KEY_MISSING"
+      });
+    }
+
+    const now = new Date().toISOString();
+    const newCiphertext = encryptTokenPayload(
+      JSON.stringify({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken
+      }),
+      enc
+    );
+
+    const persist = await persistRotatedTokensAtomic({
+      ownerUid: latest.ownerUid,
+      expectedCiphertext,
+      expectedTokenVersion,
+      newTokens: {
+        ciphertext: newCiphertext,
+        accessExpiresAt: new Date(
+          Date.now() + Math.max(60, tokens.expiresIn) * 1000
+        ).toISOString(),
+        refreshedAt: now
+      }
     });
-  } catch (e) {
+
+    if (persist.ok) {
+      // Only after confirmed persistence may callers use the new access token.
+      const confirmed = decryptTokens(persist.record);
+      if (confirmed.accessToken !== tokens.accessToken) {
+        throw Object.assign(new Error("CTRADER_TOKEN_PERSIST_MISMATCH"), {
+          code: "CTRADER_TOKEN_PERSIST_MISMATCH"
+        });
+      }
+      return { accessToken: confirmed.accessToken, connection: persist.record };
+    }
+
+    if (persist.code === "CTRADER_TOKEN_VERSION_CONFLICT" && persist.record) {
+      // Another refresh won — use the persisted winner; never write stale tokens.
+      const { accessToken } = decryptTokens(persist.record);
+      return { accessToken, connection: persist.record };
+    }
+
     throw Object.assign(new Error("CTRADER_TOKEN_REFRESH_FAILED"), {
       code: "CTRADER_TOKEN_REFRESH_FAILED",
-      cause: e
+      detail: persist.code
     });
-  }
-  const enc = loadTokenEncryptionSecret();
-  if (!enc) {
-    throw Object.assign(new Error("CTRADER_TOKEN_ENCRYPTION_KEY_MISSING"), {
-      code: "CTRADER_TOKEN_ENCRYPTION_KEY_MISSING"
-    });
-  }
-  const ciphertext = encryptTokenPayload(
-    JSON.stringify({
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken
-    }),
-    enc
-  );
-  const now = new Date().toISOString();
-  const updated: CTraderConnectionRecord = {
-    ...connection,
-    updatedAt: now,
-    tokens: {
-      ciphertext,
-      accessExpiresAt: new Date(
-        Date.now() + Math.max(60, tokens.expiresIn) * 1000
-      ).toISOString(),
-      refreshedAt: now
-    },
-    lastErrorCode: null,
-    disconnectedAt: null
-  };
-  await saveConnection(updated);
-  return { accessToken: tokens.accessToken, connection: updated };
+  });
 }
 
 /** List all authorised cTrader accounts for this user (Demo + Live). */
@@ -301,8 +395,22 @@ export async function listAuthorisedAccountsForUser(
   if (!connection) {
     throw Object.assign(new Error("CTRADER_NOT_CONNECTED"), { code: "CTRADER_NOT_CONNECTED" });
   }
-  const { accessToken } = await ensureFreshAccessToken(connection);
-  return api.listAccountsByAccessToken(accessToken);
+  const fresh = await ensureFreshAccessToken(connection);
+  try {
+    return await api.listAccountsByAccessToken(fresh.accessToken);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const authLikely =
+      /CTRADER_ACCOUNT_LIST_FAILED status=(401|403|400)/.test(msg) ||
+      /ACCESS_DENIED|UNAUTHORIZED|INVALID_TOKEN/i.test(msg);
+    if (!authLikely) throw e;
+    // Access token may be revoked while expiry metadata still looks valid.
+    // Force one serialized refresh+persist cycle, then retry once.
+    const forced = await ensureFreshAccessToken(fresh.connection, undefined, {
+      force: true
+    });
+    return api.listAccountsByAccessToken(forced.accessToken);
+  }
 }
 
 /** @deprecated Prefer listAuthorisedAccountsForUser — Demo-only filter removed from product. */

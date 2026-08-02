@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type {
@@ -25,6 +25,10 @@ import {
   friendlyBrokerReason,
   friendlyPreviewNote
 } from "../lib/brokerFriendlyCopy";
+import {
+  buildAutoTradeActivityFeed,
+  deriveAutoTradeSyncSummary
+} from "../lib/broker/autoTradeSyncState";
 import { friendlyApiCode } from "../lib/plainLanguage";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
@@ -92,6 +96,7 @@ export function AutoTradePage() {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [previewOk, setPreviewOk] = useState(false);
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
+  const reloadGenRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -113,34 +118,40 @@ export function AutoTradePage() {
   }, []);
 
   const reload = useCallback(async () => {
+    // Parallel fetch of the same authoritative cTrader sources Broker uses.
+    // latest-request-wins via generation so a slow stale response cannot overwrite.
+    const gen = ++reloadGenRef.current;
     try {
       const next = await api.autoTradeStatus();
+      if (gen !== reloadGenRef.current) return;
       setStatus(next);
       setError(null);
     } catch (err) {
+      if (gen !== reloadGenRef.current) return;
       const msg = err instanceof Error ? err.message : "Unable to load AutoTrade status";
       const code = typeof err === "object" && err && "code" in err ? String((err as { code?: string }).code ?? "") : "";
       setError(code ? friendlyApiCode(code, msg).message : friendlyBrokerReason(msg, msg));
     }
-    try {
-      const c = await api.getBrokerControlCentre();
-      setCentre(c);
-    } catch {
-      /* optional */
+    const [centreResult, diagResult, accountsResult] = await Promise.allSettled([
+      api.getBrokerControlCentre(),
+      api.getCTraderDiagnostics(),
+      api.listCTraderAccounts()
+    ]);
+    if (gen !== reloadGenRef.current) return;
+    if (centreResult.status === "fulfilled") {
+      setCentre(centreResult.value);
     }
-    try {
-      const d = await api.getCTraderDiagnostics();
+    if (diagResult.status === "fulfilled") {
+      const d = diagResult.value;
       setDiagnostics(d);
       if (d.selectedAccountIsLive || d.environment === "LIVE") setMode("live");
-      else if (d.demoAccountSelected) setMode("demo");
-    } catch {
-      setDiagnostics(null);
+      else if (d.demoAccountSelected || d.accountSelected) setMode("demo");
+    } else {
+      // Keep prior diagnostics if a transient failure occurs — do not wipe
+      // a valid Broker-selected account because one diagnostics call failed.
     }
-    try {
-      const listed = await api.listCTraderAccounts();
-      setAccounts(listed.accounts ?? []);
-    } catch {
-      setAccounts([]);
+    if (accountsResult.status === "fulfilled") {
+      setAccounts(accountsResult.value.accounts ?? []);
     }
   }, [api]);
 
@@ -150,6 +161,8 @@ export function AutoTradePage() {
         const res = await api.getAutoTradeSettings(env);
         setSettings(res.settings);
         setRecommended(res.recommended ?? null);
+        // Settings document exists for this mode — wizard step 7 can advance.
+        setSettingsSaved(true);
       } catch {
         setSettings(null);
       }
@@ -159,6 +172,25 @@ export function AutoTradePage() {
 
   useEffect(() => {
     void reload();
+  }, [reload]);
+
+  // Re-fetch canonical server state whenever AutoTrade becomes visible again
+  // (Broker → AutoTrade navigation / tab return) without requiring a full restart.
+  useEffect(() => {
+    const onFocus = () => {
+      void reload();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        void reload();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [reload]);
 
   useEffect(() => {
@@ -189,50 +221,59 @@ export function AutoTradePage() {
   const proposal = status?.t212PendingProposal;
   const candidates = status?.t212GoldCandidates ?? [];
 
-  const connectionLabel = diagnostics?.oauthConnected
-    ? diagnostics.accountSelected || diagnostics.demoAccountSelected
-      ? "Connected"
-      : "Action required"
-    : centre?.readiness?.connected
-      ? "Connected"
-      : "Disconnected";
+  const sync = useMemo(
+    () =>
+      deriveAutoTradeSyncSummary({
+        mode,
+        centre,
+        diagnostics,
+        accounts,
+        settings
+      }),
+    [mode, centre, diagnostics, accounts, settings]
+  );
 
+  const connectionLabel = sync.connectionLabel;
   const autoTradeLabel = "OFF";
-  const rawMarket = diagnostics?.quote?.marketStatus || connection?.marketStatus || "";
-  const symbolName =
-    diagnostics?.symbol?.symbolName ?? connection?.marketName ?? "XAUUSD";
-  const marketOpen =
-    rawMarket.toUpperCase() === "OPEN" || rawMarket.toUpperCase().includes("TRADEABLE");
-  const marketLabel = rawMarket
-    ? `${symbolName} · ${marketOpen ? "Open" : rawMarket}`
-    : `${symbolName} · status unknown`;
-
-  const accountLabel = diagnostics?.connection?.accountMasked
-    ? `${diagnostics.connection.brokerName ?? "Broker"} ${mode === "live" ? "Live" : "Demo"} · ${diagnostics.connection.accountMasked}`
-    : mode === "live"
-      ? "No Live account selected"
-      : "No Demo account selected";
-
-  const modeLabel = mode === "live" ? "Live AutoTrade" : "Demo AutoTrade";
-  const fundsLabel = mode === "live" ? "Real money" : "Demo funds";
+  const marketOpen = sync.marketOpen;
+  const marketLabel = sync.marketLabel;
+  const accountLabel = sync.accountLabel;
+  const modeLabel = sync.modeLabel;
+  const fundsLabel = sync.fundsLabel;
 
   const onboarding = useMemo(
     () =>
       buildOnboardingSteps({
         emailVerified: account?.emailVerified !== false,
-        connected: Boolean(diagnostics?.oauthConnected || centre?.readiness?.connected),
-        accountSelected: Boolean(
-          diagnostics?.accountSelected || diagnostics?.demoAccountSelected
-        ),
+        connected: sync.connected,
+        accountSelected: sync.accountSelected,
         mode,
-        goldOk: Boolean(diagnostics?.goldSymbolFound),
+        goldOk: sync.goldOk,
         settingsSaved,
-        checksOk: Boolean(diagnostics?.liveQuoteReceived),
+        checksOk: sync.checksOk,
         previewOk,
         tradingAuthorised: false,
         autoTradeOn: false
       }),
-    [account?.emailVerified, centre, diagnostics, mode, settingsSaved, previewOk]
+    [
+      account?.emailVerified,
+      sync.connected,
+      sync.accountSelected,
+      sync.goldOk,
+      sync.checksOk,
+      mode,
+      settingsSaved,
+      previewOk
+    ]
+  );
+
+  const activityFeed = useMemo(
+    () =>
+      buildAutoTradeActivityFeed({
+        activity: status?.activity ?? [],
+        summary: sync
+      }),
+    [status?.activity, sync]
   );
 
   const selectBroker = (broker: SelectedBrokerId) => {
@@ -926,28 +967,37 @@ export function AutoTradePage() {
           <dl>
             <div>
               <dt>Bid</dt>
-              <dd>{num(quote?.bid ?? connection?.bid, 3)}</dd>
+              <dd data-testid="autotrade-bid">{num(sync.bid ?? quote?.bid ?? connection?.bid, 3)}</dd>
             </div>
             <div>
               <dt>Ask</dt>
-              <dd>{num(quote?.ask ?? connection?.ask, 3)}</dd>
+              <dd data-testid="autotrade-ask">{num(sync.ask ?? quote?.ask ?? connection?.ask, 3)}</dd>
             </div>
             <div>
               <dt>Spread</dt>
-              <dd>{num(quote?.spread ?? connection?.spread, 3)}</dd>
+              <dd data-testid="autotrade-spread">
+                {num(sync.spread ?? quote?.spread ?? connection?.spread, 3)}
+              </dd>
             </div>
             <div>
               <dt>Market status</dt>
-              <dd>
-                {marketOpen
-                  ? "Open"
-                  : quote?.marketStatus || connection?.marketStatus
-                    ? String(quote?.marketStatus ?? connection?.marketStatus)
-                        .replace(/_/g, " ")
-                        .toLowerCase()
-                        .replace(/^\w/, (c) => c.toUpperCase())
-                    : "Unknown"}
+              <dd data-testid="autotrade-market-status">
+                {sync.marketStatusRaw
+                  ? marketOpen
+                    ? "Market open"
+                    : /CLOSE/i.test(sync.marketStatusRaw)
+                      ? "Market closed"
+                      : sync.marketStatusRaw.replace(/_/g, " ")
+                  : "Unknown"}
               </dd>
+            </div>
+            <div>
+              <dt>Quote</dt>
+              <dd data-testid="autotrade-quote-label">{sync.quoteLabel}</dd>
+            </div>
+            <div>
+              <dt>Execution</dt>
+              <dd data-testid="autotrade-execution-label">{sync.executionLabel}</dd>
             </div>
           </dl>
         </article>
@@ -1268,7 +1318,7 @@ export function AutoTradePage() {
           Activity
         </h2>
         <ul className="gm-autotrade-activity" data-testid="autotrade-activity">
-          {(status?.activity ?? []).slice(0, 12).map((item) => (
+          {activityFeed.map((item) => (
             <li key={item.id} data-level={item.level}>
               <time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time>
               <span>{item.message}</span>
