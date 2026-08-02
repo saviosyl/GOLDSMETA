@@ -192,12 +192,29 @@ export async function refreshAccessToken(args: {
     expires_in?: number;
   };
   const accessToken = json.accessToken ?? json.access_token;
-  const refreshToken = json.refreshToken ?? json.refresh_token ?? args.refreshToken;
+  // Spotware may omit refresh_token when it did not rotate; keep the prior token.
+  // Never accept an empty/partial replacement that would wipe a valid refresh token.
+  const rotatedRefresh = json.refreshToken ?? json.refresh_token;
+  const refreshToken =
+    typeof rotatedRefresh === "string" && rotatedRefresh.trim().length >= 8
+      ? rotatedRefresh.trim()
+      : args.refreshToken;
   const expiresIn = json.expiresIn ?? json.expires_in ?? 0;
-  if (!accessToken) {
+  if (
+    !accessToken ||
+    typeof accessToken !== "string" ||
+    accessToken.trim().length < 8 ||
+    !refreshToken ||
+    typeof refreshToken !== "string" ||
+    refreshToken.trim().length < 8
+  ) {
     throw new Error("CTRADER_TOKEN_REFRESH_MALFORMED");
   }
-  return { accessToken, refreshToken, expiresIn };
+  return {
+    accessToken: accessToken.trim(),
+    refreshToken: refreshToken.trim(),
+    expiresIn
+  };
 }
 
 /** Safe post-OAuth frontend redirect — never includes tokens. */

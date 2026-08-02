@@ -16,6 +16,11 @@ export type EncryptedTokenBlob = {
   ciphertext: string;
   accessExpiresAt: string;
   refreshedAt: string | null;
+  /**
+   * Monotonic token-record version for compare-and-set refresh writes.
+   * Rejects stale refresh persistence after a concurrent rotation.
+   */
+  tokenVersion?: number;
 };
 
 export type CTraderAccountEnvironment = "DEMO" | "LIVE";
@@ -101,6 +106,83 @@ export async function getConnection(
   const data = snap.data() as CTraderConnectionRecord;
   if (data.disconnectedAt) return null;
   return data;
+}
+
+export type PersistRotatedTokensResult =
+  | { ok: true; record: CTraderConnectionRecord }
+  | {
+      ok: false;
+      code: "CTRADER_NOT_CONNECTED" | "CTRADER_TOKEN_VERSION_CONFLICT";
+      record?: CTraderConnectionRecord;
+    };
+
+/**
+ * Atomically replace encrypted tokens only when the caller's expected
+ * ciphertext/version still matches the stored record.
+ *
+ * Guarantees:
+ * - previous encrypted token remains until the new record is committed
+ * - concurrent refresh losers get VERSION_CONFLICT (no partial overwrite)
+ * - never writes a tokens blob missing ciphertext / accessExpiresAt
+ */
+export async function persistRotatedTokensAtomic(args: {
+  ownerUid: string;
+  expectedCiphertext: string;
+  expectedTokenVersion: number;
+  newTokens: EncryptedTokenBlob;
+}): Promise<PersistRotatedTokensResult> {
+  if (
+    !args.newTokens?.ciphertext ||
+    !args.newTokens.accessExpiresAt ||
+    typeof args.newTokens.ciphertext !== "string" ||
+    !args.newTokens.ciphertext.startsWith("v1:")
+  ) {
+    throw Object.assign(new Error("CTRADER_TOKEN_PERSIST_PARTIAL"), {
+      code: "CTRADER_TOKEN_PERSIST_PARTIAL"
+    });
+  }
+
+  const ref = connectionDoc(args.ownerUid);
+  return getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      return { ok: false as const, code: "CTRADER_NOT_CONNECTED" as const };
+    }
+    const data = snap.data() as CTraderConnectionRecord;
+    if (data.disconnectedAt || !data.tokens?.ciphertext) {
+      return { ok: false as const, code: "CTRADER_NOT_CONNECTED" as const };
+    }
+
+    const storedVersion = data.tokens.tokenVersion ?? 0;
+    if (
+      data.tokens.ciphertext !== args.expectedCiphertext ||
+      storedVersion !== args.expectedTokenVersion
+    ) {
+      return {
+        ok: false as const,
+        code: "CTRADER_TOKEN_VERSION_CONFLICT" as const,
+        record: data
+      };
+    }
+
+    const now = new Date().toISOString();
+    const nextVersion = storedVersion + 1;
+    const updated: CTraderConnectionRecord = {
+      ...data,
+      updatedAt: now,
+      lastSyncAt: now,
+      lastErrorCode: null,
+      disconnectedAt: null,
+      tokens: {
+        ciphertext: args.newTokens.ciphertext,
+        accessExpiresAt: args.newTokens.accessExpiresAt,
+        refreshedAt: args.newTokens.refreshedAt ?? now,
+        tokenVersion: nextVersion
+      }
+    };
+    tx.set(ref, updated, { merge: true });
+    return { ok: true as const, record: updated };
+  });
 }
 
 export async function disconnectConnection(ownerUid: string): Promise<void> {
