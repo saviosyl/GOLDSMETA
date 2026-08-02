@@ -119,11 +119,35 @@ export function loadT212CredentialsFromServerEnv(
   environment: T212Environment,
   source: NodeJS.ProcessEnv = process.env
 ): T212Credentials | null {
+  // Preferred Secret Manager names for General Invest read-only phase.
+  const sharedKey = (source.T212_API_KEY ?? "").trim();
+  const sharedSecret = (source.T212_API_SECRET ?? "").trim();
+  const sharedEnv = (source.T212_ENVIRONMENT ?? "").trim().toUpperCase();
+  if (sharedKey && sharedSecret) {
+    const sharedIsLive = sharedEnv === "LIVE" || sharedEnv === "LIVE_INVEST";
+    if ((environment === "LIVE" && sharedIsLive) || (environment === "PRACTICE" && !sharedIsLive)) {
+      return { apiKey: sharedKey, apiSecret: sharedSecret };
+    }
+    // If T212_ENVIRONMENT is unset, allow shared credentials for PRACTICE reads only.
+    if (!sharedEnv && environment === "PRACTICE") {
+      return { apiKey: sharedKey, apiSecret: sharedSecret };
+    }
+  }
+
   const prefix = environment === "LIVE" ? "T212_LIVE" : "T212_DEMO";
   const apiKey = (source[`${prefix}_API_KEY`] ?? "").trim();
   const apiSecret = (source[`${prefix}_API_SECRET`] ?? "").trim();
   if (!apiKey || !apiSecret) return null;
   return { apiKey, apiSecret };
+}
+
+/** Resolve which T212 environment to use for read-only General Invest. */
+export function resolveT212InvestReadEnvironment(
+  source: NodeJS.ProcessEnv = process.env
+): T212Environment {
+  const sharedEnv = (source.T212_ENVIRONMENT ?? "").trim().toUpperCase();
+  if (sharedEnv === "LIVE" || sharedEnv === "LIVE_INVEST") return "LIVE";
+  return "PRACTICE";
 }
 
 function authHeader(creds: T212Credentials): string {

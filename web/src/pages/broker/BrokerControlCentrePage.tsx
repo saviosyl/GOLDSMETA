@@ -15,6 +15,7 @@ import {
 } from "../../lib/plainLanguage";
 import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
 import { StatusBadge } from "../../components/ui/primitives";
+import { T212InvestPanel } from "./T212InvestPanel";
 
 const FALLBACK_WIZARD = [
   {
@@ -464,15 +465,7 @@ export function BrokerControlCentrePage() {
       ) : null}
 
       {selected === "trading212_invest" ? (
-        <section className="gm-section" data-testid="t212-broker-panel">
-          <h2 className="gm-section-title">Trading 212 Practice</h2>
-          <p>
-            Practice stays read-only. Order automation is not enabled from GoldMeta in this phase.
-          </p>
-          <Link className="gm-btn" to="/autotrade">
-            Open practice view
-          </Link>
-        </section>
+        <T212InvestPanel api={api} isOwner={isOwner} />
       ) : null}
 
       {selected === "ig" ? (

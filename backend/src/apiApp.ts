@@ -26,6 +26,7 @@ import { buildCTraderRouter } from "./routes/ctrader";
 import { buildRegistrationRouter } from "./routes/registration";
 import { buildAuthSessionRouter } from "./routes/authSession";
 import { buildAdminUsersRouter } from "./routes/adminUsers";
+import { buildT212InvestRouter } from "./routes/t212Invest";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -130,6 +131,7 @@ export const createApiApp = (
   app.use(buildTradingRouter(tradingService));
   app.use(buildAutoTradeRouter(autoTradeService, store));
   app.use(buildCTraderRouter(store));
+  app.use(buildT212InvestRouter());
   app.use(buildAuthIntegrityRouter(store));
   app.use(buildSystemRouter());
   app.use(errorHandler);
