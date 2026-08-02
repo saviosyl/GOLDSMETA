@@ -8,12 +8,47 @@ import { CTraderConnection } from "@reiryoku/ctrader-layer";
 import type { BrokerAccount, BrokerQuote, BrokerSymbol } from "../domain";
 import { hashAccountKey, maskAccountId } from "./tokenCrypto";
 import {
+  pickXauUsdCandidate,
   resolveXauUsdFromCatalogue,
   type RawCTraderSymbol
 } from "./symbolResolver";
+import {
+  marketStatusFromSchedule,
+  parseScheduleIntervals
+} from "./marketSchedule";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;
+/** Spotware relative price unit — bid/ask are in 1/100000 of price. */
+const SPOT_PRICE_SCALE = 100_000;
+const SPOT_EVENT_TIMEOUT_MS = 8_000;
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function moneyFromCenti(value: unknown, moneyDigits = 2): number | null {
+  const n = asNumber(value);
+  if (n == null) return null;
+  return n / Math.pow(10, moneyDigits);
+}
+
+function volumeFromCents(value: unknown): number | null {
+  const n = asNumber(value);
+  if (n == null) return null;
+  return n / 100;
+}
+
+function spotPriceFromRelative(value: unknown): number | null {
+  const n = asNumber(value);
+  if (n == null) return null;
+  return n / SPOT_PRICE_SCALE;
+}
 
 export type DiscoveredAccount = {
   ctidTraderAccountId: string;
@@ -112,20 +147,43 @@ async function withDemoConnection<T>(
   }
 }
 
+/**
+ * Spotware HTTP account list.
+ * Do NOT use CTraderConnection.getAccessTokenAccounts — that helper
+ * JSON.parse's axios's already-parsed object and throws
+ * `"[object Object]" is not valid JSON`.
+ */
+export async function fetchTradingAccountsByAccessToken(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<DiscoveredAccount[]> {
+  const uri = `https://api.spotware.com/connect/tradingaccounts?access_token=${encodeURIComponent(accessToken)}`;
+  const res = await fetchImpl(uri);
+  if (!res.ok) {
+    throw new Error(`CTRADER_ACCOUNT_LIST_FAILED status=${res.status}`);
+  }
+  const raw = (await res.json()) as unknown;
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { data?: unknown })?.data)
+      ? ((raw as { data: unknown[] }).data as unknown[])
+      : [];
+  return list
+    .filter((item) => {
+      const row = (item ?? {}) as Record<string, unknown>;
+      if (row.deleted === true) return false;
+      const status = String(row.accountStatus ?? "").toUpperCase();
+      if (status === "DELETED" || status === "DISABLED") return false;
+      return true;
+    })
+    .map((item) => mapDiscovered((item ?? {}) as Record<string, unknown>))
+    .filter((a) => a.ctidTraderAccountId.length > 0);
+}
+
 export function createLiveOpenApiClient(): CTraderOpenApiClient {
   return {
     async listAccountsByAccessToken(accessToken: string) {
-      const raw = (await CTraderConnection.getAccessTokenAccounts(
-        accessToken
-      )) as unknown;
-      const list = Array.isArray(raw)
-        ? raw
-        : Array.isArray((raw as { data?: unknown })?.data)
-          ? ((raw as { data: unknown[] }).data as unknown[])
-          : [];
-      return list
-        .map((item) => mapDiscovered((item ?? {}) as Record<string, unknown>))
-        .filter((a) => a.ctidTraderAccountId.length > 0);
+      return fetchTradingAccountsByAccessToken(accessToken);
     },
 
     async fetchAccountSnapshot(args) {
@@ -142,34 +200,65 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         })) as Record<string, unknown>;
         const t = (trader.trader ?? trader) as Record<string, unknown>;
-        const balance =
-          typeof t.balance === "number"
-            ? t.balance / 100
-            : typeof t.balance === "string"
-              ? Number(t.balance) / 100
-              : null;
+        const moneyDigits = asNumber(t.moneyDigits) ?? 2;
+        const balance = moneyFromCenti(t.balance, moneyDigits);
+        let freeMargin = moneyFromCenti(t.freeMargin, moneyDigits);
+        let usedMargin = moneyFromCenti(t.usedMargin, moneyDigits);
+        let equity =
+          moneyFromCenti(t.equity, moneyDigits) ??
+          balance;
+
+        // Margin fields are often absent on ProtoOATraderRes — try reconcile.
+        if (freeMargin == null || usedMargin == null) {
+          try {
+            const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+              ctidTraderAccountId: Number(args.ctidTraderAccountId)
+            })) as Record<string, unknown>;
+            freeMargin =
+              freeMargin ?? moneyFromCenti(recon.freeMargin, moneyDigits);
+            usedMargin =
+              usedMargin ?? moneyFromCenti(recon.usedMargin, moneyDigits);
+            equity = moneyFromCenti(recon.equity, moneyDigits) ?? equity;
+          } catch {
+            /* reconcile optional */
+          }
+        }
+
+        let currency: string | null =
+          typeof t.depositAsset === "string" ? t.depositAsset : null;
+        const depositAssetId = asNumber(t.depositAssetId);
+        if (!currency && depositAssetId != null) {
+          try {
+            const assetsRes = (await connection.sendCommand(
+              "ProtoOAAssetListReq",
+              { ctidTraderAccountId: Number(args.ctidTraderAccountId) }
+            )) as { asset?: Array<Record<string, unknown>>; assets?: Array<Record<string, unknown>> };
+            const assets = assetsRes.asset ?? assetsRes.assets ?? [];
+            const match = assets.find(
+              (a) => asNumber(a.assetId) === depositAssetId
+            );
+            currency =
+              typeof match?.name === "string"
+                ? match.name
+                : typeof match?.displayName === "string"
+                  ? match.displayName
+                  : null;
+          } catch {
+            /* asset list optional */
+          }
+        }
+
+        const leverageInCents = asNumber(t.leverageInCents);
         return {
           balance,
-          equity:
-            typeof t.equity === "number"
-              ? t.equity / 100
-              : balance,
-          freeMargin:
-            typeof t.freeMargin === "number"
-              ? t.freeMargin / 100
-              : null,
-          usedMargin:
-            typeof t.usedMargin === "number"
-              ? t.usedMargin / 100
-              : null,
-          currency:
-            typeof t.depositAsset === "string" ? t.depositAsset : null,
+          equity,
+          freeMargin,
+          usedMargin,
+          currency,
           leverage:
-            typeof t.leverageInCents === "number"
-              ? t.leverageInCents / 100
-              : typeof t.leverage === "number"
-                ? t.leverage
-                : null
+            leverageInCents != null
+              ? leverageInCents / 100
+              : asNumber(t.leverage)
         };
       });
     },
@@ -184,6 +273,26 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
+
+        const assetsRes = (await connection.sendCommand(
+          "ProtoOAAssetListReq",
+          { ctidTraderAccountId: Number(args.ctidTraderAccountId) }
+        ).catch(() => ({ asset: [] }))) as {
+          asset?: Array<Record<string, unknown>>;
+          assets?: Array<Record<string, unknown>>;
+        };
+        const assetById = new Map<number, string>();
+        for (const a of assetsRes.asset ?? assetsRes.assets ?? []) {
+          const id = asNumber(a.assetId);
+          const name =
+            typeof a.name === "string"
+              ? a.name
+              : typeof a.displayName === "string"
+                ? a.displayName
+                : null;
+          if (id != null && name) assetById.set(id, name);
+        }
+
         const symbolsRes = (await connection.sendCommand(
           "ProtoOASymbolsListReq",
           {
@@ -193,46 +302,92 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         const rawList = (symbolsRes.symbol ??
           symbolsRes.symbols ??
           []) as Array<Record<string, unknown>>;
-        const mapped: RawCTraderSymbol[] = rawList.map((s) => ({
-          symbolId: s.symbolId as number | string | undefined,
-          symbolName: String(s.symbolName ?? s.name ?? ""),
-          description: String(s.description ?? ""),
-          baseAsset: s.baseAsset != null ? String(s.baseAsset) : undefined,
-          quoteAsset: s.quoteAsset != null ? String(s.quoteAsset) : undefined,
-          digits: typeof s.digits === "number" ? s.digits : undefined,
-          pipPosition:
-            typeof s.pipPosition === "number" ? s.pipPosition : undefined,
-          tickSize:
-            typeof s.lotSize === "number"
-              ? undefined
-              : typeof s.tickSize === "number"
-                ? s.tickSize
-                : undefined,
-          minVolume:
-            typeof s.minVolume === "number" ? s.minVolume / 100 : undefined,
-          stepVolume:
-            typeof s.stepVolume === "number" ? s.stepVolume / 100 : undefined,
-          maxVolume:
-            typeof s.maxVolume === "number" ? s.maxVolume / 100 : undefined,
-          lotSize: typeof s.lotSize === "number" ? s.lotSize : undefined,
-          minStopDistance:
-            typeof s.minStopDistance === "number"
-              ? s.minStopDistance
-              : undefined
-        }));
+        const mapped: RawCTraderSymbol[] = rawList.map((s) => {
+          const baseId = asNumber(s.baseAssetId);
+          const quoteId = asNumber(s.quoteAssetId);
+          return {
+            symbolId: s.symbolId as number | string | undefined,
+            symbolName: String(s.symbolName ?? s.name ?? ""),
+            description: String(s.description ?? ""),
+            baseAsset:
+              s.baseAsset != null
+                ? String(s.baseAsset)
+                : baseId != null
+                  ? assetById.get(baseId)
+                  : undefined,
+            quoteAsset:
+              s.quoteAsset != null
+                ? String(s.quoteAsset)
+                : quoteId != null
+                  ? assetById.get(quoteId)
+                  : undefined
+          };
+        });
 
-        // Enrich assets from symbol name when Spotware omits them
-        for (const m of mapped) {
-          const n = (m.symbolName ?? "").toUpperCase();
-          if (!m.baseAsset && /^XAU/.test(n)) m.baseAsset = "XAU";
-          if (!m.quoteAsset && /USD/.test(n)) m.quoteAsset = "USD";
-          if (!m.baseAsset && /^GOLD/.test(n)) m.baseAsset = "GOLD";
-          if (!m.tickSize && m.digits != null) {
-            m.tickSize = Math.pow(10, -m.digits);
+        const candidate = pickXauUsdCandidate(mapped);
+        if (!candidate?.symbolId) return null;
+
+        const detailRes = (await connection.sendCommand(
+          "ProtoOASymbolByIdReq",
+          {
+            ctidTraderAccountId: Number(args.ctidTraderAccountId),
+            symbolId: [Number(candidate.symbolId)]
           }
-        }
+        )) as { symbol?: Array<Record<string, unknown>> | Record<string, unknown> };
+        const detailList = Array.isArray(detailRes.symbol)
+          ? detailRes.symbol
+          : detailRes.symbol
+            ? [detailRes.symbol]
+            : [];
+        const detail = detailList[0] ?? {};
+        const digits = asNumber(detail.digits);
+        const enriched: RawCTraderSymbol = {
+          symbolId: candidate.symbolId,
+          symbolName: candidate.symbolName,
+          description: candidate.description,
+          baseAsset: candidate.baseAsset ?? "XAU",
+          quoteAsset: candidate.quoteAsset ?? "USD",
+          digits: digits ?? undefined,
+          pipPosition: asNumber(detail.pipPosition) ?? undefined,
+          tickSize: digits != null ? Math.pow(10, -digits) : undefined,
+          minVolume: volumeFromCents(detail.minVolume) ?? undefined,
+          stepVolume: volumeFromCents(detail.stepVolume) ?? undefined,
+          maxVolume: volumeFromCents(detail.maxVolume) ?? undefined,
+          lotSize: volumeFromCents(detail.lotSize) ?? undefined,
+          minStopDistance:
+            asNumber(detail.slDistance) ??
+            asNumber(detail.minStopDistance) ??
+            undefined,
+          commissionType:
+            typeof detail.commissionType === "string"
+              ? detail.commissionType
+              : undefined,
+          commission: asNumber(detail.commission) ?? undefined,
+          minCommission: asNumber(detail.minCommission) ?? undefined,
+          swapLong: asNumber(detail.swapLong) ?? undefined,
+          swapShort: asNumber(detail.swapShort) ?? undefined,
+          guaranteedStopAvailable:
+            typeof detail.guaranteedStopLoss === "boolean"
+              ? detail.guaranteedStopLoss
+              : undefined,
+          scheduleId:
+            typeof detail.scheduleTimeZone === "string"
+              ? detail.scheduleTimeZone
+              : detail.schedule != null
+                ? "schedule"
+                : undefined
+        };
 
-        return resolveXauUsdFromCatalogue(mapped);
+        const resolved = resolveXauUsdFromCatalogue([enriched]);
+        if (!resolved) return null;
+        const tz =
+          typeof detail.scheduleTimeZone === "string"
+            ? detail.scheduleTimeZone
+            : null;
+        return {
+          ...resolved,
+          tradingScheduleId: tz ?? resolved.tradingScheduleId
+        } satisfies BrokerSymbol;
       });
     },
 
@@ -246,46 +401,78 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
-        // Spot request — one-shot
-        const spot = (await connection.sendCommand("ProtoOASpotReq", {
-          ctidTraderAccountId: Number(args.ctidTraderAccountId),
-          symbolId: Number(args.symbolId)
-        }).catch(async () => {
-          // Fallback subscribe then read event is not available synchronously —
-          // use ProtoOAGetTrendbarsReq-less path: SubscribeSpots + short wait not ideal.
-          // Prefer ProtoOASpotEvent via SubscribeSpots with trySendCommand.
-          await connection.sendCommand("ProtoOASubscribeSpotsReq", {
-            ctidTraderAccountId: Number(args.ctidTraderAccountId),
-            symbolId: [Number(args.symbolId)]
+
+        let marketStatus: BrokerQuote["marketStatus"] = "UNKNOWN";
+        try {
+          const detailRes = (await connection.sendCommand(
+            "ProtoOASymbolByIdReq",
+            {
+              ctidTraderAccountId: Number(args.ctidTraderAccountId),
+              symbolId: [Number(args.symbolId)]
+            }
+          )) as { symbol?: Array<Record<string, unknown>> | Record<string, unknown> };
+          const detailList = Array.isArray(detailRes.symbol)
+            ? detailRes.symbol
+            : detailRes.symbol
+              ? [detailRes.symbol]
+              : [];
+          const detail = detailList[0] ?? {};
+          marketStatus = marketStatusFromSchedule({
+            schedule: parseScheduleIntervals(detail.schedule),
+            timeZone:
+              typeof detail.scheduleTimeZone === "string"
+                ? detail.scheduleTimeZone
+                : "UTC"
           });
-          return null;
-        })) as Record<string, unknown> | null;
+        } catch {
+          marketStatus = "UNKNOWN";
+        }
 
-        const bid =
-          typeof spot?.bid === "number"
-            ? spot.bid
-            : typeof spot?.bid === "string"
-              ? Number(spot.bid)
-              : null;
-        const ask =
-          typeof spot?.ask === "number"
-            ? spot.ask
-            : typeof spot?.ask === "string"
-              ? Number(spot.ask)
-              : null;
+        const spotPromise = new Promise<Record<string, unknown>>(
+          (resolve, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error("CTRADER_QUOTE_TIMEOUT")),
+              SPOT_EVENT_TIMEOUT_MS
+            );
+            connection.on("ProtoOASpotEvent", (event: { descriptor?: Record<string, unknown> }) => {
+              const descriptor = event?.descriptor ?? {};
+              if (
+                asNumber(descriptor.symbolId) != null &&
+                asNumber(descriptor.symbolId) !== Number(args.symbolId)
+              ) {
+                return;
+              }
+              clearTimeout(timer);
+              resolve(descriptor);
+            });
+          }
+        );
 
-        if (bid == null || ask == null) {
+        await connection.sendCommand("ProtoOASubscribeSpotsReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          symbolId: [Number(args.symbolId)],
+          subscribeToSpotTimestamp: true
+        });
+
+        const spot = await spotPromise;
+        const bid = spotPriceFromRelative(spot.bid);
+        const ask = spotPriceFromRelative(spot.ask);
+        if (bid == null || ask == null || !(ask >= bid)) {
           throw new Error("CTRADER_QUOTE_UNAVAILABLE");
         }
         const spread = Number((ask - bid).toFixed(6));
+        const tsMs = asNumber(spot.timestamp);
+        const timestamp = tsMs
+          ? new Date(tsMs).toISOString()
+          : new Date().toISOString();
         return {
           symbolId: args.symbolId,
           symbolName: "XAUUSD",
           bid,
           ask,
           spread,
-          timestamp: new Date().toISOString(),
-          marketStatus: "OPEN",
+          timestamp,
+          marketStatus,
           stale: false,
           source: "LIVE"
         } satisfies BrokerQuote;

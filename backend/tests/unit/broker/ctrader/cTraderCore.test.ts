@@ -205,9 +205,11 @@ describe("symbol resolution", () => {
       }
     ]);
     expect(ok?.metadataComplete).toBe(true);
-    expect(
-      resolveXauUsdFromCatalogue([{ symbolId: 1, symbolName: "XAUUSD" }])
-    ).toBeNull();
+    const incomplete = resolveXauUsdFromCatalogue([
+      { symbolId: 1, symbolName: "XAUUSD" }
+    ]);
+    expect(incomplete?.symbolName).toBe("XAUUSD");
+    expect(incomplete?.metadataComplete).toBe(false);
     expect(
       resolveXauUsdFromCatalogue([
         {
@@ -224,6 +226,34 @@ describe("symbol resolution", () => {
         }
       ])
     ).toBeNull();
+    // Prefer exact XAUUSD over forwards / spread-bets
+    const preferred = resolveXauUsdFromCatalogue([
+      {
+        symbolId: 99,
+        symbolName: "XAUUSD-F",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        digits: 2,
+        tickSize: 0.01,
+        minVolume: 0.01,
+        stepVolume: 0.01,
+        maxVolume: 50,
+        lotSize: 100
+      },
+      {
+        symbolId: 41,
+        symbolName: "XAUUSD",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        digits: 2,
+        tickSize: 0.01,
+        minVolume: 0.01,
+        stepVolume: 0.01,
+        maxVolume: 50,
+        lotSize: 100
+      }
+    ]);
+    expect(preferred?.symbolId).toBe("41");
   });
 });
 
@@ -398,6 +428,51 @@ describe("mutation guard + service", () => {
     expect(centre.brokers.some((b) => b.id === "ig")).toBe(false);
     const demo = buildDemonstrationBundle();
     expect(demo.banner).toBe(FIXTURE_BANNER);
+  });
+});
+
+describe("Spotware account list HTTP", () => {
+  it("parses axios-style JSON without double-parse and filters Live/deleted", async () => {
+    const { fetchTradingAccountsByAccessToken } = await import(
+      "../../../../src/services/broker/ctrader/openApiClient"
+    );
+    const payload = [
+      {
+        accountId: 48100001,
+        live: true,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: false
+      },
+      {
+        accountId: 48100002,
+        live: false,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: false
+      },
+      {
+        accountId: 48100003,
+        live: false,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: true
+      }
+    ];
+    const fetchImpl = async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    const accounts = await fetchTradingAccountsByAccessToken("tok", fetchImpl as typeof fetch);
+    expect(accounts).toHaveLength(2);
+    expect(accounts.filter((a) => a.isLive)).toHaveLength(1);
+    expect(accounts.filter((a) => !a.isLive)).toHaveLength(1);
+    expect(accounts.find((a) => !a.isLive)?.brokerNameTitle).toMatch(/Pepperstone/i);
+    expect(accounts.find((a) => !a.isLive)?.ctidTraderAccountId).toBe("48100002");
   });
 });
 

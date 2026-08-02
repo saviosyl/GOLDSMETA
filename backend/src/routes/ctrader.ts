@@ -337,6 +337,37 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
     try {
       const accounts = await listDemoAccountsForOwner(uid);
+      // Checkpoint A: exactly one Pepperstone Demo → select safely (never manual ID).
+      let autoSelected: {
+        accountIdMasked: string;
+        brokerNameTitle: string | null;
+      } | null = null;
+      const pepperstoneDemos = accounts.filter(
+        (a) => !a.isLive && /pepperstone/i.test(a.brokerNameTitle ?? "")
+      );
+      const existing = await getConnection(uid);
+      if (pepperstoneDemos.length === 1) {
+        const only = pepperstoneDemos[0]!;
+        if (
+          !existing?.selectedAccountId ||
+          existing.selectedAccountId !== only.ctidTraderAccountId
+        ) {
+          const selected = await selectDemoAccount({
+            ownerUid: uid,
+            ctidTraderAccountId: only.ctidTraderAccountId,
+            confirmPepperstone: true
+          });
+          autoSelected = {
+            accountIdMasked: selected.account.accountIdMasked,
+            brokerNameTitle: selected.account.brokerName
+          };
+        } else {
+          autoSelected = {
+            accountIdMasked: existing.selectedAccountMasked ?? only.accountIdMasked,
+            brokerNameTitle: existing.brokerName
+          };
+        }
+      }
       res.json({
         environment: "DEMO",
         accounts: accounts.map((a) => ({
@@ -347,6 +378,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           leverage: a.leverage,
           isLive: false
         })),
+        autoSelected,
         orderSubmissionEnabled: false
       });
     } catch (e) {

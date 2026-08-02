@@ -138,18 +138,30 @@ export function BrokerControlCentrePage() {
     oauthHandledRef.current = true;
     const reason = searchParams.get("reason");
     if (ctrader === "oauth_ok") {
-      setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
+      setInfoBanner("Pepperstone OAuth completed. Loading Demo accounts…");
       setSelected("pepperstone_ctrader");
       selectionTouchedRef.current = true;
       if (isOwner) {
         void api
           .listCTraderDemoAccounts()
-          .then((r) => setAccounts(r.accounts ?? []))
+          .then((r) => {
+            setAccounts(r.accounts ?? []);
+            // Server auto-selects when exactly one Pepperstone Demo exists.
+            if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
+              setInfoBanner("Pepperstone Demo account selected — read-only.");
+            } else if ((r.accounts ?? []).length > 1) {
+              setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
+            } else {
+              setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
+            }
+            void load();
+          })
           .catch((e: unknown) =>
             setErrorDetail(describeClientError(e, "Could not list Demo accounts."))
           );
+      } else {
+        void load();
       }
-      void load();
     } else if (ctrader === "oauth_error") {
       setErrorDetail(
         describeClientError(

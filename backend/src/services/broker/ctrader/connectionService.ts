@@ -382,7 +382,10 @@ export async function readQuoteForOwner(
     symbolId: freshConn.symbolId!
   });
   const ageMs = quote.timestamp ? Date.now() - Date.parse(quote.timestamp) : Infinity;
-  const stale = ageMs > STALE_QUOTE_MS;
+  // When market is CLOSED, Spotware's first spot event is last session price — not a live tick.
+  // Accept it for read-only diagnostics; only reject age when market is OPEN/UNKNOWN.
+  const marketClosed = quote.marketStatus === "CLOSED";
+  const stale = !marketClosed && ageMs > STALE_QUOTE_MS;
   const result: BrokerQuote = { ...quote, stale };
   if (stale) {
     throw Object.assign(new Error("CTRADER_QUOTE_STALE"), {
@@ -472,7 +475,12 @@ export async function buildDiagnostics(
     demoAccountSelected: Boolean(connection?.selectedAccountId),
     pepperstoneConfirmed: Boolean(connection?.brokerConfirmedPepperstone),
     goldSymbolFound: Boolean(connection?.symbolId || symbol),
-    liveQuoteReceived: Boolean(quote && !quote.stale),
+    liveQuoteReceived: Boolean(
+      quote &&
+        quote.bid != null &&
+        quote.ask != null &&
+        (!quote.stale || quote.marketStatus === "CLOSED")
+    ),
     spreadAvailable: quote?.spread != null,
     volumeRulesAvailable: volumeRules,
     marginMetadataAvailable: marginMeta,

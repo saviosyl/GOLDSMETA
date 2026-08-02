@@ -55,14 +55,46 @@ function looksLikeGoldUsd(raw: RawCTraderSymbol): boolean {
   return false;
 }
 
+/**
+ * Prefer the exact spot symbol name XAUUSD when present.
+ * Excludes forwards / spread-bets / indices that also match gold+USD heuristics.
+ * Never hardcodes symbol IDs — selection is by resolved catalogue name/assets.
+ */
+export function pickXauUsdCandidate(
+  symbols: RawCTraderSymbol[]
+): RawCTraderSymbol | null {
+  const exact = symbols.filter(
+    (s) => String(s.symbolName ?? "").trim().toUpperCase() === "XAUUSD"
+  );
+  if (exact.length === 1) return exact[0]!;
+  if (exact.length > 1) return null;
+
+  const matches = symbols.filter(looksLikeGoldUsd).filter((s) => {
+    const n = String(s.symbolName ?? "").toUpperCase();
+    if (/(_SB|_SBE|-F|PERP|INDEX)/.test(n)) return false;
+    return true;
+  });
+  if (matches.length !== 1) return null;
+  return matches[0]!;
+}
+
 export function resolveXauUsdFromCatalogue(
   symbols: RawCTraderSymbol[],
   brokerId: "pepperstone_ctrader" = "pepperstone_ctrader",
   environment: "DEMO" = "DEMO"
 ): BrokerSymbol | null {
-  const matches = symbols.filter(looksLikeGoldUsd);
-  if (matches.length !== 1) return null;
-  const raw = matches[0]!;
+  const raw = pickXauUsdCandidate(symbols);
+  if (!raw) return null;
+  // Exact XAUUSD name may omit assets in light lists — enrich for gate checks.
+  if (!raw.baseAsset && /^XAUUSD$/i.test(String(raw.symbolName ?? ""))) {
+    raw.baseAsset = "XAU";
+  }
+  if (!raw.quoteAsset && /^XAUUSD$/i.test(String(raw.symbolName ?? ""))) {
+    raw.quoteAsset = "USD";
+  }
+  if (!looksLikeGoldUsd(raw) && !/^XAUUSD$/i.test(String(raw.symbolName ?? ""))) {
+    return null;
+  }
   const missing: string[] = [];
   const req: Array<[keyof RawCTraderSymbol, string]> = [
     ["symbolId", "symbolId"],
