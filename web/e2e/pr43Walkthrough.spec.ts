@@ -39,7 +39,7 @@ test.describe("PR #43 human UX walkthrough (ui-review)", () => {
   test("Admin template page accessible in owner review shell", async ({ page }) => {
     await page.goto("/ui-review/admin/tradingview-template");
     await expect(page.getByTestId("admin-tv-template-page")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/goldmeta-standard-v1/i)).toBeVisible();
+    await expect(page.getByText("goldmeta-standard-v1", { exact: true }).first()).toBeVisible();
   });
 
   for (const vp of VIEWPORTS) {
