@@ -69,6 +69,8 @@ export type LadderInput = {
   isUiReviewFixture?: boolean | null;
   brokerQuoteVerified?: boolean | null;
   marketStatus?: "OPEN" | "CLOSED" | "UNKNOWN" | null;
+  /** When true, only show live/bar high/low — incomplete strategy signal. */
+  liveRangeOnly?: boolean | null;
 };
 
 export type LadderBuildResult = {
@@ -100,6 +102,7 @@ export function buildMarketLevelLadderDetailed(input: LadderInput): LadderBuildR
   const live = num(input.livePrice);
   const rows: MarketLevelRow[] = [];
   const source = input.priceSource ?? input.dataSourceLabel ?? null;
+  const liveRangeOnly = Boolean(input.liveRangeOnly);
 
   const push = (
     id: string,
@@ -148,10 +151,6 @@ export function buildMarketLevelLadderDetailed(input: LadderInput): LadderBuildR
     );
   }
 
-  push("poc", num(input.poc), "poc", "Session POC", "Point of control", "poc");
-  push("vah", num(input.vah), "vah", "VAH", "Value area high", "vah-val");
-  push("val", num(input.val), "val", "VAL", "Value area low", "vah-val");
-
   const barHigh = num(input.barHigh);
   const barLow = num(input.barLow);
   if (barHigh != null && live != null && barHigh > live) {
@@ -165,11 +164,17 @@ export function buildMarketLevelLadderDetailed(input: LadderInput): LadderBuildR
     push("bar-low", barLow, "bar-low", "Bar low", "Confirmed bar low", "neutral");
   }
 
-  push("entry", num(input.entry), "entry", "Plan entry", "Shadow plan entry", "plan");
-  push("stop", num(input.stop), "stop", "Plan stop", "Shadow plan stop", "plan");
-  push("tp1", num(input.tp1), "tp", "TP1", "Shadow plan take-profit 1", "plan");
-  push("tp2", num(input.tp2), "tp", "TP2", "Shadow plan take-profit 2", "plan");
-  push("tp3", num(input.tp3), "tp", "TP3", "Shadow plan take-profit 3", "plan");
+  // Incomplete OHLC-only events: do not present fabricated/absent strategy levels.
+  if (!liveRangeOnly) {
+    push("poc", num(input.poc), "poc", "Session POC", "Point of control", "poc");
+    push("vah", num(input.vah), "vah", "VAH", "Value area high", "vah-val");
+    push("val", num(input.val), "val", "VAL", "Value area low", "vah-val");
+    push("entry", num(input.entry), "entry", "Plan entry", "Shadow plan entry", "plan");
+    push("stop", num(input.stop), "stop", "Plan stop", "Shadow plan stop", "plan");
+    push("tp1", num(input.tp1), "tp", "TP1", "Shadow plan take-profit 1", "plan");
+    push("tp2", num(input.tp2), "tp", "TP2", "Shadow plan take-profit 2", "plan");
+    push("tp3", num(input.tp3), "tp", "TP3", "Shadow plan take-profit 3", "plan");
+  }
 
   rows.sort((a, b) => b.price - a.price || a.id.localeCompare(b.id));
   return { rows, mismatch: null, liveLabel };

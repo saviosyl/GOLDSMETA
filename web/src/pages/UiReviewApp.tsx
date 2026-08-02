@@ -261,6 +261,48 @@ function buildReviewApi() {
 
   return {
     latestDecision: async () => (empty ? null : decision),
+    latestDecisionPack: async () =>
+      empty
+        ? null
+        : {
+            decision,
+            latestQuote: decision,
+            latestCompleteStrategySignal: marketMismatch
+              ? null
+              : marketMatch
+                ? decision
+                : decision.marketStructure?.poc != null
+                  ? decision
+                  : null,
+            marketStructureMode: marketMismatch
+              ? "MISMATCH"
+              : marketMatch
+                ? "COMPLETE"
+                : decision.marketStructure?.poc != null
+                  ? "COMPLETE"
+                  : "LIVE_RANGE_ONLY",
+            marketStructureDiagnostics: {
+              lastWebhookOrDecisionAt: decision.generatedAt,
+              lastCompleteSignalAt:
+                decision.marketStructure?.poc != null ? decision.generatedAt : null,
+              schemaVersion: decision.schemaVersion,
+              canonicalSymbol: "XAUUSD",
+              exchangeOrBroker: decision.symbolIdentity?.exchange ?? null,
+              timeframe: decision.timeframe,
+              fieldsReceived: ["price", "ohlcv"],
+              fieldsMissing: marketMismatch ? ["combined_structure"] : [],
+              fieldsRejected: [],
+              rejectionReasons: marketMismatch ? ["PRICE_SOURCE_MISMATCH"] : [],
+              priceConsistencyOk: !marketMismatch,
+              validityStatus: marketMatch ? "VALID" : marketMismatch ? "MISMATCH" : "INCOMPLETE",
+              marketStructureMode: marketMismatch
+                ? "MISMATCH"
+                : marketMatch
+                  ? "COMPLETE"
+                  : "LIVE_RANGE_ONLY"
+            },
+            structureDecisionId: decision.decisionId
+          },
     listActiveSetups: async () => (empty ? [] : marketMismatch ? [] : [setup]),
     listSetups: async () =>
       empty

@@ -131,9 +131,21 @@ export class ApiClient {
   }
 
   async latestDecision(): Promise<Decision | null> {
+    const pack = await this.latestDecisionPack();
+    return pack?.decision ?? null;
+  }
+
+  /** Latest quote + optional complete strategy signal (Market Structure separation). */
+  async latestDecisionPack(): Promise<{
+    decision: Decision;
+    latestQuote?: Decision | null;
+    latestCompleteStrategySignal?: Decision | null;
+    marketStructureMode?: "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE";
+    marketStructureDiagnostics?: Record<string, unknown> | null;
+    structureDecisionId?: string | null;
+  } | null> {
     try {
-      const body = await this.request<{ decision: Decision }>("/v1/decisions/latest");
-      return body.decision;
+      return await this.request("/v1/decisions/latest");
     } catch (err) {
       // Expected empty state when the user has no published decision yet.
       if (err instanceof ApiError && err.status === 404 && err.code === "NOT_FOUND") {
