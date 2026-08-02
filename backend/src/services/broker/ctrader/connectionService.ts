@@ -30,7 +30,7 @@ import {
 import { decryptTokenPayload, encryptTokenPayload, maskAccountId } from "./tokenCrypto";
 import { buildTradePreview, type PreviewInput } from "./preview";
 import type { BrokerQuote, BrokerSymbol, TradePreview } from "../domain";
-import { loadOwnerAuthConfig } from "../../auth/ownerAuthConfig";
+import { getUserAutoTradeSettings } from "./userAutoTradeSettings";
 
 const STALE_QUOTE_MS = 15_000;
 
@@ -38,6 +38,8 @@ export type DiagnosticsReport = {
   credentialsConfigured: boolean;
   oauthConnected: boolean;
   demoAccountSelected: boolean;
+  accountSelected: boolean;
+  selectedAccountIsLive: boolean;
   pepperstoneConfirmed: boolean;
   goldSymbolFound: boolean;
   liveQuoteReceived: boolean;
@@ -50,7 +52,8 @@ export type DiagnosticsReport = {
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
   autoTrade: "OFF";
-  environment: "DEMO";
+  environment: "DEMO" | "LIVE";
+  orderSubmissionEnabled: false;
   connection: {
     accountMasked: string | null;
     brokerName: string | null;
@@ -73,13 +76,21 @@ function clientCreds(source = process.env) {
   };
 }
 
-export function assertPinnedOwner(ownerUid: string): void {
-  const cfg = loadOwnerAuthConfig();
-  if (!cfg.pinnedOwnerUid || cfg.pinnedOwnerUid !== ownerUid) {
-    const err = new Error("CTRADER_OWNER_ONLY");
-    (err as Error & { code: string }).code = "CTRADER_OWNER_ONLY";
+/**
+ * Per-user broker isolation — routes pass the authenticated UID only.
+ * Tokens/accounts are always loaded from users/{uid}/… — never from another UID.
+ */
+export function assertBrokerUser(uid: string): void {
+  if (!uid || typeof uid !== "string" || uid.trim().length < 8) {
+    const err = new Error("UNAUTHENTICATED");
+    (err as Error & { code: string }).code = "UNAUTHENTICATED";
     throw err;
   }
+}
+
+/** @deprecated Alias — product no longer pins AutoTrade to a single owner UID. */
+export function assertPinnedOwner(ownerUid: string): void {
+  assertBrokerUser(ownerUid);
 }
 
 export async function startOAuthForOwner(ownerUid: string): Promise<{
@@ -88,7 +99,7 @@ export async function startOAuthForOwner(ownerUid: string): Promise<{
   expiresAt: string;
   environment: "DEMO";
 }> {
-  assertPinnedOwner(ownerUid);
+  assertBrokerUser(ownerUid);
   const config = loadCTraderConfig();
   if (!config.configured) {
     const err = new Error("CTRADER_SETUP_REQUIRED");
@@ -133,7 +144,7 @@ export async function completeOAuthCallback(args: {
     throw err;
   }
   const record = consumed.record;
-  assertPinnedOwner(record.ownerUid);
+  assertBrokerUser(record.ownerUid);
 
   if (record.ownerUidHash !== hashOwnerUid(record.ownerUid)) {
     const err = new Error("OAUTH_STATE_OWNER_MISMATCH");
@@ -187,23 +198,26 @@ export async function completeOAuthCallback(args: {
     selectedAccountId: null,
     selectedAccountMasked: null,
     selectedAccountKeyHash: null,
+    selectedAccountIsLive: false,
     brokerName: null,
     brokerConfirmedPepperstone: false,
     currency: null,
     leverage: null,
+    balance: null,
     symbolId: null,
     symbolName: null,
     lastSyncAt: now,
     lastQuoteAt: null,
     lastErrorCode: null,
-    disconnectedAt: null
+    disconnectedAt: null,
+    liveSelectionConfirmedAt: null
   };
   await saveConnection(connection);
 
   const api = createOpenApiClient();
   const accounts = await api.listAccountsByAccessToken(tokens.accessToken);
-  const demoOnly = accounts.filter((a) => !a.isLive);
-  return { ownerUid: record.ownerUid, accounts: demoOnly };
+  // Return Demo + Live — UI separates modes; Live needs explicit confirmation to select.
+  return { ownerUid: record.ownerUid, accounts };
 }
 
 function decryptTokens(connection: CTraderConnectionRecord): {
@@ -277,29 +291,38 @@ async function ensureFreshAccessToken(
   return { accessToken: tokens.accessToken, connection: updated };
 }
 
-export async function listDemoAccountsForOwner(
+/** List all authorised cTrader accounts for this user (Demo + Live). */
+export async function listAuthorisedAccountsForUser(
   ownerUid: string,
   api: CTraderOpenApiClient = createOpenApiClient()
 ): Promise<DiscoveredAccount[]> {
-  assertPinnedOwner(ownerUid);
+  assertBrokerUser(ownerUid);
   const connection = await getConnection(ownerUid);
   if (!connection) {
     throw Object.assign(new Error("CTRADER_NOT_CONNECTED"), { code: "CTRADER_NOT_CONNECTED" });
   }
-  const { accessToken, connection: fresh } = await ensureFreshAccessToken(connection);
-  const accounts = await api.listAccountsByAccessToken(accessToken);
-  void fresh;
-  // Reject live accounts entirely from the selectable list
-  return accounts.filter((a) => !a.isLive);
+  const { accessToken } = await ensureFreshAccessToken(connection);
+  return api.listAccountsByAccessToken(accessToken);
 }
 
-export async function selectDemoAccount(args: {
+/** @deprecated Prefer listAuthorisedAccountsForUser — Demo-only filter removed from product. */
+export async function listDemoAccountsForOwner(
+  ownerUid: string,
+  api: CTraderOpenApiClient = createOpenApiClient()
+): Promise<DiscoveredAccount[]> {
+  const all = await listAuthorisedAccountsForUser(ownerUid, api);
+  return all.filter((a) => !a.isLive);
+}
+
+export async function selectBrokerAccountForUser(args: {
   ownerUid: string;
   ctidTraderAccountId: string;
   confirmPepperstone?: boolean;
+  /** Required when selecting a Live account — never inherited from Demo. */
+  confirmLiveSelection?: boolean;
   api?: CTraderOpenApiClient;
 }): Promise<{ account: ReturnType<typeof toSafeBrokerAccount>; symbol: BrokerSymbol | null }> {
-  assertPinnedOwner(args.ownerUid);
+  assertBrokerUser(args.ownerUid);
   const api = args.api ?? createOpenApiClient();
   const connection = await getConnection(args.ownerUid);
   if (!connection) {
@@ -307,15 +330,16 @@ export async function selectDemoAccount(args: {
   }
   const { accessToken, connection: freshConn } = await ensureFreshAccessToken(connection);
   const accounts = await api.listAccountsByAccessToken(accessToken);
+  // Never accept an account ID that was not returned for this user's OAuth tokens.
   const match = accounts.find((a) => a.ctidTraderAccountId === args.ctidTraderAccountId);
   if (!match) {
-    throw Object.assign(new Error("CTRADER_DEMO_ACCOUNT_NOT_FOUND"), {
-      code: "CTRADER_DEMO_ACCOUNT_NOT_FOUND"
+    throw Object.assign(new Error("CTRADER_ACCOUNT_NOT_AUTHORISED"), {
+      code: "CTRADER_ACCOUNT_NOT_AUTHORISED"
     });
   }
-  if (match.isLive) {
-    throw Object.assign(new Error("CTRADER_LIVE_ACCOUNT_REJECTED"), {
-      code: "CTRADER_LIVE_ACCOUNT_REJECTED"
+  if (match.isLive && !args.confirmLiveSelection) {
+    throw Object.assign(new Error("CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED"), {
+      code: "CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED"
     });
   }
 
@@ -344,31 +368,49 @@ export async function selectDemoAccount(args: {
   }
 
   const now = new Date().toISOString();
+  const environment = match.isLive ? "LIVE" : "DEMO";
   await saveConnection({
     ...freshConn,
+    environment,
     updatedAt: now,
     lastSyncAt: now,
     selectedAccountId: match.ctidTraderAccountId,
     selectedAccountMasked: match.accountIdMasked,
     selectedAccountKeyHash: match.accountKeyHash,
+    selectedAccountIsLive: match.isLive,
     brokerName: match.brokerNameTitle,
     brokerConfirmedPepperstone: pepperstone,
     currency: snap.currency ?? match.depositCurrency,
     leverage: snap.leverage ?? match.leverage,
+    balance: snap.balance,
     symbolId: symbol?.symbolId ?? null,
     symbolName: symbol?.symbolName ?? null,
     lastErrorCode: null,
-    disconnectedAt: null
+    disconnectedAt: null,
+    liveSelectionConfirmedAt: match.isLive ? now : null
   });
 
   return { account: toSafeBrokerAccount(match, snap), symbol };
+}
+
+/** @deprecated Prefer selectBrokerAccountForUser. */
+export async function selectDemoAccount(args: {
+  ownerUid: string;
+  ctidTraderAccountId: string;
+  confirmPepperstone?: boolean;
+  api?: CTraderOpenApiClient;
+}): Promise<{ account: ReturnType<typeof toSafeBrokerAccount>; symbol: BrokerSymbol | null }> {
+  return selectBrokerAccountForUser({
+    ...args,
+    confirmLiveSelection: false
+  });
 }
 
 export async function readQuoteForOwner(
   ownerUid: string,
   api: CTraderOpenApiClient = createOpenApiClient()
 ): Promise<BrokerQuote> {
-  assertPinnedOwner(ownerUid);
+  assertBrokerUser(ownerUid);
   const connection = await getConnection(ownerUid);
   if (!connection?.selectedAccountId || !connection.symbolId) {
     throw Object.assign(new Error("CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED"), {
@@ -431,7 +473,7 @@ export async function buildDiagnostics(
         const match = accounts.find(
           (a) => a.ctidTraderAccountId === connection.selectedAccountId
         );
-        if (match && !match.isLive) {
+        if (match) {
           const { clientId, clientSecret } = clientCreds();
           const snap = await api.fetchAccountSnapshot({
             accessToken,
@@ -475,7 +517,11 @@ export async function buildDiagnostics(
   return {
     credentialsConfigured: config.configured && Boolean(loadTokenEncryptionSecret()),
     oauthConnected,
-    demoAccountSelected: Boolean(connection?.selectedAccountId),
+    demoAccountSelected: Boolean(
+      connection?.selectedAccountId && !connection.selectedAccountIsLive
+    ),
+    accountSelected: Boolean(connection?.selectedAccountId),
+    selectedAccountIsLive: Boolean(connection?.selectedAccountIsLive),
     pepperstoneConfirmed: Boolean(connection?.brokerConfirmedPepperstone),
     goldSymbolFound: Boolean(connection?.symbolId || symbol),
     liveQuoteReceived: Boolean(
@@ -491,7 +537,8 @@ export async function buildDiagnostics(
     marketStatusAvailable: quote?.marketStatus != null,
     tradingSafelyLocked: true,
     autoTrade: "OFF",
-    environment: "DEMO",
+    environment: connection?.environment === "LIVE" ? "LIVE" : "DEMO",
+    orderSubmissionEnabled: false,
     connection: {
       accountMasked: connection?.selectedAccountMasked ?? null,
       brokerName: connection?.brokerName ?? null,
@@ -525,7 +572,7 @@ export async function buildLiveDemoPreview(args: {
   candleConfirmed?: boolean;
   api?: CTraderOpenApiClient;
 }): Promise<{ preview: TradePreview; quote: BrokerQuote; label: string }> {
-  assertPinnedOwner(args.ownerUid);
+  assertBrokerUser(args.ownerUid);
   const connection = await getConnection(args.ownerUid);
   if (!connection?.selectedAccountId || !connection.symbolId) {
     throw Object.assign(new Error("CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED"), {
@@ -555,10 +602,12 @@ export async function buildLiveDemoPreview(args: {
     ctidTraderAccountId: connectionFresh.selectedAccountId!
   });
 
+  const envKey = connectionFresh.selectedAccountIsLive ? "live" : "demo";
+  const settings = await getUserAutoTradeSettings(args.ownerUid, envKey);
   const input: PreviewInput = {
     decisionId: args.decisionId ?? `demo-preview-${Date.now()}`,
     decision: args.decision,
-    confidence: args.confidence ?? 85,
+    confidence: args.confidence ?? settings.minConfidence,
     generatedAt: new Date().toISOString(),
     candleConfirmed: args.candleConfirmed !== false,
     stopLoss: args.stopLoss ?? (quote.bid != null ? quote.bid - 10 : null),
@@ -570,11 +619,13 @@ export async function buildLiveDemoPreview(args: {
     equity: snap.equity,
     freeMargin: snap.freeMargin,
     accountCurrency: snap.currency ?? connectionFresh.currency ?? "EUR",
-    riskAmountEur: 20,
-    maxSpread: 2,
+    riskAmountEur: settings.fixedRiskAmount,
+    maxSpread: settings.maxSpread,
     demonstration: false,
     eurToAccountRate: 1,
-    marginPerLot: 200
+    marginPerLot: 200,
+    sizingMode: settings.sizingMode,
+    manualLotSize: settings.manualLotSize
   };
   const preview = buildTradePreview(input);
   return {
@@ -585,7 +636,7 @@ export async function buildLiveDemoPreview(args: {
 }
 
 export async function disconnectOwner(ownerUid: string): Promise<void> {
-  assertPinnedOwner(ownerUid);
+  assertBrokerUser(ownerUid);
   await disconnectConnection(ownerUid);
 }
 

@@ -80,7 +80,7 @@ function diagTone(ok: boolean): "positive" | "warning" | "negative" {
  * AutoTrade remains OFF. No order submission. Demonstration data clearly labelled.
  */
 export function BrokerControlCentrePage() {
-  const { api, account } = useAuth();
+  const { api } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [centre, setCentre] = useState<BrokerControlCentreResponse | null>(null);
   const [demo, setDemo] = useState<CTraderDemonstrationBundle | null>(null);
@@ -101,8 +101,6 @@ export function BrokerControlCentrePage() {
   const [selected, setSelected] = useState<string>("manual");
   const selectionTouchedRef = useRef(false);
   const oauthHandledRef = useRef(false);
-  const isOwner = account?.role === "OWNER";
-
   const load = useCallback(async () => {
     setLoading(true);
     setErrorDetail(null);
@@ -112,7 +110,7 @@ export function BrokerControlCentrePage() {
       if (!selectionTouchedRef.current) {
         setSelected(data.defaultBroker ?? "manual");
       }
-      if (isOwner && data.readiness?.connected) {
+      if (data.readiness?.connected) {
         try {
           const diag = await api.getCTraderDiagnostics();
           setDiagnostics(diag);
@@ -125,7 +123,7 @@ export function BrokerControlCentrePage() {
     } finally {
       setLoading(false);
     }
-  }, [api, isOwner]);
+  }, [api]);
 
   useEffect(() => {
     void load();
@@ -138,30 +136,23 @@ export function BrokerControlCentrePage() {
     oauthHandledRef.current = true;
     const reason = searchParams.get("reason");
     if (ctrader === "oauth_ok") {
-      setInfoBanner("Pepperstone OAuth completed. Loading Demo accounts…");
+      setInfoBanner("cTrader OAuth completed. Loading authorised accounts…");
       setSelected("pepperstone_ctrader");
       selectionTouchedRef.current = true;
-      if (isOwner) {
-        void api
-          .listCTraderDemoAccounts()
-          .then((r) => {
-            setAccounts(r.accounts ?? []);
-            // Server auto-selects when exactly one Pepperstone Demo exists.
-            if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
-              setInfoBanner("Pepperstone Demo account selected — read-only.");
-            } else if ((r.accounts ?? []).length > 1) {
-              setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
-            } else {
-              setInfoBanner("Pepperstone OAuth completed. Select a Demo account below.");
-            }
-            void load();
-          })
-          .catch((e: unknown) =>
-            setErrorDetail(describeClientError(e, "Could not list Demo accounts."))
-          );
-      } else {
-        void load();
-      }
+      void api
+        .listCTraderAccounts()
+        .then((r) => {
+          setAccounts(r.accounts ?? []);
+          if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
+            setInfoBanner("Pepperstone Demo account selected — read-only.");
+          } else {
+            setInfoBanner("OAuth completed. Select a Demo or Live account below.");
+          }
+          void load();
+        })
+        .catch((e: unknown) =>
+          setErrorDetail(describeClientError(e, "Could not list broker accounts."))
+        );
     } else if (ctrader === "oauth_error") {
       setErrorDetail(
         describeClientError(
@@ -174,7 +165,7 @@ export function BrokerControlCentrePage() {
     next.delete("ctrader");
     next.delete("reason");
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, api, isOwner, load]);
+  }, [searchParams, setSearchParams, api, load]);
 
   const loadDemo = async () => {
     setShowDemo(true);
@@ -187,15 +178,6 @@ export function BrokerControlCentrePage() {
   };
 
   const startOAuth = async () => {
-    if (!isOwner) {
-      setErrorDetail(
-        describeClientError(
-          new ApiError(403, "CTRADER_OWNER_ONLY", "Owner only"),
-          "Only the owner can start Pepperstone OAuth."
-        )
-      );
-      return;
-    }
     setConnecting(true);
     setErrorDetail(null);
     try {
@@ -222,18 +204,23 @@ export function BrokerControlCentrePage() {
     }
   };
 
-  const selectAccount = async (id: string) => {
+  const selectAccount = async (id: string, isLive = false) => {
     try {
-      await api.selectCTraderDemoAccount({
+      await api.selectCTraderAccount({
         ctidTraderAccountId: id,
-        confirmPepperstone: true
+        confirmPepperstone: true,
+        confirmLiveSelection: isLive
       });
-      setInfoBanner("Demo account selected — read-only checks can run.");
+      setInfoBanner(
+        isLive
+          ? "Live account selected — confirmation stored; order submission stays disabled."
+          : "Demo account selected — read-only checks can run."
+      );
       const diag = await api.getCTraderDiagnostics();
       setDiagnostics(diag);
       await load();
     } catch (e) {
-      setErrorDetail(describeClientError(e, "Could not select Demo account."));
+      setErrorDetail(describeClientError(e, "Could not select broker account."));
     }
   };
 
@@ -495,34 +482,27 @@ export function BrokerControlCentrePage() {
           </ol>
 
           <div className="gm-broker-actions">
-            {!connected && isOwner ? (
+            {!connected ? (
               <button
                 type="button"
                 className="gm-btn"
-                disabled={authBlocked || !readiness?.oauthConfigured || connecting}
+                disabled={!readiness?.oauthConfigured || connecting}
                 data-testid="ctrader-connect-btn"
                 title={
-                  authBlocked
-                    ? "Connection setup required"
-                    : !readiness?.oauthConfigured
-                      ? "Secure credentials not added yet"
-                      : "Start Pepperstone connection"
+                  !readiness?.oauthConfigured
+                    ? "Secure credentials not added yet"
+                    : "Start cTrader connection for your account"
                 }
                 onClick={() => void startOAuth()}
               >
                 {connecting
                   ? "Starting…"
-                  : authBlocked || !readiness?.oauthConfigured
+                  : !readiness?.oauthConfigured
                     ? "Connect unavailable"
-                    : "Connect Pepperstone"}
+                    : "Connect cTrader"}
               </button>
             ) : null}
-            {!connected && !isOwner ? (
-              <p className="gm-meta" data-testid="ctrader-owner-only-note">
-                Only the owner can start Pepperstone OAuth.
-              </p>
-            ) : null}
-            {connected && isOwner ? (
+            {connected ? (
               <>
                 <button
                   type="button"
@@ -530,14 +510,14 @@ export function BrokerControlCentrePage() {
                   data-testid="ctrader-refresh-accounts-btn"
                   onClick={() => {
                     void api
-                      .listCTraderDemoAccounts()
+                      .listCTraderAccounts()
                       .then((r) => setAccounts(r.accounts ?? []))
                       .catch((e: unknown) =>
-                        setErrorDetail(describeClientError(e, "Could not list Demo accounts."))
+                        setErrorDetail(describeClientError(e, "Could not list broker accounts."))
                       );
                   }}
                 >
-                  Refresh Demo accounts
+                  Refresh accounts
                 </button>
                 <button
                   type="button"
@@ -588,13 +568,14 @@ export function BrokerControlCentrePage() {
             Order buttons stay hidden. No Demo or Live order can be sent from this page.
           </p>
 
-          {accounts.length > 0 && isOwner ? (
+          {accounts.length > 0 ? (
             <section
               className="gm-risk-box"
               data-testid="ctrader-account-selector"
               aria-labelledby="account-select-heading"
             >
-              <h3 id="account-select-heading">Select Demo account</h3>
+              <h3 id="account-select-heading">Select broker account</h3>
+              <p className="gm-meta">Demo and Live accounts from your OAuth connection. Live needs confirmation.</p>
               <ul className="gm-qual-list">
                 {accounts.map((a) => (
                   <li key={a.ctidTraderAccountId}>
@@ -602,10 +583,11 @@ export function BrokerControlCentrePage() {
                       type="button"
                       className="gm-btn gm-btn-secondary"
                       data-testid={`ctrader-account-${a.accountIdMasked}`}
-                      onClick={() => void selectAccount(a.ctidTraderAccountId)}
+                      onClick={() => void selectAccount(a.ctidTraderAccountId, Boolean(a.isLive))}
                     >
-                      {a.accountIdMasked} · {a.brokerNameTitle ?? "Broker"} ·{" "}
-                      {a.depositCurrency ?? "—"}
+                      {a.brokerNameTitle ?? "Broker"} · {a.isLive ? "Live" : "Demo"} ·{" "}
+                      {a.accountIdMasked} · {a.depositCurrency ?? "—"}
+                      {a.selected ? " · Selected" : ""}
                     </button>
                   </li>
                 ))}
@@ -613,7 +595,7 @@ export function BrokerControlCentrePage() {
             </section>
           ) : null}
 
-          {diagnostics && isOwner ? (
+          {diagnostics ? (
             <section
               className="gm-section"
               data-testid="ctrader-diagnostics"
@@ -668,7 +650,8 @@ export function BrokerControlCentrePage() {
                     Token refresh healthy:{" "}
                     {String(diagnostics.connection.tokenRefreshHealthy)}
                     <br />
-                    Environment: DEMO · AutoTrade OFF · mutations disabled
+                    Environment: {diagnostics.environment === "LIVE" ? "Live" : "Demo"} ·
+                    AutoTrade OFF · mutations disabled
                   </p>
                 </div>
               </details>
@@ -758,13 +741,12 @@ export function BrokerControlCentrePage() {
             </div>
           </section>
 
-          {isOwner ? (
-            <section
+          <section
               className="gm-section gm-owner-setup-guide"
               data-testid="owner-setup-guide"
               aria-labelledby="owner-guide-heading"
             >
-              <h3 id="owner-guide-heading">Owner setup guide</h3>
+              <h3 id="owner-guide-heading">Broker setup guide</h3>
               <ol className="gm-help-steps">
                 <li>TradingView connection alone is not enough for API-authorised trading.</li>
                 <li>Create a Pepperstone cTrader Demo account (not just a chart login).</li>
@@ -797,7 +779,6 @@ export function BrokerControlCentrePage() {
                 </div>
               </details>
             </section>
-          ) : null}
         </section>
       ) : null}
 

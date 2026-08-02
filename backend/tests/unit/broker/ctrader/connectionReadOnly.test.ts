@@ -133,15 +133,16 @@ function setCredEnv() {
   process.env.GOLDMETA_PINNED_OWNER_UID = OWNER;
 }
 
-describe("connection owner gate", () => {
+describe("connection user gate", () => {
   beforeEach(() => {
     store.reset();
     setCredEnv();
   });
 
-  it("allows pinned owner and rejects others", () => {
+  it("allows any authenticated broker user UID", () => {
     expect(() => assertPinnedOwner(OWNER)).not.toThrow();
-    expect(() => assertPinnedOwner("other-user")).toThrow(/CTRADER_OWNER_ONLY/);
+    expect(() => assertPinnedOwner("other-user-ok")).not.toThrow();
+    expect(() => assertPinnedOwner("")).toThrow(/UNAUTHENTICATED/);
   });
 });
 
@@ -175,7 +176,8 @@ describe("OAuth start + callback (mocked exchange)", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch
     });
     expect(result.ownerUid).toBe(OWNER);
-    expect(result.accounts.every((a) => !a.isLive)).toBe(true);
+    // Default mock returns Demo; Live accounts are allowed when returned by OAuth.
+    expect(result.accounts.length).toBeGreaterThan(0);
 
     await expect(
       completeOAuthCallback({
@@ -186,18 +188,20 @@ describe("OAuth start + callback (mocked exchange)", () => {
     ).rejects.toThrow(/OAUTH_STATE_REPLAY/);
   });
 
-  it("rejects non-owner OAuth start", async () => {
-    await expect(startOAuthForOwner("intruder")).rejects.toThrow(/CTRADER_OWNER_ONLY/);
+  it("allows non-owner verified users to start OAuth for their own UID", async () => {
+    const started = await startOAuthForOwner("intruder-user-1");
+    expect(started.state).toBeTruthy();
+    expect(started.authorizationUrl).toContain("client_id=test-client");
   });
 });
 
-describe("Demo account selection + Live rejection", () => {
+describe("Demo account selection + Live confirmation", () => {
   beforeEach(() => {
     store.reset();
     setCredEnv();
   });
 
-  it("selects Demo Pepperstone and rejects Live", async () => {
+  it("selects Demo Pepperstone and requires confirmation for Live", async () => {
     const started = await startOAuthForOwner(OWNER);
     const fetchImpl = vi.fn(
       async () =>
@@ -243,13 +247,17 @@ describe("Demo account selection + Live rejection", () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]?.ctidTraderAccountId).toBe("222");
 
+    const { selectBrokerAccountForUser } = await import(
+      "../../../../src/services/broker/ctrader/connectionService"
+    );
+
     await expect(
       selectDemoAccount({
         ownerUid: OWNER,
         ctidTraderAccountId: "333",
         api: demoApi
       })
-    ).rejects.toThrow(/CTRADER_LIVE_ACCOUNT_REJECTED/);
+    ).rejects.toThrow(/CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED/);
 
     const selected = await selectDemoAccount({
       ownerUid: OWNER,
@@ -260,6 +268,15 @@ describe("Demo account selection + Live rejection", () => {
     expect(selected.account.accountIdMasked).toMatch(/…|•/);
     expect(isPepperstoneBrokerName(selected.account.brokerName)).toBe(true);
     expect(selected.symbol?.symbolName).toMatch(/XAU|GOLD/i);
+
+    const live = await selectBrokerAccountForUser({
+      ownerUid: OWNER,
+      ctidTraderAccountId: "333",
+      confirmLiveSelection: true,
+      confirmPepperstone: true,
+      api: demoApi
+    });
+    expect(live.account.isDemo).toBe(false);
   });
 });
 
@@ -419,7 +436,9 @@ describe("symbol suffix variants + refresh helper + friendly errors", () => {
   });
 
   it("maps friendly errors", () => {
-    expect(friendlyCTraderError("CTRADER_LIVE_ACCOUNT_REJECTED").impact).toMatch(/Demo/i);
+    expect(friendlyCTraderError("CTRADER_LIVE_ACCOUNT_REJECTED").impact).toMatch(
+      /Live|disabled|confirmation/i
+    );
     expect(friendlyCTraderError("OAUTH_STATE_REPLAY").nextStep).toMatch(/fresh/i);
   });
 

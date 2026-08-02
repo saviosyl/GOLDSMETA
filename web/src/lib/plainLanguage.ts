@@ -235,10 +235,19 @@ export function friendlyApiCode(
 
   if (c.includes("OWNER_ONLY") || c.includes("CTRADER_OWNER")) {
     return {
-      message: "Only the GoldMeta owner can manage the Pepperstone connection.",
-      whatHappened: "This broker action is restricted to the owner.",
+      message: "This broker action is not available for your account.",
+      whatHappened: "Access was denied for this broker operation.",
       impact: "Your analysis access is unchanged.",
-      nextStep: "Ask the owner to complete connection setup."
+      nextStep: "Sign in with a verified active account and open AutoTrade."
+    };
+  }
+
+  if (c.includes("LIVE_SELECTION_CONFIRMATION") || c.includes("LIVE_ACTIVATION")) {
+    return {
+      message: "Live AutoTrade needs an explicit confirmation.",
+      whatHappened: "A Live (real money) action was requested without confirmation.",
+      impact: "Live AutoTrade stays OFF. Demo settings are unchanged.",
+      nextStep: "Review the Live confirmation screen and type ENABLE LIVE."
     };
   }
 

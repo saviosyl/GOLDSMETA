@@ -24,10 +24,52 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     nextStep: "Store CTRADER_TOKEN_ENCRYPTION_KEY in Secret Manager, then retry."
   },
   CTRADER_OWNER_ONLY: {
-    message: "Only the GoldMeta owner can manage the Pepperstone connection.",
-    whatHappened: "This action is restricted to the pinned owner account.",
-    impact: "Your analysis access is unchanged. Owner tokens stay private.",
-    nextStep: "Ask the owner to complete connection setup from Broker Control Centre."
+    message: "This broker action is not available for your account.",
+    whatHappened: "Access was denied for this broker operation.",
+    impact: "Your own broker connection and analysis access are unchanged.",
+    nextStep: "Sign in with a verified active account and try again from AutoTrade."
+  },
+  UNAUTHENTICATED: {
+    message: "Sign in is required.",
+    whatHappened: "No authenticated user was found for this request.",
+    impact: "Broker data was not changed.",
+    nextStep: "Sign in, then open AutoTrade again."
+  },
+  CTRADER_ACCOUNT_NOT_AUTHORISED: {
+    message: "That broker account is not authorised for your login.",
+    whatHappened: "The account ID was not returned by your cTrader OAuth connection.",
+    impact: "No account was selected. Tokens stay private.",
+    nextStep: "Refresh your authorised accounts and choose one from the list."
+  },
+  CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED: {
+    message: "Confirm Live account selection before continuing.",
+    whatHappened: "A Live (real money) account was chosen without confirmation.",
+    impact: "The Live account was not selected. Demo settings are unchanged.",
+    nextStep: "Review the Live confirmation screen, then confirm the Live account."
+  },
+  CTRADER_ACCOUNT_TYPE_MISMATCH: {
+    message: "That account does not match the selected Demo or Live mode.",
+    whatHappened: "A Demo account was used with Live settings, or a Live account with Demo settings.",
+    impact: "Settings were not saved.",
+    nextStep: "Select a matching Demo or Live account for the mode you chose."
+  },
+  LIVE_ACTIVATION_REQUIRED: {
+    message: "Live AutoTrade needs an explicit activation confirmation.",
+    whatHappened: "Live enable was requested without completing Live confirmation.",
+    impact: "Live AutoTrade stays OFF. Demo mode is unaffected.",
+    nextStep: "Type ENABLE LIVE on the confirmation screen, then try again."
+  },
+  LIVE_CONFIRMATION_PHRASE_MISMATCH: {
+    message: "Live confirmation phrase did not match.",
+    whatHappened: "The typed confirmation was not exactly ENABLE LIVE.",
+    impact: "Live AutoTrade was not activated.",
+    nextStep: "Type ENABLE LIVE exactly, then confirm again."
+  },
+  SETTINGS_VALIDATION_FAILED: {
+    message: "One or more AutoTrade settings are invalid.",
+    whatHappened: "A value was outside the allowed range or format.",
+    impact: "Settings were not saved.",
+    nextStep: "Correct the highlighted field and save again."
   },
   OAUTH_STATE_MISSING: {
     message: "Pepperstone sign-in could not be verified.",
@@ -48,10 +90,10 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     nextStep: "Start the connection again from Broker Control Centre."
   },
   OAUTH_STATE_OWNER_MISMATCH: {
-    message: "Pepperstone sign-in did not match the owner account.",
+    message: "Broker sign-in did not match your signed-in account.",
     whatHappened: "OAuth state ownership check failed.",
     impact: "No connection was created.",
-    nextStep: "Sign in as the owner and restart the connection."
+    nextStep: "Stay signed in and restart the connection from AutoTrade."
   },
   OAUTH_REDIRECT_NOT_ALLOWLISTED: {
     message: "Pepperstone redirect URL was rejected.",
@@ -66,28 +108,28 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     nextStep: "Try Connect Pepperstone again when ready."
   },
   CTRADER_NOT_CONNECTED: {
-    message: "Pepperstone is not connected yet.",
-    whatHappened: "No Demo OAuth connection is stored for the owner.",
-    impact: "Live Demo data and previews are unavailable.",
-    nextStep: "Connect a Pepperstone cTrader Demo account from Broker Control Centre."
+    message: "Your broker is not connected yet.",
+    whatHappened: "No cTrader OAuth connection is stored for your account.",
+    impact: "Quotes and previews are unavailable.",
+    nextStep: "Connect your cTrader account from AutoTrade or Broker Control Centre."
   },
   CTRADER_DEMO_ACCOUNT_NOT_FOUND: {
-    message: "That Demo account could not be found.",
-    whatHappened: "The selected account is missing from the Demo discovery list.",
+    message: "That broker account could not be found.",
+    whatHappened: "The selected account is missing from your authorised account list.",
     impact: "No account was selected.",
-    nextStep: "Refresh the Demo account list and choose an active Demo account."
+    nextStep: "Refresh your authorised accounts and choose Demo or Live."
   },
   CTRADER_LIVE_ACCOUNT_REJECTED: {
-    message: "Live cTrader accounts cannot be connected in this phase.",
-    whatHappened: "A Live account was offered and rejected.",
-    impact: "Only Demo accounts are allowed. Trading stays locked.",
-    nextStep: "Select a genuine Pepperstone cTrader Demo account."
+    message: "Live account selection needs a separate confirmation.",
+    whatHappened: "A Live account was chosen without the Live confirmation step.",
+    impact: "The Live account was not selected. Order submission stays disabled.",
+    nextStep: "Use the Live confirmation flow, then select the Live account."
   },
   CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED: {
-    message: "Select a Demo account and confirm gold symbol first.",
+    message: "Select a broker account and confirm the gold symbol first.",
     whatHappened: "Account or XAUUSD symbol metadata is not ready.",
     impact: "Quotes and previews stay unavailable.",
-    nextStep: "Complete Demo account selection so GoldMeta can discover the gold symbol."
+    nextStep: "Choose a Demo or Live account so GoldMeta can discover the gold symbol."
   },
   CTRADER_SYMBOL_NOT_FOUND: {
     message: "Gold symbol could not be found on this Demo account.",
@@ -132,10 +174,10 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     nextStep: "Retry shortly. Analysis continues without broker data."
   },
   AUTH_SETUP_REQUIRED: {
-    message: "Pepperstone connection could not be started yet.",
-    whatHappened: "Owner Auth integrity must be HEALTHY before OAuth.",
+    message: "Broker connection could not be started yet.",
+    whatHappened: "Server credentials or security checks are not ready.",
     impact: "Broker connect stays disabled. Dashboard still works.",
-    nextStep: "Resolve Auth health, then retry from Broker Control Centre."
+    nextStep: "Retry from AutoTrade after credentials are configured."
   },
   PEPPERSTONE_NOT_CONFIRMED: {
     message: "Pepperstone broker name was not confirmed.",

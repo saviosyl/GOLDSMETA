@@ -1,6 +1,6 @@
 /**
- * Pepperstone cTrader Demo routes — read + preview only.
- * No order submission, close, or cancel mutations.
+ * Pepperstone cTrader routes — per-user Demo/Live account selection, read + preview.
+ * Order submission remains hard-disabled. AutoTrade remains OFF for this phase.
  */
 
 import { Router } from "express";
@@ -27,14 +27,14 @@ import {
   FIXTURE_BANNER
 } from "../services/broker/ctrader/fixtures";
 import {
-  assertPinnedOwner,
+  assertBrokerUser,
   buildDiagnostics,
   buildLiveDemoPreview,
   completeOAuthCallback,
   disconnectOwner,
-  listDemoAccountsForOwner,
+  listAuthorisedAccountsForUser,
   readQuoteForOwner,
-  selectDemoAccount,
+  selectBrokerAccountForUser,
   startOAuthForOwner
 } from "../services/broker/ctrader/connectionService";
 import { getConnection } from "../services/broker/ctrader/connectionStore";
@@ -43,6 +43,15 @@ import {
 } from "../services/broker/ctrader/oauth";
 import { sendFriendlyError } from "../services/broker/ctrader/friendlyErrors";
 import { loadTokenEncryptionSecret } from "../services/broker/ctrader/connectionStore";
+import {
+  confirmLiveActivation,
+  getUserAutoTradeSettings,
+  recommendedAutoTradeSettings,
+  saveUserAutoTradeSettings,
+  setEmergencyStop,
+  type AutoTradeEnvironment,
+  type UserAutoTradeSettingsPatch
+} from "../services/broker/ctrader/userAutoTradeSettings";
 
 function codeOf(err: unknown): string {
   if (err && typeof err === "object" && "code" in err) {
@@ -58,8 +67,14 @@ function codeOf(err: unknown): string {
 }
 
 function statusFor(code: string): number {
+  if (code === "UNAUTHENTICATED") return 401;
   if (code === "CTRADER_OWNER_ONLY") return 403;
   if (code === "AUTH_SETUP_REQUIRED") return 403;
+  if (code === "CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED") return 409;
+  if (code === "LIVE_ACTIVATION_REQUIRED" || code === "LIVE_CONFIRMATION_PHRASE_MISMATCH") {
+    return 409;
+  }
+  if (code === "SETTINGS_VALIDATION_FAILED") return 400;
   if (code.includes("LIVE_ACCOUNT")) return 403;
   if (code.includes("SETUP") || code.includes("MISSING") || code.includes("NOT_CONNECTED")) {
     return 503;
@@ -71,6 +86,47 @@ function statusFor(code: string): number {
     return 400;
   }
   return 400;
+}
+
+function requireUid(req: { userId?: string | null }, res: import("express").Response): string | null {
+  const uid = getAuthenticatedUserId(req as never);
+  if (!uid) {
+    sendFriendlyError(res, 401, "UNAUTHENTICATED");
+    return null;
+  }
+  try {
+    assertBrokerUser(uid);
+  } catch {
+    sendFriendlyError(res, 401, "UNAUTHENTICATED");
+    return null;
+  }
+  return uid;
+}
+
+function parseEnvironment(raw: unknown): AutoTradeEnvironment | null {
+  const v = String(raw ?? "").toLowerCase();
+  if (v === "demo" || v === "live") return v;
+  return null;
+}
+
+function publicAccount(a: {
+  ctidTraderAccountId: string;
+  accountIdMasked: string;
+  brokerNameTitle: string | null;
+  depositCurrency: string | null;
+  leverage: number | null;
+  isLive: boolean;
+}) {
+  return {
+    ctidTraderAccountId: a.ctidTraderAccountId,
+    accountIdMasked: a.accountIdMasked,
+    brokerNameTitle: a.brokerNameTitle,
+    depositCurrency: a.depositCurrency,
+    leverage: a.leverage,
+    isLive: a.isLive,
+    accountType: a.isLive ? "Live" : "Demo",
+    fundsLabel: a.isLive ? "Real money" : "Demo funds"
+  };
 }
 
 async function resolveAuthHealth(store: GoldMetaStore) {
@@ -122,16 +178,19 @@ async function resolveAuthHealth(store: GoldMetaStore) {
   }
 }
 
-async function connectionArgsForOwner(ownerUid: string | null) {
+/** Per-user connection summary — never reads another UID's tokens. */
+async function connectionArgsForUser(ownerUid: string | null) {
   if (!ownerUid) return null;
   try {
-    const pinned = loadOwnerAuthConfig().pinnedOwnerUid;
-    if (!pinned || pinned !== ownerUid) return null;
     const connection = await getConnection(ownerUid);
     if (!connection) return { oauthConnected: false };
     return {
       oauthConnected: true,
-      demoAccountSelected: Boolean(connection.selectedAccountId),
+      demoAccountSelected: Boolean(
+        connection.selectedAccountId && !connection.selectedAccountIsLive
+      ),
+      accountSelected: Boolean(connection.selectedAccountId),
+      selectedAccountIsLive: Boolean(connection.selectedAccountIsLive),
       pepperstoneConfirmed: connection.brokerConfirmedPepperstone,
       goldSymbolFound: Boolean(connection.symbolId),
       liveQuoteReceived: Boolean(connection.lastQuoteAt),
@@ -139,7 +198,10 @@ async function connectionArgsForOwner(ownerUid: string | null) {
       brokerName: connection.brokerName,
       symbolName: connection.symbolName,
       lastSyncAt: connection.lastSyncAt,
-      lastQuoteAt: connection.lastQuoteAt
+      lastQuoteAt: connection.lastQuoteAt,
+      environment: connection.environment,
+      balance: connection.balance,
+      currency: connection.currency
     };
   } catch {
     return null;
@@ -160,7 +222,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   router.get("/v1/brokers/control-centre", requireAuth, ...brokerGate, async (req, res) => {
     const auth = await resolveAuthHealth(store);
     const uid = getAuthenticatedUserId(req);
-    const connection = await connectionArgsForOwner(uid);
+    const connection = await connectionArgsForUser(uid);
     res.json({
       ...getBrokerControlCentreSnapshot(auth, connection),
       autoTrade: "OFF",
@@ -171,7 +233,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   router.get("/v1/ctrader/status", requireAuth, ...brokerGate, async (req, res) => {
     const auth = await resolveAuthHealth(store);
     const uid = getAuthenticatedUserId(req);
-    const connection = await connectionArgsForOwner(uid);
+    const connection = await connectionArgsForUser(uid);
     res.json(buildCTraderReadiness({ auth, connection }));
   });
 
@@ -205,26 +267,25 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.post("/v1/ctrader/oauth/start", requireAuth, ...brokerGate, async (req, res) => {
-    const auth = await resolveAuthHealth(store);
-    if (auth.status !== "HEALTHY") {
-      sendFriendlyError(res, 403, "AUTH_SETUP_REQUIRED");
+    // Per-user OAuth: credentials must be configured. Owner-auth integrity is informational.
+    if (!loadCTraderConfig().configured || !loadTokenEncryptionSecret()) {
+      sendFriendlyError(res, 503, "CTRADER_SETUP_REQUIRED");
       return;
     }
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
       const started = await startOAuthForOwner(uid);
       res.json({
         authorizationUrl: started.authorizationUrl,
         state: started.state,
         expiresAt: started.expiresAt,
-        environment: "DEMO",
-        // Public client id only — never secret
+        // App credentials may still target Demo Open API hosts in preview —
+        // selected account type is resolved from OAuth-returned accounts.
+        environment: started.environment,
         clientIdPresent: true,
-        message: "Open the authorization URL to connect a Pepperstone cTrader Demo account."
+        message:
+          "Open the authorization URL to connect your cTrader broker account. You can then choose Demo or Live."
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -284,18 +345,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
 
   /** Authenticated JSON callback kept for tests — still no tokens in response. */
   router.post("/v1/ctrader/oauth/callback", requireAuth, ...brokerGate, async (req, res) => {
-    const auth = await resolveAuthHealth(store);
-    if (auth.status !== "HEALTHY") {
-      sendFriendlyError(res, 403, "AUTH_SETUP_REQUIRED");
-      return;
-    }
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
-      assertPinnedOwner(uid);
       const body = (req.body ?? {}) as { code?: string; state?: string };
       if (!body.code || !body.state) {
         sendFriendlyError(res, 400, "OAUTH_STATE_MISSING");
@@ -311,16 +363,8 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       }
       res.json({
         connected: true,
-        environment: "DEMO",
         accountCount: result.accounts.length,
-        accounts: result.accounts.map((a) => ({
-          ctidTraderAccountId: a.ctidTraderAccountId,
-          accountIdMasked: a.accountIdMasked,
-          brokerNameTitle: a.brokerNameTitle,
-          depositCurrency: a.depositCurrency,
-          leverage: a.leverage,
-          isLive: false
-        })),
+        accounts: result.accounts.map(publicAccount),
         orderSubmissionEnabled: false,
         autoTrade: "OFF"
       });
@@ -330,56 +374,56 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.get("/v1/ctrader/accounts", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
-      const accounts = await listDemoAccountsForOwner(uid);
-      // Checkpoint A: exactly one Pepperstone Demo → select safely (never manual ID).
+      const accounts = await listAuthorisedAccountsForUser(uid);
+      const existing = await getConnection(uid);
+      // Auto-select only when exactly one Pepperstone Demo — never auto-select Live.
       let autoSelected: {
         accountIdMasked: string;
         brokerNameTitle: string | null;
+        accountType: "Demo" | "Live";
       } | null = null;
       const pepperstoneDemos = accounts.filter(
         (a) => !a.isLive && /pepperstone/i.test(a.brokerNameTitle ?? "")
       );
-      const existing = await getConnection(uid);
       if (pepperstoneDemos.length === 1) {
         const only = pepperstoneDemos[0]!;
         if (
           !existing?.selectedAccountId ||
           existing.selectedAccountId !== only.ctidTraderAccountId
         ) {
-          const selected = await selectDemoAccount({
+          const selected = await selectBrokerAccountForUser({
             ownerUid: uid,
             ctidTraderAccountId: only.ctidTraderAccountId,
-            confirmPepperstone: true
+            confirmPepperstone: true,
+            confirmLiveSelection: false
           });
           autoSelected = {
             accountIdMasked: selected.account.accountIdMasked,
-            brokerNameTitle: selected.account.brokerName
+            brokerNameTitle: selected.account.brokerName,
+            accountType: "Demo"
           };
         } else {
           autoSelected = {
             accountIdMasked: existing.selectedAccountMasked ?? only.accountIdMasked,
-            brokerNameTitle: existing.brokerName
+            brokerNameTitle: existing.brokerName,
+            accountType: existing.selectedAccountIsLive ? "Live" : "Demo"
           };
         }
       }
+      const selectedId = (await getConnection(uid))?.selectedAccountId ?? null;
       res.json({
-        environment: "DEMO",
         accounts: accounts.map((a) => ({
-          ctidTraderAccountId: a.ctidTraderAccountId,
-          accountIdMasked: a.accountIdMasked,
-          brokerNameTitle: a.brokerNameTitle,
-          depositCurrency: a.depositCurrency,
-          leverage: a.leverage,
-          isLive: false
+          ...publicAccount(a),
+          selected: selectedId === a.ctidTraderAccountId,
+          connectionStatus: "Connected",
+          tradingPermission: "Read only"
         })),
         autoSelected,
-        orderSubmissionEnabled: false
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -387,24 +431,23 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.post("/v1/ctrader/accounts/select", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     const body = (req.body ?? {}) as {
       ctidTraderAccountId?: string;
       confirmPepperstone?: boolean;
+      confirmLiveSelection?: boolean;
     };
     if (!body.ctidTraderAccountId) {
-      sendFriendlyError(res, 400, "CTRADER_DEMO_ACCOUNT_NOT_FOUND");
+      sendFriendlyError(res, 400, "CTRADER_ACCOUNT_NOT_AUTHORISED");
       return;
     }
     try {
-      const selected = await selectDemoAccount({
+      const selected = await selectBrokerAccountForUser({
         ownerUid: uid,
         ctidTraderAccountId: body.ctidTraderAccountId,
-        confirmPepperstone: body.confirmPepperstone
+        confirmPepperstone: body.confirmPepperstone,
+        confirmLiveSelection: Boolean(body.confirmLiveSelection)
       });
       if (!selected.account.brokerName || !/pepperstone/i.test(selected.account.brokerName)) {
         if (!body.confirmPepperstone) {
@@ -415,13 +458,22 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           return;
         }
       }
+      const isLive = !selected.account.isDemo;
+      // Persist selected account into the matching Demo/Live settings doc
+      await saveUserAutoTradeSettings(uid, isLive ? "live" : "demo", {
+        selectedAccountId: body.ctidTraderAccountId
+      });
       res.json({
         account: selected.account,
         symbol: selected.symbol,
-        environment: "DEMO",
+        environment: isLive ? "LIVE" : "DEMO",
+        accountType: isLive ? "Live" : "Demo",
+        fundsLabel: isLive ? "Real money" : "Demo funds",
         orderSubmissionEnabled: false,
         autoTrade: "OFF",
-        label: "Demo account selected — read-only"
+        label: isLive
+          ? "Live account selected — confirmation required before Live AutoTrade"
+          : "Demo account selected — read-only"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -429,11 +481,8 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.post("/v1/ctrader/disconnect", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
       await disconnectOwner(uid);
       res.json({
@@ -447,18 +496,14 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.get("/v1/ctrader/diagnostics", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
-      assertPinnedOwner(uid);
       const report = await buildDiagnostics(uid);
       res.json({
         ...report,
         orderSubmissionEnabled: false,
-        label: "cTrader Demo connection diagnostics — read-only"
+        label: "cTrader connection diagnostics — read-only"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -466,16 +511,14 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   });
 
   router.get("/v1/ctrader/quote", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = getAuthenticatedUserId(req);
-    if (!uid) {
-      sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
-      return;
-    }
+    const uid = requireUid(req, res);
+    if (!uid) return;
     try {
       const quote = await readQuoteForOwner(uid);
+      const connection = await getConnection(uid);
       res.json({
         quote,
-        label: "Live Demo data",
+        label: connection?.selectedAccountIsLive ? "Live account quote" : "Demo account quote",
         orderSubmissionEnabled: false,
         autoTrade: "OFF"
       });
@@ -489,6 +532,120 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
   });
 
+  router.get("/v1/ctrader/autotrade-settings/:environment", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const environment = parseEnvironment(req.params.environment);
+    if (!environment) {
+      res.status(400).json({
+        error: "INVALID_ENVIRONMENT",
+        message: "Use demo or live.",
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
+      });
+      return;
+    }
+    const settings = await getUserAutoTradeSettings(uid, environment);
+    res.json({
+      settings,
+      recommended: recommendedAutoTradeSettings(),
+      orderSubmissionEnabled: false,
+      autoTrade: "OFF",
+      executionNote:
+        "Settings are saved per user and environment. Order submission remains disabled in this preview."
+    });
+  });
+
+  router.put("/v1/ctrader/autotrade-settings/:environment", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const environment = parseEnvironment(req.params.environment);
+    if (!environment) {
+      res.status(400).json({
+        error: "INVALID_ENVIRONMENT",
+        message: "Use demo or live.",
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
+      });
+      return;
+    }
+    try {
+      // Reject browser-forged account IDs — must match this user's OAuth accounts when provided.
+      const patch = { ...(req.body ?? {}) } as UserAutoTradeSettingsPatch;
+      if (patch.selectedAccountId) {
+        const authorised = await listAuthorisedAccountsForUser(uid);
+        const match = authorised.find((a) => a.ctidTraderAccountId === patch.selectedAccountId);
+        if (!match) {
+          sendFriendlyError(res, 409, "CTRADER_ACCOUNT_NOT_AUTHORISED");
+          return;
+        }
+        if (environment === "demo" && match.isLive) {
+          sendFriendlyError(res, 409, "CTRADER_ACCOUNT_TYPE_MISMATCH");
+          return;
+        }
+        if (environment === "live" && !match.isLive) {
+          sendFriendlyError(res, 409, "CTRADER_ACCOUNT_TYPE_MISMATCH");
+          return;
+        }
+      }
+      // Never accept client-supplied Live activation bypass
+      if (environment === "demo") {
+        patch.liveActivationPhraseConfirmed = false;
+        patch.liveActivationConfirmedAt = null;
+      }
+      const settings = await saveUserAutoTradeSettings(uid, environment, patch);
+      res.json({
+        settings,
+        recommended: recommendedAutoTradeSettings(),
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post("/v1/ctrader/live-activation/confirm", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const phrase = String((req.body as { phrase?: string })?.phrase ?? "");
+    try {
+      const settings = await confirmLiveActivation(uid, phrase);
+      res.json({
+        settings,
+        confirmed: true,
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF",
+        message:
+          "Live activation phrase accepted. Live AutoTrade still requires a separate enable step and remains OFF while order submission is disabled."
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post("/v1/ctrader/emergency-stop", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const environment = parseEnvironment((req.body as { environment?: string })?.environment) ?? "demo";
+    const active = (req.body as { active?: boolean })?.active !== false;
+    try {
+      const settings = await setEmergencyStop(uid, environment, active);
+      res.json({
+        settings,
+        emergencyStopActive: settings.emergencyStopActive,
+        environment,
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF",
+        message: active
+          ? `Emergency STOP active for your ${environment === "live" ? "Live" : "Demo"} automation only.`
+          : `Emergency STOP cleared for your ${environment === "live" ? "Live" : "Demo"} automation.`
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
   router.post("/v1/ctrader/preview", requireAuth, ...brokerGate, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const useFixture = Boolean(body.useDemonstrationFixture);
@@ -496,7 +653,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
 
     if (!useFixture) {
       if (!uid) {
-        sendFriendlyError(res, 401, "CTRADER_OWNER_ONLY");
+        sendFriendlyError(res, 401, "UNAUTHENTICATED");
         return;
       }
       try {

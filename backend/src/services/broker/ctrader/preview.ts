@@ -33,6 +33,8 @@ export interface PreviewInput {
   demonstration?: boolean;
   eurToAccountRate?: number | null;
   marginPerLot?: number | null;
+  sizingMode?: "automatic_risk" | "manual_lots";
+  manualLotSize?: number | null;
 }
 
 function ageSeconds(generatedAt: string | null): number | null {
@@ -174,10 +176,8 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
       equity: input.equity,
       freeMargin: input.freeMargin,
       accountCurrency: input.accountCurrency,
-      riskAmountEur: Math.min(
-        input.riskAmountEur,
-        CTRADER_DEMO_SERVER_LIMITS.maxRiskPerTradeEur
-      ),
+      // User-configured risk — do not silently replace with a fixed constant.
+      riskAmountEur: input.riskAmountEur,
       entryPrice: entry,
       stopLoss: input.stopLoss,
       lotSize: input.symbol.lotSize,
@@ -186,7 +186,9 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
       volumeStep: input.symbol.volumeStep,
       maxVolume: input.symbol.maxVolume,
       marginPerLot: input.marginPerLot ?? null,
-      eurToAccountRate: input.eurToAccountRate ?? (input.accountCurrency === "EUR" ? 1 : null)
+      eurToAccountRate: input.eurToAccountRate ?? (input.accountCurrency === "EUR" ? 1 : null),
+      sizingMode: input.sizingMode ?? "automatic_risk",
+      manualLotSize: input.manualLotSize ?? null
     });
     if (!sizing.ok && sizing.rejectionReason) failed.push(sizing.rejectionReason);
     else if (sizing.ok && input.freeMargin != null) passed.push("SIZING_OK");

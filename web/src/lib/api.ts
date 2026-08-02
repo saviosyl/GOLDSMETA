@@ -744,23 +744,82 @@ export class ApiClient {
     authorizationUrl: string;
     state: string;
     expiresAt: string;
-    environment: "DEMO";
+    environment: "DEMO" | "LIVE";
   }> {
     return this.request("/v1/ctrader/oauth/start", { method: "POST", body: "{}" });
   }
 
   async listCTraderDemoAccounts(): Promise<{
-    environment: "DEMO";
-    accounts: import("./broker/ctraderTypes").CTraderDemoAccountOption[];
+    accounts: import("./broker/ctraderTypes").CTraderBrokerAccountOption[];
+    autoSelected?: {
+      accountIdMasked: string;
+      brokerNameTitle: string | null;
+      accountType?: "Demo" | "Live";
+    } | null;
   }> {
     return this.request("/v1/ctrader/accounts");
+  }
+
+  /** Alias — lists Demo and Live accounts authorised for the signed-in user. */
+  async listCTraderAccounts(): Promise<{
+    accounts: import("./broker/ctraderTypes").CTraderBrokerAccountOption[];
+    autoSelected?: {
+      accountIdMasked: string;
+      brokerNameTitle: string | null;
+      accountType?: "Demo" | "Live";
+    } | null;
+  }> {
+    return this.listCTraderDemoAccounts();
   }
 
   async selectCTraderDemoAccount(payload: {
     ctidTraderAccountId: string;
     confirmPepperstone?: boolean;
+    confirmLiveSelection?: boolean;
   }): Promise<unknown> {
     return this.request("/v1/ctrader/accounts/select", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async selectCTraderAccount(payload: {
+    ctidTraderAccountId: string;
+    confirmPepperstone?: boolean;
+    confirmLiveSelection?: boolean;
+  }): Promise<unknown> {
+    return this.selectCTraderDemoAccount(payload);
+  }
+
+  async getAutoTradeSettings(environment: "demo" | "live"): Promise<{
+    settings: import("./broker/ctraderTypes").UserAutoTradeSettingsDto;
+    recommended: Record<string, unknown>;
+  }> {
+    return this.request(`/v1/ctrader/autotrade-settings/${environment}`);
+  }
+
+  async saveAutoTradeSettings(
+    environment: "demo" | "live",
+    patch: Record<string, unknown>
+  ): Promise<{ settings: import("./broker/ctraderTypes").UserAutoTradeSettingsDto }> {
+    return this.request(`/v1/ctrader/autotrade-settings/${environment}`, {
+      method: "PUT",
+      body: JSON.stringify(patch)
+    });
+  }
+
+  async confirmLiveAutoTradeActivation(phrase: string): Promise<unknown> {
+    return this.request("/v1/ctrader/live-activation/confirm", {
+      method: "POST",
+      body: JSON.stringify({ phrase })
+    });
+  }
+
+  async setCTraderEmergencyStop(payload: {
+    environment: "demo" | "live";
+    active?: boolean;
+  }): Promise<unknown> {
+    return this.request("/v1/ctrader/emergency-stop", {
       method: "POST",
       body: JSON.stringify(payload)
     });

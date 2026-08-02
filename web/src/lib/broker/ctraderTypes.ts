@@ -71,6 +71,8 @@ export interface CTraderDiagnosticsReport {
   credentialsConfigured: boolean;
   oauthConnected: boolean;
   demoAccountSelected: boolean;
+  accountSelected?: boolean;
+  selectedAccountIsLive?: boolean;
   pepperstoneConfirmed: boolean;
   goldSymbolFound: boolean;
   liveQuoteReceived: boolean;
@@ -80,7 +82,7 @@ export interface CTraderDiagnosticsReport {
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
   autoTrade: "OFF";
-  environment: "DEMO";
+  environment: "DEMO" | "LIVE";
   connection: {
     accountMasked: string | null;
     brokerName: string | null;
@@ -130,7 +132,51 @@ export interface CTraderDemoAccountOption {
   brokerNameTitle: string | null;
   depositCurrency: string | null;
   leverage: number | null;
-  isLive: false;
+  isLive: boolean;
+  accountType?: "Demo" | "Live";
+  fundsLabel?: string;
+  selected?: boolean;
+  connectionStatus?: string;
+  tradingPermission?: string;
+  balance?: number | null;
+}
+
+/** Demo + Live authorised accounts for the signed-in user. */
+export type CTraderBrokerAccountOption = CTraderDemoAccountOption;
+
+export interface UserAutoTradeSettingsDto {
+  uid: string;
+  environment: "demo" | "live";
+  updatedAt: string;
+  selectedAccountId: string | null;
+  sizingMode: "automatic_risk" | "manual_lots";
+  fixedRiskAmount: number;
+  percentageRisk: number;
+  manualLotSize: number;
+  maxDailyLoss: number;
+  maxTradesPerDay: number;
+  maxOpenPositions: number;
+  minConfidence: number;
+  minRiskReward: number;
+  maxSpread: number;
+  maxQuoteAgeSeconds: number;
+  stopLossDistance: number | null;
+  takeProfitMethod: string;
+  tradeCooldownMinutes: number;
+  pauseAfterConsecutiveLosses: number;
+  allowedSessions: string[];
+  allowedDays: string[];
+  newsFilterEnabled: boolean;
+  confirmationCandleRequired: boolean;
+  trendConfirmationRequired: boolean;
+  volumeConfirmationRequired: boolean;
+  breakEvenEnabled: boolean;
+  trailingStopEnabled: boolean;
+  partialTakeProfitEnabled: boolean;
+  liveActivationConfirmedAt: string | null;
+  liveActivationPhraseConfirmed: boolean;
+  autoTradeEnabledIntent: boolean;
+  emergencyStopActive: boolean;
 }
 
 export interface CTraderDemonstrationBundle {

@@ -100,8 +100,47 @@ const api = {
     }
   })),
   getCTraderDiagnostics: vi.fn(async () => {
-    throw new Error("not owner");
-  })
+    throw new Error("not connected");
+  }),
+  listCTraderAccounts: vi.fn(async () => ({ accounts: [] })),
+  getAutoTradeSettings: vi.fn(async () => ({
+    settings: {
+      uid: "u",
+      environment: "demo",
+      updatedAt: new Date().toISOString(),
+      selectedAccountId: null,
+      sizingMode: "automatic_risk",
+      fixedRiskAmount: 20,
+      percentageRisk: 0.5,
+      manualLotSize: 0.01,
+      maxDailyLoss: 50,
+      maxTradesPerDay: 3,
+      maxOpenPositions: 1,
+      minConfidence: 80,
+      minRiskReward: 1.5,
+      maxSpread: 2,
+      maxQuoteAgeSeconds: 15,
+      stopLossDistance: null,
+      takeProfitMethod: "fixed_rr",
+      tradeCooldownMinutes: 30,
+      pauseAfterConsecutiveLosses: 3,
+      allowedSessions: ["London", "NewYork"],
+      allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+      newsFilterEnabled: true,
+      confirmationCandleRequired: true,
+      trendConfirmationRequired: false,
+      volumeConfirmationRequired: false,
+      breakEvenEnabled: false,
+      trailingStopEnabled: false,
+      partialTakeProfitEnabled: false,
+      liveActivationConfirmedAt: null,
+      liveActivationPhraseConfirmed: false,
+      autoTradeEnabledIntent: false,
+      emergencyStopActive: false
+    },
+    recommended: {}
+  })),
+  setCTraderEmergencyStop: vi.fn(async () => ({}))
 };
 
 vi.mock("../lib/auth", () => ({
@@ -122,12 +161,12 @@ describe("AutoTradePage", () => {
     );
     await waitFor(() => expect(screen.getByTestId("autotrade-page")).toBeInTheDocument());
     expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
-    expect(screen.getByTestId("autotrade-broker-badge")).toHaveTextContent(
-      /Pepperstone cTrader Demo/i
-    );
+    expect(screen.getByTestId("autotrade-broker-badge")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-readonly-banner")).toHaveTextContent(
       /Broker order submission is disabled/i
     );
+    expect(screen.getByTestId("autotrade-tab-demo")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-tab-live")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-emergency-stop")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-setup-journey")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-card-account")).toBeInTheDocument();

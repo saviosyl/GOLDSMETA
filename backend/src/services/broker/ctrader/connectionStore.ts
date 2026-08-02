@@ -18,25 +18,32 @@ export type EncryptedTokenBlob = {
   refreshedAt: string | null;
 };
 
+export type CTraderAccountEnvironment = "DEMO" | "LIVE";
+
 export type CTraderConnectionRecord = {
   ownerUid: string;
-  environment: "DEMO";
+  /** Resolved from the selected authorised broker account — not a global app constant. */
+  environment: CTraderAccountEnvironment;
   connectedAt: string;
   updatedAt: string;
   tokens: EncryptedTokenBlob;
   selectedAccountId: string | null;
   selectedAccountMasked: string | null;
   selectedAccountKeyHash: string | null;
+  selectedAccountIsLive: boolean;
   brokerName: string | null;
   brokerConfirmedPepperstone: boolean;
   currency: string | null;
   leverage: number | null;
+  balance: number | null;
   symbolId: string | null;
   symbolName: string | null;
   lastSyncAt: string | null;
   lastQuoteAt: string | null;
   lastErrorCode: string | null;
   disconnectedAt: string | null;
+  /** Live selection requires explicit user confirmation (not Demo inheritance). */
+  liveSelectionConfirmedAt: string | null;
 };
 
 const STATE_COL = "ctraderOAuthStates";
