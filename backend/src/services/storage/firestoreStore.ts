@@ -33,12 +33,15 @@ const webhookConnectionSchema = z.object({
   webhookId: z.string(),
   userId: z.string(),
   secret: z.string().nullable(),
+  secretHash: z.string().nullable().optional(),
   status: z.enum(["ACTIVE", "REVOKED"]),
   createdAt: z.string(),
   updatedAt: z.string(),
   revokedAt: z.string().nullable().optional(),
   rotatedAt: z.string().nullable().optional(),
-  lastAlertAt: z.string().nullable().optional()
+  lastAlertAt: z.string().nullable().optional(),
+  templateId: z.string().nullable().optional(),
+  templateMode: z.enum(["standard", "custom"]).nullable().optional()
 });
 
 const processingJobSchema = z.object({
@@ -658,7 +661,8 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
   async rotateWebhookConnection(
     userId: string,
     webhookId: string,
-    secret: string
+    secret: string,
+    secretHash?: string | null
   ): Promise<WebhookConnection | undefined> {
     const existing = await this.getWebhookConnection(userId, webhookId);
     if (!existing) {
@@ -667,7 +671,9 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     const timestamp = nowIso();
     const updated: WebhookConnection = {
       ...existing,
-      secret,
+      // Prefer hash-only persistence when hash provided
+      secret: secretHash ? null : secret,
+      secretHash: secretHash ?? existing.secretHash ?? null,
       rotatedAt: timestamp,
       updatedAt: timestamp
     };

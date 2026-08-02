@@ -31,13 +31,18 @@ export interface RawEventRecord {
 export interface WebhookConnection {
   webhookId: string;
   userId: string;
+  /** @deprecated Prefer secretHash — plaintext only briefly returned on create/rotate. */
   secret: string | null;
+  /** SHA-256 hex of webhook secret — never returned to clients. */
+  secretHash?: string | null;
   status: "ACTIVE" | "REVOKED";
   createdAt: string;
   updatedAt: string;
   revokedAt?: string | null;
   rotatedAt?: string | null;
   lastAlertAt?: string | null;
+  templateId?: string | null;
+  templateMode?: "standard" | "custom" | null;
 }
 
 export type ProcessingJobState =
@@ -77,6 +82,9 @@ export interface CreateWebhookConnectionInput {
   userId: string;
   webhookId: string;
   secret: string | null;
+  secretHash?: string | null;
+  templateId?: string | null;
+  templateMode?: "standard" | "custom" | null;
 }
 
 export interface CreateProcessingJobInput {
@@ -197,7 +205,8 @@ export interface GoldMetaStore {
   rotateWebhookConnection(
     userId: string,
     webhookId: string,
-    secret: string
+    secret: string,
+    secretHash?: string | null
   ): Awaitable<WebhookConnection | undefined>;
   updateWebhookLastAlert(webhookId: string, timestamp: string): Awaitable<void>;
 

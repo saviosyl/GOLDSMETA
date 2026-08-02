@@ -305,6 +305,53 @@ export class ApiClient {
     });
   }
 
+  async getTradingViewSetup(): Promise<Record<string, unknown>> {
+    return this.request("/v1/tradingview/setup");
+  }
+
+  async updateTradingViewSetup(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/v1/tradingview/setup", {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async restoreTradingViewStandard(): Promise<Record<string, unknown>> {
+    return this.request("/v1/tradingview/setup/restore-standard", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async saveTradingViewCustomMapping(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/v1/tradingview/setup/custom-mapping", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async rotateTradingViewConnection(webhookId: string): Promise<{
+    secret?: string;
+    webhookUrl?: string;
+    connection?: TradingViewConnection;
+  }> {
+    return this.request(`/v1/tradingview/connections/${encodeURIComponent(webhookId)}/rotate`, {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async getAdminTradingViewTemplate(): Promise<Record<string, unknown>> {
+    return this.request("/v1/admin/tradingview/template");
+  }
+
+  async publishAdminTradingViewTemplate(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/v1/admin/tradingview/template", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   async registerDevice(payload: {
     deviceId: string;
     platform: "ios" | "web";

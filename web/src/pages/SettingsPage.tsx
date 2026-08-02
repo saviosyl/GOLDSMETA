@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { BackendSettings, ManualRiskSettings, TradingViewConnection } from "../types/models";
 import {
@@ -496,6 +497,15 @@ export function SettingsPage() {
       {settingsTab === "tradingview" && (
         <div className="card settings-card">
           <h2>TradingView connection</h2>
+          <p className="muted settings-help">
+            New users start on <strong>GoldMeta Standard Setup</strong>. Open the guided wizard for
+            your private webhook and alert message.
+          </p>
+          <p>
+            <Link className="gm-btn gm-btn-primary" to="/tradingview">
+              Open TradingView setup wizard
+            </Link>
+          </p>
           <p className="muted settings-help">
             {activeCount === 0
               ? "No active webhook yet. Create one connection and paste its URL into TradingView."

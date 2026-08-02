@@ -5,6 +5,12 @@ import { isSentAtAcceptable } from "../../utils/time";
 import { logger } from "../logging/logger";
 import type { GoldMetaStore, WebhookConnection } from "../storage/types";
 import { buildStableEventId } from "./eventId";
+import {
+  applyCustomFieldMappings,
+  getUserTradingViewConnection,
+  verifyWebhookToken
+} from "../tradingview/userTradingViewConnection";
+import { getActiveStandardTemplate, normalizeSymbolAlias } from "../tradingview/standardTemplate";
 
 export class WebhookValidationError extends Error {
   constructor(
@@ -47,7 +53,61 @@ export const validateWebhookPayload = async (
   body: unknown,
   now = Date.now()
 ): Promise<ValidatedWebhookPayload> => {
-  const normalized = normalizeWebhookBody(body);
+  const connection = await store.getWebhookConnectionById(webhookId);
+  if (!connection) {
+    throw new WebhookValidationError("Webhook not found", 404, "WEBHOOK_NOT_FOUND");
+  }
+
+  // Resolve owning user first — payloads cannot forge another UID.
+  const userId = connection.userId;
+  let profile = null as Awaited<ReturnType<typeof getUserTradingViewConnection>> | null;
+  try {
+    profile = await getUserTradingViewConnection(userId);
+  } catch {
+    profile = null;
+  }
+
+  let normalized = normalizeWebhookBody(body);
+  // Custom mappings rewrite field names into the standard schema before Zod parse.
+  if (
+    profile?.templateMode === "custom" &&
+    profile.customFieldMappings.length > 0 &&
+    normalized &&
+    typeof normalized === "object" &&
+    !Array.isArray(normalized)
+  ) {
+    normalized = applyCustomFieldMappings(
+      normalized as Record<string, unknown>,
+      profile.customFieldMappings
+    );
+  }
+
+  // Normalise symbol aliases (OANDA:XAUUSD → XAUUSD) before schema enum check.
+  if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+    const obj = { ...(normalized as Record<string, unknown>) };
+    if (typeof obj.symbol === "string") {
+      const canon = normalizeSymbolAlias(obj.symbol);
+      if (!canon) {
+        throw new WebhookValidationError("Unsupported symbol", 400, "UNSUPPORTED_SYMBOL");
+      }
+      obj.symbol = canon;
+    }
+    if (typeof obj.timeframe === "string") {
+      const allowed = new Set(
+        getActiveStandardTemplate().supportedTimeframes.map((t) => t.value)
+      );
+      if (!allowed.has(obj.timeframe)) {
+        throw new WebhookValidationError("Unsupported timeframe", 400, "UNSUPPORTED_TIMEFRAME");
+      }
+    }
+    // Payload size guard
+    const bytes = Buffer.byteLength(JSON.stringify(obj), "utf8");
+    if (bytes > getActiveStandardTemplate().validationRules.maxPayloadBytes) {
+      throw new WebhookValidationError("Payload too large", 400, "PAYLOAD_TOO_LARGE");
+    }
+    normalized = obj;
+  }
+
   const parsed = tradingViewPayloadSchema.safeParse(normalized);
   if (!parsed.success) {
     const details = zodErrorToMessages(parsed.error).slice(0, 12);
@@ -61,8 +121,11 @@ export const validateWebhookPayload = async (
   }
 
   const payload = parsed.data;
-  // Validate sentAt only — barTime is the candle timestamp and may be older than skew.
-  const maxPastMs = env.WEBHOOK_MAX_SKEW_MS;
+  const maxPastMs = Math.min(
+    env.WEBHOOK_MAX_SKEW_MS,
+    (profile?.staleSignalLimitSeconds ??
+      getActiveStandardTemplate().validationRules.staleSignalLimitSeconds) * 1000
+  );
   const maxFutureMs = env.WEBHOOK_MAX_FUTURE_SKEW_MS;
   if (
     !isSentAtAcceptable(
@@ -86,26 +149,20 @@ export const validateWebhookPayload = async (
     throw new WebhookValidationError("Webhook timestamp outside allowed skew", 400, "STALE_TIMESTAMP");
   }
 
-  const connection = await store.getWebhookConnectionById(webhookId);
-  if (!connection) {
-    throw new WebhookValidationError("Webhook not found", 404, "WEBHOOK_NOT_FOUND");
-  }
-
-  // Path webhookId is the primary credential (unguessable URL). Body webhookSecret is optional
-  // defense-in-depth: only enforce when the payload actually provides a non-null secret.
-  // Pine default sends webhookSecret:null — requiring a match would 401 every live TV alert.
-  if (
-    connection.secret &&
-    payload.webhookSecret != null &&
-    payload.webhookSecret !== connection.secret
-  ) {
-    throw new WebhookValidationError("Invalid webhook credentials", 401, "INVALID_SECRET");
+  // Path webhookId is the primary credential. Body secret is optional defense-in-depth.
+  if (payload.webhookSecret != null) {
+    const okHash = verifyWebhookToken(payload.webhookSecret, connection.secretHash);
+    const okLegacy =
+      Boolean(connection.secret) && payload.webhookSecret === connection.secret;
+    if (!okHash && !okLegacy) {
+      throw new WebhookValidationError("Invalid webhook credentials", 401, "INVALID_SECRET");
+    }
   }
 
   return {
     payload,
     stableEventId: buildStableEventId(payload),
-    userId: connection.userId,
+    userId,
     webhookId: connection.webhookId,
     connection
   };

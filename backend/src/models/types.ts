@@ -111,7 +111,7 @@ export const tradingViewPayloadSchema = z
     webhookSecret: z.string().nullable().optional(),
     symbol: z.literal("XAUUSD"),
     exchange: z.string().nullable().optional(),
-    timeframe: z.enum(["1", "5", "15", "60", "240"]),
+    timeframe: z.enum(["1", "5", "15", "30", "60", "240"]),
     eventType: z.enum(["BAR_CLOSE", "BAR_UPDATE", "INDICATOR_UPDATE", "TEST"]),
     barTime: z.string().datetime(),
     sentAt: z.string().datetime(),

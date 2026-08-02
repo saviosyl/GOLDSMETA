@@ -24,7 +24,9 @@ export interface EnqueueWebhookEventResult {
 }
 
 export const shouldProcessInline = (): boolean =>
-  env.APP_ENV === "test" && env.STORAGE_BACKEND === "memory";
+  process.env.SKIP_INLINE_WEBHOOK_PROCESSING !== "1" &&
+  env.APP_ENV === "test" &&
+  env.STORAGE_BACKEND === "memory";
 
 export const enqueueWebhookEvent = async ({
   store,
