@@ -375,7 +375,7 @@ export class AutoTradeService {
       ordersEnabled: false,
       selectedBroker,
       brokerBadge: badgeForBroker(selectedBroker, t212Env ?? t212View?.environment ?? null),
-      igParked: selectedBroker !== "IG_DEMO",
+      igParked: true,
       t212: selectedBroker === "T212_INVEST" ? t212View : t212View,
       t212RiskLimits: DEFAULT_T212_RISK_LIMITS,
       t212GoldCandidates: this.t212CandidatesByUser.get(userId) ?? [],
@@ -384,13 +384,20 @@ export class AutoTradeService {
       t212Disclaimer: T212_PROXY_DISCLAIMER,
       connection: {
         connected,
-        environment: igActive ? connection.environment : null,
+        environment:
+          selectedBroker === "PEPPERSTONE_CTRADER"
+            ? "DEMO"
+            : igActive
+              ? connection.environment
+              : null,
         environmentLabel:
-          selectedBroker === "IG_DEMO"
-            ? "IG DEMO — PARKED"
-            : selectedBroker === "T212_INVEST"
-              ? badgeForBroker("T212_INVEST", t212Env ?? "PRACTICE")
-              : "MANUAL XAUUSD",
+          selectedBroker === "PEPPERSTONE_CTRADER"
+            ? "PEPPERSTONE CTRADER DEMO — READ ONLY"
+            : selectedBroker === "IG_DEMO"
+              ? "IG DEMO — PARKED"
+              : selectedBroker === "T212_INVEST"
+                ? badgeForBroker("T212_INVEST", t212Env ?? "PRACTICE")
+                : "MANUAL XAUUSD",
         accountIdMasked: igActive ? maskAccountId(connection.accountId) : null,
         accountName: igActive ? connection.accountName : null,
         currency: igActive ? connection.currency ?? limits.currency : limits.currency,

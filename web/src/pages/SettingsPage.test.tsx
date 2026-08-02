@@ -1,9 +1,18 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { SettingsPage } from "./SettingsPage";
 import { ApiError } from "../types/models";
 import "../styles/global.css";
+
+function renderSettings() {
+  return render(
+    <MemoryRouter>
+      <SettingsPage />
+    </MemoryRouter>
+  );
+}
 
 const createTradingViewConnection = vi.fn();
 const listTradingViewConnections = vi.fn();
@@ -57,7 +66,7 @@ describe("SettingsPage TradingView create connection", () => {
   });
 
   it("hides the backend API URL and shows account email", async () => {
-    render(<SettingsPage />);
+    renderSettings();
     expect(await screen.findByTestId("account-email")).toHaveTextContent("tester@example.com");
     expect(screen.queryByText(/cloudfunctions\.net\/api/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("connection-status")).toHaveTextContent(/Connected|Offline/);
@@ -79,7 +88,7 @@ describe("SettingsPage TradingView create connection", () => {
     );
 
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    renderSettings();
     await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     expect(await screen.findByText("No connections yet.")).toBeInTheDocument();
 
@@ -98,7 +107,7 @@ describe("SettingsPage TradingView create connection", () => {
     createTradingViewConnection.mockRejectedValue(new TypeError("Load failed"));
 
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    renderSettings();
     await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     await screen.findByText("No connections yet.");
     await user.click(screen.getByRole("button", { name: "Create connection" }));
@@ -115,7 +124,7 @@ describe("SettingsPage TradingView create connection", () => {
     );
 
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    renderSettings();
     await user.click(await screen.findByRole("tab", { name: "TradingView" }));
     await screen.findByText("No connections yet.");
     await user.click(screen.getByRole("button", { name: "Create connection" }));
@@ -160,7 +169,7 @@ describe("SettingsPage TradingView revoke and copy", () => {
   });
 
   async function openTradingView(user: ReturnType<typeof userEvent.setup>) {
-    render(<SettingsPage />);
+    renderSettings();
     await user.click(await screen.findByRole("tab", { name: "TradingView" }));
   }
 
@@ -238,7 +247,7 @@ describe("SettingsPage notifications UX", () => {
 
   it("disables Enable Web Push when unsupported and explains why", async () => {
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    renderSettings();
     await user.click(await screen.findByRole("tab", { name: "Notifications" }));
     expect(await screen.findByTestId("notif-headline")).toHaveTextContent(/Unavailable/i);
     expect(screen.getByRole("button", { name: "Enable Web Push" })).toBeDisabled();

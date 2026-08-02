@@ -5,7 +5,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import type { BrokerPosition, BrokerQuote, BrokerSymbol, TradePreview } from "../domain";
-import { CTRADER_DEMO_SERVER_LIMITS } from "./flags";
+import { CTRADER_RECOMMENDED_DEFAULTS } from "./flags";
 import { mapDecisionToCTraderAction } from "./decisionMapping";
 import { calculateCTraderVolume } from "./sizing";
 
@@ -33,6 +33,14 @@ export interface PreviewInput {
   demonstration?: boolean;
   eurToAccountRate?: number | null;
   marginPerLot?: number | null;
+  sizingMode?: "automatic_risk" | "manual_lots";
+  manualLotSize?: number | null;
+  /** Per-user saved limits — when set, override recommended defaults. */
+  minConfidence?: number | null;
+  maxQuoteAgeSeconds?: number | null;
+  maxOpenPositions?: number | null;
+  maxTradesPerDay?: number | null;
+  confirmationCandleRequired?: boolean | null;
 }
 
 function ageSeconds(generatedAt: string | null): number | null {
@@ -87,18 +95,29 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
     passed.push("MARKET_OPEN");
   }
 
-  if (
-    input.confidence == null ||
-    input.confidence < CTRADER_DEMO_SERVER_LIMITS.minConfidence
-  ) {
+  // Fallbacks are recommended defaults only — never override when caller passes
+  // per-user saved settings (connectionService / AutoTrade paths do).
+  const minConfidence =
+    input.minConfidence ?? CTRADER_RECOMMENDED_DEFAULTS.minConfidence;
+  const maxSignalAgeSeconds =
+    input.maxQuoteAgeSeconds ?? CTRADER_RECOMMENDED_DEFAULTS.maxSignalAgeSeconds;
+  const maxOpenPositions =
+    input.maxOpenPositions ?? CTRADER_RECOMMENDED_DEFAULTS.maxOpenPositions;
+  const maxTradesPerDay =
+    input.maxTradesPerDay ?? CTRADER_RECOMMENDED_DEFAULTS.maxTradesPerDay;
+  const confirmationRequired =
+    input.confirmationCandleRequired ??
+    CTRADER_RECOMMENDED_DEFAULTS.confirmedCandleRequired;
+
+  if (input.confidence == null || input.confidence < minConfidence) {
     failed.push("CONFIDENCE_TOO_LOW");
   } else passed.push("CONFIDENCE_OK");
 
-  if (age == null || age > CTRADER_DEMO_SERVER_LIMITS.maxSignalAgeSeconds) {
+  if (age == null || age > maxSignalAgeSeconds) {
     failed.push("SIGNAL_STALE");
   } else passed.push("SIGNAL_FRESH");
 
-  if (CTRADER_DEMO_SERVER_LIMITS.confirmedCandleRequired && !input.candleConfirmed) {
+  if (confirmationRequired && !input.candleConfirmed) {
     failed.push("CANDLE_CONFIRMATION_REQUIRED");
   } else if (input.candleConfirmed) passed.push("CANDLE_CONFIRMED");
 
@@ -118,7 +137,7 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
   if (
     (mapped.brokerMutation === "OPEN_LONG" ||
       mapped.brokerMutation === "OPEN_SHORT") &&
-    openCount >= CTRADER_DEMO_SERVER_LIMITS.maxOpenPositions
+    openCount >= maxOpenPositions
   ) {
     failed.push("MAX_OPEN_POSITIONS");
   } else if (
@@ -132,7 +151,7 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
   if (
     (mapped.brokerMutation === "OPEN_LONG" ||
       mapped.brokerMutation === "OPEN_SHORT") &&
-    tradesToday >= CTRADER_DEMO_SERVER_LIMITS.maxTradesPerDay
+    tradesToday >= maxTradesPerDay
   ) {
     failed.push("DAILY_TRADE_LIMIT");
   } else if (
@@ -165,14 +184,17 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
     (mapped.brokerMutation === "OPEN_LONG" || mapped.brokerMutation === "OPEN_SHORT") &&
     input.symbol
   ) {
+    // Do not invent freeMargin. Without it, margin eligibility is UNKNOWN and
+    // any future order path stays blocked (Checkpoint B safety).
+    if (input.freeMargin == null) {
+      failed.push("MARGIN_ELIGIBILITY_UNKNOWN");
+    }
     sizing = calculateCTraderVolume({
       equity: input.equity,
       freeMargin: input.freeMargin,
       accountCurrency: input.accountCurrency,
-      riskAmountEur: Math.min(
-        input.riskAmountEur,
-        CTRADER_DEMO_SERVER_LIMITS.maxRiskPerTradeEur
-      ),
+      // User-configured risk — do not silently replace with a fixed constant.
+      riskAmountEur: input.riskAmountEur,
       entryPrice: entry,
       stopLoss: input.stopLoss,
       lotSize: input.symbol.lotSize,
@@ -181,10 +203,12 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
       volumeStep: input.symbol.volumeStep,
       maxVolume: input.symbol.maxVolume,
       marginPerLot: input.marginPerLot ?? null,
-      eurToAccountRate: input.eurToAccountRate ?? (input.accountCurrency === "EUR" ? 1 : null)
+      eurToAccountRate: input.eurToAccountRate ?? (input.accountCurrency === "EUR" ? 1 : null),
+      sizingMode: input.sizingMode ?? "automatic_risk",
+      manualLotSize: input.manualLotSize ?? null
     });
     if (!sizing.ok && sizing.rejectionReason) failed.push(sizing.rejectionReason);
-    else if (sizing.ok) passed.push("SIZING_OK");
+    else if (sizing.ok && input.freeMargin != null) passed.push("SIZING_OK");
   }
 
   // Close actions do not need open sizing

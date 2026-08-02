@@ -117,12 +117,18 @@ describe("registration access matrix", () => {
     delete process.env.REGISTRATION_APPROVAL_REQUIRED;
   });
 
-  it("USER_APPROVED can read analysis but not broker surfaces without brokerAccess", async () => {
+  it("USER_APPROVED can configure AutoTrade/broker without brokerAccess flag", async () => {
     const h = { "x-test-user-id": "approved-1", "x-test-role": "USER_APPROVED" };
     // decisions may 404 empty but must not be 403
     const d = await request(app).get("/v1/decisions/latest").set(h);
     expect([200, 404]).toContain(d.status);
-    await request(app).post("/v1/tradingview/connections").set(h).expect(403);
+    // Verified active users may open broker configure surfaces (execution still hard-disabled).
+    const demo = await request(app).get("/v1/ctrader/demonstration").set(h);
+    expect(demo.status).toBe(200);
+    expect(demo.body.autoTrade).toBe("OFF");
+    expect(demo.body.orderSubmissionEnabled).toBe(false);
+    const tv = await request(app).post("/v1/tradingview/connections").set(h).send({});
+    expect([200, 201, 400]).toContain(tv.status);
     await request(app).get("/v1/admin/users").set(h).expect(403);
   });
 

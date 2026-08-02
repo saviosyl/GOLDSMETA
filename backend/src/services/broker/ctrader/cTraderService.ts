@@ -5,7 +5,10 @@
 
 import type { AutomationMode, BrokerHealthStatus, TradePreview } from "../domain";
 import { loadCTraderConfig } from "./config";
-import { snapshotCTraderFlags, CTRADER_DEMO_SERVER_LIMITS } from "./flags";
+import {
+  snapshotCTraderFlags,
+  CTRADER_RECOMMENDED_DEFAULTS
+} from "./flags";
 import {
   FIXTURE_BANNER,
   fixtureDemoAccount,
@@ -36,7 +39,7 @@ export interface CTraderReadinessReport {
   setupRequired: boolean;
   authSetupRequired: boolean;
   oauthConfigured: boolean;
-  connected: false;
+  connected: boolean;
   demonstrationAvailable: true;
   automationMode: AutomationMode;
   autoTrade: "OFF";
@@ -49,10 +52,18 @@ export interface CTraderReadinessReport {
   wizardSteps: Array<{
     step: number;
     title: string;
-    status: "COMPLETE" | "AVAILABLE" | "BLOCKED" | "SETUP_REQUIRED";
+    status: "COMPLETE" | "AVAILABLE" | "BLOCKED" | "SETUP_REQUIRED" | "IN_PROGRESS";
     detail: string;
   }>;
   label: string;
+  connectionSummary?: {
+    accountMasked: string | null;
+    brokerName: string | null;
+    pepperstoneConfirmed: boolean;
+    symbolName: string | null;
+    lastSyncAt: string | null;
+    lastQuoteAt: string | null;
+  };
 }
 
 const DEFAULT_QUAL: DemoAutoQualificationState = {
@@ -96,23 +107,56 @@ export function buildAuthHealthSnapshot(
 export function buildCTraderReadiness(args?: {
   auth?: AuthHealthSnapshot;
   qualification?: Partial<DemoAutoQualificationState>;
+  connection?: {
+    oauthConnected?: boolean;
+    demoAccountSelected?: boolean;
+    pepperstoneConfirmed?: boolean;
+    goldSymbolFound?: boolean;
+    liveQuoteReceived?: boolean;
+    marginMetadataAvailable?: boolean;
+    accountMasked?: string | null;
+    brokerName?: string | null;
+    symbolName?: string | null;
+    lastSyncAt?: string | null;
+    lastQuoteAt?: string | null;
+  } | null;
 }): CTraderReadinessReport {
   const config = loadCTraderConfig();
   const auth = args?.auth ?? buildAuthHealthSnapshot({ status: "UNKNOWN" });
+  const conn = args?.connection ?? null;
+  const oauthConnected = Boolean(conn?.oauthConnected);
+  const demoSelected = Boolean(conn?.demoAccountSelected);
+  const pepperstone = Boolean(conn?.pepperstoneConfirmed);
+  const goldFound = Boolean(conn?.goldSymbolFound);
+  const quoteOk = Boolean(conn?.liveQuoteReceived);
+  const marginOk = Boolean(conn?.marginMetadataAvailable);
+
   const qualState: DemoAutoQualificationState = {
     ...DEFAULT_QUAL,
     ...args?.qualification,
     authHealthy: auth.status === "HEALTHY",
-    pinnedOwnerVerified: Boolean(auth.pinnedOwnerExists && auth.emailMapsToPinned)
+    pinnedOwnerVerified: Boolean(auth.pinnedOwnerExists && auth.emailMapsToPinned),
+    oauthHealthy: oauthConnected,
+    pepperstoneDemoConfirmed: pepperstone && demoSelected,
+    xauusdMetadataComplete: goldFound
   };
   const qualification = evaluateDemoAutoQualification(qualState);
   const authSetupRequired = auth.status !== "HEALTHY";
+
+  const step4Status: CTraderReadinessReport["wizardSteps"][0]["status"] =
+    authSetupRequired
+      ? "BLOCKED"
+      : oauthConnected
+        ? "COMPLETE"
+        : config.configured
+          ? "AVAILABLE"
+          : "SETUP_REQUIRED";
 
   const wizardSteps: CTraderReadinessReport["wizardSteps"] = [
     {
       step: 1,
       title: "Create Pepperstone cTrader Demo account",
-      status: "AVAILABLE",
+      status: demoSelected ? "COMPLETE" : "AVAILABLE",
       detail:
         "TradingView-linked Pepperstone access is not automatically a cTrader Open API account."
     },
@@ -135,50 +179,65 @@ export function buildCTraderReadiness(args?: {
     {
       step: 4,
       title: "Connect account",
-      status: authSetupRequired
-        ? "BLOCKED"
-        : config.configured
-          ? "AVAILABLE"
-          : "SETUP_REQUIRED",
+      status: step4Status,
       detail: authSetupRequired
         ? "Connection setup required — OAuth stays disabled until account security is verified."
-        : config.configured
-          ? "OAuth helpers ready (state/PKCE/allowlisted redirect). Start connection only after owner approval."
-          : "Add secure credentials before starting OAuth. GoldMeta never asks for your broker password."
+        : oauthConnected
+          ? "OAuth connected. Select a Demo account if not already chosen."
+          : config.configured
+            ? "OAuth ready (state/PKCE/allowlisted redirect). Owner can start connection."
+            : "Add secure credentials before starting OAuth. GoldMeta never asks for your broker password."
     },
     {
       step: 5,
       title: "Verify XAUUSD",
-      status: "SETUP_REQUIRED",
-      detail:
-        "After connect: confirm Demo account, Pepperstone broker name, and XAUUSD symbol metadata."
+      status: goldFound ? "COMPLETE" : demoSelected ? "AVAILABLE" : "SETUP_REQUIRED",
+      detail: goldFound
+        ? `Gold symbol resolved${conn?.symbolName ? ` (${conn.symbolName})` : ""}.`
+        : "After connect: confirm Demo account, Pepperstone broker name, and XAUUSD symbol metadata."
     },
     {
       step: 6,
       title: "Run read-only checks",
-      status: "SETUP_REQUIRED",
-      detail:
-        "Confirm live bid/ask, spread, volume minimum/step, contract size, margin and market-open state."
+      status: quoteOk
+        ? marginOk
+          ? "COMPLETE"
+          : "IN_PROGRESS"
+        : goldFound
+          ? "AVAILABLE"
+          : "SETUP_REQUIRED",
+      detail: quoteOk
+        ? marginOk
+          ? "Market-data checks complete (quote, spread, volume rules). Margin metadata available."
+          : "Market-data checks complete for quote/spread/volume. Margin metadata still pending — step not fully complete."
+        : "Confirm bid/ask, spread, volume minimum/step, contract size, margin and market-open state."
     },
     {
       step: 7,
       title: "Run trade previews",
-      status: "SETUP_REQUIRED",
-      detail: "Preview BUY/SELL sizing only. No Demo or Live order is submitted."
+      status: quoteOk ? "AVAILABLE" : "SETUP_REQUIRED",
+      detail:
+        "Preview BUY/SELL sizing only. Order submission is currently disabled in this preview."
     },
     {
       step: 8,
       title: "Request Demo trading approval",
       status: "BLOCKED",
-      detail: "Execution disabled. AutoTrade off. Demo trading stays locked until separate approval."
+      detail:
+        "Order submission disabled in this preview. Demo Auto stays OFF until a separate approved activation."
     }
   ];
 
+  const setupRequired = !(oauthConnected && demoSelected && goldFound);
+  const label = oauthConnected
+    ? "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
+    : "Pepperstone connection required — preview mode — AutoTrade OFF";
+
   return {
-    setupRequired: true,
+    setupRequired,
     authSetupRequired,
     oauthConfigured: config.configured,
-    connected: false,
+    connected: oauthConnected,
     demonstrationAvailable: true,
     automationMode: "OFF",
     autoTrade: "OFF",
@@ -189,7 +248,15 @@ export function buildCTraderReadiness(args?: {
     auth,
     qualification,
     wizardSteps,
-    label: "Pepperstone connection required — Trading locked — AutoTrade OFF"
+    label,
+    connectionSummary: {
+      accountMasked: conn?.accountMasked ?? null,
+      brokerName: conn?.brokerName ?? null,
+      pepperstoneConfirmed: pepperstone,
+      symbolName: conn?.symbolName ?? null,
+      lastSyncAt: conn?.lastSyncAt ?? null,
+      lastQuoteAt: conn?.lastQuoteAt ?? null
+    }
   };
 }
 
@@ -280,62 +347,80 @@ export function buildDemonstrationBundle(): {
   };
 }
 
-export function getBrokerControlCentreSnapshot(auth?: AuthHealthSnapshot) {
-  const readiness = buildCTraderReadiness({ auth });
+export function getBrokerControlCentreSnapshot(
+  auth?: AuthHealthSnapshot,
+  connection?: Parameters<typeof buildCTraderReadiness>[0] extends infer P
+    ? P extends { connection?: infer C }
+      ? C
+      : never
+    : never
+) {
+  const readiness = buildCTraderReadiness({ auth, connection });
+  const pepperstoneStatus = readiness.connected
+    ? "Connected (preview — execution disabled)"
+    : readiness.authSetupRequired
+      ? "Connection setup required"
+      : "Pepperstone connection required";
   return {
-    defaultBroker: "manual" as const,
+    defaultBroker: "pepperstone_ctrader" as const,
     autoTrade: "OFF" as const,
     orderSubmission: false,
     brokers: [
+      {
+        id: "pepperstone_ctrader",
+        name: "Pepperstone cTrader",
+        status: pepperstoneStatus,
+        detail:
+          "Multi-user Demo/Live accounts — preview mode — order submission disabled — AutoTrade OFF",
+        badge: readiness.connected ? "CONNECTED" : "PREVIEW"
+      },
+      {
+        id: "trading212_invest",
+        name: "Trading 212 Practice",
+        status: "Read only",
+        detail: "Separate gold-proxy path — not part of the cTrader AutoTrade workflow",
+        badge: "READ_ONLY"
+      },
       {
         id: "manual",
         name: "Manual",
         status: "Available",
         detail: "Analysis only — no broker execution",
         badge: "MANUAL"
-      },
-      {
-        id: "trading212_invest",
-        name: "Trading 212 Practice",
-        status: "Read only",
-        detail: "Practice / read-only gold proxy — order automation not enabled",
-        badge: "READ_ONLY"
-      },
-      {
-        id: "pepperstone_ctrader",
-        name: "Pepperstone cTrader Demo",
-        status: readiness.authSetupRequired
-          ? "Connection setup required"
-          : "Pepperstone connection required",
-        detail: "Demo setup — AutoTrade off — Live locked",
-        badge: "DEMO_PREVIEW"
-      },
-      {
-        id: "ig",
-        name: "IG — Coming later",
-        status: "Coming later",
-        detail: "Not active yet",
-        badge: "PARKED"
       }
     ],
     automationModes: [
       { id: "OFF", available: true },
       { id: "MANUAL", available: true },
       { id: "CONFIRM", available: true, note: "Preview only — stops at PREVIEW_APPROVED" },
-      { id: "DEMO_AUTO_LOCKED", available: false, note: "Visible but locked" },
-      { id: "DEMO_AUTO", available: false, note: "Impossible to activate" },
-      { id: "LIVE_LOCKED", available: false, note: "Impossible to activate" }
+      {
+        id: "DEMO_AUTO_LOCKED",
+        available: false,
+        note: "Temporarily locked — not a permanent product limitation"
+      },
+      {
+        id: "DEMO_AUTO",
+        available: false,
+        note: "Temporarily locked pending owner approval"
+      },
+      {
+        id: "LIVE_LOCKED",
+        available: false,
+        note: "Temporarily locked — Live selection exists; execution disabled"
+      }
     ],
-    limits: CTRADER_DEMO_SERVER_LIMITS,
+    limits: CTRADER_RECOMMENDED_DEFAULTS,
     readiness,
     health: {
       brokerId: "pepperstone_ctrader",
       environment: "DEMO",
-      connectionState: readiness.authSetupRequired
-        ? "AUTH_SETUP_REQUIRED"
-        : "SETUP_REQUIRED",
+      connectionState: readiness.connected
+        ? "CONNECTED"
+        : readiness.authSetupRequired
+          ? "AUTH_SETUP_REQUIRED"
+          : "SETUP_REQUIRED",
       automationMode: "OFF",
-      oauthHealthy: null,
+      oauthHealthy: readiness.connected ? true : null,
       authIntegrityHealthy: auth?.status === "HEALTHY",
       executionEnabled: false,
       liveEnabled: false,

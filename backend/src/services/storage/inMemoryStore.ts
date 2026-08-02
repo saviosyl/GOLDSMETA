@@ -428,7 +428,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   rotateWebhookConnection(
     userId: string,
     webhookId: string,
-    secret: string
+    secret: string,
+    secretHash?: string | null
   ): WebhookConnection | undefined {
     const existing = this.getWebhookConnection(userId, webhookId);
     if (!existing) {
@@ -437,7 +438,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     const timestamp = nowIso();
     const updated: WebhookConnection = {
       ...existing,
-      secret,
+      secret: secretHash ? null : secret,
+      secretHash: secretHash ?? existing.secretHash ?? null,
       rotatedAt: timestamp,
       updatedAt: timestamp
     };

@@ -8,7 +8,12 @@ import {
   T212_PAPER_ORDER_SUBMISSION_ENABLED
 } from "../types";
 
-export type SelectedBrokerId = "MANUAL" | "T212_INVEST" | "IG_DEMO";
+export type SelectedBrokerId =
+  | "MANUAL"
+  | "T212_INVEST"
+  | "PEPPERSTONE_CTRADER"
+  /** @deprecated Parked — not offered in customer UI. Kept for stored selections only. */
+  | "IG_DEMO";
 
 export type T212Environment = "PRACTICE" | "LIVE";
 
@@ -20,6 +25,7 @@ export type BrokerBadge =
   | "MANUAL"
   | "T212 PRACTICE — READ ONLY"
   | "T212 LIVE — LOCKED"
+  | "PEPPERSTONE CTRADER DEMO — READ ONLY"
   | "IG DEMO — PARKED";
 
 export type T212ProposalStatus =
@@ -213,6 +219,7 @@ export function badgeForBroker(
   t212Env: T212Environment | null
 ): BrokerBadge {
   if (broker === "MANUAL") return "MANUAL";
+  if (broker === "PEPPERSTONE_CTRADER") return "PEPPERSTONE CTRADER DEMO — READ ONLY";
   if (broker === "IG_DEMO") return "IG DEMO — PARKED";
   if (t212Env === "LIVE") return "T212 LIVE — LOCKED";
   return "T212 PRACTICE — READ ONLY";

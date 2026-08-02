@@ -13,10 +13,12 @@ const DESKTOP_LINKS = [
 const DESKTOP_SECONDARY = [
   { to: "/brokers", label: "Brokers" },
   { to: "/autotrade", label: "AutoTrade" },
+  { to: "/tradingview", label: "TradingView" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
+  { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
   { to: "/help", label: "Help" },
   { to: "/settings", label: "Settings" }
 ];
@@ -31,11 +33,13 @@ const MOBILE_PRIMARY = [
 const MOBILE_MORE = [
   { to: "/brokers", label: "Brokers" },
   { to: "/autotrade", label: "AutoTrade" },
+  { to: "/tradingview", label: "TradingView" },
   { to: "/journal", label: "Journal" },
   { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
   { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
+  { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
   { to: "/help", label: "Help" },
   { to: "/settings", label: "Settings" }
 ];

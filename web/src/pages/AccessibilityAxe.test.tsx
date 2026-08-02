@@ -37,7 +37,7 @@ vi.mock("../lib/auth", () => ({
             name: "Pepperstone cTrader Demo",
             status: "Setup required",
             detail: "Demo",
-            badge: "DEMO_PREVIEW"
+            badge: "PREVIEW"
           }
         ],
         automationModes: [],

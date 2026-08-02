@@ -66,7 +66,9 @@ export function wizardStatusLabel(status: string | null | undefined): string {
     SETUP_REQUIRED: "Action required",
     AVAILABLE: "Action required",
     ACTION_REQUIRED: "Action required",
-    IN_PROGRESS: "In progress",
+    IN_PROGRESS: "Partially complete",
+    PARTIAL: "Partially complete",
+    PARTIALLY_COMPLETE: "Partially complete",
     COMPLETE: "Complete",
     COMPLETED: "Complete",
     BLOCKED: "Blocked",
@@ -79,9 +81,9 @@ export function wizardStatusTone(
   status: string | null | undefined
 ): "neutral" | "positive" | "warning" | "negative" | "gold" {
   const s = (status ?? "").toUpperCase();
+  if (s.includes("PARTIAL") || s.includes("IN_PROGRESS") || s.includes("PROGRESS")) return "gold";
   if (s.includes("COMPLETE")) return "positive";
   if (s.includes("BLOCK") || s.includes("LOCK") || s.includes("ERROR")) return "negative";
-  if (s.includes("PROGRESS")) return "gold";
   if (s.includes("AVAILABLE") || s.includes("SETUP") || s.includes("ACTION") || s.includes("REQUIRED")) {
     return "warning";
   }
@@ -118,16 +120,17 @@ export function brokerDisplayName(id: string | null | undefined, fallbackName?: 
   const map: Record<string, string> = {
     manual: "Manual",
     trading212_invest: "Trading 212 Practice",
-    pepperstone_ctrader: "Pepperstone cTrader Demo",
-    ig: "IG — Coming later"
+    pepperstone_ctrader: "Pepperstone cTrader",
+    PEPPERSTONE_CTRADER: "Pepperstone cTrader",
+    T212_INVEST: "Trading 212 Practice",
+    MANUAL: "Manual"
   };
   if (id && map[id]) return map[id];
   return (
     fallbackName
       ?.replace(/PEPPERSTONE\s*cTRADER\s*CFD/i, "Pepperstone cTrader Demo")
       .replace(/TRADING\s*212\s*INVEST/i, "Trading 212 Practice")
-      .replace(/\bMANUAL\b/i, "Manual")
-      .replace(/\bIG\b/i, "IG — Coming later") ?? "Broker"
+      .replace(/\bMANUAL\b/i, "Manual") ?? "Broker"
   );
 }
 
@@ -136,11 +139,12 @@ export function brokerBadgeLabel(badge: string | null | undefined): string {
   const map: Record<string, string> = {
     MANUAL: "Manual",
     READ_ONLY: "Read only",
-    DEMO_PREVIEW: "Setup required",
+    PREVIEW: "Preview",
+    DEMO_PREVIEW: "Preview",
     DEMO: "Demo",
     PARKED: "Coming later",
     CONNECTED: "Connected",
-    LIVE_LOCKED: "Live locked"
+    LIVE_LOCKED: "Preview — Live not active"
   };
   return map[b] ?? (badge ? badge.replace(/_/g, " ") : "Status");
 }
@@ -158,7 +162,7 @@ export function connectionStatusLabel(raw: string | null | undefined): string {
     TRADING_LOCKED: "Trading locked",
     READ_ONLY: "Read only",
     DEMO: "Demo",
-    LIVE_LOCKED: "Live locked",
+    LIVE_LOCKED: "Live not active in preview",
     ERROR: "Error",
     ACTION_REQUIRED: "Action required",
     NOT_HEALTHY: "Action required",
@@ -211,6 +215,79 @@ export function friendlyApiCode(
       whatHappened: "The secure sign-in with Pepperstone did not finish.",
       impact: "No orders were placed. Analysis still works.",
       nextStep: "Return to Broker Control Centre and start the connection again."
+    };
+  }
+
+  if (c.includes("LIVE_SELECTION_CONFIRMATION") || c.includes("LIVE_ACTIVATION")) {
+    return {
+      message: "Live AutoTrade needs an explicit confirmation.",
+      whatHappened: "A Live (real money) action was requested without confirmation.",
+      impact: "Live AutoTrade stays OFF. Demo settings are unchanged.",
+      nextStep: "Review the Live confirmation screen and type ENABLE LIVE."
+    };
+  }
+
+  if (c.includes("LIVE_ACCOUNT") || (c.includes("CTRADER_LIVE") && c.includes("REJECT"))) {
+    return {
+      message: "Live account selection needs confirmation. Order execution stays disabled in this preview.",
+      whatHappened: "A Live (real money) account action was blocked or needs confirmation.",
+      impact: "Demo settings are unchanged. No orders are submitted.",
+      nextStep: "Select the account again and complete the Live confirmation if prompted."
+    };
+  }
+
+  if (c.includes("QUOTE_STALE") || c.includes("STALE")) {
+    return {
+      message: "Market quote is stale.",
+      whatHappened: "The last bid/ask is older than the safety window.",
+      impact: "Trade previews are blocked until a fresh quote arrives.",
+      nextStep: "Wait for a live Demo quote refresh, then try again."
+    };
+  }
+
+  if (c.includes("OWNER_ONLY") || c.includes("CTRADER_OWNER")) {
+    return {
+      message: "This broker action is not available for your account.",
+      whatHappened: "Access was denied for this broker operation.",
+      impact: "Your analysis access is unchanged.",
+      nextStep: "Sign in with a verified active account and open AutoTrade."
+    };
+  }
+
+  if (
+    c.includes("MARGIN_ELIGIBILITY_UNKNOWN") ||
+    (c.includes("MARGIN") && c.includes("UNKNOWN"))
+  ) {
+    return {
+      message: "Margin information is not available yet. Trading remains locked.",
+      whatHappened: "The broker has not returned complete margin metadata.",
+      impact: "Previews and automation stay locked until margin data is available.",
+      nextStep: "Refresh diagnostics after the broker connection is healthy."
+    };
+  }
+
+  if (
+    c.includes("VOLUME_BELOW_MINIMUM") ||
+    c.includes("VOLUME_BELOW_MINIMUM_AFTER_ROUNDING")
+  ) {
+    return {
+      message: "Your selected risk is too low for the broker’s minimum trade size.",
+      whatHappened: "Calculated size is below the broker minimum after rounding.",
+      impact: "No order is submitted. Your saved risk setting is unchanged.",
+      nextStep: "Increase risk, switch to manual lots that meet the minimum, or choose another account."
+    };
+  }
+
+  if (
+    c.includes("BROKER_EXECUTION") ||
+    c.includes("ORDER_SUBMISSION") ||
+    /BROKER_EXECUTION_ENABLED\s*=\s*false/i.test(msg)
+  ) {
+    return {
+      message: "Order submission is currently disabled in this preview.",
+      whatHappened: "Preview locks prevent Demo and Live order submission.",
+      impact: "AutoTrade stays OFF. Settings and previews still work.",
+      nextStep: "Continue configuration. Execution will require a later approved phase."
     };
   }
 

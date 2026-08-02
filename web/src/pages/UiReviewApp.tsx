@@ -14,6 +14,8 @@ import { AutoTradePage } from "./AutoTradePage";
 import { BrokerControlCentrePage } from "./broker/BrokerControlCentrePage";
 import { HelpPage } from "./HelpPage";
 import { AdminUsersPage } from "./admin/AdminUsersPage";
+import { TradingViewSetupPage } from "./TradingViewSetupPage";
+import { TradingViewTemplateAdminPage } from "./admin/TradingViewTemplateAdminPage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
@@ -279,10 +281,18 @@ function buildReviewApi() {
     listTradingViewConnections: async () => [],
     updateSettings: async (s: unknown) => s,
     createTradingViewConnection: async () => ({
-      connection: { id: "x", status: "ACTIVE" }
+      connection: {
+        id: "review-user-wh",
+        status: "ACTIVE",
+        webhookURL:
+          "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh"
+      },
+      webhookUrl:
+        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+      secret: "once-secret-review"
     }),
     revokeTradingViewConnection: async () => ({}),
-    sendTestAlert: async () => ({ message: "queued" }),
+    sendTestAlert: async () => ({ message: "queued", ok: true }),
     getVapidPublicKey: async () => "",
     registerWebPushSubscription: async () => ({}),
     deleteWebPushSubscription: async () => ({}),
@@ -502,37 +512,31 @@ function buildReviewApi() {
       return { ...autoTrade };
     },
     getBrokerControlCentre: async () => ({
-      defaultBroker: "manual",
+      defaultBroker: "pepperstone_ctrader",
       autoTrade: "OFF",
       orderSubmissionEnabled: false,
       brokers: [
+        {
+          id: "pepperstone_ctrader",
+          name: "Pepperstone cTrader",
+          status: "Pepperstone connection required",
+          detail:
+            "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
+          badge: "PREVIEW"
+        },
+        {
+          id: "trading212_invest",
+          name: "Trading 212 Practice",
+          status: "Read only",
+          detail: "Separate gold-proxy path — not part of the cTrader AutoTrade workflow",
+          badge: "READ_ONLY"
+        },
         {
           id: "manual",
           name: "Manual",
           status: "Available",
           detail: "Analysis only — no broker execution",
           badge: "MANUAL"
-        },
-        {
-          id: "trading212_invest",
-          name: "Trading 212 Practice",
-          status: "Read only",
-          detail: "Practice / read-only gold proxy",
-          badge: "READ_ONLY"
-        },
-        {
-          id: "pepperstone_ctrader",
-          name: "Pepperstone cTrader Demo",
-          status: "Pepperstone connection required",
-          detail: "Demo setup — AutoTrade off — Live locked",
-          badge: "DEMO_PREVIEW"
-        },
-        {
-          id: "ig",
-          name: "IG — Coming later",
-          status: "Coming later",
-          detail: "Not active yet",
-          badge: "PARKED"
         }
       ],
       automationModes: [],
@@ -608,11 +612,227 @@ function buildReviewApi() {
             approvedControlledDemoTrades: 0,
             requiredTrades: 5,
             daysSinceFirstTrade: null,
-            requiredDays: 7
+            requiredDays: 7,
+            source: "recommended_qualification_defaults",
+            sourceLabel:
+              "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."
           }
         }
       }
     }),
+    getCTraderDiagnostics: async () => ({
+      oauthConnected: true,
+      accountSelected: true,
+      demoAccountSelected: true,
+      credentialsConfigured: true,
+      pepperstoneConfirmed: true,
+      goldSymbolFound: true,
+      liveQuoteReceived: true,
+      spreadAvailable: true,
+      volumeRulesAvailable: true,
+      marginMetadataAvailable: false,
+      marketStatusAvailable: true,
+      tradingSafelyLocked: true,
+      autoTrade: "OFF",
+      environment: "DEMO",
+      selectedAccountIsLive: false,
+      connection: {
+        accountMasked: "****4821",
+        brokerName: "Pepperstone cTrader",
+        currency: "EUR",
+        tokenRefreshHealthy: true
+      },
+      account: {
+        accountIdMasked: "****4821",
+        currency: "EUR",
+        balance: 10000,
+        equity: 10000,
+        freeMargin: 9500,
+        usedMargin: 120,
+        leverage: 100
+      },
+      symbol: {
+        symbolName: "XAUUSD",
+        minVolume: 0.01,
+        volumeStep: 0.01
+      },
+      quote: {
+        bid: 2350.1,
+        ask: 2350.4,
+        spread: 0.3,
+        marketStatus: "OPEN",
+        stale: false,
+        timestamp: new Date().toISOString()
+      }
+    }),
+    listCTraderAccounts: async () => ({
+      accounts: [
+        {
+          ctidTraderAccountId: "demo-4821",
+          accountIdMasked: "****4821",
+          isLive: false,
+          selected: true,
+          brokerNameTitle: "Pepperstone",
+          depositCurrency: "EUR",
+          balance: 10000,
+          connectionStatus: "Connected",
+          tradingPermission: "Read only"
+        },
+        {
+          ctidTraderAccountId: "live-9910",
+          accountIdMasked: "****9910",
+          isLive: true,
+          selected: false,
+          brokerNameTitle: "Pepperstone",
+          depositCurrency: "EUR",
+          balance: 2500,
+          connectionStatus: "Connected",
+          tradingPermission: "Read only"
+        }
+      ]
+    }),
+    getAutoTradeSettings: async (environment: "demo" | "live") => ({
+      settings: {
+        uid: "review",
+        environment,
+        updatedAt: new Date().toISOString(),
+        selectedAccountId: environment === "demo" ? "demo-4821" : null,
+        sizingMode: "automatic_risk",
+        fixedRiskAmount: 20,
+        percentageRisk: 0.5,
+        manualLotSize: 0.01,
+        maxDailyLoss: 50,
+        maxTradesPerDay: 3,
+        maxOpenPositions: 1,
+        minConfidence: 80,
+        minRiskReward: 1.5,
+        maxSpread: 2,
+        maxQuoteAgeSeconds: 15,
+        stopLossDistance: null,
+        takeProfitMethod: "fixed_rr",
+        tradeCooldownMinutes: 30,
+        pauseAfterConsecutiveLosses: 3,
+        allowedSessions: ["London", "NewYork"],
+        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        newsFilterEnabled: true,
+        confirmationCandleRequired: true,
+        trendConfirmationRequired: false,
+        volumeConfirmationRequired: false,
+        breakEvenEnabled: false,
+        trailingStopEnabled: false,
+        partialTakeProfitEnabled: false,
+        liveActivationConfirmedAt: null,
+        liveActivationPhraseConfirmed: false,
+        autoTradeEnabledIntent: false,
+        emergencyStopActive: false
+      },
+      recommended: { sizingMode: "automatic_risk", fixedRiskAmount: 20 }
+    }),
+    getTradingViewSetup: async () => ({
+      setup: {
+        templateMode: "standard",
+        templateId: "goldmeta-standard-v1",
+        templateVersion: "1.0.0",
+        connectionStatus: "waiting_for_alert",
+        setupLabel: "GoldMeta Standard",
+        selectedSymbolAlias: "XAUUSD",
+        selectedTimeframes: ["15"],
+        lastSignalAt: null,
+        lastValidSignalAt: null,
+        lastRejectedSignalAt: null,
+        lastRejectReason: null,
+        hasWebhook: true,
+        webhookIdMasked: "wh…view"
+      },
+      template: {
+        id: "goldmeta-standard-v1",
+        name: "GoldMeta Standard TradingView Template",
+        description: "Use the shared GoldMeta alert format. Fastest way to get started.",
+        recommended: true,
+        supportedTimeframes: [
+          { value: "15", label: "15 minutes" },
+          { value: "30", label: "30 minutes" },
+          { value: "60", label: "1 hour" }
+        ],
+        symbolAliases: { XAUUSD: "XAUUSD" },
+        instructions: ["Create alert", "Paste webhook", "Paste message"]
+      },
+      webhookUrl:
+        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+      alertGuide: {
+        alertName: "GoldMeta XAUUSD 15",
+        messageBody: '{"schemaVersion":"1.0","symbol":"{{ticker}}","action":"{{strategy.order.action}}"}',
+        pineReminder: "Use the GoldMeta Standard alert message."
+      }
+    }),
+    updateTradingViewSetup: async () => ({ ok: true }),
+    restoreTradingViewStandard: async () => ({ ok: true }),
+    saveTradingViewCustomMapping: async () => ({ ok: true }),
+    rotateTradingViewConnection: async () => ({
+      webhookUrl:
+        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+      secret: "rotated-once"
+    }),
+    selectCTraderAccount: async () => ({ ok: true }),
+    confirmLiveAutoTradeActivation: async () => ({ ok: true }),
+    saveAutoTradeSettings: async (_env: "demo" | "live", patch: Record<string, unknown>) => ({
+      settings: {
+        uid: "review",
+        environment: _env,
+        updatedAt: new Date().toISOString(),
+        selectedAccountId: "demo-4821",
+        sizingMode: "automatic_risk",
+        fixedRiskAmount: 20,
+        percentageRisk: 0.5,
+        manualLotSize: 0.01,
+        maxDailyLoss: 50,
+        maxTradesPerDay: 3,
+        maxOpenPositions: 1,
+        minConfidence: 80,
+        minRiskReward: 1.5,
+        maxSpread: 2,
+        maxQuoteAgeSeconds: 15,
+        stopLossDistance: null,
+        takeProfitMethod: "fixed_rr",
+        tradeCooldownMinutes: 30,
+        pauseAfterConsecutiveLosses: 3,
+        allowedSessions: ["London", "NewYork"],
+        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        newsFilterEnabled: true,
+        confirmationCandleRequired: true,
+        trendConfirmationRequired: false,
+        volumeConfirmationRequired: false,
+        breakEvenEnabled: false,
+        trailingStopEnabled: false,
+        partialTakeProfitEnabled: false,
+        liveActivationConfirmedAt: null,
+        liveActivationPhraseConfirmed: false,
+        autoTradeEnabledIntent: false,
+        emergencyStopActive: false,
+        ...patch
+      }
+    }),
+    createCTraderPreview: async () => ({
+      notice: "Order submission is currently disabled in this preview.",
+      preview: { action: "BUY", state: "READY_FOR_CONFIRMATION" }
+    }),
+    setCTraderEmergencyStop: async () => ({ ok: true }),
+    getAdminTradingViewTemplate: async () => ({
+      active: {
+        id: "goldmeta-standard-v1",
+        name: "GoldMeta Standard TradingView Template",
+        version: "1.0.0",
+        status: "published"
+      },
+      templates: [
+        {
+          id: "goldmeta-standard-v1",
+          version: "1.0.0",
+          status: "published"
+        }
+      ]
+    }),
+    publishAdminTradingViewTemplate: async () => ({ ok: true }),
     getCTraderDemonstration: async () => ({
       banner: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",
       notice: "DEMONSTRATION DATA — NO BROKER CONNECTION — NO ORDER PLACED",
@@ -746,8 +966,10 @@ function UiReviewApp() {
             <Route path="planner" element={<RiskPlannerPage />} />
             <Route path="autotrade" element={<AutoTradePage />} />
             <Route path="brokers" element={<BrokerControlCentrePage />} />
+            <Route path="tradingview" element={<TradingViewSetupPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
+            <Route path="admin/tradingview-template" element={<TradingViewTemplateAdminPage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="signal-performance" element={<SignalPerformancePage />} />

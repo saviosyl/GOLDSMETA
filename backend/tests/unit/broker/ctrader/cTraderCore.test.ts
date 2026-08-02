@@ -76,6 +76,42 @@ describe("cTrader config", () => {
   });
 });
 
+describe("OAuth authorization URL", () => {
+  it("requests scope=accounts only (Checkpoint A — never trading)", async () => {
+    const prev = {
+      CTRADER_CLIENT_ID: process.env.CTRADER_CLIENT_ID,
+      CTRADER_REDIRECT_URI: process.env.CTRADER_REDIRECT_URI,
+      CTRADER_ENVIRONMENT: process.env.CTRADER_ENVIRONMENT
+    };
+    process.env.CTRADER_CLIENT_ID = "demo-client";
+    process.env.CTRADER_REDIRECT_URI =
+      "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/v1/ctrader/oauth/callback";
+    process.env.CTRADER_ENVIRONMENT = "DEMO";
+    try {
+      const { buildAuthorizationUrl } = await import(
+        "../../../../src/services/broker/ctrader/oauth"
+      );
+      const url = buildAuthorizationUrl({
+        state: "st",
+        codeChallenge: "ch",
+        clientId: "demo-client"
+      });
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("scope")).toBe("accounts");
+      expect(parsed.searchParams.get("scope")).not.toBe("trading");
+      expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(parsed.searchParams.get("redirect_uri")).toBe(
+        process.env.CTRADER_REDIRECT_URI
+      );
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+});
+
 describe("OAuth state + PKCE", () => {
   it("validates matching state and rejects mismatch/expiry/replay/bad redirect", () => {
     const prev = {
@@ -169,9 +205,11 @@ describe("symbol resolution", () => {
       }
     ]);
     expect(ok?.metadataComplete).toBe(true);
-    expect(
-      resolveXauUsdFromCatalogue([{ symbolId: 1, symbolName: "XAUUSD" }])
-    ).toBeNull();
+    const incomplete = resolveXauUsdFromCatalogue([
+      { symbolId: 1, symbolName: "XAUUSD" }
+    ]);
+    expect(incomplete?.symbolName).toBe("XAUUSD");
+    expect(incomplete?.metadataComplete).toBe(false);
     expect(
       resolveXauUsdFromCatalogue([
         {
@@ -188,6 +226,34 @@ describe("symbol resolution", () => {
         }
       ])
     ).toBeNull();
+    // Prefer exact XAUUSD over forwards / spread-bets
+    const preferred = resolveXauUsdFromCatalogue([
+      {
+        symbolId: 99,
+        symbolName: "XAUUSD-F",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        digits: 2,
+        tickSize: 0.01,
+        minVolume: 0.01,
+        stepVolume: 0.01,
+        maxVolume: 50,
+        lotSize: 100
+      },
+      {
+        symbolId: 41,
+        symbolName: "XAUUSD",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        digits: 2,
+        tickSize: 0.01,
+        minVolume: 0.01,
+        stepVolume: 0.01,
+        maxVolume: 50,
+        lotSize: 100
+      }
+    ]);
+    expect(preferred?.symbolId).toBe("41");
   });
 });
 
@@ -303,6 +369,31 @@ describe("preview engine", () => {
     expect(blocked.state).toBe("BLOCKED");
     expect(blocked.failedGates.length).toBeGreaterThan(0);
 
+    const marginUnknown = buildTradePreview({
+      decisionId: "d3",
+      decision: "BUY",
+      confidence: 90,
+      generatedAt: new Date().toISOString(),
+      candleConfirmed: true,
+      stopLoss: 2340,
+      takeProfits: [2365],
+      symbol,
+      quote,
+      position: null,
+      pendingOrdersCount: 0,
+      equity: 10000,
+      freeMargin: null,
+      accountCurrency: "EUR",
+      riskAmountEur: 20,
+      maxSpread: 1,
+      demonstration: false,
+      eurToAccountRate: 1,
+      marginPerLot: 200
+    });
+    expect(marginUnknown.state).toBe("BLOCKED");
+    expect(marginUnknown.failedGates).toContain("MARGIN_ELIGIBILITY_UNKNOWN");
+    expect(marginUnknown.orderSubmissionEnabled).toBe(false);
+
     const key = buildIntentKey({
       ownerUid: "u",
       broker: "pepperstone_ctrader",
@@ -358,8 +449,55 @@ describe("mutation guard + service", () => {
     expect(centre.autoTrade).toBe("OFF");
     expect(centre.brokers.some((b) => b.id === "pepperstone_ctrader")).toBe(true);
     expect(centre.brokers.find((b) => b.id === "pepperstone_ctrader")?.name).toMatch(/Pepperstone/i);
+    expect(centre.defaultBroker).toBe("pepperstone_ctrader");
+    expect(centre.brokers.some((b) => b.id === "ig")).toBe(false);
     const demo = buildDemonstrationBundle();
     expect(demo.banner).toBe(FIXTURE_BANNER);
+  });
+});
+
+describe("Spotware account list HTTP", () => {
+  it("parses axios-style JSON without double-parse and filters Live/deleted", async () => {
+    const { fetchTradingAccountsByAccessToken } = await import(
+      "../../../../src/services/broker/ctrader/openApiClient"
+    );
+    const payload = [
+      {
+        accountId: 48100001,
+        live: true,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: false
+      },
+      {
+        accountId: 48100002,
+        live: false,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: false
+      },
+      {
+        accountId: 48100003,
+        live: false,
+        brokerTitle: "Pepperstone - Europe",
+        depositCurrency: "EUR",
+        leverage: 30,
+        deleted: true
+      }
+    ];
+    const fetchImpl = async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    const accounts = await fetchTradingAccountsByAccessToken("tok", fetchImpl as typeof fetch);
+    expect(accounts).toHaveLength(2);
+    expect(accounts.filter((a) => a.isLive)).toHaveLength(1);
+    expect(accounts.filter((a) => !a.isLive)).toHaveLength(1);
+    expect(accounts.find((a) => !a.isLive)?.brokerNameTitle).toMatch(/Pepperstone/i);
+    expect(accounts.find((a) => !a.isLive)?.ctidTraderAccountId).toBe("48100002");
   });
 });
 

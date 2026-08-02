@@ -1,6 +1,12 @@
 /**
  * cTrader / Pepperstone execution flags.
- * Mutation / Live flags are HARD-FALSE in this phase — env cannot enable them.
+ *
+ * TEMPORARY PREVIEW LOCKS (not permanent product design):
+ * - Demo/Live order submission stay hard-false until a later approved phase
+ * - AutoTrade execution stays OFF
+ * - Architecture and UI already support per-user Demo + Live account selection
+ *
+ * Env cannot enable mutation/Live execution while these getters return false.
  */
 
 function envTrue(name: string, source: NodeJS.ProcessEnv = process.env): boolean {
@@ -20,8 +26,8 @@ export function isCTraderDemoOrderPreviewEnabled(source?: NodeJS.ProcessEnv): bo
 }
 
 /**
- * HARD FALSE — ignore process.env until an explicitly approved future release.
- * Env cannot enable Demo order submission in this phase.
+ * TEMPORARY PREVIEW LOCK — ignore process.env until an explicitly approved phase.
+ * Product architecture supports Demo execution later; this getter stays false now.
  */
 export function isCTraderDemoOrderSubmissionEnabled(
   _source?: NodeJS.ProcessEnv
@@ -29,12 +35,15 @@ export function isCTraderDemoOrderSubmissionEnabled(
   return false;
 }
 
-/** HARD FALSE — Live cTrader is impossible to activate in this phase. */
+/**
+ * TEMPORARY PREVIEW LOCK — Live *execution* disabled.
+ * Live *account selection* and Live settings storage are implemented separately.
+ */
 export function isCTraderLiveEnabled(_source?: NodeJS.ProcessEnv): boolean {
   return false;
 }
 
-/** HARD FALSE for cTrader mutation phase — broker execution remains disabled. */
+/** TEMPORARY PREVIEW LOCK — broker order execution remains disabled. */
 export function isBrokerExecutionEnabled(_source?: NodeJS.ProcessEnv): boolean {
   return false;
 }
@@ -72,14 +81,23 @@ export function snapshotCTraderFlags(source?: NodeJS.ProcessEnv) {
   };
 }
 
-/** Server hard caps — browser may only lower these. */
-export const CTRADER_DEMO_SERVER_LIMITS = {
+/**
+ * Recommended defaults for AutoTrade / preview when a user has not saved settings.
+ * Must NOT override per-user saved AutoTrade settings when those are supplied.
+ * Classification: recommended default (not structural security, not permanent product caps).
+ */
+export const CTRADER_RECOMMENDED_DEFAULTS = {
   maxRiskPerTradeEur: 20,
   maxTradesPerDay: 3,
   maxOpenPositions: 1,
   minConfidence: 80,
   maxSignalAgeSeconds: 90,
   confirmedCandleRequired: true,
-  stopLossRequired: true,
+  stopLossRequired: true
+} as const;
+
+/** @deprecated Prefer CTRADER_RECOMMENDED_DEFAULTS — kept for existing imports. */
+export const CTRADER_DEMO_SERVER_LIMITS = {
+  ...CTRADER_RECOMMENDED_DEFAULTS,
   environment: "DEMO" as const
 } as const;

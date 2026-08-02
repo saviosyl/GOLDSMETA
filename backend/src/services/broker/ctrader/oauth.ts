@@ -1,6 +1,7 @@
 /**
- * cTrader OAuth 2.0 helpers — state, PKCE, Demo-only authorization.
- * Callback remains disabled until Auth integrity is HEALTHY.
+ * cTrader OAuth 2.0 helpers — state, PKCE, authorization URL builders.
+ * Preview OAuth uses accounts scope only (temporary lock — do not request trading).
+ * Callback remains disabled until Auth integrity is HEALTHY where gated.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -99,8 +100,9 @@ export function buildAuthorizationUrl(args: {
   const url = new URL(conf.authUrl);
   url.searchParams.set("client_id", args.clientId);
   url.searchParams.set("redirect_uri", redirectUri);
-  // Minimal trading scope for future Demo; still no submission in this phase.
-  url.searchParams.set("scope", "trading");
+  // Checkpoint A: accounts (read-only) only. Never request trading here.
+  // Trading scope requires separate Checkpoint B owner approval.
+  url.searchParams.set("scope", "accounts");
   url.searchParams.set("product", "web");
   url.searchParams.set("state", args.state);
   url.searchParams.set("code_challenge", args.codeChallenge);
@@ -153,4 +155,60 @@ export async function exchangeAuthorizationCode(args: {
     throw new Error("CTRADER_TOKEN_EXCHANGE_MALFORMED");
   }
   return { accessToken, refreshToken, expiresIn };
+}
+
+/**
+ * Refresh-token rotation — never logs tokens.
+ * Spotware may return a new refresh token; callers must persist both.
+ */
+export async function refreshAccessToken(args: {
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const fetchFn = args.fetchImpl ?? fetch;
+  const conf = loadCTraderConfig();
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: args.refreshToken,
+    client_id: args.clientId,
+    client_secret: args.clientSecret
+  });
+  const res = await fetchFn(conf.tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  if (!res.ok) {
+    throw new Error(`CTRADER_TOKEN_REFRESH_FAILED status=${res.status}`);
+  }
+  const json = (await res.json()) as {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresIn?: number;
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+  const accessToken = json.accessToken ?? json.access_token;
+  const refreshToken = json.refreshToken ?? json.refresh_token ?? args.refreshToken;
+  const expiresIn = json.expiresIn ?? json.expires_in ?? 0;
+  if (!accessToken) {
+    throw new Error("CTRADER_TOKEN_REFRESH_MALFORMED");
+  }
+  return { accessToken, refreshToken, expiresIn };
+}
+
+/** Safe post-OAuth frontend redirect — never includes tokens. */
+export function buildOAuthFrontendRedirect(args: {
+  webOrigin: string;
+  status: "ok" | "error";
+  code?: string;
+}): string {
+  const base = args.webOrigin.replace(/\/$/, "");
+  const url = new URL(`${base}/brokers`);
+  url.searchParams.set("ctrader", args.status === "ok" ? "oauth_ok" : "oauth_error");
+  if (args.code) url.searchParams.set("reason", args.code);
+  return url.toString();
 }

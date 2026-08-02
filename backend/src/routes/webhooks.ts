@@ -5,6 +5,7 @@ import { logger } from "../services/logging/logger";
 import type { GoldMetaStore } from "../services/storage/types";
 import { enqueueWebhookEvent } from "../services/webhook/enqueueWebhookEvent";
 import { validateWebhookPayload, WebhookValidationError } from "../services/webhook/validatePayload";
+import { saveUserTradingViewConnection } from "../services/tradingview/userTradingViewConnection";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -34,9 +35,38 @@ export const buildWebhooksRouter = (
           aiExplainer
         });
 
+        // Per-user connection health — never cross-user
+        try {
+          const nowIso = new Date().toISOString();
+          await saveUserTradingViewConnection(validated.userId, {
+            lastSignalAt: nowIso,
+            ...(result.duplicate ? {} : { lastValidSignalAt: nowIso }),
+            connectionStatus: "connected",
+            lastRejectReason: null
+          });
+        } catch {
+          /* profile write is best-effort */
+        }
+
         res.status(202).json(result);
       } catch (error: unknown) {
         if (error instanceof WebhookValidationError) {
+          // Best-effort reject diagnostics on the owning connection when webhookId resolves
+          try {
+            const wid = firstParam(req.params.webhookId);
+            if (wid) {
+              const conn = await store.getWebhookConnectionById(wid);
+              if (conn) {
+                await saveUserTradingViewConnection(conn.userId, {
+                  lastRejectedSignalAt: new Date().toISOString(),
+                  lastRejectReason: error.code,
+                  connectionStatus: "error"
+                });
+              }
+            }
+          } catch {
+            /* ignore */
+          }
           res.status(error.statusCode).json({
             error: {
               code: error.code,

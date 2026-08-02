@@ -183,7 +183,7 @@ export const buildAutoTradeRouter = (
 
   const brokerSelectSchema = z
     .object({
-      broker: z.enum(["MANUAL", "T212_INVEST", "IG_DEMO"])
+      broker: z.enum(["MANUAL", "T212_INVEST", "PEPPERSTONE_CTRADER", "IG_DEMO"])
     })
     .strict();
 

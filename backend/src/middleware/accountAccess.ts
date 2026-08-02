@@ -125,11 +125,12 @@ export const requireApprovedAccount: RequestHandler = async (req, res, next) => 
 
 /**
  * Broker / webhook / AutoTrade connect surfaces.
- * - OWNER always allowed (existing production owner).
+ * - OWNER / ADMIN always allowed.
  * - USER_PENDING / SUSPENDED denied.
- * - Profiles with brokerAccess=false denied (new registrations).
- * - Legacy accounts without a registration profile keep prior access
- *   (execution flags remain server-disabled).
+ * - USER_APPROVED (verified active) may configure AutoTrade and connect their own broker.
+ * - brokerAccess=false no longer blocks configure/connect for approved users.
+ * - Execution / order submission remains hard-disabled by feature flags.
+ * - Legacy accounts without a registration profile keep prior route access.
  */
 export const requireBrokerEligible: RequestHandler = async (req, res, next) => {
   const role = roleOf(req);
@@ -173,7 +174,14 @@ export const requireBrokerEligible: RequestHandler = async (req, res, next) => {
         });
         return;
       }
-      if (profile.brokerAccess !== true) {
+      // Verified active users may configure AutoTrade / connect brokers.
+      // Execution remains hard-disabled by feature flags until separately approved.
+      // brokerAccess=false no longer blocks the configure/connect UI for approved users.
+      const approved =
+        profile.role === "USER_APPROVED" ||
+        profile.role === "OWNER" ||
+        profile.role === "ADMIN";
+      if (!approved && profile.brokerAccess !== true) {
         res.status(403).json({
           error: {
             code: "BROKER_ACCESS_DISABLED",

@@ -60,6 +60,14 @@ const BrokerControlCentrePage = lazy(() =>
     default: m.BrokerControlCentrePage
   }))
 );
+const TradingViewSetupPage = lazy(() =>
+  import("./pages/TradingViewSetupPage").then((m) => ({ default: m.TradingViewSetupPage }))
+);
+const TradingViewTemplateAdminPage = lazy(() =>
+  import("./pages/admin/TradingViewTemplateAdminPage").then((m) => ({
+    default: m.TradingViewTemplateAdminPage
+  }))
+);
 const AdminUsersPage = lazy(() =>
   import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage }))
 );
@@ -251,10 +259,26 @@ function ProtectedApp() {
             }
           />
           <Route
+            path="/tradingview"
+            element={
+              <LazyRoute label="TradingView setup">
+                <TradingViewSetupPage />
+              </LazyRoute>
+            }
+          />
+          <Route
             path="/admin/users"
             element={
               <LazyRoute label="Admin users">
                 <AdminUsersPage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/admin/tradingview-template"
+            element={
+              <LazyRoute label="TradingView template">
+                <TradingViewTemplateAdminPage />
               </LazyRoute>
             }
           />

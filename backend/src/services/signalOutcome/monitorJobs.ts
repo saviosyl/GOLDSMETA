@@ -460,13 +460,18 @@ let jobStoreSingleton: OutcomeMonitorJobStore | null = null;
 
 export function getOutcomeMonitorJobStore(): OutcomeMonitorJobStore {
   if (jobStoreSingleton) return jobStoreSingleton;
+  if (allowInMemorySignalOutcomeStore()) {
+    const db = getFirestoreDb();
+    if (db != null && process.env.STORAGE_BACKEND !== "memory") {
+      jobStoreSingleton = new FirestoreOutcomeMonitorJobStore(db);
+      return jobStoreSingleton;
+    }
+    jobStoreSingleton = new InMemoryOutcomeMonitorJobStore();
+    return jobStoreSingleton;
+  }
   const db = getFirestoreDb();
   if (db != null) {
     jobStoreSingleton = new FirestoreOutcomeMonitorJobStore(db);
-    return jobStoreSingleton;
-  }
-  if (allowInMemorySignalOutcomeStore()) {
-    jobStoreSingleton = new InMemoryOutcomeMonitorJobStore();
     return jobStoreSingleton;
   }
   logger.error("Outcome monitor job storage unavailable — fail closed", {

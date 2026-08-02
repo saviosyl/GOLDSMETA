@@ -14,22 +14,28 @@ vi.mock("../../lib/auth", () => ({
     api: {
       getBrokerControlCentre,
       getCTraderDemonstration,
-      startCTraderOAuth
+      startCTraderOAuth,
+      listCTraderDemoAccounts: vi.fn(),
+      selectCTraderDemoAccount: vi.fn(),
+      disconnectCTrader: vi.fn(),
+      getCTraderDiagnostics: vi.fn(),
+      getCTraderQuote: vi.fn(),
+      createCTraderPreview: vi.fn()
     }
   })
 }));
 
 const centreFixture = {
-  defaultBroker: "manual",
+  defaultBroker: "pepperstone_ctrader",
   autoTrade: "OFF",
   orderSubmissionEnabled: false,
   brokers: [
     {
-      id: "manual",
-      name: "Manual",
-      status: "Available",
-      detail: "No broker execution",
-      badge: "MANUAL"
+      id: "pepperstone_ctrader",
+      name: "Pepperstone cTrader Demo",
+      status: "Connection setup required",
+      detail: "Demo setup",
+      badge: "PREVIEW"
     },
     {
       id: "trading212_invest",
@@ -39,18 +45,11 @@ const centreFixture = {
       badge: "READ_ONLY"
     },
     {
-      id: "pepperstone_ctrader",
-      name: "Pepperstone cTrader Demo",
-      status: "Connection setup required",
-      detail: "Demo setup",
-      badge: "DEMO_PREVIEW"
-    },
-    {
-      id: "ig",
-      name: "IG — Coming later",
-      status: "Coming later",
-      detail: "Not active",
-      badge: "PARKED"
+      id: "manual",
+      name: "Manual",
+      status: "Available",
+      detail: "No broker execution",
+      badge: "MANUAL"
     }
   ],
   automationModes: [],
@@ -106,7 +105,10 @@ const centreFixture = {
         approvedControlledDemoTrades: 0,
         requiredTrades: 5,
         daysSinceFirstTrade: null,
-        requiredDays: 7
+        requiredDays: 7,
+        source: "recommended_qualification_defaults",
+        sourceLabel:
+          "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."
       }
     }
   }
@@ -130,7 +132,13 @@ describe("BrokerControlCentrePage", () => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
     expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("OFF");
-    expect(screen.getByTestId("no-order-badge")).toHaveTextContent(/No order submission/i);
+    expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
+      /Order submission disabled in this preview/i
+    );
+    expect(screen.getByTestId("broker-edit-autotrade-settings")).toHaveAttribute(
+      "href",
+      "/autotrade"
+    );
     expect(screen.getByTestId("broker-card-pepperstone_ctrader")).toBeInTheDocument();
     expect(screen.getByTestId("broker-top-status")).toBeInTheDocument();
   });
