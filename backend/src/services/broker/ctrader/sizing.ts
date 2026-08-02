@@ -4,6 +4,7 @@
  */
 
 import { CTRADER_DEMO_SERVER_LIMITS } from "./flags";
+import { roundDownLotsToStep } from "./volumeUnits";
 
 export interface SizingInput {
   equity: number | null;
@@ -32,12 +33,6 @@ export interface SizingResult {
   estimatedMaxLoss: number | null;
   rejectionReason: string | null;
   notes: string[];
-}
-
-function roundDownToStep(value: number, step: number): number {
-  if (!(step > 0) || !(value > 0)) return 0;
-  const units = Math.floor(value / step + 1e-12);
-  return Number((units * step).toFixed(8));
 }
 
 export function calculateCTraderVolume(input: SizingInput): SizingResult {
@@ -117,11 +112,13 @@ export function calculateCTraderVolume(input: SizingInput): SizingResult {
     };
   }
 
-  // Risk = volume * lotSize * stopDistance (in quote) → convert to account/EUR
-  // For XAUUSD, P/L ≈ volume * lotSize * priceDelta (USD). Convert USD→EUR via rate.
+  // Risk = volumeLots * contractSize * stopDistance (quote currency).
+  // For XAUUSD, P/L ≈ lots * lotSize(oz) * priceDelta(USD). Convert via eurToAccountRate.
+  // minVolume/volumeStep/maxVolume/lotSize MUST already be lot-denominated
+  // (see volumeUnits.parseCTraderVolumeRules — never pass raw Open API cents here).
   const riskInQuote = riskCap * input.eurToAccountRate;
   const rawVolume = riskInQuote / (input.lotSize * stopDistance);
-  let volume = roundDownToStep(rawVolume, input.volumeStep);
+  let volume = roundDownLotsToStep(rawVolume, input.volumeStep);
 
   if (!(volume > 0)) {
     return {
@@ -148,7 +145,7 @@ export function calculateCTraderVolume(input: SizingInput): SizingResult {
     };
   }
   if (volume > input.maxVolume) {
-    volume = roundDownToStep(input.maxVolume, input.volumeStep);
+    volume = roundDownLotsToStep(input.maxVolume, input.volumeStep);
     notes.push("Capped to maxVolume.");
   }
 

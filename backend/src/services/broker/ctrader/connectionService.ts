@@ -43,7 +43,10 @@ export type DiagnosticsReport = {
   liveQuoteReceived: boolean;
   spreadAvailable: boolean;
   volumeRulesAvailable: boolean;
+  /** True only when freeMargin or usedMargin was returned by Open API — never invented. */
   marginMetadataAvailable: boolean;
+  /** UNKNOWN until freeMargin is present from Open API. */
+  marginEligibility: "OK" | "UNKNOWN" | "INSUFFICIENT";
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
   autoTrade: "OFF";
@@ -484,6 +487,7 @@ export async function buildDiagnostics(
     spreadAvailable: quote?.spread != null,
     volumeRulesAvailable: volumeRules,
     marginMetadataAvailable: marginMeta,
+    marginEligibility: marginMeta ? "OK" : "UNKNOWN",
     marketStatusAvailable: quote?.marketStatus != null,
     tradingSafelyLocked: true,
     autoTrade: "OFF",
@@ -504,7 +508,9 @@ export async function buildDiagnostics(
       setupMissing: config.missing,
       encryptionConfigured: Boolean(loadTokenEncryptionSecret()),
       connected: oauthConnected,
-      selected: Boolean(connection?.selectedAccountId)
+      selected: Boolean(connection?.selectedAccountId),
+      marginNote:
+        "freeMargin/usedMargin absent from ProtoOATraderRes and ProtoOAReconcileRes under scope=accounts; not invented. Margin eligibility UNKNOWN until Open API returns freeMargin."
     }
   };
 }

@@ -165,6 +165,11 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
     (mapped.brokerMutation === "OPEN_LONG" || mapped.brokerMutation === "OPEN_SHORT") &&
     input.symbol
   ) {
+    // Do not invent freeMargin. Without it, margin eligibility is UNKNOWN and
+    // any future order path stays blocked (Checkpoint B safety).
+    if (input.freeMargin == null) {
+      failed.push("MARGIN_ELIGIBILITY_UNKNOWN");
+    }
     sizing = calculateCTraderVolume({
       equity: input.equity,
       freeMargin: input.freeMargin,
@@ -184,7 +189,7 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
       eurToAccountRate: input.eurToAccountRate ?? (input.accountCurrency === "EUR" ? 1 : null)
     });
     if (!sizing.ok && sizing.rejectionReason) failed.push(sizing.rejectionReason);
-    else if (sizing.ok) passed.push("SIZING_OK");
+    else if (sizing.ok && input.freeMargin != null) passed.push("SIZING_OK");
   }
 
   // Close actions do not need open sizing

@@ -16,6 +16,7 @@ import {
   marketStatusFromSchedule,
   parseScheduleIntervals
 } from "./marketSchedule";
+import { parseCTraderVolumeRules } from "./volumeUnits";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;
@@ -36,12 +37,6 @@ function moneyFromCenti(value: unknown, moneyDigits = 2): number | null {
   const n = asNumber(value);
   if (n == null) return null;
   return n / Math.pow(10, moneyDigits);
-}
-
-function volumeFromCents(value: unknown): number | null {
-  const n = asNumber(value);
-  if (n == null) return null;
-  return n / 100;
 }
 
 function spotPriceFromRelative(value: unknown): number | null {
@@ -341,6 +336,18 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
             : [];
         const detail = detailList[0] ?? {};
         const digits = asNumber(detail.digits);
+        let volumeRules: ReturnType<typeof parseCTraderVolumeRules> | null =
+          null;
+        try {
+          volumeRules = parseCTraderVolumeRules({
+            minVolume: detail.minVolume as number | string,
+            maxVolume: detail.maxVolume as number | string,
+            stepVolume: detail.stepVolume as number | string,
+            lotSize: detail.lotSize as number | string
+          });
+        } catch {
+          volumeRules = null;
+        }
         const enriched: RawCTraderSymbol = {
           symbolId: candidate.symbolId,
           symbolName: candidate.symbolName,
@@ -350,10 +357,11 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           digits: digits ?? undefined,
           pipPosition: asNumber(detail.pipPosition) ?? undefined,
           tickSize: digits != null ? Math.pow(10, -digits) : undefined,
-          minVolume: volumeFromCents(detail.minVolume) ?? undefined,
-          stepVolume: volumeFromCents(detail.stepVolume) ?? undefined,
-          maxVolume: volumeFromCents(detail.maxVolume) ?? undefined,
-          lotSize: volumeFromCents(detail.lotSize) ?? undefined,
+          // Lots (not raw cents) — see volumeUnits.ts / Spotware "volume in cents".
+          minVolume: volumeRules?.minLots,
+          stepVolume: volumeRules?.stepLots,
+          maxVolume: volumeRules?.maxLots,
+          lotSize: volumeRules?.contractSize,
           minStopDistance:
             asNumber(detail.slDistance) ??
             asNumber(detail.minStopDistance) ??

@@ -369,6 +369,31 @@ describe("preview engine", () => {
     expect(blocked.state).toBe("BLOCKED");
     expect(blocked.failedGates.length).toBeGreaterThan(0);
 
+    const marginUnknown = buildTradePreview({
+      decisionId: "d3",
+      decision: "BUY",
+      confidence: 90,
+      generatedAt: new Date().toISOString(),
+      candleConfirmed: true,
+      stopLoss: 2340,
+      takeProfits: [2365],
+      symbol,
+      quote,
+      position: null,
+      pendingOrdersCount: 0,
+      equity: 10000,
+      freeMargin: null,
+      accountCurrency: "EUR",
+      riskAmountEur: 20,
+      maxSpread: 1,
+      demonstration: false,
+      eurToAccountRate: 1,
+      marginPerLot: 200
+    });
+    expect(marginUnknown.state).toBe("BLOCKED");
+    expect(marginUnknown.failedGates).toContain("MARGIN_ELIGIBILITY_UNKNOWN");
+    expect(marginUnknown.orderSubmissionEnabled).toBe(false);
+
     const key = buildIntentKey({
       ownerUid: "u",
       broker: "pepperstone_ctrader",
