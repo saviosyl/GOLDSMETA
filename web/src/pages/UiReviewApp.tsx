@@ -42,7 +42,10 @@ function buildReviewApi() {
   const decisionOverride = (params.get("decision") || "WAIT").toUpperCase();
   const decisionCode =
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
-  const signalOutcomes = params.get("scenario") === "signal-outcomes";
+  const scenario = params.get("scenario") ?? "";
+  const signalOutcomes = scenario === "signal-outcomes";
+  const marketMismatch = scenario === "market-mismatch";
+  const marketMatch = scenario === "market-match";
   const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
 
   let autoTrade = buildReviewAutoTradeStatus({
@@ -63,6 +66,7 @@ function buildReviewApi() {
     ]
   });
 
+  const nowIso = new Date().toISOString();
   const decision = {
     schemaVersion: "3",
     decisionId: "review_dec_001",
@@ -76,8 +80,10 @@ function buildReviewApi() {
     confidence: 42,
     confidenceLabel: "LOW",
     marketRegime: "RANGE",
-    dataQuality: "GOOD",
+    dataQuality: "GOOD" as string,
     isProvisional: false,
+    isTestDecision: false as boolean | null,
+    dataSourceLabel: "LIVE" as string,
     environment: "LIVE",
     setupScore: 42,
     entry: {},
@@ -86,9 +92,9 @@ function buildReviewApi() {
     riskReward: {},
     bullishEvidence: [],
     bearishEvidence: [],
-    reasonCodes: ["CONFIRMATION_INCOMPLETE"],
-    reasonSummary: ["Waiting for confirmation"],
-    warnings: [],
+    reasonCodes: ["CONFIRMATION_INCOMPLETE"] as string[],
+    reasonSummary: ["Waiting for confirmation"] as string[],
+    warnings: [] as string[],
     missingInputs: [],
     invalidation: "—",
     disclaimer: "Analysis only",
@@ -97,10 +103,93 @@ function buildReviewApi() {
     backendVersion: "review",
     notificationSent: false,
     currentSession: "NEWYORK",
-    lastKnownPrice: 2385.4,
+    lastKnownPrice: 2385.4 as number,
     ohlcv: { open: 2382, high: 2391, low: 2376, close: 2385.4, volume: 1200 },
-    marketStructure: { trend: "RANGE", poc: 2380, vah: 2390, val: 2370 }
+    marketStructure: { trend: "RANGE", poc: 2380, vah: 2390, val: 2370 },
+    symbolIdentity: {
+      tradingViewSymbol: "XAUUSD",
+      exchange: "OANDA",
+      ctraderSymbolId: null as string | null,
+      canonicalSymbol: "XAUUSD" as const
+    },
+    priceSources: {
+      alertClose: {
+        source: "TRADINGVIEW_ALERT",
+        value: 2385.4,
+        exchangeOrBroker: "OANDA"
+      }
+    }
   };
+
+  // Labelled UI-review fixtures for PR #46 Market Structure mismatch / match.
+  let briefingLevels = { poc: 2380, vah: 2390, val: 2370 };
+  if (marketMismatch) {
+    decision.decision = "WAIT";
+    decision.dataQuality = "CONFLICTED";
+    decision.dataSourceLabel = "TEST";
+    decision.isTestDecision = true;
+    decision.environment = "TEST";
+    decision.lastKnownPrice = 2408;
+    decision.ohlcv = { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 };
+    decision.marketStructure = { trend: "RANGE", poc: 2408, vah: 2415, val: 2400 };
+    decision.reasonCodes = ["PRICE_SOURCE_MISMATCH", "CONFLICTED_DATA"];
+    decision.reasonSummary = [
+      "TradingView alert price and broker/stored price disagree — signal blocked"
+    ];
+    decision.warnings = [
+      "Market data mismatch: alert close 4045.17 disagrees with stored fixture 2408.00",
+      "PRICE_SOURCE_MISMATCH"
+    ];
+    decision.symbolIdentity = {
+      tradingViewSymbol: "XAUUSD",
+      exchange: "TEST_FIXTURE",
+      ctraderSymbolId: null,
+      canonicalSymbol: "XAUUSD"
+    };
+    decision.priceSources = {
+      alertClose: {
+        source: "TEST_FIXTURE",
+        value: 2408,
+        exchangeOrBroker: "TEST_FIXTURE"
+      }
+    };
+    // Intentionally mismatched V4-style levels so the client ladder shows the error state.
+    briefingLevels = { poc: 4050.951, vah: 4052.975, val: 4047.193 };
+  } else if (marketMatch) {
+    decision.decision = "WAIT";
+    decision.dataQuality = "GOOD";
+    decision.dataSourceLabel = "LIVE";
+    decision.isTestDecision = false;
+    decision.environment = "LIVE";
+    decision.marketDataTime = nowIso;
+    decision.generatedAt = nowIso;
+    decision.barTime = nowIso;
+    decision.lastKnownPrice = 4045.165;
+    decision.ohlcv = { open: 4044, high: 4048, low: 4042, close: 4045.165, volume: 1200 };
+    decision.marketStructure = {
+      trend: "RANGE",
+      poc: 4050.951,
+      vah: 4052.975,
+      val: 4047.193
+    };
+    decision.reasonCodes = ["CONFIRMATION_INCOMPLETE"];
+    decision.reasonSummary = ["Waiting for confirmation"];
+    decision.warnings = [];
+    decision.symbolIdentity = {
+      tradingViewSymbol: "XAUUSD",
+      exchange: "OANDA",
+      ctraderSymbolId: "42",
+      canonicalSymbol: "XAUUSD"
+    };
+    decision.priceSources = {
+      alertClose: {
+        source: "TRADINGVIEW_ALERT",
+        value: 4045.165,
+        exchangeOrBroker: "OANDA"
+      }
+    };
+    briefingLevels = { poc: 4050.951, vah: 4052.975, val: 4047.193 };
+  }
 
   const setup = {
     setupId: "review_setup_1",
@@ -163,13 +252,34 @@ function buildReviewApi() {
         : {
             session: "NEWYORK",
             marketRegime: "RANGE",
-            positionVsPoc: "ABOVE_POC",
+            positionVsPoc: marketMismatch
+              ? "UNKNOWN"
+              : marketMatch
+                ? "BELOW_POC"
+                : "ABOVE_POC",
             atrLabel: "NORMAL",
             atrValue: 12.4,
-            levels: { poc: 2380, vah: 2390, val: 2370 },
+            levels: briefingLevels,
+            tradingViewAlertClose: marketMismatch
+              ? 4045.165
+              : marketMatch
+                ? 4045.165
+                : decision.ohlcv.close,
+            decisionClose: decision.lastKnownPrice,
             currentState: "WAIT",
             insufficientData: false,
             dataTimestamp: decision.generatedAt,
+            explanations: marketMismatch
+              ? [
+                  "Market data mismatch: V4 close 4045.165 vs decision close 2408. Levels not combined in production briefing.",
+                  "UI-review fixture intentionally returns mismatched levels to exercise the client guard."
+                ]
+              : [],
+            verifiedFacts: marketMismatch
+              ? ["TEST_FIXTURE OHLC ~2408", "TradingView/V4 levels ~4050"]
+              : marketMatch
+                ? ["OANDA XAUUSD close 4045.165", "POC/VAH/VAL same regime"]
+                : [],
             disclaimer: "Informational only"
           },
     v5Score: async () =>

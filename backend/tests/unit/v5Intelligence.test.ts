@@ -141,6 +141,8 @@ describe("V5 learning / analytics / coach", () => {
     expect(briefing.levels.poc).toBeNull();
     expect(briefing.levels.vah).toBeNull();
     expect(briefing.levels.val).toBeNull();
+    expect(briefing.tradingViewAlertClose).toBeCloseTo(4045.165, 3);
+    expect(briefing.decisionClose).toBe(2408);
     expect(briefing.explanations.some((e) => /mismatch/i.test(e))).toBe(true);
     expect(briefing.actionable).toBe(false);
   });

@@ -31,10 +31,13 @@ type Briefing = {
   atrLabel?: string;
   atrValue?: number | null;
   levels?: { poc?: number | null; vah?: number | null; val?: number | null };
+  tradingViewAlertClose?: number | null;
+  decisionClose?: number | null;
   currentState?: string;
   insufficientData?: boolean;
   dataTimestamp?: string;
   disclaimer?: string;
+  explanations?: string[];
 };
 
 type Score = {
@@ -85,7 +88,11 @@ function buildSnapshotFromPage(args: {
     },
     ladder: {
       livePrice: args.livePrice,
-      alertClose: decision?.ohlcv?.close ?? decision?.lastKnownPrice ?? null,
+      alertClose:
+        briefing?.tradingViewAlertClose ??
+        decision?.ohlcv?.close ??
+        decision?.lastKnownPrice ??
+        null,
       poc: args.poc,
       vah: args.vah,
       val: args.val,
@@ -393,7 +400,11 @@ export function OverviewPage() {
         <MarketLevelLadder
           input={{
             livePrice,
-            alertClose: decision?.ohlcv?.close ?? decision?.lastKnownPrice ?? null,
+            alertClose:
+              briefing?.tradingViewAlertClose ??
+              decision?.ohlcv?.close ??
+              decision?.lastKnownPrice ??
+              null,
             poc,
             vah,
             val,

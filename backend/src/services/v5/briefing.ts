@@ -104,6 +104,9 @@ export function buildDailyBriefing(input: {
       vah,
       val
     },
+    // Always surface both closes for mismatch diagnostics — never invent prices.
+    tradingViewAlertClose: analysisClose,
+    decisionClose,
     bias: a?.bias ?? null,
     news:
       a?.gateFailures.some((g) => g.includes("NEWS") || g.includes("BLACKOUT"))
