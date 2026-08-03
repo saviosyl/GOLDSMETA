@@ -166,4 +166,17 @@ describe("accessibility axe audits", () => {
     });
     expect(results).toHaveNoViolations();
   });
+
+  it("Intraday Overview dashboard passes axe after load", async () => {
+    const { container, findByTestId } = render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
+    await findByTestId("intraday-action-card");
+    const results = await axe(container, {
+      rules: { "color-contrast": { enabled: false } }
+    });
+    expect(results).toHaveNoViolations();
+  });
 });
