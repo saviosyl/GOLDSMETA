@@ -4293,6 +4293,47 @@ a {
   padding: 8px 10px !important;
 }
 
+.gm-cockpit .gm-range-ladder {
+  margin: 4px 0 2px;
+}
+
+.gm-cockpit .gm-range-ladder-track {
+  height: 28px;
+  margin: 2px 0 6px;
+}
+
+.gm-cockpit .gm-range-ladder-track .gm-intra-range-probable {
+  top: 10px;
+}
+
+.gm-cockpit .gm-range-ladder-track .gm-intra-range-marker {
+  top: 4px;
+  height: 20px;
+}
+
+.gm-cockpit .gm-range-tick {
+  top: 8px;
+  height: 12px;
+}
+
+.gm-cockpit .gm-range-tick.kind-current {
+  top: 6px;
+  height: 16px;
+}
+
+.gm-cockpit .gm-range-nodes {
+  gap: 4px;
+}
+
+.gm-cockpit .gm-range-node {
+  min-height: 44px;
+  padding: 4px 3px;
+}
+
+.gm-cockpit .gm-range-dist {
+  display: none;
+}
+
 .gm-cockpit .gm-intra-range details,
 .gm-cockpit .gm-intra-range [data-testid="range-disclaimer"],
 .gm-cockpit .gm-intra-range [data-testid="range-remaining"] {

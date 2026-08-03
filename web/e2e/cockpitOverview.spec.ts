@@ -27,9 +27,12 @@ test.describe("Overview research cockpit", () => {
       };
     });
     expect(metrics.actionBottom).toBeLessThan(metrics.vh * 0.55);
-    expect(metrics.rangeBottom).toBeLessThan(metrics.vh * 0.75);
-    expect(metrics.scenariosBottom).toBeLessThan(metrics.vh + 40);
-    expect(metrics.matrixTop).toBeLessThan(metrics.vh + 50);
+    // In-flow range labels stay inside the Expected Range card (no absolute overflow into scenarios).
+    expect(metrics.rangeBottom).toBeLessThan(metrics.vh * 0.82);
+    expect(metrics.scenariosBottom).toBeLessThan(metrics.vh + 80);
+    expect(metrics.matrixTop).toBeLessThan(metrics.vh + 100);
+    // Range labels must not overlap Trade Scenarios.
+    expect(metrics.rangeBottom).toBeLessThanOrEqual(metrics.scenariosBottom);
 
     await page.getByTestId("action-why-btn").click();
     await expect(page.getByTestId("action-panel-why")).toBeVisible();
