@@ -84,7 +84,7 @@ export const api = onRequest(
   },
   (req, res) => {
     applyProductionCTraderRuntimeEnv();
-    return app(req, res);
+    app(req, res);
   }
 );
 
