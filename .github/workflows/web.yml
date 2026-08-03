@@ -52,11 +52,20 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
+      - name: Build (production)
         run: npm run build
+
+      - name: Production bundle fixture-leak check
+        run: npm run test:production-bundle
+
+      - name: Build (ui-review for Playwright)
+        run: npm run build:ui-review
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: Signal History Playwright
         run: npx playwright test e2e/signalHistory.spec.ts --project=desktop-chromium
+
+      - name: Market Structure + mobileFit + ui-review isolation Playwright
+        run: npx playwright test e2e/marketStructureMismatch.spec.ts e2e/mobileFit.spec.ts e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium --project=mobile-chromium

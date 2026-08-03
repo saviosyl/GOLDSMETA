@@ -1,6 +1,10 @@
 import type { IntradayPlan } from "../types/intradayPlan";
 
-/** Labelled Issue #50 preview matrix — non-production ui-review only. */
+/**
+ * Labelled Issue #50 preview matrix — non-production ui-review only.
+ * Imported only from UiReviewApp, which is excluded from production builds
+ * unless VITE_ENABLE_UI_REVIEW=true (`npm run build:ui-review`).
+ */
 export type Issue50PreviewCase = {
   id: string;
   title: string;

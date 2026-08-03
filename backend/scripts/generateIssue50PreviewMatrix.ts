@@ -394,7 +394,7 @@ const cases: CasePack[] = [
   })
 ];
 
-const outDir = resolve(__dirname, "../../web/src/fixtures");
+const outDir = resolve(__dirname, "../../web/src/preview");
 mkdirSync(outDir, { recursive: true });
 
 const slim = cases.map((c) => ({
