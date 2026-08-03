@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { chartExampleIntradayPlanFixture } from "../../fixtures/intradayPlanFixture";
 import { IntradayActionCard } from "./IntradayActionCard";
 import { ExpectedRangeCard } from "./ExpectedRangeCard";
+import { NextDecisionStrip } from "./NextDecisionStrip";
 import { ScenarioCards } from "./ScenarioCards";
 import { ResearchMatrix } from "./ResearchMatrix";
 import { IndicatorChips } from "./IndicatorChips";
@@ -18,6 +19,7 @@ import {
   scenarioStatus,
   shortActionLabel
 } from "../../lib/cockpitHelpers";
+import { classifyRangeLocation } from "../../lib/rangeMapHelpers";
 
 describe("Research cockpit interactions", () => {
   it("shortens PREPARE action and opens Why / waiting / checklist panels", async () => {
@@ -34,14 +36,70 @@ describe("Research cockpit interactions", () => {
     expect(screen.getByTestId("action-panel-checklist")).toHaveTextContent(/Complete market structure/i);
   });
 
-  it("range ladder nodes open explanations via click and keyboard escape", async () => {
+  it("day trade range map opens level explanations via click and keyboard escape", async () => {
     const user = userEvent.setup();
-    render(<ExpectedRangeCard range={chartExampleIntradayPlanFixture.expectedRange} />);
+    const plan = chartExampleIntradayPlanFixture;
+    render(
+      <ExpectedRangeCard
+        range={plan.expectedRange}
+        zones={plan.zones}
+        marketStructureMode="COMPLETE"
+      />
+    );
     expect(screen.getByTestId("range-ladder")).toBeInTheDocument();
+    expect(screen.getByTestId("range-location")).toHaveTextContent(/Inside probable range|Near/i);
+    expect(screen.getByTestId("range-metrics")).toBeInTheDocument();
+    expect(screen.getByTestId("range-guidance")).toBeInTheDocument();
+    expect(screen.getByTestId("range-status-badge")).toBeInTheDocument();
+    expect(classifyRangeLocation(plan.expectedRange)).not.toBe("unknown");
     await user.click(screen.getByTestId("range-node-probable-high"));
     expect(screen.getByTestId("range-level-explain")).toHaveTextContent(/Probable High/i);
+    expect(screen.getByTestId("range-level-explain")).toHaveTextContent(/estimate/i);
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("range-level-explain")).not.toBeInTheDocument();
+  });
+
+  it("Next Decision strip surfaces action facts and mode messages", () => {
+    const plan = chartExampleIntradayPlanFixture;
+    const { rerender } = render(
+      <NextDecisionStrip plan={plan} marketStructureMode="COMPLETE" />
+    );
+    expect(screen.getByTestId("next-decision-action")).toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("next-decision-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("next-decision-mode-message")).not.toBeInTheDocument();
+
+    rerender(<NextDecisionStrip plan={plan} marketStructureMode="LIVE_RANGE_ONLY" />);
+    expect(screen.getByTestId("next-decision-mode-message")).toHaveTextContent(
+      /observation only/i
+    );
+
+    rerender(<NextDecisionStrip plan={plan} marketStructureMode="MISMATCH" />);
+    expect(screen.getByTestId("next-decision-mode-message")).toHaveTextContent(/NO TRADE/i);
+  });
+
+  it("range map handles missing values and mismatch guidance", () => {
+    const missing = {
+      ...chartExampleIntradayPlanFixture.expectedRange,
+      rangeAvailable: false,
+      unavailableReason: "Probable range unavailable in this fixture.",
+      currentPrice: null,
+      probableLow: null,
+      probableHigh: null
+    };
+    const { rerender } = render(
+      <ExpectedRangeCard range={missing} marketStructureMode="LIVE_RANGE_ONLY" />
+    );
+    expect(screen.getByTestId("range-unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("range-guidance")).toHaveTextContent(/observation only/i);
+
+    rerender(
+      <ExpectedRangeCard
+        range={chartExampleIntradayPlanFixture.expectedRange}
+        marketStructureMode="MISMATCH"
+      />
+    );
+    expect(screen.getByTestId("range-guidance")).toHaveTextContent(/NO TRADE/i);
+    expect(screen.getByTestId("range-status-badge")).toHaveTextContent(/No trade/i);
   });
 
   it("scenario explain dialog and status badges stay research-only", async () => {
