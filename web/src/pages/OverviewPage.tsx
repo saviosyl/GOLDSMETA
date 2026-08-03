@@ -25,6 +25,7 @@ import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 import { IntradayHeaderCard } from "../components/intraday/IntradayHeaderCard";
 import { IntradayActionCard } from "../components/intraday/IntradayActionCard";
 import { ExpectedRangeCard } from "../components/intraday/ExpectedRangeCard";
+import { NextDecisionStrip } from "../components/intraday/NextDecisionStrip";
 import { ScenarioCards } from "../components/intraday/ScenarioCards";
 import { ImportantLevelsPanel } from "../components/intraday/ImportantLevelsPanel";
 import { SystemStatusCollapse } from "../components/intraday/SystemStatusCollapse";
@@ -466,7 +467,19 @@ export function OverviewPage() {
 
           {researchTab === "overview" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-overview">
-              <ExpectedRangeCard range={intradayPlan.expectedRange} />
+              <ExpectedRangeCard
+                range={intradayPlan.expectedRange}
+                zones={intradayPlan.zones}
+                marketStructureMode={marketStructureMode ?? intradayPlan.freshness.marketStructureMode}
+              />
+              <NextDecisionStrip
+                plan={intradayPlan}
+                marketStructureMode={marketStructureMode ?? intradayPlan.freshness.marketStructureMode}
+                onOpenScenarios={() => {
+                  const el = document.querySelector('[data-testid="scenario-cards"]');
+                  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
               <ScenarioCards
                 plan={intradayPlan}
                 bullish={intradayPlan.bullishScenario}

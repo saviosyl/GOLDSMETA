@@ -1,34 +1,32 @@
-import { useEffect, useId, useState } from "react";
-import type { ExpectedRange } from "../../types/intradayPlan";
-import { fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
+import { useEffect, useId, useMemo, useState } from "react";
+import type { ExpectedRange, ZoneGuide } from "../../types/intradayPlan";
+import { fmtPrice } from "../../lib/intradayFormat";
+import {
+  buildRangeLevels,
+  classifyRangeLocation,
+  dayTradeGuidance,
+  distLabel,
+  nearestDecisionLevels,
+  pctAlong,
+  pointsAndPercent,
+  rangeConfidenceBand,
+  rangeDataModeLabel,
+  rangeLocationLabel,
+  rangeStatusBadge,
+  type RangeLevelPoint
+} from "../../lib/rangeMapHelpers";
 
 type Props = {
   range: ExpectedRange;
+  zones?: ZoneGuide | null;
+  marketStructureMode?: string | null;
 };
 
-type LadderPoint = {
-  id: string;
-  label: string;
-  price: number;
-  kind: "stretch-low" | "probable-low" | "current" | "probable-high" | "stretch-high";
-  why: string;
-  testId: string;
-};
-
-function pctAlong(value: number | null, low: number | null, high: number | null): number {
-  if (value == null || low == null || high == null || high <= low) return 50;
-  return Math.max(0, Math.min(100, ((value - low) / (high - low)) * 100));
-}
-
-function distLabel(from: number | null, to: number | null): string {
-  if (from == null || to == null) return "—";
-  const pts = to - from;
-  const pct = from !== 0 ? (Math.abs(pts) / from) * 100 : 0;
-  const arrow = pts > 0 ? "↑" : pts < 0 ? "↓" : "·";
-  return `${arrow} ${Math.abs(pts).toFixed(1)} pts · ${pct.toFixed(2)}%`;
-}
-
-export function ExpectedRangeCard({ range }: Props) {
+export function ExpectedRangeCard({
+  range,
+  zones = null,
+  marketStructureMode = null
+}: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const panelId = useId();
 
@@ -40,151 +38,196 @@ export function ExpectedRangeCard({ range }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  if (!range.rangeAvailable) {
+  const location = useMemo(() => classifyRangeLocation(range), [range]);
+  const confidenceBand = rangeConfidenceBand(range.confidence);
+  const dataMode = rangeDataModeLabel(
+    marketStructureMode ?? (!range.rangeAvailable ? "UNAVAILABLE" : null)
+  );
+  const badge = rangeStatusBadge({
+    location,
+    mode: marketStructureMode,
+    rangeAvailable: range.rangeAvailable,
+    remainingAbovePoints: range.remainingAbovePoints,
+    remainingBelowPoints: range.remainingBelowPoints
+  });
+  const guidance = dayTradeGuidance({
+    location,
+    mode: marketStructureMode,
+    rangeAvailable: range.rangeAvailable
+  });
+  const levels = useMemo(() => buildRangeLevels(range), [range]);
+  const open = levels.find((p) => p.id === openId) ?? null;
+  const nearest = nearestDecisionLevels(range, zones);
+
+  if (!range.rangeAvailable || levels.length === 0) {
     return (
       <section
-        className="gm-intra-range"
+        className="gm-intra-range gm-range-map"
         data-testid="expected-range-card"
-        aria-label="Expected intraday range"
+        aria-label="Day trade range map"
       >
         <div className="gm-section-head">
-          <h2 className="gm-section-title">Expected range</h2>
-          <span className="gm-meta">{valueLocationLabel(range.valueLocation)}</span>
+          <h2 className="gm-section-title">Day Trade Range Map</h2>
+          <span className="gm-range-badge tone-incomplete" data-testid="range-status-badge">
+            Range incomplete
+          </span>
+        </div>
+        <div className="gm-range-summary" data-testid="range-summary">
+          <span>
+            <em>Current location</em> <strong data-testid="range-location">Unknown</strong>
+          </span>
+          <span>
+            <em>Range confidence</em>{" "}
+            <strong data-testid="range-confidence-band">{confidenceBand}</strong>
+          </span>
+          <span>
+            <em>Data mode</em> <strong data-testid="range-data-mode">{dataMode}</strong>
+          </span>
         </div>
         <p className="gm-intra-why-not" data-testid="range-unavailable" role="status">
           {range.unavailableReason ?? "Probable range unavailable."}
         </p>
-        <p className="gm-meta">{range.estimateDisclaimer}</p>
+        <p className="gm-range-guidance" data-testid="range-guidance">
+          {guidance}
+        </p>
+        <p className="gm-meta" data-testid="range-disclaimer">
+          {range.estimateDisclaimer}
+        </p>
       </section>
     );
   }
 
   const stretchLow = range.stretchLow!;
   const stretchHigh = range.stretchHigh!;
-  const points: LadderPoint[] = [
-    {
-      id: "stretch-low",
-      label: "Stretch Low",
-      price: stretchLow,
-      kind: "stretch-low",
-      why: "Outer downside estimate. Markets can still move beyond stretch levels.",
-      testId: "range-stretch-low"
-    },
-    {
-      id: "probable-low",
-      label: "Probable Low",
-      price: range.probableLow!,
-      kind: "probable-low",
-      why: "Nearest verified support / downside bound for the current research window.",
-      testId: "range-probable-low"
-    },
-    {
-      id: "current",
-      label: "Current Price",
-      price: range.currentPrice!,
-      kind: "current",
-      why: "Live / last verified price marker for the ladder.",
-      testId: "range-current"
-    },
-    {
-      id: "probable-high",
-      label: "Probable High",
-      price: range.probableHigh!,
-      kind: "probable-high",
-      why: "Nearest verified resistance / upside bound for the current research window.",
-      testId: "range-probable-high"
-    },
-    {
-      id: "stretch-high",
-      label: "Stretch High",
-      price: stretchHigh,
-      kind: "stretch-high",
-      why: "Outer upside estimate. Stretch is not a guaranteed target.",
-      testId: "range-stretch-high"
-    }
-  ];
-
   const markerPct = pctAlong(range.currentPrice, stretchLow, stretchHigh);
   const probLowPct = pctAlong(range.probableLow, stretchLow, stretchHigh);
   const probHighPct = pctAlong(range.probableHigh, stretchLow, stretchHigh);
-  const open = points.find((p) => p.id === openId) ?? null;
-  const directionUp =
-    (range.remainingAbovePoints ?? 0) >= (range.remainingBelowPoints ?? 0);
 
   return (
     <section
-      className="gm-intra-range"
+      className="gm-intra-range gm-range-map"
       data-testid="expected-range-card"
-      aria-label="Expected intraday range ladder"
+      aria-label="Day trade range map"
     >
       <div className="gm-section-head">
-        <h2 className="gm-section-title">Expected range</h2>
-        <span className="gm-meta">
-          {valueLocationLabel(range.valueLocation)} · {range.confidence}%
+        <div>
+          <h2 className="gm-section-title">Day Trade Range Map</h2>
+          <p className="gm-meta gm-range-estimate-note">Estimated levels — not guaranteed targets</p>
+        </div>
+        <span
+          className={`gm-range-badge tone-${badgeTone(badge)}`}
+          data-testid="range-status-badge"
+        >
+          {badge}
         </span>
       </div>
 
-      <div className="gm-range-ladder" data-testid="range-ladder">
-        <div className="gm-range-ladder-track" data-testid="range-track">
+      <div className="gm-range-summary" data-testid="range-summary">
+        <span>
+          <em>Current location</em>{" "}
+          <strong data-testid="range-location">{rangeLocationLabel(location)}</strong>
+        </span>
+        <span>
+          <em>Range confidence</em>{" "}
+          <strong data-testid="range-confidence-band">{confidenceBand}</strong>
+        </span>
+        <span>
+          <em>Data mode</em> <strong data-testid="range-data-mode">{dataMode}</strong>
+        </span>
+      </div>
+
+      <div className="gm-range-map-body" data-testid="range-ladder">
+        <div className="gm-range-scale" data-testid="range-track">
+          <div className="gm-range-scale-stretch" aria-hidden="true" />
           <div
-            className="gm-intra-range-probable"
-            style={{ left: `${probLowPct}%`, width: `${Math.max(2, probHighPct - probLowPct)}%` }}
+            className="gm-range-scale-probable"
+            style={{
+              left: `${probLowPct}%`,
+              width: `${Math.max(2, probHighPct - probLowPct)}%`
+            }}
+            aria-hidden="true"
           />
           <div
-            className="gm-intra-range-marker"
+            className="gm-range-scale-bear"
+            style={{ width: `${markerPct}%` }}
+            aria-hidden="true"
+          />
+          <div
+            className="gm-range-scale-bull"
+            style={{ left: `${markerPct}%`, width: `${100 - markerPct}%` }}
+            aria-hidden="true"
+          />
+          <div
+            className="gm-range-pin"
             style={{ left: `${markerPct}%` }}
+            data-testid="range-current-pin"
             aria-hidden="true"
-          />
-          <span
-            className={`gm-range-direction ${directionUp ? "up" : "down"}`}
-            aria-hidden="true"
-            data-testid="range-direction"
           >
-            {directionUp ? "→" : "←"}
-          </span>
-          {points.map((p) => {
+            <i />
+          </div>
+          {levels.map((p) => {
+            if (p.id === "current") return null;
             const left = pctAlong(p.price, stretchLow, stretchHigh);
             return (
-              <button
-                key={p.id}
-                type="button"
-                className={`gm-range-node kind-${p.kind}${openId === p.id ? " is-open" : ""}`}
+              <span
+                key={`tick-${p.id}`}
+                className={`gm-range-scale-tick kind-${p.id}`}
                 style={{ left: `${left}%` }}
-                title={`${p.label} ${fmtPrice(p.price)} — ${p.why}`}
-                aria-expanded={openId === p.id}
-                aria-controls={panelId}
-                data-testid={`range-node-${p.id}`}
-                onClick={() => setOpenId(openId === p.id ? null : p.id)}
-              >
-                <span className="gm-range-node-label">{p.label}</span>
-                <strong data-testid={p.testId}>{fmtPrice(p.price)}</strong>
-                {p.kind !== "current" && (
-                  <em className="gm-meta">{distLabel(range.currentPrice, p.price)}</em>
-                )}
-              </button>
+                aria-hidden="true"
+              />
             );
           })}
         </div>
+
+        <div
+          className="gm-range-scale-labels"
+          role="group"
+          aria-label="Range levels"
+          data-testid="range-mobile-ladder"
+        >
+          {levels.map((p) => (
+            <LevelButton
+              key={p.id}
+              point={p}
+              current={range.currentPrice}
+              open={openId === p.id}
+              panelId={panelId}
+              onToggle={() => setOpenId(openId === p.id ? null : p.id)}
+            />
+          ))}
+        </div>
       </div>
 
-      <div className="gm-intra-range-remain" data-testid="range-remaining">
-        <span>
-          Remaining above:{" "}
-          <strong>
+      <div className="gm-range-metrics" data-testid="range-metrics">
+        <div>
+          <span className="gm-label">Room up</span>
+          <strong data-testid="range-room-up">
             {range.remainingAbovePoints != null
-              ? `${range.remainingAbovePoints.toFixed(1)} pts (${range.remainingAbovePercent ?? "—"}%)`
+              ? `${range.remainingAbovePoints.toFixed(1)} pts`
               : "—"}
           </strong>
-        </span>
-        <span>
-          Remaining below:{" "}
-          <strong>
+        </div>
+        <div>
+          <span className="gm-label">Room down</span>
+          <strong data-testid="range-room-down">
             {range.remainingBelowPoints != null
-              ? `${range.remainingBelowPoints.toFixed(1)} pts (${range.remainingBelowPercent ?? "—"}%)`
+              ? `${range.remainingBelowPoints.toFixed(1)} pts`
               : "—"}
           </strong>
-        </span>
+        </div>
+        <div>
+          <span className="gm-label">Nearest upside level</span>
+          <strong data-testid="range-nearest-upside">{fmtPrice(nearest.upside)}</strong>
+        </div>
+        <div>
+          <span className="gm-label">Nearest downside level</span>
+          <strong data-testid="range-nearest-downside">{fmtPrice(nearest.downside)}</strong>
+        </div>
       </div>
+
+      <p className="gm-range-guidance" data-testid="range-guidance" role="status">
+        {guidance}
+      </p>
 
       {open && (
         <div
@@ -196,7 +239,13 @@ export function ExpectedRangeCard({ range }: Props) {
         >
           <strong>
             {fmtPrice(open.price)} — {open.label}
+            {open.estimated ? " (estimate)" : ""}
           </strong>
+          <p className="gm-meta" data-testid="range-level-stats">
+            {open.id === "current"
+              ? "Current verified price"
+              : distLabel(range.currentPrice, open.price)}
+          </p>
           <p>
             <span className="gm-label">Why it matters</span>
             {open.why}
@@ -228,4 +277,62 @@ export function ExpectedRangeCard({ range }: Props) {
       </p>
     </section>
   );
+}
+
+function LevelButton({
+  point,
+  current,
+  open,
+  panelId,
+  onToggle
+}: {
+  point: RangeLevelPoint;
+  current: number | null;
+  open: boolean;
+  panelId: string;
+  onToggle: () => void;
+}) {
+  const { points, percent } = pointsAndPercent(current, point.price);
+  const tip =
+    point.id === "current"
+      ? `${point.label}: ${fmtPrice(point.price)}`
+      : `${point.label}: ${fmtPrice(point.price)} · ${distLabel(current, point.price)}${
+          point.estimated ? " · estimate" : ""
+        }`;
+
+  return (
+    <button
+      type="button"
+      className={`gm-range-level kind-${point.id}${open ? " is-open" : ""}${
+        point.estimated ? " is-estimate" : ""
+      }`}
+      title={tip}
+      aria-expanded={open}
+      aria-controls={panelId}
+      data-testid={`range-node-${point.id}`}
+      onClick={onToggle}
+    >
+      <span className="gm-range-level-label">
+        <span className="gm-range-label-full">{point.label}</span>
+        <span className="gm-range-label-short">{point.shortLabel}</span>
+        {point.estimated && <span className="gm-range-est">est.</span>}
+      </span>
+      <strong data-testid={point.testId}>{fmtPrice(point.price)}</strong>
+      {point.id !== "current" && (
+        <em className="gm-range-dist" data-testid={`range-dist-${point.id}`}>
+          {points != null
+            ? `${Math.abs(points).toFixed(1)} pts${percent != null ? ` · ${percent.toFixed(2)}%` : ""}`
+            : "—"}
+        </em>
+      )}
+    </button>
+  );
+}
+
+function badgeTone(badge: string): string {
+  if (badge === "No trade") return "notrade";
+  if (badge === "Range incomplete") return "incomplete";
+  if (badge === "Near resistance" || badge === "Room to fall") return "bear";
+  if (badge === "Near support" || badge === "Room to rise") return "bull";
+  return "mid";
 }
