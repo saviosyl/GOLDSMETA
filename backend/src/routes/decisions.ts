@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
 import { approvedAccountGate } from "../middleware/accountAccess";
+import { buildIntradayPlan } from "../services/decision/intradayPlan";
 import { resolveMarketStructureView } from "../services/decision/strategySignal";
 import type { GoldMetaStore } from "../services/storage/types";
 
@@ -21,13 +22,21 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       res.status(404).json({ error: { code: "NOT_FOUND", message: "No decisions found" } });
       return;
     }
+    const intradayPlan = buildIntradayPlan({
+      quote: view.quoteDecision,
+      structure: view.structureDecision,
+      mode: view.marketStructureMode,
+      quoteAgeSeconds: view.diagnostics.quoteAgeSeconds,
+      signalAgeSeconds: view.diagnostics.signalAgeSeconds
+    });
     res.json({
       decision: latest,
       latestQuote: view.latestQuote,
       latestCompleteStrategySignal: view.latestCompleteStrategySignal,
       marketStructureMode: view.marketStructureMode,
       marketStructureDiagnostics: view.diagnostics,
-      structureDecisionId: view.structureDecision?.decisionId ?? null
+      structureDecisionId: view.structureDecision?.decisionId ?? null,
+      intradayPlan
     });
   });
 

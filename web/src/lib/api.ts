@@ -158,6 +158,8 @@ export class ApiClient {
     marketStructureMode?: "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE";
     marketStructureDiagnostics?: Record<string, unknown> | null;
     structureDecisionId?: string | null;
+    /** Server-built Issue #50 intraday plan — UI must not invent levels. */
+    intradayPlan?: import("../types/intradayPlan").IntradayPlan | null;
   } | null> {
     try {
       return await this.request("/v1/decisions/latest");

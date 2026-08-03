@@ -9,6 +9,7 @@ import {
   formatUserTimestamp,
   plainLanguageReason
 } from "../lib/plainLanguage";
+import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
 import "../styles/tokens.css";
 import "../styles/redesign.css";
 
@@ -54,7 +55,8 @@ beforeEach(() => {
     latestCompleteStrategySignal: decisionFixture,
     marketStructureMode: "COMPLETE",
     marketStructureDiagnostics: null,
-    structureDecisionId: decisionFixture.decisionId
+    structureDecisionId: decisionFixture.decisionId,
+    intradayPlan: chartExampleIntradayPlanFixture
   });
   mockApi.listActiveSetups.mockResolvedValue([]);
   mockApi.listSetups.mockResolvedValue([]);
@@ -129,31 +131,25 @@ describe("OverviewPage redesign", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
-  it("shows compact home content and hides technical IDs by default", async () => {
+  it("shows compact action-first home and hides technical IDs by default", async () => {
     render(
       <MemoryRouter>
         <OverviewPage />
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("primary-decision")).toHaveTextContent(/WAIT/i);
-    expect(
-      await screen.findByText(/another plan is still being tracked/i)
-    ).toBeInTheDocument();
-    expect(screen.getAllByText(/New York/i).length).toBeGreaterThan(0);
+    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
+    expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
-    expect(screen.getByText("No validated plan yet.")).toBeInTheDocument();
-    expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
     expect(screen.getByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
-    expect(screen.getByTestId("primary-confidence")).toBeInTheDocument();
-    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
-    expect(screen.getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
+    expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getByTestId("system-status-collapse")).not.toHaveAttribute("open");
     expect(screen.queryByText("SHADOW")).not.toBeInTheDocument();
-    expect(screen.getByTestId("advanced-levels")).toBeInTheDocument();
   });
 
-  it("reveals technical details on demand", async () => {
+  it("reveals system status / technical details on demand", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -161,9 +157,11 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("overview-page");
-    await user.click(screen.getByText("Technical details"));
+    await user.click(screen.getByText(/System status/i));
     expect(screen.getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
-    expect(screen.getAllByText(/42\s*\/\s*100/).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
+    expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
   });
 
   it("includes Help in mobile navigation", async () => {

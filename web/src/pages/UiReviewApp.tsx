@@ -21,6 +21,7 @@ import { ReviewAuthProvider } from "../lib/auth";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
 import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
 import { ApiError } from "../types/models";
+import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
@@ -301,7 +302,19 @@ function buildReviewApi() {
                   ? "COMPLETE"
                   : "LIVE_RANGE_ONLY"
             },
-            structureDecisionId: decision.decisionId
+            structureDecisionId: decision.decisionId,
+            // Labelled Issue #50 fixture for UX review — never production defaults.
+            intradayPlan: marketMismatch
+              ? {
+                  ...chartExampleIntradayPlanFixture,
+                  action: "NO_TRADE",
+                  actionLabel: "NO TRADE",
+                  importantLevels: [],
+                  oneSentence:
+                    "Market structure sources disagree — stand aside until data is consistent. (LABELLED FIXTURE)",
+                  whyNotReady: "Price-source mismatch blocks important levels."
+                }
+              : chartExampleIntradayPlanFixture
           },
     listActiveSetups: async () => (empty ? [] : marketMismatch ? [] : [setup]),
     listSetups: async () =>
