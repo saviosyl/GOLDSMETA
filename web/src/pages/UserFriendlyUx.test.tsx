@@ -17,11 +17,16 @@ import {
 } from "../lib/plainLanguage";
 import "../styles/redesign.css";
 
+vi.mock("../lib/firebase", () => ({
+  sendVerificationEmail: vi.fn().mockResolvedValue(undefined)
+}));
+
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
-    user: { email: "user@example.com" },
+    user: { uid: "u1", email: "user@example.com", emailVerified: false },
     account: { role: "OWNER", profile: {} },
     signOut: vi.fn(),
+    refreshAccount: vi.fn(),
     configured: true,
     registrationEnabled: true,
     api: {

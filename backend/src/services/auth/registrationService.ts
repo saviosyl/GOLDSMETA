@@ -56,6 +56,8 @@ export type RegistrationServiceResult =
         uidMasked: string;
         role: "USER_PENDING";
         emailVerificationSent: boolean;
+        /** Who delivers the verification email. Backend never sends via Admin link gen. */
+        emailVerificationDelivery?: "client_sdk";
         brokerAccess: false;
         autoTrade: false;
         approvalRequired: boolean;
@@ -274,7 +276,8 @@ export async function registerUser(args: {
         message: registrationCompleteMessage(regConfig.approvalRequired),
         uidMasked: maskUid(reserved.existingUid) ?? "unknown",
         role: "USER_PENDING",
-        emailVerificationSent: true,
+        emailVerificationSent: false,
+        emailVerificationDelivery: "client_sdk",
         brokerAccess: false,
         autoTrade: false,
         approvalRequired: regConfig.approvalRequired
@@ -326,15 +329,11 @@ export async function registerUser(args: {
         }
       }
 
-      try {
-        await auth.generateEmailVerificationLink(
-          validated.value.emailNormalized,
-          regConfig.verificationContinueUrl
-        );
-        emailVerificationSent = true;
-      } catch {
-        emailVerificationSent = false;
-      }
+      // Verification email delivery is owned by the Firebase Web SDK
+      // (sendEmailVerification → Identity Toolkit sendOobCode). Admin
+      // generateEmailVerificationLink only builds a URL and does not send mail.
+      // Do not call it here — the client sends exactly once after sign-in.
+      emailVerificationSent = false;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "unknown";
       if (/email-already-exists|already exists/i.test(message)) {
@@ -432,7 +431,9 @@ export async function registerUser(args: {
       message: registrationCompleteMessage(regConfig.approvalRequired),
       uidMasked: maskUid(uid) ?? "unknown",
       role: "USER_PENDING",
+      // Client SDK delivers the verification email after sign-in.
       emailVerificationSent,
+      emailVerificationDelivery: "client_sdk" as const,
       brokerAccess: false,
       autoTrade: false,
       approvalRequired: regConfig.approvalRequired
@@ -498,7 +499,8 @@ export async function finalizeClientRegistration(args: {
         message: registrationCompleteMessage(regConfig.approvalRequired),
         uidMasked: maskUid(args.uid) ?? "unknown",
         role: "USER_PENDING",
-        emailVerificationSent: true,
+        emailVerificationSent: false,
+        emailVerificationDelivery: "client_sdk",
         brokerAccess: false,
         autoTrade: false,
         approvalRequired: regConfig.approvalRequired
@@ -535,7 +537,8 @@ export async function finalizeClientRegistration(args: {
       message: registrationCompleteMessage(regConfig.approvalRequired),
       uidMasked: maskUid(args.uid) ?? "unknown",
       role: "USER_PENDING",
-      emailVerificationSent: true,
+      emailVerificationSent: false,
+      emailVerificationDelivery: "client_sdk",
       brokerAccess: false,
       autoTrade: false,
       approvalRequired: regConfig.approvalRequired

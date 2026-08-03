@@ -15,7 +15,8 @@
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts",
     "precheck:owner-auth-restore": "tsx scripts/preRestoreOwnerAuthCheck.ts",
-    "gate:owner-auth-deploy": "tsx scripts/preDeployOwnerAuthHealthGate.ts"
+    "gate:owner-auth-deploy": "tsx scripts/preDeployOwnerAuthHealthGate.ts",
+    "list:disposable-auth": "tsx scripts/listDisposableAuthUsers.ts"
   },
   "dependencies": {
     "@reiryoku/ctrader-layer": "^2.2.0",

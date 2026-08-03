@@ -33,11 +33,14 @@ Status endpoint reports:
 
 ## Flow
 
-1. User registers → `USER_PENDING`, verification email sent.
-2. Unverified users receive `VERIFY_EMAIL` — Dashboard stays inaccessible.
-3. After email verification, `/v1/auth/me` (and approved API gates) idempotently promote to `USER_APPROVED`.
-4. User sees “Your account is ready” and can open the Dashboard.
-5. Broker / OAuth / AutoTrade / Live remain locked (`brokerAccess=false`).
+1. User registers via `POST /v1/auth/register` → Auth user + `USER_PENDING` profile (broker flags false).
+2. Web client signs in and calls Firebase `sendEmailVerification` **exactly once** (Identity Toolkit `sendOobCode`). Continue URL: `https://goldmeta.metamechsolutions.com/login`.
+3. Unverified users receive `VERIFY_EMAIL` — Dashboard stays inaccessible. Resend uses the client SDK with a **60s UI cooldown** (no automatic resend on refresh/`/me`).
+4. After email verification, the client refreshes the ID token and calls `/v1/auth/me`, which idempotently promotes to `USER_APPROVED`.
+5. User sees “Your account is ready” and can open the Dashboard.
+6. Broker / OAuth / AutoTrade / Live remain locked (`brokerAccess=false`).
+
+**Important:** Admin SDK `generateEmailVerificationLink` only builds a URL — it does **not** deliver email. Registration and `/v1/auth/resend-verification` must not rely on it for delivery.
 
 ## Abuse protection
 

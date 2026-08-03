@@ -8,6 +8,12 @@ import {
   validateRegistrationForm,
   type RegistrationFieldErrors
 } from "../lib/registrationValidation";
+import { sendVerificationEmail, signIn as firebaseSignIn } from "../lib/firebase";
+import {
+  VERIFICATION_SENT_MESSAGE,
+  markVerificationEmailSent,
+  wasInitialVerificationSentFor
+} from "../lib/verificationEmail";
 
 export function RegisterPage() {
   const { api, registrationEnabled, configured } = useAuth();
@@ -54,10 +60,11 @@ export function RegisterPage() {
     setFieldErrors({});
     setBusy(true);
     try {
+      const normalized = normalizeEmail(email);
       const payload = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: normalizeEmail(email),
+        email: normalized,
         password,
         confirmPassword,
         countryOfResidence: countryOfResidence.trim(),
@@ -65,8 +72,19 @@ export function RegisterPage() {
         acceptPrivacy: true,
         acceptRiskWarning: true
       };
+      // 1) Server creates Auth user + profile (no Admin link generation / no mail).
       await api.registerAccount(payload);
-      navigate("/registration-complete", { replace: true });
+      // 2) Sign in so the client SDK can deliver verification via sendOobCode.
+      const user = await firebaseSignIn(normalized, password);
+      // 3) Exactly one initial verification email for this registration.
+      if (!wasInitialVerificationSentFor(user.uid)) {
+        await sendVerificationEmail(user);
+        markVerificationEmailSent(user.uid);
+      }
+      navigate("/verify-email", {
+        replace: true,
+        state: { verificationNotice: VERIFICATION_SENT_MESSAGE }
+      });
     } catch (err) {
       if (err instanceof ApiError) {
         // One primary banner only — do not also set a duplicate field error.
@@ -115,9 +133,10 @@ export function RegisterPage() {
           </div>
           <h1 className="gm-auth-title">Create account</h1>
           <p className="gm-auth-support">
-            Email verification is required. Account approval may be required before full access.
-            Broker trading is <strong>not</strong> enabled by registration. CFDs are high risk.
-            Demo and Live trading are separate. AutoTrade is disabled by default.
+            Email verification is required. After you verify, your GoldMeta account activates
+            automatically for Dashboard and analysis. Broker trading is <strong>not</strong> enabled
+            by registration. CFDs are high risk. Demo and Live trading are separate. AutoTrade is
+            disabled by default.
           </p>
 
           {error && (

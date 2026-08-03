@@ -13,12 +13,14 @@ import {
   getIdToken,
   isFirebaseConfigured,
   isPublicRegistrationEnabled,
+  refreshAuthUserAndToken,
   signIn as firebaseSignIn,
   signOut as firebaseSignOut,
   signUp as firebaseSignUp,
   subscribeAuth
 } from "./firebase";
 import { clearUserCaches } from "./offlineCache";
+import { clearVerificationEmailSessionState } from "./verificationEmail";
 import { friendlyAuthError } from "./authErrors";
 
 export type AccountAccess =
@@ -93,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
     try {
+      // Force a fresh ID token so /me sees post-verification email_verified=true.
+      await refreshAuthUserAndToken();
       const me = await api.getAuthMe();
       setAccount(me);
       return me;
@@ -120,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     try {
       await firebaseSignIn(email, password);
+      await refreshAuthUserAndToken();
     } catch (error) {
       throw new Error(friendlyAuthError(error), { cause: error });
     }
@@ -131,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     clearUserCaches();
+    clearVerificationEmailSessionState();
     setAccount(null);
     await firebaseSignOut();
   }, []);

@@ -1,7 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "firebase-admin/auth";
 import { requireAuth } from "../middleware/auth";
-import { getFirebaseApp } from "../services/firebaseAdmin";
 import { tryActivateVerifiedPendingUser } from "../services/auth/activateVerifiedUser";
 import { loadOwnerAuthConfig, maskUid } from "../services/auth/ownerAuthConfig";
 import { checkVerificationResendRateLimit } from "../services/auth/registrationRateLimit";
@@ -133,6 +131,12 @@ export const buildAuthSessionRouter = (): Router => {
     });
   });
 
+  /**
+   * Compatibility/rate-limit endpoint. Verification email delivery is performed
+   * by the Firebase Web SDK (sendEmailVerification → Identity Toolkit sendOobCode).
+   * Admin link-only helpers are intentionally unused here — they do not deliver
+   * mail and previously contributed to Identity Toolkit rate limits.
+   */
   router.post("/v1/auth/resend-verification", requireAuth, async (req, res) => {
     const uid = req.userId!;
     const rate = await checkVerificationResendRateLimit({ uid });
@@ -141,26 +145,11 @@ export const buildAuthSessionRouter = (): Router => {
       return;
     }
 
-    // Generic success — avoid account enumeration / status leaks.
-    const generic = {
-      message: "If verification is required, an email will be sent shortly."
-    };
-
-    const app = getFirebaseApp();
-    if (!app) {
-      res.status(200).json(generic);
-      return;
-    }
-    try {
-      const auth = getAuth(app);
-      const user = await auth.getUser(uid);
-      if (user.email && !user.emailVerified) {
-        await auth.generateEmailVerificationLink(user.email);
-      }
-    } catch {
-      // swallow — generic response
-    }
-    res.status(200).json(generic);
+    res.status(200).json({
+      message:
+        "A verification email has been sent. Please check your inbox and spam folder.",
+      delivery: "client_sdk"
+    });
   });
 
   return router;

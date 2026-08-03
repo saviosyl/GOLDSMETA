@@ -39,11 +39,15 @@ export function loadRegistrationConfig(
   // Set REGISTRATION_APPROVAL_REQUIRED=true to restore manual approval.
   const approvalRequired = envFlag(source, "REGISTRATION_APPROVAL_REQUIRED", false);
 
+  // Prefer an explicit continue URL. Default lands on Sign In after the
+  // Firebase action handler so the client can refresh the ID token and call /me.
   const continueRaw = (
     source.REGISTRATION_VERIFICATION_CONTINUE_URL ??
-    "https://goldmeta.metamechsolutions.com"
+    "https://goldmeta.metamechsolutions.com/login"
   ).trim();
-  const continueUrl = `${continueRaw.replace(/\/$/, "")}/verify-email`;
+  const continueUrl = continueRaw.includes("/login") || continueRaw.includes("/verify-email")
+    ? continueRaw.replace(/\/$/, "")
+    : `${continueRaw.replace(/\/$/, "")}/login`;
 
   return {
     registrationEnabled,

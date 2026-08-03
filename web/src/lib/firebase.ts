@@ -82,7 +82,9 @@ export const signIn = async (email: string, password: string): Promise<User> => 
 /**
  * Client Firebase registration path (email/password).
  * Protected owner email is rejected before any Auth call.
- * Prefer server `/v1/auth/register` when available; this remains for finalize flows.
+ * Prefer server `/v1/auth/register` + client {@link sendVerificationEmail}
+ * for the canonical flow. This helper still creates the Auth user only —
+ * it does NOT send verification (caller must send exactly once).
  */
 export const signUp = async (email: string, password: string): Promise<User> => {
   const normalized = email.trim().toLowerCase();
@@ -95,7 +97,6 @@ export const signUp = async (email: string, password: string): Promise<User> => 
       normalized,
       password
     );
-    await sendEmailVerification(result.user);
     return result.user;
   } catch (error) {
     throw new Error(friendlyAuthError(error), { cause: error });
@@ -108,14 +109,36 @@ export const isPublicRegistrationEnabled = (): boolean => {
   return true;
 };
 
-export const sendVerificationEmail = async (): Promise<void> => {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Sign in required to resend verification.");
+/** Approved production return URL for email-verification action codes. */
+export const EMAIL_VERIFICATION_CONTINUE_URL =
+  "https://goldmeta.metamechsolutions.com/login";
+
+/**
+ * Dispatches a Firebase verification email via the client SDK
+ * (Identity Toolkit sendOobCode). Admin generateEmailVerificationLink
+ * only builds a URL and does not deliver mail.
+ */
+export const sendVerificationEmail = async (user?: User | null): Promise<void> => {
+  const target = user ?? getFirebaseAuth().currentUser;
+  if (!target) throw new Error("Sign in required to resend verification.");
   try {
-    await sendEmailVerification(user);
+    await sendEmailVerification(target, {
+      url: EMAIL_VERIFICATION_CONTINUE_URL,
+      handleCodeInApp: false
+    });
   } catch (error) {
     throw new Error(friendlyAuthError(error), { cause: error });
   }
+};
+
+/** Reload Auth user + force-refresh ID token to clear stale emailVerified claims. */
+export const refreshAuthUserAndToken = async (): Promise<User | null> => {
+  if (!isFirebaseConfigured()) return null;
+  const user = getFirebaseAuth().currentUser;
+  if (!user) return null;
+  await user.reload();
+  await user.getIdToken(true);
+  return getFirebaseAuth().currentUser;
 };
 
 export const signOut = async (): Promise<void> => {

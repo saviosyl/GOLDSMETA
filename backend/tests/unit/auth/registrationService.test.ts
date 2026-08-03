@@ -32,6 +32,7 @@ describe("registrationService", () => {
   it("registers a USER_PENDING profile without broker flags or webhooks", async () => {
     const createUser = vi.fn(async () => ({ uid: "new-user-1" }));
     const setClaims = vi.fn(async () => undefined);
+    const generateEmailVerificationLink = vi.fn(async () => "https://example.test/verify");
     const result = await registerUser({
       body: baseBody,
       ip: "1.2.3.4",
@@ -43,7 +44,7 @@ describe("registrationService", () => {
         getUserByEmail: async () => null,
         createUser,
         setCustomUserClaims: setClaims,
-        generateEmailVerificationLink: async () => "https://example.test/verify"
+        generateEmailVerificationLink
       }
     });
     expect(result.ok).toBe(true);
@@ -51,6 +52,9 @@ describe("registrationService", () => {
     expect(result.body.role).toBe("USER_PENDING");
     expect(result.body.brokerAccess).toBe(false);
     expect(result.body.autoTrade).toBe(false);
+    expect(result.body.emailVerificationSent).toBe(false);
+    expect(result.body.emailVerificationDelivery).toBe("client_sdk");
+    expect(generateEmailVerificationLink).not.toHaveBeenCalled();
     expect(createUser).toHaveBeenCalled();
     expect(setClaims).toHaveBeenCalledWith(
       "new-user-1",

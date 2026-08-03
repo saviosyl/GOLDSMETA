@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { PublicPageShell } from "./layout/PublicPageShell";
@@ -31,6 +31,16 @@ const READY_HANDOFF_PATHS = new Set([
 export function AccountAccessGate({ children }: { children: ReactNode }) {
   const { user, account, loading, refreshAccount } = useAuth();
   const location = useLocation();
+
+  // After Firebase action-code verify, Auth may already show emailVerified while
+  // the ID token /me snapshot is still stale → force one refresh (no email send).
+  useEffect(() => {
+    if (!user?.emailVerified) return;
+    if (account?.access === "APP" || account?.access === "AWAITING_APPROVAL") return;
+    if (account?.access === "VERIFY_EMAIL" || !account) {
+      void refreshAccount();
+    }
+  }, [user?.emailVerified, account?.access, account, refreshAccount]);
 
   if (loading) {
     return (
