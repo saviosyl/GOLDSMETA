@@ -3,12 +3,23 @@ import { expect, test } from "@playwright/test";
 /**
  * PR #46 — Market Structure price-source mismatch / match (ui-review fixtures).
  * No broker orders. AutoTrade remains OFF.
+ * Issue #50: primary action uses intraday-action-label (NO TRADE on mismatch).
  */
 test.describe("Market Structure Map price sources", () => {
+  async function ensureStructureOpen(page: import("@playwright/test").Page) {
+    const details = page.getByTestId("market-structure-collapse");
+    await expect(details).toBeVisible();
+    const open = await details.evaluate((el) => (el as HTMLDetailsElement).open);
+    if (!open) {
+      await details.locator("summary").filter({ hasText: "Market Structure Map" }).click();
+    }
+  }
+
   test("mismatch case blocks ladder and shows Market data mismatch", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-mismatch");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("overview-page")).toBeVisible();
+    await ensureStructureOpen(page);
 
     await expect(page.getByTestId("market-data-mismatch-title")).toHaveText(
       "Market data mismatch"
@@ -25,23 +36,20 @@ test.describe("Market Structure Map price sources", () => {
       page.getByTestId("market-level-ladder").getByText("LIVE PRICE", { exact: true })
     ).toHaveCount(0);
 
-    // Primary signal stays WAIT — no BUY/SELL recommendation
-    await expect(page.getByTestId("primary-decision")).toContainText(/WAIT/i);
-    await expect(page.getByTestId("summary-decision")).toContainText(/WAIT|waiting/i);
-    await expect(page.getByTestId("dashboard-autotrade-off")).toContainText(/AutoTrade OFF/i);
+    // Issue #50: mismatch → NO TRADE (not a BUY/SELL recommendation)
+    await expect(page.getByTestId("intraday-action-label")).toContainText(/NO TRADE/i);
+    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/AutoTrade OFF/i);
 
-    // Diagnostics expose conflict codes
-    const details = page.getByTestId("primary-signal-card").locator("details");
-    if (await details.count()) {
-      await details.first().click();
-    }
-    await expect(page.getByTestId("primary-signal-card")).toContainText(/PRICE_SOURCE_MISMATCH/);
-    await expect(page.getByTestId("primary-signal-card")).toContainText(/CONFLICTED_DATA/);
+    // Diagnostics expose conflict codes inside collapsed System status
+    await page.getByTestId("system-status-collapse").locator("summary").click();
+    await expect(page.getByTestId("system-status-collapse")).toContainText(/PRICE_SOURCE_MISMATCH/);
+    await expect(page.getByTestId("system-status-collapse")).toContainText(/CONFLICTED_DATA/);
   });
 
   test("matching ~4050 case renders ladder without mismatch warning", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-match");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
+    await ensureStructureOpen(page);
     await expect(page.getByTestId("market-level-ladder")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-title")).toHaveCount(0);
 
@@ -58,6 +66,7 @@ test.describe("Market Structure Map price sources", () => {
   test("mismatch remains readable on mobile viewport", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/ui-review/?scenario=market-mismatch");
+    await ensureStructureOpen(page);
     await expect(page.getByTestId("market-data-mismatch-title")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-alert")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-broker")).toBeVisible();
@@ -68,6 +77,7 @@ test.describe("Market Structure Map price sources", () => {
 
   test("print stylesheet keeps mismatch copy available", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-mismatch");
+    await ensureStructureOpen(page);
     await page.emulateMedia({ media: "print" });
     await expect(page.getByTestId("market-data-mismatch-title")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-detail")).toContainText(

@@ -47,7 +47,7 @@ The script is non-repainting for its multi-timeframe diagnostics by using `reque
 
 Use **desktop Supercharts**. Do **not** create the alert from a legend series or by right-clicking a level.
 
-1. Confirm the status table shows script version **2.0.4+** and `Webhook = Any alert()`.
+1. Confirm the status table shows script version **2.1.0+** and `Webhook = STRATEGY` (or `STRAT+QUOTE`).
 2. Click the toolbar **Alert** clock → **Create alert**.
 3. In **Condition**, first field: choose **`GoldMeta Bridge`** (the indicator), not Session High / POC / VAH / VAL.
 4. Second field: choose **`Any alert() function call`** (first option when `alert()` is present).
@@ -65,20 +65,35 @@ The script builds the JSON itself. Frequency is controlled by `alert()` in Pine 
 
 **If you only see level / plot names:** you are on TradingView’s technical-alert path. Those cannot send webhook JSON. Go back and select the indicator, then **Any alert() function call**.
 
-## Recommended chart setup
+## Recommended chart setup (intraday day-trade)
 
 - Symbol: `XAUUSD`
-- Primary timeframe for Phase 2: **`15`**
+- Chart timeframe: **`15`** (structure and setup)
+- Intraday MTF roles (via `request.security`, `lookahead_off`):
+  - **1 hour** — main direction
+  - **15 minutes** — structure / setup (chart)
+  - **5 minutes** — entry confirmation
+  - **1 minute** — optional quote-only freshness (setting default OFF; never reverses plan)
 - Confirmed-bar mode: ON for production.
 - Test-alert mode: use only to verify connectivity, then turn it OFF.
 
-## Indicator methods (Phase 2)
+### STRATEGY vs QUOTE alerts
+
+| Kind | `metadata.alertKind` | When | Backend use |
+| --- | --- | --- | --- |
+| STRATEGY | `STRATEGY` | 15m bar close | Full structure signal |
+| QUOTE | `QUOTE` | 1m bar close (optional) | Live price freshness only — does not replace complete strategy |
+
+Sample payloads: `docs/examples/tradingview-intraday-strategy-payload.json`, `docs/examples/tradingview-intraday-quote-payload.json`.
+
+## Indicator methods (2.1.0 intraday)
 
 GoldMetaBridge calculates deterministic **GoldMeta-derived** values:
 
-- `gm_svp_v1` — session POC / VAH / VAL (equivalent internal; not proprietary VP)
-- `gm_trend_v1` — EMA stack trend with HTF 60/240 (`lookahead_off`)
-- `gm_candle_v1` — confirmation candle classification
+- `gm_svp_v1` — session POC / VAH / VAL (developing; equivalent internal; not proprietary VP)
+- `gm_trend_v1` — EMA stack: 1h direction + 15m structure + 5m entry (`lookahead_off`)
+- `gm_candle_v1` — confirmation candle classification on 15m
+- Plus: VWAP, EMA 21/50/200, RSI, ADX, relative volume, day levels, opening range, swing/structure states
 
 Full formulas, session boundaries, bin size, and value-area rules: `docs/INDICATOR_METHODOLOGY.md`.
 

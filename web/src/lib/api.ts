@@ -72,7 +72,22 @@ export class ApiClient {
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     const ctraderEnv = (import.meta.env.VITE_CTRADER_API_BASE_URL as string | undefined)?.trim();
-    this.ctraderBaseUrl = (ctraderEnv || this.baseUrl).replace(/\/$/, "");
+    /**
+     * Production cTrader OAuth/read routes are served by isolated apiCTraderPreview
+     * (CTRADER_* secrets bound there). Fall back to that host in production builds
+     * when the env var is omitted so Broker Control Centre cannot silently hit
+     * production `api` without secrets and show false "Setup required".
+     */
+    const productionCTraderFallback =
+      "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview";
+    const useProdFallback =
+      !ctraderEnv &&
+      import.meta.env.PROD &&
+      /goldmeta-web\.cloudfunctions\.net\/api\/?$/.test(this.baseUrl);
+    this.ctraderBaseUrl = (ctraderEnv || (useProdFallback ? productionCTraderFallback : this.baseUrl)).replace(
+      /\/$/,
+      ""
+    );
     this.getIdToken = options.getIdToken;
   }
 
@@ -143,6 +158,8 @@ export class ApiClient {
     marketStructureMode?: "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE";
     marketStructureDiagnostics?: Record<string, unknown> | null;
     structureDecisionId?: string | null;
+    /** Server-built Issue #50 intraday plan — UI must not invent levels. */
+    intradayPlan?: import("../types/intradayPlan").IntradayPlan | null;
   } | null> {
     try {
       return await this.request("/v1/decisions/latest");

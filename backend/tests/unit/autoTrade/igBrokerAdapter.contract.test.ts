@@ -703,7 +703,9 @@ describe("IgBrokerAdapter DEMO read-only REST contract", () => {
     // Production `api` may bind pinned-owner UID + T212 Practice DEMO secrets for
     // read-only / dry-run Invest diagnostics. Never IG Demo (apiV6Preview) or T212 Live.
     const apiBlock = index.slice(index.indexOf("export const api = onRequest"));
-    const apiOpts = apiBlock.slice(0, apiBlock.indexOf("app\n);") + 10);
+    // Options object ends before the request handler; tolerate `app(req, res)` with or without return.
+    const handlerIdx = apiBlock.search(/\(\s*req\s*,\s*res\s*\)\s*=>/);
+    const apiOpts = handlerIdx >= 0 ? apiBlock.slice(0, handlerIdx) : apiBlock.slice(0, 800);
     expect(apiOpts).toMatch(/"GOLDMETA_PINNED_OWNER_UID"/);
     expect(apiOpts).toMatch(/"T212_DEMO_API_KEY"/);
     expect(apiOpts).toMatch(/"T212_DEMO_API_SECRET"/);

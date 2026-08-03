@@ -25,6 +25,8 @@ export interface BrokerControlCentreResponse {
     setupRequired: boolean;
     authSetupRequired: boolean;
     oauthConfigured: boolean;
+    /** Human-readable, non-secret missing server configuration items. */
+    missingConfigurationItems?: string[];
     connected: boolean;
     demonstrationAvailable: true;
     automationMode: string;

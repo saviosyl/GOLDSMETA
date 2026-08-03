@@ -17,6 +17,14 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     impact: "Broker connection stays locked. Analysis still works.",
     nextStep: "Ask the owner to store Open API credentials in Secret Manager, then retry."
   },
+  CONFIGURATION_REQUIRED: {
+    message: "Pepperstone server configuration is incomplete.",
+    whatHappened:
+      "One or more non-secret configuration items required for OAuth are unavailable to this function.",
+    impact: "Broker connection stays locked. Analysis still works. AutoTrade stays OFF.",
+    nextStep:
+      "Review the listed missing configuration items in Broker Control Centre, then retry Authorise Demo Trading."
+  },
   CTRADER_TOKEN_ENCRYPTION_KEY_MISSING: {
     message: "Secure token storage is not configured yet.",
     whatHappened: "The server encryption key for OAuth tokens is missing.",

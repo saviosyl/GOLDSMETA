@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID?: string;
   readonly VITE_FIREBASE_STORAGE_BUCKET?: string;
   readonly VITE_V5_SCREENSHOT_COMPARISON_ENABLED?: string;
+  /** Set to "true" only for non-production ui-review builds (`npm run build:ui-review`). */
+  readonly VITE_ENABLE_UI_REVIEW?: string;
 }
 
 interface ImportMeta {

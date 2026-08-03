@@ -20,6 +20,7 @@ import {
   type ActionPhase,
   type BrokerAction
 } from "../../lib/broker/brokerPageState";
+import { formatMissingConfigurationItems } from "../../lib/broker/missingConfigCopy";
 import { describeClientError } from "../../lib/errors";
 import {
   brokerBadgeLabel,
@@ -660,6 +661,10 @@ export function BrokerControlCentrePage() {
   const readiness = centre?.readiness;
   const authBlocked = Boolean(readiness?.authSetupRequired);
   const setupRequired = Boolean(readiness?.setupRequired ?? true);
+  const oauthConfigured = Boolean(readiness?.oauthConfigured);
+  const missingConfigurationItems = formatMissingConfigurationItems(
+    readiness?.missingConfigurationItems
+  );
   const connected = Boolean(readiness?.connected);
   const baseWizardSteps =
     readiness?.wizardSteps && readiness.wizardSteps.length >= 6
@@ -705,6 +710,7 @@ export function BrokerControlCentrePage() {
     readinessConnected: connected,
     authSetupRequired: authBlocked,
     setupRequired,
+    oauthConfigured,
     reconnectRequired,
     tokenRefreshHealthy:
       diagnostics?.connection?.tokenRefreshHealthy === undefined
@@ -960,7 +966,9 @@ export function BrokerControlCentrePage() {
               ? "Connected in preview mode. Order submission is currently disabled in this preview. AutoTrade stays OFF."
               : canonical.reconnectRequired
                 ? "Session needs reconnect. TradingView alone cannot authorise GoldMeta for cTrader."
-                : "Connection setup required until secure credentials and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
+                : oauthConfigured
+                  ? "Server OAuth is configured. Authorise Demo Trading to grant Demo trading permission (scope=trading) with PKCE. TradingView alone cannot authorise GoldMeta for cTrader. AutoTrade stays OFF."
+                  : "Connection setup required until server configuration and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
           </p>
 
           {canonical.connectionPhase !== "connected" && !canonical.reconnectRequired ? (
@@ -972,13 +980,26 @@ export function BrokerControlCentrePage() {
               <strong data-testid="auth-setup-required">
                 {authBlocked
                   ? "Connection setup required"
-                  : "Pepperstone connection required"}
+                  : oauthConfigured
+                    ? "Pepperstone connection ready"
+                    : "Pepperstone connection required"}
               </strong>
               <p>
                 {authBlocked
                   ? "Broker connect stays disabled until account security checks pass. Dashboard and analysis still work."
-                  : "Add secure server credentials, then connect with OAuth. No broker password is collected here."}
+                  : oauthConfigured
+                    ? "Press Authorise Demo Trading to open the official cTrader consent page for your Demo account. GoldMeta never asks for your broker password. Live accounts must not be selected. AutoTrade stays OFF."
+                    : missingConfigurationItems.length
+                      ? "Server configuration is incomplete. Fix the items below, then retry."
+                      : "Server configuration is incomplete. OAuth cannot start until the missing items are available to the function."}
               </p>
+              {!authBlocked && !oauthConfigured && missingConfigurationItems.length ? (
+                <ul data-testid="ctrader-missing-config-list">
+                  {missingConfigurationItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 
@@ -1011,7 +1032,13 @@ export function BrokerControlCentrePage() {
                   <p className="gm-meta">
                     {step.detail
                       .replace(/AUTH SETUP REQUIRED[^.]*\.?/gi, "Connection setup required.")
-                      .replace(/CTRADER_CLIENT_[A-Z_*]+/g, "secure credentials")
+                      .replace(/CTRADER_CLIENT_ID/g, "cTrader Client ID")
+                      .replace(
+                        /CTRADER_CLIENT_SECRET/g,
+                        "cTrader Client Secret unavailable to function"
+                      )
+                      .replace(/CTRADER_REDIRECT_URI/g, "Redirect URI")
+                      .replace(/CTRADER_TOKEN_ENCRYPTION_KEY/g, "Encryption key")
                       .replace(/Missing:\s*/i, "Still needed: ")}
                   </p>
                 </div>
@@ -1024,17 +1051,17 @@ export function BrokerControlCentrePage() {
               <button
                 type="button"
                 className={actionBtnClass(canonical.reconnectRequired ? "reconnect" : "connect")}
-                disabled={!readiness?.oauthConfigured || anyActionBusy}
+                disabled={!oauthConfigured || anyActionBusy}
                 data-testid={
                   canonical.reconnectRequired ? "ctrader-reconnect-btn-main" : "ctrader-connect-btn"
                 }
                 aria-busy={isBusy(canonical.reconnectRequired ? "reconnect" : "connect")}
                 title={
-                  !readiness?.oauthConfigured
-                    ? "Secure credentials not added yet"
+                  !oauthConfigured
+                    ? missingConfigurationItems[0] ?? "Server configuration incomplete"
                     : canonical.reconnectRequired
                       ? "Reconnect Pepperstone cTrader"
-                      : "Start cTrader connection for your account"
+                      : "Start cTrader connection for your account (accounts scope)"
                 }
                 onClick={() =>
                   void startOAuth(canonical.reconnectRequired ? "reconnect" : "connect")
@@ -1043,11 +1070,28 @@ export function BrokerControlCentrePage() {
                 {actionButtonLabel(
                   canonical.reconnectRequired ? "reconnect" : "connect",
                   phaseOf(canonical.reconnectRequired ? "reconnect" : "connect"),
-                  !readiness?.oauthConfigured
+                  !oauthConfigured
                     ? "Connect unavailable"
                     : canonical.reconnectRequired
                       ? "Reconnect cTrader"
                       : "Connect cTrader"
+                )}
+              </button>
+            ) : null}
+            {oauthConfigured && !canonical.reconnectRequired ? (
+              <button
+                type="button"
+                className={actionBtnClass("authorise_demo_trading")}
+                data-testid="ctrader-authorise-demo-trading-btn"
+                disabled={anyActionBusy || authBlocked}
+                aria-busy={isBusy("authorise_demo_trading")}
+                title="Request cTrader trading permission for your Demo account (scope=trading, PKCE). AutoTrade stays OFF. No order is submitted."
+                onClick={() => void authoriseDemoTrading()}
+              >
+                {actionButtonLabel(
+                  "authorise_demo_trading",
+                  phaseOf("authorise_demo_trading"),
+                  "Authorise Demo Trading"
                 )}
               </button>
             ) : null}
@@ -1081,21 +1125,6 @@ export function BrokerControlCentrePage() {
                     "refresh_diagnostics",
                     phaseOf("refresh_diagnostics"),
                     "Refresh diagnostics"
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className={actionBtnClass("authorise_demo_trading")}
-                  data-testid="ctrader-authorise-demo-trading-btn"
-                  disabled={anyActionBusy || !readiness?.oauthConfigured}
-                  aria-busy={isBusy("authorise_demo_trading")}
-                  title="Request cTrader trading permission for your Demo account (scope=trading). AutoTrade stays OFF."
-                  onClick={() => void authoriseDemoTrading()}
-                >
-                  {actionButtonLabel(
-                    "authorise_demo_trading",
-                    phaseOf("authorise_demo_trading"),
-                    "Authorise Demo Trading"
                   )}
                 </button>
                 <button

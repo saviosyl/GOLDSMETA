@@ -6,6 +6,7 @@ import { OverviewPage } from "./OverviewPage";
 import { ScoreBreakdown } from "../components/v5/ScoreBreakdown";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { PrimarySignalCard } from "../components/v5/PrimarySignalCard";
+import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
 
 const decisionFixture = {
   decisionId: "dec_hidden",
@@ -46,7 +47,8 @@ beforeEach(() => {
     latestCompleteStrategySignal: decisionFixture,
     marketStructureMode: "COMPLETE",
     marketStructureDiagnostics: null,
-    structureDecisionId: decisionFixture.decisionId
+    structureDecisionId: decisionFixture.decisionId,
+    intradayPlan: chartExampleIntradayPlanFixture
   });
   mockApi.listActiveSetups.mockResolvedValue([]);
   mockApi.listSetups.mockResolvedValue([
@@ -215,22 +217,23 @@ describe("OverviewPage compact dashboard", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
-  it("renders compact summary without email and shows primary signal + ladder", async () => {
+  it("renders action-first intraday dashboard without email and collapses system status", async () => {
     render(
       <MemoryRouter>
         <OverviewPage />
       </MemoryRouter>
     );
-    expect(await screen.findByTestId("dashboard-summary")).toBeInTheDocument();
+    expect(await screen.findByTestId("intraday-action-card")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
-    expect(await screen.findByTestId("primary-signal-card")).toBeInTheDocument();
+    expect(screen.getByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/);
+    expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
+    expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
     expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
     expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
-    expect(await screen.findByTestId("goldmeta-score")).toBeInTheDocument();
-    // technical id stays inside collapsed disclosure
-    const tech = screen.getByText("Technical details").closest("details");
-    expect(tech).not.toHaveAttribute("open");
+    const system = screen.getByTestId("system-status-collapse");
+    expect(system).not.toHaveAttribute("open");
+    expect(system).toHaveTextContent(/System status/i);
   });
 });

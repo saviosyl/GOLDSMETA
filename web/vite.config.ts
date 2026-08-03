@@ -1,11 +1,30 @@
 /// <reference types="vitest/config" />
+import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+/** Drop any leftover Issue #50 / UiReview chunks from production builds. */
+function stripUiReviewFromProduction(): Plugin {
+  const uiReviewEnabled = process.env.VITE_ENABLE_UI_REVIEW === "true";
+  return {
+    name: "strip-ui-review-from-production",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      if (uiReviewEnabled) return;
+      for (const fileName of Object.keys(bundle)) {
+        if (/UiReviewApp|issue50PreviewMatrix|issue50-preview/i.test(fileName)) {
+          delete bundle[fileName];
+        }
+      }
+    }
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
+    stripUiReviewFromProduction(),
     VitePWA({
       registerType: "prompt",
       includeAssets: [
@@ -118,7 +137,8 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
     // React 19 only exports act() from the development build.
     env: {
-      NODE_ENV: "test"
+      NODE_ENV: "test",
+      VITE_ENABLE_UI_REVIEW: "true"
     }
   }
 });

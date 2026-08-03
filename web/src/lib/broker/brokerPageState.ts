@@ -98,6 +98,8 @@ export type DeriveCanonicalArgs = {
   readinessConnected: boolean;
   authSetupRequired: boolean;
   setupRequired: boolean;
+  /** Server Open API credentials + encryption key available. */
+  oauthConfigured?: boolean;
   reconnectRequired: boolean;
   tokenRefreshHealthy: boolean | null;
   accountSelected: boolean;
@@ -121,6 +123,7 @@ export function deriveCanonicalBrokerView(args: DeriveCanonicalArgs): CanonicalB
     readinessConnected,
     authSetupRequired,
     setupRequired,
+    oauthConfigured = false,
     reconnectRequired,
     tokenRefreshHealthy,
     accountSelected,
@@ -151,12 +154,21 @@ export function deriveCanonicalBrokerView(args: DeriveCanonicalArgs): CanonicalB
   } else if (readinessConnected) {
     connectionPhase = "connected";
     connectionLabel = "Connected";
-  } else if (authSetupRequired || setupRequired) {
+  } else if (authSetupRequired) {
+    connectionPhase = "setup_required";
+    connectionLabel = "Connection setup required";
+  } else if (!oauthConfigured) {
+    // Credentials missing — true configuration setup required.
     connectionPhase = "setup_required";
     connectionLabel = "Setup required";
+  } else if (setupRequired) {
+    // Server configured but owner has not completed Demo OAuth / account / XAUUSD yet.
+    connectionPhase = "available";
+    connectionLabel = "Ready to connect";
   } else {
     connectionPhase = "available";
-    connectionLabel = brokerStatusLabel && brokerStatusLabel.trim() ? brokerStatusLabel : "Available";
+    connectionLabel =
+      brokerStatusLabel && brokerStatusLabel.trim() ? brokerStatusLabel : "Available";
   }
 
   let accountPhase: AccountPhase;

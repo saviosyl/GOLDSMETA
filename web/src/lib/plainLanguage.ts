@@ -188,15 +188,20 @@ export function friendlyApiCode(
   const msg = serverMessage ?? "";
 
   if (
+    c.includes("CONFIGURATION_REQUIRED") ||
     c.includes("CTRADER_SETUP") ||
     c.includes("SETUP_REQUIRED") ||
-    /CTRADER_CLIENT|Missing CTRADER/i.test(msg)
+    /CTRADER_CLIENT|Missing CTRADER|Encryption key unavailable|Redirect URI not configured/i.test(
+      msg
+    )
   ) {
     return {
-      message: "Pepperstone secure credentials have not been added yet.",
-      whatHappened: "GoldMeta is ready for connection setup, but Pepperstone API credentials are missing.",
-      impact: "Market analysis still works. Broker connection and trading stay locked.",
-      nextStep: "Open Broker Control Centre and follow the Pepperstone setup steps."
+      message: "Pepperstone server configuration is incomplete.",
+      whatHappened:
+        "GoldMeta identified specific missing non-secret configuration items required for OAuth.",
+      impact: "Market analysis still works. Broker connection and trading stay locked. AutoTrade stays OFF.",
+      nextStep:
+        "Open Broker Control Centre and fix the listed missing configuration items, then press Authorise Demo Trading."
     };
   }
 

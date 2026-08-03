@@ -1,7 +1,8 @@
 //@version=6
 indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50, max_bars_back=5000)
 
-// GoldMeta Pine Script bridge — Phase 2 (gm_svp_v1 / gm_trend_v1 / gm_candle_v1)
+// GoldMeta Pine Script bridge — Intraday day-trade (gm_svp_v1 / gm_trend_v1 / gm_candle_v1)
+// Timeframe roles: 1h direction | 15m structure/setup | 5m entry confirm | 1m quote-only (optional)
 //
 // TradingView alert setup (desktop Supercharts — verified TV Web behavior):
 // 1. Add this script to an XAUUSD 15-minute chart. Confirm status table version.
@@ -25,7 +26,9 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.0.5"
+const string SCRIPT_VERSION = "2.1.0"
+const string ALERT_KIND_STRATEGY = "STRATEGY"
+const string ALERT_KIND_QUOTE = "QUOTE"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -36,11 +39,14 @@ groupSymbol = "Symbol"
 expectedSymbol = input.string("XAUUSD", "Expected symbol", group=groupSymbol)
 
 groupTimeframes = "Timeframes"
-htf1Input = input.timeframe("60", "Trend HTF 1", group=groupTimeframes)
-htf2Input = input.timeframe("240", "Trend HTF 2", group=groupTimeframes)
+directionTfInput = input.timeframe("60", "Direction TF (main bias)", group=groupTimeframes, tooltip="1 hour — main intraday direction. lookahead_off security.")
+structureTfInput = input.timeframe("15", "Structure TF (setup)", group=groupTimeframes, tooltip="15 minutes — structure and setup. Chart should match this timeframe.")
+entryTfInput = input.timeframe("5", "Entry confirm TF", group=groupTimeframes, tooltip="5 minutes — entry confirmation. lookahead_off security.")
+quoteTfInput = input.timeframe("1", "Quote TF (freshness)", group=groupTimeframes, tooltip="1 minute — optional price/freshness updates only; never reverses day-trade plan.")
 
 groupAlerts = "Alerts"
 enableAlertCalls = input.bool(true, "Call alert() from script", group=groupAlerts)
+enableQuoteUpdates = input.bool(false, "Enable 1m quote-only alerts", group=groupAlerts, tooltip="Lightweight OHLC freshness on 1m closes. Never replaces complete STRATEGY alerts.")
 confirmedBarMode = input.bool(true, "Confirmed-bar mode", group=groupAlerts)
 testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
 payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret.")
@@ -51,6 +57,11 @@ swingLength = input.int(5, "Swing pivot length (diagnostic)", minval=1, maxval=5
 atrLength = input.int(14, "ATR length", minval=1, maxval=200, group=groupLevels)
 emaFastLen = input.int(21, "Trend EMA fast", minval=2, maxval=200, group=groupLevels)
 emaSlowLen = input.int(50, "Trend EMA slow", minval=3, maxval=400, group=groupLevels)
+ema200Len = input.int(200, "Trend EMA 200", minval=10, maxval=400, group=groupLevels)
+rsiLength = input.int(14, "RSI length", minval=2, maxval=100, group=groupLevels)
+adxLength = input.int(14, "ADX length", minval=2, maxval=100, group=groupLevels)
+relVolLength = input.int(20, "Relative volume SMA", minval=5, maxval=200, group=groupLevels)
+openingRangeMinutes = input.int(30, "Opening range minutes (London)", minval=15, maxval=120, group=groupLevels, tooltip="First N minutes of LONDON session UTC for opening-range high/low.")
 
 groupStatus = "Status"
 showStatusTable = input.bool(true, "Show status table", group=groupStatus)
@@ -78,6 +89,10 @@ f_json_bool(bool value) =>
 
 f_json_time(int timestamp) =>
     f_json_string(str.format_time(timestamp, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC"))
+
+// Deterministic event id: symbol|timeframe|barCloseMs|alertKind (stable for dedup).
+f_deterministic_event_id(string alertKind, string tf, int barCloseMs) =>
+    str.upper(syminfo.tickerid) + "|" + tf + "|" + str.tostring(barCloseMs) + "|" + alertKind
 
 f_session_name(int utcHour) =>
     utcHour >= 0 and utcHour < 7 ? "ASIA" :
@@ -299,6 +314,50 @@ else
 atrValue = ta.atr(atrLength)
 emaFast = ta.ema(close, emaFastLen)
 emaSlow = ta.ema(close, emaSlowLen)
+ema200 = ta.ema(close, ema200Len)
+rsiValue = ta.rsi(close, rsiLength)
+[diPlus, diMinus, adxValue] = ta.dmi(adxLength, adxLength)
+volSma = ta.sma(volume, relVolLength)
+relVolume = na(volSma) or volSma <= 0.0 ? na : volume / volSma
+
+// Session VWAP (resets on session name change).
+var float vwapCumVol = 0.0
+var float vwapCumVolPrice = 0.0
+if sessionChanged or na(vwapCumVol)
+    vwapCumVol := volume
+    vwapCumVolPrice := volume * hl2
+else
+    vwapCumVol += volume
+    vwapCumVolPrice += volume * hl2
+vwapValue = vwapCumVol > 0.0 ? vwapCumVolPrice / vwapCumVol : na
+
+// Opening range — first N minutes of LONDON session (UTC).
+utcMinute = minute(time, "UTC")
+inLondonOpenWindow = sessionName == "LONDON" and utcHour == 7 and utcMinute < openingRangeMinutes
+var float openingRangeHigh = na
+var float openingRangeLow = na
+var bool openingRangeLocked = false
+if sessionName != "LONDON"
+    openingRangeHigh := na
+    openingRangeLow := na
+    openingRangeLocked := false
+else if not openingRangeLocked
+    if na(openingRangeHigh)
+        openingRangeHigh := high
+        openingRangeLow := low
+    else if inLondonOpenWindow
+        openingRangeHigh := math.max(openingRangeHigh, high)
+        openingRangeLow := math.min(openingRangeLow, low)
+    else
+        openingRangeLocked := true
+
+// Daily / previous-day levels (lookahead_off).
+[prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dayHigh, dayLow] = request.security(syminfo.tickerid, "D", [high, low], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+chartTfSeconds = timeframe.in_seconds(timeframe.period)
+structureTfSeconds = timeframe.in_seconds(structureTfInput)
+chartMatchesStructure = chartTfSeconds == structureTfSeconds
 
 // --- gm_svp_v1: session volume profile (GoldMeta-derived, not proprietary VP) ---
 var float[] binVolumes = array.new_float()
@@ -349,19 +408,19 @@ else if sessionKnown and not na(pocPrice) and not profileOverflow
 
 acceptanceState = not profileReady ? "UNKNOWN" : close >= valPrice and close <= vahPrice ? "ACCEPTANCE" : close > vahPrice or close < valPrice ? "REJECTION" : "UNKNOWN"
 
-// --- gm_trend_v1 ---
+// --- gm_trend_v1 (intraday MTF roles) ---
 chartDir = f_trend_dir(close, emaFast, emaSlow)
 chartStrength = f_trend_strength(close, emaFast, emaSlow, atrValue, chartDir)
 
-[htf1Close, htf1EmaFast, htf1EmaSlow, htf1Atr] = request.security(syminfo.tickerid, htf1Input, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[htf2Close, htf2EmaFast, htf2EmaSlow, htf2Atr] = request.security(syminfo.tickerid, htf2Input, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dirClose, dirEmaFast, dirEmaSlow, dirAtr] = request.security(syminfo.tickerid, directionTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[entryClose, entryEmaFast, entryEmaSlow, entryAtr] = request.security(syminfo.tickerid, entryTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-htf1Dir = f_trend_dir(htf1Close, htf1EmaFast, htf1EmaSlow)
-htf1Strength = f_trend_strength(htf1Close, htf1EmaFast, htf1EmaSlow, htf1Atr, htf1Dir)
-htf2Dir = f_trend_dir(htf2Close, htf2EmaFast, htf2EmaSlow)
-htf2Strength = f_trend_strength(htf2Close, htf2EmaFast, htf2EmaSlow, htf2Atr, htf2Dir)
+dirDir = f_trend_dir(dirClose, dirEmaFast, dirEmaSlow)
+dirStrength = f_trend_strength(dirClose, dirEmaFast, dirEmaSlow, dirAtr, dirDir)
+entryDir = f_trend_dir(entryClose, entryEmaFast, entryEmaSlow)
+entryStrength = f_trend_strength(entryClose, entryEmaFast, entryEmaSlow, entryAtr, entryDir)
 
-aggSigned = (f_signed(chartDir, chartStrength) + f_signed(htf1Dir, htf1Strength) + f_signed(htf2Dir, htf2Strength)) / 3.0
+aggSigned = (f_signed(dirDir, dirStrength) + f_signed(chartDir, chartStrength) + f_signed(entryDir, entryStrength)) / 3.0
 trendDirection = aggSigned >= 15.0 ? "BULLISH" : aggSigned <= -15.0 ? "BEARISH" : "NEUTRAL"
 trendStrength = f_clamp100(math.abs(aggSigned))
 
@@ -390,15 +449,27 @@ classification = rejectLong or rejectShort ? "REJECTION" : brokeAboveVah or brok
 
 relatedLevel = brokeAboveVah or retestVah or rejectShort ? "VAH" : brokeBelowVal or retestVal or rejectLong ? "VAL" : profileReady and not na(pocPrice) and math.abs(close - pocPrice) <= nz(atrValue) * 0.25 ? "POC" : ""
 
+breakoutState = brokeAboveVah ? "ABOVE_VAH" : brokeBelowVal ? "BELOW_VAL" : "NONE"
+rejectionState = rejectLong ? "BULLISH_REJECTION_AT_VAL" : rejectShort ? "BEARISH_REJECTION_AT_VAH" : "NONE"
+retestState = retestVah ? "VAH_RETEST" : retestVal ? "VAL_RETEST" : "NONE"
+orBreakoutState = not na(openingRangeHigh) and close > openingRangeHigh ? "ABOVE_OPENING_RANGE" : not na(openingRangeLow) and close < openingRangeLow ? "BELOW_OPENING_RANGE" : "NONE"
+
 pivotHigh = ta.pivothigh(high, swingLength, swingLength)
 pivotLow = ta.pivotlow(low, swingLength, swingLength)
 lastSwingHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
 lastSwingLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
 
-payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN"
+payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN" or not chartMatchesStructure
 dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 
-eventId = syminfo.tickerid + "-" + timeframe.period + "-" + str.tostring(time_close)
+// --- 1m quote series (lookahead_off) for optional freshness alerts ---
+[m1Open, m1High, m1Low, m1Close, m1Vol, m1TimeClose, m1Confirmed] = request.security(syminfo.tickerid, quoteTfInput, [open, high, low, close, volume, time_close, barstate.isconfirmed], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+var int lastQuoteEmitMs = na
+quoteBarReady = enableQuoteUpdates and m1Confirmed and (na(lastQuoteEmitMs) or m1TimeClose != lastQuoteEmitMs)
+
+strategyEventId = f_deterministic_event_id(ALERT_KIND_STRATEGY, timeframe.period, time_close)
+quoteEventId = f_deterministic_event_id(ALERT_KIND_QUOTE, quoteTfInput, m1TimeClose)
 
 ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
   ",\"high\":" + f_json_number(high) +
@@ -428,9 +499,9 @@ marketProfileJson = "\"marketProfile\":{\"tpoPoc\":null,\"initialBalanceHigh\":n
 trendJson = "\"trend\":{\"direction\":" + f_json_string(trendDirection) +
   ",\"strength\":" + f_json_number_raw(trendStrength) +
   ",\"components\":[" +
-  "{\"name\":\"gm_chart_ema_stack\",\"direction\":" + f_json_string(chartDir) + ",\"strength\":" + f_json_number_raw(chartStrength) + ",\"sourceTimeframe\":" + f_json_string(timeframe.period) + "}," +
-  "{\"name\":\"gm_htf1_ema_stack\",\"direction\":" + f_json_string(htf1Dir) + ",\"strength\":" + f_json_number_raw(htf1Strength) + ",\"sourceTimeframe\":" + f_json_string(htf1Input) + "}," +
-  "{\"name\":\"gm_htf2_ema_stack\",\"direction\":" + f_json_string(htf2Dir) + ",\"strength\":" + f_json_number_raw(htf2Strength) + ",\"sourceTimeframe\":" + f_json_string(htf2Input) + "}" +
+  "{\"name\":\"gm_direction_1h\",\"direction\":" + f_json_string(dirDir) + ",\"strength\":" + f_json_number_raw(dirStrength) + ",\"sourceTimeframe\":" + f_json_string(directionTfInput) + "}," +
+  "{\"name\":\"gm_structure_15m\",\"direction\":" + f_json_string(chartDir) + ",\"strength\":" + f_json_number_raw(chartStrength) + ",\"sourceTimeframe\":" + f_json_string(structureTfInput) + "}," +
+  "{\"name\":\"gm_entry_5m\",\"direction\":" + f_json_string(entryDir) + ",\"strength\":" + f_json_number_raw(entryStrength) + ",\"sourceTimeframe\":" + f_json_string(entryTfInput) + "}" +
   "]}"
 
 confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(confirmedNow) +
@@ -450,12 +521,40 @@ confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(
 
 optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) +
   ",\"value\":" + f_json_number(atrValue) + "}" +
+  ",\"vwap\":{\"session\":" + f_json_string(sessionName) + ",\"value\":" + f_json_number(vwapValue) + "}" +
+  ",\"ema21\":" + f_json_number(emaFast) +
+  ",\"ema50\":" + f_json_number(emaSlow) +
+  ",\"ema200\":" + f_json_number(ema200) +
+  ",\"rsi\":{\"length\":" + str.tostring(rsiLength) + ",\"value\":" + f_json_number(rsiValue) + "}" +
+  ",\"adx\":{\"length\":" + str.tostring(adxLength) + ",\"value\":" + f_json_number(adxValue) + ",\"diPlus\":" + f_json_number(diPlus) + ",\"diMinus\":" + f_json_number(diMinus) + "}" +
+  ",\"volume\":{\"value\":" + f_json_number(volume) + ",\"relative\":" + f_json_number(relVolume) + ",\"smaLength\":" + str.tostring(relVolLength) + "}" +
+  ",\"developingVolumeProfile\":{\"poc\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vah\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"val\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"developing\":true,\"overflow\":" + f_json_bool(profileOverflow) + "}" +
   ",\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
   ",\"high\":" + f_json_number(sessionHigh) +
   ",\"low\":" + f_json_number(sessionLow) + "}" +
-  ",\"structure\":{\"placeholder\":true,\"swingLength\":" + str.tostring(swingLength) +
+  ",\"dayLevels\":{\"previousDayHigh\":" + f_json_number(prevDayHigh) +
+  ",\"previousDayLow\":" + f_json_number(prevDayLow) +
+  ",\"currentDayHigh\":" + f_json_number(dayHigh) +
+  ",\"currentDayLow\":" + f_json_number(dayLow) + "}" +
+  ",\"openingRange\":{\"high\":" + f_json_number(openingRangeLocked or not na(openingRangeHigh) ? openingRangeHigh : na) +
+  ",\"low\":" + f_json_number(openingRangeLocked or not na(openingRangeLow) ? openingRangeLow : na) +
+  ",\"locked\":" + f_json_bool(openingRangeLocked) +
+  ",\"minutes\":" + str.tostring(openingRangeMinutes) + "}" +
+  ",\"structure\":{\"swingLength\":" + str.tostring(swingLength) +
   ",\"lastSwingHigh\":" + f_json_number(lastSwingHigh) +
-  ",\"lastSwingLow\":" + f_json_number(lastSwingLow) + "}" +
+  ",\"lastSwingLow\":" + f_json_number(lastSwingLow) +
+  ",\"breakoutState\":" + f_json_string(breakoutState) +
+  ",\"rejectionState\":" + f_json_string(rejectionState) +
+  ",\"retestState\":" + f_json_string(retestState) +
+  ",\"openingRangeBreakout\":" + f_json_string(orBreakoutState) + "}" +
+  ",\"supportResistance\":{\"support\":[" +
+  f_json_number(valPrice) + "," + f_json_number(lastSwingLow) + "," + f_json_number(openingRangeLow) + "," + f_json_number(sessionLow) + "," + f_json_number(prevDayLow) + "," + f_json_number(dayLow) +
+  "],\"resistance\":[" +
+  f_json_number(vahPrice) + "," + f_json_number(lastSwingHigh) + "," + f_json_number(openingRangeHigh) + "," + f_json_number(sessionHigh) + "," + f_json_number(prevDayHigh) + "," + f_json_number(dayHigh) +
+  "]}" +
   ",\"methodology\":{\"volumeProfile\":" + f_json_string(METHOD_VP) +
   ",\"trend\":" + f_json_string(METHOD_TREND) +
   ",\"candle\":" + f_json_string(METHOD_CANDLE) +
@@ -466,29 +565,33 @@ optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.to
   ",\"profileDiagnostics\":{\"binSize\":" + f_json_number(binSizeUsed) +
   ",\"valueAreaPct\":" + str.tostring(VA_PCT) +
   ",\"overflow\":" + f_json_bool(profileOverflow) +
-  ",\"ready\":" + f_json_bool(profileReady) + "}}"
+  ",\"ready\":" + f_json_bool(profileReady) + "}" +
+  ",\"timeframeRoles\":{\"direction\":" + f_json_string(directionTfInput) +
+  ",\"structure\":" + f_json_string(structureTfInput) +
+  ",\"entryConfirm\":" + f_json_string(entryTfInput) +
+  ",\"quoteFreshness\":" + f_json_string(quoteTfInput) + "}}"
 
 metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
   ",\"symbolOk\":" + f_json_bool(symbolOk) +
+  ",\"chartMatchesStructure\":" + f_json_bool(chartMatchesStructure) +
   ",\"partial\":" + f_json_bool(payloadPartial) +
   ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
   ",\"volumeProfileMethod\":" + f_json_string(METHOD_VP) +
   ",\"trendMethod\":" + f_json_string(METHOD_TREND) +
   ",\"candleMethod\":" + f_json_string(METHOD_CANDLE) + "}"
 
-alertMessage = "{" +
+strategyAlertMessage = "{" +
   "\"schemaVersion\":\"1.0\"," +
   "\"source\":\"tradingview\"," +
-  "\"eventId\":" + f_json_string(eventId) + "," +
+  "\"eventId\":" + f_json_string(strategyEventId) + "," +
   "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
   "\"symbol\":" + f_json_string(payloadSymbol) + "," +
   "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
   "\"timeframe\":" + f_json_string(timeframe.period) + "," +
   "\"eventType\":" + f_json_string(eventType) + "," +
-  // barTime = candle close time (market bar). sentAt = alert generation time (timenow).
-  // Backend skew validates sentAt only; delayed TradingView delivery may lag sentAt.
   "\"barTime\":" + f_json_time(time_close) + "," +
   "\"sentAt\":" + f_json_time(timenow) + "," +
   "\"isConfirmedBar\":" + f_json_bool(confirmedNow) + "," +
@@ -503,23 +606,59 @@ alertMessage = "{" +
   metadataJson +
   "}"
 
+quoteOhlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(m1Open) +
+  ",\"high\":" + f_json_number(m1High) +
+  ",\"low\":" + f_json_number(m1Low) +
+  ",\"close\":" + f_json_number(m1Close) +
+  ",\"volume\":" + f_json_number(m1Vol) + "}"
+
+quoteMetadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_QUOTE) +
+  ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
+  ",\"partial\":true" +
+  ",\"dataQualityHint\":\"QUOTE_ONLY\"" +
+  ",\"quoteOnly\":true" +
+  ",\"neverReversesStrategy\":true" +
+  ",\"structureTimeframe\":" + f_json_string(structureTfInput) + "}"
+
+quoteAlertMessage = "{" +
+  "\"schemaVersion\":\"1.0\"," +
+  "\"source\":\"tradingview\"," +
+  "\"eventId\":" + f_json_string(quoteEventId) + "," +
+  "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
+  "\"symbol\":" + f_json_string(payloadSymbol) + "," +
+  "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
+  "\"timeframe\":" + f_json_string(quoteTfInput) + "," +
+  "\"eventType\":\"BAR_UPDATE\"," +
+  "\"barTime\":" + f_json_time(m1TimeClose) + "," +
+  "\"sentAt\":" + f_json_time(timenow) + "," +
+  "\"isConfirmedBar\":true," +
+  "\"indicatorName\":\"GoldMetaBridge\"," +
+  quoteOhlcvJson + "," +
+  quoteMetadataJson +
+  "}"
+
 // ---------------------------------------------------------------------------
 // Script alerts (webhook JSON) — requires Create Alert → Any alert() function call.
-// Official TV Help: select the script in Condition, then choose
-// "Any alert() function call" (first option). Message: {{alert_message}}.
-// alert() is a no-op on historical bars; do not gate on barstate.isrealtime.
-// Frequency for production: alert.freq_once_per_bar_close (confirmed-bar mode).
+// STRATEGY = full structure on structure TF bar close. QUOTE = lightweight 1m OHLC only.
+// Quote updates never replace complete strategy signals on the backend.
 // ---------------------------------------------------------------------------
 var bool testAlertSent = false
-bool emitAlert = enableAlertCalls and canEmitBar
-if emitAlert and testAlertMode and not testAlertSent
-    alert(alertMessage, alert.freq_once_per_bar)
+bool emitStrategyAlert = enableAlertCalls and canEmitBar and chartMatchesStructure
+bool emitQuoteAlert = enableAlertCalls and enableQuoteUpdates and quoteBarReady and not testAlertMode and chartMatchesStructure
+
+if emitStrategyAlert and testAlertMode and not testAlertSent
+    alert(strategyAlertMessage, alert.freq_once_per_bar)
     testAlertSent := true
-else if emitAlert and not testAlertMode
-    alert(alertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+else if emitStrategyAlert and not testAlertMode
+    alert(strategyAlertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
     testAlertSent := false
 else if not testAlertMode
     testAlertSent := false
+
+if emitQuoteAlert
+    alert(quoteAlertMessage, alert.freq_once_per_bar_close)
+    lastQuoteEmitMs := m1TimeClose
 
 // Diagnostic levels use line.new (not plot/plotshape) so TradingView Create Alert
 // does not list "GoldMeta Session High / POC / …" as technical-alert series.
@@ -569,25 +708,35 @@ if showWarnings and barstate.islast
         else
             label.set_xy(warningLabel, bar_index, high)
             label.set_text(warningLabel, warningText)
+    else if not chartMatchesStructure
+        tfWarn = "GoldMeta intraday expects " + structureTfInput + " chart. Current: " + timeframe.period
+        if na(warningLabel)
+            warningLabel := label.new(bar_index, high, tfWarn, style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white)
+        else
+            label.set_xy(warningLabel, bar_index, high)
+            label.set_text(warningLabel, tfWarn)
     else if not na(warningLabel)
         label.delete(warningLabel)
         warningLabel := na
 
-var table statusTable = table.new(position.top_right, 2, 8, border_width=1)
+var table statusTable = table.new(position.top_right, 2, 9, border_width=1)
 if showStatusTable and barstate.islast
     table.cell(statusTable, 0, 0, "GoldMeta", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 0, 1, "Symbol OK", text_color=color.white)
     table.cell(statusTable, 1, 1, symbolOk ? "YES" : "NO", text_color=color.white, bgcolor=symbolOk ? color.new(color.green, 35) : color.new(color.red, 20))
-    table.cell(statusTable, 0, 2, "Confirmed", text_color=color.white)
-    table.cell(statusTable, 1, 2, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
-    table.cell(statusTable, 0, 3, "Session", text_color=color.white)
-    table.cell(statusTable, 1, 3, sessionName, text_color=color.white)
-    table.cell(statusTable, 0, 4, "Trend", text_color=color.white)
-    table.cell(statusTable, 1, 4, trendDirection + " " + str.tostring(trendStrength, "#"), text_color=color.white)
-    table.cell(statusTable, 0, 5, "VP ready", text_color=color.white)
-    table.cell(statusTable, 1, 5, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
-    table.cell(statusTable, 0, 6, "Candle", text_color=color.white)
-    table.cell(statusTable, 1, 6, classification, text_color=color.white)
-    table.cell(statusTable, 0, 7, "Webhook", text_color=color.white)
-    table.cell(statusTable, 1, 7, enableAlertCalls ? "Any alert()" : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))
+    table.cell(statusTable, 0, 2, "Chart TF", text_color=color.white)
+    table.cell(statusTable, 1, 2, chartMatchesStructure ? "OK" : "USE " + structureTfInput, text_color=color.white, bgcolor=chartMatchesStructure ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 3, "Confirmed", text_color=color.white)
+    table.cell(statusTable, 1, 3, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
+    table.cell(statusTable, 0, 4, "Session", text_color=color.white)
+    table.cell(statusTable, 1, 4, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 5, "Trend", text_color=color.white)
+    table.cell(statusTable, 1, 5, trendDirection + " " + str.tostring(trendStrength, "#"), text_color=color.white)
+    table.cell(statusTable, 0, 6, "VP ready", text_color=color.white)
+    table.cell(statusTable, 1, 6, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 7, "Candle", text_color=color.white)
+    table.cell(statusTable, 1, 7, classification, text_color=color.white)
+    table.cell(statusTable, 0, 8, "Webhook", text_color=color.white)
+    quoteLabel = enableQuoteUpdates ? "STRAT+QUOTE" : "STRATEGY"
+    table.cell(statusTable, 1, 8, enableAlertCalls ? quoteLabel : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))

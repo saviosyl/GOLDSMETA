@@ -87,6 +87,7 @@ const centreFixture = {
     setupRequired: true,
     authSetupRequired: true,
     oauthConfigured: false,
+    missingConfigurationItems: ["cTrader Client Secret unavailable to function"],
     connected: false,
     demonstrationAvailable: true,
     automationMode: "OFF",
@@ -151,6 +152,7 @@ const connectedCentre = {
     setupRequired: false,
     authSetupRequired: false,
     oauthConfigured: true,
+    missingConfigurationItems: [],
     connected: true,
     connectionSummary: {
       accountMasked: "****4821",
@@ -286,10 +288,58 @@ describe("BrokerControlCentrePage", () => {
       /Connection setup required|Pepperstone connection required/i
     );
     expect(screen.getByTestId("ctrader-connect-btn")).toBeDisabled();
+    expect(screen.queryByTestId("ctrader-authorise-demo-trading-btn")).not.toBeInTheDocument();
     expect(screen.getByTestId("no-order-controls")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /place|submit order/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("owner-setup-guide")).toBeInTheDocument();
     expect(screen.getByTestId("wizard-status-1")).toHaveTextContent(/Action required/i);
+  });
+
+  it("lists specific missing configuration items instead of vague credentials copy", async () => {
+    getBrokerControlCentre.mockResolvedValue({
+      ...centreFixture,
+      readiness: {
+        ...centreFixture.readiness,
+        authSetupRequired: false,
+        oauthConfigured: false,
+        missingConfigurationItems: ["cTrader Client Secret unavailable to function"],
+        auth: {
+          ...centreFixture.readiness.auth,
+          status: "HEALTHY",
+          brokerSetupEnabled: true,
+          notes: []
+        }
+      }
+    });
+    renderBroker();
+    fireEvent.click(await screen.findByTestId("broker-card-pepperstone_ctrader"));
+    expect(await screen.findByTestId("ctrader-missing-config-list")).toHaveTextContent(
+      /cTrader Client Secret unavailable to function/i
+    );
+    expect(screen.getByTestId("ctrader-setup-required").textContent).not.toMatch(
+      /Add secure server credentials/i
+    );
+  });
+
+  it("shows Authorise Demo Trading when OAuth is configured", async () => {
+    getBrokerControlCentre.mockResolvedValue({
+      ...connectedCentre,
+      readiness: {
+        ...connectedCentre.readiness,
+        connected: false,
+        setupRequired: true,
+        oauthConfigured: true,
+        missingConfigurationItems: [],
+        authSetupRequired: false
+      }
+    });
+    renderBroker();
+    fireEvent.click(await screen.findByTestId("broker-card-pepperstone_ctrader"));
+    expect(await screen.findByTestId("ctrader-authorise-demo-trading-btn")).toBeEnabled();
+    expect(screen.getByTestId("broker-connection-status")).toHaveTextContent(/Ready to connect/i);
+    expect(screen.getByTestId("auth-setup-required")).toHaveTextContent(
+      /Pepperstone connection ready/i
+    );
   });
 
   it("keeps technical codes out of the main wizard copy", async () => {

@@ -38,8 +38,13 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
       await expect(page.getByTestId("overview-page")).toBeVisible();
       expect((await pageOverflow(page)).delta).toBeLessThanOrEqual(1);
 
+      // Score lives inside collapsed System status — open it before expanding.
+      const system = page.getByTestId("system-status-collapse");
+      if (await system.count()) {
+        await system.locator("summary").click();
+      }
       const toggle = page.getByTestId("score-toggle");
-      if (await toggle.count()) {
+      if (await toggle.isVisible().catch(() => false)) {
         await toggle.click();
         await page.waitForTimeout(100);
       }
@@ -94,8 +99,8 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
   test("Share Market Snapshot opens from V5.4.1 Dashboard", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/ui-review/");
-    await expect(page.getByTestId("dashboard-summary")).toBeVisible();
-    await expect(page.getByTestId("primary-signal-card")).toBeVisible();
+    await expect(page.getByTestId("intraday-action-card")).toBeVisible();
+    await expect(page.getByTestId("intraday-header-card")).toBeVisible();
     await expect(page.getByTestId("share-market-snapshot")).toBeVisible();
     await page.getByTestId("share-market-snapshot").click();
     await expect(page.getByTestId("promo-snapshot-modal")).toBeVisible();
@@ -107,6 +112,7 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
   test("expanded colourful score reaches News row above bottom nav", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/ui-review/");
+    await page.getByTestId("system-status-collapse").locator("summary").click();
     await expect(page.getByTestId("goldmeta-score")).toBeVisible();
     const toggle = page.getByTestId("score-toggle");
     await expect(toggle).toBeVisible();
@@ -141,11 +147,12 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
     for (const width of [390, 430] as const) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 932 });
       await page.goto("/ui-review/");
-      await expect(page.getByTestId("primary-decision")).toBeVisible();
+      await expect(page.getByTestId("intraday-action-label")).toBeVisible();
       await page.screenshot({
         path: path.join(outDir, `dashboard-${width}.png`),
         fullPage: false
       });
+      await page.getByTestId("system-status-collapse").locator("summary").click();
       const toggle = page.getByTestId("score-toggle");
       if (await toggle.count()) await toggle.click();
       await page.screenshot({

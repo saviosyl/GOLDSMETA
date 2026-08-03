@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useMemo } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { OverviewPage } from "./OverviewPage";
@@ -21,19 +21,14 @@ import { ReviewAuthProvider } from "../lib/auth";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
 import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
 import { ApiError } from "../types/models";
+import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
+import { getIssue50PreviewCase } from "../preview/issue50PreviewMatrix";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
- * Enabled only on localhost / *.pages.dev (and similar preview hosts).
+ * Loaded only when VITE_ENABLE_UI_REVIEW=true (non-production builds).
+ * Production builds dead-code-eliminate this module via UiReviewGate.
  */
-export function isUiReviewHost(hostname = window.location.hostname): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.endsWith(".pages.dev") ||
-    hostname.includes("preview")
-  );
-}
 
 function buildReviewApi() {
   const params = new URLSearchParams(window.location.search);
@@ -46,6 +41,12 @@ function buildReviewApi() {
   const signalOutcomes = scenario === "signal-outcomes";
   const marketMismatch = scenario === "market-mismatch";
   const marketMatch = scenario === "market-match";
+  const issue50Id = scenario.startsWith("issue50-")
+    ? scenario.slice("issue50-".length)
+    : scenario === "issue50"
+      ? (params.get("case") ?? "below-val")
+      : "";
+  const issue50Case = issue50Id ? getIssue50PreviewCase(issue50Id) : undefined;
   const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
 
   let autoTrade = buildReviewAutoTradeStatus({
@@ -103,9 +104,10 @@ function buildReviewApi() {
     backendVersion: "review",
     notificationSent: false,
     currentSession: "NEWYORK",
-    lastKnownPrice: 2385.4 as number,
-    ohlcv: { open: 2382, high: 2391, low: 2376, close: 2385.4, volume: 1200 },
-    marketStructure: { trend: "RANGE", poc: 2380, vah: 2390, val: 2370 },
+    // Default UI-review uses Issue #50 labelled chart-example regime (~4034).
+    lastKnownPrice: 4034.815 as number,
+    ohlcv: { open: 4036, high: 4041.2, low: 4031.1, close: 4034.815, volume: 1200 },
+    marketStructure: { trend: "RANGE", poc: 4045.087, vah: 4049.633, val: 4037.308 },
     symbolIdentity: {
       tradingViewSymbol: "XAUUSD",
       exchange: "OANDA",
@@ -115,14 +117,14 @@ function buildReviewApi() {
     priceSources: {
       alertClose: {
         source: "TRADINGVIEW_ALERT",
-        value: 2385.4,
+        value: 4034.815,
         exchangeOrBroker: "OANDA"
       }
     }
   };
 
   // Labelled UI-review fixtures for PR #46 Market Structure mismatch / match.
-  let briefingLevels = { poc: 2380, vah: 2390, val: 2370 };
+  let briefingLevels = { poc: 4045.087, vah: 4049.633, val: 4037.308 };
   if (marketMismatch) {
     decision.decision = "WAIT";
     decision.dataQuality = "CONFLICTED";
@@ -164,6 +166,7 @@ function buildReviewApi() {
     decision.marketDataTime = nowIso;
     decision.generatedAt = nowIso;
     decision.barTime = nowIso;
+    // PR #46 match case stays in the ~4050 verified-alert regime.
     decision.lastKnownPrice = 4045.165;
     decision.ohlcv = { open: 4044, high: 4048, low: 4042, close: 4045.165, volume: 1200 };
     decision.marketStructure = {
@@ -191,6 +194,44 @@ function buildReviewApi() {
     briefingLevels = { poc: 4050.951, vah: 4052.975, val: 4047.193 };
   }
 
+  // Issue #50 labelled preview matrix — temporary non-production validation cases.
+  if (issue50Case) {
+    decision.decision = (issue50Case.decisionCode as "BUY" | "SELL" | "WAIT") || "WAIT";
+    decision.lastKnownPrice = Number(issue50Case.decision.lastKnownPrice ?? decision.lastKnownPrice);
+    decision.ohlcv = (issue50Case.decision.ohlcv as typeof decision.ohlcv) ?? decision.ohlcv;
+    decision.marketStructure =
+      (issue50Case.decision.marketStructure as typeof decision.marketStructure) ??
+      decision.marketStructure;
+    decision.dataQuality = String(issue50Case.decision.dataQuality ?? decision.dataQuality);
+    decision.dataSourceLabel = String(
+      issue50Case.decision.dataSourceLabel ?? decision.dataSourceLabel
+    );
+    decision.isTestDecision = Boolean(issue50Case.decision.isTestDecision ?? true);
+    decision.environment = "TEST";
+    decision.generatedAt = String(issue50Case.decision.generatedAt ?? decision.generatedAt);
+    decision.marketDataTime = String(issue50Case.decision.marketDataTime ?? decision.marketDataTime);
+    decision.currentSession = String(
+      issue50Case.decision.currentSession ?? decision.currentSession
+    );
+    const ms = issue50Case.decision.marketStructure as
+      | { poc?: number | null; vah?: number | null; val?: number | null }
+      | null
+      | undefined;
+    briefingLevels = {
+      poc: ms?.poc ?? null,
+      vah: ms?.vah ?? null,
+      val: ms?.val ?? null
+    } as typeof briefingLevels;
+    if (issue50Case.mode === "MISMATCH") {
+      decision.reasonCodes = ["PRICE_SOURCE_MISMATCH", "CONFLICTED_DATA"];
+      decision.warnings = [
+        "Market data mismatch: preview quote and stored structure disagree",
+        "PRICE_SOURCE_MISMATCH"
+      ];
+      decision.dataQuality = "CONFLICTED";
+    }
+  }
+
   const setup = {
     setupId: "review_setup_1",
     decisionId: decision.decisionId,
@@ -203,14 +244,14 @@ function buildReviewApi() {
     barTime: "2026-07-21T20:00:00.000Z",
     session: "LONDON",
     levels: {
-      entryPrice: 2384.2,
+      entryPrice: 4036.0,
       entryType: "LIMIT",
-      stopLoss: 2378.0,
-      tp1: 2390,
-      tp2: 2395,
-      tp3: 2400
+      stopLoss: 4028.6,
+      tp1: 4045.1,
+      tp2: 4049.8,
+      tp3: 4053.7
     },
-    initialRisk: 6.2,
+    initialRisk: 7.4,
     expectedRR: { tp1: 1, tp2: 1.8, tp3: 2.5 },
     confidence: 55,
     status: "ACTIVE_SHADOW",
@@ -259,51 +300,178 @@ function buildReviewApi() {
     setup.initialRisk = 6.5;
   }
 
+  if (issue50Case) {
+    if (issue50Case.mode === "MISMATCH" || issue50Case.mode === "LIVE_RANGE_ONLY") {
+      setup.status = "REJECTED";
+      (setup as { levels: Record<string, number | string | null> }).levels = {
+        entryPrice: null,
+        entryType: null,
+        stopLoss: null,
+        tp1: null,
+        tp2: null,
+        tp3: null
+      };
+    } else if (issue50Case.id === "buy-confirmed") {
+      setup.direction = "BUY";
+      setup.levels = {
+        entryPrice: 4040,
+        entryType: "LIMIT",
+        stopLoss: 4030,
+        tp1: 4050,
+        tp2: 4055,
+        tp3: 4060
+      };
+    } else if (issue50Case.id === "sell-confirmed") {
+      (setup as { direction: "BUY" | "SELL" }).direction = "SELL";
+      setup.levels = {
+        entryPrice: 4042,
+        entryType: "LIMIT",
+        stopLoss: 4052,
+        tp1: 4032,
+        tp2: 4026,
+        tp3: 4020
+      };
+    }
+  }
+
   return {
     latestDecision: async () => (empty ? null : decision),
-    latestDecisionPack: async () =>
-      empty
-        ? null
-        : {
-            decision,
-            latestQuote: decision,
-            latestCompleteStrategySignal: marketMismatch
-              ? null
-              : marketMatch
-                ? decision
-                : decision.marketStructure?.poc != null
-                  ? decision
-                  : null,
-            marketStructureMode: marketMismatch
-              ? "MISMATCH"
-              : marketMatch
-                ? "COMPLETE"
-                : decision.marketStructure?.poc != null
-                  ? "COMPLETE"
-                  : "LIVE_RANGE_ONLY",
-            marketStructureDiagnostics: {
-              lastWebhookOrDecisionAt: decision.generatedAt,
-              lastCompleteSignalAt:
-                decision.marketStructure?.poc != null ? decision.generatedAt : null,
-              schemaVersion: decision.schemaVersion,
-              canonicalSymbol: "XAUUSD",
-              exchangeOrBroker: decision.symbolIdentity?.exchange ?? null,
-              timeframe: decision.timeframe,
-              fieldsReceived: ["price", "ohlcv"],
-              fieldsMissing: marketMismatch ? ["combined_structure"] : [],
-              fieldsRejected: [],
-              rejectionReasons: marketMismatch ? ["PRICE_SOURCE_MISMATCH"] : [],
-              priceConsistencyOk: !marketMismatch,
-              validityStatus: marketMatch ? "VALID" : marketMismatch ? "MISMATCH" : "INCOMPLETE",
-              marketStructureMode: marketMismatch
-                ? "MISMATCH"
-                : marketMatch
-                  ? "COMPLETE"
-                  : "LIVE_RANGE_ONLY"
-            },
-            structureDecisionId: decision.decisionId
+    latestDecisionPack: async () => {
+      if (empty) return null;
+      if (issue50Case) {
+        const mode = issue50Case.mode;
+        return {
+          decision,
+          latestQuote: decision,
+          latestCompleteStrategySignal:
+            mode === "MISMATCH" || mode === "LIVE_RANGE_ONLY" ? null : decision,
+          marketStructureMode: mode,
+          marketStructureDiagnostics: {
+            lastWebhookOrDecisionAt: decision.generatedAt,
+            lastCompleteSignalAt: mode === "COMPLETE" ? decision.generatedAt : null,
+            schemaVersion: decision.schemaVersion,
+            canonicalSymbol: "XAUUSD",
+            exchangeOrBroker: "TEST_PREVIEW",
+            timeframe: decision.timeframe,
+            fieldsReceived: ["price", "ohlcv"],
+            fieldsMissing: mode === "LIVE_RANGE_ONLY" ? ["poc", "vah", "val"] : [],
+            fieldsRejected: [],
+            rejectionReasons: mode === "MISMATCH" ? ["PRICE_SOURCE_MISMATCH"] : [],
+            priceConsistencyOk: mode !== "MISMATCH",
+            validityStatus:
+              mode === "COMPLETE" ? "VALID" : mode === "MISMATCH" ? "MISMATCH" : "INCOMPLETE",
+            marketStructureMode: mode,
+            quoteAgeSeconds: issue50Case.quoteAgeSeconds,
+            signalAgeSeconds: issue50Case.signalAgeSeconds,
+            previewCaseId: issue50Case.id
           },
-    listActiveSetups: async () => (empty ? [] : marketMismatch ? [] : [setup]),
+          structureDecisionId: decision.decisionId,
+          intradayPlan: issue50Case.plan
+        };
+      }
+      return {
+        decision,
+        latestQuote: decision,
+        latestCompleteStrategySignal: marketMismatch
+          ? null
+          : marketMatch
+            ? decision
+            : decision.marketStructure?.poc != null
+              ? decision
+              : null,
+        marketStructureMode: marketMismatch
+          ? "MISMATCH"
+          : marketMatch
+            ? "COMPLETE"
+            : decision.marketStructure?.poc != null
+              ? "COMPLETE"
+              : "LIVE_RANGE_ONLY",
+        marketStructureDiagnostics: {
+          lastWebhookOrDecisionAt: decision.generatedAt,
+          lastCompleteSignalAt:
+            decision.marketStructure?.poc != null ? decision.generatedAt : null,
+          schemaVersion: decision.schemaVersion,
+          canonicalSymbol: "XAUUSD",
+          exchangeOrBroker: decision.symbolIdentity?.exchange ?? null,
+          timeframe: decision.timeframe,
+          fieldsReceived: ["price", "ohlcv"],
+          fieldsMissing: marketMismatch ? ["combined_structure"] : [],
+          fieldsRejected: [],
+          rejectionReasons: marketMismatch ? ["PRICE_SOURCE_MISMATCH"] : [],
+          priceConsistencyOk: !marketMismatch,
+          validityStatus: marketMatch ? "VALID" : marketMismatch ? "MISMATCH" : "INCOMPLETE",
+          marketStructureMode: marketMismatch
+            ? "MISMATCH"
+            : marketMatch
+              ? "COMPLETE"
+              : "LIVE_RANGE_ONLY"
+        },
+        structureDecisionId: decision.decisionId,
+        // Labelled Issue #50 fixture for UX review — never production defaults.
+        // Default uses chart-example ~4034; market-match keeps PR #46 ~4050 ladder.
+        intradayPlan: marketMismatch
+          ? {
+              ...chartExampleIntradayPlanFixture,
+              action: "NO_TRADE",
+              actionLabel: "NO TRADE",
+              valueLocation: "UNKNOWN" as const,
+              importantLevels: [],
+              oneSentence:
+                "Market structure sources disagree — stand aside until data is consistent. (LABELLED FIXTURE)",
+              whyNotReady: "Price-source mismatch blocks important levels.",
+              expectedRange: {
+                ...chartExampleIntradayPlanFixture.expectedRange,
+                rangeAvailable: false,
+                unavailableReason:
+                  "Range unavailable — market data mismatch blocks combining levels.",
+                valueLocation: "UNKNOWN" as const,
+                currentPrice: 2408,
+                probableLow: null,
+                probableHigh: null,
+                stretchLow: null,
+                stretchHigh: null
+              },
+              tradePlan: {
+                ...chartExampleIntradayPlanFixture.tradePlan,
+                cardKind: "NONE" as const,
+                title: "No trade plan — data mismatch",
+                actionable: false,
+                direction: "NONE" as const,
+                stopLoss: null,
+                tp1: null,
+                tp2: null,
+                tp3: null,
+                bullishConditional: null,
+                bearishConditional: null
+              }
+            }
+          : marketMatch
+            ? {
+                ...chartExampleIntradayPlanFixture,
+                valueLocation: "BELOW_VALUE" as const,
+                oneSentence:
+                  "Matching price sources — complete structure available. (LABELLED FIXTURE — market-match)",
+                // Keep a valid range around the ~4050 match quote (probableLow ≤ current ≤ probableHigh).
+                expectedRange: {
+                  ...chartExampleIntradayPlanFixture.expectedRange,
+                  rangeAvailable: true,
+                  unavailableReason: null,
+                  valueLocation: "BELOW_VALUE" as const,
+                  currentPrice: 4045.165,
+                  probableLow: 4042,
+                  probableHigh: 4047.193,
+                  stretchLow: 4038,
+                  stretchHigh: 4055,
+                  remainingAbovePoints: 2.03,
+                  remainingBelowPoints: 3.17
+                },
+                importantLevels: []
+              }
+            : chartExampleIntradayPlanFixture
+      };
+    },
+    listActiveSetups: async () =>
+      empty || marketMismatch || issue50Case?.mode === "MISMATCH" ? [] : [setup],
     listSetups: async () =>
       empty
         ? []
@@ -736,6 +904,7 @@ function buildReviewApi() {
         setupRequired: false,
         authSetupRequired: false,
         oauthConfigured: true,
+        missingConfigurationItems: [],
         connected: true,
         demonstrationAvailable: true,
         automationMode: "OFF",
@@ -1116,14 +1285,7 @@ function buildReviewApi() {
   };
 }
 
-export function UiReviewGate() {
-  if (typeof window !== "undefined" && !isUiReviewHost()) {
-    return <Navigate to="/" replace />;
-  }
-  return <UiReviewApp />;
-}
-
-function UiReviewApp() {
+export default function UiReviewApp() {
   const location = useLocation();
   const value = useMemo<AuthContextValue>(() => {
     const api = buildReviewApi();

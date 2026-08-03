@@ -4,7 +4,8 @@
  */
 
 import type { AutomationMode, BrokerHealthStatus, TradePreview } from "../domain";
-import { loadCTraderConfig } from "./config";
+import { labelMissingConfiguration, loadCTraderConfig } from "./config";
+import { loadTokenEncryptionSecret } from "./connectionStore";
 import {
   snapshotCTraderFlags,
   CTRADER_RECOMMENDED_DEFAULTS
@@ -39,6 +40,8 @@ export interface CTraderReadinessReport {
   setupRequired: boolean;
   authSetupRequired: boolean;
   oauthConfigured: boolean;
+  /** Human-readable, non-secret missing server configuration items. */
+  missingConfigurationItems: string[];
   connected: boolean;
   demonstrationAvailable: true;
   automationMode: AutomationMode;
@@ -122,6 +125,13 @@ export function buildCTraderReadiness(args?: {
   } | null;
 }): CTraderReadinessReport {
   const config = loadCTraderConfig();
+  const encryptionConfigured = Boolean(loadTokenEncryptionSecret());
+  const missingCodes = [
+    ...config.missing,
+    ...(encryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+  ];
+  const missingConfigurationItems = labelMissingConfiguration(missingCodes);
+  const oauthConfigured = config.configured && encryptionConfigured;
   const auth = args?.auth ?? buildAuthHealthSnapshot({ status: "UNKNOWN" });
   const conn = args?.connection ?? null;
   const oauthConnected = Boolean(conn?.oauthConnected);
@@ -148,7 +158,7 @@ export function buildCTraderReadiness(args?: {
       ? "BLOCKED"
       : oauthConnected
         ? "COMPLETE"
-        : config.configured
+        : oauthConfigured
           ? "AVAILABLE"
           : "SETUP_REQUIRED";
 
@@ -171,10 +181,12 @@ export function buildCTraderReadiness(args?: {
     {
       step: 3,
       title: "Add secure credentials",
-      status: config.configured ? "COMPLETE" : "SETUP_REQUIRED",
-      detail: config.configured
-        ? "Client credentials present in Secret Manager."
-        : `Secure credentials still needed (${config.missing.join(", ") || "client id/secret/redirect"}). Store only in Secret Manager.`
+      status: oauthConfigured ? "COMPLETE" : "SETUP_REQUIRED",
+      detail: oauthConfigured
+        ? "Client credentials and token encryption key present in Secret Manager."
+        : missingConfigurationItems.length
+          ? `Still needed: ${missingConfigurationItems.join("; ")}.`
+          : "Secure credentials still needed in Secret Manager."
     },
     {
       step: 4,
@@ -184,9 +196,9 @@ export function buildCTraderReadiness(args?: {
         ? "Connection setup required — OAuth stays disabled until account security is verified."
         : oauthConnected
           ? "OAuth connected. Select a Demo account if not already chosen."
-          : config.configured
-            ? "OAuth ready (state/PKCE/allowlisted redirect). Owner can start connection."
-            : "Add secure credentials before starting OAuth. GoldMeta never asks for your broker password."
+          : oauthConfigured
+            ? "OAuth ready (state/PKCE/allowlisted redirect). Use Authorise Demo Trading or Connect cTrader — Demo only. GoldMeta never asks for your broker password."
+            : "Complete the missing server configuration items before starting OAuth. GoldMeta never asks for your broker password."
     },
     {
       step: 5,
@@ -231,12 +243,15 @@ export function buildCTraderReadiness(args?: {
   const setupRequired = !(oauthConnected && demoSelected && goldFound);
   const label = oauthConnected
     ? "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
-    : "Pepperstone connection required — preview mode — AutoTrade OFF";
+    : oauthConfigured
+      ? "Pepperstone OAuth ready — Authorise Demo Trading available — AutoTrade OFF"
+      : "Pepperstone connection required — preview mode — AutoTrade OFF";
 
   return {
     setupRequired,
     authSetupRequired,
-    oauthConfigured: config.configured,
+    oauthConfigured,
+    missingConfigurationItems,
     connected: oauthConnected,
     demonstrationAvailable: true,
     automationMode: "OFF",
@@ -360,7 +375,9 @@ export function getBrokerControlCentreSnapshot(
     ? "Connected (preview — execution disabled)"
     : readiness.authSetupRequired
       ? "Connection setup required"
-      : "Pepperstone connection required";
+      : readiness.oauthConfigured
+        ? "Ready to connect"
+        : "Pepperstone connection required";
   return {
     defaultBroker: "pepperstone_ctrader" as const,
     autoTrade: "OFF" as const,
@@ -372,7 +389,11 @@ export function getBrokerControlCentreSnapshot(
         status: pepperstoneStatus,
         detail:
           "Multi-user Demo/Live accounts — preview mode — order submission disabled — AutoTrade OFF",
-        badge: readiness.connected ? "CONNECTED" : "PREVIEW"
+        badge: readiness.connected
+          ? "CONNECTED"
+          : readiness.oauthConfigured
+            ? "READY"
+            : "PREVIEW"
       },
       {
         id: "trading212_invest",

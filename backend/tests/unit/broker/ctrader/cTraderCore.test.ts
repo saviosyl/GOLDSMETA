@@ -72,7 +72,37 @@ describe("cTrader config", () => {
     const cfg = loadCTraderConfig({});
     expect(cfg.setupRequired).toBe(true);
     expect(cfg.missing).toContain("CTRADER_CLIENT_ID");
+    expect(cfg.missingConfigurationItems).toContain("cTrader Client ID missing");
     expect(cfg.environment).toBe("DEMO");
+    expect(cfg.redirectUri).toBeNull();
+  });
+
+  it("exposes public redirect hostname/path without treating production callback as mismatch", () => {
+    const cfg = loadCTraderConfig({
+      CTRADER_CLIENT_ID: "id",
+      CTRADER_CLIENT_SECRET: "secret",
+      CTRADER_REDIRECT_URI:
+        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/v1/ctrader/oauth/callback",
+      CTRADER_ENVIRONMENT: "DEMO"
+    });
+    expect(cfg.configured).toBe(true);
+    expect(cfg.redirectUriPublic).toEqual({
+      hostname: "us-central1-goldmeta-web.cloudfunctions.net",
+      pathname: "/apiCTraderPreview/v1/ctrader/oauth/callback"
+    });
+    expect(cfg.missing).not.toContain("OAUTH_CALLBACK_MISMATCH");
+  });
+
+  it("flags localhost redirect as OAuth callback mismatch", () => {
+    const cfg = loadCTraderConfig({
+      CTRADER_CLIENT_ID: "id",
+      CTRADER_CLIENT_SECRET: "secret",
+      CTRADER_REDIRECT_URI: "http://localhost:5001/api/v1/ctrader/oauth/callback",
+      CTRADER_ENVIRONMENT: "DEMO"
+    });
+    expect(cfg.configured).toBe(false);
+    expect(cfg.missing).toContain("OAUTH_CALLBACK_MISMATCH");
+    expect(cfg.missingConfigurationItems).toContain("OAuth callback mismatch");
   });
 });
 
