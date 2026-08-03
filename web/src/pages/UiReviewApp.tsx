@@ -104,9 +104,10 @@ function buildReviewApi() {
     backendVersion: "review",
     notificationSent: false,
     currentSession: "NEWYORK",
-    lastKnownPrice: 2385.4 as number,
-    ohlcv: { open: 2382, high: 2391, low: 2376, close: 2385.4, volume: 1200 },
-    marketStructure: { trend: "RANGE", poc: 2380, vah: 2390, val: 2370 },
+    // Default UI-review uses Issue #50 labelled chart-example regime (~4034).
+    lastKnownPrice: 4034.815 as number,
+    ohlcv: { open: 4036, high: 4041.2, low: 4031.1, close: 4034.815, volume: 1200 },
+    marketStructure: { trend: "RANGE", poc: 4045.087, vah: 4049.633, val: 4037.308 },
     symbolIdentity: {
       tradingViewSymbol: "XAUUSD",
       exchange: "OANDA",
@@ -116,14 +117,14 @@ function buildReviewApi() {
     priceSources: {
       alertClose: {
         source: "TRADINGVIEW_ALERT",
-        value: 2385.4,
+        value: 4034.815,
         exchangeOrBroker: "OANDA"
       }
     }
   };
 
   // Labelled UI-review fixtures for PR #46 Market Structure mismatch / match.
-  let briefingLevels = { poc: 2380, vah: 2390, val: 2370 };
+  let briefingLevels = { poc: 4045.087, vah: 4049.633, val: 4037.308 };
   if (marketMismatch) {
     decision.decision = "WAIT";
     decision.dataQuality = "CONFLICTED";
@@ -165,6 +166,7 @@ function buildReviewApi() {
     decision.marketDataTime = nowIso;
     decision.generatedAt = nowIso;
     decision.barTime = nowIso;
+    // PR #46 match case stays in the ~4050 verified-alert regime.
     decision.lastKnownPrice = 4045.165;
     decision.ohlcv = { open: 4044, high: 4048, low: 4042, close: 4045.165, volume: 1200 };
     decision.marketStructure = {
@@ -204,14 +206,14 @@ function buildReviewApi() {
     barTime: "2026-07-21T20:00:00.000Z",
     session: "LONDON",
     levels: {
-      entryPrice: 2384.2,
+      entryPrice: 4036.0,
       entryType: "LIMIT",
-      stopLoss: 2378.0,
-      tp1: 2390,
-      tp2: 2395,
-      tp3: 2400
+      stopLoss: 4028.6,
+      tp1: 4045.1,
+      tp2: 4049.8,
+      tp3: 4053.7
     },
-    initialRisk: 6.2,
+    initialRisk: 7.4,
     expectedRR: { tp1: 1, tp2: 1.8, tp3: 2.5 },
     confidence: 55,
     status: "ACTIVE_SHADOW",
@@ -304,6 +306,7 @@ function buildReviewApi() {
             },
             structureDecisionId: decision.decisionId,
             // Labelled Issue #50 fixture for UX review — never production defaults.
+            // Default uses chart-example ~4034; market-match keeps PR #46 ~4050 ladder.
             intradayPlan: marketMismatch
               ? {
                   ...chartExampleIntradayPlanFixture,
@@ -312,9 +315,32 @@ function buildReviewApi() {
                   importantLevels: [],
                   oneSentence:
                     "Market structure sources disagree — stand aside until data is consistent. (LABELLED FIXTURE)",
-                  whyNotReady: "Price-source mismatch blocks important levels."
+                  whyNotReady: "Price-source mismatch blocks important levels.",
+                  expectedRange: {
+                    ...chartExampleIntradayPlanFixture.expectedRange,
+                    currentPrice: 2408,
+                    probableLow: null,
+                    probableHigh: null,
+                    stretchLow: null,
+                    stretchHigh: null
+                  }
                 }
-              : chartExampleIntradayPlanFixture
+              : marketMatch
+                ? {
+                    ...chartExampleIntradayPlanFixture,
+                    oneSentence:
+                      "Matching price sources — complete structure available. (LABELLED FIXTURE — market-match)",
+                    expectedRange: {
+                      ...chartExampleIntradayPlanFixture.expectedRange,
+                      currentPrice: 4045.165,
+                      probableLow: 4047.193,
+                      probableHigh: 4052.975,
+                      stretchLow: 4038,
+                      stretchHigh: 4062
+                    },
+                    importantLevels: []
+                  }
+                : chartExampleIntradayPlanFixture
           },
     listActiveSetups: async () => (empty ? [] : marketMismatch ? [] : [setup]),
     listSetups: async () =>

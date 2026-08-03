@@ -435,13 +435,15 @@ export function OverviewPage() {
         diagnostics={marketStructureDiagnostics}
         decisionId={decision?.decisionId}
       >
-        <p className="gm-meta">
+        <p className="gm-meta" data-testid="system-status-reasons">
           Legacy decision code: {decisionCode}. Reasons:{" "}
           {plainLanguageReason(
             decision?.reasonCodes ??
               (Array.isArray(decision?.reasonSummary) ? decision.reasonSummary : undefined),
             undefined
           )}
+          <br />
+          Raw codes: {(decision?.reasonCodes ?? []).join(", ") || "none"}
         </p>
         <div className="gm-trading-status-row" data-testid="dashboard-safety">
           <span className="gm-badge warning">Trading locked</span>
