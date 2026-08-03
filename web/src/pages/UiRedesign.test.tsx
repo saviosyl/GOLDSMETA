@@ -12,52 +12,76 @@ import {
 import "../styles/tokens.css";
 import "../styles/redesign.css";
 
+const decisionFixture = {
+  decisionId: "dec_hidden_id_abc123",
+  decision: "WAIT",
+  reasonCodes: ["ONE-ACTIVE-SETUP", "still open"],
+  reasonSummary: "Blocked",
+  currentSession: "NEWYORK",
+  generatedAt: "2026-07-21T21:45:00.000Z",
+  barTime: "2026-07-21T21:30:00.000Z",
+  lastKnownPrice: 2385.4,
+  ohlcv: { high: 2391, low: 2376, close: 2385.4 },
+  marketStructure: { poc: 2380, vah: 2390, val: 2370, trend: "RANGE" },
+  environment: "LIVE",
+  marketRegime: "RANGE"
+};
+
+const { mockApi } = vi.hoisted(() => {
+  const mockApi = {
+    latestDecision: vi.fn(),
+    latestDecisionPack: vi.fn(),
+    listActiveSetups: vi.fn(),
+    listSetups: vi.fn(),
+    v5Briefing: vi.fn(),
+    v5Score: vi.fn()
+  };
+  return { mockApi };
+});
+
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
     user: { email: "tester@example.com" },
-    api: {
-      latestDecision: vi.fn().mockResolvedValue({
-        decisionId: "dec_hidden_id_abc123",
-        decision: "WAIT",
-        reasonCodes: ["ONE-ACTIVE-SETUP", "still open"],
-        reasonSummary: "Blocked",
-        currentSession: "NEWYORK",
-        generatedAt: "2026-07-21T21:45:00.000Z",
-        barTime: "2026-07-21T21:30:00.000Z",
-        lastKnownPrice: 2385.4,
-        ohlcv: { high: 2391, low: 2376, close: 2385.4 },
-        marketStructure: { poc: 2380, vah: 2390, val: 2370, trend: "RANGE" },
-        environment: "LIVE",
-        marketRegime: "RANGE"
-      }),
-      listActiveSetups: vi.fn().mockResolvedValue([]),
-      listSetups: vi.fn().mockResolvedValue([]),
-      v5Briefing: vi.fn().mockResolvedValue({
-        session: "NEWYORK",
-        marketRegime: "RANGE",
-        positionVsPoc: "ABOVE_POC",
-        atrLabel: "NORMAL",
-        atrValue: 12.4,
-        levels: { poc: 2380, vah: 2390, val: 2370 },
-        currentState: "WAIT",
-        insufficientData: false,
-        dataTimestamp: "2026-07-21T21:45:00.000Z"
-      }),
-      v5Score: vi.fn().mockResolvedValue({
-        total: 42,
-        components: [
-          { label: "Market Structure", score: 8, max: 20, reason: "Incomplete" },
-          { label: "Confirmation", score: 4, max: 12, reason: "Incomplete" },
-          { label: "Trend", score: 10, max: 12, reason: "Aligned" },
-          { label: "Volume Profile", score: 8, max: 12, reason: "Near POC" },
-          { label: "ATR", score: 6, max: 10, reason: "Normal" },
-          { label: "News", score: 0, max: 5, reason: "No verified calendar available." }
-        ],
-        disclaimer: "GoldMeta Score is a rules-based quality score, not the probability of profit."
-      })
-    }
+    api: mockApi
   })
 }));
+
+beforeEach(() => {
+  mockApi.latestDecision.mockResolvedValue(decisionFixture);
+  mockApi.latestDecisionPack.mockResolvedValue({
+    decision: decisionFixture,
+    latestQuote: decisionFixture,
+    latestCompleteStrategySignal: decisionFixture,
+    marketStructureMode: "COMPLETE",
+    marketStructureDiagnostics: null,
+    structureDecisionId: decisionFixture.decisionId
+  });
+  mockApi.listActiveSetups.mockResolvedValue([]);
+  mockApi.listSetups.mockResolvedValue([]);
+  mockApi.v5Briefing.mockResolvedValue({
+    session: "NEWYORK",
+    marketRegime: "RANGE",
+    positionVsPoc: "ABOVE_POC",
+    atrLabel: "NORMAL",
+    atrValue: 12.4,
+    levels: { poc: 2380, vah: 2390, val: 2370 },
+    currentState: "WAIT",
+    insufficientData: false,
+    dataTimestamp: "2026-07-21T21:45:00.000Z"
+  });
+  mockApi.v5Score.mockResolvedValue({
+    total: 42,
+    components: [
+      { label: "Market Structure", score: 8, max: 20, reason: "Incomplete" },
+      { label: "Confirmation", score: 4, max: 12, reason: "Incomplete" },
+      { label: "Trend", score: 10, max: 12, reason: "Aligned" },
+      { label: "Volume Profile", score: 8, max: 12, reason: "Near POC" },
+      { label: "ATR", score: 6, max: 10, reason: "Normal" },
+      { label: "News", score: 0, max: 5, reason: "No verified calendar available." }
+    ],
+    disclaimer: "GoldMeta Score is a rules-based quality score, not the probability of profit."
+  });
+});
 
 describe("plainLanguage helpers", () => {
   it("formats sessions and timestamps for users", () => {

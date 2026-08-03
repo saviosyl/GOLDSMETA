@@ -9,15 +9,28 @@ export type MarketLevelLadderProps = {
   input: LadderInput;
   dataTimestamp?: string | null;
   className?: string;
+  mode?: "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE" | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 /** Market Structure Map — verified levels only; highest price at top. */
-export function MarketLevelLadder({ input, dataTimestamp, className = "" }: MarketLevelLadderProps) {
-  const { rows, mismatch, liveLabel } = buildMarketLevelLadderDetailed(input);
+export function MarketLevelLadder({
+  input,
+  dataTimestamp,
+  className = "",
+  mode = null,
+  diagnostics = null
+}: MarketLevelLadderProps) {
+  const { rows, mismatch, liveLabel } = buildMarketLevelLadderDetailed({
+    ...input,
+    liveRangeOnly: mode === "LIVE_RANGE_ONLY" || input.liveRangeOnly
+  });
   const { resistance, support } = nearestLevels(rows);
   const ts = formatLocalTimestamp(dataTimestamp);
 
-  if (mismatch) {
+  if (mismatch || mode === "MISMATCH") {
+    const alertPrice = mismatch?.alertClose;
+    const brokerPrice = mismatch?.comparisonPrice;
     return (
       <div
         className={`gm-ladder gm-ladder-mismatch ${className}`.trim()}
@@ -28,15 +41,17 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
           Market data mismatch
         </h3>
         <p data-testid="market-data-mismatch-alert">
-          TradingView alert price: {mismatch.alertClose.toFixed(2)}
+          TradingView alert price:{" "}
+          {alertPrice != null ? alertPrice.toFixed(2) : "unavailable"}
         </p>
         <p data-testid="market-data-mismatch-broker">
-          Broker/live price: {mismatch.comparisonPrice.toFixed(2)}
+          Broker/live price: {brokerPrice != null ? brokerPrice.toFixed(2) : "unavailable"}
         </p>
         <p className="gm-meta" data-testid="market-data-mismatch-detail">
           Signal blocked until the price sources match. GoldMeta will not combine incompatible
           price regimes (for example a ~2400 test fixture with a ~4050 live alert).
         </p>
+        <MarketStructureDiagnostics diagnostics={diagnostics} />
       </div>
     );
   }
@@ -47,6 +62,7 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
         <p className="gm-meta" role="status">
           No verified market levels available yet.
         </p>
+        <MarketStructureDiagnostics diagnostics={diagnostics} />
       </div>
     );
   }
@@ -55,16 +71,27 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
     1,
     ...rows.filter((r) => r.kind !== "live").map((r) => Math.abs(r.distance ?? 0))
   );
+  const liveRangeOnly = mode === "LIVE_RANGE_ONLY" || Boolean(input.liveRangeOnly);
 
   return (
     <div className={`gm-ladder ${className}`.trim()} data-testid="market-level-ladder">
+      {liveRangeOnly && (
+        <div className="gm-ladder-range-only" data-testid="live-market-range-only" role="status">
+          <h3 className="gm-subsection-title">Live market range only</h3>
+          <p className="gm-meta">
+            Live price is available, but the latest complete TradingView strategy signal has not been
+            received or is no longer valid. Showing current/last price and bar high/low only — missing
+            levels are never fabricated.
+          </p>
+        </div>
+      )}
       <div className="gm-ladder-meta">
         <span className="gm-meta">
           Updated {ts.primary}
           {ts.timeZone !== "UTC" ? ` · ${ts.timeZone}` : ""} · {ts.secondaryUtc}
           {liveLabel !== "LIVE PRICE" ? ` · ${liveLabel}` : ""}
         </span>
-        {(resistance || support) && (
+        {!liveRangeOnly && (resistance || support) && (
           <span className="gm-meta">
             {resistance ? `Nearest resistance ${resistance.price}` : ""}
             {resistance && support ? " · " : ""}
@@ -107,6 +134,64 @@ export function MarketLevelLadder({ input, dataTimestamp, className = "" }: Mark
         Levels shown are from verified stored market data only. Missing levels are omitted — never
         fabricated. “LIVE PRICE” is shown only for a verified fresh non-test source.
       </p>
+      <MarketStructureDiagnostics diagnostics={diagnostics} />
     </div>
+  );
+}
+
+function MarketStructureDiagnostics({
+  diagnostics
+}: {
+  diagnostics?: Record<string, unknown> | null;
+}) {
+  if (!diagnostics) return null;
+  const fieldsReceived = Array.isArray(diagnostics.fieldsReceived)
+    ? diagnostics.fieldsReceived.join(", ")
+    : "—";
+  const fieldsMissing = Array.isArray(diagnostics.fieldsMissing)
+    ? diagnostics.fieldsMissing.join(", ")
+    : "—";
+  const fieldsRejected = Array.isArray(diagnostics.fieldsRejected)
+    ? diagnostics.fieldsRejected.join(", ")
+    : "—";
+  const rejectionReasons = Array.isArray(diagnostics.rejectionReasons)
+    ? diagnostics.rejectionReasons.join(" · ")
+    : "—";
+  return (
+    <details className="gm-disclosure" data-testid="market-structure-diagnostics" style={{ marginTop: 12 }}>
+      <summary>Market Structure diagnostics</summary>
+      <div className="gm-disclosure-body gm-meta">
+        <p>Last decision/webhook: {String(diagnostics.lastWebhookOrDecisionAt ?? "—")}</p>
+        <p>Last complete signal: {String(diagnostics.lastCompleteSignalAt ?? "—")}</p>
+        <p>
+          Schema {String(diagnostics.schemaVersion ?? "—")} · Symbol{" "}
+          {String(diagnostics.canonicalSymbol ?? "—")} · Exchange/broker{" "}
+          {String(diagnostics.exchangeOrBroker ?? "—")} · Timeframe{" "}
+          {String(diagnostics.timeframe ?? "—")}
+        </p>
+        <p>
+          Quote source: {String(diagnostics.quoteSource ?? "—")} · Signal source:{" "}
+          {String(diagnostics.signalSource ?? "—")}
+        </p>
+        <p>Fields received: {fieldsReceived || "—"}</p>
+        <p>Fields missing: {fieldsMissing || "—"}</p>
+        <p>Fields rejected: {fieldsRejected || "—"}</p>
+        <p>Rejection reasons: {rejectionReasons || "—"}</p>
+        <p>
+          Price consistency:{" "}
+          {diagnostics.priceConsistencyOk == null
+            ? "—"
+            : diagnostics.priceConsistencyOk
+              ? "OK"
+              : "FAILED"}{" "}
+          · Validity: {String(diagnostics.validityStatus ?? "—")} · Mode:{" "}
+          {String(diagnostics.marketStructureMode ?? "—")}
+        </p>
+        <p>
+          Quote age (s): {String(diagnostics.quoteAgeSeconds ?? "—")} · Signal age (s):{" "}
+          {String(diagnostics.signalAgeSeconds ?? "—")}
+        </p>
+      </div>
+    </details>
   );
 }

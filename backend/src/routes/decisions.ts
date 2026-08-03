@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
 import { approvedAccountGate } from "../middleware/accountAccess";
+import { resolveMarketStructureView } from "../services/decision/strategySignal";
 import type { GoldMetaStore } from "../services/storage/types";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
@@ -13,14 +14,21 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
     const userId = getAuthenticatedUserId(req);
     // Prefer non-test decisions so TradingView TEST fixture OHLC (~2408) cannot
     // become the LIVE dashboard "live price" next to a real ~4050 alert profile.
-    const recent = await store.listDecisions(userId, 30);
-    const latest =
-      recent.find((d) => !d.isTestDecision && d.environment !== "TEST") ?? recent[0];
+    const recent = await store.listDecisions(userId, 40);
+    const view = resolveMarketStructureView(recent);
+    const latest = view.quoteDecision ?? recent[0];
     if (!latest) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: "No decisions found" } });
       return;
     }
-    res.json({ decision: latest });
+    res.json({
+      decision: latest,
+      latestQuote: view.latestQuote,
+      latestCompleteStrategySignal: view.latestCompleteStrategySignal,
+      marketStructureMode: view.marketStructureMode,
+      marketStructureDiagnostics: view.diagnostics,
+      structureDecisionId: view.structureDecision?.decisionId ?? null
+    });
   });
 
   router.get("/v1/decisions", requireAuth, ...approvedAccountGate, async (req, res) => {

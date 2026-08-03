@@ -112,6 +112,14 @@ function buildSnapshotFromPage(args: {
 export function OverviewPage() {
   const { api } = useAuth();
   const [decision, setDecision] = useState<Decision | null>(null);
+  const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
+  const [marketStructureMode, setMarketStructureMode] = useState<
+    "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE" | null
+  >(null);
+  const [marketStructureDiagnostics, setMarketStructureDiagnostics] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [setup, setSetup] = useState<SetupRecord | null>(null);
   const [recent, setRecent] = useState<SetupRecord[]>([]);
   const [overnightSetups, setOvernightSetups] = useState<SetupRecord[]>([]);
@@ -131,15 +139,22 @@ export function OverviewPage() {
   const load = useCallback(async () => {
     setErrorDetail(null);
     try {
-      const [latest, active, recentSetups, overnight, b, s] = await Promise.all([
-        api.latestDecision(),
+      const [pack, active, recentSetups, overnight, b, s] = await Promise.all([
+        api.latestDecisionPack(),
         api.listActiveSetups().catch(() => [] as SetupRecord[]),
         api.listSetups(6, "LIVE").catch(() => [] as SetupRecord[]),
         api.listSetups(20, "LIVE").catch(() => [] as SetupRecord[]),
         api.v5Briefing("LIVE").catch(() => null),
         api.v5Score("LIVE").catch(() => null)
       ]);
+      const latest = pack?.decision ?? null;
+      const complete = pack?.latestCompleteStrategySignal ?? null;
       setDecision(latest);
+      setStructureDecision(complete);
+      setMarketStructureMode(pack?.marketStructureMode ?? null);
+      setMarketStructureDiagnostics(
+        (pack?.marketStructureDiagnostics as Record<string, unknown> | null | undefined) ?? null
+      );
       setRecent(recentSetups.slice(0, 3));
       setOvernightSetups(overnight);
       setBriefing(b as Briefing | null);
@@ -148,7 +163,13 @@ export function OverviewPage() {
       setCachedAt(null);
       if (latest) {
         saveCache(cacheKeys.decision, latest);
-        setSetup(active.find((x) => x.decisionId === latest.decisionId) ?? active[0] ?? null);
+        const structureId = pack?.structureDecisionId ?? complete?.decisionId ?? latest.decisionId;
+        setSetup(
+          active.find((x) => x.decisionId === structureId) ??
+            active.find((x) => x.decisionId === latest.decisionId) ??
+            active[0] ??
+            null
+        );
       } else {
         setSetup(active[0] ?? null);
       }
@@ -202,14 +223,15 @@ export function OverviewPage() {
       : typeof score?.total === "number"
         ? score.total
         : null;
-  const planEntry = decision?.entry?.price ?? setup?.levels?.entryPrice ?? null;
-  const planStop = decision?.stopLoss?.price ?? setup?.levels?.stopLoss ?? null;
+  const structure = structureDecision ?? decision;
+  const planEntry = structure?.entry?.price ?? setup?.levels?.entryPrice ?? null;
+  const planStop = structure?.stopLoss?.price ?? setup?.levels?.stopLoss ?? null;
   const planTp1 =
-    decision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? setup?.levels?.tp1 ?? null;
+    structure?.takeProfits?.find((t) => t.label === "TP1")?.price ?? setup?.levels?.tp1 ?? null;
   const planTp2 =
-    decision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? setup?.levels?.tp2 ?? null;
+    structure?.takeProfits?.find((t) => t.label === "TP2")?.price ?? setup?.levels?.tp2 ?? null;
   const planTp3 =
-    decision?.takeProfits?.find((t) => t.label === "TP3")?.price ?? setup?.levels?.tp3 ?? null;
+    structure?.takeProfits?.find((t) => t.label === "TP3")?.price ?? setup?.levels?.tp3 ?? null;
   const estimatedRisk =
     planEntry != null && planStop != null
       ? `About ${Math.abs(planEntry - planStop).toFixed(2)} points to stop (not guaranteed)`
@@ -227,12 +249,18 @@ export function OverviewPage() {
         : `Updated ${compactTime} local time`;
 
   const sessionLabel = formatSession(briefing?.session ?? decision?.currentSession);
-  // Prefer same-source decision OHLC + structure. Briefing levels are only used when
-  // they agree with the decision close (server also omits mismatched V4 levels).
+  // Quote from latest decision; structure from latest complete compatible strategy signal.
   const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
-  const poc = briefing?.levels?.poc ?? decision?.marketStructure?.poc ?? null;
-  const vah = briefing?.levels?.vah ?? decision?.marketStructure?.vah ?? null;
-  const val = briefing?.levels?.val ?? decision?.marketStructure?.val ?? null;
+  const liveRangeOnly = marketStructureMode === "LIVE_RANGE_ONLY";
+  const poc = liveRangeOnly
+    ? null
+    : structure?.marketStructure?.poc ?? briefing?.levels?.poc ?? null;
+  const vah = liveRangeOnly
+    ? null
+    : structure?.marketStructure?.vah ?? briefing?.levels?.vah ?? null;
+  const val = liveRangeOnly
+    ? null
+    : structure?.marketStructure?.val ?? briefing?.levels?.val ?? null;
   const hasPlan = Boolean(
     setup &&
       (setup.levels?.entryPrice != null ||
@@ -402,6 +430,7 @@ export function OverviewPage() {
             livePrice,
             alertClose:
               briefing?.tradingViewAlertClose ??
+              structure?.ohlcv?.close ??
               decision?.ohlcv?.close ??
               decision?.lastKnownPrice ??
               null,
@@ -410,11 +439,11 @@ export function OverviewPage() {
             val,
             barHigh: decision?.ohlcv?.high ?? null,
             barLow: decision?.ohlcv?.low ?? null,
-            entry: setup?.levels?.entryPrice ?? null,
-            stop: setup?.levels?.stopLoss ?? null,
-            tp1: setup?.levels?.tp1 ?? null,
-            tp2: setup?.levels?.tp2 ?? null,
-            tp3: setup?.levels?.tp3 ?? null,
+            entry: liveRangeOnly ? null : planEntry,
+            stop: liveRangeOnly ? null : planStop,
+            tp1: liveRangeOnly ? null : planTp1,
+            tp2: liveRangeOnly ? null : planTp2,
+            tp3: liveRangeOnly ? null : planTp3,
             dataSourceLabel: decision?.dataSourceLabel ?? null,
             isTestDecision: decision?.isTestDecision ?? null,
             marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
@@ -422,6 +451,7 @@ export function OverviewPage() {
             brokerQuoteVerified:
               decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
             marketStatus: "UNKNOWN",
+            liveRangeOnly,
             priceSource: decision?.isTestDecision
               ? "TEST_FIXTURE"
               : decision?.symbolIdentity?.exchange ??
@@ -429,6 +459,8 @@ export function OverviewPage() {
                 "DECISION"
           }}
           dataTimestamp={stampIso}
+          mode={marketStructureMode}
+          diagnostics={marketStructureDiagnostics}
         />
       </SectionCard>
 
