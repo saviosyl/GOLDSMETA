@@ -9,10 +9,12 @@ type Props = {
 type LadderPoint = {
   id: string;
   label: string;
+  shortLabel: string;
   price: number;
   kind: "stretch-low" | "probable-low" | "current" | "probable-high" | "stretch-high";
   why: string;
   testId: string;
+  prominence: "primary" | "edge";
 };
 
 function pctAlong(value: number | null, low: number | null, high: number | null): number {
@@ -65,42 +67,52 @@ export function ExpectedRangeCard({ range }: Props) {
     {
       id: "stretch-low",
       label: "Stretch Low",
+      shortLabel: "Stretch L",
       price: stretchLow,
       kind: "stretch-low",
       why: "Outer downside estimate. Markets can still move beyond stretch levels.",
-      testId: "range-stretch-low"
+      testId: "range-stretch-low",
+      prominence: "edge"
     },
     {
       id: "probable-low",
       label: "Probable Low",
+      shortLabel: "Prob. Low",
       price: range.probableLow!,
       kind: "probable-low",
       why: "Nearest verified support / downside bound for the current research window.",
-      testId: "range-probable-low"
+      testId: "range-probable-low",
+      prominence: "primary"
     },
     {
       id: "current",
       label: "Current Price",
+      shortLabel: "Current",
       price: range.currentPrice!,
       kind: "current",
       why: "Live / last verified price marker for the ladder.",
-      testId: "range-current"
+      testId: "range-current",
+      prominence: "primary"
     },
     {
       id: "probable-high",
       label: "Probable High",
+      shortLabel: "Prob. High",
       price: range.probableHigh!,
       kind: "probable-high",
       why: "Nearest verified resistance / upside bound for the current research window.",
-      testId: "range-probable-high"
+      testId: "range-probable-high",
+      prominence: "primary"
     },
     {
       id: "stretch-high",
       label: "Stretch High",
+      shortLabel: "Stretch H",
       price: stretchHigh,
       kind: "stretch-high",
       why: "Outer upside estimate. Stretch is not a guaranteed target.",
-      testId: "range-stretch-high"
+      testId: "range-stretch-high",
+      prominence: "edge"
     }
   ];
 
@@ -145,25 +157,40 @@ export function ExpectedRangeCard({ range }: Props) {
           {points.map((p) => {
             const left = pctAlong(p.price, stretchLow, stretchHigh);
             return (
-              <button
-                key={p.id}
-                type="button"
-                className={`gm-range-node kind-${p.kind}${openId === p.id ? " is-open" : ""}`}
+              <span
+                key={`tick-${p.id}`}
+                className={`gm-range-tick kind-${p.kind}`}
                 style={{ left: `${left}%` }}
-                title={`${p.label} ${fmtPrice(p.price)} — ${p.why}`}
-                aria-expanded={openId === p.id}
-                aria-controls={panelId}
-                data-testid={`range-node-${p.id}`}
-                onClick={() => setOpenId(openId === p.id ? null : p.id)}
-              >
-                <span className="gm-range-node-label">{p.label}</span>
-                <strong data-testid={p.testId}>{fmtPrice(p.price)}</strong>
-                {p.kind !== "current" && (
-                  <em className="gm-meta">{distLabel(range.currentPrice, p.price)}</em>
-                )}
-              </button>
+                aria-hidden="true"
+              />
             );
           })}
+        </div>
+
+        <div className="gm-range-nodes" role="group" aria-label="Range levels">
+          {points.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`gm-range-node kind-${p.kind} prominence-${p.prominence}${
+                openId === p.id ? " is-open" : ""
+              }`}
+              title={`${p.label} ${fmtPrice(p.price)} — ${p.why}`}
+              aria-expanded={openId === p.id}
+              aria-controls={panelId}
+              data-testid={`range-node-${p.id}`}
+              onClick={() => setOpenId(openId === p.id ? null : p.id)}
+            >
+              <span className="gm-range-node-label">
+                <span className="gm-range-label-full">{p.label}</span>
+                <span className="gm-range-label-short">{p.shortLabel}</span>
+              </span>
+              <strong data-testid={p.testId}>{fmtPrice(p.price)}</strong>
+              {p.kind !== "current" && (
+                <em className="gm-meta gm-range-dist">{distLabel(range.currentPrice, p.price)}</em>
+              )}
+            </button>
+          ))}
         </div>
       </div>
 

@@ -26,14 +26,19 @@ type Props = {
 function Chip({
   children,
   tone,
-  testId
+  testId,
+  className = ""
 }: {
   children: ReactNode;
   tone?: FreshnessTone | "bullish" | "bearish" | "neutral" | "prepare" | "safe";
   testId?: string;
+  className?: string;
 }) {
   return (
-    <span className={`gm-status-chip tone-${tone ?? "neutral"}`} data-testid={testId}>
+    <span
+      className={`gm-status-chip tone-${tone ?? "neutral"} ${className}`.trim()}
+      data-testid={testId}
+    >
       {children}
     </span>
   );
@@ -106,10 +111,11 @@ export function IntradayHeaderCard({
         <Chip tone={tone} testId="intraday-freshness">
           {freshLabel}
         </Chip>
-        <Chip tone="safe">Analysis only</Chip>
-        <Chip tone="neutral">Manual trading</Chip>
         <span data-testid="intraday-autotrade-off">
-          <Chip tone="prepare">AutoTrade OFF</Chip>
+          <Chip tone="prepare" testId="cockpit-safety-chip" className="gm-safety-combo">
+            <span className="gm-safety-quiet">Analysis only · Manual</span>
+            <span className="gm-safety-autotrade">AutoTrade OFF</span>
+          </Chip>
         </span>
         {source !== "live" && (
           <Chip tone="stale">{source === "offline" ? "Offline" : "Cached"}</Chip>

@@ -390,7 +390,7 @@ export function OverviewPage() {
         style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", flexWrap: "wrap" }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <PageHeader title="GoldMeta" freshness={freshness} />
+          <PageHeader title="GoldMeta" />
         </div>
         <ExplainThisPage />
         <button
@@ -404,13 +404,14 @@ export function OverviewPage() {
         </button>
       </div>
 
-      <p className="gm-meta" data-testid="dashboard-last-refresh" style={{ marginTop: 0 }}>
+      <p className="gm-meta gm-sr-meta" data-testid="dashboard-last-refresh" style={{ marginTop: 0 }}>
         Last refresh:{" "}
         {lastSuccessAt
           ? formatCompactLocalTime(lastSuccessAt, tzPref)
           : loading
             ? "…"
             : "pending"}
+        {freshness ? ` · ${freshness}` : ""}
       </p>
 
       {errorDetail && (

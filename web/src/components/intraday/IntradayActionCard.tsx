@@ -1,7 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import { actionTone, fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
-import { shortActionLabel } from "../../lib/cockpitHelpers";
+import {
+  actionSubtitle,
+  ensureReadableSpacing,
+  shortActionLabel
+} from "../../lib/cockpitHelpers";
 
 function fmtDistanceAbs(points: number | null | undefined): string {
   if (points == null || !Number.isFinite(points)) return "—";
@@ -21,6 +25,7 @@ export function IntradayActionCard({ plan }: Props) {
   const [panel, setPanel] = useState<Panel>(null);
   const panelId = useId();
   const short = shortActionLabel(plan.action, plan.actionLabel);
+  const subtitle = actionSubtitle(plan.actionLabel, short);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -43,12 +48,14 @@ export function IntradayActionCard({ plan }: Props) {
           <p className="gm-label">What should I do now?</p>
           <h2 className="gm-intra-action-label" data-testid="intraday-action-label">
             <span data-testid="intraday-action-short">{short}</span>
-            {plan.actionLabel !== short && (
-              <span className="gm-action-sublabel">{plan.actionLabel}</span>
+            {subtitle && (
+              <span className="gm-action-sublabel" data-testid="intraday-action-subtitle">
+                {subtitle}
+              </span>
             )}
           </h2>
           <p className="gm-intra-action-sentence" data-testid="intraday-one-sentence">
-            {plan.oneSentence}
+            {ensureReadableSpacing(plan.oneSentence)}
           </p>
           {plan.valueLocation && (
             <p className="gm-meta" data-testid="intraday-value-location">
@@ -93,7 +100,9 @@ export function IntradayActionCard({ plan }: Props) {
       <div className="gm-intra-action-grid gm-action-keyfacts">
         <div>
           <span className="gm-label">Trigger</span>
-          <strong data-testid="intraday-trigger">{plan.trigger ?? "—"}</strong>
+          <strong data-testid="intraday-trigger">
+            {ensureReadableSpacing(plan.trigger ?? "—")}
+          </strong>
           {plan.triggerPrice != null && (
             <span className="gm-meta">
               {fmtPrice(plan.triggerPrice)} · {fmtDistanceAbs(plan.distanceToTriggerPoints)}
@@ -103,16 +112,20 @@ export function IntradayActionCard({ plan }: Props) {
         <div>
           <span className="gm-label">Confirmation</span>
           <strong data-testid="intraday-confirmation-summary">
-            {plan.entryConfirmation[0] ?? "None listed"}
+            {ensureReadableSpacing(plan.entryConfirmation[0] ?? "None listed")}
           </strong>
         </div>
         <div>
           <span className="gm-label">Nearest target</span>
-          <strong data-testid="intraday-next-target">{plan.nextTarget ?? "—"}</strong>
+          <strong data-testid="intraday-next-target">
+            {ensureReadableSpacing(plan.nextTarget ?? "—")}
+          </strong>
         </div>
-        <div>
+        <div className="gm-action-invalidation">
           <span className="gm-label">Invalidation</span>
-          <strong data-testid="intraday-invalidation">{plan.invalidation}</strong>
+          <strong data-testid="intraday-invalidation">
+            {ensureReadableSpacing(plan.invalidation)}
+          </strong>
         </div>
       </div>
       {(plan.afterThatTarget || plan.majorTarget) && (
