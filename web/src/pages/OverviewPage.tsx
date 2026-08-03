@@ -17,7 +17,7 @@ import { buildOvernightReview } from "../lib/overnight";
 import type { BuildSnapshotInput } from "../lib/promoSnapshot";
 import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
 import { useDashboardDecisionPoll } from "../lib/useDashboardDecisionPoll";
-import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
+import { EmptyState, PageHeader, SectionCard, Tabs } from "../components/ui/primitives";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
 import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
@@ -26,10 +26,13 @@ import { IntradayHeaderCard } from "../components/intraday/IntradayHeaderCard";
 import { IntradayActionCard } from "../components/intraday/IntradayActionCard";
 import { ExpectedRangeCard } from "../components/intraday/ExpectedRangeCard";
 import { ScenarioCards } from "../components/intraday/ScenarioCards";
-import { ZoneGuideCard } from "../components/intraday/ZoneGuideCard";
-import { CompactTradePlanCard } from "../components/intraday/CompactTradePlanCard";
 import { ImportantLevelsPanel } from "../components/intraday/ImportantLevelsPanel";
 import { SystemStatusCollapse } from "../components/intraday/SystemStatusCollapse";
+import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
+import { IndicatorChips } from "../components/intraday/IndicatorChips";
+import { ExplainThisPage } from "../components/intraday/ExplainThisPage";
+import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
+import { shortActionLabel } from "../lib/cockpitHelpers";
 
 type Briefing = {
   session?: string | null;
@@ -52,6 +55,8 @@ type Score = {
   components?: Array<{ label: string; score: number; max: number; reason: string }>;
   disclaimer?: string;
 };
+
+type ResearchTab = "overview" | "structure" | "momentum" | "volume" | "history";
 
 function buildSnapshotFromPage(args: {
   decision: Decision | null;
@@ -134,13 +139,13 @@ function useIsDesktop(): boolean {
 function StickyActionSummary({
   actionLabel,
   livePrice,
-  sessionLabel,
-  trigger
+  trigger,
+  triggerPrice
 }: {
   actionLabel: string;
   livePrice: number | null;
-  sessionLabel: string;
   trigger: string | null;
+  triggerPrice: number | null;
 }) {
   const [pinned, setPinned] = useState(false);
 
@@ -149,7 +154,6 @@ function StickyActionSummary({
     if (!anchor || typeof IntersectionObserver === "undefined") return;
     const obs = new IntersectionObserver(
       ([entry]) => {
-        // Show sticky only after the main action summary has left the viewport.
         setPinned(!(entry?.isIntersecting ?? true));
       },
       { root: null, threshold: 0, rootMargin: "-8px 0px 0px 0px" }
@@ -158,6 +162,13 @@ function StickyActionSummary({
     return () => obs.disconnect();
   }, [actionLabel]);
 
+  const triggerBit =
+    triggerPrice != null
+      ? `Trigger ${triggerPrice.toFixed(2)}`
+      : trigger
+        ? trigger.slice(0, 42)
+        : "No trigger";
+
   return (
     <div
       className={`gm-sticky-action${pinned ? " is-visible" : ""}`}
@@ -165,23 +176,20 @@ function StickyActionSummary({
       data-pinned={pinned ? "1" : "0"}
       aria-hidden={!pinned}
     >
-      <strong>{actionLabel}</strong>
-      <span>
-        {livePrice != null ? `XAUUSD ${livePrice.toFixed(2)}` : "XAUUSD"} · {sessionLabel} ·{" "}
-        {trigger ?? "No trigger"}
-      </span>
+      <strong>
+        XAUUSD | {actionLabel}
+        {livePrice != null ? ` | ${livePrice.toFixed(2)}` : ""} | {triggerBit} | AutoTrade OFF
+      </strong>
     </div>
   );
 }
 
-/** Issue #50 — compact premium intraday assistant home. */
+/** Compact interactive intraday research cockpit. */
 export function OverviewPage() {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
   const isDesktop = useIsDesktop();
-  const [structureOpen, setStructureOpen] = useState(isDesktop);
-  useEffect(() => {
-    setStructureOpen(isDesktop);
-  }, [isDesktop]);
+  const [structureOpen, setStructureOpen] = useState(false);
+  const [researchTab, setResearchTab] = useState<ResearchTab>("overview");
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
   const [intradayPlan, setIntradayPlan] = useState<IntradayPlan | null>(null);
@@ -205,6 +213,7 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
+  const [previousPrice, setPreviousPrice] = useState<number | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
@@ -220,7 +229,14 @@ export function OverviewPage() {
       ]);
       const latest = pack?.decision ?? null;
       const complete = pack?.latestCompleteStrategySignal ?? null;
-      setDecision(latest);
+      setDecision((prev) => {
+        const nextPrice = latest?.lastKnownPrice ?? latest?.ohlcv?.close ?? null;
+        const prevPrice = prev?.lastKnownPrice ?? prev?.ohlcv?.close ?? null;
+        if (prevPrice != null && nextPrice != null && prevPrice !== nextPrice) {
+          setPreviousPrice(prevPrice);
+        }
+        return latest;
+      });
       setStructureDecision(complete);
       setIntradayPlan((pack?.intradayPlan as IntradayPlan | null | undefined) ?? null);
       setMarketStructureMode(pack?.marketStructureMode ?? null);
@@ -355,16 +371,28 @@ export function OverviewPage() {
   const downsideLevels =
     intradayPlan?.importantLevels.filter((l) => l.side === "DOWNSIDE") ?? [];
   const orderedLevels = [...upsideLevels, ...downsideLevels];
+  const shortAction = intradayPlan
+    ? shortActionLabel(intradayPlan.action, intradayPlan.actionLabel)
+    : "—";
+
+  const tabItems = [
+    { id: "overview", label: "Overview" },
+    { id: "structure", label: "Structure" },
+    { id: "momentum", label: "Momentum" },
+    { id: "volume", label: "Volume" },
+    { id: "history", label: "History" }
+  ];
 
   return (
-    <div data-testid="overview-page" className="gm-dashboard">
+    <div data-testid="overview-page" className="gm-dashboard gm-cockpit">
       <div
         className="gm-page-header-row"
-        style={{ display: "flex", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}
+        style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", flexWrap: "wrap" }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
           <PageHeader title="GoldMeta" freshness={freshness} />
         </div>
+        <ExplainThisPage />
         <button
           type="button"
           className="gm-btn-outline"
@@ -400,39 +428,218 @@ export function OverviewPage() {
           Tap Refresh when you are back online.
         </div>
       )}
-      {loading && (
-        <SectionCard>
-          <p className="gm-meta">Loading market state…</p>
-        </SectionCard>
-      )}
+
+      <CockpitAlerts
+        marketStructureMode={marketStructureMode}
+        loading={loading && !intradayPlan}
+        signedOut={!user && !loading}
+        apiError={Boolean(errorDetail) && !intradayPlan}
+      />
 
       {intradayPlan ? (
-        <>
+        <div className="gm-cockpit-main" data-testid="cockpit-main">
           <StickyActionSummary
-            actionLabel={intradayPlan.actionLabel}
+            actionLabel={shortAction}
             livePrice={livePrice}
-            sessionLabel={sessionLabel}
             trigger={intradayPlan.trigger}
+            triggerPrice={intradayPlan.triggerPrice}
           />
           <IntradayHeaderCard
             plan={intradayPlan}
             livePrice={livePrice}
+            previousPrice={previousPrice}
             sessionLabel={sessionLabel}
             freshness={freshness}
             source={source}
+            marketStructureMode={marketStructureMode}
+            compactTime={compactTime}
           />
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
             <IntradayActionCard plan={intradayPlan} />
           </div>
-          <ExpectedRangeCard range={intradayPlan.expectedRange} />
-          <ScenarioCards
-            bullish={intradayPlan.bullishScenario}
-            bearish={intradayPlan.bearishScenario}
+
+          <Tabs
+            items={tabItems}
+            value={researchTab}
+            onChange={(id) => setResearchTab(id as ResearchTab)}
           />
-          <ZoneGuideCard zones={intradayPlan.zones} livePrice={livePrice} />
-          <CompactTradePlanCard tradePlan={intradayPlan.tradePlan} />
-          <ImportantLevelsPanel levels={orderedLevels} allLevels={intradayPlan.importantLevels} />
-        </>
+
+          {researchTab === "overview" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-overview">
+              <ExpectedRangeCard range={intradayPlan.expectedRange} />
+              <ScenarioCards
+                plan={intradayPlan}
+                bullish={intradayPlan.bullishScenario}
+                bearish={intradayPlan.bearishScenario}
+              />
+              <ResearchMatrix
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                scoreComponents={score?.components}
+              />
+              <ImportantLevelsPanel
+                levels={orderedLevels}
+                allLevels={intradayPlan.importantLevels}
+                compactDefault
+              />
+              <IndicatorChips
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                poc={poc}
+                vah={vah}
+                val={val}
+                atrLabel={briefing?.atrLabel}
+                atrValue={briefing?.atrValue}
+                scoreComponents={score?.components}
+              />
+            </div>
+          )}
+
+          {researchTab === "structure" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-structure">
+              <IndicatorChips
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                poc={poc}
+                vah={vah}
+                val={val}
+                atrLabel={briefing?.atrLabel}
+                atrValue={briefing?.atrValue}
+                scoreComponents={score?.components}
+              />
+              <ImportantLevelsPanel
+                levels={orderedLevels}
+                allLevels={intradayPlan.importantLevels}
+              />
+              <details
+                className="gm-structure-collapse"
+                data-testid="market-structure-collapse"
+                open={structureOpen || isDesktop}
+                onToggle={(e) => setStructureOpen((e.currentTarget as HTMLDetailsElement).open)}
+              >
+                <summary>Market Structure Map</summary>
+                <div className="gm-structure-collapse-body">
+                  <MarketLevelLadder
+                    input={{
+                      livePrice,
+                      alertClose:
+                        briefing?.tradingViewAlertClose ??
+                        structure?.ohlcv?.close ??
+                        decision?.ohlcv?.close ??
+                        decision?.lastKnownPrice ??
+                        null,
+                      poc,
+                      vah,
+                      val,
+                      barHigh: decision?.ohlcv?.high ?? null,
+                      barLow: decision?.ohlcv?.low ?? null,
+                      entry: liveRangeOnly ? null : planEntry,
+                      stop: liveRangeOnly ? null : planStop,
+                      tp1: liveRangeOnly ? null : planTp1,
+                      tp2: liveRangeOnly ? null : planTp2,
+                      tp3: liveRangeOnly ? null : planTp3,
+                      dataSourceLabel: decision?.dataSourceLabel ?? null,
+                      isTestDecision: decision?.isTestDecision ?? null,
+                      marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
+                      brokerQuoteVerified:
+                        decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
+                      marketStatus: "UNKNOWN",
+                      liveRangeOnly,
+                      priceSource: decision?.isTestDecision
+                        ? "TEST_FIXTURE"
+                        : decision?.symbolIdentity?.exchange ??
+                          decision?.dataSourceLabel ??
+                          "DECISION"
+                    }}
+                    dataTimestamp={stampIso}
+                    mode={marketStructureMode}
+                    diagnostics={marketStructureDiagnostics}
+                  />
+                </div>
+              </details>
+            </div>
+          )}
+
+          {researchTab === "momentum" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-momentum">
+              <ResearchMatrix
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                scoreComponents={score?.components}
+              />
+              <IndicatorChips
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                poc={poc}
+                vah={vah}
+                val={val}
+                atrLabel={briefing?.atrLabel}
+                atrValue={briefing?.atrValue}
+                scoreComponents={score?.components}
+              />
+              <SectionCard title="Momentum notes">
+                <p className="gm-meta" style={{ margin: 0 }}>
+                  RSI, ADX, EMA and VWAP chips appear only when verified in structure reasons or score
+                  text. Missing values stay unavailable — GoldMeta does not invent them.
+                </p>
+              </SectionCard>
+            </div>
+          )}
+
+          {researchTab === "volume" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-volume">
+              <SectionCard title="Volume research">
+                <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+                  Session {sessionLabel}. Regime {briefing?.marketRegime ?? "unknown"}. Position vs
+                  POC {briefing?.positionVsPoc?.replace(/_/g, " ") ?? "—"}. ATR{" "}
+                  {briefing?.atrLabel ?? "—"}.
+                </p>
+                <p className="gm-meta">{briefing?.disclaimer}</p>
+              </SectionCard>
+              <IndicatorChips
+                plan={intradayPlan}
+                decision={structureDecision ?? decision}
+                poc={poc}
+                vah={vah}
+                val={val}
+                atrLabel={briefing?.atrLabel}
+                atrValue={briefing?.atrValue}
+                scoreComponents={score?.components}
+              />
+            </div>
+          )}
+
+          {researchTab === "history" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-history">
+              <OvernightReviewCard review={overnight} />
+              <SectionCard
+                title="Recent activity"
+                action={
+                  <Link className="gm-linkish" to="/history">
+                    View history
+                  </Link>
+                }
+              >
+                {recent.length === 0 ? (
+                  <EmptyState title="No recent setups yet." />
+                ) : (
+                  <ul className="list">
+                    {recent.map((s) => (
+                      <li key={s.setupId}>
+                        <Link to={`/setups/${s.setupId}`}>
+                          {s.direction ?? "—"} · {String(s.status).replace(/_/g, " ")}
+                        </Link>
+                        <div className="gm-meta">
+                          {formatLocalTimestamp(s.createdAt, tzPref).primary}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </SectionCard>
+            </div>
+          )}
+        </div>
       ) : (
         !loading && (
           <SectionCard title="What should I do?">
@@ -445,52 +652,52 @@ export function OverviewPage() {
         )
       )}
 
-      <details
-        className="gm-structure-collapse"
-        data-testid="market-structure-collapse"
-        open={structureOpen}
-        onToggle={(e) => setStructureOpen((e.currentTarget as HTMLDetailsElement).open)}
-      >
-        <summary>Market Structure Map</summary>
-        <div className="gm-structure-collapse-body">
-          <MarketLevelLadder
-            input={{
-              livePrice,
-              alertClose:
-                briefing?.tradingViewAlertClose ??
-                structure?.ohlcv?.close ??
-                decision?.ohlcv?.close ??
-                decision?.lastKnownPrice ??
-                null,
-              poc,
-              vah,
-              val,
-              barHigh: decision?.ohlcv?.high ?? null,
-              barLow: decision?.ohlcv?.low ?? null,
-              entry: liveRangeOnly ? null : planEntry,
-              stop: liveRangeOnly ? null : planStop,
-              tp1: liveRangeOnly ? null : planTp1,
-              tp2: liveRangeOnly ? null : planTp2,
-              tp3: liveRangeOnly ? null : planTp3,
-              dataSourceLabel: decision?.dataSourceLabel ?? null,
-              isTestDecision: decision?.isTestDecision ?? null,
-              marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
-              brokerQuoteVerified:
-                decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
-              marketStatus: "UNKNOWN",
-              liveRangeOnly,
-              priceSource: decision?.isTestDecision
-                ? "TEST_FIXTURE"
-                : decision?.symbolIdentity?.exchange ??
-                  decision?.dataSourceLabel ??
-                  "DECISION"
-            }}
-            dataTimestamp={stampIso}
-            mode={marketStructureMode}
-            diagnostics={marketStructureDiagnostics}
-          />
-        </div>
-      </details>
+      {!intradayPlan && (
+        <details
+          className="gm-structure-collapse"
+          data-testid="market-structure-collapse"
+          open={structureOpen}
+          onToggle={(e) => setStructureOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
+          <summary>Market Structure Map</summary>
+          <div className="gm-structure-collapse-body">
+            <MarketLevelLadder
+              input={{
+                livePrice,
+                alertClose:
+                  briefing?.tradingViewAlertClose ??
+                  structure?.ohlcv?.close ??
+                  decision?.ohlcv?.close ??
+                  decision?.lastKnownPrice ??
+                  null,
+                poc,
+                vah,
+                val,
+                barHigh: decision?.ohlcv?.high ?? null,
+                barLow: decision?.ohlcv?.low ?? null,
+                entry: liveRangeOnly ? null : planEntry,
+                stop: liveRangeOnly ? null : planStop,
+                tp1: liveRangeOnly ? null : planTp1,
+                tp2: liveRangeOnly ? null : planTp2,
+                tp3: liveRangeOnly ? null : planTp3,
+                dataSourceLabel: decision?.dataSourceLabel ?? null,
+                isTestDecision: decision?.isTestDecision ?? null,
+                marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
+                brokerQuoteVerified:
+                  decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
+                marketStatus: "UNKNOWN",
+                liveRangeOnly,
+                priceSource: decision?.isTestDecision
+                  ? "TEST_FIXTURE"
+                  : decision?.symbolIdentity?.exchange ?? decision?.dataSourceLabel ?? "DECISION"
+              }}
+              dataTimestamp={stampIso}
+              mode={marketStructureMode}
+              diagnostics={marketStructureDiagnostics}
+            />
+          </div>
+        </details>
+      )}
 
       <div className="gm-snapshot-actions-row">
         <PromoSnapshotButton onClick={snapshot.openModal} disabled={!decision && !briefing} />
@@ -535,47 +742,6 @@ export function OverviewPage() {
           </span>
         </div>
       </SystemStatusCollapse>
-
-      <OvernightReviewCard review={overnight} />
-
-      <div className="gm-two-col">
-        <SectionCard title="Market briefing">
-          {briefing?.insufficientData ? (
-            <EmptyState title="Insufficient verified data for a full briefing." />
-          ) : (
-            <p style={{ margin: 0, maxWidth: 720, color: "var(--text-secondary)" }}>
-              Session {sessionLabel}. Regime {briefing?.marketRegime ?? "unknown"}. Position vs POC{" "}
-              {briefing?.positionVsPoc?.replace(/_/g, " ") ?? "—"}. ATR {briefing?.atrLabel ?? "—"}.
-              This summary is informational only.
-            </p>
-          )}
-          <p className="gm-meta">{briefing?.disclaimer}</p>
-        </SectionCard>
-
-        <SectionCard
-          title="Recent activity"
-          action={
-            <Link className="gm-linkish" to="/history">
-              View history
-            </Link>
-          }
-        >
-          {recent.length === 0 ? (
-            <EmptyState title="No recent setups yet." />
-          ) : (
-            <ul className="list">
-              {recent.map((s) => (
-                <li key={s.setupId}>
-                  <Link to={`/setups/${s.setupId}`}>
-                    {s.direction ?? "—"} · {String(s.status).replace(/_/g, " ")}
-                  </Link>
-                  <div className="gm-meta">{formatLocalTimestamp(s.createdAt, tzPref).primary}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-      </div>
 
       <SectionCard
         title="Risk planner"

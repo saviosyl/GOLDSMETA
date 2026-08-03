@@ -1,13 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ImportantLevel, LevelProximity } from "../../types/intradayPlan";
 import { fmtPrice, fmtSignedDistance, rolePlain } from "../../lib/intradayFormat";
+import { levelProgressState } from "../../lib/cockpitHelpers";
 
 type Props = {
   levels: ImportantLevel[];
   allLevels: ImportantLevel[];
+  /** When true, show nearest 3 above + 3 below even on desktop. */
+  compactDefault?: boolean;
 };
 
-const MOBILE_NEAR_COUNT = 3;
+const NEAR_COUNT = 3;
 
 function LevelDetail({
   level,
@@ -20,6 +23,7 @@ function LevelDetail({
 }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const progress = levelProgressState(level);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -52,18 +56,15 @@ function LevelDetail({
       </div>
 
       <section>
-        <h4>What it is</h4>
-        <p>
-          {rolePlain(level.roleAtCurrentPrice)} · {level.strength.toLowerCase()} ·{" "}
-          {level.proximity.toLowerCase()} current price
+        <h4>Why it is important</h4>
+        <p>{level.shortMeaning}</p>
+        <p className="gm-meta">
+          {rolePlain(level.roleAtCurrentPrice)} · {level.strength.toLowerCase()} · progress{" "}
+          <strong data-testid={`level-progress-${level.id}`}>{progress}</strong>
         </p>
       </section>
       <section>
-        <h4>Why it matters</h4>
-        <p>{level.shortMeaning}</p>
-      </section>
-      <section>
-        <h4>Evidence behind this level</h4>
+        <h4>Supporting evidence</h4>
         <ul data-testid="level-evidence">
           {level.reasons.map((r) => (
             <li key={`${r.code}-${r.label}`}>
@@ -72,25 +73,19 @@ function LevelDetail({
             </li>
           ))}
         </ul>
+        <p className="gm-meta">Evidence count: {level.reasons.length}</p>
       </section>
       <section>
-        <h4>What to watch</h4>
-        <ul>
-          {level.whatToWatch.map((w) => (
-            <li key={w}>{w}</li>
-          ))}
-        </ul>
-      </section>
-      <section>
-        <h4>What happens if it holds</h4>
+        <h4>Bullish behaviour</h4>
         <p>{level.ifHolds}</p>
       </section>
       <section>
-        <h4>What happens if it breaks</h4>
+        <h4>Bearish behaviour</h4>
         <p>{level.ifBreaks}</p>
       </section>
       <section>
-        <h4>Confirmation required</h4>
+        <h4>What invalidates the level</h4>
+        <p>{level.riskWarning}</p>
         <ul>
           {level.confirmationRequired.map((c) => (
             <li key={c}>{c}</li>
@@ -98,16 +93,12 @@ function LevelDetail({
         </ul>
       </section>
       <section>
-        <h4>Next level / target</h4>
+        <h4>Next level</h4>
         <p>
           {nextLevel
             ? `${fmtPrice(nextLevel.price)} · ${nextLevel.shortMeaning}`
             : "No next verified level linked."}
         </p>
-      </section>
-      <section>
-        <h4>Risk warning</h4>
-        <p>{level.riskWarning}</p>
       </section>
       <section>
         <h4>Simple explanation</h4>
@@ -147,6 +138,7 @@ function LevelGroup({
             level.zoneLow != null && level.zoneHigh != null
               ? `${fmtPrice(level.zoneLow)}–${fmtPrice(level.zoneHigh)}`
               : fmtPrice(level.price);
+          const progress = levelProgressState(level);
           return (
             <li key={level.id}>
               <button
@@ -168,10 +160,14 @@ function LevelGroup({
                   {fmtSignedDistance(level.distancePoints)}
                 </span>
                 <span className="gm-level-meta">
-                  {rolePlain(level.roleAtCurrentPrice)} · {level.strength.toLowerCase()}
+                  {level.kind.replace(/_/g, " ")} · {rolePlain(level.roleAtCurrentPrice)}
+                </span>
+                <span className="gm-level-meta">
+                  {level.strength.toLowerCase()} · {level.reasons.length} evidence ·{" "}
+                  <em data-testid={`level-state-${level.id}`}>{progress}</em>
                 </span>
                 <span className="gm-level-meaning">{level.shortMeaning}</span>
-                <span className="gm-level-cta">{expanded ? "Hide details" : "Tap to understand"}</span>
+                <span className="gm-level-cta">{expanded ? "Hide details" : "Explain level"}</span>
               </button>
               {expanded && (
                 <div id={`level-panel-${level.id}`}>
@@ -196,9 +192,9 @@ function nearestByDistance(levels: ImportantLevel[], count: number): ImportantLe
     .slice(0, count);
 }
 
-export function ImportantLevelsPanel({ levels, allLevels }: Props) {
+export function ImportantLevelsPanel({ levels, allLevels, compactDefault = false }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [showAllMobile, setShowAllMobile] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -212,95 +208,96 @@ export function ImportantLevelsPanel({ levels, allLevels }: Props) {
   const nearAll = useMemo(() => levels.filter((l) => l.proximity === "NEAR"), [levels]);
   const belowAll = useMemo(() => levels.filter((l) => l.proximity === "BELOW"), [levels]);
 
-  const mobileAbove = nearestByDistance(aboveAll, MOBILE_NEAR_COUNT);
-  const mobileBelow = nearestByDistance(belowAll, MOBILE_NEAR_COUNT);
-  const mobileNear = nearAll;
-  const mobileCollapsedCount =
-    Math.max(0, aboveAll.length - mobileAbove.length) +
-    Math.max(0, belowAll.length - mobileBelow.length);
-  const mobileTotal = levels.length;
+  const compactAbove = nearestByDistance(aboveAll, NEAR_COUNT);
+  const compactBelow = nearestByDistance(belowAll, NEAR_COUNT);
+  const collapsedCount =
+    Math.max(0, aboveAll.length - compactAbove.length) +
+    Math.max(0, belowAll.length - compactBelow.length);
 
   if (!levels.length) {
     return (
-      <section className="gm-intra-levels" data-testid="important-levels-panel">
-        <h2 className="gm-section-title">Important levels</h2>
+      <section className="gm-intra-levels gm-levels-empty" data-testid="important-levels-panel">
         <p className="gm-meta" data-testid="no-important-levels">
-          No explained important levels yet. GoldMeta only labels a level important when it can cite
-          structured evidence.
+          No verified explained levels yet.
         </p>
       </section>
     );
   }
 
-  return (
-    <section className="gm-intra-levels" data-testid="important-levels-panel" aria-label="Important price levels">
-      <h2 className="gm-section-title">Important levels</h2>
-      <p className="gm-meta gm-desktop-only">Tap a level to understand what it is and what to watch.</p>
+  const renderGroups = (above: ImportantLevel[], below: ImportantLevel[], near: ImportantLevel[]) => (
+    <>
+      <LevelGroup
+        title="Above current price"
+        proximity="ABOVE"
+        levels={above}
+        allLevels={allLevels}
+        openId={openId}
+        setOpenId={setOpenId}
+      />
+      <LevelGroup
+        title="Near current price"
+        proximity="NEAR"
+        levels={near}
+        allLevels={allLevels}
+        openId={openId}
+        setOpenId={setOpenId}
+      />
+      <LevelGroup
+        title="Below current price"
+        proximity="BELOW"
+        levels={below}
+        allLevels={allLevels}
+        openId={openId}
+        setOpenId={setOpenId}
+      />
+    </>
+  );
 
-      {/* Desktop / tablet: full grouped grid */}
-      <div className="gm-levels-desktop" data-testid="levels-desktop-full">
-        <LevelGroup
-          title="Above current price"
-          proximity="ABOVE"
-          levels={aboveAll}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
-        <LevelGroup
-          title="Near current price"
-          proximity="NEAR"
-          levels={nearAll}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
-        <LevelGroup
-          title="Below current price"
-          proximity="BELOW"
-          levels={belowAll}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
+  return (
+    <section
+      className="gm-intra-levels"
+      data-testid="important-levels-panel"
+      aria-label="Important price levels"
+    >
+      <div className="gm-section-head">
+        <h2 className="gm-section-title">Important levels</h2>
+        <span className="gm-meta">Nearest verified levels</span>
       </div>
 
-      {/* Mobile: nearest 3 above + 3 below by default */}
+      {/* Desktop / tablet */}
+      <div className="gm-levels-desktop" data-testid="levels-desktop-full">
+        {renderGroups(
+          compactDefault && !showAll ? compactAbove : aboveAll,
+          compactDefault && !showAll ? compactBelow : belowAll,
+          nearAll
+        )}
+        {compactDefault && (collapsedCount > 0 || showAll) && (
+          <button
+            type="button"
+            className="gm-btn-outline gm-levels-show-all"
+            data-testid="levels-show-all-desktop"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? "Show nearest levels" : `Show all levels (${levels.length})`}
+          </button>
+        )}
+      </div>
+
+      {/* Mobile compact */}
       <div className="gm-levels-mobile gm-mobile-only" data-testid="levels-mobile-compact">
-        <LevelGroup
-          title="Above current price"
-          proximity="ABOVE"
-          levels={showAllMobile ? aboveAll : mobileAbove}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
-        <LevelGroup
-          title="Near current price"
-          proximity="NEAR"
-          levels={mobileNear}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
-        <LevelGroup
-          title="Below current price"
-          proximity="BELOW"
-          levels={showAllMobile ? belowAll : mobileBelow}
-          allLevels={allLevels}
-          openId={openId}
-          setOpenId={setOpenId}
-        />
-        {(mobileCollapsedCount > 0 || showAllMobile) && (
+        {renderGroups(
+          showAll ? aboveAll : compactAbove,
+          showAll ? belowAll : compactBelow,
+          nearAll
+        )}
+        {(collapsedCount > 0 || showAll) && (
           <button
             type="button"
             className="gm-btn-outline gm-levels-show-all"
             data-testid="levels-show-all"
-            onClick={() => setShowAllMobile((v) => !v)}
+            onClick={() => setShowAll((v) => !v)}
           >
-            {showAllMobile
-              ? "Show nearest levels"
-              : `Show all levels (${mobileTotal})`}
+            {showAll ? "Show nearest levels" : `Show all levels (${levels.length})`}
           </button>
         )}
       </div>
