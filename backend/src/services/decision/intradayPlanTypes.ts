@@ -14,15 +14,34 @@ export type IntradayAction =
   | "PREPARE"
   | "NO_TRADE";
 
-export type LevelSide = "UPSIDE" | "DOWNSIDE";
+export type LevelSide = "UPSIDE" | "DOWNSIDE" | "AT_PRICE";
 export type LevelKind =
   | "SUPPORT"
   | "RESISTANCE"
   | "TARGET"
   | "BREAKDOWN"
   | "BREAKOUT"
-  | "STRETCH";
+  | "STRETCH"
+  | "RECLAIM"
+  | "MAGNET"
+  | "INVALIDATION";
+
+export type LevelRoleAtPrice =
+  | "SUPPORT"
+  | "RESISTANCE"
+  | "RECLAIM_LEVEL"
+  | "BREAKDOWN_LEVEL"
+  | "BREAKOUT_LEVEL"
+  | "MAGNET"
+  | "TARGET"
+  | "INVALIDATION"
+  | "STRETCH_ESTIMATE"
+  | "PREVIOUS_SUPPORT_NOW_RESISTANCE"
+  | "PREVIOUS_RESISTANCE_NOW_SUPPORT";
+
+export type LevelProximity = "ABOVE" | "NEAR" | "BELOW";
 export type LevelStrength = "MINOR" | "MODERATE" | "STRONG" | "MAJOR";
+export type ValueLocation = "BELOW_VALUE" | "INSIDE_VALUE" | "ABOVE_VALUE" | "UNKNOWN";
 
 export type LevelReasonCode =
   | "POC"
@@ -68,6 +87,8 @@ export type ImportantLevel = {
   id: string;
   side: LevelSide;
   kind: LevelKind;
+  roleAtCurrentPrice: LevelRoleAtPrice;
+  proximity: LevelProximity;
   price: number | null;
   zoneLow: number | null;
   zoneHigh: number | null;
@@ -89,9 +110,13 @@ export type ImportantLevel = {
 export type ScenarioPlan = {
   label: string;
   trigger: string;
+  triggerPrice: number | null;
   firstTarget: string;
+  firstTargetPrice: number | null;
   secondTarget: string;
+  secondTargetPrice: number | null;
   invalidation: string;
+  invalidationPrice: number | null;
 };
 
 export type SetupChecklistItem = {
@@ -101,7 +126,21 @@ export type SetupChecklistItem = {
   detail: string;
 };
 
+export type ConditionalPlanRef = {
+  label: string;
+  direction: "BUY" | "SELL";
+  trigger: string;
+  entryZone: string | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  invalidation: string;
+  confirmationRequired: string[];
+};
+
 export type ManualTradePlanCard = {
+  /** ACTIVE_PLAN only when direction+entry+stop+TP1 and ordering are valid. */
+  cardKind: "ACTIVE_PLAN" | "CONDITIONAL_REFERENCE" | "NONE";
+  title: string;
   actionable: boolean;
   direction: "BUY" | "SELL" | "NONE";
   entryZone: string | null;
@@ -114,9 +153,16 @@ export type ManualTradePlanCard = {
   positionSizeNote: string;
   invalidation: string;
   management: string;
+  orderingValid: boolean;
+  orderingNote: string | null;
+  bullishConditional: ConditionalPlanRef | null;
+  bearishConditional: ConditionalPlanRef | null;
 };
 
 export type ExpectedRange = {
+  rangeAvailable: boolean;
+  unavailableReason: string | null;
+  valueLocation: ValueLocation;
   probableLow: number | null;
   probableHigh: number | null;
   stretchLow: number | null;
@@ -133,15 +179,22 @@ export type ExpectedRange = {
 };
 
 export type ZoneGuide = {
+  valueLocation: ValueLocation;
   bestBuyZone: string | null;
+  bestBuyImmediate: boolean;
+  bestBuyConfirmation: string | null;
+  bestBuyInvalidation: string | null;
   bestSellZone: string | null;
+  bestSellImmediate: boolean;
+  bestSellConfirmation: string | null;
+  bestSellInvalidation: string | null;
   noTradeZone: string | null;
   nearestSupport: number | null;
   nearestResistance: number | null;
 };
 
 export type IntradayPlan = {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   action: IntradayAction;
   actionLabel: string;
   oneSentence: string;
@@ -152,6 +205,7 @@ export type IntradayPlan = {
   invalidation: string;
   nextTarget: string | null;
   whyNotReady: string | null;
+  valueLocation: ValueLocation;
   setupProgress: {
     complete: number;
     total: number;

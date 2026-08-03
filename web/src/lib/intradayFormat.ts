@@ -8,30 +8,39 @@ export function fmtPrice(n: number | null | undefined, digits = 2): string {
   });
 }
 
-export function fmtDistance(points: number | null | undefined): string {
+export function fmtSignedDistance(points: number | null | undefined): string {
   if (points == null || !Number.isFinite(points)) return "—";
-  const abs = Math.abs(points);
-  const dir = points > 0 ? "above" : points < 0 ? "below" : "at";
-  if (points === 0) return "At price";
-  return `${abs.toFixed(1)} pts ${dir}`;
+  if (Math.abs(points) < 0.005) return "At price";
+  const arrow = points > 0 ? "↑" : "↓";
+  return `${arrow} ${Math.abs(points).toFixed(2)} points`;
 }
 
-export function kindPlain(kind: string): string {
-  switch (kind.toUpperCase()) {
-    case "RESISTANCE":
-      return "Ceiling (resistance)";
+export function rolePlain(role: string): string {
+  switch (role) {
     case "SUPPORT":
       return "Floor (support)";
-    case "BREAKOUT":
-      return "Breakout (break and hold)";
-    case "BREAKDOWN":
-      return "Breakdown (break and hold lower)";
+    case "RESISTANCE":
+      return "Ceiling (resistance)";
+    case "RECLAIM_LEVEL":
+      return "Reclaim level / first resistance";
+    case "BREAKDOWN_LEVEL":
+      return "Breakdown level";
+    case "BREAKOUT_LEVEL":
+      return "Breakout level";
+    case "MAGNET":
+      return "Magnet / decision point";
     case "TARGET":
       return "Target";
-    case "STRETCH":
-      return "Stretch target (estimate)";
+    case "INVALIDATION":
+      return "Invalidation";
+    case "STRETCH_ESTIMATE":
+      return "Stretch estimate";
+    case "PREVIOUS_SUPPORT_NOW_RESISTANCE":
+      return "Previous support — now reclaim/resistance";
+    case "PREVIOUS_RESISTANCE_NOW_SUPPORT":
+      return "Previous resistance — potential support after retest";
     default:
-      return kind.replace(/_/g, " ");
+      return role.replace(/_/g, " ");
   }
 }
 
@@ -59,4 +68,17 @@ export function confidenceLabel(pct: number): string {
   if (pct >= 60) return "Moderate";
   if (pct >= 40) return "Cautious";
   return "Low";
+}
+
+export function valueLocationLabel(loc: string | undefined): string {
+  switch (loc) {
+    case "BELOW_VALUE":
+      return "Below value";
+    case "ABOVE_VALUE":
+      return "Above value";
+    case "INSIDE_VALUE":
+      return "Inside value";
+    default:
+      return "Value location unknown";
+  }
 }

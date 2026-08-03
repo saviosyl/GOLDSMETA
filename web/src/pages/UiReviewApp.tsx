@@ -312,31 +312,56 @@ function buildReviewApi() {
                   ...chartExampleIntradayPlanFixture,
                   action: "NO_TRADE",
                   actionLabel: "NO TRADE",
+                  valueLocation: "UNKNOWN" as const,
                   importantLevels: [],
                   oneSentence:
                     "Market structure sources disagree — stand aside until data is consistent. (LABELLED FIXTURE)",
                   whyNotReady: "Price-source mismatch blocks important levels.",
                   expectedRange: {
                     ...chartExampleIntradayPlanFixture.expectedRange,
+                    rangeAvailable: false,
+                    unavailableReason:
+                      "Range unavailable — market data mismatch blocks combining levels.",
+                    valueLocation: "UNKNOWN" as const,
                     currentPrice: 2408,
                     probableLow: null,
                     probableHigh: null,
                     stretchLow: null,
                     stretchHigh: null
+                  },
+                  tradePlan: {
+                    ...chartExampleIntradayPlanFixture.tradePlan,
+                    cardKind: "NONE" as const,
+                    title: "No trade plan — data mismatch",
+                    actionable: false,
+                    direction: "NONE" as const,
+                    stopLoss: null,
+                    tp1: null,
+                    tp2: null,
+                    tp3: null,
+                    bullishConditional: null,
+                    bearishConditional: null
                   }
                 }
               : marketMatch
                 ? {
                     ...chartExampleIntradayPlanFixture,
+                    valueLocation: "BELOW_VALUE" as const,
                     oneSentence:
                       "Matching price sources — complete structure available. (LABELLED FIXTURE — market-match)",
+                    // Keep a valid range around the ~4050 match quote (probableLow ≤ current ≤ probableHigh).
                     expectedRange: {
                       ...chartExampleIntradayPlanFixture.expectedRange,
+                      rangeAvailable: true,
+                      unavailableReason: null,
+                      valueLocation: "BELOW_VALUE" as const,
                       currentPrice: 4045.165,
-                      probableLow: 4047.193,
-                      probableHigh: 4052.975,
+                      probableLow: 4042,
+                      probableHigh: 4047.193,
                       stretchLow: 4038,
-                      stretchHigh: 4062
+                      stretchHigh: 4055,
+                      remainingAbovePoints: 2.03,
+                      remainingBelowPoints: 3.17
                     },
                     importantLevels: []
                   }

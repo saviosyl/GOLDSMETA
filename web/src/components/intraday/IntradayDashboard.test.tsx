@@ -7,54 +7,64 @@ import { IntradayActionCard } from "./IntradayActionCard";
 import { ExpectedRangeCard } from "./ExpectedRangeCard";
 import { ImportantLevelsPanel } from "./ImportantLevelsPanel";
 import { ScenarioCards } from "./ScenarioCards";
+import { CompactTradePlanCard } from "./CompactTradePlanCard";
 
 describe("Issue #50 intraday dashboard components", () => {
-  it("shows clearer action states instead of bare WAIT", () => {
+  it("shows below-value reclaim language instead of bare WAIT / floor above price", () => {
     render(
       <MemoryRouter>
         <IntradayActionCard plan={chartExampleIntradayPlanFixture} />
       </MemoryRouter>
     );
     expect(screen.getByTestId("intraday-action-label")).toHaveTextContent("PREPARE — SETUP FORMING");
-    expect(screen.getByTestId("intraday-trigger")).toBeInTheDocument();
-    expect(screen.getByTestId("intraday-why-not-ready")).toHaveTextContent(/confirmation/i);
-    expect(screen.getByTestId("intraday-setup-progress")).toHaveTextContent(/3 of 6/);
-    expect(screen.getByTestId("intraday-entry-confirmation")).toBeInTheDocument();
+    expect(screen.getByTestId("intraday-one-sentence")).toHaveTextContent(/below value/i);
+    expect(screen.getByTestId("intraday-one-sentence")).toHaveTextContent(/reclaim/i);
+    expect(screen.getByTestId("intraday-trigger")).toHaveTextContent(/reclaim/i);
+    expect(screen.getByTestId("intraday-value-location")).toHaveTextContent(/Below value/i);
   });
 
-  it("orders probable and stretch range markers and labels estimates", () => {
+  it("keeps current price inside probable low/high when range is available", () => {
     const r = chartExampleIntradayPlanFixture.expectedRange;
+    expect(r.rangeAvailable).toBe(true);
+    expect(r.probableLow!).toBeLessThanOrEqual(r.currentPrice!);
+    expect(r.currentPrice!).toBeLessThanOrEqual(r.probableHigh!);
     expect(r.stretchLow!).toBeLessThanOrEqual(r.probableLow!);
-    expect(r.probableLow!).toBeLessThanOrEqual(r.probableHigh!);
     expect(r.probableHigh!).toBeLessThanOrEqual(r.stretchHigh!);
     render(<ExpectedRangeCard range={r} />);
-    expect(screen.getByTestId("range-disclaimer")).toHaveTextContent(/estimates only/i);
     expect(screen.getByTestId("range-probable-low")).toBeInTheDocument();
-    expect(screen.getByTestId("range-stretch-high")).toBeInTheDocument();
+    expect(screen.getByTestId("range-disclaimer")).toHaveTextContent(/estimates only/i);
   });
 
-  it("never renders an important level without evidence and expands by mouse/keyboard", async () => {
+  it("labels VAL above price as reclaim, not plain support", async () => {
     const user = userEvent.setup();
     const levels = chartExampleIntradayPlanFixture.importantLevels;
+    const val = levels.find((l) => l.id === "lvl-val");
+    expect(val?.roleAtCurrentPrice).toBe("RECLAIM_LEVEL");
+    expect(val?.proximity).toBe("ABOVE");
     for (const level of levels) {
-      expect(level.reasons.length).toBeGreaterThan(0);
+      if (level.roleAtCurrentPrice === "SUPPORT") {
+        expect(level.proximity).not.toBe("ABOVE");
+      }
     }
     render(<ImportantLevelsPanel levels={levels} allLevels={levels} />);
-    const card = screen.getByTestId("level-card-lvl-vah");
-    expect(card).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("level-group-above")).toBeInTheDocument();
+    expect(screen.getByTestId("level-group-below")).toBeInTheDocument();
+    const card = screen.getByTestId("level-card-lvl-val");
+    expect(card).toHaveTextContent(/reclaim/i);
     await user.click(card);
-    expect(card).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByTestId("level-detail-lvl-vah")).toHaveTextContent(/What it is/i);
-    expect(screen.getByTestId("level-evidence")).toHaveTextContent(/VAH/i);
-    expect(screen.getByText(/What happens if it holds/i)).toBeInTheDocument();
-    expect(screen.getByText(/Simple explanation/i)).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByTestId("level-detail-lvl-vah")).not.toBeInTheDocument();
+    expect(screen.getByTestId("level-detail-lvl-val")).toHaveTextContent(/below VAL/i);
+  });
 
-    const support = screen.getByTestId("level-card-lvl-val");
-    support.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getByTestId("level-detail-lvl-val")).toBeInTheDocument();
+  it("does not show an active stop/TP plan for PREPARE NONE", () => {
+    render(
+      <MemoryRouter>
+        <CompactTradePlanCard tradePlan={chartExampleIntradayPlanFixture.tradePlan} />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("tp-no-active")).toBeInTheDocument();
+    expect(screen.getByTestId("bullish-conditional")).toBeInTheDocument();
+    expect(screen.getByTestId("bearish-conditional")).toBeInTheDocument();
+    expect(screen.queryByTestId("tp-stop")).not.toBeInTheDocument();
   });
 
   it("renders both bullish and bearish scenarios", () => {

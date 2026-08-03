@@ -1,5 +1,5 @@
 import type { ExpectedRange } from "../../types/intradayPlan";
-import { fmtPrice } from "../../lib/intradayFormat";
+import { fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
 
 type Props = {
   range: ExpectedRange;
@@ -11,8 +11,23 @@ function pctAlong(value: number | null, low: number | null, high: number | null)
 }
 
 export function ExpectedRangeCard({ range }: Props) {
-  const stretchLow = range.stretchLow ?? range.probableLow;
-  const stretchHigh = range.stretchHigh ?? range.probableHigh;
+  if (!range.rangeAvailable) {
+    return (
+      <section className="gm-intra-range" data-testid="expected-range-card" aria-label="Expected intraday range">
+        <div className="gm-section-head">
+          <h2 className="gm-section-title">Expected range</h2>
+          <span className="gm-meta">{valueLocationLabel(range.valueLocation)}</span>
+        </div>
+        <p className="gm-intra-why-not" data-testid="range-unavailable" role="status">
+          {range.unavailableReason ?? "Probable range unavailable."}
+        </p>
+        <p className="gm-meta">{range.estimateDisclaimer}</p>
+      </section>
+    );
+  }
+
+  const stretchLow = range.stretchLow!;
+  const stretchHigh = range.stretchHigh!;
   const markerPct = pctAlong(range.currentPrice, stretchLow, stretchHigh);
   const probLowPct = pctAlong(range.probableLow, stretchLow, stretchHigh);
   const probHighPct = pctAlong(range.probableHigh, stretchLow, stretchHigh);
@@ -21,7 +36,9 @@ export function ExpectedRangeCard({ range }: Props) {
     <section className="gm-intra-range" data-testid="expected-range-card" aria-label="Expected intraday range">
       <div className="gm-section-head">
         <h2 className="gm-section-title">Expected range (estimates)</h2>
-        <span className="gm-meta">Confidence {range.confidence}%</span>
+        <span className="gm-meta">
+          {valueLocationLabel(range.valueLocation)} · {range.confidence}%
+        </span>
       </div>
 
       <div className="gm-intra-range-labels">
@@ -75,16 +92,17 @@ export function ExpectedRangeCard({ range }: Props) {
         </span>
       </div>
 
-      {range.reasons.length > 0 && (
+      <details className="gm-intra-details gm-mobile-collapse">
+        <summary>Why this range</summary>
         <ul className="gm-intra-range-reasons" data-testid="range-reasons">
           {range.reasons.map((r) => (
             <li key={r}>{r}</li>
           ))}
         </ul>
-      )}
-      <p className="gm-meta" data-testid="range-invalidation">
-        Recalculate when: {range.invalidation}
-      </p>
+        <p className="gm-meta" data-testid="range-invalidation">
+          Recalculate when: {range.invalidation}
+        </p>
+      </details>
       <p className="gm-meta" data-testid="range-disclaimer">
         {range.estimateDisclaimer}
       </p>

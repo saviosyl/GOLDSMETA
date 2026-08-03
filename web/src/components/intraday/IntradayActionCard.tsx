@@ -1,5 +1,11 @@
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { actionTone, fmtDistance, fmtPrice } from "../../lib/intradayFormat";
+import { actionTone, fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
+
+function fmtDistanceAbs(points: number | null | undefined): string {
+  if (points == null || !Number.isFinite(points)) return "—";
+  if (points === 0) return "At price";
+  return `${Math.abs(points).toFixed(1)} pts away`;
+}
 
 type Props = {
   plan: IntradayPlan;
@@ -22,6 +28,11 @@ export function IntradayActionCard({ plan }: Props) {
       <p className="gm-intra-action-sentence" data-testid="intraday-one-sentence">
         {plan.oneSentence}
       </p>
+      {plan.valueLocation && (
+        <p className="gm-meta" data-testid="intraday-value-location">
+          {valueLocationLabel(plan.valueLocation)}
+        </p>
+      )}
 
       <div className="gm-intra-action-grid">
         <div>
@@ -29,7 +40,7 @@ export function IntradayActionCard({ plan }: Props) {
           <strong data-testid="intraday-trigger">{plan.trigger ?? "—"}</strong>
           {plan.triggerPrice != null && (
             <span className="gm-meta">
-              {fmtPrice(plan.triggerPrice)} · {fmtDistance(plan.distanceToTriggerPoints)}
+              {fmtPrice(plan.triggerPrice)} · {fmtDistanceAbs(plan.distanceToTriggerPoints)}
             </span>
           )}
         </div>
@@ -44,14 +55,14 @@ export function IntradayActionCard({ plan }: Props) {
       </div>
 
       {plan.entryConfirmation.length > 0 && (
-        <div className="gm-intra-confirm" data-testid="intraday-entry-confirmation">
-          <span className="gm-label">Confirmation still required</span>
+        <details className="gm-intra-details gm-mobile-collapse" data-testid="intraday-entry-confirmation">
+          <summary>Confirmation still required</summary>
           <ul>
             {plan.entryConfirmation.map((c) => (
               <li key={c}>{c}</li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
 
       <div className="gm-intra-progress" data-testid="intraday-setup-progress">
@@ -69,17 +80,20 @@ export function IntradayActionCard({ plan }: Props) {
         >
           <i style={{ width: `${(progress.complete / Math.max(progress.total, 1)) * 100}%` }} />
         </div>
-        <ul className="gm-intra-checklist">
-          {progress.items.map((item) => (
-            <li key={item.id} data-complete={item.complete ? "1" : "0"}>
-              <span aria-hidden="true">{item.complete ? "✓" : "○"}</span>
-              <span>
-                <strong>{item.label}</strong>
-                <em className="gm-meta">{item.detail}</em>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <details className="gm-intra-details gm-mobile-collapse">
+          <summary>Checklist details</summary>
+          <ul className="gm-intra-checklist">
+            {progress.items.map((item) => (
+              <li key={item.id} data-complete={item.complete ? "1" : "0"}>
+                <span aria-hidden="true">{item.complete ? "✓" : "○"}</span>
+                <span>
+                  <strong>{item.label}</strong>
+                  <em className="gm-meta">{item.detail}</em>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
       </div>
 
       {plan.whyNotReady && (

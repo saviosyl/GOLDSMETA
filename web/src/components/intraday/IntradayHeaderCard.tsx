@@ -1,5 +1,11 @@
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { biasLabel, confidenceLabel, fmtPrice, marketTypeLabel } from "../../lib/intradayFormat";
+import {
+  biasLabel,
+  confidenceLabel,
+  fmtPrice,
+  marketTypeLabel,
+  valueLocationLabel
+} from "../../lib/intradayFormat";
 import { StatusBadge } from "../ui/primitives";
 
 type Props = {
@@ -44,6 +50,11 @@ export function IntradayHeaderCard({ plan, livePrice, sessionLabel, freshness, s
         <span>
           <em>Type</em> {marketTypeLabel(plan.marketType)}
         </span>
+        {plan.valueLocation && (
+          <span data-testid="header-value-location">
+            <em>Location</em> {valueLocationLabel(plan.valueLocation)}
+          </span>
+        )}
         <span>
           <em>Confidence</em> {conf}% · {confidenceLabel(conf)}
         </span>

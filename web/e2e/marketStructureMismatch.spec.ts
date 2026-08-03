@@ -6,10 +6,20 @@ import { expect, test } from "@playwright/test";
  * Issue #50: primary action uses intraday-action-label (NO TRADE on mismatch).
  */
 test.describe("Market Structure Map price sources", () => {
+  async function ensureStructureOpen(page: import("@playwright/test").Page) {
+    const details = page.getByTestId("market-structure-collapse");
+    await expect(details).toBeVisible();
+    const open = await details.evaluate((el) => (el as HTMLDetailsElement).open);
+    if (!open) {
+      await details.locator("summary").filter({ hasText: "Market Structure Map" }).click();
+    }
+  }
+
   test("mismatch case blocks ladder and shows Market data mismatch", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-mismatch");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("overview-page")).toBeVisible();
+    await ensureStructureOpen(page);
 
     await expect(page.getByTestId("market-data-mismatch-title")).toHaveText(
       "Market data mismatch"
@@ -39,6 +49,7 @@ test.describe("Market Structure Map price sources", () => {
   test("matching ~4050 case renders ladder without mismatch warning", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-match");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
+    await ensureStructureOpen(page);
     await expect(page.getByTestId("market-level-ladder")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-title")).toHaveCount(0);
 
@@ -55,6 +66,7 @@ test.describe("Market Structure Map price sources", () => {
   test("mismatch remains readable on mobile viewport", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/ui-review/?scenario=market-mismatch");
+    await ensureStructureOpen(page);
     await expect(page.getByTestId("market-data-mismatch-title")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-alert")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-broker")).toBeVisible();
@@ -65,6 +77,7 @@ test.describe("Market Structure Map price sources", () => {
 
   test("print stylesheet keeps mismatch copy available", async ({ page }) => {
     await page.goto("/ui-review/?scenario=market-mismatch");
+    await ensureStructureOpen(page);
     await page.emulateMedia({ media: "print" });
     await expect(page.getByTestId("market-data-mismatch-title")).toBeVisible();
     await expect(page.getByTestId("market-data-mismatch-detail")).toContainText(

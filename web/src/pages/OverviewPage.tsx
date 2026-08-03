@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, SetupRecord } from "../types/models";
@@ -115,9 +115,30 @@ function buildSnapshotFromPage(args: {
   };
 }
 
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (typeof window === "undefined" || !window.matchMedia) return () => undefined;
+      const mq = window.matchMedia("(min-width: 721px)");
+      mq.addEventListener("change", onStoreChange);
+      return () => mq.removeEventListener("change", onStoreChange);
+    },
+    () =>
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia("(min-width: 721px)").matches
+        : true,
+    () => true
+  );
+}
+
 /** Issue #50 — compact premium intraday assistant home. */
 export function OverviewPage() {
   const { api } = useAuth();
+  const isDesktop = useIsDesktop();
+  const [structureOpen, setStructureOpen] = useState(isDesktop);
+  useEffect(() => {
+    setStructureOpen(isDesktop);
+  }, [isDesktop]);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
   const [intradayPlan, setIntradayPlan] = useState<IntradayPlan | null>(null);
@@ -344,6 +365,13 @@ export function OverviewPage() {
 
       {intradayPlan ? (
         <>
+          <div className="gm-sticky-action" data-testid="sticky-action-summary">
+            <strong>{intradayPlan.actionLabel}</strong>
+            <span>
+              {livePrice != null ? `XAUUSD ${livePrice.toFixed(2)}` : "XAUUSD"} · {sessionLabel} ·{" "}
+              {intradayPlan.trigger ?? "No trigger"}
+            </span>
+          </div>
           <IntradayHeaderCard
             plan={intradayPlan}
             livePrice={livePrice}
@@ -373,44 +401,52 @@ export function OverviewPage() {
         )
       )}
 
-      <SectionCard title="Market Structure Map">
-        <MarketLevelLadder
-          input={{
-            livePrice,
-            alertClose:
-              briefing?.tradingViewAlertClose ??
-              structure?.ohlcv?.close ??
-              decision?.ohlcv?.close ??
-              decision?.lastKnownPrice ??
-              null,
-            poc,
-            vah,
-            val,
-            barHigh: decision?.ohlcv?.high ?? null,
-            barLow: decision?.ohlcv?.low ?? null,
-            entry: liveRangeOnly ? null : planEntry,
-            stop: liveRangeOnly ? null : planStop,
-            tp1: liveRangeOnly ? null : planTp1,
-            tp2: liveRangeOnly ? null : planTp2,
-            tp3: liveRangeOnly ? null : planTp3,
-            dataSourceLabel: decision?.dataSourceLabel ?? null,
-            isTestDecision: decision?.isTestDecision ?? null,
-            marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
-            brokerQuoteVerified:
-              decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
-            marketStatus: "UNKNOWN",
-            liveRangeOnly,
-            priceSource: decision?.isTestDecision
-              ? "TEST_FIXTURE"
-              : decision?.symbolIdentity?.exchange ??
-                decision?.dataSourceLabel ??
-                "DECISION"
-          }}
-          dataTimestamp={stampIso}
-          mode={marketStructureMode}
-          diagnostics={marketStructureDiagnostics}
-        />
-      </SectionCard>
+      <details
+        className="gm-structure-collapse"
+        data-testid="market-structure-collapse"
+        open={structureOpen}
+        onToggle={(e) => setStructureOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary>Market Structure Map</summary>
+        <div className="gm-structure-collapse-body">
+          <MarketLevelLadder
+            input={{
+              livePrice,
+              alertClose:
+                briefing?.tradingViewAlertClose ??
+                structure?.ohlcv?.close ??
+                decision?.ohlcv?.close ??
+                decision?.lastKnownPrice ??
+                null,
+              poc,
+              vah,
+              val,
+              barHigh: decision?.ohlcv?.high ?? null,
+              barLow: decision?.ohlcv?.low ?? null,
+              entry: liveRangeOnly ? null : planEntry,
+              stop: liveRangeOnly ? null : planStop,
+              tp1: liveRangeOnly ? null : planTp1,
+              tp2: liveRangeOnly ? null : planTp2,
+              tp3: liveRangeOnly ? null : planTp3,
+              dataSourceLabel: decision?.dataSourceLabel ?? null,
+              isTestDecision: decision?.isTestDecision ?? null,
+              marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
+              brokerQuoteVerified:
+                decision?.dataSourceLabel === "LIVE" && !decision?.isTestDecision,
+              marketStatus: "UNKNOWN",
+              liveRangeOnly,
+              priceSource: decision?.isTestDecision
+                ? "TEST_FIXTURE"
+                : decision?.symbolIdentity?.exchange ??
+                  decision?.dataSourceLabel ??
+                  "DECISION"
+            }}
+            dataTimestamp={stampIso}
+            mode={marketStructureMode}
+            diagnostics={marketStructureDiagnostics}
+          />
+        </div>
+      </details>
 
       <div className="gm-snapshot-actions-row">
         <PromoSnapshotButton onClick={snapshot.openModal} disabled={!decision && !briefing} />
