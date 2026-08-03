@@ -83,6 +83,26 @@ a {
   font-weight: 700;
 }
 
+.gm-avatar-btn {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.gm-avatar-btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.gm-topbar-email {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gm-sidebar-brand {
   display: flex;
   gap: 12px;
@@ -3852,6 +3872,23 @@ a {
 /* ===== Research cockpit (compact interactive Overview) ===== */
 .gm-cockpit {
   --cockpit-gap: 6px;
+  max-width: 100%;
+  overflow-x: clip;
+  min-width: 0;
+}
+
+.gm-cockpit .gm-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.gm-cockpit .gm-tabs [role="tab"] {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .gm-cockpit .gm-page-header-row {
@@ -3903,6 +3940,22 @@ a {
 .gm-status-chip.tone-prepare { background: var(--warning-soft); color: #92400e; }
 .gm-status-chip.tone-safe { background: var(--gold-soft); color: var(--navy); }
 .gm-status-chip.tone-neutral { background: var(--neutral-soft); }
+
+.gm-safety-combo {
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.gm-safety-quiet {
+  color: inherit;
+  opacity: 0.9;
+}
+
+.gm-safety-autotrade {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
 
 .gm-price-move.up { color: var(--positive); font-weight: 700; }
 .gm-price-move.down { color: var(--negative); font-weight: 700; }
@@ -4044,31 +4097,56 @@ a {
 
 .gm-range-ladder {
   margin: 8px 0 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .gm-range-ladder-track {
   position: relative;
-  height: 64px;
-  margin: 4px 0 2px;
+  height: 36px;
+  margin: 4px 0 8px;
   border-radius: 12px;
   background: linear-gradient(90deg, var(--negative-soft), var(--surface-alt), var(--positive-soft));
   border: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .gm-range-ladder-track .gm-intra-range-probable {
-  top: 26px;
+  position: absolute;
+  top: 14px;
   height: 8px;
   border-radius: 999px;
   background: rgba(17, 40, 74, 0.16);
 }
 
 .gm-range-ladder-track .gm-intra-range-marker {
-  top: 18px;
+  position: absolute;
+  top: 6px;
   width: 3px;
   height: 24px;
   background: var(--navy);
   border-radius: 2px;
   z-index: 2;
+  transform: translateX(-50%);
+}
+
+.gm-range-tick {
+  position: absolute;
+  top: 10px;
+  width: 2px;
+  height: 16px;
+  background: rgba(17, 40, 74, 0.35);
+  border-radius: 1px;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+.gm-range-tick.kind-current {
+  background: var(--navy);
+  width: 3px;
+  height: 20px;
+  top: 8px;
 }
 
 .gm-range-direction {
@@ -4076,53 +4154,88 @@ a {
   top: 2px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   color: var(--navy);
   font-weight: 800;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* In-flow labels — never absolutely positioned outside the card */
+.gm-range-nodes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
 }
 
 .gm-range-node {
-  position: absolute;
-  top: 34px;
-  transform: translateX(-50%);
-  min-width: 68px;
-  max-width: 90px;
-  min-height: 40px;
-  padding: 2px 5px;
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 52px;
+  padding: 6px 4px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   text-align: center;
   cursor: pointer;
-  z-index: 3;
+  z-index: 1;
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  overflow: hidden;
 }
 
 .gm-range-node strong {
   display: block;
   font-size: 0.78rem;
   color: var(--navy);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .gm-range-node-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  line-height: 1.2;
 }
 
-.gm-range-node em {
+.gm-range-label-short {
+  display: none;
+}
+
+.gm-range-node em,
+.gm-range-dist {
   display: block;
   font-style: normal;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   color: var(--text-secondary);
+  line-height: 1.2;
+  margin-top: 2px;
 }
 
 .gm-range-node.kind-current {
   border-color: var(--navy);
   background: var(--navy-soft);
-  top: 32px;
+}
+
+.gm-range-node.prominence-primary {
+  border-color: rgba(17, 40, 74, 0.28);
+}
+
+.gm-range-node.prominence-edge {
+  opacity: 0.92;
 }
 
 .gm-cockpit .gm-intra-action {
@@ -4137,10 +4250,19 @@ a {
 .gm-cockpit .gm-intra-action-sentence {
   margin-bottom: 4px;
   font-size: 0.78rem;
+  line-height: 1.35;
   display: -webkit-box;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.gm-cockpit .gm-action-invalidation strong {
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
 }
 
 .gm-cockpit .gm-why-compact,
@@ -4169,6 +4291,47 @@ a {
 
 .gm-cockpit .gm-intra-range {
   padding: 8px 10px !important;
+}
+
+.gm-cockpit .gm-range-ladder {
+  margin: 4px 0 2px;
+}
+
+.gm-cockpit .gm-range-ladder-track {
+  height: 28px;
+  margin: 2px 0 6px;
+}
+
+.gm-cockpit .gm-range-ladder-track .gm-intra-range-probable {
+  top: 10px;
+}
+
+.gm-cockpit .gm-range-ladder-track .gm-intra-range-marker {
+  top: 4px;
+  height: 20px;
+}
+
+.gm-cockpit .gm-range-tick {
+  top: 8px;
+  height: 12px;
+}
+
+.gm-cockpit .gm-range-tick.kind-current {
+  top: 6px;
+  height: 16px;
+}
+
+.gm-cockpit .gm-range-nodes {
+  gap: 4px;
+}
+
+.gm-cockpit .gm-range-node {
+  min-height: 44px;
+  padding: 4px 3px;
+}
+
+.gm-cockpit .gm-range-dist {
+  display: none;
 }
 
 .gm-cockpit .gm-intra-range details,
@@ -4380,16 +4543,6 @@ a {
   margin-bottom: 0 !important;
 }
 
-@media (max-width: 1024px) {
-  .gm-cockpit-split {
-    grid-template-columns: 1fr;
-  }
-
-  .gm-cockpit .gm-action-keyfacts {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
 .gm-cockpit .gm-action-top {
   gap: 4px;
 }
@@ -4452,19 +4605,94 @@ a {
   line-height: 1.3;
 }
 
+/* Tablet + mobile: compact range ladder — primary levels prominent, stretch as edges */
+@media (max-width: 1024px) {
+  .gm-cockpit-split {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-cockpit .gm-action-keyfacts {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .gm-topbar-email {
+    display: none;
+  }
+
+  .gm-range-nodes {
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.15fr) minmax(0, 1.25fr) minmax(0, 1.15fr) minmax(0, 0.7fr);
+    gap: 4px;
+  }
+
+  .gm-range-label-full {
+    display: none;
+  }
+
+  .gm-range-label-short {
+    display: block;
+  }
+
+  .gm-range-node.prominence-primary {
+    min-height: 56px;
+    padding: 6px 3px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .gm-range-node.prominence-primary strong {
+    font-size: 0.8rem;
+  }
+
+  .gm-range-node.prominence-edge {
+    min-height: 48px;
+    padding: 4px 2px;
+    opacity: 0.85;
+    box-shadow: none;
+  }
+
+  .gm-range-node.prominence-edge .gm-range-node-label {
+    font-size: 0.52rem;
+  }
+
+  .gm-range-node.prominence-edge strong {
+    font-size: 0.68rem;
+  }
+
+  .gm-range-node.prominence-edge .gm-range-dist {
+    display: none;
+  }
+
+  .gm-safety-combo {
+    gap: 4px 8px;
+    padding: 4px 8px;
+    font-size: 0.68rem;
+  }
+}
+
 @media (max-width: 720px) {
   .gm-range-ladder-track {
-    height: 108px;
+    height: 32px;
+  }
+
+  .gm-range-nodes {
+    gap: 3px;
   }
 
   .gm-range-node {
-    min-width: 58px;
-    max-width: 72px;
-    padding: 3px 4px;
+    padding: 4px 2px;
+    border-radius: 6px;
   }
 
   .gm-range-node-label {
-    font-size: 0.58rem;
+    font-size: 0.54rem;
+  }
+
+  .gm-range-node.prominence-primary strong {
+    font-size: 0.72rem;
+  }
+
+  .gm-range-node.prominence-edge strong {
+    font-size: 0.62rem;
   }
 
   .gm-intra-scenarios-grid {
@@ -4483,9 +4711,15 @@ a {
     margin-bottom: 8px;
   }
 
-  .gm-cockpit .gm-main-inner,
+  /* Keep research tabs + page content clear of fixed bottom nav + home indicator */
+  .gm-cockpit.gm-main-inner,
+  .gm-main-inner:has(.gm-cockpit),
+  .gm-shell:has(.gm-cockpit) .gm-main-inner {
+    padding-bottom: calc(112px + var(--safe-bottom));
+  }
+
   .gm-cockpit {
-    padding-bottom: 72px;
+    padding-bottom: 0;
   }
 }
 

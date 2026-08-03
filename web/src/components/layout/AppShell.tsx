@@ -146,10 +146,19 @@ export function AppShell({
             </div>
             <div className="gm-topbar-actions">
               <span className="gm-badge gold">LIVE</span>
-              <div className="gm-avatar" aria-hidden>
+              <button
+                type="button"
+                className="gm-avatar gm-avatar-btn"
+                data-testid="topbar-avatar"
+                title={email}
+                aria-label={`Account ${email}`}
+                onClick={() => setMoreOpen(true)}
+              >
                 {initials(email)}
-              </div>
-              <span className="gm-meta">{email}</span>
+              </button>
+              <span className="gm-meta gm-topbar-email" data-testid="topbar-email">
+                {email}
+              </span>
             </div>
           </header>
           {children ?? <Outlet />}

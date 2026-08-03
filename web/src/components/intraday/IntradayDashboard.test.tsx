@@ -16,7 +16,10 @@ describe("Issue #50 intraday dashboard components", () => {
         <IntradayActionCard plan={chartExampleIntradayPlanFixture} />
       </MemoryRouter>
     );
-    expect(screen.getByTestId("intraday-action-label")).toHaveTextContent("PREPARE — SETUP FORMING");
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("PREPARE");
+    expect(screen.getByTestId("intraday-action-subtitle")).toHaveTextContent("Setup forming");
+    expect(screen.getByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/);
+    expect(screen.getByTestId("intraday-action-label")).not.toHaveTextContent(/PREPARE — PREPARE/i);
     expect(screen.getByTestId("intraday-one-sentence")).toHaveTextContent(/below value/i);
     expect(screen.getByTestId("intraday-one-sentence")).toHaveTextContent(/reclaim/i);
     expect(screen.getByTestId("intraday-trigger")).toHaveTextContent(/reclaim/i);

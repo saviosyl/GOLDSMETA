@@ -11,8 +11,10 @@ import { ExplainThisPage } from "./ExplainThisPage";
 import { CockpitAlerts } from "./CockpitAlerts";
 import { ImportantLevelsPanel } from "./ImportantLevelsPanel";
 import {
+  actionSubtitle,
   buildIndicatorChips,
   buildResearchRows,
+  ensureReadableSpacing,
   freshnessTone,
   levelProgressState,
   scenarioStatus,
@@ -24,6 +26,10 @@ describe("Research cockpit interactions", () => {
     const user = userEvent.setup();
     render(<IntradayActionCard plan={chartExampleIntradayPlanFixture} />);
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("PREPARE");
+    expect(screen.getByTestId("intraday-action-subtitle")).toHaveTextContent("Setup forming");
+    expect(screen.getByTestId("intraday-invalidation")).toHaveTextContent(
+      /4031\.1 ends the immediate reclaim attempt/i
+    );
     await user.click(screen.getByTestId("action-why-btn"));
     expect(screen.getByTestId("action-panel-why")).toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -163,6 +169,10 @@ describe("Research cockpit interactions", () => {
 
   it("helper pure functions preserve safety wording", () => {
     expect(shortActionLabel("PREPARE", "PREPARE — SETUP FORMING")).toBe("PREPARE");
+    expect(actionSubtitle("PREPARE — SETUP FORMING", "PREPARE")).toBe("Setup forming");
+    expect(ensureReadableSpacing("4031.1ends the immediate reclaim attempt.")).toBe(
+      "4031.1 ends the immediate reclaim attempt."
+    );
     expect(
       freshnessTone({
         quoteAgeSeconds: 20,

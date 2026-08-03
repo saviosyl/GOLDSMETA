@@ -54,6 +54,28 @@ export function shortActionLabel(action: IntradayAction | string, actionLabel?: 
   return actionLabel ?? a.replace(/_/g, " ");
 }
 
+/** Secondary line under the short action — never repeats the short label. */
+export function actionSubtitle(actionLabel: string | undefined, short: string): string | null {
+  if (!actionLabel) return null;
+  const raw = actionLabel.includes("—")
+    ? actionLabel.split("—").slice(1).join("—").trim()
+    : actionLabel.replace(new RegExp(`^${short}\\s*`, "i"), "").trim();
+  if (!raw || raw.toUpperCase() === short.toUpperCase()) return null;
+  return raw
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bSetup Forming\b/i, "Setup forming");
+}
+
+/** Keep number/word boundaries readable in compact cards. */
+export function ensureReadableSpacing(text: string): string {
+  return text
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function freshnessTone(args: {
   quoteAgeSeconds: number | null | undefined;
   source: "live" | "cached" | "offline";
