@@ -1,0 +1,1497 @@
+[
+  {
+    "id": "below-val",
+    "title": "Price below VAL",
+    "mode": "COMPLETE",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "BELOW_VALUE",
+    "triggerPrice": 4037.308,
+    "nextTargetPrice": 4041.2,
+    "bull": {
+      "trigger": 4037.308,
+      "t1": 4041.2,
+      "t2": 4045.09,
+      "firstTarget": "4041.2 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4031.1,
+      "t1": null,
+      "t2": 4022.32,
+      "firstTarget": "Unavailable"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "BELOW_VALUE",
+      "probableLow": 4031.1,
+      "probableHigh": 4037.31,
+      "stretchLow": 4022.32,
+      "stretchHigh": 4047.32,
+      "currentPrice": 4034.815,
+      "remainingAbovePoints": 2.49,
+      "remainingBelowPoints": 3.72,
+      "remainingAbovePercent": 0.06,
+      "remainingBelowPercent": 0.09,
+      "confidence": 58,
+      "reasons": [
+        "Below value: probable low from verified bar/ATR support at or below price; probable high is VAL reclaim resistance",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 30,
+    "signalAgeSeconds": 120,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-tp3",
+          "price": 4053.7,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-tp2",
+          "price": 4049.8,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-atr-high",
+          "price": 4047.32,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-tp1",
+          "price": 4045.1,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4041.2,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "RECLAIM_LEVEL",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4031.1,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-stop",
+          "price": 4028.6,
+          "roleAtCurrentPrice": "INVALIDATION",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4022.32,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Reclaim and hold above VAL 4037.308",
+        "triggerPrice": 4037.308,
+        "confirmationRequired": [
+          "5-minute candle closes above VAL",
+          "Retest holds above VAL"
+        ],
+        "firstTarget": "4041.2 — recent bar high",
+        "firstTargetPrice": 4041.2,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4045.09 — POC / volume magnet",
+        "secondTargetPrice": 4045.09,
+        "secondTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "invalidation": "Break and hold below 4031.1",
+        "invalidationPrice": 4031.1
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Break and hold below 4031.1",
+        "triggerPrice": 4031.1,
+        "confirmationRequired": [
+          "5-minute candle closes below the support trigger",
+          "Hold below on retest"
+        ],
+        "firstTarget": "Unavailable",
+        "firstTargetPrice": null,
+        "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+        "secondTarget": "4022.32 — stretch low (estimate)",
+        "secondTargetPrice": 4022.32,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Reclaim and hold above 4037.308",
+        "invalidationPrice": 4037.308
+      },
+      "whyNotReady": "Price is below the value area — wait for reclaim-and-hold or a confirmed breakdown from genuine support below.",
+      "freshness": {
+        "quoteAgeSeconds": 30,
+        "signalAgeSeconds": 120,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST_FIXTURE",
+        "dataQuality": null
+      }
+    }
+  },
+  {
+    "id": "inside-value",
+    "title": "Price inside VAL–VAH",
+    "mode": "COMPLETE",
+    "action": "RANGE_TRADE",
+    "actionLabel": "RANGE TRADE",
+    "valueLocation": "INSIDE_VALUE",
+    "triggerPrice": null,
+    "nextTargetPrice": 4045.09,
+    "bull": {
+      "trigger": 4037.308,
+      "t1": 4045.09,
+      "t2": 4048,
+      "firstTarget": "4045.09 — POC / volume magnet"
+    },
+    "bear": {
+      "trigger": 4049.633,
+      "t1": 4045.09,
+      "t2": 4037.31,
+      "firstTarget": "4045.09 — POC / volume magnet"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "INSIDE_VALUE",
+      "probableLow": 4037.31,
+      "probableHigh": 4049.63,
+      "stretchLow": 4030,
+      "stretchHigh": 4055,
+      "currentPrice": 4042.5,
+      "remainingAbovePoints": 7.13,
+      "remainingBelowPoints": 5.19,
+      "remainingAbovePercent": 0.18,
+      "remainingBelowPercent": 0.13,
+      "confidence": 72,
+      "reasons": [
+        "Inside value: probable range uses verified VAL → VAH",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-atr-high",
+          "price": 4055,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4048,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4036,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4030,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4037.308",
+        "triggerPrice": 4037.308,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045.09 — POC / volume magnet",
+        "firstTargetPrice": 4045.09,
+        "firstTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "secondTarget": "4048 — recent bar high",
+        "secondTargetPrice": 4048,
+        "secondTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "invalidation": "Break and hold below 4037.308",
+        "invalidationPrice": 4037.308
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4049.633",
+        "triggerPrice": 4049.633,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045.09 — POC / volume magnet",
+        "firstTargetPrice": 4045.09,
+        "firstTargetWhy": "Verified POC as a downside magnet when below the trigger.",
+        "secondTarget": "4037.31 — probable low (range)",
+        "secondTargetPrice": 4037.31,
+        "secondTargetWhy": "Expected-range low used only when it is not the same price as the trigger/support break.",
+        "invalidation": "Break and hold above 4049.633",
+        "invalidationPrice": 4049.633
+      },
+      "whyNotReady": "No one-sided confirmation yet; mid-range entries are low quality.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "above-vah",
+    "title": "Price above VAH",
+    "mode": "COMPLETE",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "ABOVE_VALUE",
+    "triggerPrice": 4049.633,
+    "nextTargetPrice": 4055,
+    "bull": {
+      "trigger": 4049.633,
+      "t1": 4055,
+      "t2": 4064.9,
+      "firstTarget": "4055 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4049.633,
+      "t1": 4048,
+      "t2": 4045.09,
+      "firstTarget": "4048 — recent bar low"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "ABOVE_VALUE",
+      "probableLow": 4049.63,
+      "probableHigh": 4055,
+      "stretchLow": 4039.9,
+      "stretchHigh": 4064.9,
+      "currentPrice": 4052.4,
+      "remainingAbovePoints": 2.6,
+      "remainingBelowPoints": 2.77,
+      "remainingAbovePercent": 0.06,
+      "remainingBelowPercent": 0.07,
+      "confidence": 58,
+      "reasons": [
+        "Above value: probable low uses VAH as potential retest/support reference",
+        "Above value: probable high uses verified bar high / extension reference",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-atr-high",
+          "price": 4064.9,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4055,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "PREVIOUS_RESISTANCE_NOW_SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4048,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4039.9,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Continuation hold above VAH 4049.633",
+        "triggerPrice": 4049.633,
+        "confirmationRequired": [
+          "Hold above VAH on retest",
+          "Bullish continuation candle"
+        ],
+        "firstTarget": "4055 — recent bar high",
+        "firstTargetPrice": 4055,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4064.9 — stretch high (estimate)",
+        "secondTargetPrice": 4064.9,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Close back below 4049.633",
+        "invalidationPrice": 4049.633
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Breakdown and hold below VAH 4049.633",
+        "triggerPrice": 4049.633,
+        "confirmationRequired": [
+          "Confirmed close below VAH",
+          "Failed retest from below"
+        ],
+        "firstTarget": "4048 — recent bar low",
+        "firstTargetPrice": 4048,
+        "firstTargetWhy": "Nearest verified recent bar low beyond the bearish trigger.",
+        "secondTarget": "4045.09 — POC / volume magnet",
+        "secondTargetPrice": 4045.09,
+        "secondTargetWhy": "Verified POC as a downside magnet when below the trigger.",
+        "invalidation": "Reclaim and hold above 4049.633",
+        "invalidationPrice": 4049.633
+      },
+      "whyNotReady": "Extension above value — wait for retest hold (bullish) or confirmed breakdown (bearish).",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "buy-confirmed",
+    "title": "Confirmed BUY plan",
+    "mode": "COMPLETE",
+    "action": "BUY_NOW",
+    "actionLabel": "BUY NOW",
+    "valueLocation": "INSIDE_VALUE",
+    "triggerPrice": 4040,
+    "nextTargetPrice": 4045,
+    "bull": {
+      "trigger": 4038,
+      "t1": 4045,
+      "t2": 4048,
+      "firstTarget": "4045 — POC / volume magnet"
+    },
+    "bear": {
+      "trigger": 4050,
+      "t1": 4045,
+      "t2": 4038,
+      "firstTarget": "4045 — POC / volume magnet"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "INSIDE_VALUE",
+      "probableLow": 4038,
+      "probableHigh": 4050,
+      "stretchLow": 4032,
+      "stretchHigh": 4052,
+      "currentPrice": 4042,
+      "remainingAbovePoints": 8,
+      "remainingBelowPoints": 4,
+      "remainingAbovePercent": 0.2,
+      "remainingBelowPercent": 0.1,
+      "confidence": 72,
+      "reasons": [
+        "Inside value: probable range uses verified VAL → VAH",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "ACTIVE_PLAN",
+    "tradePlanDirection": "BUY",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-tp3",
+          "price": 4060,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-tp2",
+          "price": 4055,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-atr-high",
+          "price": 4052,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4050,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-tp1",
+          "price": 4050,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4048,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4038,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4036,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4032,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-stop",
+          "price": 4030,
+          "roleAtCurrentPrice": "INVALIDATION",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4038",
+        "triggerPrice": 4038,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045 — POC / volume magnet",
+        "firstTargetPrice": 4045,
+        "firstTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "secondTarget": "4048 — recent bar high",
+        "secondTargetPrice": 4048,
+        "secondTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "invalidation": "Break and hold below 4038",
+        "invalidationPrice": 4038
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4050",
+        "triggerPrice": 4050,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045 — POC / volume magnet",
+        "firstTargetPrice": 4045,
+        "firstTargetWhy": "Verified POC as a downside magnet when below the trigger.",
+        "secondTarget": "4038 — probable low (range)",
+        "secondTargetPrice": 4038,
+        "secondTargetWhy": "Expected-range low used only when it is not the same price as the trigger/support break.",
+        "invalidation": "Break and hold above 4050",
+        "invalidationPrice": 4050
+      },
+      "whyNotReady": null,
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "sell-confirmed",
+    "title": "Confirmed SELL plan",
+    "mode": "COMPLETE",
+    "action": "SELL_ON_REJECTION",
+    "actionLabel": "SELL ON REJECTION",
+    "valueLocation": "INSIDE_VALUE",
+    "triggerPrice": 4042,
+    "nextTargetPrice": 4045,
+    "bull": {
+      "trigger": 4038,
+      "t1": 4045,
+      "t2": 4048,
+      "firstTarget": "4045 — POC / volume magnet"
+    },
+    "bear": {
+      "trigger": 4050,
+      "t1": 4045,
+      "t2": 4038,
+      "firstTarget": "4045 — POC / volume magnet"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "INSIDE_VALUE",
+      "probableLow": 4038,
+      "probableHigh": 4050,
+      "stretchLow": 4032,
+      "stretchHigh": 4052,
+      "currentPrice": 4042,
+      "remainingAbovePoints": 8,
+      "remainingBelowPoints": 4,
+      "remainingAbovePercent": 0.2,
+      "remainingBelowPercent": 0.1,
+      "confidence": 72,
+      "reasons": [
+        "Inside value: probable range uses verified VAL → VAH",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "ACTIVE_PLAN",
+    "tradePlanDirection": "SELL",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-stop",
+          "price": 4052,
+          "roleAtCurrentPrice": "INVALIDATION",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-atr-high",
+          "price": 4052,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4050,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4048,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4038,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4038,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-tp1",
+          "price": 4032,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4032,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-tp2",
+          "price": 4026,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-tp3",
+          "price": 4020,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4038",
+        "triggerPrice": 4038,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045 — POC / volume magnet",
+        "firstTargetPrice": 4045,
+        "firstTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "secondTarget": "4048 — recent bar high",
+        "secondTargetPrice": 4048,
+        "secondTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "invalidation": "Break and hold below 4038",
+        "invalidationPrice": 4038
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4050",
+        "triggerPrice": 4050,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045 — POC / volume magnet",
+        "firstTargetPrice": 4045,
+        "firstTargetWhy": "Verified POC as a downside magnet when below the trigger.",
+        "secondTarget": "4038 — recent bar low",
+        "secondTargetPrice": 4038,
+        "secondTargetWhy": "Nearest verified recent bar low beyond the bearish trigger.",
+        "invalidation": "Break and hold above 4050",
+        "invalidationPrice": 4050
+      },
+      "whyNotReady": null,
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "range-conditional",
+    "title": "RANGE / conditional scenarios",
+    "mode": "COMPLETE",
+    "action": "RANGE_TRADE",
+    "actionLabel": "RANGE TRADE",
+    "valueLocation": "INSIDE_VALUE",
+    "triggerPrice": null,
+    "nextTargetPrice": 4045.09,
+    "bull": {
+      "trigger": 4037.308,
+      "t1": 4045.09,
+      "t2": 4047,
+      "firstTarget": "4045.09 — POC / volume magnet"
+    },
+    "bear": {
+      "trigger": 4049.633,
+      "t1": 4045.09,
+      "t2": 4039,
+      "firstTarget": "4045.09 — POC / volume magnet"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "INSIDE_VALUE",
+      "probableLow": 4037.31,
+      "probableHigh": 4049.63,
+      "stretchLow": 4032,
+      "stretchHigh": 4054,
+      "currentPrice": 4043,
+      "remainingAbovePoints": 6.63,
+      "remainingBelowPoints": 5.69,
+      "remainingAbovePercent": 0.16,
+      "remainingBelowPercent": 0.14,
+      "confidence": 72,
+      "reasons": [
+        "Inside value: probable range uses verified VAL → VAH",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-atr-high",
+          "price": 4054,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4047,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4039,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4032,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4037.308",
+        "triggerPrice": 4037.308,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045.09 — POC / volume magnet",
+        "firstTargetPrice": 4045.09,
+        "firstTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "secondTarget": "4047 — recent bar high",
+        "secondTargetPrice": 4047,
+        "secondTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "invalidation": "Break and hold below 4037.308",
+        "invalidationPrice": 4037.308
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4049.633",
+        "triggerPrice": 4049.633,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4045.09 — POC / volume magnet",
+        "firstTargetPrice": 4045.09,
+        "firstTargetWhy": "Verified POC as a downside magnet when below the trigger.",
+        "secondTarget": "4039 — recent bar low",
+        "secondTargetPrice": 4039,
+        "secondTargetWhy": "Nearest verified recent bar low beyond the bearish trigger.",
+        "invalidation": "Break and hold above 4049.633",
+        "invalidationPrice": 4049.633
+      },
+      "whyNotReady": "No one-sided confirmation yet; mid-range entries are low quality.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "mismatch",
+    "title": "MISMATCH",
+    "mode": "MISMATCH",
+    "action": "NO_TRADE",
+    "actionLabel": "NO TRADE",
+    "valueLocation": "UNKNOWN",
+    "triggerPrice": null,
+    "nextTargetPrice": null,
+    "bull": {
+      "trigger": null,
+      "t1": null,
+      "t2": null,
+      "firstTarget": "Unavailable"
+    },
+    "bear": {
+      "trigger": null,
+      "t1": null,
+      "t2": null,
+      "firstTarget": "Unavailable"
+    },
+    "range": {
+      "rangeAvailable": false,
+      "unavailableReason": "Range unavailable — market data mismatch blocks combining levels.",
+      "valueLocation": "UNKNOWN",
+      "probableLow": null,
+      "probableHigh": null,
+      "stretchLow": null,
+      "stretchHigh": null,
+      "currentPrice": 2408,
+      "remainingAbovePoints": null,
+      "remainingBelowPoints": null,
+      "remainingAbovePercent": null,
+      "remainingBelowPercent": null,
+      "confidence": 0,
+      "reasons": [
+        "Range unavailable — market data mismatch blocks combining levels."
+      ],
+      "invalidation": "Recalculate when a trustworthy range around current price can be formed.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bullish confirmation at structure",
+        "triggerPrice": null,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "Unavailable",
+        "firstTargetPrice": null,
+        "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+        "secondTarget": "Unavailable",
+        "secondTargetPrice": null,
+        "secondTargetWhy": null,
+        "invalidation": "Plan stop breach",
+        "invalidationPrice": null
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Bearish confirmation at structure",
+        "triggerPrice": null,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "Unavailable",
+        "firstTargetPrice": null,
+        "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+        "secondTarget": "Unavailable",
+        "secondTargetPrice": null,
+        "secondTargetWhy": null,
+        "invalidation": "Plan stop breach",
+        "invalidationPrice": null
+      },
+      "whyNotReady": "Market data mismatch between the live quote and the stored strategy signal.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "MISMATCH",
+        "sourceLabel": "TEST",
+        "dataQuality": "CONFLICTED"
+      }
+    }
+  },
+  {
+    "id": "live-range-only",
+    "title": "LIVE_RANGE_ONLY / OHLC-only",
+    "mode": "LIVE_RANGE_ONLY",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "UNKNOWN",
+    "triggerPrice": null,
+    "nextTargetPrice": 4041.2,
+    "bull": {
+      "trigger": 4031.1,
+      "t1": 4041.2,
+      "t2": 4047.3,
+      "firstTarget": "4041.2 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4041.2,
+      "t1": 4031.1,
+      "t2": 4022.3,
+      "firstTarget": "4031.1 — recent bar low"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "UNKNOWN",
+      "probableLow": 4031.1,
+      "probableHigh": 4041.2,
+      "stretchLow": 4022.3,
+      "stretchHigh": 4047.3,
+      "currentPrice": 4034.8,
+      "remainingAbovePoints": 6.4,
+      "remainingBelowPoints": 3.7,
+      "remainingAbovePercent": 0.16,
+      "remainingBelowPercent": 0.09,
+      "confidence": 40,
+      "reasons": [
+        "OHLC/unknown value location: probable range uses bar high/low around current price",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-atr-high",
+          "price": 4047.3,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4041.2,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4031.1,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4022.3,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4031.1",
+        "triggerPrice": 4031.1,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4041.2 — recent bar high",
+        "firstTargetPrice": 4041.2,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4047.3 — stretch high (estimate)",
+        "secondTargetPrice": 4047.3,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Break and hold below 4031.1",
+        "invalidationPrice": 4031.1
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4041.2",
+        "triggerPrice": 4041.2,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4031.1 — recent bar low",
+        "firstTargetPrice": 4031.1,
+        "firstTargetWhy": "Nearest verified recent bar low beyond the bearish trigger.",
+        "secondTarget": "4022.3 — stretch low (estimate)",
+        "secondTargetPrice": 4022.3,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Break and hold above 4041.2",
+        "invalidationPrice": 4041.2
+      },
+      "whyNotReady": "OHLC-only updates cannot create an entry plan without verified structure levels.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "LIVE_RANGE_ONLY",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "missing-atr",
+    "title": "Missing ATR",
+    "mode": "COMPLETE",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "BELOW_VALUE",
+    "triggerPrice": 4037.308,
+    "nextTargetPrice": 4041.2,
+    "bull": {
+      "trigger": 4037.308,
+      "t1": 4041.2,
+      "t2": 4045.09,
+      "firstTarget": "4041.2 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4031.1,
+      "t1": null,
+      "t2": 4028.93,
+      "firstTarget": "Unavailable"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "BELOW_VALUE",
+      "probableLow": 4031.1,
+      "probableHigh": 4037.31,
+      "stretchLow": 4028.93,
+      "stretchHigh": 4039.48,
+      "currentPrice": 4034.815,
+      "remainingAbovePoints": 2.49,
+      "remainingBelowPoints": 3.72,
+      "remainingAbovePercent": 0.06,
+      "remainingBelowPercent": 0.09,
+      "confidence": 58,
+      "reasons": [
+        "Below value: probable low from verified bar/ATR support at or below price; probable high is VAL reclaim resistance",
+        "Stretch targets extend ~35% beyond the probable range width"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4041.2,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "RECLAIM_LEVEL",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4031.1,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Reclaim and hold above VAL 4037.308",
+        "triggerPrice": 4037.308,
+        "confirmationRequired": [
+          "5-minute candle closes above VAL",
+          "Retest holds above VAL"
+        ],
+        "firstTarget": "4041.2 — recent bar high",
+        "firstTargetPrice": 4041.2,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4045.09 — POC / volume magnet",
+        "secondTargetPrice": 4045.09,
+        "secondTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "invalidation": "Break and hold below 4031.1",
+        "invalidationPrice": 4031.1
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Break and hold below 4031.1",
+        "triggerPrice": 4031.1,
+        "confirmationRequired": [
+          "5-minute candle closes below the support trigger",
+          "Hold below on retest"
+        ],
+        "firstTarget": "Unavailable",
+        "firstTargetPrice": null,
+        "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+        "secondTarget": "4028.93 — stretch low (estimate)",
+        "secondTargetPrice": 4028.93,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Reclaim and hold above 4037.308",
+        "invalidationPrice": 4037.308
+      },
+      "whyNotReady": "Price is below the value area — wait for reclaim-and-hold or a confirmed breakdown from genuine support below.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "missing-structure",
+    "title": "Missing POC, VAH or VAL",
+    "mode": "COMPLETE",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "UNKNOWN",
+    "triggerPrice": null,
+    "nextTargetPrice": 4041.2,
+    "bull": {
+      "trigger": 4031.1,
+      "t1": 4041.2,
+      "t2": 4047.32,
+      "firstTarget": "4041.2 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4041.2,
+      "t1": 4031.1,
+      "t2": 4022.32,
+      "firstTarget": "4031.1 — recent bar low"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "UNKNOWN",
+      "probableLow": 4031.1,
+      "probableHigh": 4041.2,
+      "stretchLow": 4022.32,
+      "stretchHigh": 4047.32,
+      "currentPrice": 4034.815,
+      "remainingAbovePoints": 6.38,
+      "remainingBelowPoints": 3.72,
+      "remainingAbovePercent": 0.16,
+      "remainingBelowPercent": 0.09,
+      "confidence": 58,
+      "reasons": [
+        "OHLC/unknown value location: probable range uses bar high/low around current price",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 20,
+    "signalAgeSeconds": 90,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-atr-high",
+          "price": 4047.32,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4041.2,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4031.1,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4022.32,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Bounce from support 4031.1",
+        "triggerPrice": 4031.1,
+        "confirmationRequired": [
+          "Confirmation candle at the bullish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4041.2 — recent bar high",
+        "firstTargetPrice": 4041.2,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4047.32 — stretch high (estimate)",
+        "secondTargetPrice": 4047.32,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Break and hold below 4031.1",
+        "invalidationPrice": 4031.1
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Rejection from resistance 4041.2",
+        "triggerPrice": 4041.2,
+        "confirmationRequired": [
+          "Confirmation candle at the bearish trigger",
+          "Hold on retest"
+        ],
+        "firstTarget": "4031.1 — recent bar low",
+        "firstTargetPrice": 4031.1,
+        "firstTargetWhy": "Nearest verified recent bar low beyond the bearish trigger.",
+        "secondTarget": "4022.32 — stretch low (estimate)",
+        "secondTargetPrice": 4022.32,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Break and hold above 4041.2",
+        "invalidationPrice": 4041.2
+      },
+      "whyNotReady": "Confirmation and/or complete plan conditions are still incomplete.",
+      "freshness": {
+        "quoteAgeSeconds": 20,
+        "signalAgeSeconds": 90,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  },
+  {
+    "id": "stale-signal-fresh-quote",
+    "title": "Stale strategy signal with a fresh quote",
+    "mode": "COMPLETE",
+    "action": "PREPARE",
+    "actionLabel": "PREPARE — SETUP FORMING",
+    "valueLocation": "BELOW_VALUE",
+    "triggerPrice": 4037.308,
+    "nextTargetPrice": 4040,
+    "bull": {
+      "trigger": 4037.308,
+      "t1": 4040,
+      "t2": 4045.09,
+      "firstTarget": "4040 — recent bar high"
+    },
+    "bear": {
+      "trigger": 4030,
+      "t1": null,
+      "t2": 4023.7,
+      "firstTarget": "Unavailable"
+    },
+    "range": {
+      "rangeAvailable": true,
+      "unavailableReason": null,
+      "valueLocation": "BELOW_VALUE",
+      "probableLow": 4030,
+      "probableHigh": 4037.31,
+      "stretchLow": 4023.7,
+      "stretchHigh": 4048.7,
+      "currentPrice": 4036.2,
+      "remainingAbovePoints": 1.11,
+      "remainingBelowPoints": 6.2,
+      "remainingAbovePercent": 0.03,
+      "remainingBelowPercent": 0.15,
+      "confidence": 58,
+      "reasons": [
+        "Below value: probable low from verified bar/ATR support at or below price; probable high is VAL reclaim resistance",
+        "Stretch targets use approximately one ATR beyond current price / probable bounds"
+      ],
+      "invalidation": "Recalculate when a new complete strategy signal arrives, when price leaves the stretch band, or when market-structure mode becomes MISMATCH.",
+      "estimateDisclaimer": "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range."
+    },
+    "tradePlanKind": "CONDITIONAL_REFERENCE",
+    "tradePlanDirection": "NONE",
+    "autoTrade": "OFF",
+    "quoteAgeSeconds": 15,
+    "signalAgeSeconds": 3600,
+    "plan": {
+      "importantLevels": [
+        {
+          "id": "lvl-tp2",
+          "price": 4049.8,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-vah",
+          "price": 4049.633,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-atr-high",
+          "price": 4048.7,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-tp1",
+          "price": 4045.1,
+          "roleAtCurrentPrice": "TARGET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-poc",
+          "price": 4045.087,
+          "roleAtCurrentPrice": "MAGNET",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-bar-high",
+          "price": 4040,
+          "roleAtCurrentPrice": "RESISTANCE",
+          "proximity": "ABOVE"
+        },
+        {
+          "id": "lvl-val",
+          "price": 4037.308,
+          "roleAtCurrentPrice": "RECLAIM_LEVEL",
+          "proximity": "NEAR"
+        },
+        {
+          "id": "lvl-bar-low",
+          "price": 4030,
+          "roleAtCurrentPrice": "SUPPORT",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-stop",
+          "price": 4028.6,
+          "roleAtCurrentPrice": "INVALIDATION",
+          "proximity": "BELOW"
+        },
+        {
+          "id": "lvl-atr-low",
+          "price": 4023.7,
+          "roleAtCurrentPrice": "STRETCH_ESTIMATE",
+          "proximity": "BELOW"
+        }
+      ],
+      "bullishScenario": {
+        "label": "If price rises",
+        "trigger": "Reclaim and hold above VAL 4037.308",
+        "triggerPrice": 4037.308,
+        "confirmationRequired": [
+          "5-minute candle closes above VAL",
+          "Retest holds above VAL"
+        ],
+        "firstTarget": "4040 — recent bar high",
+        "firstTargetPrice": 4040,
+        "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+        "secondTarget": "4045.09 — POC / volume magnet",
+        "secondTargetPrice": 4045.09,
+        "secondTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
+        "invalidation": "Break and hold below 4030",
+        "invalidationPrice": 4030
+      },
+      "bearishScenario": {
+        "label": "If price falls",
+        "trigger": "Break and hold below 4030",
+        "triggerPrice": 4030,
+        "confirmationRequired": [
+          "5-minute candle closes below the support trigger",
+          "Hold below on retest"
+        ],
+        "firstTarget": "Unavailable",
+        "firstTargetPrice": null,
+        "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+        "secondTarget": "4023.7 — stretch low (estimate)",
+        "secondTargetPrice": 4023.7,
+        "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
+        "invalidation": "Reclaim and hold above 4037.308",
+        "invalidationPrice": 4037.308
+      },
+      "whyNotReady": "Price is below the value area — wait for reclaim-and-hold or a confirmed breakdown from genuine support below.",
+      "freshness": {
+        "quoteAgeSeconds": 15,
+        "signalAgeSeconds": 3600,
+        "marketStructureMode": "COMPLETE",
+        "sourceLabel": "TEST",
+        "dataQuality": "GOOD"
+      }
+    }
+  }
+]

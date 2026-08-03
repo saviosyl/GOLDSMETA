@@ -10,10 +10,25 @@ import {
   VerifyEmailPage
 } from "./auth/StatusPages";
 import { BrokerControlCentrePage } from "./broker/BrokerControlCentrePage";
+import { OverviewPage } from "./OverviewPage";
+import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
 import { vi } from "vitest";
 import "../styles/redesign.css";
 
 expect.extend(toHaveNoViolations);
+
+const decisionFixture = {
+  decisionId: "dec_a11y",
+  decision: "WAIT",
+  reasonCodes: ["CONFIRMATION"],
+  currentSession: "LONDON",
+  generatedAt: "2026-07-21T21:45:00.000Z",
+  lastKnownPrice: 4034.82,
+  ohlcv: { high: 4041.2, low: 4031.1, close: 4034.82 },
+  marketStructure: { poc: 4045.09, vah: 4049.63, val: 4037.31, trend: "RANGE" },
+  environment: "LIVE",
+  dataSourceLabel: "LIVE"
+};
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
@@ -26,6 +41,25 @@ vi.mock("../lib/auth", () => ({
     apiBaseUrl: "https://example.test",
     api: {
       resendVerification: vi.fn().mockResolvedValue({ message: "Sent" }),
+      latestDecision: vi.fn().mockResolvedValue(decisionFixture),
+      latestDecisionPack: vi.fn().mockResolvedValue({
+        decision: decisionFixture,
+        latestQuote: decisionFixture,
+        latestCompleteStrategySignal: decisionFixture,
+        marketStructureMode: "COMPLETE",
+        marketStructureDiagnostics: null,
+        structureDecisionId: decisionFixture.decisionId,
+        intradayPlan: chartExampleIntradayPlanFixture
+      }),
+      listActiveSetups: vi.fn().mockResolvedValue([]),
+      listSetups: vi.fn().mockResolvedValue([]),
+      v5Briefing: vi.fn().mockResolvedValue({
+        session: "LONDON",
+        levels: { poc: 4045.09, vah: 4049.63, val: 4037.31 },
+        insufficientData: false,
+        dataTimestamp: "2026-07-21T21:45:00.000Z"
+      }),
+      v5Score: vi.fn().mockResolvedValue({ total: 61, components: [] }),
       getBrokerControlCentre: vi.fn().mockResolvedValue({
         defaultBroker: "manual",
         autoTrade: "OFF",
@@ -127,6 +161,19 @@ describe("accessibility axe audits", () => {
       </MemoryRouter>
     );
     await findByTestId("broker-control-centre");
+    const results = await axe(container, {
+      rules: { "color-contrast": { enabled: false } }
+    });
+    expect(results).toHaveNoViolations();
+  });
+
+  it("Intraday Overview dashboard passes axe after load", async () => {
+    const { container, findByTestId } = render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
+    await findByTestId("intraday-action-card");
     const results = await axe(container, {
       rules: { "color-contrast": { enabled: false } }
     });

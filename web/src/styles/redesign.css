@@ -3195,3 +3195,656 @@ a {
     padding: 0.5rem;
   }
 }
+
+/* ===== Issue #50 — compact premium intraday dashboard ===== */
+
+.gm-intra-header,
+.gm-intra-action,
+.gm-intra-range,
+.gm-intra-zones,
+.gm-intra-tradeplan,
+.gm-intra-levels {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+
+.gm-intra-scenarios {
+  margin-bottom: 12px;
+  min-width: 0;
+}
+
+.gm-intra-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gm-intra-price {
+  display: block;
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  font-weight: 780;
+  letter-spacing: -0.03em;
+  color: var(--navy);
+  line-height: 1.1;
+}
+
+.gm-intra-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.gm-intra-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-size: var(--text-label);
+  color: var(--text);
+}
+
+.gm-intra-header-meta em {
+  font-style: normal;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.gm-intra-action .gm-intra-action-label {
+  margin: 2px 0 6px;
+  font-size: clamp(1.75rem, 6vw, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.gm-intra-action.tone-buy .gm-intra-action-label { color: var(--buy); }
+.gm-intra-action.tone-sell .gm-intra-action-label { color: var(--sell); }
+.gm-intra-action.tone-prepare .gm-intra-action-label { color: var(--wait); }
+.gm-intra-action.tone-range .gm-intra-action-label { color: var(--liquidity); }
+.gm-intra-action.tone-none .gm-intra-action-label { color: var(--neutral); }
+
+.gm-intra-action-sentence {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  max-width: 720px;
+}
+
+.gm-intra-action-grid,
+.gm-intra-zones-grid,
+.gm-intra-tradeplan-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.gm-intra-action-grid > div,
+.gm-intra-zones-grid > div,
+.gm-intra-tradeplan-grid > div {
+  min-width: 0;
+}
+
+.gm-intra-action-grid strong,
+.gm-intra-zones-grid strong,
+.gm-intra-tradeplan-grid strong {
+  display: block;
+  font-size: 0.95rem;
+  color: var(--navy);
+  word-break: break-word;
+}
+
+.gm-intra-action-span,
+.gm-intra-zones-span,
+.gm-intra-tradeplan-span {
+  grid-column: 1 / -1;
+}
+
+.gm-intra-confirm ul,
+.gm-intra-checklist,
+.gm-intra-range-reasons,
+.gm-level-list {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+}
+
+.gm-intra-progress {
+  margin-top: 12px;
+}
+
+.gm-intra-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.gm-intra-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.gm-intra-progress-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--navy-2), var(--gold));
+}
+
+.gm-intra-checklist {
+  list-style: none;
+  padding: 0;
+}
+
+.gm-intra-checklist li {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--text-label);
+}
+
+.gm-intra-checklist li[data-complete="0"] {
+  opacity: 0.75;
+}
+
+.gm-intra-checklist em {
+  display: block;
+  font-style: normal;
+}
+
+.gm-intra-why-not {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: var(--text-label);
+}
+
+.gm-intra-range-labels,
+.gm-intra-range-stretch,
+.gm-intra-range-remain {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--text-label);
+}
+
+.gm-intra-range-labels strong,
+.gm-intra-range-stretch strong {
+  display: block;
+  color: var(--navy);
+}
+
+.gm-intra-range-track {
+  position: relative;
+  height: 14px;
+  margin: 12px 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--negative-soft), var(--surface-alt), var(--positive-soft));
+  overflow: hidden;
+}
+
+.gm-intra-range-probable {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 999px;
+  background: rgba(17, 40, 74, 0.18);
+}
+
+.gm-intra-range-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--navy);
+  border-radius: 2px;
+}
+
+.gm-intra-scenarios {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.gm-intra-scenarios-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.gm-intra-scenario {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  padding: 12px 14px;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.gm-intra-scenario h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--navy);
+}
+
+.gm-intra-scenario.tone-bull { border-top: 3px solid var(--buy); }
+.gm-intra-scenario.tone-bear { border-top: 3px solid var(--sell); }
+
+.gm-intra-scenario dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.gm-intra-scenario dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.gm-intra-scenario dd {
+  margin: 2px 0 0;
+  font-size: var(--text-label);
+  color: var(--text);
+  word-break: break-word;
+}
+
+.gm-intra-scenario dd.gm-scenario-why,
+.gm-conditional-why {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.gm-level-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.gm-level-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 12px 14px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-height: 44px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gm-level-card:hover,
+.gm-level-card:focus-visible {
+  border-color: var(--navy-2);
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+
+.gm-level-card.side-upside { border-left: 3px solid var(--ladder-resistance); }
+.gm-level-card.side-downside { border-left: 3px solid var(--ladder-support); }
+
+.gm-level-price {
+  font-size: 1.1rem;
+  font-weight: 750;
+  color: var(--navy);
+}
+
+.gm-level-meta,
+.gm-level-meaning,
+.gm-level-cta {
+  font-size: var(--text-label);
+  color: var(--text-secondary);
+}
+
+.gm-level-cta {
+  color: var(--navy-2);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.gm-level-detail {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gm-level-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.gm-level-detail h3 {
+  margin: 0;
+  color: var(--navy);
+}
+
+.gm-level-detail h4 {
+  margin: 10px 0 4px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.gm-level-detail p,
+.gm-level-detail li {
+  margin: 0;
+  font-size: var(--text-label);
+  color: var(--text);
+}
+
+.gm-level-detail ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.gm-system-status {
+  margin: 12px 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 0 12px;
+}
+
+.gm-system-status > summary {
+  cursor: pointer;
+  padding: 12px 4px;
+  font-weight: 650;
+  color: var(--navy);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  list-style: none;
+}
+
+.gm-system-status > summary::-webkit-details-marker { display: none; }
+
+.gm-system-status-body {
+  padding: 0 4px 12px;
+  min-width: 0;
+}
+
+.gm-system-diagnostics {
+  max-height: 180px;
+  overflow: auto;
+  font-size: 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .gm-intra-action-grid,
+  .gm-intra-zones-grid,
+  .gm-intra-tradeplan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-intra-header,
+  .gm-intra-action,
+  .gm-intra-range,
+  .gm-intra-zones,
+  .gm-intra-tradeplan,
+  .gm-intra-levels {
+    padding: 12px;
+  }
+}
+
+@media (min-width: 960px) {
+  .gm-intra-levels .gm-level-list {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ===== Issue #50 logic fix — mobile compactness + level roles ===== */
+
+.gm-mobile-only { display: none !important; }
+.gm-desktop-only { display: block; }
+.gm-levels-desktop { display: block; }
+.gm-levels-mobile { display: none; }
+
+.gm-scenario-tabs {
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.gm-scenario-tabs button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-height: 40px;
+  font-size: 0.85rem;
+}
+
+.gm-scenario-tabs button.active {
+  background: var(--surface-alt);
+  color: var(--navy);
+  border-color: var(--navy-2);
+  box-shadow: inset 0 -2px 0 var(--navy-2);
+}
+
+.gm-intra-details {
+  margin-top: 10px;
+}
+
+.gm-intra-details > summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--navy-2);
+  font-size: var(--text-label);
+  padding: 6px 0;
+}
+
+.gm-level-group { margin-top: 12px; }
+.gm-level-group-title {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.gm-level-dist {
+  font-weight: 700;
+  color: var(--navy);
+  font-size: var(--text-label);
+}
+
+.gm-level-card.prox-above { border-left: 3px solid var(--ladder-resistance); }
+.gm-level-card.prox-below { border-left: 3px solid var(--ladder-support); }
+.gm-level-card.prox-near { border-left: 3px solid var(--gold); }
+
+.gm-intra-conditional-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.gm-intra-conditional-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-alt);
+  min-width: 0;
+}
+
+.gm-intra-conditional-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: var(--navy);
+}
+
+.gm-intra-conditional-card.tone-bull { border-top: 3px solid var(--buy); }
+.gm-intra-conditional-card.tone-bear { border-top: 3px solid var(--sell); }
+
+.gm-intra-conditional-card .gm-label { display: block; }
+.gm-intra-conditional-card strong { display: block; word-break: break-word; font-size: var(--text-label); }
+.gm-intra-conditional-card p { margin: 0 0 8px; }
+
+.gm-structure-collapse {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-structure-collapse > summary {
+  cursor: pointer;
+  padding: 12px 4px;
+  font-weight: 700;
+  color: var(--navy);
+  list-style: none;
+}
+
+.gm-structure-collapse > summary::-webkit-details-marker { display: none; }
+.gm-structure-collapse-body { padding: 0 0 12px; min-width: 0; }
+
+.gm-sticky-action {
+  display: none;
+}
+
+.gm-levels-show-all {
+  width: 100%;
+  margin-top: 10px;
+  min-height: 44px;
+}
+
+@media (max-width: 720px) {
+  .gm-mobile-only { display: block !important; }
+  .gm-desktop-only { display: none !important; }
+  .gm-levels-desktop { display: none !important; }
+  .gm-levels-mobile { display: block !important; }
+
+  /* Keep dashboard chrome inside the viewport on narrow phones. */
+  .gm-shell,
+  .gm-main,
+  .gm-main-inner {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  .gm-topbar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
+  }
+
+  .gm-topbar-brand {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .gm-topbar-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-topbar-actions .gm-meta {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .gm-scenario-tabs.gm-mobile-only {
+    display: grid !important;
+  }
+
+  .gm-intra-scenarios-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-intra-scenario { display: none; }
+  .gm-intra-scenario.is-active { display: flex; }
+
+  .gm-intra-conditional-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-intra-levels .gm-level-list {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-intra-header,
+  .gm-intra-action,
+  .gm-intra-range {
+    margin-bottom: 8px;
+    padding: 10px 12px;
+  }
+
+  .gm-intra-action .gm-intra-action-label {
+    font-size: clamp(1.45rem, 7vw, 1.9rem);
+  }
+
+  .gm-intra-action-sentence {
+    font-size: var(--text-label);
+    margin-bottom: 8px;
+  }
+
+  .gm-sticky-action {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: rgba(247, 248, 250, 0.96);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0;
+    margin: 0 0 8px;
+  }
+
+  .gm-sticky-action.is-visible {
+    display: block;
+  }
+
+  .gm-sticky-action strong {
+    display: block;
+    color: var(--navy);
+    font-size: 0.95rem;
+  }
+
+  .gm-sticky-action span {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+}
