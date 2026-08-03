@@ -17,7 +17,10 @@ import {
   cTraderOrderApi,
   getBrokerControlCentreSnapshot
 } from "../services/broker/ctrader/cTraderService";
-import { loadCTraderConfig } from "../services/broker/ctrader/config";
+import {
+  labelMissingConfiguration,
+  loadCTraderConfig
+} from "../services/broker/ctrader/config";
 import { assertCTraderMutationsDisabled, snapshotCTraderFlags } from "../services/broker/ctrader/flags";
 import { CTraderMutationDisabledError } from "../services/broker/ctrader/mutationGuard";
 import { approveTradePreview, buildTradePreview } from "../services/broker/ctrader/preview";
@@ -241,11 +244,23 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/ctrader/config", requireAuth, ...brokerGate, async (_req, res) => {
     const config = loadCTraderConfig();
+    const tokenEncryptionConfigured = Boolean(loadTokenEncryptionSecret());
+    const missingCodes = [
+      ...config.missing,
+      ...(tokenEncryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+    ];
+    // Never return secret values — strip redirectUri raw value from the public payload.
+    const { redirectUri: _redirectUri, ...publicConfig } = config;
     res.json({
-      ...config,
+      ...publicConfig,
+      redirectUri: null,
+      redirectUriPublic: config.redirectUriPublic,
       clientIdPresent: config.clientIdPresent,
       clientSecretPresent: config.clientSecretPresent,
-      tokenEncryptionConfigured: Boolean(loadTokenEncryptionSecret()),
+      tokenEncryptionConfigured,
+      missing: missingCodes,
+      missingConfigurationItems: labelMissingConfiguration(missingCodes),
+      oauthReady: config.configured && tokenEncryptionConfigured,
       flags: snapshotCTraderFlags()
     });
   });
@@ -270,8 +285,18 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
 
   router.post("/v1/ctrader/oauth/start", requireAuth, ...brokerGate, async (req, res) => {
     // Per-user OAuth: credentials must be configured. Owner-auth integrity is informational.
-    if (!loadCTraderConfig().configured || !loadTokenEncryptionSecret()) {
-      sendFriendlyError(res, 503, "CTRADER_SETUP_REQUIRED");
+    const config = loadCTraderConfig();
+    const encryptionConfigured = Boolean(loadTokenEncryptionSecret());
+    if (!config.configured || !encryptionConfigured) {
+      const missingCodes = [
+        ...config.missing,
+        ...(encryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+      ];
+      sendFriendlyError(res, 503, "CONFIGURATION_REQUIRED", {
+        code: "CONFIGURATION_REQUIRED",
+        missingConfigurationItems: labelMissingConfiguration(missingCodes),
+        missing: missingCodes
+      });
       return;
     }
     const uid = requireUid(req, res);
@@ -306,8 +331,18 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     requireAuth,
     ...brokerGate,
     async (req, res) => {
-      if (!loadCTraderConfig().configured || !loadTokenEncryptionSecret()) {
-        sendFriendlyError(res, 503, "CTRADER_SETUP_REQUIRED");
+      const config = loadCTraderConfig();
+      const encryptionConfigured = Boolean(loadTokenEncryptionSecret());
+      if (!config.configured || !encryptionConfigured) {
+        const missingCodes = [
+          ...config.missing,
+          ...(encryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+        ];
+        sendFriendlyError(res, 503, "CONFIGURATION_REQUIRED", {
+          code: "CONFIGURATION_REQUIRED",
+          missingConfigurationItems: labelMissingConfiguration(missingCodes),
+          missing: missingCodes
+        });
         return;
       }
       const uid = requireUid(req, res);

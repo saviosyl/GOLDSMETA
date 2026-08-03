@@ -736,6 +736,7 @@ function buildReviewApi() {
         setupRequired: false,
         authSetupRequired: false,
         oauthConfigured: true,
+        missingConfigurationItems: [],
         connected: true,
         demonstrationAvailable: true,
         automationMode: "OFF",

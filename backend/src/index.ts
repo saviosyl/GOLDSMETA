@@ -34,15 +34,46 @@ export const createApp = (dependencies: Partial<AppDependencies> = {}) =>
   });
 
 export const app = createApp();
+/**
+ * Apply cTrader Demo connector env on production `api` when CTRADER_* secrets
+ * are bound. Order submission / Live execution remain hard-locked via flags.ts.
+ * OAuth redirect URI continues to come from CTRADER_REDIRECT_URI (Secret Manager).
+ */
+function applyProductionCTraderRuntimeEnv(): void {
+  if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
+  process.env.CTRADER_CONNECTOR_ENABLED =
+    process.env.CTRADER_CONNECTOR_ENABLED || "true";
+  process.env.CTRADER_DEMO_READ_ENABLED =
+    process.env.CTRADER_DEMO_READ_ENABLED || "true";
+  process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED =
+    process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED || "true";
+  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
+  process.env.CTRADER_LIVE_ENABLED = "false";
+  process.env.BROKER_EXECUTION_ENABLED = "false";
+  if (!process.env.GOLDMETA_WEB_ORIGIN) {
+    process.env.GOLDMETA_WEB_ORIGIN =
+      process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
+  }
+  // Force DEMO Open API environment for this phase.
+  process.env.CTRADER_ENVIRONMENT = "DEMO";
+}
+
 export const api = onRequest(
   {
     region: env.FIREBASE_REGION,
     // Pinned owner UID for Auth integrity; T212 Practice DEMO secrets for
     // read-only / dry-run Invest diagnostics only. Never bind T212_LIVE_*.
+    // CTRADER_* secrets enable Pepperstone OAuth on production `api` as well as
+    // apiCTraderPreview. Redirect URI must match the Open API app allowlist.
     secrets: [
       "GOLDMETA_PINNED_OWNER_UID",
       "T212_DEMO_API_KEY",
-      "T212_DEMO_API_SECRET"
+      "T212_DEMO_API_SECRET",
+      "CTRADER_CLIENT_ID",
+      "CTRADER_CLIENT_SECRET",
+      "CTRADER_REDIRECT_URI",
+      "CTRADER_TOKEN_ENCRYPTION_KEY",
+      "CTRADER_ENVIRONMENT"
     ],
     cors: [
       "https://goldmeta.metamechsolutions.com",
@@ -51,7 +82,10 @@ export const api = onRequest(
       "http://localhost:5173"
     ]
   },
-  app
+  (req, res) => {
+    applyProductionCTraderRuntimeEnv();
+    return app(req, res);
+  }
 );
 
 /** Isolated V6 IG Demo read-only preview — deploy with --only functions:apiV6Preview */

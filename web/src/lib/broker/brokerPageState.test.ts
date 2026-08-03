@@ -84,6 +84,44 @@ describe("brokerPageState", () => {
     expect(view.accountTypeLabel).toBe("Analysis only");
   });
 
+  it("shows Ready to connect when OAuth is configured but not yet connected", () => {
+    const view = deriveCanonicalBrokerView({
+      pageLoading: false,
+      hasCentre: true,
+      selectedBrokerId: "pepperstone_ctrader",
+      readinessConnected: false,
+      authSetupRequired: false,
+      setupRequired: true,
+      oauthConfigured: true,
+      reconnectRequired: false,
+      tokenRefreshHealthy: null,
+      accountSelected: false,
+      selectedAccountIsLive: false,
+      demoAccountSelected: false
+    });
+    expect(view.connectionPhase).toBe("available");
+    expect(view.connectionLabel).toBe("Ready to connect");
+  });
+
+  it("keeps Setup required when OAuth credentials are missing", () => {
+    const view = deriveCanonicalBrokerView({
+      pageLoading: false,
+      hasCentre: true,
+      selectedBrokerId: "pepperstone_ctrader",
+      readinessConnected: false,
+      authSetupRequired: false,
+      setupRequired: true,
+      oauthConfigured: false,
+      reconnectRequired: false,
+      tokenRefreshHealthy: null,
+      accountSelected: false,
+      selectedAccountIsLive: false,
+      demoAccountSelected: false
+    });
+    expect(view.connectionPhase).toBe("setup_required");
+    expect(view.connectionLabel).toBe("Setup required");
+  });
+
   it("recognises ACCESS_DENIED and VERSION_CONFLICT codes", () => {
     expect(isAuthReconnectCode("ACCESS_DENIED")).toBe(true);
     expect(isAuthReconnectCode("CTRADER_TOKEN_REFRESH_FAILED")).toBe(true);
