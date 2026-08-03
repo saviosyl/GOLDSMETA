@@ -12,7 +12,7 @@ describe("formatClientError", () => {
     );
     expect(
       formatClientError(new ApiError(403, "CTRADER_SETUP_REQUIRED", "Missing CTRADER_CLIENT_SECRET"), "x")
-    ).toMatch(/secure credentials/i);
+    ).toMatch(/server configuration is incomplete/i);
   });
 
   it("maps browser network/CORS failures to a friendly message", () => {
