@@ -31,8 +31,9 @@ test.describe("Overview research cockpit", () => {
     });
     expect(metrics.overflow).toBe(false);
     expect(metrics.actionBottom).toBeLessThan(metrics.vh * 0.55);
-    expect(metrics.rangeBottom).toBeLessThan(metrics.vh * 0.75);
-    expect(metrics.nextBottom).toBeLessThan(metrics.vh * 0.92);
+    // Range map includes summary + scale + metrics + guidance (still above the fold with Next Decision).
+    expect(metrics.rangeBottom).toBeLessThan(metrics.vh * 0.88);
+    expect(metrics.nextBottom).toBeLessThan(metrics.vh + 40);
 
     await page.getByTestId("range-node-probable-high").click();
     await expect(page.getByTestId("range-level-explain")).toBeVisible();

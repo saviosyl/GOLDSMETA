@@ -4402,8 +4402,37 @@ a {
 }
 
 .gm-cockpit .gm-intra-range details,
-.gm-cockpit .gm-intra-range [data-testid="range-disclaimer"] {
+.gm-cockpit .gm-intra-range [data-testid="range-disclaimer"],
+.gm-cockpit .gm-range-estimate-note {
   display: none;
+}
+
+.gm-cockpit .gm-range-summary {
+  margin: 2px 0 6px;
+  gap: 6px 12px;
+}
+
+.gm-cockpit .gm-range-scale {
+  height: 32px;
+  margin-bottom: 6px;
+}
+
+.gm-cockpit .gm-range-level {
+  min-height: 40px;
+  padding: 3px 2px;
+}
+
+.gm-cockpit .gm-range-dist {
+  display: none;
+}
+
+.gm-cockpit .gm-range-guidance {
+  margin: 4px 0 0;
+  font-size: 0.74rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .gm-cockpit .gm-next-decision {
@@ -4413,11 +4442,17 @@ a {
 
 .gm-cockpit .gm-range-metrics {
   gap: 4px;
-  margin: 6px 0 4px;
+  margin: 4px 0 2px;
 }
 
 .gm-cockpit .gm-range-metrics strong {
   font-size: 0.78rem;
+}
+
+@media (max-width: 720px) {
+  .gm-cockpit .gm-range-dist {
+    display: block;
+  }
 }
 
 .gm-cockpit .gm-intra-scenarios .gm-scenario-label {
