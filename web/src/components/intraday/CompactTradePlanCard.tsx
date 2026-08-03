@@ -1,10 +1,56 @@
 import { Link } from "react-router-dom";
-import type { ManualTradePlanCard } from "../../types/intradayPlan";
+import type { ConditionalPlanRef, ManualTradePlanCard } from "../../types/intradayPlan";
 import { fmtPrice } from "../../lib/intradayFormat";
 
 type Props = {
   tradePlan: ManualTradePlanCard;
 };
+
+function ConditionalCard({
+  plan,
+  testId
+}: {
+  plan: ConditionalPlanRef;
+  testId: string;
+}) {
+  return (
+    <article
+      className={`gm-intra-conditional-card tone-${plan.direction === "BUY" ? "bull" : "bear"}`}
+      data-testid={testId}
+    >
+      <h3>{plan.label}</h3>
+      <p>
+        <span className="gm-label">Trigger</span>
+        <strong>{plan.trigger}</strong>
+      </p>
+      <p>
+        <span className="gm-label">Confirmation required</span>
+        <strong>{plan.confirmationRequired.join("; ")}</strong>
+      </p>
+      <p>
+        <span className="gm-label">Target 1</span>
+        <strong data-testid={`${testId}-target1`}>{plan.target1 ?? "Unavailable"}</strong>
+      </p>
+      {plan.target1Why && (
+        <p>
+          <span className="gm-label">Why this target was selected</span>
+          <strong className="gm-conditional-why">{plan.target1Why}</strong>
+        </p>
+      )}
+      <p>
+        <span className="gm-label">Target 2</span>
+        <strong>{plan.target2 ?? "Unavailable"}</strong>
+      </p>
+      <p>
+        <span className="gm-label">Invalidation</span>
+        <strong>
+          {plan.invalidation}
+          {plan.invalidationPrice != null ? ` (${fmtPrice(plan.invalidationPrice)})` : ""}
+        </strong>
+      </p>
+    </article>
+  );
+}
 
 export function CompactTradePlanCard({ tradePlan }: Props) {
   if (tradePlan.cardKind !== "ACTIVE_PLAN") {
@@ -19,44 +65,16 @@ export function CompactTradePlanCard({ tradePlan }: Props) {
           <span className="gm-badge neutral">No trade plan active</span>
         </div>
         <p className="gm-meta" data-testid="tp-no-active">
-          {tradePlan.orderingNote ?? "No trade plan is active."} Stop/TP values are not presented as
-          an order ticket until direction, entry, stop, TP1 and ordering are valid.
+          {tradePlan.orderingNote ?? "No trade plan is active."} Conditional levels are not an order
+          ticket until direction, entry, stop, TP1 and ordering are valid.
         </p>
 
         <div className="gm-intra-conditional-grid">
           {tradePlan.bullishConditional && (
-            <article className="gm-intra-conditional-card tone-bull" data-testid="bullish-conditional">
-              <h3>{tradePlan.bullishConditional.label}</h3>
-              <p>
-                <span className="gm-label">Trigger</span>
-                <strong>{tradePlan.bullishConditional.trigger}</strong>
-              </p>
-              <p>
-                <span className="gm-label">Reference TP1</span>
-                <strong>{fmtPrice(tradePlan.bullishConditional.tp1)}</strong>
-              </p>
-              <p>
-                <span className="gm-label">Invalidation</span>
-                <strong>{tradePlan.bullishConditional.invalidation}</strong>
-              </p>
-            </article>
+            <ConditionalCard plan={tradePlan.bullishConditional} testId="bullish-conditional" />
           )}
           {tradePlan.bearishConditional && (
-            <article className="gm-intra-conditional-card tone-bear" data-testid="bearish-conditional">
-              <h3>{tradePlan.bearishConditional.label}</h3>
-              <p>
-                <span className="gm-label">Trigger</span>
-                <strong>{tradePlan.bearishConditional.trigger}</strong>
-              </p>
-              <p>
-                <span className="gm-label">Reference TP1</span>
-                <strong>{fmtPrice(tradePlan.bearishConditional.tp1)}</strong>
-              </p>
-              <p>
-                <span className="gm-label">Invalidation</span>
-                <strong>{tradePlan.bearishConditional.invalidation}</strong>
-              </p>
-            </article>
+            <ConditionalCard plan={tradePlan.bearishConditional} testId="bearish-conditional" />
           )}
         </div>
         <p className="gm-meta gm-mobile-collapse-note" style={{ marginBottom: 0 }}>

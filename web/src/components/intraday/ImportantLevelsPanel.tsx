@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ImportantLevel, LevelProximity } from "../../types/intradayPlan";
 import { fmtPrice, fmtSignedDistance, rolePlain } from "../../lib/intradayFormat";
 
@@ -6,6 +6,8 @@ type Props = {
   levels: ImportantLevel[];
   allLevels: ImportantLevel[];
 };
+
+const MOBILE_NEAR_COUNT = 3;
 
 function LevelDetail({
   level,
@@ -188,8 +190,15 @@ function LevelGroup({
   );
 }
 
+function nearestByDistance(levels: ImportantLevel[], count: number): ImportantLevel[] {
+  return [...levels]
+    .sort((a, b) => Math.abs(a.distancePoints ?? 0) - Math.abs(b.distancePoints ?? 0))
+    .slice(0, count);
+}
+
 export function ImportantLevelsPanel({ levels, allLevels }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [showAllMobile, setShowAllMobile] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -198,6 +207,18 @@ export function ImportantLevelsPanel({ levels, allLevels }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const aboveAll = useMemo(() => levels.filter((l) => l.proximity === "ABOVE"), [levels]);
+  const nearAll = useMemo(() => levels.filter((l) => l.proximity === "NEAR"), [levels]);
+  const belowAll = useMemo(() => levels.filter((l) => l.proximity === "BELOW"), [levels]);
+
+  const mobileAbove = nearestByDistance(aboveAll, MOBILE_NEAR_COUNT);
+  const mobileBelow = nearestByDistance(belowAll, MOBILE_NEAR_COUNT);
+  const mobileNear = nearAll;
+  const mobileCollapsedCount =
+    Math.max(0, aboveAll.length - mobileAbove.length) +
+    Math.max(0, belowAll.length - mobileBelow.length);
+  const mobileTotal = levels.length;
 
   if (!levels.length) {
     return (
@@ -211,38 +232,78 @@ export function ImportantLevelsPanel({ levels, allLevels }: Props) {
     );
   }
 
-  const above = levels.filter((l) => l.proximity === "ABOVE");
-  const near = levels.filter((l) => l.proximity === "NEAR");
-  const below = levels.filter((l) => l.proximity === "BELOW");
-
   return (
     <section className="gm-intra-levels" data-testid="important-levels-panel" aria-label="Important price levels">
       <h2 className="gm-section-title">Important levels</h2>
       <p className="gm-meta gm-desktop-only">Tap a level to understand what it is and what to watch.</p>
-      <LevelGroup
-        title="Above current price"
-        proximity="ABOVE"
-        levels={above}
-        allLevels={allLevels}
-        openId={openId}
-        setOpenId={setOpenId}
-      />
-      <LevelGroup
-        title="Near current price"
-        proximity="NEAR"
-        levels={near}
-        allLevels={allLevels}
-        openId={openId}
-        setOpenId={setOpenId}
-      />
-      <LevelGroup
-        title="Below current price"
-        proximity="BELOW"
-        levels={below}
-        allLevels={allLevels}
-        openId={openId}
-        setOpenId={setOpenId}
-      />
+
+      {/* Desktop / tablet: full grouped grid */}
+      <div className="gm-levels-desktop" data-testid="levels-desktop-full">
+        <LevelGroup
+          title="Above current price"
+          proximity="ABOVE"
+          levels={aboveAll}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+        <LevelGroup
+          title="Near current price"
+          proximity="NEAR"
+          levels={nearAll}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+        <LevelGroup
+          title="Below current price"
+          proximity="BELOW"
+          levels={belowAll}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+      </div>
+
+      {/* Mobile: nearest 3 above + 3 below by default */}
+      <div className="gm-levels-mobile gm-mobile-only" data-testid="levels-mobile-compact">
+        <LevelGroup
+          title="Above current price"
+          proximity="ABOVE"
+          levels={showAllMobile ? aboveAll : mobileAbove}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+        <LevelGroup
+          title="Near current price"
+          proximity="NEAR"
+          levels={mobileNear}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+        <LevelGroup
+          title="Below current price"
+          proximity="BELOW"
+          levels={showAllMobile ? belowAll : mobileBelow}
+          allLevels={allLevels}
+          openId={openId}
+          setOpenId={setOpenId}
+        />
+        {(mobileCollapsedCount > 0 || showAllMobile) && (
+          <button
+            type="button"
+            className="gm-btn-outline gm-levels-show-all"
+            data-testid="levels-show-all"
+            onClick={() => setShowAllMobile((v) => !v)}
+          >
+            {showAllMobile
+              ? "Show nearest levels"
+              : `Show all levels (${mobileTotal})`}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

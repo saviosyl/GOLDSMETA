@@ -48,6 +48,18 @@ export function IntradayActionCard({ plan }: Props) {
           <span className="gm-label">Next target</span>
           <strong data-testid="intraday-next-target">{plan.nextTarget ?? "—"}</strong>
         </div>
+        {plan.afterThatTarget && (
+          <div>
+            <span className="gm-label">After that</span>
+            <strong data-testid="intraday-after-that">{plan.afterThatTarget}</strong>
+          </div>
+        )}
+        {plan.majorTarget && (
+          <div>
+            <span className="gm-label">Major target</span>
+            <strong data-testid="intraday-major-target">{plan.majorTarget}</strong>
+          </div>
+        )}
         <div className="gm-intra-action-span">
           <span className="gm-label">Invalidation</span>
           <strong data-testid="intraday-invalidation">{plan.invalidation}</strong>

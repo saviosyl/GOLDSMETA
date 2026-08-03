@@ -5,7 +5,7 @@ import type { IntradayPlan } from "../types/intradayPlan";
  * Generated from backend buildChartExampleIntradayFixture — never production defaults.
  */
 export const chartExampleIntradayPlanFixture = {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "action": "PREPARE",
   "actionLabel": "PREPARE — SETUP FORMING",
   "oneSentence": "Price is below value. VAL 4037.308 is the first reclaim/overhead resistance. A bullish plan requires a reclaim and hold above VAL; a failed reclaim may support bearish continuation. (LABELLED FIXTURE — not live market data)",
@@ -18,7 +18,12 @@ export const chartExampleIntradayPlanFixture = {
     "Do not treat VAL as a floor while it remains above price"
   ],
   "invalidation": "Break and hold below 4031.1 ends the immediate reclaim attempt",
-  "nextTarget": "VAH 4049.633 after successful reclaim",
+  "nextTarget": "4041.2 — recent bar high",
+  "nextTargetPrice": 4041.2,
+  "afterThatTarget": "4045.09 — POC / volume magnet",
+  "afterThatTargetPrice": 4045.09,
+  "majorTarget": "4049.63 — VAH",
+  "majorTargetPrice": 4049.63,
   "whyNotReady": "Price is below the value area — wait for reclaim-and-hold or a confirmed breakdown from genuine support below.",
   "valueLocation": "BELOW_VALUE",
   "setupProgress": {
@@ -93,21 +98,33 @@ export const chartExampleIntradayPlanFixture = {
     "label": "If price rises",
     "trigger": "Reclaim and hold above VAL 4037.308",
     "triggerPrice": 4037.308,
-    "firstTarget": "4037.31",
-    "firstTargetPrice": 4037.31,
-    "secondTarget": "4049.633",
-    "secondTargetPrice": 4049.633,
+    "confirmationRequired": [
+      "5-minute candle closes above VAL",
+      "Retest holds above VAL"
+    ],
+    "firstTarget": "4041.2 — recent bar high",
+    "firstTargetPrice": 4041.2,
+    "firstTargetWhy": "Nearest verified recent bar high beyond the bullish trigger.",
+    "secondTarget": "4045.09 — POC / volume magnet",
+    "secondTargetPrice": 4045.09,
+    "secondTargetWhy": "Verified point of control — volume magnet beyond the trigger.",
     "invalidation": "Break and hold below 4031.1",
     "invalidationPrice": 4031.1
   },
   "bearishScenario": {
     "label": "If price falls",
-    "trigger": "Breakdown and hold below support 4031.1",
+    "trigger": "Break and hold below 4031.1",
     "triggerPrice": 4031.1,
-    "firstTarget": "4031.1",
-    "firstTargetPrice": 4031.1,
-    "secondTarget": "4022.32",
+    "confirmationRequired": [
+      "5-minute candle closes below the support trigger",
+      "Hold below on retest"
+    ],
+    "firstTarget": "Unavailable",
+    "firstTargetPrice": null,
+    "firstTargetWhy": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+    "secondTarget": "4022.32 — stretch low (estimate)",
     "secondTargetPrice": 4022.32,
+    "secondTargetWhy": "Stretch estimate only — no nearer verified intermediate target.",
     "invalidation": "Reclaim and hold above 4037.308",
     "invalidationPrice": 4037.308
   },
@@ -531,25 +548,35 @@ export const chartExampleIntradayPlanFixture = {
       "label": "Bullish conditional plan",
       "direction": "BUY",
       "trigger": "Reclaim and hold above VAL 4037.308",
-      "entryZone": "4037.308",
-      "stopLoss": 4031.1,
-      "tp1": 4037.31,
-      "invalidation": "Break and hold below 4031.1",
       "confirmationRequired": [
-        "Confirmation candle on the bullish trigger"
-      ]
+        "5-minute candle closes above VAL",
+        "Retest holds above VAL"
+      ],
+      "target1": "4041.2 — recent bar high",
+      "target1Price": 4041.2,
+      "target1Why": "Nearest verified recent bar high beyond the bullish trigger.",
+      "target2": "4045.09 — POC / volume magnet",
+      "target2Price": 4045.09,
+      "target2Why": "Verified point of control — volume magnet beyond the trigger.",
+      "invalidation": "Break and hold below 4031.1",
+      "invalidationPrice": 4031.1
     },
     "bearishConditional": {
       "label": "Bearish conditional plan",
       "direction": "SELL",
-      "trigger": "Breakdown and hold below support 4031.1",
-      "entryZone": "4031.1",
-      "stopLoss": 4037.308,
-      "tp1": 4031.1,
-      "invalidation": "Reclaim and hold above 4037.308",
+      "trigger": "Break and hold below 4031.1",
       "confirmationRequired": [
-        "Confirmation candle on the bearish trigger"
-      ]
+        "5-minute candle closes below the support trigger",
+        "Hold below on retest"
+      ],
+      "target1": "Unavailable",
+      "target1Price": null,
+      "target1Why": "No verified intermediate target is available beyond the trigger — do not invent a price.",
+      "target2": "4022.32 — stretch low (estimate)",
+      "target2Price": 4022.32,
+      "target2Why": "Stretch estimate only — no nearer verified intermediate target.",
+      "invalidation": "Reclaim and hold above 4037.308",
+      "invalidationPrice": 4037.308
     }
   },
   "freshness": {

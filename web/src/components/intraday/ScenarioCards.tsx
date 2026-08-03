@@ -13,13 +13,25 @@ function ScenarioBody({ plan }: { plan: ScenarioPlan }) {
         <dt>Trigger</dt>
         <dd>{plan.trigger}</dd>
       </div>
+      {(plan.confirmationRequired?.length ?? 0) > 0 && (
+        <div>
+          <dt>Confirmation required</dt>
+          <dd>{plan.confirmationRequired!.join("; ")}</dd>
+        </div>
+      )}
       <div>
-        <dt>First target</dt>
-        <dd>{plan.firstTarget}</dd>
+        <dt>Target 1</dt>
+        <dd data-testid="scenario-target-1">{plan.firstTarget}</dd>
       </div>
+      {plan.firstTargetWhy && (
+        <div>
+          <dt>Why this target</dt>
+          <dd className="gm-scenario-why">{plan.firstTargetWhy}</dd>
+        </div>
+      )}
       <div>
-        <dt>Second target</dt>
-        <dd>{plan.secondTarget}</dd>
+        <dt>Target 2</dt>
+        <dd data-testid="scenario-target-2">{plan.secondTarget}</dd>
       </div>
       <div>
         <dt>Invalidation</dt>
@@ -61,22 +73,24 @@ export function ScenarioCards({ bullish, bearish }: Props) {
         </button>
       </div>
 
-      <article
-        className={`gm-intra-scenario tone-bull ${tab === "bull" ? "is-active" : ""}`}
-        data-testid="scenario-bull"
-        aria-label={bullish.label}
-      >
-        <h3>{bullish.label}</h3>
-        <ScenarioBody plan={bullish} />
-      </article>
-      <article
-        className={`gm-intra-scenario tone-bear ${tab === "bear" ? "is-active" : ""}`}
-        data-testid="scenario-bear"
-        aria-label={bearish.label}
-      >
-        <h3>{bearish.label}</h3>
-        <ScenarioBody plan={bearish} />
-      </article>
+      <div className="gm-intra-scenarios-grid" data-testid="scenario-grid">
+        <article
+          className={`gm-intra-scenario tone-bull ${tab === "bull" ? "is-active" : ""}`}
+          data-testid="scenario-bull"
+          aria-label={bullish.label}
+        >
+          <h3>{bullish.label}</h3>
+          <ScenarioBody plan={bullish} />
+        </article>
+        <article
+          className={`gm-intra-scenario tone-bear ${tab === "bear" ? "is-active" : ""}`}
+          data-testid="scenario-bear"
+          aria-label={bearish.label}
+        >
+          <h3>{bearish.label}</h3>
+          <ScenarioBody plan={bearish} />
+        </article>
+      </div>
     </section>
   );
 }

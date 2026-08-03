@@ -21,6 +21,7 @@ import type {
   ManualTradePlanCard,
   ScenarioPlan,
   SetupChecklistItem,
+  TargetPick,
   ValueLocation,
   ZoneGuide
 } from "./intradayPlanTypes";
@@ -29,6 +30,21 @@ const ESTIMATE_DISCLAIMER =
   "Probable and stretch prices are estimates only — never guarantees. Markets can move beyond any projected range.";
 
 const NEAR_POINTS = 1.5;
+/** Tick/epsilon for rounded XAUUSD price comparisons (~0.05). */
+export const PRICE_TICK_EPS = 0.05;
+
+const UNAVAILABLE_TARGET = "Unavailable";
+const UNAVAILABLE_WHY =
+  "No verified intermediate target is available beyond the trigger — do not invent a price.";
+
+export type TargetCandidate = {
+  price: number;
+  label: string;
+  levelId: string | null;
+  whySelected: string;
+  /** 1 = structural/swing/session, 2 = value/profile, 3 = same-direction strategy, 4 = ATR/stretch. */
+  sourceRank: number;
+};
 
 function positive(n: unknown): number | null {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
@@ -36,6 +52,94 @@ function positive(n: unknown): number | null {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+export function pricesNearlyEqual(a: number, b: number, eps = PRICE_TICK_EPS): boolean {
+  return Math.abs(a - b) <= eps;
+}
+
+function dedupeCandidates(candidates: TargetCandidate[]): TargetCandidate[] {
+  const out: TargetCandidate[] = [];
+  for (const c of candidates) {
+    const existing = out.find((x) => pricesNearlyEqual(x.price, c.price));
+    if (!existing) {
+      out.push(c);
+      continue;
+    }
+    if (c.sourceRank < existing.sourceRank) {
+      out[out.indexOf(existing)] = c;
+    }
+  }
+  return out;
+}
+
+function isExcludedPrice(
+  price: number,
+  excludes: Array<number | null | undefined>,
+  eps = PRICE_TICK_EPS
+): boolean {
+  return excludes.some((e) => e != null && pricesNearlyEqual(price, e, eps));
+}
+
+/**
+ * Nearest valid level strictly above the trigger.
+ * Excludes trigger, current price, invalidation, duplicates, and wrong-side prices.
+ */
+export function nextLevelAbove(
+  trigger: number,
+  candidates: TargetCandidate[],
+  opts?: {
+    excludePrices?: Array<number | null | undefined>;
+    live?: number | null;
+    maxSourceRank?: number;
+  }
+): TargetCandidate | null {
+  const excludes = [...(opts?.excludePrices ?? []), trigger, opts?.live ?? null];
+  const maxRank = opts?.maxSourceRank ?? 99;
+  const pool = dedupeCandidates(candidates)
+    .filter((c) => c.sourceRank <= maxRank)
+    .filter((c) => c.price > trigger + PRICE_TICK_EPS)
+    .filter((c) => !isExcludedPrice(c.price, excludes));
+  pool.sort((a, b) => a.price - b.price || a.sourceRank - b.sourceRank);
+  return pool[0] ?? null;
+}
+
+/**
+ * Nearest valid level strictly below the trigger.
+ * Excludes trigger, current price, invalidation, duplicates, and wrong-side prices.
+ */
+export function nextLevelBelow(
+  trigger: number,
+  candidates: TargetCandidate[],
+  opts?: {
+    excludePrices?: Array<number | null | undefined>;
+    live?: number | null;
+    maxSourceRank?: number;
+  }
+): TargetCandidate | null {
+  const excludes = [...(opts?.excludePrices ?? []), trigger, opts?.live ?? null];
+  const maxRank = opts?.maxSourceRank ?? 99;
+  const pool = dedupeCandidates(candidates)
+    .filter((c) => c.sourceRank <= maxRank)
+    .filter((c) => c.price < trigger - PRICE_TICK_EPS)
+    .filter((c) => !isExcludedPrice(c.price, excludes));
+  pool.sort((a, b) => b.price - a.price || a.sourceRank - b.sourceRank);
+  return pool[0] ?? null;
+}
+
+function toTargetPick(c: TargetCandidate | null): TargetPick | null {
+  if (!c) return null;
+  return {
+    price: round2(c.price),
+    label: c.label,
+    levelId: c.levelId,
+    whySelected: c.whySelected
+  };
+}
+
+function formatTargetLine(pick: TargetPick | null, unavailableLabel = UNAVAILABLE_TARGET): string {
+  if (!pick) return unavailableLabel;
+  return `${pick.price} — ${pick.label}`;
 }
 
 function dist(price: number, live: number | null): { points: number | null; percent: number | null } {
@@ -900,6 +1004,366 @@ function buildZones(args: {
   };
 }
 
+function planShape(args: {
+  decision: string;
+  stop: number | null;
+  tp1: number | null;
+  live: number | null;
+}): "BUY" | "SELL" | "NONE" {
+  const d = args.decision.toUpperCase();
+  if (d === "BUY") return "BUY";
+  if (d === "SELL") return "SELL";
+  // Inactive WAIT plan: infer shape from stop/TP geometry only for same-direction reuse.
+  if (args.live != null && args.tp1 != null && args.stop != null) {
+    if (args.stop < args.live && args.tp1 > args.live) return "BUY";
+    if (args.stop > args.live && args.tp1 < args.live) return "SELL";
+  }
+  return "NONE";
+}
+
+/** Expected-range boundaries are not automatic trade targets when they equal the trigger. */
+function rangeBoundaryAsTarget(
+  boundary: number | null,
+  trigger: number | null,
+  label: string,
+  why: string
+): TargetCandidate | null {
+  if (boundary == null || trigger == null) return null;
+  if (pricesNearlyEqual(boundary, trigger)) return null;
+  return {
+    price: boundary,
+    label,
+    levelId: null,
+    whySelected: why,
+    sourceRank: 1
+  };
+}
+
+function collectBullishCandidates(args: {
+  live: number | null;
+  val: number | null;
+  vah: number | null;
+  poc: number | null;
+  barHigh: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  stop: number | null;
+  atr: number | null;
+  decision: string;
+  expectedRange: ExpectedRange;
+  triggerPrice: number | null;
+}): TargetCandidate[] {
+  const out: TargetCandidate[] = [];
+  const shape = planShape(args);
+
+  if (args.barHigh != null) {
+    out.push({
+      price: args.barHigh,
+      label: "recent bar high",
+      levelId: "lvl-bar-high",
+      whySelected: "Nearest verified recent bar high beyond the bullish trigger.",
+      sourceRank: 1
+    });
+  }
+
+  const rangeHigh = rangeBoundaryAsTarget(
+    args.expectedRange.probableHigh,
+    args.triggerPrice,
+    "probable high (range)",
+    "Expected-range high used only when it is not the same price as the trigger."
+  );
+  if (rangeHigh) out.push(rangeHigh);
+
+  if (args.poc != null) {
+    out.push({
+      price: args.poc,
+      label: "POC / volume magnet",
+      levelId: "lvl-poc",
+      whySelected: "Verified point of control — volume magnet beyond the trigger.",
+      sourceRank: 2
+    });
+  }
+  if (args.vah != null) {
+    out.push({
+      price: args.vah,
+      label: "VAH",
+      levelId: "lvl-vah",
+      whySelected: "Verified value-area high — major upside structure beyond the trigger.",
+      sourceRank: 2
+    });
+  }
+  // Same-direction strategy TPs only (never opposite inactive SELL TPs for a BUY scenario).
+  if (shape === "BUY") {
+    if (args.tp1 != null) {
+      out.push({
+        price: args.tp1,
+        label: "strategy TP1",
+        levelId: "lvl-tp1",
+        whySelected: "Same-direction strategy take-profit from the verified BUY-shaped plan.",
+        sourceRank: 3
+      });
+    }
+    if (args.tp2 != null) {
+      out.push({
+        price: args.tp2,
+        label: "strategy TP2",
+        levelId: "lvl-tp2",
+        whySelected: "Same-direction strategy TP2.",
+        sourceRank: 3
+      });
+    }
+    if (args.tp3 != null) {
+      out.push({
+        price: args.tp3,
+        label: "strategy TP3 / stretch",
+        levelId: "lvl-tp3",
+        whySelected: "Same-direction strategy stretch target.",
+        sourceRank: 3
+      });
+    }
+  }
+  // Never use a plan stop as a bullish profit target.
+  if (args.atr != null && args.live != null) {
+    out.push({
+      price: round2(args.live + args.atr),
+      label: "ATR stretch high",
+      levelId: "lvl-atr-high",
+      whySelected: "ATR statistical stretch estimate — not a verified structural target.",
+      sourceRank: 4
+    });
+  }
+  if (args.expectedRange.stretchHigh != null) {
+    out.push({
+      price: args.expectedRange.stretchHigh,
+      label: "stretch high (estimate)",
+      levelId: null,
+      whySelected: "Session stretch high estimate beyond verified structure.",
+      sourceRank: 4
+    });
+  }
+  return out;
+}
+
+function collectBearishCandidates(args: {
+  live: number | null;
+  val: number | null;
+  vah: number | null;
+  poc: number | null;
+  barLow: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  stop: number | null;
+  atr: number | null;
+  decision: string;
+  expectedRange: ExpectedRange;
+  triggerPrice: number | null;
+}): TargetCandidate[] {
+  const out: TargetCandidate[] = [];
+  const shape = planShape(args);
+
+  // Structural support below — bar low only when it is not the breakdown trigger itself.
+  if (args.barLow != null && args.triggerPrice != null && !pricesNearlyEqual(args.barLow, args.triggerPrice)) {
+    out.push({
+      price: args.barLow,
+      label: "recent bar low",
+      levelId: "lvl-bar-low",
+      whySelected: "Nearest verified recent bar low beyond the bearish trigger.",
+      sourceRank: 1
+    });
+  }
+
+  const rangeLow = rangeBoundaryAsTarget(
+    args.expectedRange.probableLow,
+    args.triggerPrice,
+    "probable low (range)",
+    "Expected-range low used only when it is not the same price as the trigger/support break."
+  );
+  if (rangeLow) out.push(rangeLow);
+
+  if (args.poc != null) {
+    out.push({
+      price: args.poc,
+      label: "POC / volume magnet",
+      levelId: "lvl-poc",
+      whySelected: "Verified POC as a downside magnet when below the trigger.",
+      sourceRank: 2
+    });
+  }
+  if (args.val != null && args.triggerPrice != null && !pricesNearlyEqual(args.val, args.triggerPrice)) {
+    out.push({
+      price: args.val,
+      label: "VAL",
+      levelId: "lvl-val",
+      whySelected: "Verified value-area low below the bearish trigger.",
+      sourceRank: 2
+    });
+  }
+
+  // Same-direction SELL strategy TPs only — never reuse an inactive BUY stop as a bearish TP.
+  if (shape === "SELL") {
+    if (args.tp1 != null) {
+      out.push({
+        price: args.tp1,
+        label: "strategy TP1",
+        levelId: "lvl-tp1",
+        whySelected: "Same-direction strategy take-profit from the verified SELL plan.",
+        sourceRank: 3
+      });
+    }
+    if (args.tp2 != null) {
+      out.push({
+        price: args.tp2,
+        label: "strategy TP2",
+        levelId: "lvl-tp2",
+        whySelected: "Same-direction strategy TP2.",
+        sourceRank: 3
+      });
+    }
+    if (args.tp3 != null) {
+      out.push({
+        price: args.tp3,
+        label: "strategy TP3 / stretch",
+        levelId: "lvl-tp3",
+        whySelected: "Same-direction strategy stretch target.",
+        sourceRank: 3
+      });
+    }
+  }
+  // Explicitly omit inactive BUY stops / opposite-direction plan invalidation as profit targets.
+
+  if (args.atr != null && args.live != null) {
+    out.push({
+      price: round2(args.live - args.atr),
+      label: "ATR stretch low",
+      levelId: "lvl-atr-low",
+      whySelected: "ATR statistical stretch estimate — not a verified structural target.",
+      sourceRank: 4
+    });
+  }
+  if (args.expectedRange.stretchLow != null) {
+    out.push({
+      price: args.expectedRange.stretchLow,
+      label: "stretch low (estimate)",
+      levelId: null,
+      whySelected: "Session stretch low estimate beyond verified structure.",
+      sourceRank: 4
+    });
+  }
+  return out;
+}
+
+function buildDirectionalTargets(args: {
+  direction: "BULLISH" | "BEARISH";
+  triggerPrice: number | null;
+  live: number | null;
+  invalidationPrice: number | null;
+  candidates: TargetCandidate[];
+  stretchPrice: number | null;
+  stretchLabel: string;
+}): {
+  first: TargetPick | null;
+  second: TargetPick | null;
+  major: TargetPick | null;
+} {
+  if (args.triggerPrice == null) {
+    return { first: null, second: null, major: null };
+  }
+  const excludes = [args.invalidationPrice];
+  const picker = args.direction === "BULLISH" ? nextLevelAbove : nextLevelBelow;
+  // Verified first target: structural / profile / same-direction strategy (not ATR alone).
+  const firstC = picker(args.triggerPrice, args.candidates, {
+    excludePrices: excludes,
+    live: args.live,
+    maxSourceRank: 3
+  });
+  const first = toTargetPick(firstC);
+  const afterExcludes = [...excludes, first?.price ?? null];
+  const secondC = first
+    ? picker(args.triggerPrice, args.candidates, {
+        excludePrices: afterExcludes,
+        live: args.live,
+        maxSourceRank: 3
+      })
+    : null;
+  let second = toTargetPick(secondC);
+  if (!second && args.stretchPrice != null && !pricesNearlyEqual(args.stretchPrice, args.triggerPrice)) {
+    const stretchOk =
+      args.direction === "BULLISH"
+        ? args.stretchPrice > args.triggerPrice + PRICE_TICK_EPS
+        : args.stretchPrice < args.triggerPrice - PRICE_TICK_EPS;
+    if (stretchOk && (first == null || !pricesNearlyEqual(args.stretchPrice, first.price))) {
+      second = {
+        price: round2(args.stretchPrice),
+        label: args.stretchLabel,
+        levelId: null,
+        whySelected: "Stretch estimate only — no nearer verified intermediate target."
+      };
+    }
+  }
+  // Major = next profile/major after second (or after first if no second verified).
+  const majorExcludes = [...afterExcludes, second?.price ?? null];
+  const majorC = picker(args.triggerPrice, args.candidates, {
+    excludePrices: majorExcludes,
+    live: args.live,
+    maxSourceRank: 2
+  });
+  // Prefer a profile level further out; if majorC equals first/second skip.
+  let major = toTargetPick(majorC);
+  if (major && first && pricesNearlyEqual(major.price, first.price)) major = null;
+  if (major && second && pricesNearlyEqual(major.price, second.price)) major = null;
+
+  // Enforce invariants with epsilon.
+  if (first && args.direction === "BULLISH" && !(args.triggerPrice < first.price - PRICE_TICK_EPS / 2)) {
+    return { first: null, second: null, major: null };
+  }
+  if (first && args.direction === "BEARISH" && !(first.price < args.triggerPrice - PRICE_TICK_EPS / 2)) {
+    return { first: null, second: null, major: null };
+  }
+  if (first && second && args.direction === "BULLISH" && second.price + PRICE_TICK_EPS < first.price) {
+    second = null;
+  }
+  if (first && second && args.direction === "BEARISH" && first.price + PRICE_TICK_EPS < second.price) {
+    second = null;
+  }
+
+  return { first, second, major };
+}
+
+function scenarioFromTargets(args: {
+  label: string;
+  trigger: string;
+  triggerPrice: number | null;
+  confirmationRequired: string[];
+  invalidation: string;
+  invalidationPrice: number | null;
+  targets: { first: TargetPick | null; second: TargetPick | null; major: TargetPick | null };
+}): ScenarioPlan {
+  const { first, second } = args.targets;
+  const secondLine = second
+    ? formatTargetLine(second)
+    : args.targets.major
+      ? formatTargetLine(args.targets.major)
+      : UNAVAILABLE_TARGET;
+  const secondPrice = second?.price ?? args.targets.major?.price ?? null;
+  const secondWhy = second?.whySelected ?? args.targets.major?.whySelected ?? null;
+  return {
+    label: args.label,
+    trigger: args.trigger,
+    triggerPrice: args.triggerPrice,
+    confirmationRequired: args.confirmationRequired,
+    firstTarget: formatTargetLine(first),
+    firstTargetPrice: first?.price ?? null,
+    firstTargetWhy: first?.whySelected ?? UNAVAILABLE_WHY,
+    secondTarget: secondLine,
+    secondTargetPrice: secondPrice,
+    secondTargetWhy: secondWhy,
+    invalidation: args.invalidation,
+    invalidationPrice: args.invalidationPrice
+  };
+}
+
 function buildScenarios(args: {
   location: ValueLocation;
   live: number | null;
@@ -910,111 +1374,140 @@ function buildScenarios(args: {
   barHigh: number | null;
   tp1: number | null;
   tp2: number | null;
+  tp3: number | null;
   stop: number | null;
+  atr: number | null;
+  decision: string;
   expectedRange: ExpectedRange;
-}): { bullish: ScenarioPlan; bearish: ScenarioPlan } {
-  const { location, live, val, vah, barLow, barHigh, tp1, tp2, expectedRange } = args;
+}): {
+  bullish: ScenarioPlan;
+  bearish: ScenarioPlan;
+  bullishTargets: { first: TargetPick | null; second: TargetPick | null; major: TargetPick | null };
+  bearishTargets: { first: TargetPick | null; second: TargetPick | null; major: TargetPick | null };
+} {
+  const { location, live, val, vah, barLow, expectedRange } = args;
+
+  let bullTrigger: string;
+  let bullTriggerPrice: number | null;
+  let bullConfirm: string[];
+  let bullInv: string;
+  let bullInvPrice: number | null;
+  let bearTrigger: string;
+  let bearTriggerPrice: number | null;
+  let bearConfirm: string[];
+  let bearInv: string;
+  let bearInvPrice: number | null;
 
   if (location === "BELOW_VALUE" && val != null) {
-    const bullHigh1 = expectedRange.probableHigh ?? val;
-    const bullHigh2 = vah ?? expectedRange.stretchHigh ?? bullHigh1;
-    const bearLow1 = expectedRange.probableLow ?? barLow;
-    const bearLow2 = expectedRange.stretchLow ?? bearLow1;
-    return {
-      bullish: {
-        label: "If price rises",
-        trigger: `Reclaim and hold above VAL ${val}`,
-        triggerPrice: val,
-        firstTarget: String(bullHigh1),
-        firstTargetPrice: bullHigh1,
-        secondTarget: String(bullHigh2),
-        secondTargetPrice: bullHigh2,
-        invalidation: barLow != null ? `Break and hold below ${barLow}` : "Failed reclaim closes back below VAL",
-        invalidationPrice: barLow
-      },
-      bearish: {
-        label: "If price falls",
-        trigger:
-          barLow != null
-            ? `Breakdown and hold below support ${barLow}`
-            : `Failed reclaim at VAL ${val} then continuation lower`,
-        triggerPrice: barLow ?? val,
-        firstTarget: bearLow1 != null ? String(bearLow1) : "Next support",
-        firstTargetPrice: bearLow1,
-        secondTarget: bearLow2 != null ? String(bearLow2) : "Stretch low (estimate)",
-        secondTargetPrice: bearLow2,
-        invalidation: `Reclaim and hold above ${val}`,
-        invalidationPrice: val
-      }
+    bullTrigger = `Reclaim and hold above VAL ${val}`;
+    bullTriggerPrice = val;
+    bullConfirm = ["5-minute candle closes above VAL", "Retest holds above VAL"];
+    bullInv = barLow != null ? `Break and hold below ${barLow}` : "Failed reclaim closes back below VAL";
+    bullInvPrice = barLow;
+    bearTrigger =
+      barLow != null
+        ? `Break and hold below ${barLow}`
+        : `Failed reclaim at VAL ${val} then continuation lower`;
+    bearTriggerPrice = barLow ?? val;
+    bearConfirm = ["5-minute candle closes below the support trigger", "Hold below on retest"];
+    bearInv = `Reclaim and hold above ${val}`;
+    bearInvPrice = val;
+  } else if (location === "ABOVE_VALUE" && vah != null) {
+    bullTrigger = `Continuation hold above VAH ${vah}`;
+    bullTriggerPrice = vah;
+    bullConfirm = ["Hold above VAH on retest", "Bullish continuation candle"];
+    bullInv = `Close back below ${vah}`;
+    bullInvPrice = vah;
+    bearTrigger = `Breakdown and hold below VAH ${vah}`;
+    bearTriggerPrice = vah;
+    bearConfirm = ["Confirmed close below VAH", "Failed retest from below"];
+    bearInv = `Reclaim and hold above ${vah}`;
+    bearInvPrice = vah;
+  } else {
+    const support = val ?? expectedRange.probableLow;
+    const resist = vah ?? expectedRange.probableHigh;
+    const bounce = support != null && live != null && support <= live;
+    bullTrigger = bounce
+      ? `Bounce from support ${support}`
+      : resist != null
+        ? `Break and hold above ${resist}`
+        : "Bullish confirmation at structure";
+    bullTriggerPrice = bounce ? support : resist;
+    bullConfirm = ["Confirmation candle at the bullish trigger", "Hold on retest"];
+    bullInv = support != null ? `Break and hold below ${support}` : "Plan stop breach";
+    bullInvPrice = support;
+    const reject = resist != null && live != null && resist >= live;
+    bearTrigger = reject
+      ? `Rejection from resistance ${resist}`
+      : support != null
+        ? `Break and hold below ${support}`
+        : "Bearish confirmation at structure";
+    bearTriggerPrice = reject ? resist : support;
+    bearConfirm = ["Confirmation candle at the bearish trigger", "Hold on retest"];
+    bearInv = resist != null ? `Break and hold above ${resist}` : "Plan stop breach";
+    bearInvPrice = resist;
+  }
+
+  const bullCandidates = collectBullishCandidates({ ...args, triggerPrice: bullTriggerPrice });
+  const bearCandidates = collectBearishCandidates({ ...args, triggerPrice: bearTriggerPrice });
+
+  const bullishTargets = buildDirectionalTargets({
+    direction: "BULLISH",
+    triggerPrice: bullTriggerPrice,
+    live,
+    invalidationPrice: bullInvPrice,
+    candidates: bullCandidates,
+    stretchPrice: expectedRange.stretchHigh,
+    stretchLabel: "stretch high (estimate)"
+  });
+  const bearishTargets = buildDirectionalTargets({
+    direction: "BEARISH",
+    triggerPrice: bearTriggerPrice,
+    live,
+    invalidationPrice: bearInvPrice,
+    candidates: bearCandidates,
+    stretchPrice: expectedRange.stretchLow,
+    stretchLabel: "stretch low (estimate)"
+  });
+
+  // Prefer VAH as major when present and beyond second for below-value bullish.
+  if (
+    location === "BELOW_VALUE" &&
+    vah != null &&
+    bullTriggerPrice != null &&
+    vah > bullTriggerPrice + PRICE_TICK_EPS &&
+    (!bullishTargets.first || !pricesNearlyEqual(vah, bullishTargets.first.price)) &&
+    (!bullishTargets.second || !pricesNearlyEqual(vah, bullishTargets.second.price))
+  ) {
+    bullishTargets.major = {
+      price: round2(vah),
+      label: "VAH",
+      levelId: "lvl-vah",
+      whySelected: "Major value-area high after nearer verified upside levels."
     };
   }
 
-  if (location === "ABOVE_VALUE" && vah != null) {
-    const bullHigh1 = barHigh ?? expectedRange.probableHigh ?? (live != null ? live + 5 : null);
-    const bullHigh2 = expectedRange.stretchHigh ?? bullHigh1;
-    return {
-      bullish: {
-        label: "If price rises",
-        trigger: `Continuation hold above VAH ${vah}`,
-        triggerPrice: vah,
-        firstTarget: bullHigh1 != null ? String(bullHigh1) : "Next resistance",
-        firstTargetPrice: bullHigh1,
-        secondTarget: bullHigh2 != null ? String(bullHigh2) : "Stretch high (estimate)",
-        secondTargetPrice: bullHigh2,
-        invalidation: `Close back below ${vah}`,
-        invalidationPrice: vah
-      },
-      bearish: {
-        label: "If price falls",
-        trigger: `Breakdown and hold below VAH ${vah}`,
-        triggerPrice: vah,
-        firstTarget: args.poc != null ? String(args.poc) : String(vah),
-        firstTargetPrice: args.poc ?? vah,
-        secondTarget: val != null ? String(val) : "Next support",
-        secondTargetPrice: val,
-        invalidation: `Reclaim and hold above ${vah}`,
-        invalidationPrice: vah
-      }
-    };
-  }
-
-  // Inside value / default
-  const support = val ?? expectedRange.probableLow;
-  const resist = vah ?? expectedRange.probableHigh;
   return {
-    bullish: {
+    bullish: scenarioFromTargets({
       label: "If price rises",
-      trigger:
-        support != null && live != null && support <= live
-          ? `Bounce from support ${support}`
-          : resist != null
-            ? `Break and hold above ${resist}`
-            : "Bullish confirmation at structure",
-      triggerPrice: support != null && live != null && support <= live ? support : resist,
-      firstTarget: tp1 != null ? String(tp1) : resist != null ? String(resist) : "Next resistance",
-      firstTargetPrice: tp1 ?? resist,
-      secondTarget: tp2 != null ? String(tp2) : expectedRange.stretchHigh != null ? String(expectedRange.stretchHigh) : "Stretch high",
-      secondTargetPrice: tp2 ?? expectedRange.stretchHigh,
-      invalidation: support != null ? `Break and hold below ${support}` : "Plan stop breach",
-      invalidationPrice: support
-    },
-    bearish: {
+      trigger: bullTrigger,
+      triggerPrice: bullTriggerPrice,
+      confirmationRequired: bullConfirm,
+      invalidation: bullInv,
+      invalidationPrice: bullInvPrice,
+      targets: bullishTargets
+    }),
+    bearish: scenarioFromTargets({
       label: "If price falls",
-      trigger:
-        resist != null && live != null && resist >= live
-          ? `Rejection from resistance ${resist}`
-          : support != null
-            ? `Break and hold below ${support}`
-            : "Bearish confirmation at structure",
-      triggerPrice: resist != null && live != null && resist >= live ? resist : support,
-      firstTarget: support != null ? String(support) : "Next support",
-      firstTargetPrice: support,
-      secondTarget:
-        expectedRange.stretchLow != null ? String(expectedRange.stretchLow) : "Stretch low (estimate)",
-      secondTargetPrice: expectedRange.stretchLow,
-      invalidation: resist != null ? `Break and hold above ${resist}` : "Plan stop breach",
-      invalidationPrice: resist
-    }
+      trigger: bearTrigger,
+      triggerPrice: bearTriggerPrice,
+      confirmationRequired: bearConfirm,
+      invalidation: bearInv,
+      invalidationPrice: bearInvPrice,
+      targets: bearishTargets
+    }),
+    bullishTargets,
+    bearishTargets
   };
 }
 
@@ -1340,11 +1833,18 @@ function buildTradePlanCard(args: {
           label: "Bullish conditional plan",
           direction: "BUY" as const,
           trigger: args.bullish.trigger,
-          entryZone: args.bullish.triggerPrice != null ? String(args.bullish.triggerPrice) : null,
-          stopLoss: args.bullish.invalidationPrice,
-          tp1: args.bullish.firstTargetPrice,
+          confirmationRequired:
+            args.bullish.confirmationRequired.length > 0
+              ? args.bullish.confirmationRequired
+              : ["Confirmation candle on the bullish trigger"],
+          target1: args.bullish.firstTarget,
+          target1Price: args.bullish.firstTargetPrice,
+          target1Why: args.bullish.firstTargetWhy,
+          target2: args.bullish.secondTarget,
+          target2Price: args.bullish.secondTargetPrice,
+          target2Why: args.bullish.secondTargetWhy,
           invalidation: args.bullish.invalidation,
-          confirmationRequired: ["Confirmation candle on the bullish trigger"]
+          invalidationPrice: args.bullish.invalidationPrice
         }
       : null;
 
@@ -1354,11 +1854,18 @@ function buildTradePlanCard(args: {
           label: "Bearish conditional plan",
           direction: "SELL" as const,
           trigger: args.bearish.trigger,
-          entryZone: args.bearish.triggerPrice != null ? String(args.bearish.triggerPrice) : null,
-          stopLoss: args.bearish.invalidationPrice,
-          tp1: args.bearish.firstTargetPrice,
+          confirmationRequired:
+            args.bearish.confirmationRequired.length > 0
+              ? args.bearish.confirmationRequired
+              : ["Confirmation candle on the bearish trigger"],
+          target1: args.bearish.firstTarget,
+          target1Price: args.bearish.firstTargetPrice,
+          target1Why: args.bearish.firstTargetWhy,
+          target2: args.bearish.secondTarget,
+          target2Price: args.bearish.secondTargetPrice,
+          target2Why: args.bearish.secondTargetWhy,
           invalidation: args.bearish.invalidation,
-          confirmationRequired: ["Confirmation candle on the bearish trigger"]
+          invalidationPrice: args.bearish.invalidationPrice
         }
       : null;
 
@@ -1550,7 +2057,10 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
     barHigh,
     tp1,
     tp2,
+    tp3,
     stop,
+    atr,
+    decision,
     expectedRange
   });
 
@@ -1573,8 +2083,22 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
     Math.max(0, Math.min(100, confidenceBase <= 1 ? confidenceBase * 100 : confidenceBase))
   );
 
+  // Action-card ladder: below-value prepare uses bullish reclaim path; above-value uses bearish fade path when selling bias else bullish continuation.
+  const primaryTargets =
+    location === "ABOVE_VALUE" && (decision === "SELL" || resolved.action.startsWith("SELL"))
+      ? scenarios.bearishTargets
+      : scenarios.bullishTargets;
+  const nextPick = primaryTargets.first;
+  const afterPick = primaryTargets.second;
+  const majorPick = primaryTargets.major;
+  const nextTargetLabel = nextPick
+    ? formatTargetLine(nextPick)
+    : location === "BELOW_VALUE" || location === "ABOVE_VALUE"
+      ? UNAVAILABLE_TARGET
+      : resolved.nextTarget;
+
   return {
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     action: resolved.action,
     actionLabel: actionLabel(resolved.action),
     oneSentence: resolved.oneSentence,
@@ -1586,7 +2110,12 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
         : null,
     entryConfirmation: resolved.entryConfirmation,
     invalidation: resolved.invalidation,
-    nextTarget: resolved.nextTarget,
+    nextTarget: nextTargetLabel,
+    nextTargetPrice: nextPick?.price ?? null,
+    afterThatTarget: afterPick ? formatTargetLine(afterPick) : null,
+    afterThatTargetPrice: afterPick?.price ?? null,
+    majorTarget: majorPick ? formatTargetLine(majorPick) : null,
+    majorTargetPrice: majorPick?.price ?? null,
     whyNotReady: resolved.whyNotReady,
     valueLocation: location,
     setupProgress: {

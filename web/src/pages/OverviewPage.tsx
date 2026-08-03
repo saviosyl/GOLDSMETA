@@ -131,6 +131,49 @@ function useIsDesktop(): boolean {
   );
 }
 
+function StickyActionSummary({
+  actionLabel,
+  livePrice,
+  sessionLabel,
+  trigger
+}: {
+  actionLabel: string;
+  livePrice: number | null;
+  sessionLabel: string;
+  trigger: string | null;
+}) {
+  const [pinned, setPinned] = useState(false);
+
+  useEffect(() => {
+    const anchor = document.getElementById("gm-main-action-anchor");
+    if (!anchor || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        // Show sticky only after the main action summary has left the viewport.
+        setPinned(!(entry?.isIntersecting ?? true));
+      },
+      { root: null, threshold: 0, rootMargin: "-8px 0px 0px 0px" }
+    );
+    obs.observe(anchor);
+    return () => obs.disconnect();
+  }, [actionLabel]);
+
+  return (
+    <div
+      className={`gm-sticky-action${pinned ? " is-visible" : ""}`}
+      data-testid="sticky-action-summary"
+      data-pinned={pinned ? "1" : "0"}
+      aria-hidden={!pinned}
+    >
+      <strong>{actionLabel}</strong>
+      <span>
+        {livePrice != null ? `XAUUSD ${livePrice.toFixed(2)}` : "XAUUSD"} · {sessionLabel} ·{" "}
+        {trigger ?? "No trigger"}
+      </span>
+    </div>
+  );
+}
+
 /** Issue #50 — compact premium intraday assistant home. */
 export function OverviewPage() {
   const { api } = useAuth();
@@ -365,13 +408,12 @@ export function OverviewPage() {
 
       {intradayPlan ? (
         <>
-          <div className="gm-sticky-action" data-testid="sticky-action-summary">
-            <strong>{intradayPlan.actionLabel}</strong>
-            <span>
-              {livePrice != null ? `XAUUSD ${livePrice.toFixed(2)}` : "XAUUSD"} · {sessionLabel} ·{" "}
-              {intradayPlan.trigger ?? "No trigger"}
-            </span>
-          </div>
+          <StickyActionSummary
+            actionLabel={intradayPlan.actionLabel}
+            livePrice={livePrice}
+            sessionLabel={sessionLabel}
+            trigger={intradayPlan.trigger}
+          />
           <IntradayHeaderCard
             plan={intradayPlan}
             livePrice={livePrice}
@@ -379,7 +421,9 @@ export function OverviewPage() {
             freshness={freshness}
             source={source}
           />
-          <IntradayActionCard plan={intradayPlan} />
+          <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
+            <IntradayActionCard plan={intradayPlan} />
+          </div>
           <ExpectedRangeCard range={intradayPlan.expectedRange} />
           <ScenarioCards
             bullish={intradayPlan.bullishScenario}

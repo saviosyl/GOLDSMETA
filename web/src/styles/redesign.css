@@ -3203,13 +3203,17 @@ a {
 .gm-intra-range,
 .gm-intra-zones,
 .gm-intra-tradeplan,
-.gm-intra-levels,
-.gm-intra-scenarios {
+.gm-intra-levels {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 12px);
   box-shadow: var(--shadow-sm);
   padding: 14px 16px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+
+.gm-intra-scenarios {
   margin-bottom: 12px;
   min-width: 0;
 }
@@ -3409,13 +3413,17 @@ a {
 }
 
 .gm-intra-scenarios {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
   background: transparent;
   border: 0;
   box-shadow: none;
   padding: 0;
+}
+
+.gm-intra-scenarios-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: stretch;
 }
 
 .gm-intra-scenario {
@@ -3424,6 +3432,9 @@ a {
   border-radius: var(--radius-md, 12px);
   padding: 12px 14px;
   min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .gm-intra-scenario h3 {
@@ -3453,6 +3464,12 @@ a {
   font-size: var(--text-label);
   color: var(--text);
   word-break: break-word;
+}
+
+.gm-intra-scenario dd.gm-scenario-why,
+.gm-conditional-why {
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .gm-level-list {
@@ -3586,10 +3603,6 @@ a {
 }
 
 @media (max-width: 720px) {
-  .gm-intra-scenarios {
-    grid-template-columns: 1fr;
-  }
-
   .gm-intra-action-grid,
   .gm-intra-zones-grid,
   .gm-intra-tradeplan-grid {
@@ -3614,11 +3627,13 @@ a {
 
 /* ===== Issue #50 logic fix — mobile compactness + level roles ===== */
 
-.gm-mobile-only { display: none; }
+.gm-mobile-only { display: none !important; }
 .gm-desktop-only { display: block; }
+.gm-levels-desktop { display: block; }
+.gm-levels-mobile { display: none; }
 
 .gm-scenario-tabs {
-  display: grid;
+  display: none;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-bottom: 10px;
@@ -3626,18 +3641,20 @@ a {
 
 .gm-scenario-tabs button {
   border: 1px solid var(--border);
-  background: var(--surface-alt);
+  background: var(--surface);
   border-radius: 8px;
-  padding: 10px 8px;
-  font-weight: 650;
-  color: var(--navy);
-  min-height: 44px;
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-height: 40px;
+  font-size: 0.85rem;
 }
 
 .gm-scenario-tabs button.active {
-  background: var(--navy);
-  color: #fff;
-  border-color: var(--navy);
+  background: var(--surface-alt);
+  color: var(--navy);
+  border-color: var(--navy-2);
+  box-shadow: inset 0 -2px 0 var(--navy-2);
 }
 
 .gm-intra-details {
@@ -3722,16 +3739,28 @@ a {
   display: none;
 }
 
-@media (max-width: 720px) {
-  .gm-mobile-only { display: block; }
-  .gm-desktop-only { display: none !important; }
+.gm-levels-show-all {
+  width: 100%;
+  margin-top: 10px;
+  min-height: 44px;
+}
 
-  .gm-intra-scenarios {
+@media (max-width: 720px) {
+  .gm-mobile-only { display: block !important; }
+  .gm-desktop-only { display: none !important; }
+  .gm-levels-desktop { display: none !important; }
+  .gm-levels-mobile { display: block !important; }
+
+  .gm-scenario-tabs.gm-mobile-only {
+    display: grid !important;
+  }
+
+  .gm-intra-scenarios-grid {
     grid-template-columns: 1fr;
   }
 
   .gm-intra-scenario { display: none; }
-  .gm-intra-scenario.is-active { display: block; }
+  .gm-intra-scenario.is-active { display: flex; }
 
   .gm-intra-conditional-grid {
     grid-template-columns: 1fr;
@@ -3758,15 +3787,19 @@ a {
   }
 
   .gm-sticky-action {
-    display: block;
+    display: none;
     position: sticky;
     top: 0;
     z-index: 20;
-    background: rgba(247, 248, 250, 0.92);
+    background: rgba(247, 248, 250, 0.96);
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
     padding: 8px 0;
     margin: 0 0 8px;
+  }
+
+  .gm-sticky-action.is-visible {
+    display: block;
   }
 
   .gm-sticky-action strong {

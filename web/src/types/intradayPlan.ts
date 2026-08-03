@@ -73,10 +73,13 @@ export type ScenarioPlan = {
   label: string;
   trigger: string;
   triggerPrice?: number | null;
+  confirmationRequired?: string[];
   firstTarget: string;
   firstTargetPrice?: number | null;
+  firstTargetWhy?: string | null;
   secondTarget: string;
   secondTargetPrice?: number | null;
+  secondTargetWhy?: string | null;
   invalidation: string;
   invalidationPrice?: number | null;
 };
@@ -92,11 +95,15 @@ export type ConditionalPlanRef = {
   label: string;
   direction: "BUY" | "SELL";
   trigger: string;
-  entryZone: string | null;
-  stopLoss: number | null;
-  tp1: number | null;
-  invalidation: string;
   confirmationRequired: string[];
+  target1: string | null;
+  target1Price: number | null;
+  target1Why: string | null;
+  target2: string | null;
+  target2Price: number | null;
+  target2Why: string | null;
+  invalidation: string;
+  invalidationPrice: number | null;
 };
 
 export type ManualTradePlanCard = {
@@ -155,7 +162,7 @@ export type ZoneGuide = {
 };
 
 export type IntradayPlan = {
-  schemaVersion: "1.0" | "1.1";
+  schemaVersion: "1.0" | "1.1" | "1.2";
   action: IntradayAction;
   actionLabel: string;
   oneSentence: string;
@@ -165,6 +172,11 @@ export type IntradayPlan = {
   entryConfirmation: string[];
   invalidation: string;
   nextTarget: string | null;
+  nextTargetPrice?: number | null;
+  afterThatTarget?: string | null;
+  afterThatTargetPrice?: number | null;
+  majorTarget?: string | null;
+  majorTargetPrice?: number | null;
   whyNotReady: string | null;
   valueLocation?: ValueLocation;
   setupProgress: {

@@ -3,8 +3,12 @@ import {
   buildChartExampleIntradayFixture,
   buildExpectedRange,
   buildIntradayPlan,
+  nextLevelAbove,
+  nextLevelBelow,
+  pricesNearlyEqual,
   validatePlanOrdering,
-  valueLocationOf
+  valueLocationOf,
+  type TargetCandidate
 } from "../../src/services/decision/intradayPlan";
 import type { DecisionRecord } from "../../src/models/types";
 
@@ -285,7 +289,7 @@ describe("scenarios + zones + trade plan", () => {
   it("12) bullish and bearish triggers are not contradictory", () => {
     const plan = buildChartExampleIntradayFixture();
     expect(plan.bullishScenario.trigger).toMatch(/reclaim/i);
-    expect(plan.bearishScenario.trigger).toMatch(/breakdown|failed reclaim/i);
+    expect(plan.bearishScenario.trigger).toMatch(/break(?:down)? and hold below|failed reclaim/i);
     expect(plan.bullishScenario.triggerPrice).not.toBeNull();
     expect(plan.bullishScenario.triggerPrice!).toBeGreaterThan(plan.expectedRange.currentPrice!);
     if (plan.bearishScenario.triggerPrice != null) {
@@ -427,5 +431,191 @@ describe("PR #47 OHLC-only separation (16)", () => {
       true
     );
     expect(plan.whyNotReady).toMatch(/OHLC-only|structure/i);
+  });
+});
+
+describe("trigger ≠ target + nearest valid level selection", () => {
+  const candidates: TargetCandidate[] = [
+    {
+      price: 4041.2,
+      label: "recent bar high",
+      levelId: "lvl-bar-high",
+      whySelected: "bar high",
+      sourceRank: 1
+    },
+    {
+      price: 4045.087,
+      label: "POC / volume magnet",
+      levelId: "lvl-poc",
+      whySelected: "poc",
+      sourceRank: 2
+    },
+    {
+      price: 4049.633,
+      label: "VAH",
+      levelId: "lvl-vah",
+      whySelected: "vah",
+      sourceRank: 2
+    },
+    {
+      price: 4037.31,
+      label: "probable high",
+      levelId: null,
+      whySelected: "range",
+      sourceRank: 1
+    },
+    {
+      price: 4028.6,
+      label: "inactive buy stop",
+      levelId: "lvl-stop",
+      whySelected: "stop",
+      sourceRank: 3
+    },
+    {
+      price: 4022.32,
+      label: "stretch low",
+      levelId: null,
+      whySelected: "atr",
+      sourceRank: 4
+    }
+  ];
+
+  it("1) bullish target is strictly above bullish trigger", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.bullishScenario.triggerPrice).toBe(4037.308);
+    expect(plan.bullishScenario.firstTargetPrice).not.toBeNull();
+    expect(plan.bullishScenario.firstTargetPrice!).toBeGreaterThan(
+      plan.bullishScenario.triggerPrice! + 0.05
+    );
+  });
+
+  it("2) bearish target is strictly below bearish trigger when available", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.bearishScenario.triggerPrice).toBe(4031.1);
+    if (plan.bearishScenario.firstTargetPrice != null) {
+      expect(plan.bearishScenario.firstTargetPrice).toBeLessThan(
+        plan.bearishScenario.triggerPrice! - 0.05
+      );
+    } else {
+      expect(plan.bearishScenario.firstTarget).toMatch(/Unavailable/i);
+      expect(plan.bearishScenario.secondTargetPrice!).toBeLessThan(
+        plan.bearishScenario.triggerPrice! - 0.05
+      );
+    }
+  });
+
+  it("3) trigger cannot equal TP1 after rounding", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(
+      pricesNearlyEqual(plan.bullishScenario.triggerPrice!, plan.bullishScenario.firstTargetPrice!)
+    ).toBe(false);
+    if (plan.bearishScenario.firstTargetPrice != null) {
+      expect(
+        pricesNearlyEqual(plan.bearishScenario.triggerPrice!, plan.bearishScenario.firstTargetPrice)
+      ).toBe(false);
+    }
+    // Probable high equals VAL reclaim — must not be TP1
+    expect(plan.expectedRange.probableHigh).toBe(4037.31);
+    expect(plan.bullishScenario.firstTargetPrice).not.toBe(4037.31);
+  });
+
+  it("4) main action next target is the nearest valid target", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.nextTargetPrice).toBe(4041.2);
+    expect(plan.nextTarget).toMatch(/4041\.2.*bar high/i);
+  });
+
+  it("5) nearer bar high is selected before POC/VAH", () => {
+    const next = nextLevelAbove(4037.308, candidates, { live: 4034.815 });
+    expect(next?.price).toBe(4041.2);
+    expect(next?.levelId).toBe("lvl-bar-high");
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.bullishScenario.firstTargetPrice).toBe(4041.2);
+    expect(plan.bullishScenario.secondTargetPrice).toBe(4045.09);
+    expect(plan.majorTargetPrice).toBe(4049.63);
+    expect(plan.afterThatTarget).toMatch(/POC/i);
+    expect(plan.majorTarget).toMatch(/VAH/i);
+  });
+
+  it("6) expected-range boundary is not reused as TP1 when equal to trigger", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(pricesNearlyEqual(plan.expectedRange.probableHigh!, plan.bullishScenario.triggerPrice!)).toBe(
+      true
+    );
+    expect(plan.bullishScenario.firstTargetPrice).not.toBeNull();
+    expect(
+      pricesNearlyEqual(plan.bullishScenario.firstTargetPrice!, plan.expectedRange.probableHigh!)
+    ).toBe(false);
+    // Bearish: probable low equals breakdown trigger — not TP1
+    expect(pricesNearlyEqual(plan.expectedRange.probableLow!, plan.bearishScenario.triggerPrice!)).toBe(
+      true
+    );
+    expect(plan.bearishScenario.firstTargetPrice).toBeNull();
+  });
+
+  it("7) inactive BUY stop is not automatically used as bearish TP", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.bearishScenario.firstTargetPrice).not.toBe(4028.6);
+    expect(plan.bearishScenario.secondTargetPrice).not.toBe(4028.6);
+    const stopLevel = plan.importantLevels.find((l) => l.id === "lvl-stop");
+    expect(stopLevel?.price).toBe(4028.6);
+    expect(stopLevel?.roleAtCurrentPrice).toBe("INVALIDATION");
+  });
+
+  it("8) inactive SELL stop is not automatically used as bullish TP", () => {
+    const plan = buildIntradayPlan({
+      mode: "COMPLETE",
+      quote: baseDecision({
+        decision: "WAIT",
+        lastKnownPrice: 4042,
+        atr: 10,
+        ohlcv: { open: 4040, high: 4048, low: 4036, close: 4042, volume: 1 },
+        marketStructure: {
+          trend: "RANGE",
+          poc: 4045,
+          vah: 4050,
+          val: 4038,
+          confirmationClassification: "NONE"
+        }
+      }),
+      structure: baseDecision({
+        decision: "WAIT",
+        lastKnownPrice: 4042,
+        atr: 10,
+        ohlcv: { open: 4040, high: 4048, low: 4036, close: 4042, volume: 1 },
+        marketStructure: {
+          trend: "RANGE",
+          poc: 4045,
+          vah: 4050,
+          val: 4038,
+          confirmationClassification: "NONE"
+        },
+        // Inactive SELL-shaped geometry
+        stopLoss: { price: 4055 },
+        takeProfits: [
+          { label: "TP1", price: 4030 },
+          { label: "TP2", price: 4025 }
+        ]
+      })
+    });
+    expect(plan.bullishScenario.firstTargetPrice).not.toBe(4055);
+    expect(plan.bullishScenario.secondTargetPrice).not.toBe(4055);
+  });
+
+  it("9) no valid target produces Unavailable, not a fabricated price", () => {
+    const plan = buildChartExampleIntradayFixture();
+    expect(plan.bearishScenario.firstTarget).toMatch(/^Unavailable/);
+    expect(plan.bearishScenario.firstTargetPrice).toBeNull();
+    expect(plan.bearishScenario.firstTargetWhy).toMatch(/no verified intermediate target/i);
+    expect(plan.bearishScenario.secondTarget).toMatch(/4022\.32.*stretch/i);
+  });
+
+  it("nextLevelBelow excludes trigger, live, and invalidation", () => {
+    const next = nextLevelBelow(4031.1, candidates, {
+      live: 4034.815,
+      excludePrices: [4028.6],
+      maxSourceRank: 3
+    });
+    expect(next).toBeNull();
   });
 });
