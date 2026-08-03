@@ -1,65 +1,126 @@
+import type { ReactNode } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import {
   biasLabel,
   confidenceLabel,
   fmtPrice,
-  marketTypeLabel,
-  valueLocationLabel
+  marketTypeLabel
 } from "../../lib/intradayFormat";
-import { StatusBadge } from "../ui/primitives";
+import {
+  freshnessChipLabel,
+  freshnessTone,
+  type FreshnessTone
+} from "../../lib/cockpitHelpers";
 
 type Props = {
   plan: IntradayPlan;
   livePrice: number | null;
+  previousPrice?: number | null;
   sessionLabel: string;
   freshness: string;
   source: "live" | "cached" | "offline";
+  marketStructureMode?: string | null;
+  compactTime?: string;
 };
 
-export function IntradayHeaderCard({ plan, livePrice, sessionLabel, freshness, source }: Props) {
+function Chip({
+  children,
+  tone,
+  testId
+}: {
+  children: ReactNode;
+  tone?: FreshnessTone | "bullish" | "bearish" | "neutral" | "prepare" | "safe";
+  testId?: string;
+}) {
+  return (
+    <span className={`gm-status-chip tone-${tone ?? "neutral"}`} data-testid={testId}>
+      {children}
+    </span>
+  );
+}
+
+export function IntradayHeaderCard({
+  plan,
+  livePrice,
+  previousPrice,
+  sessionLabel,
+  freshness,
+  source,
+  marketStructureMode,
+  compactTime
+}: Props) {
   const price = livePrice ?? plan.expectedRange.currentPrice;
   const conf = Math.round(plan.confidence <= 1 ? plan.confidence * 100 : plan.confidence);
+  const tone = freshnessTone({
+    quoteAgeSeconds: plan.freshness.quoteAgeSeconds,
+    source,
+    marketStructureMode: marketStructureMode ?? plan.freshness.marketStructureMode,
+    dataQuality: plan.freshness.dataQuality
+  });
+  const freshLabel = freshnessChipLabel({
+    tone,
+    quoteAgeSeconds: plan.freshness.quoteAgeSeconds,
+    source,
+    compactTime
+  });
+  const move =
+    price != null && previousPrice != null && Number.isFinite(previousPrice)
+      ? price - previousPrice
+      : null;
+  const bias = biasLabel(plan.directionBias);
+  const biasTone =
+    plan.directionBias.includes("BULL")
+      ? "bullish"
+      : plan.directionBias.includes("BEAR")
+        ? "bearish"
+        : "neutral";
 
   return (
-    <section className="gm-intra-header" data-testid="intraday-header-card" aria-label="Market overview">
-      <div className="gm-intra-header-top">
-        <div>
-          <span className="gm-label">XAUUSD</span>
-          <strong className="gm-intra-price" data-testid="intraday-live-price">
+    <section
+      className="gm-intra-header gm-cockpit-strip"
+      data-testid="intraday-header-card"
+      aria-label="Market status strip"
+    >
+      <div className="gm-status-strip" data-testid="cockpit-status-strip">
+        <Chip tone="neutral">
+          <strong>XAUUSD</strong>{" "}
+          <span className="gm-intra-price" data-testid="intraday-live-price">
             {fmtPrice(price)}
-          </strong>
-        </div>
-        <div className="gm-intra-header-badges">
-          <StatusBadge tone="gold">Analysis only</StatusBadge>
-          <StatusBadge tone="neutral">Manual trading</StatusBadge>
-          <span data-testid="intraday-autotrade-off">
-            <StatusBadge tone="neutral">AutoTrade OFF</StatusBadge>
           </span>
-          {source !== "live" && (
-            <StatusBadge tone="warning">{source === "offline" ? "Offline" : "Cached"}</StatusBadge>
+          {move != null && (
+            <span
+              className={`gm-price-move ${move >= 0 ? "up" : "down"}`}
+              data-testid="cockpit-price-move"
+            >
+              {move >= 0 ? "▲" : "▼"} {Math.abs(move).toFixed(2)}
+            </span>
           )}
-        </div>
+        </Chip>
+        <Chip tone="neutral">{sessionLabel}</Chip>
+        <Chip tone={biasTone} testId="cockpit-bias">
+          {bias}
+        </Chip>
+        <Chip tone="neutral" testId="cockpit-confidence">
+          {conf}% confidence · {confidenceLabel(conf)}
+        </Chip>
+        <Chip tone={tone} testId="intraday-freshness">
+          {freshLabel}
+        </Chip>
+        <Chip tone="safe">Analysis only</Chip>
+        <Chip tone="neutral">Manual trading</Chip>
+        <span data-testid="intraday-autotrade-off">
+          <Chip tone="prepare">AutoTrade OFF</Chip>
+        </span>
+        {source !== "live" && (
+          <Chip tone="stale">{source === "offline" ? "Offline" : "Cached"}</Chip>
+        )}
       </div>
-      <div className="gm-intra-header-meta" data-testid="intraday-header-meta">
-        <span>
-          <em>Session</em> {sessionLabel}
-        </span>
-        <span>
-          <em>Bias</em> {biasLabel(plan.directionBias)}
-        </span>
+      <div className="gm-intra-header-meta gm-sr-meta" data-testid="intraday-header-meta">
         <span>
           <em>Type</em> {marketTypeLabel(plan.marketType)}
         </span>
-        {plan.valueLocation && (
-          <span data-testid="header-value-location">
-            <em>Location</em> {valueLocationLabel(plan.valueLocation)}
-          </span>
-        )}
-        <span>
-          <em>Confidence</em> {conf}% · {confidenceLabel(conf)}
-        </span>
-        <span data-testid="intraday-freshness">
-          <em>Data</em> {freshness}
+        <span className="gm-meta" data-testid="data-freshness-legacy">
+          {freshness}
         </span>
       </div>
     </section>

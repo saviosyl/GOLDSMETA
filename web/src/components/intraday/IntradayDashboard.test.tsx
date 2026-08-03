@@ -78,6 +78,7 @@ describe("Issue #50 intraday dashboard components", () => {
   it("10) desktop shows both scenario cards without relying on selector tiles", () => {
     render(
       <ScenarioCards
+        plan={chartExampleIntradayPlanFixture}
         bullish={chartExampleIntradayPlanFixture.bullishScenario}
         bearish={chartExampleIntradayPlanFixture.bearishScenario}
       />
@@ -89,7 +90,7 @@ describe("Issue #50 intraday dashboard components", () => {
     expect(screen.getByTestId("scenario-cards").querySelector(".gm-scenario-tabs")).toHaveClass(
       "gm-mobile-only"
     );
-    expect(screen.getByTestId("scenario-bull")).toHaveTextContent(/Target 1/i);
+    expect(screen.getByTestId("scenario-bull")).toHaveTextContent(/TP1/i);
     expect(screen.getByTestId("scenario-bull")).toHaveTextContent(/4041\.2/);
     expect(screen.getByTestId("scenario-bear")).toHaveTextContent(/Unavailable/i);
   });
@@ -98,6 +99,7 @@ describe("Issue #50 intraday dashboard components", () => {
     const user = userEvent.setup();
     render(
       <ScenarioCards
+        plan={chartExampleIntradayPlanFixture}
         bullish={chartExampleIntradayPlanFixture.bullishScenario}
         bearish={chartExampleIntradayPlanFixture.bearishScenario}
       />

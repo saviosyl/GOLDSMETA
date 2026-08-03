@@ -7,6 +7,12 @@ import { expect, test } from "@playwright/test";
  */
 test.describe("Market Structure Map price sources", () => {
   async function ensureStructureOpen(page: import("@playwright/test").Page) {
+    // Ladder lives under the Structure research tab in the cockpit.
+    await expect(page.getByTestId("cockpit-main")).toBeVisible();
+    const structureTab = page.getByTestId("tabs").getByRole("tab", { name: "Structure" });
+    await expect(structureTab).toBeVisible();
+    await structureTab.click();
+    await expect(page.getByTestId("research-tab-structure")).toBeVisible();
     const details = page.getByTestId("market-structure-collapse");
     await expect(details).toBeVisible();
     const open = await details.evaluate((el) => (el as HTMLDetailsElement).open);

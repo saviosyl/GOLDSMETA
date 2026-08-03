@@ -218,6 +218,7 @@ describe("OverviewPage compact dashboard", () => {
   });
 
   it("renders action-first intraday dashboard without email and collapses system status", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <OverviewPage />
@@ -230,7 +231,9 @@ describe("OverviewPage compact dashboard", () => {
     expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
     expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
     expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "History" }));
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
     const system = screen.getByTestId("system-status-collapse");
     expect(system).not.toHaveAttribute("open");

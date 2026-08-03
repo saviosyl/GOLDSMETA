@@ -132,6 +132,7 @@ describe("OverviewPage redesign", () => {
   });
 
   it("shows compact action-first home and hides technical IDs by default", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <OverviewPage />
@@ -141,8 +142,10 @@ describe("OverviewPage redesign", () => {
     expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/i);
     expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
     expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("research-matrix")).toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
-    expect(screen.getByTestId("market-level-ladder")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Structure" }));
+    expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
     expect(screen.getByTestId("system-status-collapse")).not.toHaveAttribute("open");
