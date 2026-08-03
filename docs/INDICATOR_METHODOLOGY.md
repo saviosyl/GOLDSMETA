@@ -1,6 +1,15 @@
 # GoldMeta Indicator Methodology (Phase 2)
 
-This document defines the deterministic methods used by `pine/GoldMetaBridge.pine` (script version `2.0.2+`).
+This document defines the deterministic methods used by `pine/GoldMetaBridge.pine` (script version `2.1.0+`).
+
+**Intraday timeframe roles (2.1.0)**
+
+| TF | Role | Component name |
+| --- | --- | --- |
+| 60 | Main direction | `gm_direction_1h` |
+| 15 | Structure / setup (chart) | `gm_structure_15m` |
+| 5 | Entry confirmation | `gm_entry_5m` |
+| 1 | Quote freshness only (optional alert) | `metadata.alertKind = QUOTE` |
 
 **Important distinction**
 
@@ -80,11 +89,13 @@ This is **not** TradingView’s built-in Visible Range / Session Volume Profile 
 
 ### Inputs (closed-bar series only)
 - Chart: `EMA(21)`, `EMA(50)`, `ATR(14)`, `close`
-- HTF1 default `60`, HTF2 default `240` via:
+- Direction TF default `60`, entry TF default `5` via:
 
 ```text
 request.security(..., lookahead = barmerge.lookahead_off)
 ```
+
+Aggregate uses three components: **1h direction**, **15m structure** (chart), **5m entry confirmation** (replaces prior 60/240 HTF pair in 2.1.0).
 
 ### Component direction
 For each timeframe component:
