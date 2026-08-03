@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useMemo } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { OverviewPage } from "./OverviewPage";
@@ -22,20 +22,13 @@ import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixt
 import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
 import { ApiError } from "../types/models";
 import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
-import { getIssue50PreviewCase } from "../fixtures/issue50PreviewMatrix";
+import { getIssue50PreviewCase } from "../preview/issue50PreviewMatrix";
 
 /**
  * Preview-only UI review shell — no passwords or tokens.
- * Enabled only on localhost / *.pages.dev (and similar preview hosts).
+ * Loaded only when VITE_ENABLE_UI_REVIEW=true (non-production builds).
+ * Production builds dead-code-eliminate this module via UiReviewGate.
  */
-export function isUiReviewHost(hostname = window.location.hostname): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.endsWith(".pages.dev") ||
-    hostname.includes("preview")
-  );
-}
 
 function buildReviewApi() {
   const params = new URLSearchParams(window.location.search);
@@ -1292,14 +1285,7 @@ function buildReviewApi() {
   };
 }
 
-export function UiReviewGate() {
-  if (typeof window !== "undefined" && !isUiReviewHost()) {
-    return <Navigate to="/" replace />;
-  }
-  return <UiReviewApp />;
-}
-
-function UiReviewApp() {
+export default function UiReviewApp() {
   const location = useLocation();
   const value = useMemo<AuthContextValue>(() => {
     const api = buildReviewApi();

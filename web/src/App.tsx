@@ -32,7 +32,7 @@ import { SetupDetailPage } from "./pages/SetupDetailPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { BrandConceptsPage } from "./pages/BrandConceptsPage";
 import { RiskPlannerPage } from "./pages/RiskPlannerPage";
-import { UiReviewGate } from "./pages/UiReviewApp";
+import { UiReviewGate } from "./pages/UiReviewGate";
 
 const IntelligencePage = lazy(() =>
   import("./pages/IntelligencePage").then((m) => ({ default: m.IntelligencePage }))

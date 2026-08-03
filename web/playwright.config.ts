@@ -21,6 +21,8 @@ export default defineConfig({
       use: { ...devices["Pixel 7"], viewport: { width: 390, height: 844 } }
     }
   ],
+  // UI-review e2e requires a build with VITE_ENABLE_UI_REVIEW=true
+  // (`npm run build:ui-review`). Production `npm run build` omits preview fixtures.
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
