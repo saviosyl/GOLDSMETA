@@ -3751,6 +3751,41 @@ a {
   .gm-levels-desktop { display: none !important; }
   .gm-levels-mobile { display: block !important; }
 
+  /* Keep dashboard chrome inside the viewport on narrow phones. */
+  .gm-shell,
+  .gm-main,
+  .gm-main-inner {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  .gm-topbar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
+  }
+
+  .gm-topbar-brand {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .gm-topbar-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-topbar-actions .gm-meta {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .gm-scenario-tabs.gm-mobile-only {
     display: grid !important;
   }
