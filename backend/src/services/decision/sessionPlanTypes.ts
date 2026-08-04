@@ -39,7 +39,7 @@ export type PlanMutation =
 export type PlanQualityGrade = "A" | "B" | "C" | "NO_PLAN";
 
 export type FourHourContext = {
-  direction: TrendDirection | string | null;
+  direction: TrendDirection | null;
   strength: number | null;
   structureState: string | null;
   ema21: number | null;
