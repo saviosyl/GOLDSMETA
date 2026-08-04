@@ -1,6 +1,7 @@
 /**
  * Bridge backend sessionPlan / stablePlan into IntradayPlan optional Pine3 fields.
  * Safe when backend fields are absent — returns plan unchanged.
+ * Applies authoritative 5M confirmation + geometry safety for display.
  */
 
 import type {
@@ -9,6 +10,11 @@ import type {
   StablePlanStatus,
   TimeframeAlignment
 } from "../types/intradayPlan";
+import {
+  alignTimeframesWithConfirmation,
+  resolveAuthoritativeConfirmation,
+  toConfirmation5m
+} from "./confirmationAuthority";
 
 export type StablePlanSummary = {
   planId?: string | null;
@@ -39,24 +45,12 @@ export type StablePlanSummary = {
     tp1Label?: string | null;
     tp1Reason?: string | null;
   } | null;
+  geometryValid?: boolean | null;
+  geometryReasonCodes?: string[] | null;
+  geometryMessage?: string | null;
 };
 
-function mapConfirmation(state: string | null | undefined): Confirmation5M | null {
-  if (!state) return null;
-  const s = state.toUpperCase();
-  const quiet = ["NONE", "OUTSIDE_ZONE", "INSIDE_ZONE", "APPROACHING_ZONE"];
-  const meaningful = !quiet.includes(s);
-  return {
-    state: s,
-    label: s.replace(/_/g, " "),
-    meaningful,
-    detail: meaningful
-      ? `5M confirmation state: ${s.replace(/_/g, " ")}`
-      : "No meaningful 5-minute confirmation state change."
-  };
-}
-
-function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary): TimeframeAlignment {
+function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary, confLabel: string, confTone: string): TimeframeAlignment {
   const ctx = stable.fourHourContext;
   const bias = stable.higherTimeframeBias ?? ctx?.direction ?? plan.directionBias;
   const biasTone =
@@ -65,14 +59,6 @@ function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary): TimeframeA
       : String(bias).toUpperCase().includes("BEAR")
         ? "sell"
         : "wait";
-  const conf = stable.confirmationState?.toUpperCase() ?? "";
-  const confTone = conf.includes("BREAKOUT") || conf.includes("HELD")
-    ? "buy"
-    : conf.includes("REJECTION") || conf.includes("FAILED")
-      ? "sell"
-      : conf
-        ? "wait"
-        : "unavailable";
 
   return {
     cells: [
@@ -104,9 +90,9 @@ function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary): TimeframeA
       },
       {
         timeframe: "5M",
-        direction: stable.confirmationState?.replace(/_/g, " ") ?? "Pending",
+        direction: confLabel,
         label: "Entry confirm",
-        tone: confTone
+        tone: confTone as TimeframeAlignment["cells"][number]["tone"]
       }
     ],
     conclusion:
@@ -126,23 +112,78 @@ export function applyStablePlanToIntraday(
   stable: StablePlanSummary | null | undefined
 ): IntradayPlan | null {
   if (!plan) return null;
-  if (!stable) return plan;
+  if (!stable) {
+    // Still normalize confirmation authority from plan-local fields.
+    const auth = resolveAuthoritativeConfirmation({
+      confirmationState: plan.confirmation5m?.state,
+      direction: plan.tradePlan.direction || plan.action
+    });
+    const confirmation5m = toConfirmation5m(auth);
+    return {
+      ...plan,
+      confirmation5m,
+      timeframeAlignment: alignTimeframesWithConfirmation(
+        plan,
+        auth,
+        plan.timeframeAlignment
+      )
+    };
+  }
 
-  const confirmation5m =
-    mapConfirmation(stable.confirmationState) ?? plan.confirmation5m ?? null;
   const planStatus = (stable.lifecycleState as StablePlanStatus | null) ?? plan.planStatus ?? null;
   const planUnchanged =
     stable.planStabilityLabel === "PLAN UNCHANGED" ||
     stable.planMutation === "PLAN_UNCHANGED" ||
     plan.planUnchanged === true;
 
-  const tp1 =
-    stable.quickTarget?.tp1 ??
-    stable.takeProfits?.find((t) => t.label === "TP1")?.price ??
-    null;
+  const grade = String(stable.planQuality?.grade ?? plan.planQuality?.grade ?? "").toUpperCase();
+  const qualityReasons = stable.planQuality?.reasons ?? plan.planQuality?.reasons ?? [];
+  const failedGeometry =
+    stable.geometryValid === false ||
+    plan.geometryValid === false ||
+    planStatus === "NO_VALID_PLAN" ||
+    grade === "C" ||
+    grade === "NO_PLAN" ||
+    qualityReasons.some((r) =>
+      /STRUCTURE_ONLY|TRADE_LEVELS_FAILED|WAIT_NO_VALID|ENTRY_EQUALS_STOP|STOP_WRONG_SIDE|ZERO_RISK|INVALID_TARGET|MISSING_REQUIRED|PRICE_ALREADY/i.test(
+        r
+      )
+    );
 
-  const nextTradePlan =
-    plan.tradePlan.cardKind === "ACTIVE_PLAN" || !stable.entry
+  // geometryValid===undefined means legacy payload — do not invent a failure.
+  const geometryValid = failedGeometry
+    ? false
+    : stable.geometryValid === true || plan.geometryValid === true
+      ? true
+      : plan.geometryValid ?? null;
+
+  const auth = resolveAuthoritativeConfirmation({
+    confirmationState: stable.confirmationState ?? plan.confirmation5m?.state,
+    direction: stable.direction ?? plan.tradePlan.direction ?? plan.action
+  });
+  const confirmation5m: Confirmation5M = toConfirmation5m(auth);
+
+  const tp1 = !failedGeometry
+    ? stable.quickTarget?.tp1 ??
+      stable.takeProfits?.find((t) => t.label === "TP1")?.price ??
+      null
+    : null;
+
+  const nextTradePlan = failedGeometry
+    ? {
+        ...plan.tradePlan,
+        cardKind: "NONE" as const,
+        actionable: false,
+        orderingValid: false,
+        orderingNote: stable.geometryMessage ?? "Trade levels failed safety validation.",
+        direction: "NONE" as const,
+        entryZone: null,
+        stopLoss: null,
+        tp1: null,
+        tp2: null,
+        tp3: null
+      }
+    : plan.tradePlan.cardKind === "ACTIVE_PLAN" || !stable.entry
       ? plan.tradePlan
       : {
           ...plan.tradePlan,
@@ -153,19 +194,34 @@ export function applyStablePlanToIntraday(
           tp1: plan.tradePlan.tp1 ?? tp1
         };
 
+  const baseAlignment = mapAlignment(plan, stable, auth.label, auth.tone);
+  const timeframeAlignment = alignTimeframesWithConfirmation(plan, auth, baseAlignment);
+
   return {
     ...plan,
+    action: failedGeometry ? "PREPARE" : plan.action,
+    actionLabel: failedGeometry ? "WAIT — NO VALID PLAN" : plan.actionLabel,
     planStatus,
     planUnchanged,
     planSourceKey: stable.planSourceKey ?? plan.planSourceKey ?? null,
     confirmation5m,
-    timeframeAlignment: plan.timeframeAlignment ?? mapAlignment(plan, stable),
+    timeframeAlignment,
     tradePlan: nextTradePlan,
-    planQuality: stable.planQuality ?? (plan as IntradayPlan & { planQuality?: StablePlanSummary["planQuality"] }).planQuality ?? null,
+    planQuality: stable.planQuality ?? plan.planQuality ?? null,
+    geometryValid,
+    geometryReasonCodes: failedGeometry
+      ? stable.geometryReasonCodes ?? plan.geometryReasonCodes ?? []
+      : stable.geometryReasonCodes ?? plan.geometryReasonCodes ?? [],
+    geometryMessage: failedGeometry
+      ? stable.geometryMessage ?? plan.geometryMessage ?? "Trade levels failed safety validation."
+      : stable.geometryMessage ?? plan.geometryMessage ?? null,
+    invalidation: failedGeometry
+      ? stable.geometryMessage ?? "Trade levels failed safety validation."
+      : plan.invalidation,
     freshness: {
       ...plan.freshness,
       quoteAgeSeconds: stable.quoteAgeSeconds ?? plan.freshness.quoteAgeSeconds,
       signalAgeSeconds: stable.signalAgeSeconds ?? plan.freshness.signalAgeSeconds
     }
-  } as IntradayPlan;
+  };
 }

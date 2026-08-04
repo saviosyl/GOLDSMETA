@@ -1,20 +1,23 @@
 import { Link } from "react-router-dom";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { fmtPrice } from "../../lib/intradayFormat";
 import {
-  formatLevelWithOptionalPrice,
+  formatXauPrice,
+  invalidationFromStop,
   isLegacyPlanData,
   isNoValidIntradayPlan,
   LEGACY_PLAN_BANNER,
   NO_VALID_PLAN_NEXT,
+  NO_VALID_PLAN_SAFETY_REASON,
   NO_VALID_PLAN_TITLE,
-  sanitizePlanText
+  sanitizePlanText,
+  WAIT_NO_VALID_PLAN_LABEL
 } from "../../lib/planTextFormat";
 import {
   planStatusLabel,
   resolveDisplayAction,
   toneIcon
 } from "../../lib/planDisplay";
+import { resolveAuthoritativeConfirmation } from "../../lib/confirmationAuthority";
 import { ExplainThisPage } from "./ExplainThisPage";
 
 type Props = {
@@ -31,51 +34,49 @@ function setupTypeLabel(plan: IntradayPlan): string {
 
 function resolveLevels(plan: IntradayPlan) {
   const tp = plan.tradePlan;
-  const entry =
-    tp.entryZone != null
-      ? sanitizePlanText(String(tp.entryZone))
-      : plan.triggerPrice != null
-        ? fmtPrice(plan.triggerPrice)
-        : sanitizePlanText(plan.trigger);
-  const stop =
-    tp.stopLoss ??
-    plan.bullishScenario?.invalidationPrice ??
-    plan.bearishScenario?.invalidationPrice ??
-    null;
-  const tp1 =
-    tp.tp1 ??
-    plan.nextTargetPrice ??
-    plan.bullishScenario?.firstTargetPrice ??
-    plan.bearishScenario?.firstTargetPrice ??
-    null;
-  const tp2 =
-    tp.tp2 ??
-    plan.afterThatTargetPrice ??
-    plan.bullishScenario?.secondTargetPrice ??
-    plan.bearishScenario?.secondTargetPrice ??
-    null;
+  const entryNum =
+    typeof tp.entryZone === "string" && Number.isFinite(Number(tp.entryZone.replace(/,/g, "")))
+      ? Number(tp.entryZone.replace(/,/g, ""))
+      : plan.triggerPrice;
+  const entry = entryNum != null ? formatXauPrice(entryNum) : sanitizePlanText(plan.trigger);
+  const stop = tp.stopLoss ?? null;
+  const tp1 = tp.tp1 ?? plan.nextTargetPrice ?? null;
+  const tp2 = tp.tp2 ?? plan.afterThatTargetPrice ?? null;
   return { entry, stop, tp1, tp2 };
 }
 
 /**
- * Single primary card: Today's Intraday Plan (replaces duplicate PREPARE action card).
+ * Single primary card: Today's Intraday Plan.
+ * Never shows actionable BUY/SELL levels when geometry or quality fails.
  */
 export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Props) {
+  const quality = planQuality ?? plan.planQuality ?? null;
   const display = resolveDisplayAction(plan);
-  const noValid = isNoValidIntradayPlan(plan, marketStructureMode);
+  const noValid = isNoValidIntradayPlan(
+    { ...plan, planQuality: quality },
+    marketStructureMode
+  );
   const legacy = !noValid && isLegacyPlanData(plan);
   const levels = resolveLevels(plan);
-  const showLevels = !noValid && plan.action !== "NO_TRADE";
-  const confirmation =
-    sanitizePlanText(plan.entryConfirmation?.[0]) ||
-    sanitizePlanText(plan.confirmation5m?.detail) ||
-    "Wait for a meaningful 5-minute confirmation.";
+  const showLevels = !noValid && plan.action !== "NO_TRADE" && plan.tradePlan.actionable;
+  const auth = resolveAuthoritativeConfirmation({
+    confirmationState: plan.confirmation5m?.state,
+    direction: plan.tradePlan.direction || plan.action
+  });
+  const confirmation = auth.detail;
   const whatToDo = sanitizePlanText(plan.oneSentence) || sanitizePlanText(plan.whyNotReady);
-  const invalidation = formatLevelWithOptionalPrice(plan.invalidation, null);
-  const qualityGrade =
-    planQuality?.grade ??
-    (plan.confidence >= 80 ? "A" : plan.confidence >= 60 ? "B" : plan.confidence >= 40 ? "C" : null);
+  const invalidation = levels.stop != null
+    ? invalidationFromStop(plan.tradePlan.direction || plan.action, levels.stop)
+    : sanitizePlanText(plan.invalidation);
+  const qualityGrade = quality?.grade ?? null;
   const status = plan.planStatus ? planStatusLabel(plan.planStatus) : null;
+  const reasonCodes = plan.geometryReasonCodes?.length
+    ? plan.geometryReasonCodes
+    : quality?.reasons?.filter((r) =>
+        /ENTRY_EQUALS_STOP|STOP_WRONG_SIDE|TP1_|ZERO_RISK|INVALID_TARGET|MISSING_REQUIRED|PRICE_ALREADY|TRADE_LEVELS_FAILED|STRUCTURE_ONLY|WAIT_NO_VALID/i.test(
+          r
+        )
+      ) ?? [];
 
   if (noValid) {
     return (
@@ -88,18 +89,33 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
         <div className="gm-section-head">
           <h2 className="gm-section-title">Today&apos;s Intraday Plan</h2>
           <span className="gm-tone-pill tone-unavailable" data-testid="plan-direction-pill">
-            <span aria-hidden="true">{toneIcon("unavailable")}</span> NO PLAN
+            <span aria-hidden="true">{toneIcon("unavailable")}</span> {WAIT_NO_VALID_PLAN_LABEL}
           </span>
         </div>
+        <h3 className="gm-no-plan-title" data-testid="intraday-action-label">
+          <span data-testid="intraday-action-short">{WAIT_NO_VALID_PLAN_LABEL}</span>
+        </h3>
         <h3 className="gm-no-plan-title" data-testid="no-valid-plan-title">
           {NO_VALID_PLAN_TITLE}
         </h3>
+        <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-reason">
+          <strong>Reason:</strong> {plan.geometryMessage ?? NO_VALID_PLAN_SAFETY_REASON}
+        </p>
         <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-next">
           {NO_VALID_PLAN_NEXT}
         </p>
+        {reasonCodes.length > 0 && (
+          <ul className="gm-geometry-reasons" data-testid="geometry-reason-codes">
+            {reasonCodes.map((code) => (
+              <li key={code}>
+                <code>{code}</code>
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="gm-meta" data-testid="no-valid-plan-note">
-          Live price may be available, but complete 15-minute market structure has not been received.
-          Observation only — no actionable entry, stop or targets.
+          No BUY ON PULLBACK, SELL ON REJECTION, entry, stop, TP1, TP2 or actionable confirmation
+          while safety validation fails. Observation only.
         </p>
         <div className="gm-primary-plan-footer">
           <ExplainThisPage />
@@ -131,13 +147,12 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
             {display.icon}
           </span>{" "}
           <span data-testid="intraday-action-short">{display.shortLabel}</span>
-          {display.fullLabel !== display.shortLabel && (
-            <span className="gm-action-sublabel">{sanitizePlanText(display.fullLabel)}</span>
-          )}
         </h3>
-        <span className={`gm-tone-pill tone-${display.tone}`} data-testid="plan-direction-pill">
-          <span aria-hidden="true">{display.icon}</span> {display.shortLabel}
-        </span>
+        {display.demotedFromNow ? (
+          <p className="gm-meta" data-testid="action-now-gated" role="status">
+            BUY NOW / SELL NOW stays gated until every mandatory checklist condition passes.
+          </p>
+        ) : null}
       </div>
 
       <p className="gm-meta gm-setup-type" data-testid="primary-plan-setup-type">
@@ -155,11 +170,6 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
         <p className="gm-primary-plan-sentence" data-testid="intraday-one-sentence">
           {whatToDo || "Wait for the next verified plan update."}
         </p>
-        {display.demotedFromNow && (
-          <p className="gm-meta" data-testid="action-now-gated" role="status">
-            BUY NOW / SELL NOW only when all six conditions pass.
-          </p>
-        )}
       </div>
 
       {showLevels ? (
@@ -170,22 +180,22 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
           </div>
           <div data-testid="plan-level-stop">
             <span className="gm-label">Stop</span>
-            <strong className="gm-plan-price tone-sell">{fmtPrice(levels.stop)}</strong>
+            <strong className="gm-plan-price tone-sell">{formatXauPrice(levels.stop)}</strong>
           </div>
           <div data-testid="plan-level-tp1">
             <span className="gm-label">TP1</span>
-            <strong className="gm-plan-price tone-buy">{fmtPrice(levels.tp1)}</strong>
+            <strong className="gm-plan-price tone-buy">{formatXauPrice(levels.tp1)}</strong>
           </div>
           <div data-testid="plan-level-tp2">
             <span className="gm-label">TP2</span>
             <strong className="gm-plan-price">
-              {levels.tp2 != null ? fmtPrice(levels.tp2) : "Optional"}
+              {levels.tp2 != null ? formatXauPrice(levels.tp2) : "Optional"}
             </strong>
           </div>
         </div>
       ) : (
         <p className="gm-meta" data-testid="plan-levels-hidden">
-          No actionable entry, stop or targets while the plan is NO TRADE.
+          No actionable entry, stop or targets while the plan is not tradeable.
         </p>
       )}
 
@@ -193,6 +203,9 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
         <p className="gm-label">5M confirmation required</p>
         <p className="gm-confirm-detail" data-testid="intraday-confirmation-summary">
           {confirmation}
+        </p>
+        <p className="gm-meta" data-testid="confirm-5m-state">
+          {auth.label}
         </p>
       </div>
 
@@ -203,23 +216,12 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
         </div>
         <div>
           <span className="gm-label">Plan quality</span>
-          <strong data-testid="primary-plan-quality">
-            {qualityGrade ? `${qualityGrade}` : "—"}
-            {planQuality?.reasons?.[0]
-              ? ` — ${sanitizePlanText(planQuality.reasons[0])}`
-              : ""}
-          </strong>
+          <strong data-testid="primary-plan-quality">{qualityGrade ?? "—"}</strong>
         </div>
         {status && (
           <div>
             <span className="gm-label">Current status</span>
             <strong data-testid="primary-plan-status">{status}</strong>
-          </div>
-        )}
-        {plan.whyNotReady && (
-          <div className="gm-primary-fact-span">
-            <span className="gm-label">Why waiting</span>
-            <strong data-testid="primary-plan-why">{sanitizePlanText(plan.whyNotReady)}</strong>
           </div>
         )}
       </div>

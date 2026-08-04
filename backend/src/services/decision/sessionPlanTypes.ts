@@ -106,6 +106,10 @@ export type SessionPlanRecord = {
   session: string | null;
   higherTimeframeBias: TrendDirection | null;
   invalidation: string | null;
+  /** Geometry safety — set by central validator before save / API return. */
+  geometryValid?: boolean;
+  geometryReasonCodes?: string[];
+  geometryMessage?: string | null;
   createdAt: string;
   updatedAt: string;
   validUntil: string | null;

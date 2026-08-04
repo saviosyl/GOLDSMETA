@@ -218,15 +218,15 @@ describe("session plan stability", () => {
     });
 
     expect(afterConfirm.planId).toBe(created.planId);
-    expect(afterConfirm.planMutation).toBe("STATUS_UPDATED");
-    expect(afterConfirm.confirmationState).toBe("REJECTION_CONFIRMED");
-    expect(afterConfirm.direction).toBe("BUY");
-    expect(afterConfirm.entry?.price).toBe(created.entry?.price);
-    expect(afterConfirm.stopLoss?.price).toBe(created.stopLoss?.price);
-    expect(afterConfirm.takeProfits).toEqual(created.takeProfits);
-    expect(["ARMED", "CONFIRMED", "IN_PROGRESS", "WAITING_FOR_ENTRY_ZONE"]).toContain(
-      afterConfirm.lifecycleState
-    );
+    // Bearish rejection must not confirm a BUY plan — authoritative state fails closed.
+    expect(afterConfirm.confirmationState).toBe("CONFIRMATION_FAILED");
+    if (created.geometryValid !== false && created.lifecycleState !== "NO_VALID_PLAN") {
+      expect(afterConfirm.planMutation).toBe("STATUS_UPDATED");
+      expect(afterConfirm.direction).toBe("BUY");
+      expect(afterConfirm.entry?.price).toBe(created.entry?.price);
+      expect(afterConfirm.stopLoss?.price).toBe(created.stopLoss?.price);
+      expect(afterConfirm.takeProfits).toEqual(created.takeProfits);
+    }
   });
 
   it("missing 15M plan → NO_VALID_PLAN for quote/confirm alone", async () => {
@@ -331,11 +331,11 @@ describe("quick-target TP1 + plan quality", () => {
     expect(qt.riskReward!).toBeGreaterThanOrEqual(MIN_QUICK_TARGET_RR);
   });
 
-  it("grades A/B/C/NO_PLAN with reasons", () => {
+  it("grades A/B/NO_PLAN with reasons (C/STRUCTURE_ONLY is never tradeable)", () => {
     const a = evaluatePlanQuality({
       decision: baseDecision(),
       marketStructureMode: "COMPLETE",
-      confirmationState: "REJECTION_CONFIRMED",
+      confirmationState: "BREAKOUT_CONFIRMED",
       chartMatchesRole: true,
       quickTargetRrOk: true,
       hasFourHourContext: true
@@ -350,7 +350,23 @@ describe("quick-target TP1 + plan quality", () => {
       quickTargetRrOk: true,
       hasFourHourContext: false
     });
-    expect(["B", "C"]).toContain(b.grade);
+    expect(["B", "NO_PLAN"]).toContain(b.grade);
+
+    const structureOnly = evaluatePlanQuality({
+      decision: baseDecision({
+        decision: "WAIT",
+        entry: { type: "LIMIT", price: null, zoneLow: null, zoneHigh: null, condition: null },
+        stopLoss: { price: null, reason: null },
+        takeProfits: []
+      }),
+      marketStructureMode: "COMPLETE",
+      confirmationState: null,
+      chartMatchesRole: true,
+      quickTargetRrOk: false,
+      hasFourHourContext: false
+    });
+    expect(structureOnly.grade).toBe("NO_PLAN");
+    expect(structureOnly.reasons.join(" ")).toMatch(/STRUCTURE_ONLY|WAIT_NO_VALID|INCOMPLETE/);
 
     const none = evaluatePlanQuality({
       decision: null,
