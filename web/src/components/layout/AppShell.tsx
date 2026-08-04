@@ -2,47 +2,104 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 
-const DESKTOP_LINKS = [
+type NavItem = { to: string; label: string; end?: boolean; staffOnly?: boolean };
+
+/** Desktop grouped navigation — Daily / Research / Tools / Account / Admin */
+const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
+  {
+    heading: "Daily",
+    items: [
+      { to: "/", label: "Today's Plan", end: true },
+      { to: "/intelligence", label: "Markets" },
+      { to: "/journal", label: "Journal" }
+    ]
+  },
+  {
+    heading: "Research",
+    items: [
+      { to: "/v4", label: "Research" },
+      { to: "/analytics", label: "Performance" },
+      { to: "/replay", label: "Replay" }
+    ]
+  },
+  {
+    heading: "Tools",
+    items: [
+      { to: "/planner", label: "Risk Planner" },
+      { to: "/tradingview", label: "TradingView" }
+    ]
+  },
+  {
+    heading: "Account",
+    items: [
+      { to: "/settings", label: "Settings" },
+      { to: "/help", label: "Help" }
+    ]
+  },
+  {
+    heading: "Admin",
+    items: [
+      { to: "/admin/users", label: "Users", staffOnly: true },
+      { to: "/admin/tradingview-template", label: "TradingView Template", staffOnly: true },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true }
+    ]
+  }
+];
+
+/** Mobile primary: Plan · Markets · Journal · More */
+const MOBILE_PRIMARY: NavItem[] = [
   { to: "/", label: "Plan", end: true },
-  { to: "/v4", label: "Research", end: false },
-  { to: "/history", label: "History", end: false },
-  { to: "/intelligence", label: "Markets", end: false },
-  { to: "/analytics", label: "Analytics", end: false }
-];
-
-const DESKTOP_SECONDARY = [
-  { to: "/replay", label: "Replay" },
-  { to: "/journal", label: "Journal" },
-  { to: "/brokers", label: "Brokers" },
-  { to: "/autotrade", label: "AutoTrade" },
-  { to: "/tradingview", label: "TradingView" },
-  { to: "/planner", label: "Risk planner" },
-  { to: "/admin/users", label: "Users", staffOnly: true },
-  { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
-  { to: "/help", label: "Help" },
-  { to: "/settings", label: "Settings" }
-];
-
-/** Product language: Plan / Research / History / More — routes preserved. */
-const MOBILE_PRIMARY = [
-  { to: "/", label: "Plan", end: true },
-  { to: "/v4", label: "Research", end: false },
-  { to: "/history", label: "History", end: false }
-];
-
-const MOBILE_MORE = [
   { to: "/intelligence", label: "Markets" },
-  { to: "/analytics", label: "Analytics" },
-  { to: "/replay", label: "Replay" },
-  { to: "/brokers", label: "Brokers" },
-  { to: "/autotrade", label: "AutoTrade" },
-  { to: "/tradingview", label: "TradingView" },
-  { to: "/journal", label: "Journal" },
-  { to: "/planner", label: "Risk planner" },
-  { to: "/admin/users", label: "Users", staffOnly: true },
-  { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
-  { to: "/help", label: "Help" },
-  { to: "/settings", label: "Settings" }
+  { to: "/journal", label: "Journal" }
+];
+
+type MoreGroup = { heading: string; items: NavItem[] };
+
+const MOBILE_MORE_GROUPS: MoreGroup[] = [
+  {
+    heading: "Research",
+    items: [
+      { to: "/v4", label: "Research" },
+      { to: "/analytics", label: "Analytics" },
+      { to: "/signal-performance", label: "Performance" }
+    ]
+  },
+  {
+    heading: "Review",
+    items: [
+      { to: "/history", label: "History" },
+      { to: "/replay", label: "Replay" }
+    ]
+  },
+  {
+    heading: "Trading tools",
+    items: [
+      { to: "/planner", label: "Risk Planner" },
+      { to: "/tradingview", label: "TradingView Setup" }
+    ]
+  },
+  {
+    heading: "Account",
+    items: [
+      { to: "/settings", label: "Settings" },
+      { to: "/help", label: "Help" }
+    ]
+  },
+  {
+    heading: "System",
+    items: [
+      { to: "/brokers", label: "Brokers" },
+      { to: "/autotrade", label: "AutoTrade" }
+    ]
+  },
+  {
+    heading: "Admin",
+    items: [
+      { to: "/admin/users", label: "Users", staffOnly: true },
+      { to: "/admin/tradingview-template", label: "TradingView Template", staffOnly: true },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true }
+    ]
+  }
 ];
 
 function initials(email: string | null | undefined): string {
@@ -51,6 +108,10 @@ function initials(email: string | null | undefined): string {
   const parts = local.split(/[._-]/).filter(Boolean);
   if (parts.length >= 2) return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
   return local.slice(0, 2).toUpperCase();
+}
+
+function filterStaff<T extends { staffOnly?: boolean }>(items: T[], isStaff: boolean): T[] {
+  return items.filter((l) => !l.staffOnly || isStaff);
 }
 
 export function AppShell({
@@ -75,23 +136,30 @@ export function AppShell({
     return `${prefix}${to}`;
   };
 
-  const desktopSecondary = useMemo(
-    () => DESKTOP_SECONDARY.filter((l) => !("staffOnly" in l && l.staffOnly) || isStaff),
-    [isStaff]
-  );
-  const mobileMore = useMemo(
-    () => MOBILE_MORE.filter((l) => !("staffOnly" in l && l.staffOnly) || isStaff),
+  const desktopGroups = useMemo(
+    () =>
+      DESKTOP_GROUPS.map((g) => ({
+        ...g,
+        items: filterStaff(g.items, isStaff)
+      })).filter((g) => g.items.length > 0),
     [isStaff]
   );
 
-  const moreActive = useMemo(
+  const mobileMoreGroups = useMemo(
     () =>
-      mobileMore.some((l) => {
-        const target = withPrefix(l.to);
-        return location.pathname === target || location.pathname.startsWith(`${target}/`);
-      }),
-    [location.pathname, prefix, mobileMore]
+      MOBILE_MORE_GROUPS.map((g) => ({
+        ...g,
+        items: filterStaff(g.items, isStaff)
+      })).filter((g) => g.items.length > 0),
+    [isStaff]
   );
+
+  const moreActive = useMemo(() => {
+    const paths = mobileMoreGroups.flatMap((g) => g.items.map((i) => withPrefix(i.to)));
+    return paths.some(
+      (target) => location.pathname === target || location.pathname.startsWith(`${target}/`)
+    );
+  }, [location.pathname, prefix, mobileMoreGroups]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -109,6 +177,10 @@ export function AppShell({
     };
   }, [profileOpen]);
 
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="gm-shell" data-testid="app-shell-redesign">
       <aside className="gm-sidebar" aria-label="Desktop navigation" data-testid="desktop-sidebar">
@@ -120,35 +192,25 @@ export function AppShell({
           </div>
         </div>
         <nav className="gm-sidebar-nav">
-          {DESKTOP_LINKS.map((link) => (
-            <NavLink
-              key={link.to}
-              to={withPrefix(link.to)}
-              end={link.end}
-              className={({ isActive }) => (isActive ? "active" : undefined)}
-            >
-              {link.label}
-            </NavLink>
-          ))}
-          <p className="gm-meta" style={{ margin: "16px 8px 6px" }}>
-            More
-          </p>
-          {desktopSecondary.map((link) => (
-            <NavLink
-              key={link.to}
-              to={withPrefix(link.to)}
-              className={({ isActive }) => (isActive ? "active" : undefined)}
-            >
-              {link.label}
-            </NavLink>
+          {desktopGroups.map((group) => (
+            <div key={group.heading} className="gm-nav-group" data-testid={`nav-group-${group.heading.toLowerCase()}`}>
+              <p className="gm-nav-heading">{group.heading}</p>
+              {group.items.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={withPrefix(link.to)}
+                  end={link.end}
+                  className={({ isActive }) => (isActive ? "active" : undefined)}
+                >
+                  {link.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
             <p>Analysis only. Broker execution stays disabled.</p>
-            <span className="gm-meta" style={{ color: "rgba(255,255,255,0.75)" }}>
-              {email}
-            </span>
           </div>
         </div>
       </aside>
@@ -166,11 +228,13 @@ export function AppShell({
               />
               <div>
                 <strong>GOLDMETA</strong>
-                <span>Gold market intelligence</span>
+                <span>Daily trading assistant</span>
               </div>
             </div>
             <div className="gm-topbar-actions">
-              <span className="gm-badge gold">LIVE</span>
+              <span className="gm-badge neutral" data-testid="topbar-autotrade-off">
+                AutoTrade OFF
+              </span>
               <div className="gm-profile-menu" ref={profileRef}>
                 <button
                   type="button"
@@ -185,7 +249,6 @@ export function AppShell({
                     {initials(email)}
                   </span>
                 </button>
-                {/* Desktop: email visible; mobile: behind profile popover */}
                 <span className="gm-meta gm-topbar-email" data-testid="topbar-email-desktop">
                   {email}
                 </span>
@@ -202,6 +265,13 @@ export function AppShell({
                     <p className="gm-meta" style={{ marginTop: 8 }}>
                       AutoTrade OFF · Analysis only
                     </p>
+                    <NavLink
+                      to={withPrefix("/settings")}
+                      className="gm-linkish"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      Settings
+                    </NavLink>
                   </div>
                 )}
               </div>
@@ -248,13 +318,22 @@ export function AppShell({
                 Close
               </button>
             </div>
-            <div className="gm-more-links">
-              {mobileMore.map((link) => (
-                <NavLink key={link.to} to={withPrefix(link.to)} onClick={() => setMoreOpen(false)}>
-                  {link.label}
-                </NavLink>
-              ))}
-            </div>
+            {mobileMoreGroups.map((group) => (
+              <div key={group.heading} className="gm-more-group" data-testid={`more-group-${group.heading.toLowerCase().replace(/\s+/g, "-")}`}>
+                <p className="gm-nav-heading">{group.heading}</p>
+                <div className="gm-more-links">
+                  {group.items.map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={withPrefix(link.to)}
+                      onClick={() => setMoreOpen(false)}
+                    >
+                      {link.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

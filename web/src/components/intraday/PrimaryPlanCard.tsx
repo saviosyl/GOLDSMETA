@@ -12,6 +12,8 @@ import {
   sanitizePlanText,
   WAIT_NO_VALID_PLAN_LABEL
 } from "../../lib/planTextFormat";
+import { plainReason, plainReasons } from "../../lib/reasonCodePlain";
+import { DisclosurePanel } from "../ui/primitives";
 import {
   planStatusLabel,
   resolveDisplayAction,
@@ -99,23 +101,33 @@ export function PrimaryPlanCard({ plan, marketStructureMode, planQuality }: Prop
           {NO_VALID_PLAN_TITLE}
         </h3>
         <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-reason">
-          <strong>Reason:</strong> {plan.geometryMessage ?? NO_VALID_PLAN_SAFETY_REASON}
+          <strong>Reason:</strong>{" "}
+          {plainReason(plan.geometryMessage ?? reasonCodes[0] ?? NO_VALID_PLAN_SAFETY_REASON)}
         </p>
         <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-next">
           {NO_VALID_PLAN_NEXT}
         </p>
         {reasonCodes.length > 0 && (
-          <ul className="gm-geometry-reasons" data-testid="geometry-reason-codes">
-            {reasonCodes.map((code) => (
-              <li key={code}>
-                <code>{code}</code>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="gm-geometry-reasons" data-testid="geometry-reason-plain">
+              {plainReasons(reasonCodes).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <DisclosurePanel summary="Advanced diagnostics">
+              <ul className="gm-geometry-reasons" data-testid="geometry-reason-codes">
+                {reasonCodes.map((code) => (
+                  <li key={code}>
+                    <code>{code}</code>
+                  </li>
+                ))}
+              </ul>
+            </DisclosurePanel>
+          </>
         )}
         <p className="gm-meta" data-testid="no-valid-plan-note">
-          No BUY ON PULLBACK, SELL ON REJECTION, entry, stop, TP1, TP2 or actionable confirmation
-          while safety validation fails. Observation only.
+          No buy, sell, entry, stop, TP1, TP2 or actionable confirmation while safety validation
+          fails. Observation only.
         </p>
         <div className="gm-primary-plan-footer">
           <ExplainThisPage />

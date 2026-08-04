@@ -2,46 +2,104 @@ import { Link } from "react-router-dom";
 import { GLOSSARY } from "../lib/glossary";
 import { PageHeader, SectionCard } from "../components/ui/primitives";
 
-/** First-use guide + beginner glossary. */
+/** Beginner-friendly help centre — how to use GoldMeta today. */
 export function HelpPage() {
   return (
     <div className="gm-help-page" data-testid="help-page">
       <PageHeader title="Help" freshness="Beginner-friendly guide" />
 
-      <SectionCard title="Welcome to GoldMeta">
+      <SectionCard title="How to use GoldMeta today">
         <ol className="gm-help-steps" data-testid="first-use-guide">
-          <li>Check the market decision (BUY, SELL, or WAIT).</li>
-          <li>Read the reasons in plain language.</li>
-          <li>Review entry, stop loss and targets when a plan exists.</li>
-          <li>Keep trading in Manual mode initially.</li>
-          <li>Connect a Demo broker only when ready.</li>
-          <li>Never risk money you cannot afford to lose.</li>
+          <li>
+            Open <Link to="/">Plan</Link>.
+          </li>
+          <li>Read BUY / SELL / WAIT / NO TRADE.</li>
+          <li>Check Entry, Stop and TP1 when the plan is valid.</li>
+          <li>Wait for 5-minute confirmation that matches the plan.</li>
+          <li>
+            Calculate risk in the <Link to="/planner">Risk Planner</Link>.
+          </li>
+          <li>Place the trade manually only when you are personally satisfied.</li>
+          <li>
+            Record the outcome in <Link to="/journal">Journal</Link>.
+          </li>
         </ol>
         <p className="gm-meta" data-testid="help-analysis-disclaimer">
-          GoldMeta provides trading analysis, not guaranteed results.
-        </p>
-        <p className="gm-meta" style={{ marginBottom: 0 }}>
-          GoldMeta is analysis-first. Broker trading stays locked until a separate, approved setup is
-          complete. AutoTrade remains OFF.
+          GoldMeta is analysis only. There is no profit guarantee. AutoTrade stays OFF. Broker
+          execution stays disabled.
         </p>
       </SectionCard>
 
-      <SectionCard title="What to do next">
-        <ul className="gm-help-list">
-          <li>
-            <Link to="/">Open the Dashboard</Link> for today’s gold decision.
-          </li>
-          <li>
-            <Link to="/brokers">Broker Control Centre</Link> — connect Demo later; no orders from
-            setup screens.
-          </li>
-          <li>
-            <Link to="/settings">Profile &amp; settings</Link> — account preferences and alerts.
-          </li>
-          <li>
-            <Link to="/legal/risk">Risk disclosure</Link> — CFDs are high risk.
-          </li>
-        </ul>
+      <SectionCard title="Quick topics">
+        <div className="gm-glossary" data-testid="help-topics">
+          {[
+            {
+              id: "buy",
+              term: "What BUY means",
+              detail:
+                "GoldMeta sees a bullish manual plan. Enter only after confirmation and your own risk check."
+            },
+            {
+              id: "wait",
+              term: "What WAIT means",
+              detail: "Conditions are incomplete. Stay flat until the next verified signal."
+            },
+            {
+              id: "no-trade",
+              term: "What NO TRADE means",
+              detail: "Do not enter. Data mismatch, unsafe geometry, or blocked conditions."
+            },
+            {
+              id: "entry",
+              term: "Entry zone",
+              detail: "The price area where a manual entry is considered. Stay patient until price arrives."
+            },
+            {
+              id: "stop",
+              term: "Stop",
+              detail: "The invalidation price. If price breaks and holds beyond it, the plan ends."
+            },
+            {
+              id: "tp",
+              term: "TP1 and TP2",
+              detail: "First and second targets. TP1 should leave enough room versus the stop."
+            },
+            {
+              id: "quality",
+              term: "Plan quality",
+              detail: "A/B plans may be tradeable when geometry is valid. C / incomplete plans are never actionable."
+            },
+            {
+              id: "tf",
+              term: "4H / 1H / 15M / 5M",
+              detail: "Wider context, session bias, plan structure, and entry confirmation."
+            },
+            {
+              id: "pine",
+              term: "Pine setup",
+              detail: "Install PLAN 15M and CONFIRM 5M alerts. QUOTE 1M is optional."
+            },
+            {
+              id: "risk",
+              term: "Risk planner",
+              detail: "Size the trade from balance, risk %, entry and stop. Never places orders."
+            },
+            {
+              id: "fail",
+              term: "Why plans can fail",
+              detail: "Markets move. Confirmation can fail. Stops can be hit. Treat every plan as uncertain."
+            }
+          ].map((item) => (
+            <details key={item.id} className="gm-disclosure" data-testid={`help-topic-${item.id}`}>
+              <summary>
+                <span className="gm-glossary-term">{item.term}</span>
+              </summary>
+              <div className="gm-disclosure-body">
+                <p style={{ margin: 0 }}>{item.detail}</p>
+              </div>
+            </details>
+          ))}
+        </div>
       </SectionCard>
 
       <SectionCard title="Plain-language glossary">
@@ -60,21 +118,21 @@ export function HelpPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Pepperstone connection (read-only prep)">
-        <p>
-          TradingView alone is not enough for secure broker automation. A Pepperstone{" "}
-          <strong>cTrader Demo</strong> account and a registered <strong>cTrader Open API</strong>{" "}
-          application are required before GoldMeta can run read-only checks.
-        </p>
+      <SectionCard title="What to do next">
         <ul className="gm-help-list">
-          <li>Never paste your broker password into GoldMeta.</li>
-          <li>Never commit API secrets to GitHub.</li>
-          <li>Secrets belong in Secret Manager on the server only.</li>
-          <li>Read-only verification happens before any Demo trading approval.</li>
+          <li>
+            <Link to="/">Open Plan</Link> for today’s gold decision.
+          </li>
+          <li>
+            <Link to="/intelligence">Markets</Link> for session context.
+          </li>
+          <li>
+            <Link to="/tradingview">TradingView Setup</Link> for alert roles.
+          </li>
+          <li>
+            <Link to="/legal/risk">Risk disclosure</Link> — CFDs are high risk.
+          </li>
         </ul>
-        <p className="gm-meta" style={{ marginBottom: 0 }}>
-          Owners: open Broker Control Centre → Pepperstone for the step-by-step setup checklist.
-        </p>
       </SectionCard>
     </div>
   );

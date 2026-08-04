@@ -37,6 +37,7 @@ import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { ExplainThisPage } from "../components/intraday/ExplainThisPage";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
+import { PlanStageStepper } from "../components/intraday/PlanStageStepper";
 import { resolveDisplayAction } from "../lib/planDisplay";
 import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 import { isNoValidIntradayPlan, NO_VALID_PLAN_NEXT, NO_VALID_PLAN_TITLE } from "../lib/planTextFormat";
@@ -196,7 +197,8 @@ export function OverviewPage() {
   const { api, user } = useAuth();
   const isDesktop = useIsDesktop();
   const [structureOpen, setStructureOpen] = useState(false);
-  const [researchTab, setResearchTab] = useState<ResearchTab>("plan");
+  const [researchTab, setResearchTab] = useState<ResearchTab>("structure");
+  const [researchOpen, setResearchOpen] = useState(false);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
   const [intradayPlan, setIntradayPlan] = useState<IntradayPlan | null>(null);
@@ -397,15 +399,14 @@ export function OverviewPage() {
   ];
 
   return (
-    <div data-testid="overview-page" className="gm-dashboard gm-cockpit">
+    <div data-testid="overview-page" className="gm-dashboard gm-cockpit gm-plan-page">
       <div
-        className="gm-page-header-row"
+        className="gm-page-header-row gm-plan-header-compact"
         style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", flexWrap: "wrap" }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <PageHeader title="GoldMeta" freshness={freshness} />
+          <PageHeader title="Today's Plan" freshness={freshness} />
         </div>
-        <ExplainThisPage />
         <button
           type="button"
           className="gm-btn-outline"
@@ -416,8 +417,7 @@ export function OverviewPage() {
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </div>
-
-      <p className="gm-meta" data-testid="dashboard-last-refresh" style={{ marginTop: 0 }}>
+      <p className="gm-meta gm-sr-only" data-testid="dashboard-last-refresh">
         Last refresh:{" "}
         {lastSuccessAt
           ? formatCompactLocalTime(lastSuccessAt, tzPref)
@@ -468,7 +468,6 @@ export function OverviewPage() {
             compactTime={compactTime}
           />
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
-            {/* Single primary card immediately under the market strip — before research tabs */}
             <PrimaryPlanCard
               plan={intradayPlan}
               marketStructureMode={
@@ -478,54 +477,74 @@ export function OverviewPage() {
             />
           </div>
 
-          <Tabs
-            items={tabItems}
-            value={researchTab}
-            onChange={(id) => setResearchTab(id as ResearchTab)}
+          <PlanStageStepper
+            plan={intradayPlan}
+            marketStructureMode={
+              marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+            }
           />
 
-          {researchTab === "plan" && (
-            <div className="gm-cockpit-tab gm-plan-fold" data-testid="research-tab-plan">
-              {/* Secondary research under the primary plan */}
-              {!isNoValidIntradayPlan(
-                intradayPlan,
+          {/* Phone-first plan fold: confirmation, checks, range, alternative — before research */}
+          <div className="gm-cockpit-tab gm-plan-fold" data-testid="research-tab-plan">
+            {!isNoValidIntradayPlan(
+              intradayPlan,
+              marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+            ) && (
+              <>
+                <Confirmation5MCard
+                  plan={intradayPlan}
+                  decisionConfirmation={
+                    structureDecision?.marketStructure?.confirmationClassification ??
+                    decision?.marketStructure?.confirmationClassification
+                  }
+                />
+                <SetupChecklist plan={intradayPlan} />
+                <TimeframeAlignmentPanel plan={intradayPlan} />
+              </>
+            )}
+            <ExpectedRangeCard
+              range={intradayPlan.expectedRange}
+              zones={intradayPlan.zones}
+              marketStructureMode={
                 marketStructureMode ?? intradayPlan.freshness.marketStructureMode
-              ) && (
-                <>
-                  <SetupChecklist plan={intradayPlan} />
-                  <Confirmation5MCard
-                    plan={intradayPlan}
-                    decisionConfirmation={
-                      structureDecision?.marketStructure?.confirmationClassification ??
-                      decision?.marketStructure?.confirmationClassification
-                    }
-                  />
-                  <TimeframeAlignmentPanel plan={intradayPlan} />
-                </>
-              )}
-              <ExpectedRangeCard
-                range={intradayPlan.expectedRange}
-                zones={intradayPlan.zones}
-                marketStructureMode={
-                  marketStructureMode ?? intradayPlan.freshness.marketStructureMode
-                }
-              />
-              <NextDecisionStrip
-                plan={intradayPlan}
-                marketStructureMode={
-                  marketStructureMode ?? intradayPlan.freshness.marketStructureMode
-                }
-                onOpenScenarios={() => {
-                  const el = document.querySelector('[data-testid="alternative-scenario"]');
-                  if (el instanceof HTMLDetailsElement) el.open = true;
-                  el?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              />
-              <AlternativeScenario plan={intradayPlan} />
-            </div>
+              }
+            />
+            <NextDecisionStrip
+              plan={intradayPlan}
+              marketStructureMode={
+                marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+              }
+              onOpenScenarios={() => {
+                const el = document.querySelector('[data-testid="alternative-scenario"]');
+                if (el instanceof HTMLDetailsElement) el.open = true;
+                el?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            />
+            <AlternativeScenario plan={intradayPlan} />
+          </div>
+
+          <div className="gm-research-gate" data-testid="view-research-gate">
+            <button
+              type="button"
+              className="gm-btn-outline gm-view-research-btn"
+              data-testid="view-research-btn"
+              aria-expanded={researchOpen}
+              onClick={() => setResearchOpen((v) => !v)}
+            >
+              {researchOpen ? "Hide research" : "View research"}
+            </button>
+            <ExplainThisPage />
+          </div>
+
+          {researchOpen && (
+            <Tabs
+              items={tabItems.filter((t) => t.id !== "plan")}
+              value={researchTab === "plan" ? "structure" : researchTab}
+              onChange={(id) => setResearchTab(id as ResearchTab)}
+            />
           )}
 
-          {researchTab === "structure" && (
+          {researchOpen && researchTab === "structure" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-structure">
               <IndicatorChips
                 plan={intradayPlan}
@@ -590,7 +609,7 @@ export function OverviewPage() {
             </div>
           )}
 
-          {researchTab === "momentum" && (
+          {researchOpen && researchTab === "momentum" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-momentum">
               <ResearchMatrix
                 plan={intradayPlan}
@@ -616,7 +635,7 @@ export function OverviewPage() {
             </div>
           )}
 
-          {researchTab === "volume" && (
+          {researchOpen && researchTab === "volume" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-volume">
               <SectionCard title="Volume research">
                 <p style={{ margin: 0, color: "var(--text-secondary)" }}>
@@ -639,7 +658,7 @@ export function OverviewPage() {
             </div>
           )}
 
-          {researchTab === "levels" && (
+          {researchOpen && researchTab === "levels" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-levels">
               <ImportantLevelsPanel
                 levels={orderedLevels}
@@ -653,7 +672,7 @@ export function OverviewPage() {
             </div>
           )}
 
-          {researchTab === "history" && (
+          {researchOpen && researchTab === "history" && (
             <div className="gm-cockpit-tab" data-testid="research-tab-history">
               <OvernightReviewCard review={overnight} />
               <SectionCard

@@ -232,6 +232,7 @@ describe("OverviewPage compact dashboard", () => {
     expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
     expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
     expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("view-research-btn"));
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Levels" }));

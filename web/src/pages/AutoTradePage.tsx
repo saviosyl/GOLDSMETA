@@ -25,6 +25,7 @@ import {
   friendlyBrokerReason,
   friendlyPreviewNote
 } from "../lib/brokerFriendlyCopy";
+import { ExecutionDisabledBanner } from "../components/ExecutionDisabledBanner";
 import {
   buildAutoTradeActivityFeed,
   deriveAutoTradeSyncSummary
@@ -437,11 +438,11 @@ export function AutoTradePage() {
           <p className="gm-autotrade-kicker">GoldMeta</p>
           <h1 className="gm-page-title gm-autotrade-title">AutoTrade</h1>
           <p className="gm-meta gm-autotrade-lead">
-            Connect your own broker account, choose Demo or Live, configure risk, and preview
-            trades. Order submission stays disabled in this preview.
+            Execution is disabled. Analysis and manual planning remain available.
           </p>
         </div>
       </header>
+      <ExecutionDisabledBanner page="autotrade" />
 
       <section className="gm-at-summary" data-testid="autotrade-status" aria-label="Status summary">
         <div>

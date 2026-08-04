@@ -242,13 +242,39 @@ export function TradingViewSetupPage() {
   return (
     <div className="gm-tv-setup" data-testid="tradingview-setup-page">
       <header className="gm-tv-setup-hero">
-        <p className="gm-autotrade-kicker">GoldMeta</p>
+        <p className="gm-autotrade-kicker">Installation wizard</p>
         <h1 className="gm-page-title">TradingView Setup</h1>
         <p className="gm-meta">
-          Use the same standard alert structure as the platform. Your webhook and signals stay
-          private to your account.
+          Install three alert roles. Your webhook and signals stay private. Passwords and tokens are
+          never shown or copied.
         </p>
       </header>
+
+      <section className="gm-tv-role-cards" data-testid="tv-role-cards" aria-label="Alert roles">
+        <article className="gm-tv-role-card">
+          <h2>1. PLAN 15M — Required</h2>
+          <p className="gm-meta">Chart timeframe 15 · Alert Role PLAN_15M</p>
+        </article>
+        <article className="gm-tv-role-card">
+          <h2>2. CONFIRM 5M — Required</h2>
+          <p className="gm-meta">Chart timeframe 5 · Alert Role CONFIRM_5M</p>
+        </article>
+        <article className="gm-tv-role-card">
+          <h2>3. QUOTE 1M — Optional</h2>
+          <p className="gm-meta">Chart timeframe 1 · Alert Role QUOTE_1M</p>
+        </article>
+      </section>
+
+      <section className="gm-tv-progress" data-testid="tv-progress-checklist" aria-label="Setup progress">
+        <h2 className="gm-section-title">Progress</h2>
+        <ul className="gm-help-list">
+          <li>○ Pine 3.0 installed</li>
+          <li>{data?.setup.lastValidSignalAt ? "✓" : "○"} PLAN_15M received</li>
+          <li>○ CONFIRM_5M received</li>
+          <li>○ QUOTE_1M optional</li>
+          <li>○ Old Pine 2.1 alert disabled</li>
+        </ul>
+      </section>
 
       <section className="gm-tv-status-card" data-testid="tv-status-card" aria-label="TradingView status">
         <div>
