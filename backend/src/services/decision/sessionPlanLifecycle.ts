@@ -13,7 +13,7 @@
 
 import { createHash } from "crypto";
 import { decisionConfig } from "../../config/decisionConfig";
-import type { DecisionRecord, TradingViewPayload } from "../../models/types";
+import type { DecisionRecord, TradingViewPayload, TrendDirection } from "../../models/types";
 import { addMsIso, nowIso } from "../../utils/time";
 import type { GoldMetaStore } from "../storage/types";
 import { logger } from "../logging/logger";
@@ -28,6 +28,11 @@ import {
   metadataString,
   resolveAlertRole
 } from "./alertRole";
+
+const asTrendDirection = (value: string | null): TrendDirection | null => {
+  if (value === "BULLISH" || value === "BEARISH" || value === "NEUTRAL") return value;
+  return null;
+};
 import { evaluatePlanQuality } from "./planQuality";
 import { selectQuickTargetTp1 } from "./quickTargetTp";
 import {
@@ -68,7 +73,7 @@ const parseFourHour = (raw: Record<string, unknown> | null): FourHourContext | n
     return typeof v === "string" ? v : null;
   };
   return {
-    direction: str("direction"),
+    direction: asTrendDirection(str("direction")),
     strength: num("strength"),
     structureState: str("structureState"),
     ema21: num("ema21"),
