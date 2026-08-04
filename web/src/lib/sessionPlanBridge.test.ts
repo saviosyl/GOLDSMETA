@@ -11,7 +11,7 @@ describe("sessionPlanBridge", () => {
     const plan = chartExampleIntradayPlanFixture;
     const next = applyStablePlanToIntraday(plan, null);
     expect(next).not.toBeNull();
-    expect(next?.confirmation5m?.state).toBe(plan.confirmation5m.state);
+    expect(next?.confirmation5m?.state).toBe(plan.confirmation5m?.state);
     expect(next?.confirmation5m?.meaningful).toBe(false);
     expect(next?.confirmation5m?.label).toBe("Pending");
     expect(next?.timeframeAlignment?.cells.some((c) => c.timeframe === "5M")).toBe(true);
