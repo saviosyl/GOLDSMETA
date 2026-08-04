@@ -140,9 +140,10 @@ describe("OverviewPage redesign", () => {
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
     expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-checklist")).toBeInTheDocument();
     expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
-    expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("research-matrix")).toBeInTheDocument();
+    expect(screen.getByTestId("research-tab-plan")).toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();

@@ -31,22 +31,21 @@ export function TimeframeAlignmentPanel({ plan }: Props) {
         <h2 className="gm-section-title">Timeframe alignment</h2>
         <span className="gm-meta">4H · 1H · 15M · 5M</span>
       </div>
-      <div className="gm-tf-grid" role="list">
+      <div className="gm-tf-grid">
         {alignment.cells.map((cell) => {
           const tone = cellTone(cell.tone);
           return (
-            <article
+            <div
               key={cell.timeframe}
               className={`gm-tf-cell tone-${tone}`}
               data-testid={`tf-cell-${cell.timeframe}`}
-              role="listitem"
             >
               <span className="gm-tf-name">
                 <span aria-hidden="true">{toneIcon(tone)}</span> {cell.timeframe}
               </span>
               <strong>{cell.direction ?? "—"}</strong>
               {cell.label && <em className="gm-meta">{cell.label}</em>}
-            </article>
+            </div>
           );
         })}
       </div>

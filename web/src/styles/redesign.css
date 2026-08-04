@@ -5109,6 +5109,32 @@ a {
     display: none;
   }
 
+  /* Compact cockpit chrome — market strip is the mobile header */
+  .gm-cockpit .gm-page-header-row {
+    margin-bottom: 4px;
+    gap: 0.4rem !important;
+  }
+
+  .gm-cockpit .gm-page-title {
+    font-size: 1.15rem;
+  }
+
+  .gm-cockpit .gm-page-header-meta {
+    display: none;
+  }
+
+  .gm-cockpit .gm-intra-action {
+    padding: 12px;
+  }
+
+  .gm-cockpit .gm-intra-action .gm-intra-action-label {
+    font-size: clamp(1.55rem, 7vw, 2rem);
+  }
+
+  .gm-cockpit .gm-action-keyfacts {
+    gap: 8px;
+  }
+
   .gm-primary-plan-facts,
   .gm-plan-levels-grid {
     grid-template-columns: 1fr;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-const setPersistence = vi.fn(() => Promise.resolve());
+const setPersistence = vi.fn(async (_auth: unknown, _persistence: unknown) => undefined);
 const onAuthStateChanged = vi.fn((_auth: unknown, cb: (u: null) => void) => {
   queueMicrotask(() => cb(null));
   return () => undefined;
@@ -14,7 +14,7 @@ vi.mock("firebase/app", () => ({
 vi.mock("firebase/auth", () => ({
   getAuth: vi.fn(() => ({ app: { name: "test-app" } })),
   onAuthStateChanged: (auth: unknown, cb: (u: null) => void) => onAuthStateChanged(auth, cb),
-  setPersistence: (...args: unknown[]) => setPersistence(...args),
+  setPersistence: (auth: unknown, persistence: unknown) => setPersistence(auth, persistence),
   browserLocalPersistence: { type: "LOCAL" },
   signInWithEmailAndPassword: vi.fn(),
   createUserWithEmailAndPassword: vi.fn(),
@@ -45,7 +45,7 @@ describe("auth persistence + loading gate", () => {
     expect(firebase.getFirebaseProjectId()).toBe("goldmeta-prod-example");
     await firebase.ensureAuthPersistence();
     expect(setPersistence).toHaveBeenCalled();
-    const persistenceArg = setPersistence.mock.calls[0]?.[1] as { type?: string };
+    const persistenceArg = setPersistence.mock.calls[0]?.[1] as { type?: string } | undefined;
     expect(persistenceArg?.type).toBe("LOCAL");
   });
 

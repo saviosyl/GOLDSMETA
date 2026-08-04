@@ -45,7 +45,8 @@ test.describe("Overview research cockpit", () => {
     expect(metrics.overflow).toBe(false);
     expect(metrics.altOpen).toBe(false);
     expect(metrics.actionBottom).toBeLessThan(metrics.vh * 0.55);
-    expect(metrics.planBottom).toBeLessThan(metrics.vh * 0.75);
+    // Primary plan follows action; Day Trade Range stays secondary below.
+    expect(metrics.planBottom).toBeLessThan(metrics.vh * 0.85);
     for (let i = 1; i < metrics.order.length; i++) {
       expect(metrics.order[i]!).toBeGreaterThanOrEqual(metrics.order[i - 1]! - 1);
     }

@@ -59,8 +59,8 @@ describe("Today's Intraday Plan UI", () => {
     );
     expect(screen.getByTestId("todays-intraday-plan")).toHaveTextContent(/Today's Intraday Plan/i);
     expect(screen.getByTestId("plan-level-entry").querySelector(".gm-plan-price")).toBeTruthy();
-    expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4038/);
-    expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4045/);
+    expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4,?038/);
+    expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4,?045/);
   });
 
   it("shows six-condition checklist with pass/pending marks", () => {
