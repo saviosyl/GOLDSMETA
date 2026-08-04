@@ -2,7 +2,8 @@
 
 export function fmtPrice(n: number | null | undefined, digits = 2): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {
+  // Always en-US grouping so 4077.816 → "4,077.82" (never truncated "407.816").
+  return Number(n).toLocaleString("en-US", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits
   });

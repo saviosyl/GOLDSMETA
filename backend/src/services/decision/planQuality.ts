@@ -6,6 +6,7 @@ import type { DecisionRecord } from "../../models/types";
 import { isPositivePrice } from "../../utils/money";
 import type { PlanQuality, PlanQualityGrade } from "./sessionPlanTypes";
 import type { MarketStructureMode } from "./strategySignal";
+import { validateTradePlanGeometry } from "./tradePlanGeometry";
 
 const positive = (n: unknown): number | null =>
   typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
@@ -34,6 +35,7 @@ export const evaluatePlanQuality = (args: {
   const entry = positive(d.entry?.price) ?? positive(d.entry?.zoneLow);
   const stop = positive(d.stopLoss?.price);
   const tp1 = positive(d.takeProfits?.find((t) => t.label === "TP1")?.price);
+  const tp2 = positive(d.takeProfits?.find((t) => t.label === "TP2")?.price);
   const poc = positive(d.marketStructure?.poc);
   const vah = positive(d.marketStructure?.vah);
   const val = positive(d.marketStructure?.val);
@@ -59,9 +61,30 @@ export const evaluatePlanQuality = (args: {
     reasons.push("MISSING_4H_CONTEXT");
   }
 
+  const geometry = validateTradePlanGeometry({
+    direction,
+    entryPrice: entry,
+    entryZoneLow: positive(d.entry?.zoneLow),
+    entryZoneHigh: positive(d.entry?.zoneHigh),
+    stop,
+    tp1,
+    tp2,
+    currentPrice: positive(d.lastKnownPrice),
+    invalidationText: d.invalidation,
+    quickTargetOk: args.quickTargetRrOk,
+    marketStructureMode: args.marketStructureMode
+  });
+  if (!geometry.actionable && (direction === "BUY" || direction === "SELL")) {
+    reasons.push(...geometry.reasonCodes);
+    reasons.push("TRADE_LEVELS_FAILED_SAFETY_VALIDATION");
+    return { grade: "NO_PLAN", reasons: [...new Set(reasons)] };
+  }
+
   const confirmed =
     args.confirmationState != null &&
-    /CONFIRMED|HELD|INSIDE_ZONE|APPROACHING/i.test(args.confirmationState);
+    /BREAKOUT_CONFIRMED|RETEST_HELD|BULLISH_CONFIRMATION|BEARISH_CONFIRMATION/i.test(
+      args.confirmationState
+    );
   if (!confirmed) {
     reasons.push("AWAITING_5M_CONFIRMATION");
   }
@@ -74,12 +97,23 @@ export const evaluatePlanQuality = (args: {
     stop != null &&
     tp1 != null &&
     direction !== "WAIT" &&
+    geometry.actionable &&
     isPositivePrice(entry) &&
     isPositivePrice(stop) &&
     isPositivePrice(tp1);
 
   if (!essentialsOk && (poc == null || vah == null || val == null)) {
     return { grade: "NO_PLAN", reasons: reasons.length ? reasons : ["INCOMPLETE_SETUP"] };
+  }
+
+  // C / STRUCTURE_ONLY must never grade as a tradeable plan — force NO_PLAN.
+  if (!essentialsOk) {
+    return {
+      grade: "NO_PLAN",
+      reasons: [
+        ...new Set(["STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN", "WAIT_NO_VALID_PLAN", ...reasons])
+      ]
+    };
   }
 
   let grade: PlanQualityGrade;
@@ -96,12 +130,10 @@ export const evaluatePlanQuality = (args: {
   } else if (essentialsOk && (confirmed || args.quickTargetRrOk)) {
     grade = "B";
     reasons.unshift("COMPLETE_LEVELS_PARTIAL_CONFIRM");
-  } else if (poc != null && vah != null && val != null) {
-    grade = "C";
-    reasons.unshift("STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN");
   } else {
     grade = "NO_PLAN";
-    reasons.unshift("INCOMPLETE_SETUP");
+    reasons.unshift("STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN");
+    reasons.push("WAIT_NO_VALID_PLAN");
   }
 
   return { grade, reasons: [...new Set(reasons)] };

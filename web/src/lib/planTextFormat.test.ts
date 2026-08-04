@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   fixJoinedPricesAndSpaces,
   formatLevelWithOptionalPrice,
+  formatXauPrice,
+  invalidationFromStop,
   isLegacyPlanData,
   isNoValidIntradayPlan,
   sanitizePlanText,
@@ -56,6 +58,40 @@ describe("planTextFormat", () => {
         freshness: { marketStructureMode: "COMPLETE" }
       })
     ).toBe(false);
+  });
+
+  it("treats C-grade and geometry failures as NO VALID, not orderingValid alone", () => {
+    expect(
+      isNoValidIntradayPlan({
+        planStatus: "ARMED",
+        planQuality: { grade: "C", reasons: ["STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN"] }
+      })
+    ).toBe(true);
+    expect(
+      isNoValidIntradayPlan({
+        planStatus: "ARMED",
+        geometryValid: false,
+        geometryReasonCodes: ["ENTRY_EQUALS_STOP"]
+      })
+    ).toBe(true);
+    expect(
+      isNoValidIntradayPlan({
+        planStatus: "ARMED",
+        tradePlan: { actionable: false, cardKind: "CONDITIONAL_REFERENCE", orderingValid: false },
+        freshness: { marketStructureMode: "COMPLETE" }
+      })
+    ).toBe(false);
+  });
+
+  it("formats XAU prices with thousands separators and builds invalidation from stop", () => {
+    expect(formatXauPrice(4077.816)).toBe("4,077.82");
+    expect(formatXauPrice(4038)).toBe("4,038.00");
+    expect(invalidationFromStop("BUY", 4038)).toBe(
+      "Break and hold below 4,038.00 ends the immediate plan (stop / invalidation)."
+    );
+    expect(invalidationFromStop("SELL", 4050.5)).toBe(
+      "Break and hold above 4,050.50 ends the immediate plan (stop / invalidation)."
+    );
   });
 
   it("flags legacy plan data when planSourceKey is absent", () => {

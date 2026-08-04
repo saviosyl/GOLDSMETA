@@ -276,4 +276,7 @@ export type IntradayPlan = {
   timeframeAlignment?: TimeframeAlignment | null;
   primaryScenarioSide?: "bullish" | "bearish" | "none" | null;
   planQuality?: { grade?: string | null; reasons?: string[] | null } | null;
+  geometryValid?: boolean | null;
+  geometryReasonCodes?: string[] | null;
+  geometryMessage?: string | null;
 };

@@ -1,9 +1,9 @@
 import type { IntradayPlan } from "../../types/intradayPlan";
+import { toneIcon } from "../../lib/planDisplay";
 import {
-  confirmationTone,
-  deriveConfirmation5m,
-  toneIcon
-} from "../../lib/planDisplay";
+  resolveAuthoritativeConfirmation,
+  toConfirmation5m
+} from "../../lib/confirmationAuthority";
 
 type Props = {
   plan: IntradayPlan;
@@ -11,11 +11,16 @@ type Props = {
 };
 
 /**
- * 5M Entry Confirmation — shows only meaningful states (or a muted unavailable state).
+ * 5M Entry Confirmation — authoritative state shared with the timeframe panel.
  */
 export function Confirmation5MCard({ plan, decisionConfirmation }: Props) {
-  const conf = deriveConfirmation5m(plan, decisionConfirmation);
-  const tone = confirmationTone(conf.state);
+  const auth = resolveAuthoritativeConfirmation({
+    confirmationState: plan.confirmation5m?.state ?? decisionConfirmation,
+    candleClassification: decisionConfirmation,
+    direction: plan.tradePlan.direction || plan.action
+  });
+  const conf = toConfirmation5m(auth);
+  const tone = auth.tone;
 
   if (!conf.meaningful) {
     return (

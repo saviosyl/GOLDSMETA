@@ -46,6 +46,126 @@ import {
 } from "./sessionPlanTypes";
 import type { MarketStructureMode } from "./strategySignal";
 import { isCompleteStrategySignal } from "./strategySignal";
+import {
+  buildInvalidationSentence,
+  isNonActionableQuality,
+  resolveAuthoritativeConfirmation,
+  validateTradePlanGeometry,
+  type GeometryResult
+} from "./tradePlanGeometry";
+
+/** Run central geometry validator and strip actionable levels on failure. */
+export const applyGeometrySafetyGate = (plan: SessionPlanRecord): SessionPlanRecord => {
+  const tp1 =
+    positive(plan.quickTarget?.tp1) ??
+    positive(plan.takeProfits.find((t) => t.label === "TP1")?.price);
+  const tp2 = positive(plan.takeProfits.find((t) => t.label === "TP2")?.price);
+  const authConfirm = resolveAuthoritativeConfirmation({
+    confirmationState: plan.confirmationState,
+    direction: plan.direction
+  });
+
+  const geometry = validateTradePlanGeometry({
+    direction: plan.direction,
+    entryPrice: positive(plan.entry?.price),
+    entryZoneLow: positive(plan.entry?.zoneLow),
+    entryZoneHigh: positive(plan.entry?.zoneHigh),
+    stop: positive(plan.stopLoss?.price),
+    tp1,
+    tp2,
+    currentPrice: plan.currentPrice,
+    invalidationText: plan.invalidation,
+    quickTargetOk: plan.quickTarget?.rrOk !== false && plan.quickTarget?.tp1 != null
+      ? plan.quickTarget.rrOk
+      : plan.direction === "BUY" || plan.direction === "SELL"
+        ? plan.quickTarget?.rrOk ?? false
+        : null,
+    marketStructureMode: plan.marketStructureMode,
+    confirmed: authConfirm.supportsPlan
+  });
+
+  const qualityBlocked = isNonActionableQuality(
+    plan.planQuality?.grade,
+    plan.planQuality?.reasons ?? []
+  );
+
+  if (geometry.actionable && !qualityBlocked) {
+    const stop = geometry.normalized.stop;
+    return {
+      ...plan,
+      geometryValid: true,
+      geometryReasonCodes: [],
+      geometryMessage: null,
+      confirmationState: authConfirm.state,
+      invalidation:
+        buildInvalidationSentence(geometry.normalized.direction, stop) ?? plan.invalidation
+    };
+  }
+
+  // Failed geometry or C / STRUCTURE_ONLY → NO VALID PLAN (preserve diagnostics).
+  const reasons = [
+    ...(geometry.reasonCodes.length ? geometry.reasonCodes : ["GEOMETRY_INVALID"]),
+    ...(qualityBlocked ? ["STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN", "WAIT_NO_VALID_PLAN"] : []),
+    "TRADE_LEVELS_FAILED_SAFETY_VALIDATION"
+  ];
+  return {
+    ...plan,
+    lifecycleState: "NO_VALID_PLAN",
+    planMutation: "NO_VALID_PLAN",
+    planStabilityLabel: "NO VALID PLAN",
+    direction: null,
+    entry: null,
+    stopLoss: null,
+    takeProfits: [],
+    riskReward: { tp1: null, tp2: null, tp3: null },
+    confirmationState: authConfirm.meaningful ? authConfirm.state : plan.confirmationState,
+    distanceToEntryPoints: null,
+    distanceToStopPoints: null,
+    distanceToTp1Points: null,
+    quickTarget: EMPTY_QUICK_TARGET(),
+    planQuality: {
+      grade: "NO_PLAN",
+      reasons: [...new Set([...reasons, ...(plan.planQuality?.reasons ?? [])])]
+    },
+    geometryValid: false,
+    geometryReasonCodes: geometry.reasonCodes.length
+      ? geometry.reasonCodes
+      : ["MISSING_REQUIRED_LEVEL"],
+    geometryMessage: "Trade levels failed safety validation.",
+    invalidation: `Trade levels failed safety validation. ${
+      geometry.primaryReason ?? reasons[0]
+    }`,
+    // Keep diagnostic breadcrumbs on the record via sourceDecisionId / planId / createdAt.
+    updatedAt: nowIso()
+  };
+};
+
+/** Public helper for GET handlers — never return actionable levels when geometry fails. */
+export const sanitizeSessionPlanForApi = (
+  plan: SessionPlanRecord | null
+): SessionPlanRecord | null => {
+  if (!plan) return null;
+  if (plan.geometryValid === false) return plan;
+  if (plan.lifecycleState === "NO_VALID_PLAN" || plan.lifecycleState === "NO_TRADE") {
+    return {
+      ...plan,
+      entry: null,
+      stopLoss: null,
+      takeProfits: [],
+      direction: plan.lifecycleState === "NO_TRADE" ? plan.direction : null,
+      geometryValid: plan.geometryValid ?? false,
+      geometryReasonCodes: plan.geometryReasonCodes ?? plan.planQuality?.reasons ?? [],
+      geometryMessage:
+        plan.geometryMessage ??
+        (plan.lifecycleState === "NO_VALID_PLAN"
+          ? "Trade levels failed safety validation."
+          : null)
+    };
+  }
+  return applyGeometrySafetyGate(plan);
+};
+
+export type { GeometryResult };
 
 const positive = (n: unknown): number | null =>
   typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
@@ -526,7 +646,7 @@ export const processSessionPlanLifecycle = async (
 
   // Quotes: never create plan; refresh price only.
   if (isQuoteAlert(role)) {
-    if (!existing || existing.lifecycleState === "NO_VALID_PLAN") {
+    if (!existing) {
       const plan = emptyNoValidPlan(
         userId,
         payload,
@@ -538,6 +658,25 @@ export const processSessionPlanLifecycle = async (
       );
       await store.saveSessionPlan?.(plan);
       return plan;
+    }
+    // Preserve existing NO_VALID_PLAN record (same planId) — quotes only refresh price.
+    if (existing.lifecycleState === "NO_VALID_PLAN") {
+      const price = positive(decision.lastKnownPrice) ?? positive(payload.ohlcv?.close);
+      const preserved = {
+        ...existing,
+        planMutation: "PLAN_UNCHANGED" as const,
+        planStabilityLabel: "PLAN UNCHANGED" as const,
+        currentPrice: price ?? existing.currentPrice,
+        lastQuoteAt: nowIso(),
+        updatedAt: nowIso(),
+        marketStructureMode: mode ?? existing.marketStructureMode,
+        direction: null,
+        entry: null,
+        stopLoss: null,
+        takeProfits: [] as SessionPlanRecord["takeProfits"]
+      };
+      await store.saveSessionPlan?.(preserved);
+      return preserved;
     }
     const price = positive(decision.lastKnownPrice) ?? positive(payload.ohlcv?.close);
     const nowMs = Date.now();
@@ -585,8 +724,22 @@ export const processSessionPlanLifecycle = async (
       planId: existing.planId,
       planSourceKey: existing.planSourceKey
     };
-    await store.saveSessionPlan?.(updated);
-    return updated;
+    // Quotes must not resurrect invalid geometry — re-gate on every refresh.
+    if (existing.geometryValid === false) {
+      const stillInvalid = applyGeometrySafetyGate({
+        ...updated,
+        direction: existing.direction,
+        entry: existing.entry,
+        stopLoss: existing.stopLoss,
+        takeProfits: existing.takeProfits,
+        quickTarget: existing.quickTarget
+      });
+      await store.saveSessionPlan?.(stillInvalid);
+      return stillInvalid;
+    }
+    const gatedQuote = applyGeometrySafetyGate(updated);
+    await store.saveSessionPlan?.(gatedQuote);
+    return gatedQuote;
   }
 
   // CONFIRM_5M: never create plan; status only.
@@ -662,8 +815,10 @@ export const processSessionPlanLifecycle = async (
       })
     };
     updated = refreshDistances(updated, price, nowMs);
-    await store.saveSessionPlan?.(updated);
-    return updated;
+    // Re-validate geometry after confirmation — never leave invalid levels active.
+    const gatedConfirm = applyGeometrySafetyGate(updated);
+    await store.saveSessionPlan?.(gatedConfirm);
+    return gatedConfirm;
   }
 
   // PLAN_15M / legacy STRATEGY — create or replace when complete confirmed.
@@ -760,8 +915,9 @@ export const processSessionPlanLifecycle = async (
       plan.createdAt = existing.createdAt;
     }
 
-    await store.saveSessionPlan?.(plan);
-    return plan;
+    const gated = applyGeometrySafetyGate(plan);
+    await store.saveSessionPlan?.(gated);
+    return gated;
   }
 
   // Unknown role without existing plan.

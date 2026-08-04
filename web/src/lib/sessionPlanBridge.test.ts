@@ -7,9 +7,17 @@ describe("sessionPlanBridge", () => {
     expect(applyStablePlanToIntraday(null, { lifecycleState: "ARMED" })).toBeNull();
   });
 
-  it("leaves plan unchanged when stable plan absent", () => {
+  it("normalizes 5M confirmation authority when stable plan absent", () => {
     const plan = chartExampleIntradayPlanFixture;
-    expect(applyStablePlanToIntraday(plan, null)).toBe(plan);
+    const next = applyStablePlanToIntraday(plan, null);
+    expect(next).not.toBeNull();
+    expect(next?.confirmation5m?.state).toBe(plan.confirmation5m.state);
+    expect(next?.confirmation5m?.meaningful).toBe(false);
+    expect(next?.confirmation5m?.label).toBe("Pending");
+    expect(next?.timeframeAlignment?.cells.some((c) => c.timeframe === "5M")).toBe(true);
+    // Actionable wait/prepare fixture must not be demoted to NO VALID without geometry failure.
+    expect(next?.actionLabel).toBe(plan.actionLabel);
+    expect(next?.geometryValid).not.toBe(false);
   });
 
   it("maps lifecycle, confirmation, and PLAN UNCHANGED from stable plan", () => {

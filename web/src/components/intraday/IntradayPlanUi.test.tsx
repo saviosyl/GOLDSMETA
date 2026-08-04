@@ -33,12 +33,14 @@ function buyNowPlan(complete: boolean): IntradayPlan {
     ...plan.tradePlan,
     cardKind: complete ? "ACTIVE_PLAN" : "CONDITIONAL_REFERENCE",
     actionable: complete,
+    orderingValid: complete,
     direction: complete ? "BUY" : "NONE",
     entryZone: "4040 – 4041",
     stopLoss: 4038,
     tp1: 4045,
     tp2: 4049
   };
+  plan.geometryValid = complete ? true : null;
   plan.confirmation5m = complete
     ? {
         state: "BREAKOUT_CONFIRMED",

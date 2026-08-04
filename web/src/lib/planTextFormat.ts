@@ -121,24 +121,76 @@ export function formatLevelWithOptionalPrice(
   return `${clean} (${formatted})`;
 }
 
+/** Format a numeric XAUUSD price — always en-US thousands separators, 2 dp. */
+export function formatXauPrice(price: number | null | undefined): string {
+  if (price == null || !Number.isFinite(price) || price <= 0) return "—";
+  // Guard against truncated display bugs (e.g. 407.816 instead of 4,077.82).
+  const n = Math.round(price * 100) / 100;
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+/**
+ * Rebuild invalidation copy from the exact numeric stop stored on the plan.
+ * Never trust free-text prices that may be truncated or concatenated.
+ */
+export function invalidationFromStop(
+  direction: string | null | undefined,
+  stop: number | null | undefined
+): string {
+  if (stop == null || !Number.isFinite(stop)) return "";
+  const p = formatXauPrice(stop);
+  const dir = String(direction ?? "").toUpperCase();
+  if (dir.includes("SELL") || dir === "BEARISH") {
+    return `Break and hold above ${p} ends the immediate plan (stop / invalidation).`;
+  }
+  return `Break and hold below ${p} ends the immediate plan (stop / invalidation).`;
+}
+
 /** True when the plan should show the NO VALID INTRADAY PLAN empty state. */
 export function isNoValidIntradayPlan(
   plan: {
     planStatus?: string | null;
     action?: string | null;
     freshness?: { marketStructureMode?: string | null; sourceLabel?: string | null };
-    tradePlan?: { actionable?: boolean; cardKind?: string };
+    tradePlan?: { actionable?: boolean; cardKind?: string; orderingValid?: boolean };
+    planQuality?: { grade?: string | null; reasons?: string[] | null } | null;
+    geometryValid?: boolean | null;
+    geometryReasonCodes?: string[] | null;
+    geometryMessage?: string | null;
   } | null | undefined,
   marketStructureMode?: string | null
 ): boolean {
   if (!plan) return true;
+  // Explicit geometry failure from the server-side validator.
+  if (plan.geometryValid === false) return true;
   const status = String(plan.planStatus ?? "").toUpperCase();
   if (status === "NO_VALID_PLAN") return true;
+  // C-grade / STRUCTURE_ONLY / incomplete trade plans are never actionable BUY/SELL.
+  const grade = String(plan.planQuality?.grade ?? "").toUpperCase();
+  if (grade === "NO_PLAN" || grade === "C") return true;
+  const reasons = plan.planQuality?.reasons ?? [];
+  if (
+    reasons.some((r) =>
+      /STRUCTURE_ONLY|TRADE_LEVELS_FAILED|WAIT_NO_VALID|ENTRY_EQUALS_STOP|STOP_WRONG_SIDE|ZERO_RISK|INVALID_TARGET|MISSING_REQUIRED|PRICE_ALREADY/i.test(
+        r
+      )
+    )
+  ) {
+    return true;
+  }
+  if ((plan.geometryReasonCodes?.length ?? 0) > 0 && plan.geometryValid !== true) {
+    return true;
+  }
   const mode = String(
     marketStructureMode ?? plan.freshness?.marketStructureMode ?? ""
   ).toUpperCase();
   if (mode === "UNAVAILABLE") return true;
   if (mode === "LIVE_RANGE_ONLY") return true;
+  // MISMATCH stays on the NO TRADE path (not the empty NO_VALID_PLAN card).
+  // orderingValid===false alone is not enough — conditional/wait plans use that flag.
   if (String(plan.action ?? "").toUpperCase() === "UNAVAILABLE") return true;
   return false;
 }
@@ -167,3 +219,5 @@ export const LEGACY_PLAN_BANNER =
 export const NO_VALID_PLAN_TITLE = "NO VALID INTRADAY PLAN";
 export const NO_VALID_PLAN_NEXT =
   "Waiting for the next verified 15-minute TradingView plan signal.";
+export const NO_VALID_PLAN_SAFETY_REASON = "Trade levels failed safety validation.";
+export const WAIT_NO_VALID_PLAN_LABEL = "WAIT — NO VALID PLAN";

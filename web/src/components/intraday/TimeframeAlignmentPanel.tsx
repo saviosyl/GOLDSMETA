@@ -4,6 +4,10 @@ import {
   toneIcon,
   type PlanColourTone
 } from "../../lib/planDisplay";
+import {
+  alignTimeframesWithConfirmation,
+  resolveAuthoritativeConfirmation
+} from "../../lib/confirmationAuthority";
 
 type Props = {
   plan: IntradayPlan;
@@ -11,15 +15,27 @@ type Props = {
 
 function cellTone(raw: string | null | undefined): PlanColourTone {
   const t = (raw || "info").toLowerCase();
-  if (t === "buy" || t === "sell" || t === "wait" || t === "info" || t === "unavailable") {
-    return t;
+  if (
+    t === "buy" ||
+    t === "sell" ||
+    t === "wait" ||
+    t === "info" ||
+    t === "unavailable" ||
+    t === "notrade"
+  ) {
+    return t === "notrade" ? "notrade" : t;
   }
   if (t === "none") return "unavailable";
   return "info";
 }
 
 export function TimeframeAlignmentPanel({ plan }: Props) {
-  const alignment = deriveTimeframeAlignment(plan);
+  const auth = resolveAuthoritativeConfirmation({
+    confirmationState: plan.confirmation5m?.state,
+    direction: plan.tradePlan.direction || plan.action
+  });
+  const base = deriveTimeframeAlignment(plan);
+  const alignment = alignTimeframesWithConfirmation(plan, auth, base);
 
   return (
     <section
