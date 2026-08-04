@@ -1,30 +1,27 @@
 //@version=6
 indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50, max_bars_back=5000)
 
-// GoldMeta Pine Script bridge — Intraday day-trade (gm_svp_v1 / gm_trend_v1 / gm_candle_v1)
-// Timeframe roles: 1h direction | 15m structure/setup | 5m entry confirm | 1m quote-only (optional)
+// GoldMeta Bridge 3.0.0 — canonical TradingView → GoldMeta webhook (schemaVersion 1.1).
+// Backend remains backward-compatible with Bridge 2.1.0 / schema 1.0 during rollout.
 //
-// TradingView alert setup (desktop Supercharts — verified TV Web behavior):
-// 1. Add this script to an XAUUSD 15-minute chart. Confirm status table version.
+// Timeframe hierarchy: 4H context | 1H direction | 15M primary plan | 5M confirmation | 1M quote-only.
+// Alert Role input (same script for all users): PLAN_15M | CONFIRM_5M | QUOTE_1M.
+// Never put email, password, UID, or account tokens in this script.
+//
+// TradingView alert setup (desktop Supercharts):
+// 1. Add this script to the chart timeframe matching Alert Role (15 / 5 / 1).
 // 2. Toolbar clock → Create alert (do NOT use legend/plot "Add alert").
-// 3. Condition field 1: "GoldMeta Bridge" (the indicator), NOT Session High / POC / …
-// 4. Condition field 2: "Any alert() function call" (first option when alert() is present).
-// 5. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-// 6. Message: {{alert_message}}
-// 7. Frequency is controlled by alert() in this script (once per bar close when confirmed-bar ON).
+// 3. Condition: "GoldMeta Bridge" → "Any alert() function call".
+// 4. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
+// 5. Message: {{alert_message}}
+// 6. Confirmed-bar mode ON for production. Frequency is controlled by alert() here.
 //
-// Why plot names appear: every plot()/plotshape() is a technical-alert series. Those are a
-// different TradingView path and cannot send this script's dynamic JSON. GoldMeta webhooks
-// require "Any alert() function call" + {{alert_message}}. See docs/TRADINGVIEW_ALERT_INVESTIGATION.md.
+// Why plot names appear: every plot()/plotshape() is a technical-alert series. Those cannot
+// send this script's dynamic JSON. See docs/TRADINGVIEW_ALERT_INVESTIGATION.md.
 //
-// Values labeled gm_* are GoldMeta-derived equivalents calculated inside this script.
-// They are NOT claimed to be identical to proprietary Volume Profile / Trend Meter products.
-// TPO market-profile fields remain unavailable (null) unless supplied by a separate licensed alert.
-//
-// Non-repainting rules: closed bars only for alerts; request.security(..., lookahead_off); no future data.
-// Pine v6 note: user functions must not reassign global scalars; VP helpers return tuples and/or
-// mutate array contents by reference. All scalar state is assigned at global scope.
-// GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
+// gm_* values are GoldMeta-derived equivalents — not proprietary VP/Trend Meter products.
+// TPO / unavailable fields stay null. Non-repainting: confirmed bars; lookahead_off.
+// Analysis only — trading involves substantial risk. AutoTrade remains OFF.
 
 const string SCRIPT_VERSION = "3.0.0"
 const string SCHEMA_VERSION = "1.1"
@@ -809,8 +806,8 @@ if showWarnings and barstate.islast
         else
             label.set_xy(warningLabel, bar_index, high)
             label.set_text(warningLabel, warningText)
-    else if not chartMatchesStructure
-        tfWarn = "GoldMeta intraday expects " + structureTfInput + " chart. Current: " + timeframe.period
+    else if not chartMatchesRole
+        tfWarn = "Alert Role " + alertRoleInput + " expects " + expectedRoleTf + " chart. Current: " + timeframe.period
         if na(warningLabel)
             warningLabel := label.new(bar_index, high, tfWarn, style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white)
         else
@@ -826,18 +823,18 @@ if showStatusTable and barstate.islast
     table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 0, 1, "Symbol OK", text_color=color.white)
     table.cell(statusTable, 1, 1, symbolOk ? "YES" : "NO", text_color=color.white, bgcolor=symbolOk ? color.new(color.green, 35) : color.new(color.red, 20))
-    table.cell(statusTable, 0, 2, "Chart TF", text_color=color.white)
-    table.cell(statusTable, 1, 2, chartMatchesStructure ? "OK" : "USE " + structureTfInput, text_color=color.white, bgcolor=chartMatchesStructure ? color.new(color.green, 35) : color.new(color.orange, 35))
-    table.cell(statusTable, 0, 3, "Confirmed", text_color=color.white)
-    table.cell(statusTable, 1, 3, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
-    table.cell(statusTable, 0, 4, "Session", text_color=color.white)
-    table.cell(statusTable, 1, 4, sessionName, text_color=color.white)
-    table.cell(statusTable, 0, 5, "Trend", text_color=color.white)
-    table.cell(statusTable, 1, 5, trendDirection + " " + str.tostring(trendStrength, "#"), text_color=color.white)
-    table.cell(statusTable, 0, 6, "VP ready", text_color=color.white)
-    table.cell(statusTable, 1, 6, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
-    table.cell(statusTable, 0, 7, "Candle", text_color=color.white)
-    table.cell(statusTable, 1, 7, classification, text_color=color.white)
+    table.cell(statusTable, 0, 2, "Role", text_color=color.white)
+    table.cell(statusTable, 1, 2, alertRoleInput, text_color=color.white, bgcolor=color.new(color.blue, 35))
+    table.cell(statusTable, 0, 3, "Chart TF", text_color=color.white)
+    table.cell(statusTable, 1, 3, chartMatchesRole ? "OK" : "USE " + expectedRoleTf, text_color=color.white, bgcolor=chartMatchesRole ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 4, "4H ctx", text_color=color.white)
+    table.cell(statusTable, 1, 4, ctxDir, text_color=color.white)
+    table.cell(statusTable, 0, 5, "Session", text_color=color.white)
+    table.cell(statusTable, 1, 5, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 6, "Confirm", text_color=color.white)
+    table.cell(statusTable, 1, 6, confirmState, text_color=color.white)
+    table.cell(statusTable, 0, 7, "VP ready", text_color=color.white)
+    table.cell(statusTable, 1, 7, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
     table.cell(statusTable, 0, 8, "Webhook", text_color=color.white)
-    quoteLabel = enableQuoteUpdates ? "STRAT+QUOTE" : "STRATEGY"
-    table.cell(statusTable, 1, 8, enableAlertCalls ? quoteLabel : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))
+    roleWebhookLabel = alertRoleInput == ROLE_PLAN_15M ? (enableQuoteUpdates ? "PLAN+QUOTE" : "PLAN_15M") : alertRoleInput
+    table.cell(statusTable, 1, 8, enableAlertCalls ? roleWebhookLabel : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))
