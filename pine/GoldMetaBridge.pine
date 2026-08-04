@@ -26,9 +26,13 @@ indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_lab
 // mutate array contents by reference. All scalar state is assigned at global scope.
 // GoldMeta provides market analysis and decision support only. Trading involves substantial risk.
 
-const string SCRIPT_VERSION = "2.1.0"
+const string SCRIPT_VERSION = "3.0.0"
+const string SCHEMA_VERSION = "1.1"
 const string ALERT_KIND_STRATEGY = "STRATEGY"
 const string ALERT_KIND_QUOTE = "QUOTE"
+const string ROLE_PLAN_15M = "PLAN_15M"
+const string ROLE_CONFIRM_5M = "CONFIRM_5M"
+const string ROLE_QUOTE_1M = "QUOTE_1M"
 const string METHOD_VP = "gm_svp_v1"
 const string METHOD_TREND = "gm_trend_v1"
 const string METHOD_CANDLE = "gm_candle_v1"
@@ -38,18 +42,22 @@ const int MAX_BINS = 300
 groupSymbol = "Symbol"
 expectedSymbol = input.string("XAUUSD", "Expected symbol", group=groupSymbol)
 
+groupRole = "Alert Role"
+alertRoleInput = input.string(ROLE_PLAN_15M, "Alert Role", options=[ROLE_PLAN_15M, ROLE_CONFIRM_5M, ROLE_QUOTE_1M], group=groupRole, tooltip="Same canonical script for all users. PLAN_15M on 15m chart, CONFIRM_5M on 5m chart, QUOTE_1M on 1m chart.")
+
 groupTimeframes = "Timeframes"
+contextTfInput = input.timeframe("240", "Context TF (4H wider market)", group=groupTimeframes, tooltip="4 hour — wider context only. Never triggers entry. lookahead_off.")
 directionTfInput = input.timeframe("60", "Direction TF (main bias)", group=groupTimeframes, tooltip="1 hour — main intraday direction. lookahead_off security.")
-structureTfInput = input.timeframe("15", "Structure TF (setup)", group=groupTimeframes, tooltip="15 minutes — structure and setup. Chart should match this timeframe.")
-entryTfInput = input.timeframe("5", "Entry confirm TF", group=groupTimeframes, tooltip="5 minutes — entry confirmation. lookahead_off security.")
-quoteTfInput = input.timeframe("1", "Quote TF (freshness)", group=groupTimeframes, tooltip="1 minute — optional price/freshness updates only; never reverses day-trade plan.")
+structureTfInput = input.timeframe("15", "Structure TF (setup)", group=groupTimeframes, tooltip="15 minutes — primary plan structure.")
+entryTfInput = input.timeframe("5", "Entry confirm TF", group=groupTimeframes, tooltip="5 minutes — entry confirmation.")
+quoteTfInput = input.timeframe("1", "Quote TF (freshness)", group=groupTimeframes, tooltip="1 minute — price/freshness only; never reverses the day-trade plan.")
 
 groupAlerts = "Alerts"
 enableAlertCalls = input.bool(true, "Call alert() from script", group=groupAlerts)
-enableQuoteUpdates = input.bool(false, "Enable 1m quote-only alerts", group=groupAlerts, tooltip="Lightweight OHLC freshness on 1m closes. Never replaces complete STRATEGY alerts.")
+enableQuoteUpdates = input.bool(false, "Legacy dual-emit quotes (PLAN chart only)", group=groupAlerts, tooltip="Deprecated when using dedicated QUOTE_1M role alert. Prefer a separate 1m alert with Alert Role = QUOTE_1M.")
 confirmedBarMode = input.bool(true, "Confirmed-bar mode", group=groupAlerts)
-testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
-payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret.")
+testAlertMode = input.bool(false, "Test-alert / production state", group=groupAlerts, tooltip="When ON, marks payload as test. Does not place orders.")
+payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret. Never put email/password/UID here.")
 
 groupLevels = "Levels"
 showDiagnosticLevels = input.bool(true, "Draw POC / VAH / VAL / session lines", group=groupLevels, tooltip="Drawn with line.new (not plot) so Create Alert is not filled with plot-series names. Webhooks still require Any alert() function call.")
@@ -357,7 +365,19 @@ else if not openingRangeLocked
 
 chartTfSeconds = timeframe.in_seconds(timeframe.period)
 structureTfSeconds = timeframe.in_seconds(structureTfInput)
+entryTfSeconds = timeframe.in_seconds(entryTfInput)
+quoteTfSeconds = timeframe.in_seconds(quoteTfInput)
+contextTfSeconds = timeframe.in_seconds(contextTfInput)
 chartMatchesStructure = chartTfSeconds == structureTfSeconds
+chartMatchesRole =
+     alertRoleInput == ROLE_PLAN_15M ? chartMatchesStructure :
+     alertRoleInput == ROLE_CONFIRM_5M ? chartTfSeconds == entryTfSeconds :
+     alertRoleInput == ROLE_QUOTE_1M ? chartTfSeconds == quoteTfSeconds :
+     false
+expectedRoleTf =
+     alertRoleInput == ROLE_PLAN_15M ? structureTfInput :
+     alertRoleInput == ROLE_CONFIRM_5M ? entryTfInput :
+     quoteTfInput
 
 // --- gm_svp_v1: session volume profile (GoldMeta-derived, not proprietary VP) ---
 var float[] binVolumes = array.new_float()
@@ -412,6 +432,11 @@ acceptanceState = not profileReady ? "UNKNOWN" : close >= valPrice and close <= 
 chartDir = f_trend_dir(close, emaFast, emaSlow)
 chartStrength = f_trend_strength(close, emaFast, emaSlow, atrValue, chartDir)
 
+[ctxClose, ctxEmaFast, ctxEmaSlow, ctxEma200, ctxAtr, ctxSwingHigh, ctxSwingLow, ctxTimeClose] = request.security(syminfo.tickerid, contextTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.ema(close, ema200Len), ta.atr(atrLength), ta.highest(high, swingLength), ta.lowest(low, swingLength), time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+ctxDir = f_trend_dir(ctxClose, ctxEmaFast, ctxEmaSlow)
+ctxStrength = f_trend_strength(ctxClose, ctxEmaFast, ctxEmaSlow, ctxAtr, ctxDir)
+ctxStructure = ctxClose > ctxEmaFast and ctxEmaFast > ctxEmaSlow ? "BULLISH" : ctxClose < ctxEmaFast and ctxEmaFast < ctxEmaSlow ? "BEARISH" : "RANGE"
+
 [dirClose, dirEmaFast, dirEmaSlow, dirAtr] = request.security(syminfo.tickerid, directionTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [entryClose, entryEmaFast, entryEmaSlow, entryAtr] = request.security(syminfo.tickerid, entryTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
@@ -459,17 +484,37 @@ pivotLow = ta.pivotlow(low, swingLength, swingLength)
 lastSwingHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
 lastSwingLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
 
-payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN" or not chartMatchesStructure
+payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN" or not chartMatchesRole
 dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 
 // --- 1m quote series (lookahead_off) for optional freshness alerts ---
 [m1Open, m1High, m1Low, m1Close, m1Vol, m1TimeClose, m1Confirmed] = request.security(syminfo.tickerid, quoteTfInput, [open, high, low, close, volume, time_close, barstate.isconfirmed], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-var int lastQuoteEmitMs = na
-quoteBarReady = enableQuoteUpdates and m1Confirmed and (na(lastQuoteEmitMs) or m1TimeClose != lastQuoteEmitMs)
+// Confirmed 15M close used as plan-source key even when this alert runs on 5M/1M.
+[plan15CloseTs] = request.security(syminfo.tickerid, structureTfInput, [time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+planSourceKey = str.upper(syminfo.tickerid) + "|" + sessionName + "|" + str.tostring(plan15CloseTs) + "|" + ROLE_PLAN_15M
 
-strategyEventId = f_deterministic_event_id(ALERT_KIND_STRATEGY, timeframe.period, time_close)
-quoteEventId = f_deterministic_event_id(ALERT_KIND_QUOTE, quoteTfInput, m1TimeClose)
+// Meaningful 5M confirmation state (state-change emit only).
+confirmState =
+     classification == "BREAKOUT" ? "BREAKOUT_CONFIRMED" :
+     classification == "REJECTION" ? "REJECTION_CONFIRMED" :
+     retestState == "HELD" ? "RETEST_HELD" :
+     retestState == "FAILED" ? "RETEST_FAILED" :
+     retestState == "PENDING" ? "RETEST_PENDING" :
+     breakoutState == "FAILED" or rejectionState == "FAILED" ? "CONFIRMATION_FAILED" :
+     profileReady and not na(valPrice) and close >= valPrice and close <= vahPrice ? "INSIDE_ZONE" :
+     profileReady and not na(valPrice) and math.abs(close - valPrice) <= atrValue * 0.25 ? "APPROACHING_ZONE" :
+     profileReady and not na(vahPrice) and math.abs(close - vahPrice) <= atrValue * 0.25 ? "APPROACHING_ZONE" :
+     "OUTSIDE_ZONE"
+
+var string lastConfirmState = ""
+confirmStateChanged = confirmState != lastConfirmState
+
+var int lastQuoteEmitMs = na
+quoteBarReady = (alertRoleInput == ROLE_QUOTE_1M or enableQuoteUpdates) and m1Confirmed and (na(lastQuoteEmitMs) or m1TimeClose != lastQuoteEmitMs)
+
+strategyEventId = f_deterministic_event_id(alertRoleInput, timeframe.period, time_close)
+quoteEventId = f_deterministic_event_id(ROLE_QUOTE_1M, quoteTfInput, m1TimeClose)
 
 ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
   ",\"high\":" + f_json_number(high) +
@@ -566,17 +611,34 @@ optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.to
   ",\"valueAreaPct\":" + str.tostring(VA_PCT) +
   ",\"overflow\":" + f_json_bool(profileOverflow) +
   ",\"ready\":" + f_json_bool(profileReady) + "}" +
-  ",\"timeframeRoles\":{\"direction\":" + f_json_string(directionTfInput) +
+  ",\"timeframeRoles\":{\"context\":" + f_json_string(contextTfInput) +
+  ",\"direction\":" + f_json_string(directionTfInput) +
   ",\"structure\":" + f_json_string(structureTfInput) +
   ",\"entryConfirm\":" + f_json_string(entryTfInput) +
-  ",\"quoteFreshness\":" + f_json_string(quoteTfInput) + "}}"
+  ",\"quoteFreshness\":" + f_json_string(quoteTfInput) + "}" +
+  ",\"fourHourContext\":{\"direction\":" + f_json_string(ctxDir) +
+  ",\"strength\":" + f_json_number_raw(ctxStrength) +
+  ",\"structureState\":" + f_json_string(ctxStructure) +
+  ",\"ema21\":" + f_json_number(ctxEmaFast) +
+  ",\"ema50\":" + f_json_number(ctxEmaSlow) +
+  ",\"ema200\":" + f_json_number(ctxEma200) +
+  ",\"atr\":" + f_json_number(ctxAtr) +
+  ",\"swingHigh\":" + f_json_number(ctxSwingHigh) +
+  ",\"swingLow\":" + f_json_number(ctxSwingLow) +
+  ",\"sourceCloseTime\":" + f_json_time(ctxTimeClose) +
+  ",\"neverTriggersEntry\":true}}"
 
 metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
   ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
+  ",\"alertRole\":" + f_json_string(alertRoleInput) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"confirmationState\":" + f_json_string(confirmState) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
+  ",\"testMode\":" + f_json_bool(testAlertMode) +
   ",\"symbolOk\":" + f_json_bool(symbolOk) +
   ",\"chartMatchesStructure\":" + f_json_bool(chartMatchesStructure) +
+  ",\"chartMatchesRole\":" + f_json_bool(chartMatchesRole) +
   ",\"partial\":" + f_json_bool(payloadPartial) +
   ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
   ",\"volumeProfileMethod\":" + f_json_string(METHOD_VP) +
@@ -584,7 +646,7 @@ metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION
   ",\"candleMethod\":" + f_json_string(METHOD_CANDLE) + "}"
 
 strategyAlertMessage = "{" +
-  "\"schemaVersion\":\"1.0\"," +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
   "\"source\":\"tradingview\"," +
   "\"eventId\":" + f_json_string(strategyEventId) + "," +
   "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
@@ -614,6 +676,8 @@ quoteOhlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(m1Open) +
 
 quoteMetadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
   ",\"alertKind\":" + f_json_string(ALERT_KIND_QUOTE) +
+  ",\"alertRole\":" + f_json_string(ROLE_QUOTE_1M) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"partial\":true" +
   ",\"dataQualityHint\":\"QUOTE_ONLY\"" +
@@ -622,7 +686,7 @@ quoteMetadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VE
   ",\"structureTimeframe\":" + f_json_string(structureTfInput) + "}"
 
 quoteAlertMessage = "{" +
-  "\"schemaVersion\":\"1.0\"," +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
   "\"source\":\"tradingview\"," +
   "\"eventId\":" + f_json_string(quoteEventId) + "," +
   "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
@@ -638,23 +702,60 @@ quoteAlertMessage = "{" +
   quoteMetadataJson +
   "}"
 
+confirmAlertMessage = "{" +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
+  "\"source\":\"tradingview\"," +
+  "\"eventId\":" + f_json_string(strategyEventId) + "," +
+  "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
+  "\"symbol\":" + f_json_string(payloadSymbol) + "," +
+  "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
+  "\"timeframe\":" + f_json_string(timeframe.period) + "," +
+  "\"eventType\":" + f_json_string(eventType) + "," +
+  "\"barTime\":" + f_json_time(time_close) + "," +
+  "\"sentAt\":" + f_json_time(timenow) + "," +
+  "\"isConfirmedBar\":" + f_json_bool(confirmedNow) + "," +
+  "\"indicatorName\":\"GoldMetaBridge\"," +
+  ohlcvJson + "," +
+  confirmationCandleJson + "," +
+  "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) + ",\"value\":" + f_json_number(atrValue) + "}," +
+  "\"structure\":{\"breakoutState\":" + f_json_string(breakoutState) +
+  ",\"rejectionState\":" + f_json_string(rejectionState) +
+  ",\"retestState\":" + f_json_string(retestState) + "}}," +
+  "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
+  ",\"alertRole\":" + f_json_string(ROLE_CONFIRM_5M) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"confirmationState\":" + f_json_string(confirmState) +
+  ",\"neverCreatesPlan\":true" +
+  ",\"neverReplacesEntryStopTargets\":true" +
+  ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
+  ",\"partial\":false" +
+  ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
+  ",\"testMode\":" + f_json_bool(testAlertMode) + "}" +
+  "}"
+
 // ---------------------------------------------------------------------------
-// Script alerts (webhook JSON) — requires Create Alert → Any alert() function call.
-// STRATEGY = full structure on structure TF bar close. QUOTE = lightweight 1m OHLC only.
-// Quote updates never replace complete strategy signals on the backend.
+// Script alerts — Create Alert → Any alert() function call + {{alert_message}}.
+// Role-based: PLAN_15M (full), CONFIRM_5M (state change), QUOTE_1M (OHLC only).
+// Quote / confirm never replace complete plan structure on the backend.
 // ---------------------------------------------------------------------------
 var bool testAlertSent = false
-bool emitStrategyAlert = enableAlertCalls and canEmitBar and chartMatchesStructure
-bool emitQuoteAlert = enableAlertCalls and enableQuoteUpdates and quoteBarReady and not testAlertMode and chartMatchesStructure
+bool emitPlanAlert = enableAlertCalls and alertRoleInput == ROLE_PLAN_15M and canEmitBar and chartMatchesRole
+bool emitConfirmAlert = enableAlertCalls and alertRoleInput == ROLE_CONFIRM_5M and canEmitBar and chartMatchesRole and confirmStateChanged and not testAlertMode
+bool emitQuoteAlert = enableAlertCalls and (alertRoleInput == ROLE_QUOTE_1M or (alertRoleInput == ROLE_PLAN_15M and enableQuoteUpdates)) and quoteBarReady and not testAlertMode and (alertRoleInput == ROLE_QUOTE_1M ? chartMatchesRole : chartMatchesStructure)
 
-if emitStrategyAlert and testAlertMode and not testAlertSent
+if emitPlanAlert and testAlertMode and not testAlertSent
     alert(strategyAlertMessage, alert.freq_once_per_bar)
     testAlertSent := true
-else if emitStrategyAlert and not testAlertMode
+else if emitPlanAlert and not testAlertMode
     alert(strategyAlertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
     testAlertSent := false
 else if not testAlertMode
     testAlertSent := false
+
+if emitConfirmAlert
+    alert(confirmAlertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+    lastConfirmState := confirmState
 
 if emitQuoteAlert
     alert(quoteAlertMessage, alert.freq_once_per_bar_close)

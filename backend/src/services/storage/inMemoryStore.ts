@@ -14,6 +14,7 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import type { SessionPlanRecord } from "../decision/sessionPlanTypes";
 import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
@@ -176,6 +177,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private v4Candidates = new Map<string, import("../v4/shadowTypes").V4ShadowCandidateRecord[]>();
   private v4Plans = new Map<string, import("../v4/shadowTypes").V4LockedShadowPlan[]>();
   private v4Mutations = new Map<string, import("../v4/shadowTypes").V4PlanMutationAudit[]>();
+  private sessionPlans = new Map<string, SessionPlanRecord>();
+  private activeSessionPlanByUser = new Map<string, string>();
 
   saveV4ShadowResult(userId: string, result: Record<string, unknown>): void {
     this.v4Shadows.unshift({ ...result, userId });
@@ -259,6 +262,22 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     limit = 50
   ): import("../v4/shadowTypes").V4PlanMutationAudit[] {
     return (this.v4Mutations.get(userId) ?? []).slice(0, limit);
+  }
+
+  saveSessionPlan(plan: SessionPlanRecord): SessionPlanRecord {
+    this.sessionPlans.set(userScopedKey(plan.userId, plan.planId), plan);
+    this.activeSessionPlanByUser.set(plan.userId, plan.planId);
+    return plan;
+  }
+
+  getActiveSessionPlan(userId: string): SessionPlanRecord | undefined {
+    const planId = this.activeSessionPlanByUser.get(userId);
+    if (!planId) return undefined;
+    return this.sessionPlans.get(userScopedKey(userId, planId));
+  }
+
+  getSessionPlan(userId: string, planId: string): SessionPlanRecord | undefined {
+    return this.sessionPlans.get(userScopedKey(userId, planId));
   }
 
   recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {

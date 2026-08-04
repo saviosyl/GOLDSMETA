@@ -16,6 +16,7 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import type { SessionPlanRecord } from "../decision/sessionPlanTypes";
 import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
@@ -446,6 +447,48 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
       .limit(limit)
       .get();
     return snap.docs.map((d) => d.data() as import("../v4/shadowTypes").V4PlanMutationAudit);
+  }
+
+  async saveSessionPlan(plan: SessionPlanRecord): Promise<SessionPlanRecord> {
+    const batch = this.db.batch();
+    const planRef = this.db
+      .collection("users")
+      .doc(plan.userId)
+      .collection("sessionPlans")
+      .doc(plan.planId);
+    const activeRef = this.db
+      .collection("users")
+      .doc(plan.userId)
+      .collection("sessionPlans")
+      .doc("active");
+    batch.set(planRef, toFirestoreData(plan), { merge: true });
+    batch.set(activeRef, toFirestoreData({ ...plan, activePointer: true }), { merge: true });
+    await batch.commit();
+    return plan;
+  }
+
+  async getActiveSessionPlan(userId: string): Promise<SessionPlanRecord | undefined> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("sessionPlans")
+      .doc("active")
+      .get();
+    if (!snap.exists) return undefined;
+    const data = snap.data() as SessionPlanRecord & { activePointer?: boolean };
+    const { activePointer: _pointer, ...plan } = data;
+    return plan as SessionPlanRecord;
+  }
+
+  async getSessionPlan(userId: string, planId: string): Promise<SessionPlanRecord | undefined> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("sessionPlans")
+      .doc(planId)
+      .get();
+    if (!snap.exists) return undefined;
+    return snap.data() as SessionPlanRecord;
   }
 
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {

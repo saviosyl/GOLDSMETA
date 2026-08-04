@@ -103,9 +103,15 @@ const confirmationCandleSchema = z
   })
   .strict();
 
+/**
+ * Pine Bridge payload contract:
+ * - schemaVersion "1.0" — Pine 2.1.0 and earlier (alertKind STRATEGY/QUOTE)
+ * - schemaVersion "1.1" — Pine 3.0.0+ (alertRole PLAN_15M / CONFIRM_5M / QUOTE_1M)
+ * Both remain accepted. Extra metadata fields are ignored by consumers that don't need them.
+ */
 export const tradingViewPayloadSchema = z
   .object({
-    schemaVersion: z.literal("1.0"),
+    schemaVersion: z.enum(["1.0", "1.1"]),
     source: z.enum(["tradingview", "proprietary_alert", "manual"]),
     eventId: z.string().min(8),
     webhookSecret: z.string().nullable().optional(),
@@ -124,11 +130,20 @@ export const tradingViewPayloadSchema = z
     trend: trendSchema.nullable().optional(),
     confirmationCandle: confirmationCandleSchema.nullable().optional(),
     optionalIndicators: z.record(z.string(), z.unknown()).nullable().optional(),
+    /** Open record — Pine 3.0 adds alertRole, planSourceKey, confirmationState, etc. */
     metadata: z.record(z.string(), z.unknown()).nullable().optional()
   })
   .strict();
 
 export type TradingViewPayload = z.infer<typeof tradingViewPayloadSchema>;
+export type PayloadSchemaVersion = TradingViewPayload["schemaVersion"];
+
+/** Known Pine 3.0.0 alert roles (absent on 2.1.0). */
+export const alertRoleSchema = z.enum(["PLAN_15M", "CONFIRM_5M", "QUOTE_1M"]);
+export type AlertRole = z.infer<typeof alertRoleSchema>;
+
+export const alertKindSchema = z.enum(["STRATEGY", "QUOTE"]);
+export type AlertKind = z.infer<typeof alertKindSchema>;
 export type DecisionDirection = z.infer<typeof decisionDirectionSchema>;
 export type DataQuality = z.infer<typeof dataQualitySchema>;
 export type TrendDirection = z.infer<typeof directionSchema>;

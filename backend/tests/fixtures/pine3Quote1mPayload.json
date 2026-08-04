@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.1",
+  "source": "tradingview",
+  "eventId": "OANDA:XAUUSD|1|1794903060000|QUOTE_1M",
+  "webhookSecret": null,
+  "symbol": "XAUUSD",
+  "exchange": "OANDA",
+  "timeframe": "1",
+  "eventType": "BAR_UPDATE",
+  "barTime": "2026-07-20T14:51:00Z",
+  "sentAt": "2026-07-20T14:51:01Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2420.1,
+    "high": 2420.7,
+    "low": 2419.9,
+    "close": 2420.55,
+    "volume": 380
+  },
+  "metadata": {
+    "scriptVersion": "3.0.0",
+    "alertKind": "QUOTE",
+    "alertRole": "QUOTE_1M",
+    "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "confirmedBarMode": true,
+    "partial": true,
+    "dataQualityHint": "QUOTE_ONLY",
+    "quoteOnly": true,
+    "neverReversesStrategy": true,
+    "structureTimeframe": "15",
+    "chartMatchesRole": true,
+    "testMode": false
+  }
+}

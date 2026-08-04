@@ -11,6 +11,7 @@ import type {
 } from "../../models/types";
 import type { ManualExecutionRecord, SetupSkipRecord } from "../../models/manualRisk";
 import type { SetupRecord } from "../../models/setup";
+import type { SessionPlanRecord } from "../decision/sessionPlanTypes";
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -224,4 +225,9 @@ export interface GoldMetaStore {
 
   recordWebhookReject?(log: Omit<WebhookRejectLog, "id">): Awaitable<void>;
   listRecentWebhookRejects?(limit?: number): Awaitable<WebhookRejectLog[]>;
+
+  /** Stable intraday session plan (Pine 3.0 lifecycle). Optional for older store stubs. */
+  saveSessionPlan?(plan: SessionPlanRecord): Awaitable<SessionPlanRecord>;
+  getActiveSessionPlan?(userId: string): Awaitable<SessionPlanRecord | undefined>;
+  getSessionPlan?(userId: string, planId: string): Awaitable<SessionPlanRecord | undefined>;
 }
