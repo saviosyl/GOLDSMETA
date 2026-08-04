@@ -40,6 +40,7 @@ import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { ExplainThisPage } from "../components/intraday/ExplainThisPage";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { resolveDisplayAction } from "../lib/planDisplay";
+import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 
 type Briefing = {
   session?: string | null;
@@ -245,7 +246,12 @@ export function OverviewPage() {
         return latest;
       });
       setStructureDecision(complete);
-      setIntradayPlan((pack?.intradayPlan as IntradayPlan | null | undefined) ?? null);
+      setIntradayPlan(
+        applyStablePlanToIntraday(
+          (pack?.intradayPlan as IntradayPlan | null | undefined) ?? null,
+          pack?.stablePlan ?? pack?.sessionPlan ?? null
+        )
+      );
       setMarketStructureMode(pack?.marketStructureMode ?? null);
       setMarketStructureDiagnostics(
         (pack?.marketStructureDiagnostics as Record<string, unknown> | null | undefined) ?? null

@@ -129,7 +129,7 @@ export type TimeframeAlignmentCell = {
   direction?: string | null;
   structure?: string | null;
   label?: string | null;
-  tone?: "buy" | "sell" | "wait" | "info" | "unavailable" | "none" | null;
+  tone?: "buy" | "sell" | "wait" | "info" | "unavailable" | "none" | "notrade" | null;
 };
 
 export type TimeframeAlignment = {
