@@ -216,8 +216,9 @@ export function isLegacyPlanData(plan: {
 export const LEGACY_PLAN_BANNER =
   "Legacy plan data — enhanced 4H/5M confirmation pending.";
 
-export const NO_VALID_PLAN_TITLE = "NO VALID INTRADAY PLAN";
+/** @deprecated Prefer WAIT_NO_VALID_PLAN_LABEL — kept for diagnostics only. */
+export const NO_VALID_PLAN_TITLE = "WAIT — NO VALID PLAN";
 export const NO_VALID_PLAN_NEXT =
-  "Waiting for the next verified 15-minute TradingView plan signal.";
+  "The 15-minute trade structure is incomplete. Wait for the next verified 15-minute signal.";
 export const NO_VALID_PLAN_SAFETY_REASON = "Trade levels failed safety validation.";
 export const WAIT_NO_VALID_PLAN_LABEL = "WAIT — NO VALID PLAN";

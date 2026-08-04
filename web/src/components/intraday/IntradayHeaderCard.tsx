@@ -1,10 +1,8 @@
-import type { ReactNode } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import { biasLabel, fmtPrice } from "../../lib/intradayFormat";
 import {
   freshnessChipLabel,
-  freshnessTone,
-  type FreshnessTone
+  freshnessTone
 } from "../../lib/cockpitHelpers";
 
 type Props = {
@@ -18,23 +16,7 @@ type Props = {
   compactTime?: string;
 };
 
-function Chip({
-  children,
-  tone,
-  testId
-}: {
-  children: ReactNode;
-  tone?: FreshnessTone | "bullish" | "bearish" | "neutral" | "prepare" | "safe";
-  testId?: string;
-}) {
-  return (
-    <span className={`gm-status-chip tone-${tone ?? "neutral"}`} data-testid={testId}>
-      {children}
-    </span>
-  );
-}
-
-/** Compact market strip — phone above-the-fold #1. */
+/** Sticky compact market bar — phone above-the-fold #1. */
 export function IntradayHeaderCard({
   plan,
   livePrice,
@@ -72,13 +54,13 @@ export function IntradayHeaderCard({
 
   return (
     <section
-      className="gm-intra-header gm-cockpit-strip gm-market-strip"
+      className="gm-intra-header gm-cockpit-strip gm-market-strip gm-market-bar-sticky"
       data-testid="intraday-header-card"
       aria-label="Market status strip"
     >
-      <div className="gm-status-strip" data-testid="cockpit-status-strip">
-        <Chip tone="neutral" testId="market-strip-symbol">
-          <strong>XAUUSD</strong>{" "}
+      <div className="gm-market-bar-primary">
+        <div className="gm-market-bar-price-row" data-testid="cockpit-status-strip">
+          <strong data-testid="market-strip-symbol">XAUUSD</strong>{" "}
           <span className="gm-intra-price" data-testid="intraday-live-price">
             {fmtPrice(price)}
           </span>
@@ -90,28 +72,41 @@ export function IntradayHeaderCard({
               {move >= 0 ? "▲" : "▼"} {Math.abs(move).toFixed(2)}
             </span>
           )}
-        </Chip>
-        <Chip tone="neutral" testId="market-strip-session">
-          {sessionLabel}
-        </Chip>
-        <Chip tone={tone} testId="intraday-freshness">
-          {freshLabel}
-        </Chip>
-        <span data-testid="intraday-autotrade-off">
-          <Chip tone="prepare">AutoTrade OFF</Chip>
-        </span>
-        <Chip tone={biasTone} testId="cockpit-bias">
-          {bias}
-        </Chip>
-        {source !== "live" && (
-          <Chip tone="stale">{source === "offline" ? "Offline" : "Cached"}</Chip>
-        )}
+        </div>
+        <p className="gm-market-bar-meta" data-testid="market-strip-session">
+          <span>{sessionLabel}</span>
+          <span aria-hidden="true"> · </span>
+          <span data-testid="intraday-freshness" data-tone={tone}>
+            {freshLabel}
+          </span>
+          {source !== "live" && (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span data-testid="market-source-chip">
+                {source === "offline" ? "Offline" : "Cached"}
+              </span>
+            </>
+          )}
+        </p>
+        <p className="gm-market-bar-bias" data-testid="cockpit-bias" data-tone={biasTone}>
+          <span>
+            Market bias: <strong>{bias}</strong>
+          </span>
+          <span
+            className="gm-bias-hint"
+            title="Bias is market context, not an entry signal."
+            data-testid="bias-context-hint"
+          >
+            Bias is market context, not an entry signal.
+          </span>
+        </p>
+        <p className="gm-market-bar-autotrade" data-testid="intraday-autotrade-off">
+          AutoTrade OFF
+        </p>
       </div>
-      <div className="gm-intra-header-meta gm-sr-meta" data-testid="intraday-header-meta">
-        <span className="gm-meta" data-testid="data-freshness-legacy">
-          {freshness}
-        </span>
-      </div>
+      <p className="gm-sr-only" data-testid="intraday-header-meta">
+        {freshness}
+      </p>
     </section>
   );
 }

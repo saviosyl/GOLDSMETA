@@ -66,12 +66,13 @@ describe("Today's Intraday Plan UI", () => {
   it("renders one primary card with 2x2 Entry/Stop/TP1/TP2 prices", () => {
     const plan = buyNowPlan(true);
     render(wrap(<PrimaryPlanCard plan={plan} />));
-    expect(screen.getByTestId("todays-intraday-plan")).toHaveTextContent(/Today's Intraday Plan/i);
+    expect(screen.getByTestId("todays-intraday-plan")).toHaveTextContent(/BUY/i);
     expect(screen.getByTestId("plan-level-entry").querySelector(".gm-plan-price")).toBeTruthy();
     expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4,?038/);
     expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4,?045/);
     expect(screen.getByTestId("plan-level-tp2")).toHaveTextContent(/4,?049/);
     expect(screen.getByTestId("intraday-action-card")).toBeInTheDocument();
+    expect(screen.getByTestId("next-plan-update")).toBeInTheDocument();
   });
 
   it("never shows fixture labels or joined prices", () => {
@@ -152,10 +153,13 @@ describe("Today's Intraday Plan UI", () => {
     const plan = structuredClone(chartExampleIntradayPlanFixture);
     plan.planStatus = "NO_VALID_PLAN";
     render(wrap(<PrimaryPlanCard plan={plan} marketStructureMode="LIVE_RANGE_ONLY" />));
-    expect(screen.getByTestId("no-valid-plan-title")).toHaveTextContent(/NO VALID INTRADAY PLAN/i);
+    expect(screen.getByTestId("no-valid-plan-title")).toHaveTextContent(/WAIT — NO VALID PLAN/i);
     expect(screen.getByTestId("no-valid-plan-next")).toHaveTextContent(/15-minute/i);
+    expect(screen.getByTestId("no-valid-plan-reason")).toBeInTheDocument();
     expect(screen.queryByTestId("plan-level-entry")).not.toBeInTheDocument();
     expect(screen.getByTestId("todays-intraday-plan")).not.toHaveTextContent(/LABELLED FIXTURE/i);
+    expect(screen.getByTestId("todays-intraday-plan")).not.toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("todays-intraday-plan").textContent?.match(/NO VALID PLAN/gi)?.length).toBe(1);
   });
 
   it("legacy plan data shows enhanced-pending banner", () => {

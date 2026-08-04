@@ -8,9 +8,57 @@ type Props = {
   allLevels: ImportantLevel[];
   /** When true, show nearest 3 above + 3 below even on desktop. */
   compactDefault?: boolean;
+  livePrice?: number | null;
 };
 
 const NEAR_COUNT = 3;
+
+function strengthPlain(strength: string, evidenceCount: number): string {
+  const s = strength.toLowerCase();
+  const strengthWord =
+    s === "major" ? "Strong level" : s === "moderate" ? "Moderate level" : "Minor level";
+  const evidence =
+    evidenceCount <= 0
+      ? "No confirmation yet"
+      : evidenceCount === 1
+        ? "Confirmed once"
+        : `Confirmed ${evidenceCount} times`;
+  return `${strengthWord} · ${evidence}`;
+}
+
+function roleLadderLabel(role: string): string {
+  switch (role) {
+    case "SUPPORT":
+      return "Support";
+    case "RESISTANCE":
+      return "Resistance";
+    case "MAGNET":
+      return "Magnet";
+    case "TARGET":
+      return "Target";
+    case "INVALIDATION":
+      return "Invalidation";
+    case "RECLAIM_LEVEL":
+      return "Reclaim";
+    case "BREAKDOWN_LEVEL":
+      return "Support";
+    case "BREAKOUT_LEVEL":
+      return "Resistance";
+    default:
+      return rolePlain(role).split("(")[0]?.trim() || role.replace(/_/g, " ");
+  }
+}
+
+function kindShort(kind: string): string {
+  const k = kind.replace(/_/g, " ");
+  if (/VAH/i.test(k)) return "VAH";
+  if (/VAL/i.test(k)) return "VAL";
+  if (/POC/i.test(k)) return "POC";
+  if (/BAR HIGH|HIGH/i.test(k)) return "Bar high";
+  if (/BAR LOW|LOW/i.test(k)) return "Bar low";
+  if (/STRETCH/i.test(k)) return "Stretch";
+  return k.length > 18 ? `${k.slice(0, 16)}…` : k;
+}
 
 function LevelDetail({
   level,
@@ -23,7 +71,6 @@ function LevelDetail({
 }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
-  const progress = levelProgressState(level);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -54,14 +101,10 @@ function LevelDetail({
           Close
         </button>
       </div>
-
       <section>
         <h4>Why it is important</h4>
         <p>{level.shortMeaning}</p>
-        <p className="gm-meta">
-          {rolePlain(level.roleAtCurrentPrice)} · {level.strength.toLowerCase()} · progress{" "}
-          <strong data-testid={`level-progress-${level.id}`}>{progress}</strong>
-        </p>
+        <p className="gm-meta">{strengthPlain(level.strength, level.reasons.length)}</p>
       </section>
       <section>
         <h4>Supporting evidence</h4>
@@ -73,7 +116,6 @@ function LevelDetail({
             </li>
           ))}
         </ul>
-        <p className="gm-meta">Evidence count: {level.reasons.length}</p>
       </section>
       <section>
         <h4>Bullish behaviour</h4>
@@ -86,11 +128,6 @@ function LevelDetail({
       <section>
         <h4>What invalidates the level</h4>
         <p>{level.riskWarning}</p>
-        <ul>
-          {level.confirmationRequired.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
       </section>
       <section>
         <h4>Next level</h4>
@@ -127,7 +164,7 @@ function LevelGroup({
   return (
     <div className="gm-level-group" data-testid={`level-group-${proximity.toLowerCase()}`}>
       <h3 className="gm-level-group-title">{title}</h3>
-      <ul className="gm-level-list">
+      <ul className="gm-level-ladder-list">
         {levels.map((level) => {
           const expanded = openId === level.id;
           const nextLevel =
@@ -143,31 +180,20 @@ function LevelGroup({
             <li key={level.id}>
               <button
                 type="button"
-                className={`gm-level-card prox-${level.proximity.toLowerCase()}`}
+                className={`gm-level-row prox-${level.proximity.toLowerCase()}`}
                 data-testid={`level-card-${level.id}`}
                 aria-expanded={expanded}
                 aria-controls={`level-panel-${level.id}`}
                 onClick={() => setOpenId(expanded ? null : level.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setOpenId(expanded ? null : level.id);
-                  }
-                }}
               >
                 <span className="gm-level-price">{priceLabel}</span>
-                <span className="gm-level-dist" data-testid={`level-dist-${level.id}`}>
-                  {fmtSignedDistance(level.distancePoints)}
-                </span>
-                <span className="gm-level-meta">
-                  {level.kind.replace(/_/g, " ")} · {rolePlain(level.roleAtCurrentPrice)}
-                </span>
-                <span className="gm-level-meta">
-                  {level.strength.toLowerCase()} · {level.reasons.length} evidence ·{" "}
+                <span className="gm-level-kind">{kindShort(level.kind)}</span>
+                <span className="gm-level-role">{roleLadderLabel(level.roleAtCurrentPrice)}</span>
+                <span className="gm-level-meta-plain">
+                  {strengthPlain(level.strength, level.reasons.length)} ·{" "}
                   <em data-testid={`level-state-${level.id}`}>{progress}</em>
                 </span>
-                <span className="gm-level-meaning">{level.shortMeaning}</span>
-                <span className="gm-level-cta">{expanded ? "Hide details" : "Explain level"}</span>
+                <span className="gm-sr-only">{fmtSignedDistance(level.distancePoints)}</span>
               </button>
               {expanded && (
                 <div id={`level-panel-${level.id}`}>
@@ -192,7 +218,12 @@ function nearestByDistance(levels: ImportantLevel[], count: number): ImportantLe
     .slice(0, count);
 }
 
-export function ImportantLevelsPanel({ levels, allLevels, compactDefault = false }: Props) {
+export function ImportantLevelsPanel({
+  levels,
+  allLevels,
+  compactDefault = false,
+  livePrice
+}: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
 
@@ -234,6 +265,13 @@ export function ImportantLevelsPanel({ levels, allLevels, compactDefault = false
         openId={openId}
         setOpenId={setOpenId}
       />
+      {livePrice != null && Number.isFinite(livePrice) && (
+        <div className="gm-level-live-row" data-testid="level-ladder-live-price">
+          <span className="gm-level-price">{fmtPrice(livePrice)}</span>
+          <span className="gm-level-kind">Live price</span>
+          <span className="gm-level-role">—</span>
+        </div>
+      )}
       <LevelGroup
         title="Near current price"
         proximity="NEAR"
@@ -255,16 +293,15 @@ export function ImportantLevelsPanel({ levels, allLevels, compactDefault = false
 
   return (
     <section
-      className="gm-intra-levels"
+      className="gm-intra-levels gm-level-ladder"
       data-testid="important-levels-panel"
       aria-label="Important price levels"
     >
       <div className="gm-section-head">
         <h2 className="gm-section-title">Important levels</h2>
-        <span className="gm-meta">Nearest verified levels</span>
+        <span className="gm-meta">Compact ladder — tap a row for detail</span>
       </div>
 
-      {/* Desktop / tablet */}
       <div className="gm-levels-desktop" data-testid="levels-desktop-full">
         {renderGroups(
           compactDefault && !showAll ? compactAbove : aboveAll,
@@ -283,13 +320,8 @@ export function ImportantLevelsPanel({ levels, allLevels, compactDefault = false
         )}
       </div>
 
-      {/* Mobile compact */}
       <div className="gm-levels-mobile gm-mobile-only" data-testid="levels-mobile-compact">
-        {renderGroups(
-          showAll ? aboveAll : compactAbove,
-          showAll ? belowAll : compactBelow,
-          nearAll
-        )}
+        {renderGroups(showAll ? aboveAll : compactAbove, showAll ? belowAll : compactBelow, nearAll)}
         {(collapsedCount > 0 || showAll) && (
           <button
             type="button"

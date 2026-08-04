@@ -22,10 +22,19 @@ const PLAN_EXPLAINERS: Array<{ title: string; body: string }> = [
     title: "Alternative Scenario",
     body: "The opposite research path, kept collapsed so it never competes with the primary plan. It is never an order ticket."
   },
+  {
+    title: "Market bias",
+    body: "Bias is market context from higher timeframes. It is not an entry signal and never authorises a trade by itself."
+  },
   ...PAGE_EXPLAINERS
 ];
 
-export function ExplainThisPage() {
+type Props = {
+  /** Shorter button label for the sticky action bar */
+  compact?: boolean;
+};
+
+export function ExplainThisPage({ compact = false }: Props = {}) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
 
@@ -41,13 +50,13 @@ export function ExplainThisPage() {
     <div className="gm-explain-page" data-testid="explain-this-page">
       <button
         type="button"
-        className="gm-chip-btn"
+        className={compact ? "gm-btn-outline gm-action-bar-btn" : "gm-chip-btn"}
         aria-expanded={open}
         aria-controls={panelId}
         data-testid="explain-page-btn"
         onClick={() => setOpen((v) => !v)}
       >
-        Explain this plan
+        {compact ? "Explain" : "Explain this plan"}
       </button>
       {open && (
         <div

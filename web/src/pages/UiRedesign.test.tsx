@@ -140,19 +140,20 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/i);
+    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/WAIT/i);
     expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
     expect(screen.getByTestId("setup-checklist")).toBeInTheDocument();
-    expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
     expect(screen.getByTestId("research-tab-plan")).toBeInTheDocument();
     expect(screen.getByTestId("plan-stage-stepper")).toBeInTheDocument();
+    expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("cockpit-bias")).toHaveTextContent(/Market bias:/i);
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("view-research-btn"));
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
-    expect(screen.getByTestId("system-status-collapse")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("advanced-diagnostics-section")).not.toHaveAttribute("open");
     expect(screen.queryByText("SHADOW")).not.toBeInTheDocument();
   });
 
@@ -164,6 +165,7 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("overview-page");
+    await user.click(screen.getByText(/ADVANCED DIAGNOSTICS/i));
     await user.click(screen.getByText(/System status/i));
     expect(screen.getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
