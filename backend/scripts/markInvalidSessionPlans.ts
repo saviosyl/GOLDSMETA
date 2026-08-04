@@ -9,34 +9,93 @@
  *
  * Never prints secrets. Never touches Firebase Auth users.
  */
-import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
+import {
+  applicationDefault,
+  cert,
+  getApps,
+  initializeApp,
+  type Credential
+} from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { applyGeometrySafetyGate } from "../src/services/decision/sessionPlanLifecycle";
 import type { SessionPlanRecord } from "../src/services/decision/sessionPlanTypes";
 import { validateTradePlanGeometry } from "../src/services/decision/tradePlanGeometry";
 
 const dryRun = !process.argv.includes("--apply");
+const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "goldmeta-web";
 
-function initDb(): Firestore {
+/** Refresh FIREBASE_TOKEN (CI refresh token) into a short-lived access token. */
+async function credentialFromFirebaseToken(refreshToken: string): Promise<Credential> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com",
+    client_secret: "j9iVZfS8kkCEFUPaAeJV0sAi"
+  });
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const json = (await res.json()) as { access_token?: string; expires_in?: number; error?: string };
+  if (!json.access_token) {
+    throw new Error(`FIREBASE_TOKEN exchange failed: ${json.error ?? res.status}`);
+  }
+  const accessToken = json.access_token;
+  const expiresIn = json.expires_in ?? 3600;
+  return {
+    getAccessToken: async () => ({
+      access_token: accessToken,
+      expires_in: expiresIn
+    })
+  };
+}
+
+async function initDb(): Promise<Firestore> {
   if (!getApps().length) {
-    initializeApp({
-      credential: applicationDefault(),
-      projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "goldmeta-web"
-    });
+    let credential: Credential;
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      credential = applicationDefault();
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      credential = cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON));
+    } else if (process.env.FIREBASE_TOKEN) {
+      credential = await credentialFromFirebaseToken(process.env.FIREBASE_TOKEN);
+    } else {
+      credential = applicationDefault();
+    }
+    initializeApp({ credential, projectId: PROJECT_ID });
   }
   return getFirestore();
 }
 
+async function resolveUserIds(db: Firestore): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const ref of await db.collection("users").listDocuments()) ids.add(ref.id);
+  const directory = await db.collection("userDirectory").select().get();
+  for (const doc of directory.docs) ids.add(doc.id);
+  // Collection-group fallback for active pointers under users/{uid}/sessionPlans/active
+  try {
+    const group = await db.collectionGroup("sessionPlans").get();
+    for (const doc of group.docs) {
+      if (doc.id !== "active") continue;
+      const userId = doc.ref.parent.parent?.id;
+      if (userId) ids.add(userId);
+    }
+  } catch {
+    // Ignore missing collection-group index — userDirectory/users paths are enough.
+  }
+  return [...ids];
+}
+
 async function main(): Promise<void> {
-  const db = initDb();
-  const users = await db.collection("users").listDocuments();
+  const db = await initDb();
+  const userIds = await resolveUserIds(db);
   let scanned = 0;
   let invalid = 0;
   let marked = 0;
   const findings: Array<{ userId: string; planId: string; reasons: string[] }> = [];
 
-  for (const userRef of users) {
-    const userId = userRef.id;
+  for (const userId of userIds) {
     const activeSnap = await db.doc(`users/${userId}/sessionPlans/active`).get();
     if (!activeSnap.exists) continue;
     const data = activeSnap.data() as SessionPlanRecord | undefined;
