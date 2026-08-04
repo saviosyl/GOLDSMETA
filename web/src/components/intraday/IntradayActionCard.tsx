@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { actionTone, fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
-import { shortActionLabel } from "../../lib/cockpitHelpers";
+import { fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
+import { resolveDisplayAction } from "../../lib/planDisplay";
 
 function fmtDistanceAbs(points: number | null | undefined): string {
   if (points == null || !Number.isFinite(points)) return "—";
@@ -9,18 +9,16 @@ function fmtDistanceAbs(points: number | null | undefined): string {
   return `${Math.abs(points).toFixed(1)} pts away`;
 }
 
-type Panel = "why" | "waiting" | "checklist" | null;
+type Panel = "why" | "waiting" | null;
 
 type Props = {
   plan: IntradayPlan;
 };
 
 export function IntradayActionCard({ plan }: Props) {
-  const tone = actionTone(plan.action);
-  const progress = plan.setupProgress;
+  const display = resolveDisplayAction(plan);
   const [panel, setPanel] = useState<Panel>(null);
   const panelId = useId();
-  const short = shortActionLabel(plan.action, plan.actionLabel);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,17 +32,22 @@ export function IntradayActionCard({ plan }: Props) {
 
   return (
     <section
-      className={`gm-intra-action tone-${tone}`}
+      className={`gm-intra-action tone-${display.tone}`}
       data-testid="intraday-action-card"
+      data-tone={display.tone}
+      data-demoted={display.demotedFromNow ? "1" : "0"}
       aria-label="Current trading action"
     >
       <div className="gm-action-top">
         <div>
           <p className="gm-label">What should I do now?</p>
           <h2 className="gm-intra-action-label" data-testid="intraday-action-label">
-            <span data-testid="intraday-action-short">{short}</span>
-            {plan.actionLabel !== short && (
-              <span className="gm-action-sublabel">{plan.actionLabel}</span>
+            <span className="gm-action-icon" aria-hidden="true">
+              {display.icon}
+            </span>{" "}
+            <span data-testid="intraday-action-short">{display.shortLabel}</span>
+            {display.fullLabel !== display.shortLabel && (
+              <span className="gm-action-sublabel">{display.fullLabel}</span>
             )}
           </h2>
           <p className="gm-intra-action-sentence" data-testid="intraday-one-sentence">
@@ -53,6 +56,11 @@ export function IntradayActionCard({ plan }: Props) {
           {plan.valueLocation && (
             <p className="gm-meta" data-testid="intraday-value-location">
               {valueLocationLabel(plan.valueLocation)}
+            </p>
+          )}
+          {display.demotedFromNow && (
+            <p className="gm-meta" data-testid="action-now-gated" role="status">
+              BUY NOW / SELL NOW only when all six conditions pass.
             </p>
           )}
         </div>
@@ -76,16 +84,6 @@ export function IntradayActionCard({ plan }: Props) {
             onClick={() => toggle("waiting")}
           >
             What am I waiting for?
-          </button>
-          <button
-            type="button"
-            className="gm-chip-btn"
-            aria-expanded={panel === "checklist"}
-            aria-controls={panelId}
-            data-testid="action-checklist-btn"
-            onClick={() => toggle("checklist")}
-          >
-            Show checklist
           </button>
         </div>
       </div>
@@ -130,37 +128,12 @@ export function IntradayActionCard({ plan }: Props) {
         </div>
       )}
 
-      <div className="gm-intra-progress" data-testid="intraday-setup-progress">
-        <div className="gm-intra-progress-head">
-          <span className="gm-label">Setup progress</span>
-          <strong>
-            {progress.complete} / {progress.total} conditions complete
-          </strong>
-        </div>
-        <div
-          className="gm-intra-progress-bar"
-          role="progressbar"
-          aria-valuenow={progress.complete}
-          aria-valuemin={0}
-          aria-valuemax={progress.total}
-          aria-label={progress.label}
-        >
-          <i style={{ width: `${(progress.complete / Math.max(progress.total, 1)) * 100}%` }} />
-        </div>
-      </div>
-
       {panel && (
         <div
           id={panelId}
           className="gm-action-drawer"
           role="region"
-          aria-label={
-            panel === "why"
-              ? "Why this action"
-              : panel === "waiting"
-                ? "What you are waiting for"
-                : "Setup checklist"
-          }
+          aria-label={panel === "why" ? "Why this action" : "What you are waiting for"}
           data-testid={`action-panel-${panel}`}
         >
           {panel === "why" && (
@@ -188,19 +161,6 @@ export function IntradayActionCard({ plan }: Props) {
                 Conditional scenarios are research only — never an active order ticket.
               </p>
             </>
-          )}
-          {panel === "checklist" && (
-            <ul className="gm-intra-checklist" data-testid="intraday-entry-confirmation">
-              {progress.items.map((item) => (
-                <li key={item.id} data-complete={item.complete ? "1" : "0"}>
-                  <span aria-hidden="true">{item.complete ? "✓" : "○"}</span>
-                  <span>
-                    <strong>{item.label}</strong>
-                    <em className="gm-meta">{item.detail}</em>
-                  </span>
-                </li>
-              ))}
-            </ul>
           )}
           <button
             type="button"

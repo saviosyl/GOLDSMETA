@@ -10,6 +10,8 @@ vi.mock("firebase/app", () => ({
 vi.mock("firebase/auth", () => ({
   getAuth: vi.fn(() => ({})),
   onAuthStateChanged: vi.fn(),
+  setPersistence: vi.fn(() => Promise.resolve()),
+  browserLocalPersistence: { type: "LOCAL" },
   signInWithEmailAndPassword: vi.fn(),
   createUserWithEmailAndPassword: (...args: unknown[]) => createUserWithEmailAndPassword(...args),
   sendEmailVerification: (...args: unknown[]) => sendEmailVerification(...args),

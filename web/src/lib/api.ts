@@ -160,6 +160,10 @@ export class ApiClient {
     structureDecisionId?: string | null;
     /** Server-built Issue #50 intraday plan — UI must not invent levels. */
     intradayPlan?: import("../types/intradayPlan").IntradayPlan | null;
+    /** Pine 3.0 stable session plan (optional until backend ships). */
+    sessionPlan?: import("./sessionPlanBridge").StablePlanSummary | null;
+    /** Compact stable-plan projection from GET /v1/decisions/latest. */
+    stablePlan?: import("./sessionPlanBridge").StablePlanSummary | null;
   } | null> {
     try {
       return await this.request("/v1/decisions/latest");

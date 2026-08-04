@@ -43,7 +43,7 @@ describe("Routing / lazy loading", () => {
       </MemoryRouter>
     );
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
-    for (const label of ["Home", "Intel", "Analytics", "Replay", "Settings"]) {
+    for (const label of ["Plan", "Research", "History", "More"]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
   });

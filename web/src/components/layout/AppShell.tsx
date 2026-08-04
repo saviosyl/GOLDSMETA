@@ -1,43 +1,44 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 
 const DESKTOP_LINKS = [
-  { to: "/", label: "Dashboard", end: true },
+  { to: "/", label: "Plan", end: true },
+  { to: "/v4", label: "Research", end: false },
+  { to: "/history", label: "History", end: false },
   { to: "/intelligence", label: "Markets", end: false },
-  { to: "/analytics", label: "Analytics", end: false },
-  { to: "/replay", label: "Replay", end: false },
-  { to: "/journal", label: "Journal", end: false }
+  { to: "/analytics", label: "Analytics", end: false }
 ];
 
 const DESKTOP_SECONDARY = [
+  { to: "/replay", label: "Replay" },
+  { to: "/journal", label: "Journal" },
   { to: "/brokers", label: "Brokers" },
   { to: "/autotrade", label: "AutoTrade" },
   { to: "/tradingview", label: "TradingView" },
-  { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
   { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
   { to: "/help", label: "Help" },
   { to: "/settings", label: "Settings" }
 ];
 
+/** Product language: Plan / Research / History / More — routes preserved. */
 const MOBILE_PRIMARY = [
-  { to: "/", label: "Home", end: true },
-  { to: "/intelligence", label: "Markets", end: false },
-  { to: "/analytics", label: "Analytics", end: false },
-  { to: "/replay", label: "Replay", end: false }
+  { to: "/", label: "Plan", end: true },
+  { to: "/v4", label: "Research", end: false },
+  { to: "/history", label: "History", end: false }
 ];
 
 const MOBILE_MORE = [
+  { to: "/intelligence", label: "Markets" },
+  { to: "/analytics", label: "Analytics" },
+  { to: "/replay", label: "Replay" },
   { to: "/brokers", label: "Brokers" },
   { to: "/autotrade", label: "AutoTrade" },
   { to: "/tradingview", label: "TradingView" },
   { to: "/journal", label: "Journal" },
-  { to: "/history", label: "History" },
   { to: "/planner", label: "Risk planner" },
-  { to: "/v4", label: "Research" },
   { to: "/admin/users", label: "Users", staffOnly: true },
   { to: "/admin/tradingview-template", label: "TV template", staffOnly: true },
   { to: "/help", label: "Help" },
@@ -62,6 +63,8 @@ export function AppShell({
   const { user, account } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement | null>(null);
   const email = user?.email ?? "Account";
   const prefix = linkPrefix.replace(/\/$/, "");
   const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
@@ -89,6 +92,22 @@ export function AppShell({
       }),
     [location.pathname, prefix, mobileMore]
   );
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [profileOpen]);
 
   return (
     <div className="gm-shell" data-testid="app-shell-redesign">
@@ -138,7 +157,13 @@ export function AppShell({
         <div className="gm-main-inner">
           <header className="gm-topbar" data-testid="topbar">
             <div className="gm-topbar-brand">
-              <img src="/brand/mark-official.png" alt="" width={28} height={28} className="gm-topbar-mark" />
+              <img
+                src="/brand/mark-official.png"
+                alt=""
+                width={28}
+                height={28}
+                className="gm-topbar-mark"
+              />
               <div>
                 <strong>GOLDMETA</strong>
                 <span>Gold market intelligence</span>
@@ -146,17 +171,51 @@ export function AppShell({
             </div>
             <div className="gm-topbar-actions">
               <span className="gm-badge gold">LIVE</span>
-              <div className="gm-avatar" aria-hidden>
-                {initials(email)}
+              <div className="gm-profile-menu" ref={profileRef}>
+                <button
+                  type="button"
+                  className="gm-avatar-btn"
+                  aria-expanded={profileOpen}
+                  aria-controls="gm-profile-popover"
+                  data-testid="profile-menu-btn"
+                  onClick={() => setProfileOpen((v) => !v)}
+                  aria-label="Account profile"
+                >
+                  <span className="gm-avatar" aria-hidden>
+                    {initials(email)}
+                  </span>
+                </button>
+                {/* Desktop: email visible; mobile: behind profile popover */}
+                <span className="gm-meta gm-topbar-email" data-testid="topbar-email-desktop">
+                  {email}
+                </span>
+                {profileOpen && (
+                  <div
+                    id="gm-profile-popover"
+                    className="gm-profile-popover"
+                    role="dialog"
+                    aria-label="Account email"
+                    data-testid="profile-popover"
+                  >
+                    <p className="gm-meta">Signed in as</p>
+                    <strong data-testid="profile-email">{email}</strong>
+                    <p className="gm-meta" style={{ marginTop: 8 }}>
+                      AutoTrade OFF · Analysis only
+                    </p>
+                  </div>
+                )}
               </div>
-              <span className="gm-meta">{email}</span>
             </div>
           </header>
           {children ?? <Outlet />}
         </div>
       </div>
 
-      <nav className="gm-mobile-nav" aria-label="Mobile primary" data-testid="mobile-bottom-nav">
+      <nav
+        className="gm-mobile-nav gm-mobile-nav-4"
+        aria-label="Mobile primary"
+        data-testid="mobile-bottom-nav"
+      >
         {MOBILE_PRIMARY.map((link) => (
           <NavLink
             key={link.to}
@@ -173,6 +232,7 @@ export function AppShell({
           className={moreOpen || moreActive ? "active" : undefined}
           aria-expanded={moreOpen}
           aria-controls="gm-more-sheet"
+          data-testid="mobile-more-btn"
           onClick={() => setMoreOpen((v) => !v)}
         >
           More

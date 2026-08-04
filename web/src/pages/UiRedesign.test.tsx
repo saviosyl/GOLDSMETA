@@ -104,9 +104,9 @@ describe("AppShell navigation", () => {
     );
     expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
-    expect(screen.getByText("Home")).toBeInTheDocument();
-    expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Research").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("History").length).toBeGreaterThan(0);
     expect(screen.getAllByText("More").length).toBeGreaterThan(0);
   });
 
@@ -122,7 +122,7 @@ describe("AppShell navigation", () => {
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Markets" })).toBeInTheDocument();
   });
 });
 
@@ -140,9 +140,10 @@ describe("OverviewPage redesign", () => {
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
     expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-checklist")).toBeInTheDocument();
     expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
-    expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("research-matrix")).toBeInTheDocument();
+    expect(screen.getByTestId("research-tab-plan")).toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();

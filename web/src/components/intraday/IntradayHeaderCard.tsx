@@ -1,11 +1,6 @@
 import type { ReactNode } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import {
-  biasLabel,
-  confidenceLabel,
-  fmtPrice,
-  marketTypeLabel
-} from "../../lib/intradayFormat";
+import { biasLabel, fmtPrice } from "../../lib/intradayFormat";
 import {
   freshnessChipLabel,
   freshnessTone,
@@ -39,6 +34,7 @@ function Chip({
   );
 }
 
+/** Compact market strip — phone above-the-fold #1. */
 export function IntradayHeaderCard({
   plan,
   livePrice,
@@ -50,7 +46,6 @@ export function IntradayHeaderCard({
   compactTime
 }: Props) {
   const price = livePrice ?? plan.expectedRange.currentPrice;
-  const conf = Math.round(plan.confidence <= 1 ? plan.confidence * 100 : plan.confidence);
   const tone = freshnessTone({
     quoteAgeSeconds: plan.freshness.quoteAgeSeconds,
     source,
@@ -77,12 +72,12 @@ export function IntradayHeaderCard({
 
   return (
     <section
-      className="gm-intra-header gm-cockpit-strip"
+      className="gm-intra-header gm-cockpit-strip gm-market-strip"
       data-testid="intraday-header-card"
       aria-label="Market status strip"
     >
       <div className="gm-status-strip" data-testid="cockpit-status-strip">
-        <Chip tone="neutral">
+        <Chip tone="neutral" testId="market-strip-symbol">
           <strong>XAUUSD</strong>{" "}
           <span className="gm-intra-price" data-testid="intraday-live-price">
             {fmtPrice(price)}
@@ -96,29 +91,23 @@ export function IntradayHeaderCard({
             </span>
           )}
         </Chip>
-        <Chip tone="neutral">{sessionLabel}</Chip>
-        <Chip tone={biasTone} testId="cockpit-bias">
-          {bias}
-        </Chip>
-        <Chip tone="neutral" testId="cockpit-confidence">
-          {conf}% confidence · {confidenceLabel(conf)}
+        <Chip tone="neutral" testId="market-strip-session">
+          {sessionLabel}
         </Chip>
         <Chip tone={tone} testId="intraday-freshness">
           {freshLabel}
         </Chip>
-        <Chip tone="safe">Analysis only</Chip>
-        <Chip tone="neutral">Manual trading</Chip>
         <span data-testid="intraday-autotrade-off">
           <Chip tone="prepare">AutoTrade OFF</Chip>
         </span>
+        <Chip tone={biasTone} testId="cockpit-bias">
+          {bias}
+        </Chip>
         {source !== "live" && (
           <Chip tone="stale">{source === "offline" ? "Offline" : "Cached"}</Chip>
         )}
       </div>
       <div className="gm-intra-header-meta gm-sr-meta" data-testid="intraday-header-meta">
-        <span>
-          <em>Type</em> {marketTypeLabel(plan.marketType)}
-        </span>
         <span className="gm-meta" data-testid="data-freshness-legacy">
           {freshness}
         </span>

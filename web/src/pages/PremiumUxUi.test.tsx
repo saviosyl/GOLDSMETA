@@ -227,12 +227,15 @@ describe("OverviewPage compact dashboard", () => {
     expect(await screen.findByTestId("intraday-action-card")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(screen.getByTestId("intraday-action-label")).toHaveTextContent(/PREPARE/);
+    expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-checklist")).toBeInTheDocument();
     expect(screen.getByTestId("expected-range-card")).toBeInTheDocument();
-    expect(screen.getByTestId("important-levels-panel")).toBeInTheDocument();
     expect(screen.getByTestId("share-market-snapshot")).toBeInTheDocument();
     expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Levels" }));
+    expect(await screen.findByTestId("important-levels-panel")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "History" }));
     expect(await screen.findByTestId("overnight-review")).toBeInTheDocument();
     const system = screen.getByTestId("system-status-collapse");

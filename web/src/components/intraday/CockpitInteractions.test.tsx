@@ -22,18 +22,17 @@ import {
 import { classifyRangeLocation } from "../../lib/rangeMapHelpers";
 
 describe("Research cockpit interactions", () => {
-  it("shortens PREPARE action and opens Why / waiting / checklist panels", async () => {
+  it("shortens PREPARE action and opens Why / waiting panels", async () => {
     const user = userEvent.setup();
     render(<IntradayActionCard plan={chartExampleIntradayPlanFixture} />);
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("PREPARE");
+    expect(screen.getByTestId("intraday-action-card")).toHaveAttribute("data-tone", "wait");
     await user.click(screen.getByTestId("action-why-btn"));
     expect(screen.getByTestId("action-panel-why")).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("action-panel-why")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("action-waiting-btn"));
     expect(screen.getByTestId("action-panel-waiting")).toHaveTextContent(/Trigger/i);
-    await user.click(screen.getByTestId("action-checklist-btn"));
-    expect(screen.getByTestId("action-panel-checklist")).toHaveTextContent(/Complete market structure/i);
   });
 
   it("day trade range map opens level explanations via click and keyboard escape", async () => {
@@ -189,11 +188,12 @@ describe("Research cockpit interactions", () => {
     expect(screen.queryByTestId("indicator-explain")).not.toBeInTheDocument();
   });
 
-  it("explain this page and mismatch / live-range alerts are single-instance", async () => {
+  it("explain this plan and mismatch / live-range alerts are single-instance", async () => {
     const user = userEvent.setup();
     render(<ExplainThisPage />);
+    expect(screen.getByTestId("explain-page-btn")).toHaveTextContent(/Explain this plan/i);
     await user.click(screen.getByTestId("explain-page-btn"));
-    expect(screen.getByTestId("explain-page-panel")).toHaveTextContent(/What PREPARE means/i);
+    expect(screen.getByTestId("explain-page-panel")).toHaveTextContent(/Today's Intraday Plan/i);
     expect(screen.getByTestId("explain-page-panel")).toHaveTextContent(/POC, VAH and VAL/i);
 
     const { rerender } = render(

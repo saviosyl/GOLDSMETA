@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1.1",
+  "source": "tradingview",
+  "eventId": "OANDA:XAUUSD|5|1794903000000|CONFIRM_5M",
+  "webhookSecret": null,
+  "symbol": "XAUUSD",
+  "exchange": "OANDA",
+  "timeframe": "5",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T14:50:00Z",
+  "sentAt": "2026-07-20T14:50:01Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2419.5,
+    "high": 2421.0,
+    "low": 2418.8,
+    "close": 2420.2,
+    "volume": 2100
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "candleType": null,
+    "classification": "REJECTION",
+    "open": 2419.5,
+    "high": 2421.0,
+    "low": 2418.8,
+    "close": 2420.2,
+    "bodyPercent": 40,
+    "upperWickPercent": 20,
+    "lowerWickPercent": 40,
+    "volume": 2100,
+    "isClosed": true,
+    "relatedLevel": "VAL"
+  },
+  "optionalIndicators": {
+    "atr": { "length": 14, "value": 4.2 },
+    "structure": {
+      "breakoutState": "NONE",
+      "rejectionState": "HELD",
+      "retestState": "HELD"
+    }
+  },
+  "metadata": {
+    "scriptVersion": "3.0.0",
+    "alertKind": "STRATEGY",
+    "alertRole": "CONFIRM_5M",
+    "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "confirmationState": "REJECTION_CONFIRMED",
+    "neverCreatesPlan": true,
+    "neverReplacesEntryStopTargets": true,
+    "confirmedBarMode": true,
+    "partial": false,
+    "dataQualityHint": "GOOD",
+    "testMode": false,
+    "chartMatchesRole": true
+  }
+}

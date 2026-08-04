@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
 import { approvedAccountGate } from "../middleware/accountAccess";
 import { buildIntradayPlan } from "../services/decision/intradayPlan";
+import { getOrEmptySessionPlan } from "../services/decision/sessionPlanLifecycle";
 import { resolveMarketStructureView } from "../services/decision/strategySignal";
 import type { GoldMetaStore } from "../services/storage/types";
 
@@ -29,6 +30,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       quoteAgeSeconds: view.diagnostics.quoteAgeSeconds,
       signalAgeSeconds: view.diagnostics.signalAgeSeconds
     });
+    const sessionPlan = await getOrEmptySessionPlan(store, userId);
     res.json({
       decision: latest,
       latestQuote: view.latestQuote,
@@ -36,7 +38,34 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       marketStructureMode: view.marketStructureMode,
       marketStructureDiagnostics: view.diagnostics,
       structureDecisionId: view.structureDecision?.decisionId ?? null,
-      intradayPlan
+      intradayPlan,
+      sessionPlan,
+      /** Stable plan fields for web consumers (Pine 3.0 lifecycle). */
+      stablePlan: sessionPlan
+        ? {
+            planId: sessionPlan.planId,
+            planSourceKey: sessionPlan.planSourceKey,
+            lifecycleState: sessionPlan.lifecycleState,
+            planMutation: sessionPlan.planMutation,
+            planStabilityLabel: sessionPlan.planStabilityLabel,
+            direction: sessionPlan.direction,
+            entry: sessionPlan.entry,
+            stopLoss: sessionPlan.stopLoss,
+            takeProfits: sessionPlan.takeProfits,
+            riskReward: sessionPlan.riskReward,
+            confirmationState: sessionPlan.confirmationState,
+            currentPrice: sessionPlan.currentPrice,
+            distanceToEntryPoints: sessionPlan.distanceToEntryPoints,
+            distanceToStopPoints: sessionPlan.distanceToStopPoints,
+            distanceToTp1Points: sessionPlan.distanceToTp1Points,
+            planQuality: sessionPlan.planQuality,
+            quickTarget: sessionPlan.quickTarget,
+            fourHourContext: sessionPlan.fourHourContext,
+            quoteAgeSeconds: sessionPlan.quoteAgeSeconds,
+            signalAgeSeconds: sessionPlan.signalAgeSeconds,
+            safety: sessionPlan.safety
+          }
+        : null
     });
   });
 

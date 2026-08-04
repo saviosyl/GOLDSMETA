@@ -24,8 +24,14 @@ import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
 import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 import { IntradayHeaderCard } from "../components/intraday/IntradayHeaderCard";
 import { IntradayActionCard } from "../components/intraday/IntradayActionCard";
+import { PrimaryPlanCard } from "../components/intraday/PrimaryPlanCard";
+import { PlanLevelsStrip } from "../components/intraday/PlanLevelsStrip";
+import { SetupChecklist } from "../components/intraday/SetupChecklist";
+import { Confirmation5MCard } from "../components/intraday/Confirmation5MCard";
+import { TimeframeAlignmentPanel } from "../components/intraday/TimeframeAlignmentPanel";
 import { ExpectedRangeCard } from "../components/intraday/ExpectedRangeCard";
 import { NextDecisionStrip } from "../components/intraday/NextDecisionStrip";
+import { AlternativeScenario } from "../components/intraday/AlternativeScenario";
 import { ScenarioCards } from "../components/intraday/ScenarioCards";
 import { ImportantLevelsPanel } from "../components/intraday/ImportantLevelsPanel";
 import { SystemStatusCollapse } from "../components/intraday/SystemStatusCollapse";
@@ -33,7 +39,8 @@ import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { ExplainThisPage } from "../components/intraday/ExplainThisPage";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
-import { shortActionLabel } from "../lib/cockpitHelpers";
+import { resolveDisplayAction } from "../lib/planDisplay";
+import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 
 type Briefing = {
   session?: string | null;
@@ -57,7 +64,7 @@ type Score = {
   disclaimer?: string;
 };
 
-type ResearchTab = "overview" | "structure" | "momentum" | "volume" | "history";
+type ResearchTab = "plan" | "structure" | "momentum" | "volume" | "levels" | "history";
 
 function buildSnapshotFromPage(args: {
   decision: Decision | null;
@@ -190,7 +197,7 @@ export function OverviewPage() {
   const { api, user } = useAuth();
   const isDesktop = useIsDesktop();
   const [structureOpen, setStructureOpen] = useState(false);
-  const [researchTab, setResearchTab] = useState<ResearchTab>("overview");
+  const [researchTab, setResearchTab] = useState<ResearchTab>("plan");
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
   const [intradayPlan, setIntradayPlan] = useState<IntradayPlan | null>(null);
@@ -239,7 +246,12 @@ export function OverviewPage() {
         return latest;
       });
       setStructureDecision(complete);
-      setIntradayPlan((pack?.intradayPlan as IntradayPlan | null | undefined) ?? null);
+      setIntradayPlan(
+        applyStablePlanToIntraday(
+          (pack?.intradayPlan as IntradayPlan | null | undefined) ?? null,
+          pack?.stablePlan ?? pack?.sessionPlan ?? null
+        )
+      );
       setMarketStructureMode(pack?.marketStructureMode ?? null);
       setMarketStructureDiagnostics(
         (pack?.marketStructureDiagnostics as Record<string, unknown> | null | undefined) ?? null
@@ -373,14 +385,15 @@ export function OverviewPage() {
     intradayPlan?.importantLevels.filter((l) => l.side === "DOWNSIDE") ?? [];
   const orderedLevels = [...upsideLevels, ...downsideLevels];
   const shortAction = intradayPlan
-    ? shortActionLabel(intradayPlan.action, intradayPlan.actionLabel)
+    ? resolveDisplayAction(intradayPlan).shortLabel
     : "—";
 
   const tabItems = [
-    { id: "overview", label: "Overview" },
+    { id: "plan", label: "Plan" },
     { id: "structure", label: "Structure" },
     { id: "momentum", label: "Momentum" },
     { id: "volume", label: "Volume" },
+    { id: "levels", label: "Levels" },
     { id: "history", label: "History" }
   ];
 
@@ -465,46 +478,39 @@ export function OverviewPage() {
             onChange={(id) => setResearchTab(id as ResearchTab)}
           />
 
-          {researchTab === "overview" && (
-            <div className="gm-cockpit-tab" data-testid="research-tab-overview">
+          {researchTab === "plan" && (
+            <div className="gm-cockpit-tab gm-plan-fold" data-testid="research-tab-plan">
+              {/* Phone fold order: strip+action above tabs; then plan → levels → checklist → 5M → range → alt */}
+              <PrimaryPlanCard plan={intradayPlan} />
+              <PlanLevelsStrip plan={intradayPlan} />
+              <SetupChecklist plan={intradayPlan} />
+              <Confirmation5MCard
+                plan={intradayPlan}
+                decisionConfirmation={
+                  structureDecision?.marketStructure?.confirmationClassification ??
+                  decision?.marketStructure?.confirmationClassification
+                }
+              />
+              <TimeframeAlignmentPanel plan={intradayPlan} />
               <ExpectedRangeCard
                 range={intradayPlan.expectedRange}
                 zones={intradayPlan.zones}
-                marketStructureMode={marketStructureMode ?? intradayPlan.freshness.marketStructureMode}
+                marketStructureMode={
+                  marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+                }
               />
               <NextDecisionStrip
                 plan={intradayPlan}
-                marketStructureMode={marketStructureMode ?? intradayPlan.freshness.marketStructureMode}
+                marketStructureMode={
+                  marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+                }
                 onOpenScenarios={() => {
-                  const el = document.querySelector('[data-testid="scenario-cards"]');
+                  const el = document.querySelector('[data-testid="alternative-scenario"]');
+                  if (el instanceof HTMLDetailsElement) el.open = true;
                   el?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
               />
-              <ScenarioCards
-                plan={intradayPlan}
-                bullish={intradayPlan.bullishScenario}
-                bearish={intradayPlan.bearishScenario}
-              />
-              <ResearchMatrix
-                plan={intradayPlan}
-                decision={structureDecision ?? decision}
-                scoreComponents={score?.components}
-              />
-              <ImportantLevelsPanel
-                levels={orderedLevels}
-                allLevels={intradayPlan.importantLevels}
-                compactDefault
-              />
-              <IndicatorChips
-                plan={intradayPlan}
-                decision={structureDecision ?? decision}
-                poc={poc}
-                vah={vah}
-                val={val}
-                atrLabel={briefing?.atrLabel}
-                atrValue={briefing?.atrValue}
-                scoreComponents={score?.components}
-              />
+              <AlternativeScenario plan={intradayPlan} />
             </div>
           )}
 
@@ -618,6 +624,20 @@ export function OverviewPage() {
                 atrLabel={briefing?.atrLabel}
                 atrValue={briefing?.atrValue}
                 scoreComponents={score?.components}
+              />
+            </div>
+          )}
+
+          {researchTab === "levels" && (
+            <div className="gm-cockpit-tab" data-testid="research-tab-levels">
+              <ImportantLevelsPanel
+                levels={orderedLevels}
+                allLevels={intradayPlan.importantLevels}
+              />
+              <ScenarioCards
+                plan={intradayPlan}
+                bullish={intradayPlan.bullishScenario}
+                bearish={intradayPlan.bearishScenario}
               />
             </div>
           )}
