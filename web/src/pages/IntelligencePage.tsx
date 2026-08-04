@@ -1,5 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { GlossaryTerm } from "../components/v5/GlossaryTerm";
 import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
@@ -86,11 +87,24 @@ export function IntelligencePage() {
   };
 
   return (
-    <div className="v5-page" data-testid="intelligence-page">
-      <PageHeader title="Intelligence" environment="LIVE" freshness={online ? "Online" : "Offline"} />
-      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }} data-testid="intelligence-impl-type">
-        Implementation: deterministic / rules-based / templated (no external AI model). This is not an
-        AI chatbot. <code>AI_ENABLED=false</code>
+    <div className="v5-page gm-markets-page" data-testid="intelligence-page">
+      <PageHeader title="Markets" environment="LIVE" freshness={online ? "Online" : "Offline"} />
+      <SectionCard title="Market in plain English">
+        <p data-testid="markets-plain-english" style={{ marginTop: 0 }}>
+          {answer?.answer
+            ? answer.answer
+            : "Ask a verified question below, or open Today’s Plan for the actionable levels."}
+        </p>
+        <p className="gm-meta" style={{ marginBottom: 12 }}>
+          XAUUSD · session context · 4H / 1H / 15M bias. Unavailable fields stay Unavailable — never
+          estimated as fact.
+        </p>
+        <Link className="gm-btn-outline" to="/" data-testid="view-todays-plan-btn">
+          View today&apos;s plan
+        </Link>
+      </SectionCard>
+      <p className="gm-meta" style={{ marginTop: 8, marginBottom: 16 }} data-testid="intelligence-impl-type">
+        Deterministic market context (not an AI chatbot). Analysis only · AutoTrade OFF.
       </p>
       {!online && (
         <div className="banner stale" role="status" data-testid="offline-status">

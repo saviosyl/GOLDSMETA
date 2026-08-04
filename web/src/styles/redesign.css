@@ -5302,3 +5302,154 @@ a {
   }
 }
 
+
+/* —— Daily trader UX: nav groups, stages, execution lock —— */
+.gm-nav-heading {
+  margin: 14px 8px 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gm-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gm-more-group + .gm-more-group {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.gm-stage-stepper {
+  margin: 12px 0 16px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.gm-stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.gm-stage-list li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
+  min-height: var(--touch-min);
+}
+
+.gm-stage-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  background: var(--neutral-soft);
+  color: var(--navy);
+}
+
+.gm-stage-list li[data-status="done"] .gm-stage-mark {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.gm-stage-list li[data-status="current"] .gm-stage-mark {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.gm-stage-list li[data-status="blocked"] .gm-stage-mark {
+  background: var(--notrade-soft);
+  color: var(--notrade);
+}
+
+.gm-research-gate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0 16px;
+}
+
+.gm-view-research-btn {
+  min-height: var(--touch-min);
+  font-weight: 650;
+}
+
+.gm-execution-disabled {
+  margin: 12px 0 18px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--notrade-soft);
+  color: var(--notrade);
+}
+
+.gm-execution-disabled .gm-section-title {
+  color: var(--notrade);
+  font-weight: 700;
+}
+
+.gm-tv-role-cards {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gm-tv-role-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gm-tv-role-card h2 {
+  margin: 0 0 4px;
+  font-size: var(--text-card);
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.gm-plan-page .gm-page-title,
+.gm-section-title {
+  font-weight: 700;
+}
+
+.gm-plan-price {
+  font-size: var(--price-size);
+  font-weight: var(--price-weight);
+}
+
+.gm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: 900px) {
+  .gm-tv-role-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .gm-stage-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

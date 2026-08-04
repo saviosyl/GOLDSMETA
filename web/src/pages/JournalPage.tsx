@@ -1,11 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import type { Decision, JournalEntry, JournalTag } from "../types/models";
 import { formatWhen } from "../lib/format";
+import { PageHeader, SectionCard } from "../components/ui/primitives";
 
 const TAG_OPTIONS: Array<{ id: JournalTag; label: string }> = [
-  { id: "followed", label: "Followed" },
-  { id: "ignored", label: "Ignored" },
+  { id: "followed", label: "Followed plan: YES" },
+  { id: "ignored", label: "Followed plan: NO" },
   { id: "entered_manually", label: "Entered manually" },
   { id: "avoided", label: "Avoided" },
   { id: "news_risk", label: "News risk" },
@@ -13,15 +15,19 @@ const TAG_OPTIONS: Array<{ id: JournalTag; label: string }> = [
   { id: "discretionary_override", label: "Discretionary override" }
 ];
 
-/** Escape text content by relying on React text nodes — never dangerouslySetInnerHTML. */
+type DirFilter = "ALL" | Decision["decision"];
+
+/** Journal — main review workspace (notes never alter engine outcomes). */
 export function JournalPage() {
   const { api } = useAuth();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [notes, setNotes] = useState("");
+  const [lesson, setLesson] = useState("");
   const [direction, setDirection] = useState<Decision["decision"]>("WAIT");
   const [tags, setTags] = useState<JournalTag[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dirFilter, setDirFilter] = useState<DirFilter>("ALL");
   const offline = !navigator.onLine;
 
   const reload = async () => {
@@ -39,18 +45,27 @@ export function JournalPage() {
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   };
 
+  const filtered = useMemo(() => {
+    if (dirFilter === "ALL") return entries;
+    return entries.filter((e) => e.direction === dirFilter);
+  }, [entries, dirFilter]);
+
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (offline) return;
     setBusy(true);
     setError(null);
     try {
+      const combined = [notes.trim(), lesson.trim() ? `Lesson: ${lesson.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n");
       await api.createJournal({
         direction,
-        notes: notes.trim() || undefined,
+        notes: combined || undefined,
         tags: tags.length ? tags : undefined
       });
       setNotes("");
+      setLesson("");
       setTags([]);
       await reload();
     } catch (err) {
@@ -61,11 +76,12 @@ export function JournalPage() {
   };
 
   return (
-    <div data-testid="journal-page">
-      <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-        Journal
-      </h1>
-      <p className="muted">Notes and tags never alter engine outcomes.</p>
+    <div data-testid="journal-page" className="gm-journal-page">
+      <PageHeader title="Journal" freshness="Review workspace" />
+      <p className="gm-meta">
+        Record outcomes and lessons. Notes never alter engine outcomes.{" "}
+        <Link to="/history">Open read-only History archive</Link>.
+      </p>
       {offline && (
         <div className="banner stale" role="status">
           Offline — journaling requires the server. Viewing is limited.
@@ -76,9 +92,27 @@ export function JournalPage() {
           {error}
         </div>
       )}
-      <div className="card">
-        <h2>New entry</h2>
-        <form onSubmit={onSubmit}>
+
+      <SectionCard title="Filters">
+        <div className="gm-journal-filters" data-testid="journal-filters">
+          <label htmlFor="journal-dir-filter">
+            Direction
+            <select
+              id="journal-dir-filter"
+              value={dirFilter}
+              onChange={(e) => setDirFilter(e.target.value as DirFilter)}
+            >
+              <option value="ALL">All</option>
+              <option value="BUY">Long</option>
+              <option value="SELL">Short</option>
+              <option value="WAIT">Wait</option>
+            </select>
+          </label>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="New entry">
+        <form onSubmit={onSubmit} data-testid="journal-new-entry">
           <div className="field">
             <label htmlFor="direction">Direction</label>
             <select
@@ -93,18 +127,31 @@ export function JournalPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="notes">Notes</label>
+            <label htmlFor="notes">Notes / outcome</label>
             <textarea
               id="notes"
               rows={3}
-              maxLength={2000}
+              maxLength={1600}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={offline}
+              placeholder="TP1 hit, invalidated, skipped…"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="lesson">Lesson learned</label>
+            <textarea
+              id="lesson"
+              rows={2}
+              maxLength={400}
+              value={lesson}
+              onChange={(e) => setLesson(e.target.value)}
+              disabled={offline}
+              placeholder="What will you do differently?"
             />
           </div>
           <fieldset className="field tag-fieldset" disabled={offline}>
-            <legend>Tags</legend>
+            <legend>Followed plan / tags</legend>
             <div className="tag-grid">
               {TAG_OPTIONS.map((tag) => (
                 <label key={tag.id} className="tag-option">
@@ -122,12 +169,12 @@ export function JournalPage() {
             {busy ? "Saving…" : "Save entry"}
           </button>
         </form>
-      </div>
-      <div className="card">
-        <h2>Recent</h2>
-        <ul className="list">
-          {entries.length === 0 && <li>No journal entries yet.</li>}
-          {entries.map((entry) => (
+      </SectionCard>
+
+      <SectionCard title="Recent">
+        <ul className="list" data-testid="journal-recent-list">
+          {filtered.length === 0 && <li>No journal entries yet.</li>}
+          {filtered.map((entry) => (
             <li key={entry.journalId ?? entry.id ?? `${entry.createdAt}-${entry.direction}`}>
               <strong>{entry.direction}</strong> · {entry.outcome} · {formatWhen(entry.createdAt)}
               {entry.tags && entry.tags.length > 0 ? (
@@ -137,7 +184,7 @@ export function JournalPage() {
             </li>
           ))}
         </ul>
-      </div>
+      </SectionCard>
     </div>
   );
 }

@@ -42,14 +42,20 @@ export function RiskPlannerPage() {
   }, [api]);
 
   return (
-    <div data-testid="risk-planner-page">
-      <PageHeader title="Risk planner" environment="LIVE" freshness="Manual only" />
+    <div data-testid="risk-planner-page" className="gm-risk-planner-page">
+      <PageHeader title="Risk Planner" environment="LIVE" freshness="Manual only" />
       <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
-        Progressive calculator for position sizing. GoldMeta never places trades.{" "}
+        Size the trade from balance, risk, entry and stop. GoldMeta never places orders and never
+        connects this calculator to broker execution.{" "}
         <Link className="gm-linkish" to="/settings">
           Edit risk preferences
         </Link>
       </p>
+      <ul className="gm-help-list" data-testid="risk-planner-warnings">
+        <li>Warns when entry equals stop or stop is on the wrong side.</li>
+        <li>Warns when the target is invalid or risk is above your limit.</li>
+        <li>No averaging down · no martingale · AutoTrade OFF.</li>
+      </ul>
       {error && (
         <div className="banner error" role="alert">
           {error}

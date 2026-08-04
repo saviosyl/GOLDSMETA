@@ -31,6 +31,7 @@ import {
   wizardStatusTone
 } from "../../lib/plainLanguage";
 import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
+import { ExecutionDisabledBanner } from "../../components/ExecutionDisabledBanner";
 import { StatusBadge } from "../../components/ui/primitives";
 import { ApiError } from "../../types/models";
 
@@ -784,11 +785,12 @@ export function BrokerControlCentrePage() {
     <div className="gm-broker-centre" data-testid="broker-control-centre">
       <header className="gm-broker-hero">
         <p className="gm-meta">Broker Control Centre</p>
-        <h1 className="gm-section-title">Choose how GoldMeta connects to markets</h1>
+        <h1 className="gm-section-title">Execution disabled</h1>
         <p className="gm-broker-lead">
           Manual analysis stays available. Broker automation remains off. No order can be submitted
           from this screen.
         </p>
+        <ExecutionDisabledBanner page="brokers" />
 
         <div className="gm-broker-top-status" data-testid="broker-top-status" aria-live="polite">
           <div className="gm-broker-status-cell">
