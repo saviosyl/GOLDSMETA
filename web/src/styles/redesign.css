@@ -5848,9 +5848,53 @@ a {
   padding-bottom: calc(168px + var(--safe-bottom));
 }
 
+.gm-plan-v2-page .gm-plan-header-compact .gm-page-title {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.gm-plan-v2-page .gm-desktop-refresh {
+  display: none;
+}
+
+.gm-plan-v2 .gm-primary-plan-facts-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 6px;
+}
+
+.gm-plan-v2 .gm-plan-levels-2x2 {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.gm-plan-v2 .gm-what-now {
+  margin: 6px 0;
+}
+
+.gm-plan-v2 .gm-what-now .gm-primary-plan-sentence {
+  margin: 2px 0 0;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 720px) {
+  .gm-plan-v2-page .gm-sticky-action {
+    display: none !important;
+  }
+
+  .gm-plan-v2 .gm-desktop-only-links {
+    display: none;
+  }
+}
+
 @media (min-width: 721px) {
   .gm-mobile-action-bar {
     display: none;
+  }
+
+  .gm-plan-v2-page .gm-desktop-refresh {
+    display: inline-flex;
   }
 
   .gm-shell:has(.gm-plan-v2-page) .gm-main-inner {

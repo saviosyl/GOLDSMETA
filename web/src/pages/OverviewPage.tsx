@@ -506,6 +506,7 @@ export function OverviewPage() {
             marketStructureMode={marketStructureMode}
             compactTime={compactTime}
           />
+          <PlanStageStepper plan={intradayPlan} marketStructureMode={mode} />
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
             <PrimaryPlanCard
               plan={intradayPlan}
@@ -514,8 +515,6 @@ export function OverviewPage() {
               livePrice={livePrice}
             />
           </div>
-
-          <PlanStageStepper plan={intradayPlan} marketStructureMode={mode} />
 
           {/* Valid-plan fold only — never contradict NO VALID / NO TRADE */}
           {!hideTradeActions && (

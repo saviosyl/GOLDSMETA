@@ -29,16 +29,16 @@ type Props = {
 
 function resolveLevels(plan: IntradayPlan) {
   const tp = plan.tradePlan;
-  const entryNum =
-    typeof tp.entryZone === "string" && Number.isFinite(Number(tp.entryZone.replace(/,/g, "")))
-      ? Number(tp.entryZone.replace(/,/g, ""))
-      : plan.triggerPrice;
+  const zoneRaw = tp.entryZone != null ? String(tp.entryZone).trim() : "";
+  const zoneAsNumber = zoneRaw ? Number(zoneRaw.replace(/,/g, "")) : NaN;
   const entry =
-    tp.entryZone != null && String(tp.entryZone).trim()
-      ? sanitizePlanText(tp.entryZone)
-      : entryNum != null
-        ? formatXauPrice(entryNum)
-        : sanitizePlanText(plan.trigger);
+    zoneRaw && Number.isFinite(zoneAsNumber) && !/[–—-]/.test(zoneRaw)
+      ? formatXauPrice(zoneAsNumber)
+      : zoneRaw
+        ? sanitizePlanText(zoneRaw)
+        : plan.triggerPrice != null
+          ? formatXauPrice(plan.triggerPrice)
+          : sanitizePlanText(plan.trigger);
   const stop = tp.stopLoss ?? null;
   const tp1 = tp.tp1 ?? plan.nextTargetPrice ?? null;
   const tp2 = tp.tp2 ?? plan.afterThatTargetPrice ?? null;
