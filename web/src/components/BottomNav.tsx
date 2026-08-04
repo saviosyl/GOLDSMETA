@@ -1,11 +1,11 @@
 import { NavLink } from "react-router-dom";
 
+/** Legacy bottom nav — AppShell owns the primary mobile nav. Kept for tests/compat. */
 const links = [
-  { to: "/", label: "Home", end: true },
-  { to: "/intelligence", label: "Intel", end: false },
-  { to: "/analytics", label: "Analytics", end: false },
-  { to: "/replay", label: "Replay", end: false },
-  { to: "/settings", label: "Settings", end: false }
+  { to: "/", label: "Plan", end: true },
+  { to: "/v4", label: "Research", end: false },
+  { to: "/history", label: "History", end: false },
+  { to: "/settings", label: "More", end: false }
 ];
 
 export function BottomNav() {

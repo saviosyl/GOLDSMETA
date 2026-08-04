@@ -168,6 +168,10 @@ a {
   box-sizing: border-box;
 }
 
+.gm-mobile-nav.gm-mobile-nav-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .gm-mobile-nav a,
 .gm-mobile-nav button {
   appearance: none;
@@ -3265,11 +3269,29 @@ a {
   line-height: 1.05;
 }
 
-.gm-intra-action.tone-buy .gm-intra-action-label { color: var(--buy); }
-.gm-intra-action.tone-sell .gm-intra-action-label { color: var(--sell); }
+.gm-intra-action.tone-buy .gm-intra-action-label,
+.gm-intra-action.tone-buy .gm-action-icon { color: var(--buy); }
+.gm-intra-action.tone-sell .gm-intra-action-label,
+.gm-intra-action.tone-sell .gm-action-icon { color: var(--sell); }
+.gm-intra-action.tone-wait .gm-intra-action-label,
+.gm-intra-action.tone-wait .gm-action-icon,
 .gm-intra-action.tone-prepare .gm-intra-action-label { color: var(--wait); }
-.gm-intra-action.tone-range .gm-intra-action-label { color: var(--liquidity); }
+.gm-intra-action.tone-notrade .gm-intra-action-label,
+.gm-intra-action.tone-notrade .gm-action-icon { color: #7f1d1d; }
+.gm-intra-action.tone-unavailable .gm-intra-action-label,
+.gm-intra-action.tone-unavailable .gm-action-icon { color: var(--neutral); }
+.gm-intra-action.tone-info .gm-intra-action-label,
+.gm-intra-action.tone-info .gm-action-icon,
+.gm-intra-action.tone-range .gm-intra-action-label { color: var(--navy); }
 .gm-intra-action.tone-none .gm-intra-action-label { color: var(--neutral); }
+
+.gm-intra-action.tone-buy { border-color: #bbf7d0; background: linear-gradient(180deg, var(--positive-soft), var(--surface)); }
+.gm-intra-action.tone-sell { border-color: #fecaca; background: linear-gradient(180deg, var(--negative-soft), var(--surface)); }
+.gm-intra-action.tone-wait,
+.gm-intra-action.tone-prepare { border-color: #fde68a; background: linear-gradient(180deg, var(--warning-soft), var(--surface)); }
+.gm-intra-action.tone-notrade { border-color: #fecaca; background: linear-gradient(180deg, #fee2e2, var(--surface)); }
+.gm-intra-action.tone-unavailable { border-color: var(--border); background: var(--neutral-soft); }
+.gm-intra-action.tone-info { border-color: #c7d2fe; background: linear-gradient(180deg, var(--navy-soft), var(--surface)); }
 
 .gm-intra-action-sentence {
   margin: 0 0 12px;
@@ -4828,3 +4850,290 @@ a {
     padding: 10px 12px;
   }
 }
+
+/* ===== Today's Intraday Plan (Pine3 mobile-first) ===== */
+
+.gm-tone-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--text-label);
+  font-weight: 700;
+  border: 1px solid var(--border);
+}
+
+.gm-tone-pill.tone-buy { background: var(--positive-soft); color: #166534; border-color: #bbf7d0; }
+.gm-tone-pill.tone-sell { background: var(--negative-soft); color: #991b1b; border-color: #fecaca; }
+.gm-tone-pill.tone-wait { background: var(--warning-soft); color: #92400e; border-color: #fde68a; }
+.gm-tone-pill.tone-notrade { background: #fee2e2; color: #7f1d1d; border-color: #fecaca; }
+.gm-tone-pill.tone-unavailable { background: var(--neutral-soft); color: var(--neutral); }
+.gm-tone-pill.tone-info { background: var(--navy-soft); color: var(--navy); }
+
+.gm-primary-plan,
+.gm-plan-levels,
+.gm-setup-checklist,
+.gm-confirm-5m,
+.gm-tf-alignment,
+.gm-alt-scenario {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+
+.gm-primary-plan.tone-buy { border-left: 4px solid var(--buy); }
+.gm-primary-plan.tone-sell { border-left: 4px solid var(--sell); }
+.gm-primary-plan.tone-wait { border-left: 4px solid var(--wait); }
+.gm-primary-plan.tone-notrade { border-left: 4px solid #7f1d1d; }
+.gm-primary-plan.tone-info { border-left: 4px solid var(--navy); }
+.gm-primary-plan.tone-unavailable { border-left: 4px solid var(--neutral); }
+
+.gm-primary-plan .gm-section-title,
+.gm-plan-levels .gm-section-title,
+.gm-setup-checklist .gm-section-title,
+.gm-confirm-5m .gm-section-title,
+.gm-tf-alignment .gm-section-title {
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-primary-plan-sentence {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+}
+
+.gm-primary-plan-facts,
+.gm-plan-levels-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gm-primary-plan-facts {
+  grid-template-columns: 1fr 1fr;
+}
+
+.gm-plan-price {
+  display: block;
+  font-size: clamp(1.25rem, 4.5vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--navy);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-plan-price.tone-buy { color: var(--buy); }
+.gm-plan-price.tone-sell { color: var(--sell); }
+
+.gm-checklist-visible {
+  margin-top: 8px;
+}
+
+.gm-check-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.gm-check-mark.tone-pass { background: var(--positive-soft); color: #166534; }
+.gm-check-mark.tone-pending { background: var(--warning-soft); color: #92400e; }
+.gm-check-mark.tone-fail { background: var(--negative-soft); color: #991b1b; }
+
+.gm-checklist-count {
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-confirm-5m.tone-buy { border-left: 4px solid var(--buy); }
+.gm-confirm-5m.tone-sell { border-left: 4px solid var(--sell); }
+.gm-confirm-5m.tone-wait { border-left: 4px solid var(--wait); }
+.gm-confirm-5m.tone-notrade { border-left: 4px solid #7f1d1d; }
+.gm-confirm-5m.tone-unavailable { opacity: 0.92; }
+
+.gm-confirm-detail {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.gm-tf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gm-tf-cell {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  min-height: 44px;
+  background: var(--surface-alt);
+}
+
+.gm-tf-cell strong {
+  display: block;
+  font-size: var(--text-label);
+  color: var(--navy);
+  word-break: break-word;
+}
+
+.gm-tf-name {
+  display: block;
+  font-weight: 800;
+  font-size: var(--text-meta);
+  margin-bottom: 4px;
+  color: var(--navy);
+}
+
+.gm-tf-cell.tone-buy { border-color: #bbf7d0; }
+.gm-tf-cell.tone-sell { border-color: #fecaca; }
+.gm-tf-cell.tone-wait { border-color: #fde68a; }
+.gm-tf-cell.tone-info { border-color: #c7d2fe; }
+.gm-tf-cell.tone-unavailable { opacity: 0.75; }
+
+.gm-tf-conclusion {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--navy-soft);
+  color: var(--navy);
+  font-size: var(--text-label);
+}
+
+.gm-alt-scenario {
+  padding: 0;
+}
+
+.gm-alt-scenario > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 12px 16px;
+}
+
+.gm-alt-scenario > summary::-webkit-details-marker { display: none; }
+
+.gm-alt-scenario-body {
+  padding: 0 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.gm-alt-scenario-body dl {
+  margin: 8px 0;
+  display: grid;
+  gap: 6px;
+}
+
+.gm-alt-scenario-body dt {
+  font-size: var(--text-meta);
+  color: var(--text-secondary);
+}
+
+.gm-alt-scenario-body dd {
+  margin: 0;
+  font-weight: 650;
+  color: var(--navy);
+}
+
+.gm-profile-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gm-avatar-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.gm-avatar-btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.gm-profile-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  min-width: 220px;
+  max-width: min(320px, 90vw);
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.gm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .gm-topbar-email {
+    display: none;
+  }
+
+  .gm-primary-plan-facts,
+  .gm-plan-levels-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-tf-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gm-market-strip .gm-status-strip {
+    gap: 4px;
+  }
+
+  .gm-market-strip .gm-status-chip {
+    min-height: 36px;
+    padding: 4px 8px;
+  }
+
+  /* Keep Day Trade Range secondary — slightly tighter under primary plan stack */
+  .gm-plan-fold .gm-range-map {
+    opacity: 0.98;
+  }
+
+  .gm-plan-fold .gm-alt-scenario {
+    margin-top: 4px;
+  }
+}
+

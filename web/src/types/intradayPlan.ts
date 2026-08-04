@@ -84,11 +84,67 @@ export type ScenarioPlan = {
   invalidationPrice?: number | null;
 };
 
+/** Optional Pine3 checklist mark — falls back to complete→pass / !complete→pending. */
+export type ChecklistMark = "pass" | "pending" | "fail";
+
 export type SetupChecklistItem = {
   id: string;
   label: string;
   complete: boolean;
   detail: string;
+  /** ✓ pass · ○ pending · ✕ fail — optional until backend ships mark field */
+  mark?: ChecklistMark;
+};
+
+/** Stable plan lifecycle (Pine 3.0 / backend session plan). All optional for compat. */
+export type StablePlanStatus =
+  | "NO_VALID_PLAN"
+  | "BUILDING"
+  | "WAITING_FOR_ENTRY_ZONE"
+  | "ARMED"
+  | "CONFIRMED"
+  | "IN_PROGRESS"
+  | "TP1_REACHED"
+  | "TP2_REACHED"
+  | "INVALIDATED"
+  | "EXPIRED"
+  | "NO_TRADE";
+
+export type Confirmation5MState =
+  | "BREAKOUT_CONFIRMED"
+  | "REJECTION_CONFIRMED"
+  | "RETEST_HELD"
+  | "RETEST_FAILED"
+  | "RETEST_PENDING"
+  | "CONFIRMATION_FAILED"
+  | "INSIDE_ZONE"
+  | "APPROACHING_ZONE"
+  | "OUTSIDE_ZONE"
+  | "NONE"
+  | "UNAVAILABLE"
+  | string;
+
+export type TimeframeAlignmentCell = {
+  timeframe: "4H" | "1H" | "15M" | "5M" | string;
+  direction?: string | null;
+  structure?: string | null;
+  label?: string | null;
+  tone?: "buy" | "sell" | "wait" | "info" | "unavailable" | "none" | null;
+};
+
+export type TimeframeAlignment = {
+  cells: TimeframeAlignmentCell[];
+  /** Plain-language conclusion shown under the panel */
+  conclusion: string;
+};
+
+export type Confirmation5M = {
+  state: Confirmation5MState | null;
+  label: string;
+  /** Only meaningful state changes are shown; false → hide or show muted unavailable */
+  meaningful: boolean;
+  detail?: string | null;
+  updatedAt?: string | null;
 };
 
 export type ConditionalPlanRef = {
@@ -209,4 +265,14 @@ export type IntradayPlan = {
     analysisOnly: true;
   };
   disclaimer: string;
+  /**
+   * Optional Pine 3.0 / stable session-plan fields.
+   * UI uses optional chaining until backend ships them.
+   */
+  planStatus?: StablePlanStatus | null;
+  planUnchanged?: boolean | null;
+  planSourceKey?: string | null;
+  confirmation5m?: Confirmation5M | null;
+  timeframeAlignment?: TimeframeAlignment | null;
+  primaryScenarioSide?: "bullish" | "bearish" | "none" | null;
 };

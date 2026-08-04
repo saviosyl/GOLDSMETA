@@ -10,6 +10,7 @@ import {
 import type { User } from "firebase/auth";
 import { ApiClient } from "./api";
 import {
+  ensureAuthPersistence,
   getIdToken,
   isFirebaseConfigured,
   isPublicRegistrationEnabled,
@@ -107,10 +108,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    return subscribeAuth((next) => {
-      setUser(next);
-      setLoading(false);
-    });
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    // Keep loading=true until persistence is applied and the first auth event arrives.
+    void ensureAuthPersistence()
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) return;
+        unsub = subscribeAuth((next) => {
+          setUser(next);
+          setLoading(false);
+        });
+      });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [configured]);
 
   useEffect(() => {

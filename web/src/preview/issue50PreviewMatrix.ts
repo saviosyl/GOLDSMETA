@@ -2183,7 +2183,25 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture buy-confirmed — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture buy-confirmed — not live market data.",
+      "planStatus": "CONFIRMED",
+      "planUnchanged": false,
+      "confirmation5m": {
+        "state": "BREAKOUT_CONFIRMED",
+        "label": "BREAKOUT CONFIRMED",
+        "meaningful": true,
+        "detail": "5M close held above the buy trigger — manage risk manually."
+      },
+      "timeframeAlignment": {
+        "cells": [
+          { "timeframe": "4H", "direction": "Bullish", "label": "Wider context", "tone": "buy" },
+          { "timeframe": "1H", "direction": "Bullish", "label": "Main bias", "tone": "buy" },
+          { "timeframe": "15M", "direction": "BUY NOW", "label": "Plan structure", "tone": "buy" },
+          { "timeframe": "5M", "direction": "Breakout confirmed", "label": "Entry confirm", "tone": "buy" }
+        ],
+        "conclusion": "Higher timeframes and 5M confirmation align for a manual buy plan."
+      },
+      "primaryScenarioSide": "bullish"
     },
     "decision": {
       "lastKnownPrice": 4042,

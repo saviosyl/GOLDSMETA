@@ -2,6 +2,8 @@ import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -42,8 +44,22 @@ const readConfig = (): FirebaseWebConfig | null => {
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
+let persistenceReady: Promise<void> | null = null;
 
 export const isFirebaseConfigured = (): boolean => readConfig() !== null;
+
+/**
+ * Ensure Auth uses browserLocalPersistence so refresh keeps the session.
+ * Never changes Firebase project IDs — only persistence mode.
+ */
+export const ensureAuthPersistence = async (): Promise<void> => {
+  if (!isFirebaseConfigured()) return;
+  const a = getFirebaseAuth();
+  if (!persistenceReady) {
+    persistenceReady = setPersistence(a, browserLocalPersistence).then(() => undefined);
+  }
+  await persistenceReady;
+};
 
 export const getFirebaseAuth = (): Auth => {
   const config = readConfig();
@@ -67,7 +83,10 @@ export const subscribeAuth = (listener: (user: User | null) => void): (() => voi
     listener(null);
     return () => undefined;
   }
-  return onAuthStateChanged(getFirebaseAuth(), listener);
+  const authInstance = getFirebaseAuth();
+  // Kick persistence early; do not block first auth callback.
+  void ensureAuthPersistence().catch(() => undefined);
+  return onAuthStateChanged(authInstance, listener);
 };
 
 export const signIn = async (email: string, password: string): Promise<User> => {
