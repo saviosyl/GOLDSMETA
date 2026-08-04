@@ -161,10 +161,11 @@ export function applyStablePlanToIntraday(
     confirmation5m,
     timeframeAlignment: plan.timeframeAlignment ?? mapAlignment(plan, stable),
     tradePlan: nextTradePlan,
+    planQuality: stable.planQuality ?? (plan as IntradayPlan & { planQuality?: StablePlanSummary["planQuality"] }).planQuality ?? null,
     freshness: {
       ...plan.freshness,
       quoteAgeSeconds: stable.quoteAgeSeconds ?? plan.freshness.quoteAgeSeconds,
       signalAgeSeconds: stable.signalAgeSeconds ?? plan.freshness.signalAgeSeconds
     }
-  };
+  } as IntradayPlan;
 }

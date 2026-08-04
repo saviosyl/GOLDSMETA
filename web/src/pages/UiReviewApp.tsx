@@ -366,7 +366,18 @@ function buildReviewApi() {
             previewCaseId: issue50Case.id
           },
           structureDecisionId: decision.decisionId,
-          intradayPlan: issue50Case.plan
+          // Review-only: mark as Pine 3 plan-source so UI exercises the enhanced path.
+          // Fixture labels in copy are stripped by production display sanitizers.
+          intradayPlan: {
+            ...issue50Case.plan,
+            planSourceKey:
+              issue50Case.plan.planSourceKey ??
+              `XAUUSD|REVIEW|${issue50Case.id}|PLAN_15M`,
+            freshness: {
+              ...issue50Case.plan.freshness,
+              sourceLabel: issue50Case.plan.freshness?.sourceLabel ?? "GoldMeta Bridge 3.0.0"
+            }
+          }
         };
       }
       return {

@@ -1,22 +1,28 @@
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { chartExampleIntradayPlanFixture } from "../../fixtures/intradayPlanFixture";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { IntradayActionCard } from "./IntradayActionCard";
 import { PrimaryPlanCard } from "./PrimaryPlanCard";
-import { PlanLevelsStrip } from "./PlanLevelsStrip";
 import { SetupChecklist } from "./SetupChecklist";
 import { Confirmation5MCard } from "./Confirmation5MCard";
 import { TimeframeAlignmentPanel } from "./TimeframeAlignmentPanel";
 import { AlternativeScenario } from "./AlternativeScenario";
 import { ExplainThisPage } from "./ExplainThisPage";
 
+function wrap(ui: ReactNode) {
+  return <MemoryRouter>{ui}</MemoryRouter>;
+}
+
 function buyNowPlan(complete: boolean): IntradayPlan {
   const plan = structuredClone(chartExampleIntradayPlanFixture);
   plan.action = "BUY_NOW";
   plan.actionLabel = "BUY NOW";
   plan.whyNotReady = complete ? null : "Waiting on confirmation";
+  plan.planSourceKey = "XAUUSD|LONDON|1|PLAN_15M";
+  plan.oneSentence = "Buy pullback confirmed. Manage risk manually.";
   plan.setupProgress.items = plan.setupProgress.items.map((item) => ({
     ...item,
     complete,
@@ -30,7 +36,8 @@ function buyNowPlan(complete: boolean): IntradayPlan {
     direction: complete ? "BUY" : "NONE",
     entryZone: "4040 – 4041",
     stopLoss: 4038,
-    tp1: 4045
+    tp1: 4045,
+    tp2: 4049
   };
   plan.confirmation5m = complete
     ? {
@@ -45,22 +52,33 @@ function buyNowPlan(complete: boolean): IntradayPlan {
         meaningful: false,
         detail: "Waiting"
       };
+  plan.freshness = {
+    ...plan.freshness,
+    marketStructureMode: "COMPLETE",
+    sourceLabel: "GoldMeta Bridge 3.0.0"
+  };
   return plan;
 }
 
 describe("Today's Intraday Plan UI", () => {
-  it("renders bold plan headings and large Entry/Stop/TP1 prices", () => {
+  it("renders one primary card with 2x2 Entry/Stop/TP1/TP2 prices", () => {
     const plan = buyNowPlan(true);
-    render(
-      <>
-        <PrimaryPlanCard plan={plan} />
-        <PlanLevelsStrip plan={plan} />
-      </>
-    );
+    render(wrap(<PrimaryPlanCard plan={plan} />));
     expect(screen.getByTestId("todays-intraday-plan")).toHaveTextContent(/Today's Intraday Plan/i);
     expect(screen.getByTestId("plan-level-entry").querySelector(".gm-plan-price")).toBeTruthy();
     expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4,?038/);
     expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4,?045/);
+    expect(screen.getByTestId("plan-level-tp2")).toHaveTextContent(/4,?049/);
+    expect(screen.getByTestId("intraday-action-card")).toBeInTheDocument();
+  });
+
+  it("never shows fixture labels or joined prices", () => {
+    render(wrap(<PrimaryPlanCard plan={chartExampleIntradayPlanFixture} />));
+    const card = screen.getByTestId("todays-intraday-plan");
+    expect(card).not.toHaveTextContent(/LABELLED FIXTURE/i);
+    expect(card).not.toHaveTextContent(/not live market data/i);
+    expect(card).not.toHaveTextContent(/preview fixture/i);
+    expect(card.textContent || "").not.toMatch(/\d+\.\d+\d{1,3},\d{3}\.\d{2}/);
   });
 
   it("shows six-condition checklist with pass/pending marks", () => {
@@ -76,12 +94,12 @@ describe("Today's Intraday Plan UI", () => {
 
   it("colour-codes action with text+icon and gates BUY NOW", () => {
     const incomplete = buyNowPlan(false);
-    const { rerender } = render(<IntradayActionCard plan={incomplete} />);
+    const { rerender } = render(wrap(<PrimaryPlanCard plan={incomplete} />));
     expect(screen.getByTestId("intraday-action-card")).toHaveAttribute("data-tone", "wait");
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("WAIT");
     expect(screen.getByTestId("action-now-gated")).toBeInTheDocument();
 
-    rerender(<IntradayActionCard plan={buyNowPlan(true)} />);
+    rerender(wrap(<PrimaryPlanCard plan={buyNowPlan(true)} />));
     expect(screen.getByTestId("intraday-action-card")).toHaveAttribute("data-tone", "buy");
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY NOW");
     expect(screen.queryByTestId("action-now-gated")).not.toBeInTheDocument();
@@ -117,11 +135,32 @@ describe("Today's Intraday Plan UI", () => {
     expect(screen.getByTestId("explain-page-panel")).toHaveAttribute("role", "dialog");
   });
 
-  it("NO TRADE uses dark-red tone", () => {
+  it("NO TRADE uses dark-red tone and hides actionable levels", () => {
     const plan = structuredClone(chartExampleIntradayPlanFixture);
     plan.action = "NO_TRADE";
     plan.actionLabel = "NO TRADE";
-    render(<IntradayActionCard plan={plan} />);
+    plan.planSourceKey = "XAUUSD|LONDON|1|PLAN_15M";
+    plan.freshness = { ...plan.freshness, marketStructureMode: "MISMATCH" };
+    render(wrap(<PrimaryPlanCard plan={plan} marketStructureMode="MISMATCH" />));
     expect(screen.getByTestId("intraday-action-card")).toHaveAttribute("data-tone", "notrade");
+    expect(screen.getByTestId("plan-levels-hidden")).toBeInTheDocument();
+  });
+
+  it("NO_VALID_PLAN / LIVE_RANGE_ONLY shows waiting copy without levels", () => {
+    const plan = structuredClone(chartExampleIntradayPlanFixture);
+    plan.planStatus = "NO_VALID_PLAN";
+    render(wrap(<PrimaryPlanCard plan={plan} marketStructureMode="LIVE_RANGE_ONLY" />));
+    expect(screen.getByTestId("no-valid-plan-title")).toHaveTextContent(/NO VALID INTRADAY PLAN/i);
+    expect(screen.getByTestId("no-valid-plan-next")).toHaveTextContent(/15-minute/i);
+    expect(screen.queryByTestId("plan-level-entry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("todays-intraday-plan")).not.toHaveTextContent(/LABELLED FIXTURE/i);
+  });
+
+  it("legacy plan data shows enhanced-pending banner", () => {
+    const plan = structuredClone(chartExampleIntradayPlanFixture);
+    plan.planSourceKey = null;
+    plan.freshness = { ...plan.freshness, marketStructureMode: "COMPLETE", sourceLabel: "2.1.0" };
+    render(wrap(<PrimaryPlanCard plan={plan} marketStructureMode="COMPLETE" />));
+    expect(screen.getByTestId("legacy-plan-banner")).toHaveTextContent(/Legacy plan data/i);
   });
 });

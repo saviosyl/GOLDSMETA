@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { fmtPrice, valueLocationLabel } from "../../lib/intradayFormat";
+import { valueLocationLabel } from "../../lib/intradayFormat";
+import { formatLevelWithOptionalPrice, sanitizePlanText } from "../../lib/planTextFormat";
 import { resolveDisplayAction } from "../../lib/planDisplay";
 
 function fmtDistanceAbs(points: number | null | undefined): string {
@@ -51,7 +52,7 @@ export function IntradayActionCard({ plan }: Props) {
             )}
           </h2>
           <p className="gm-intra-action-sentence" data-testid="intraday-one-sentence">
-            {plan.oneSentence}
+            {sanitizePlanText(plan.oneSentence)}
           </p>
           {plan.valueLocation && (
             <p className="gm-meta" data-testid="intraday-value-location">
@@ -91,26 +92,28 @@ export function IntradayActionCard({ plan }: Props) {
       <div className="gm-intra-action-grid gm-action-keyfacts">
         <div>
           <span className="gm-label">Trigger</span>
-          <strong data-testid="intraday-trigger">{plan.trigger ?? "—"}</strong>
+          <strong data-testid="intraday-trigger">
+            {formatLevelWithOptionalPrice(plan.trigger, plan.triggerPrice)}
+          </strong>
           {plan.triggerPrice != null && (
-            <span className="gm-meta">
-              {fmtPrice(plan.triggerPrice)} · {fmtDistanceAbs(plan.distanceToTriggerPoints)}
-            </span>
+            <span className="gm-meta">{fmtDistanceAbs(plan.distanceToTriggerPoints)}</span>
           )}
         </div>
         <div>
           <span className="gm-label">Confirmation</span>
           <strong data-testid="intraday-confirmation-summary">
-            {plan.entryConfirmation[0] ?? "None listed"}
+            {sanitizePlanText(plan.entryConfirmation[0]) || "None listed"}
           </strong>
         </div>
         <div>
           <span className="gm-label">Nearest target</span>
-          <strong data-testid="intraday-next-target">{plan.nextTarget ?? "—"}</strong>
+          <strong data-testid="intraday-next-target">
+            {formatLevelWithOptionalPrice(plan.nextTarget, plan.nextTargetPrice)}
+          </strong>
         </div>
         <div>
           <span className="gm-label">Invalidation</span>
-          <strong data-testid="intraday-invalidation">{plan.invalidation}</strong>
+          <strong data-testid="intraday-invalidation">{sanitizePlanText(plan.invalidation)}</strong>
         </div>
       </div>
       {(plan.afterThatTarget || plan.majorTarget) && (
@@ -174,7 +177,7 @@ export function IntradayActionCard({ plan }: Props) {
 
       {plan.whyNotReady && (
         <p className="gm-meta gm-why-compact" data-testid="intraday-why-not-ready" role="status">
-          <strong>Why not ready:</strong> {plan.whyNotReady}
+          <strong>Why not ready:</strong> {sanitizePlanText(plan.whyNotReady)}
         </p>
       )}
     </section>

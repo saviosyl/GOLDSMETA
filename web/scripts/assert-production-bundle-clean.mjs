@@ -9,6 +9,10 @@ import { join, relative } from "path";
 const DIST = new URL("../dist", import.meta.url).pathname;
 const FORBIDDEN = [
   "LABELLED PREVIEW",
+  "LABELLED FIXTURE",
+  "not live market data",
+  "preview fixture",
+  "test scenario labels",
   "issue50-below-val",
   "issue50-buy-confirmed",
   "issue50PreviewMatrix",
