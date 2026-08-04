@@ -117,10 +117,11 @@ export function toConfirmation5m(auth: AuthoritativeConfirmation): Confirmation5
 
 /** Build timeframe alignment whose 5M cell matches the authoritative confirmation. */
 export function alignTimeframesWithConfirmation(
-  plan: IntradayPlan,
+  _plan: IntradayPlan,
   auth: AuthoritativeConfirmation,
   base?: TimeframeAlignment | null
 ): TimeframeAlignment {
+  void _plan;
   const cells = (base?.cells?.length ? base.cells : []).map((cell) => {
     if (cell.timeframe !== "5M") return cell;
     return {
