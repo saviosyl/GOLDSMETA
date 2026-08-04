@@ -23,9 +23,7 @@ import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
 import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
 import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
 import { IntradayHeaderCard } from "../components/intraday/IntradayHeaderCard";
-import { IntradayActionCard } from "../components/intraday/IntradayActionCard";
 import { PrimaryPlanCard } from "../components/intraday/PrimaryPlanCard";
-import { PlanLevelsStrip } from "../components/intraday/PlanLevelsStrip";
 import { SetupChecklist } from "../components/intraday/SetupChecklist";
 import { Confirmation5MCard } from "../components/intraday/Confirmation5MCard";
 import { TimeframeAlignmentPanel } from "../components/intraday/TimeframeAlignmentPanel";
@@ -41,6 +39,7 @@ import { ExplainThisPage } from "../components/intraday/ExplainThisPage";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { resolveDisplayAction } from "../lib/planDisplay";
 import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
+import { isNoValidIntradayPlan, NO_VALID_PLAN_NEXT, NO_VALID_PLAN_TITLE } from "../lib/planTextFormat";
 
 type Briefing = {
   session?: string | null;
@@ -121,7 +120,7 @@ function buildSnapshotFromPage(args: {
       dataSourceLabel: decision?.dataSourceLabel ?? null,
       isTestDecision: decision?.isTestDecision ?? null,
       marketDataTime: decision?.marketDataTime ?? decision?.generatedAt ?? null,
-      isUiReviewFixture: true
+      isUiReviewFixture: false
     },
     plan: args.setup,
     scoreComponents: args.score?.components
@@ -469,7 +468,14 @@ export function OverviewPage() {
             compactTime={compactTime}
           />
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
-            <IntradayActionCard plan={intradayPlan} />
+            {/* Single primary card immediately under the market strip — before research tabs */}
+            <PrimaryPlanCard
+              plan={intradayPlan}
+              marketStructureMode={
+                marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+              }
+              planQuality={intradayPlan.planQuality ?? null}
+            />
           </div>
 
           <Tabs
@@ -480,18 +486,23 @@ export function OverviewPage() {
 
           {researchTab === "plan" && (
             <div className="gm-cockpit-tab gm-plan-fold" data-testid="research-tab-plan">
-              {/* Phone fold order: strip+action above tabs; then plan → levels → checklist → 5M → range → alt */}
-              <PrimaryPlanCard plan={intradayPlan} />
-              <PlanLevelsStrip plan={intradayPlan} />
-              <SetupChecklist plan={intradayPlan} />
-              <Confirmation5MCard
-                plan={intradayPlan}
-                decisionConfirmation={
-                  structureDecision?.marketStructure?.confirmationClassification ??
-                  decision?.marketStructure?.confirmationClassification
-                }
-              />
-              <TimeframeAlignmentPanel plan={intradayPlan} />
+              {/* Secondary research under the primary plan */}
+              {!isNoValidIntradayPlan(
+                intradayPlan,
+                marketStructureMode ?? intradayPlan.freshness.marketStructureMode
+              ) && (
+                <>
+                  <SetupChecklist plan={intradayPlan} />
+                  <Confirmation5MCard
+                    plan={intradayPlan}
+                    decisionConfirmation={
+                      structureDecision?.marketStructure?.confirmationClassification ??
+                      decision?.marketStructure?.confirmationClassification
+                    }
+                  />
+                  <TimeframeAlignmentPanel plan={intradayPlan} />
+                </>
+              )}
               <ExpectedRangeCard
                 range={intradayPlan.expectedRange}
                 zones={intradayPlan.zones}
@@ -675,13 +686,25 @@ export function OverviewPage() {
         </div>
       ) : (
         !loading && (
-          <SectionCard title="What should I do?">
-            <EmptyState title="No intraday plan yet." />
-            <p className="gm-meta">
-              Waiting for a verified TradingView strategy alert. Manual trading only — AutoTrade stays
-              OFF.
+          <section
+            className="gm-primary-plan tone-unavailable gm-primary-plan-unified"
+            data-testid="todays-intraday-plan"
+            data-state="NO_VALID_PLAN"
+            aria-label="Today's intraday plan"
+          >
+            <div className="gm-section-head">
+              <h2 className="gm-section-title">Today&apos;s Intraday Plan</h2>
+            </div>
+            <h3 className="gm-no-plan-title" data-testid="no-valid-plan-title">
+              {NO_VALID_PLAN_TITLE}
+            </h3>
+            <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-next">
+              {NO_VALID_PLAN_NEXT}
             </p>
-          </SectionCard>
+            <p className="gm-meta">
+              Manual trading only — AutoTrade stays OFF. No actionable entry, stop or targets.
+            </p>
+          </section>
         )
       )}
 

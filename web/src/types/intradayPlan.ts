@@ -275,4 +275,5 @@ export type IntradayPlan = {
   confirmation5m?: Confirmation5M | null;
   timeframeAlignment?: TimeframeAlignment | null;
   primaryScenarioSide?: "bullish" | "bearish" | "none" | null;
+  planQuality?: { grade?: string | null; reasons?: string[] | null } | null;
 };
