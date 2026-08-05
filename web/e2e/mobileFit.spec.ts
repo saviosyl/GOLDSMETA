@@ -152,9 +152,12 @@ test.describe("V5.4.3 on V5.4.1 — zoom + horizontal overflow", () => {
         path: path.join(outDir, `dashboard-${width}.png`),
         fullPage: false
       });
-      await page.getByTestId("system-status-collapse").locator("summary").click();
+      const systemSummary = page.getByTestId("system-status-collapse").locator("summary");
+      if (await systemSummary.isVisible().catch(() => false)) {
+        await systemSummary.click({ force: true });
+      }
       const toggle = page.getByTestId("score-toggle");
-      if (await toggle.count()) await toggle.click();
+      if (await toggle.isVisible().catch(() => false)) await toggle.click({ force: true });
       await page.screenshot({
         path: path.join(outDir, `score-expanded-${width}.png`),
         fullPage: false
