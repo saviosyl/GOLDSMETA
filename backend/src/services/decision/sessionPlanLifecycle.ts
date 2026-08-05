@@ -36,6 +36,10 @@ const asTrendDirection = (value: string | null): TrendDirection | null => {
 import { evaluatePlanQuality } from "./planQuality";
 import { selectQuickTargetTp1 } from "./quickTargetTp";
 import {
+  buildShadowPlanCandidate,
+  persistShadowPlanCandidate
+} from "./shadowPlanCandidate";
+import {
   EMPTY_PLAN_QUALITY,
   EMPTY_QUICK_TARGET,
   SESSION_PLAN_DISCLAIMER,
@@ -54,16 +58,24 @@ import {
   type GeometryResult
 } from "./tradePlanGeometry";
 
-/** Run central geometry validator and strip actionable levels on failure. */
+/** Run central geometry validator — hard failures strip levels; soft limitations preserve them. */
 export const applyGeometrySafetyGate = (plan: SessionPlanRecord): SessionPlanRecord => {
-  const tp1 =
-    positive(plan.quickTarget?.tp1) ??
-    positive(plan.takeProfits.find((t) => t.label === "TP1")?.price);
+  const engineTp1 = positive(plan.takeProfits.find((t) => t.label === "TP1")?.price);
+  const tp1 = positive(plan.quickTarget?.tp1) ?? engineTp1;
   const tp2 = positive(plan.takeProfits.find((t) => t.label === "TP2")?.price);
   const authConfirm = resolveAuthoritativeConfirmation({
     confirmationState: plan.confirmationState,
     direction: plan.direction
   });
+
+  // Soft: missing/failed quick-target does not force quickTargetOk=false when engine TP1 exists.
+  const quickTargetOk =
+    plan.quickTarget?.rrOk === true ||
+    (engineTp1 != null && (plan.direction === "BUY" || plan.direction === "SELL"))
+      ? true
+      : plan.direction === "BUY" || plan.direction === "SELL"
+        ? plan.quickTarget?.rrOk ?? false
+        : null;
 
   const geometry = validateTradePlanGeometry({
     direction: plan.direction,
@@ -75,11 +87,7 @@ export const applyGeometrySafetyGate = (plan: SessionPlanRecord): SessionPlanRec
     tp2,
     currentPrice: plan.currentPrice,
     invalidationText: plan.invalidation,
-    quickTargetOk: plan.quickTarget?.rrOk !== false && plan.quickTarget?.tp1 != null
-      ? plan.quickTarget.rrOk
-      : plan.direction === "BUY" || plan.direction === "SELL"
-        ? plan.quickTarget?.rrOk ?? false
-        : null,
+    quickTargetOk,
     marketStructureMode: plan.marketStructureMode,
     confirmed: authConfirm.supportsPlan
   });
@@ -91,20 +99,47 @@ export const applyGeometrySafetyGate = (plan: SessionPlanRecord): SessionPlanRec
 
   if (geometry.actionable && !qualityBlocked) {
     const stop = geometry.normalized.stop;
+    const soft = geometry.softReasonCodes;
+    // Never rewrite quote-only PLAN UNCHANGED / create/replace labels from soft gaps.
+    const preserveLabel =
+      plan.planMutation === "PLAN_UNCHANGED" ||
+      plan.planMutation === "CREATED" ||
+      plan.planMutation === "REPLACED" ||
+      plan.planMutation === "STATUS_UPDATED";
+    let stability = plan.planStabilityLabel;
+    if (!preserveLabel || stability === "NO VALID PLAN" || stability === "NO TRADE") {
+      const waitingOutsideZone =
+        plan.lifecycleState === "WAITING_FOR_ENTRY_ZONE" ||
+        plan.lifecycleState === "BUILDING";
+      stability =
+        soft.length || !authConfirm.supportsPlan
+          ? waitingOutsideZone
+            ? "PLAN READY — WAIT FOR ENTRY ZONE"
+            : "VALID PLAN — WAITING"
+          : stability === "NO VALID PLAN" || stability === "NO TRADE"
+            ? "VALID PLAN — WAITING"
+            : stability;
+    }
     return {
       ...plan,
       geometryValid: true,
-      geometryReasonCodes: [],
-      geometryMessage: null,
+      geometryReasonCodes: soft,
+      softLimitationCodes: soft,
+      geometryMessage: soft.length ? geometry.message : null,
+      planStabilityLabel: stability,
       confirmationState: authConfirm.state,
       invalidation:
         buildInvalidationSentence(geometry.normalized.direction, stop) ?? plan.invalidation
     };
   }
 
-  // Failed geometry or C / STRUCTURE_ONLY → NO VALID PLAN (preserve diagnostics).
+  // Hard geometry failure or hard quality block → NO VALID PLAN (preserve diagnostics).
   const reasons = [
-    ...(geometry.reasonCodes.length ? geometry.reasonCodes : ["GEOMETRY_INVALID"]),
+    ...(geometry.hardReasonCodes.length
+      ? geometry.hardReasonCodes
+      : geometry.reasonCodes.length
+        ? geometry.reasonCodes
+        : ["GEOMETRY_INVALID"]),
     ...(qualityBlocked ? ["STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN", "WAIT_NO_VALID_PLAN"] : []),
     "TRADE_LEVELS_FAILED_SAFETY_VALIDATION"
   ];
@@ -128,14 +163,16 @@ export const applyGeometrySafetyGate = (plan: SessionPlanRecord): SessionPlanRec
       reasons: [...new Set([...reasons, ...(plan.planQuality?.reasons ?? [])])]
     },
     geometryValid: false,
-    geometryReasonCodes: geometry.reasonCodes.length
-      ? geometry.reasonCodes
-      : ["MISSING_REQUIRED_LEVEL"],
+    geometryReasonCodes: geometry.hardReasonCodes.length
+      ? geometry.hardReasonCodes
+      : geometry.reasonCodes.length
+        ? geometry.reasonCodes
+        : ["MISSING_REQUIRED_LEVEL"],
+    softLimitationCodes: geometry.softReasonCodes,
     geometryMessage: "Trade levels failed safety validation.",
     invalidation: `Trade levels failed safety validation. ${
       geometry.primaryReason ?? reasons[0]
     }`,
-    // Keep diagnostic breadcrumbs on the record via sourceDecisionId / planId / createdAt.
     updatedAt: nowIso()
   };
 };
@@ -442,6 +479,7 @@ const buildPlanFromDecision = (args: {
   const stopPrice = positive(stopLoss?.price);
   const price = positive(decision.lastKnownPrice) ?? positive(payload.ohlcv?.close);
 
+  const engineTp1 = positive(takeProfits.find((t) => t.label === "TP1")?.price);
   const quickTarget =
     lockStrategy && existing?.quickTarget?.tp1 != null
       ? existing.quickTarget
@@ -450,7 +488,8 @@ const buildPlanFromDecision = (args: {
           entry: entryPrice,
           stop: stopPrice,
           decision,
-          optionalIndicators: payload.optionalIndicators as Record<string, unknown> | null
+          optionalIndicators: payload.optionalIndicators as Record<string, unknown> | null,
+          engineTp1
         });
 
   // If quick-target found a better validated TP1 on create/replace, prefer it in takeProfits display copy
@@ -916,6 +955,38 @@ export const processSessionPlanLifecycle = async (
     }
 
     const gated = applyGeometrySafetyGate(plan);
+    if (gated.lifecycleState === "NO_VALID_PLAN") {
+      const shadow = buildShadowPlanCandidate({
+        userId,
+        sourceDecisionId: decision.decisionId,
+        planSourceKey: plan.planSourceKey,
+        direction: plan.direction,
+        entry: positive(plan.entry?.price) ?? positive(plan.entry?.zoneLow),
+        stop: positive(plan.stopLoss?.price),
+        tp1:
+          positive(plan.quickTarget?.tp1) ??
+          positive(plan.takeProfits.find((t) => t.label === "TP1")?.price),
+        tp2: positive(plan.takeProfits.find((t) => t.label === "TP2")?.price),
+        riskDistance: gated.geometryReasonCodes?.includes("ZERO_RISK")
+          ? 0
+          : null,
+        blockingReasons: gated.geometryReasonCodes ?? gated.planQuality?.reasons ?? [],
+        softLimitations: gated.softLimitationCodes ?? [],
+        session: plan.session,
+        marketRegime: decision.marketRegime ?? null,
+        marketStructureMode: plan.marketStructureMode,
+        scriptVersion: plan.pineScriptVersion,
+        schemaVersion: plan.schemaVersion,
+        alertRole: plan.alertRole,
+        hasProfile: Boolean(
+          decision.marketStructure?.poc &&
+            decision.marketStructure?.vah &&
+            decision.marketStructure?.val
+        ),
+        hasFourHour: plan.fourHourContext != null
+      });
+      await persistShadowPlanCandidate(store, shadow);
+    }
     await store.saveSessionPlan?.(gated);
     return gated;
   }

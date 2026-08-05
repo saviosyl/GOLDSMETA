@@ -126,20 +126,21 @@ export const evaluateHardGuards = (
     }
   }
   if (dataQuality.quality === "PARTIAL") {
-    reasonCodes.push("INCOMPLETE_DATA");
+    // Soft: partial optional inputs (profile/TPO) must not alone erase a valid plan.
+    warnings.push("INCOMPLETE_DATA");
   }
 
   if (dataQuality.missingInputs.includes("volumeProfile")) {
-    reasonCodes.push("MISSING_VOLUME_PROFILE");
+    warnings.push("MISSING_VOLUME_PROFILE");
   }
   if (
     dataQuality.missingInputs.includes("trend.direction") ||
     dataQuality.missingInputs.includes("trend.strength")
   ) {
-    reasonCodes.push("MISSING_TREND");
+    warnings.push("MISSING_TREND");
   }
   if (dataQuality.missingInputs.includes("confirmationCandle")) {
-    reasonCodes.push("MISSING_CONFIRMATION");
+    warnings.push("MISSING_CONFIRMATION");
   }
 
   if (!isPositivePrice(snapshot.price)) {
@@ -164,12 +165,14 @@ export const evaluateHardGuards = (
       // Already conflicted — keep BUY/SELL blocked via failed guards.
     }
 
+    // Soft: optional volume profile / confirmation gaps do not hard-block when
+    // Entry/Stop/TP1 geometry can still be validated by the session-plan gate.
     if (profile.poc === null || profile.vah === null || profile.val === null) {
-      reasonCodes.push("MISSING_VOLUME_PROFILE");
+      warnings.push("MISSING_VOLUME_PROFILE");
     }
 
     if (!snapshot.trend?.direction || snapshot.trend.direction === "NEUTRAL") {
-      reasonCodes.push("MISSING_TREND");
+      warnings.push("MISSING_TREND");
     }
 
     if (
@@ -178,11 +181,11 @@ export const evaluateHardGuards = (
       !candle.classification ||
       candle.classification === "NONE"
     ) {
-      reasonCodes.push("MISSING_CONFIRMATION");
+      warnings.push("MISSING_CONFIRMATION");
     }
 
     if (evidenceFamilies(snapshot, decision) < 2) {
-      reasonCodes.push("INSUFFICIENT_EVIDENCE");
+      warnings.push("INSUFFICIENT_EVIDENCE");
     }
 
     if (!isPositivePrice(stopLoss)) {
@@ -209,9 +212,16 @@ export const evaluateHardGuards = (
       }
     }
 
+    // TP2 is optional. Enforce min RR to TP2 only when TP2 exists; otherwise TP1 RR.
+    const tp1RiskReward = plan.riskReward.tp1;
     const tp2RiskReward = plan.riskReward.tp2;
-    if (tp2RiskReward === null || tp2RiskReward < decisionConfig.thresholds.minRiskRewardToTp2) {
-      reasonCodes.push("MIN_RR_TO_TP2_NOT_MET");
+    const hasTp2 = plan.takeProfits.some((t) => t.label === "TP2" && isPositivePrice(t.price));
+    if (hasTp2) {
+      if (tp2RiskReward === null || tp2RiskReward < decisionConfig.thresholds.minRiskRewardToTp2) {
+        reasonCodes.push("MIN_RR_TO_TP2_NOT_MET");
+        reasonCodes.push("POOR_RISK_REWARD");
+      }
+    } else if (tp1RiskReward === null || tp1RiskReward < 1.0) {
       reasonCodes.push("POOR_RISK_REWARD");
     }
 

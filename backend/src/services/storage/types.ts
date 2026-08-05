@@ -230,4 +230,14 @@ export interface GoldMetaStore {
   saveSessionPlan?(plan: SessionPlanRecord): Awaitable<SessionPlanRecord>;
   getActiveSessionPlan?(userId: string): Awaitable<SessionPlanRecord | undefined>;
   getSessionPlan?(userId: string, planId: string): Awaitable<SessionPlanRecord | undefined>;
+
+  /** Diagnostics-only blocked PLAN_15M shadows — never actionable. */
+  saveShadowPlanCandidate?(
+    userId: string,
+    candidate: import("../decision/shadowPlanCandidate").ShadowPlanCandidate
+  ): Awaitable<void>;
+  listShadowPlanCandidates?(
+    userId: string,
+    limit?: number
+  ): Awaitable<Array<import("../decision/shadowPlanCandidate").ShadowPlanCandidate>>;
 }

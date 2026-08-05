@@ -137,12 +137,8 @@ export const scoreSnapshot = (snapshot: MarketSnapshot): ScoreResult => {
     }
   }
 
-  if (!snapshot.trend?.direction) {
-    reasonCodes.push("MISSING_TREND");
-  }
-  if (poc === null || vah === null || val === null) {
-    reasonCodes.push("MISSING_VOLUME_PROFILE");
-  }
+  // Soft optional gaps (missing trend / volume profile) no longer emit hard
+  // reason codes that force WAIT — session-plan quality surfaces them softly.
 
   // TPO value migration
   const valueMigration = snapshot.marketProfile?.valueMigration;

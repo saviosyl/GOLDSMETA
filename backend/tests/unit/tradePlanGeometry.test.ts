@@ -178,6 +178,87 @@ describe("validateTradePlanGeometry", () => {
     expect(r.normalized.entryZoneHigh).toBe(4040);
     expect(r.actionable).toBe(true);
   });
+
+  it("accepts valid BUY Entry/Stop/TP1 without TP2", () => {
+    const r = validateTradePlanGeometry({
+      direction: "BUY",
+      entryPrice: 4040,
+      stop: 4035,
+      tp1: 4048,
+      tp2: null,
+      marketStructureMode: "COMPLETE",
+      quickTargetOk: true
+    });
+    expect(r.actionable).toBe(true);
+    expect(r.hardReasonCodes).toEqual([]);
+  });
+
+  it("accepts valid SELL Entry/Stop/TP1 without TP2", () => {
+    const r = validateTradePlanGeometry({
+      direction: "SELL",
+      entryPrice: 4040,
+      stop: 4046,
+      tp1: 4032,
+      tp2: null,
+      marketStructureMode: "COMPLETE",
+      quickTargetOk: true
+    });
+    expect(r.actionable).toBe(true);
+  });
+
+  it("keeps plan actionable when TP2 missing and optional profile incomplete", () => {
+    const r = validateTradePlanGeometry({
+      direction: "BUY",
+      entryPrice: 4040,
+      stop: 4035,
+      tp1: 4048,
+      marketStructureMode: "LIVE_RANGE_ONLY",
+      quickTargetOk: false
+    });
+    expect(r.actionable).toBe(true);
+    expect(r.softReasonCodes).toContain("STRUCTURE_INCOMPLETE");
+    expect(r.softReasonCodes).toContain("QUICK_TARGET_FAILED");
+    expect(r.hardReasonCodes).not.toContain("STRUCTURE_INCOMPLETE");
+  });
+
+  it("keeps plan actionable when quick target fails but engine TP1 is valid", () => {
+    const r = validateTradePlanGeometry({
+      direction: "SELL",
+      entryPrice: 4040,
+      stop: 4048,
+      tp1: 4030,
+      marketStructureMode: "COMPLETE",
+      quickTargetOk: false
+    });
+    expect(r.actionable).toBe(true);
+    expect(r.softReasonCodes).toContain("QUICK_TARGET_FAILED");
+  });
+
+  it("still blocks when no valid TP1", () => {
+    const r = validateTradePlanGeometry({
+      direction: "BUY",
+      entryPrice: 4040,
+      stop: 4035,
+      tp1: null,
+      marketStructureMode: "COMPLETE",
+      quickTargetOk: true
+    });
+    expect(r.actionable).toBe(false);
+    expect(r.hardReasonCodes).toContain("MISSING_REQUIRED_LEVEL");
+  });
+
+  it("still blocks mismatch as hard", () => {
+    const r = validateTradePlanGeometry({
+      direction: "BUY",
+      entryPrice: 4040,
+      stop: 4035,
+      tp1: 4048,
+      marketStructureMode: "MISMATCH",
+      quickTargetOk: true
+    });
+    expect(r.actionable).toBe(false);
+    expect(r.hardReasonCodes).toContain("STRUCTURE_MISMATCH");
+  });
 });
 
 describe("resolveAuthoritativeConfirmation", () => {

@@ -491,6 +491,36 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     return snap.data() as SessionPlanRecord;
   }
 
+  async saveShadowPlanCandidate(
+    userId: string,
+    candidate: import("../decision/shadowPlanCandidate").ShadowPlanCandidate
+  ): Promise<void> {
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("planShadowCandidates")
+      .doc(candidate.shadowId)
+      .set(toFirestoreData({ ...candidate, diagnosticsOnly: true, actionable: false }), {
+        merge: true
+      });
+  }
+
+  async listShadowPlanCandidates(
+    userId: string,
+    limit = 50
+  ): Promise<Array<import("../decision/shadowPlanCandidate").ShadowPlanCandidate>> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("planShadowCandidates")
+      .orderBy("createdAt", "desc")
+      .limit(Math.min(Math.max(limit, 1), 100))
+      .get();
+    return snap.docs.map(
+      (d) => d.data() as import("../decision/shadowPlanCandidate").ShadowPlanCandidate
+    );
+  }
+
   async registerDevice(device: DeviceRecord): Promise<DeviceRecord> {
     await this.db
       .collection("users")

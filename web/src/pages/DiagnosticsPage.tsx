@@ -227,6 +227,67 @@ export function DiagnosticsPage() {
         )}
       </section>
 
+      <section className="card" data-testid="plan15m-opportunity-funnel">
+        <h2 className="section-title">PLAN_15M OPPORTUNITY FUNNEL</h2>
+        <p className="muted">Diagnostics only — hidden from normal users. Never actionable.</p>
+        {diagnostics.planOpportunityFunnel ? (
+          <>
+            <div className="price-row">
+              <span>Signals received</span>
+              <strong>{diagnostics.planOpportunityFunnel.signalsReceived}</strong>
+            </div>
+            <div className="price-row">
+              <span>Directional candidates</span>
+              <strong>{diagnostics.planOpportunityFunnel.directionalCandidates}</strong>
+            </div>
+            <div className="price-row">
+              <span>Valid geometry</span>
+              <strong>{diagnostics.planOpportunityFunnel.validGeometry}</strong>
+            </div>
+            <div className="price-row">
+              <span>Adequate TP1 room</span>
+              <strong>{diagnostics.planOpportunityFunnel.adequateTp1Room}</strong>
+            </div>
+            <div className="price-row">
+              <span>Waiting for entry zone</span>
+              <strong>{diagnostics.planOpportunityFunnel.waitingForEntryZone}</strong>
+            </div>
+            <div className="price-row">
+              <span>Waiting for 5M confirmation</span>
+              <strong>{diagnostics.planOpportunityFunnel.waitingFor5mConfirmation}</strong>
+            </div>
+            <div className="price-row">
+              <span>Confirmed</span>
+              <strong>{diagnostics.planOpportunityFunnel.confirmed}</strong>
+            </div>
+            <div className="price-row">
+              <span>Blocked</span>
+              <strong>{diagnostics.planOpportunityFunnel.blocked}</strong>
+            </div>
+            <div className="price-row">
+              <span>Expired</span>
+              <strong>{diagnostics.planOpportunityFunnel.expired}</strong>
+            </div>
+            <h3 className="section-title" style={{ fontSize: "1rem", marginTop: "1rem" }}>
+              Top blocking reasons
+            </h3>
+            {diagnostics.planOpportunityFunnel.topBlockingReasons.length === 0 ? (
+              <p className="muted">None</p>
+            ) : (
+              <ul className="list">
+                {diagnostics.planOpportunityFunnel.topBlockingReasons.map((r) => (
+                  <li key={r.reason}>
+                    <strong>{r.reason}</strong> · {r.count}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <p className="muted">Funnel unavailable on this backend revision.</p>
+        )}
+      </section>
+
       <section className="card">
         <h2 className="section-title">Recent rejects</h2>
         {diagnostics.recentRejects.length === 0 && <p className="muted">None recorded</p>}

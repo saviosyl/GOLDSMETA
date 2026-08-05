@@ -2,15 +2,16 @@
  * Quick-target day-trade mode: TP1 from nearest structural level with room + RR validation.
  */
 
+import { planRiskConfig } from "../../config/planRiskConfig";
 import type { DecisionDirection, DecisionRecord, MarketSnapshot } from "../../models/types";
 import { isPositivePrice, roundPrice, roundRatio } from "../../utils/money";
 import type { QuickTargetDayTrade } from "./sessionPlanTypes";
 import { EMPTY_QUICK_TARGET } from "./sessionPlanTypes";
 
 /** Minimum points of room to the structural target (XAUUSD). */
-export const MIN_ROOM_POINTS = 1.5;
+export const MIN_ROOM_POINTS = planRiskConfig.minQuickTargetRoomPoints;
 /** Minimum R:R for quick-target TP1 acceptance. */
-export const MIN_QUICK_TARGET_RR = 1.0;
+export const MIN_QUICK_TARGET_RR = planRiskConfig.minQuickTargetRiskReward;
 
 const positive = (n: unknown): number | null =>
   typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
@@ -91,11 +92,14 @@ export const selectQuickTargetTp1 = (args: {
   decision: DecisionRecord | null;
   snapshot?: MarketSnapshot | null;
   optionalIndicators?: Record<string, unknown> | null;
+  /** Engine/Pine TP1 — used when structural quick-target fails (soft fallback). */
+  engineTp1?: number | null;
 }): QuickTargetDayTrade => {
   const empty = EMPTY_QUICK_TARGET();
   const direction = args.direction;
   const entry = positive(args.entry);
   const stop = positive(args.stop);
+  const engineTp1 = positive(args.engineTp1);
 
   if (!direction || direction === "WAIT" || entry == null || stop == null) {
     return { ...empty, tp1Reason: "Need direction, entry, and stop for quick-target TP1" };
@@ -111,14 +115,13 @@ export const selectQuickTargetTp1 = (args: {
     ...collectFromOptional(args.optionalIndicators)
   ];
 
+  const sideOk = (price: number): boolean =>
+    direction === "BUY" ? price > entry + MIN_ROOM_POINTS * 0.25 : price < entry - MIN_ROOM_POINTS * 0.25;
+
   const candidates =
     direction === "BUY"
-      ? levels
-          .filter((l) => l.price > entry + MIN_ROOM_POINTS * 0.25)
-          .sort((a, b) => a.price - b.price)
-      : levels
-          .filter((l) => l.price < entry - MIN_ROOM_POINTS * 0.25)
-          .sort((a, b) => b.price - a.price);
+      ? levels.filter((l) => sideOk(l.price)).sort((a, b) => a.price - b.price)
+      : levels.filter((l) => sideOk(l.price)).sort((a, b) => b.price - a.price);
 
   for (const candidate of candidates) {
     const room = Math.abs(candidate.price - entry);
@@ -140,7 +143,29 @@ export const selectQuickTargetTp1 = (args: {
     }
   }
 
-  // Fallback: nearest level even if RR/room weak — report validation failure.
+  // Soft fallback: keep a valid engine/Pine TP1 instead of rejecting the whole plan.
+  if (engineTp1 != null && sideOk(engineTp1)) {
+    const room = Math.abs(engineTp1 - entry);
+    const rr = room / risk;
+    const roomOk = room >= planRiskConfig.minTp1DistancePoints;
+    const rrOk = rr >= planRiskConfig.minTp1RiskReward;
+    return {
+      enabled: true,
+      tp1: roundPrice(engineTp1),
+      tp1Label: "TP1",
+      tp1Reason: roomOk && rrOk
+        ? `Engine/Pine TP1 retained after structural quick-target miss (room=${roundPrice(room)}, R:R=${roundRatio(rr)})`
+        : `Engine/Pine TP1 retained (soft) after quick-target miss; room/RR caution (room=${roundPrice(room)}, R:R=${roundRatio(rr)})`,
+      roomPoints: roundPrice(room),
+      roomOk,
+      // Soft: engine TP1 with correct side keeps plan actionable even if RR soft-fails.
+      riskReward: roundRatio(rr),
+      rrOk: true,
+      structuralLevelUsed: null
+    };
+  }
+
+  // Fallback: nearest level even if RR/room weak — report soft validation failure.
   const nearest = candidates[0];
   if (nearest) {
     const room = Math.abs(nearest.price - entry);

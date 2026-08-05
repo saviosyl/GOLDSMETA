@@ -391,6 +391,20 @@ export interface AdminDiagnostics {
     code: string;
     message: string;
   }>;
+  /** Owner/admin only — PLAN_15M opportunity funnel (diagnostics). */
+  planOpportunityFunnel?: {
+    signalsReceived: number;
+    directionalCandidates: number;
+    validGeometry: number;
+    adequateTp1Room: number;
+    waitingForEntryZone: number;
+    waitingFor5mConfirmation: number;
+    confirmed: number;
+    blocked: number;
+    expired: number;
+    topBlockingReasons: Array<{ reason: string; count: number }>;
+    diagnosticsOnly: true;
+  };
   igDemoPlan: Record<string, unknown>;
   mockBrokerReady: string;
   v4?: {
