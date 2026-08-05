@@ -88,14 +88,20 @@ const checkDist = () => {
   for (const file of jsFiles) {
     combined += readFileSync(file, "utf8");
   }
-  const hasApiKey = /AIza[0-9A-Za-z_-]{20,}/.test(combined);
-  const hasAuthDomain = /[A-Za-z0-9.-]+\.firebaseapp\.com/.test(combined);
-  const hasProjectId =
-    /projectId:\s*[`"']goldmeta-web[`"']/.test(combined) ||
-    /projectId:\s*[`"'][^`"']+[`"']/.test(combined);
+  // Vite minifies to apiKey:`...`,authDomain:`....firebaseapp.com`,projectId:`...`
+  const configObject = combined.match(
+    /apiKey:\s*[`"']([^`"']+)[`"']\s*,\s*authDomain:\s*[`"']([^`"']+\.firebaseapp\.com)[`"']\s*,\s*projectId:\s*[`"']([^`"']+)[`"']/
+  );
+  const hasConfigObject = Boolean(configObject);
+  const apiKeyValue = configObject?.[1] ?? "";
+  const authDomainValue = configObject?.[2] ?? "";
+  const projectIdValue = configObject?.[3] ?? "";
+  const hasApiKey =
+    hasConfigObject && apiKeyValue.trim().length > 0 && apiKeyValue !== "undefined";
+  const hasAuthDomain = hasConfigObject && authDomainValue.includes(".firebaseapp.com");
+  const hasProjectId = hasConfigObject && projectIdValue.trim().length > 0;
   const hasGoldmetaProject =
-    /projectId:\s*[`"']goldmeta-web[`"']/.test(combined) ||
-    combined.includes("goldmeta-web.firebaseapp.com");
+    projectIdValue === "goldmeta-web" || authDomainValue === "goldmeta-web.firebaseapp.com";
 
   if (!hasApiKey || !hasAuthDomain || !hasProjectId) {
     fail(
@@ -115,7 +121,7 @@ const checkDist = () => {
     return;
   }
   console.log(
-    `PASS: Firebase web config present in dist (js files=${jsFiles.length}, goldmeta-web=${hasGoldmetaProject}).`
+    `PASS: Firebase web config present in dist (js files=${jsFiles.length}, projectIdLength=${projectIdValue.length}, goldmeta-web=${hasGoldmetaProject}).`
   );
 };
 
