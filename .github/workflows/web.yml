@@ -22,7 +22,7 @@ jobs:
   web:
     name: web
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       VITE_API_BASE_URL: http://127.0.0.1:8080
       VITE_FIREBASE_API_KEY: test-api-key
@@ -52,8 +52,14 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Production Firebase env gate
+        run: npm run gate:production-config:env
+
       - name: Build (production)
         run: npm run build
+
+      - name: Production Firebase bundle gate
+        run: npm run gate:production-config:dist
 
       - name: Production bundle fixture-leak check
         run: npm run test:production-bundle
@@ -67,5 +73,41 @@ jobs:
       - name: Signal History Playwright
         run: npx playwright test e2e/signalHistory.spec.ts --project=desktop-chromium
 
-      - name: Market Structure + mobileFit + ui-review isolation Playwright
-        run: npx playwright test e2e/marketStructureMismatch.spec.ts e2e/mobileFit.spec.ts e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium --project=mobile-chromium
+      - name: UI-review host isolation Playwright
+        run: npx playwright test e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium
+
+  # Separate job so release gates are not blocked by the large mobileFit matrix.
+  web-mobile-e2e:
+    name: web-mobile-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: web
+    continue-on-error: true
+    env:
+      VITE_API_BASE_URL: http://127.0.0.1:8080
+      VITE_FIREBASE_API_KEY: test-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: example.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: example-project
+      VITE_FIREBASE_APP_ID: 1:000000000000:web:test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (ui-review for Playwright)
+        run: npm run build:ui-review
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Market Structure + mobileFit Playwright
+        run: npx playwright test e2e/marketStructureMismatch.spec.ts e2e/mobileFit.spec.ts --project=desktop-chromium --project=mobile-chromium
