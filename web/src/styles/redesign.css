@@ -2993,6 +2993,9 @@ a {
   touch-action: manipulation;
   user-select: none;
   text-align: left;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
   transition:
     border-color 140ms ease,
     background-color 140ms ease,
