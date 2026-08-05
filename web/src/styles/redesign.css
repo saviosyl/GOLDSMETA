@@ -2953,7 +2953,8 @@ a {
 
 .gm-tv-actions,
 .gm-tv-step-nav,
-.gm-tv-tf-grid {
+.gm-tv-tf-grid,
+.gm-tv-role-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -2962,6 +2963,108 @@ a {
 .gm-tv-actions .gm-btn,
 .gm-tv-step-nav .gm-btn {
   min-height: 44px;
+}
+
+.gm-tv-role-fieldset {
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.gm-tv-role-fieldset legend {
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+
+.gm-tv-role-btn,
+.gm-tv-tf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  min-width: 72px;
+  padding: 10px 14px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt, #f4f7fb);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.gm-tv-role-btn {
+  flex: 1 1 180px;
+}
+
+.gm-tv-tf-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-width: 88px;
+  position: relative;
+  padding-right: 28px;
+}
+
+.gm-tv-role-btn:hover,
+.gm-tv-tf-btn:hover,
+.gm-tv-role-btn:focus-visible,
+.gm-tv-tf-btn:focus-visible {
+  border-color: var(--navy, #1d3557);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(29, 53, 87, 0.12);
+}
+
+.gm-tv-role-btn.is-selected,
+.gm-tv-tf-btn.is-selected {
+  border-color: var(--navy, #1d3557);
+  background: rgba(29, 53, 87, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(29, 53, 87, 0.25);
+}
+
+.gm-tv-tf-check {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--navy, #1d3557);
+}
+
+.gm-tv-role-btn .gm-tv-tf-check {
+  position: static;
+  width: auto;
+  height: auto;
+  min-width: 1.1rem;
+}
+
+.gm-tv-tf-label {
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.gm-tv-tf-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.gm-tv-role-btn em {
+  display: block;
+  font-style: normal;
+  margin-top: 2px;
 }
 
 .gm-tv-wizard,

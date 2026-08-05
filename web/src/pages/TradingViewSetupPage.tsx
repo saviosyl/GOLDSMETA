@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { friendlyBrokerReason } from "../lib/brokerFriendlyCopy";
+import {
+  mergeTimeframeOptions,
+  normalizeSelectedTimeframe,
+  resolveDefaultTimeframeForRole,
+  TV_ALERT_ROLE_OPTIONS,
+  TV_TIMEFRAME_GUIDANCE,
+  type TvAlertRole
+} from "../lib/tvSetupTimeframes";
 
 type SetupMode = "standard" | "custom";
 
@@ -84,6 +92,7 @@ async function copyText(value: string): Promise<boolean> {
 /**
  * Easy TradingView setup for every verified user.
  * Standard template by default; optional custom mapping; private webhook per user.
+ * All alert roles share the same user webhook URL.
  */
 export function TradingViewSetupPage() {
   const { api } = useAuth();
@@ -91,7 +100,11 @@ export function TradingViewSetupPage() {
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<SetupMode>("standard");
   const [symbol, setSymbol] = useState("XAUUSD");
-  const [timeframes, setTimeframes] = useState<string[]>(["15"]);
+  /** Wizard guidance role — does not change the shared webhook URL. */
+  const [alertRole, setAlertRole] = useState<TvAlertRole>("PLAN_15M");
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>(
+    resolveDefaultTimeframeForRole("PLAN_15M")
+  );
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [oneTimeSecret, setOneTimeSecret] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -100,15 +113,31 @@ export function TradingViewSetupPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [customTvField, setCustomTvField] = useState("trend_value");
   const [customGmField, setCustomGmField] = useState("trendMeter");
+  /** Hydrate wizard prefs from the server only once so async reloads do not wipe user picks. */
+  const prefsHydratedRef = useRef(false);
+
+  const selectAlertRole = (role: TvAlertRole) => {
+    setAlertRole(role);
+    setSelectedTimeframe(resolveDefaultTimeframeForRole(role));
+  };
+
+  const selectTimeframe = (value: string) => {
+    setSelectedTimeframe(value);
+  };
 
   const load = useCallback(async () => {
     try {
       const res = (await api.getTradingViewSetup()) as SetupResponse;
       setData(res);
-      setMode(res.setup.templateMode);
-      setSymbol(res.setup.selectedSymbolAlias || "XAUUSD");
-      setTimeframes(res.setup.selectedTimeframes?.length ? res.setup.selectedTimeframes : ["15"]);
       setWebhookUrl(res.webhookUrl);
+      if (!prefsHydratedRef.current) {
+        setMode(res.setup.templateMode);
+        setSymbol(res.setup.selectedSymbolAlias || "XAUUSD");
+        setSelectedTimeframe(
+          normalizeSelectedTimeframe(res.setup.selectedTimeframes, "PLAN_15M")
+        );
+        prefsHydratedRef.current = true;
+      }
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load TradingView setup");
@@ -148,7 +177,7 @@ export function TradingViewSetupPage() {
       await api.updateTradingViewSetup({
         templateMode: mode,
         selectedSymbolAlias: symbol,
-        selectedTimeframes: timeframes
+        selectedTimeframes: selectedTimeframe ? [selectedTimeframe] : []
       });
       setMessage("Setup preferences saved.");
       await load();
@@ -231,13 +260,21 @@ export function TradingViewSetupPage() {
     }
   };
 
-  const tfOptions = data?.template.supportedTimeframes ?? [];
+  const tfOptions = useMemo(
+    () => mergeTimeframeOptions(data?.template.supportedTimeframes),
+    [data?.template.supportedTimeframes]
+  );
   const alertBody = data?.alertGuide.messageBody ?? "{{alert_message}}";
+  const timeframeReady = Boolean(selectedTimeframe);
 
   const connectionLabel = useMemo(
     () => statusLabel(data?.setup.connectionStatus ?? "not_connected"),
     [data?.setup.connectionStatus]
   );
+
+  const selectedTfLabel =
+    tfOptions.find((t) => t.value === selectedTimeframe)?.label ??
+    (selectedTimeframe ? `${selectedTimeframe} minutes` : "Not selected");
 
   return (
     <div className="gm-tv-setup" data-testid="tradingview-setup-page">
@@ -246,7 +283,7 @@ export function TradingViewSetupPage() {
         <h1 className="gm-page-title">TradingView Setup</h1>
         <p className="gm-meta">
           Install three alert roles. Your webhook and signals stay private. Passwords and tokens are
-          never shown or copied.
+          never shown or copied. Every role uses the same private webhook URL.
         </p>
       </header>
 
@@ -291,9 +328,7 @@ export function TradingViewSetupPage() {
         </div>
         <div>
           <span className="gm-label">Timeframe</span>
-          <strong>
-            {tfOptions.find((t) => t.value === timeframes[0])?.label ?? `${timeframes[0]} minutes`}
-          </strong>
+          <strong data-testid="tv-status-timeframe">{selectedTfLabel}</strong>
         </div>
         <div>
           <span className="gm-label">Last alert</span>
@@ -326,14 +361,22 @@ export function TradingViewSetupPage() {
           type="button"
           className="gm-btn"
           disabled={!webhookUrl}
-          onClick={() => void copyText(webhookUrl ?? "").then((ok) => setMessage(ok ? "Webhook URL copied." : "Copy failed — select the URL manually."))}
+          onClick={() =>
+            void copyText(webhookUrl ?? "").then((ok) =>
+              setMessage(ok ? "Webhook URL copied." : "Copy failed — select the URL manually.")
+            )
+          }
         >
           Copy webhook
         </button>
         <button
           type="button"
           className="gm-btn"
-          onClick={() => void copyText(alertBody).then((ok) => setMessage(ok ? "Alert message copied." : "Copy failed."))}
+          onClick={() =>
+            void copyText(alertBody).then((ok) =>
+              setMessage(ok ? "Alert message copied." : "Copy failed.")
+            )
+          }
         >
           Copy alert message
         </button>
@@ -434,37 +477,115 @@ export function TradingViewSetupPage() {
         ) : null}
 
         {step === 3 ? (
-          <div className="gm-tv-step">
+          <div className="gm-tv-step" data-testid="tv-step-timeframe">
             <h3>Select timeframe</h3>
-            <div className="gm-tv-tf-grid">
+            <p className="gm-meta" data-testid="tv-timeframe-guidance">
+              {TV_TIMEFRAME_GUIDANCE}
+            </p>
+            <p className="gm-meta">
+              All alert roles use the same private webhook URL. Changing the timeframe here does not
+              create a new webhook.
+            </p>
+
+            <fieldset className="gm-tv-role-fieldset" data-testid="tv-alert-role-fieldset">
+              <legend>Alert role for this setup</legend>
+              <div className="gm-tv-role-grid" role="group" aria-label="Alert role">
+                {TV_ALERT_ROLE_OPTIONS.map((role) => {
+                  const selected = alertRole === role.value;
+                  return (
+                    <button
+                      key={role.value}
+                      type="button"
+                      className={`gm-tv-role-btn${selected ? " is-selected" : ""}`}
+                      aria-pressed={selected}
+                      data-testid={`tv-alert-role-${role.value}`}
+                      onClick={() => selectAlertRole(role.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectAlertRole(role.value);
+                        }
+                      }}
+                    >
+                      <span className="gm-tv-tf-check" aria-hidden>
+                        {selected ? "✓" : ""}
+                      </span>
+                      <span>
+                        <strong>{role.label}</strong>
+                        <em className="gm-meta">{role.description}</em>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+
+            <div
+              className="gm-tv-tf-grid"
+              role="group"
+              aria-label="Chart timeframe"
+              data-testid="tv-timeframe-grid"
+            >
               {tfOptions.map((tf) => {
-                const on = timeframes.includes(tf.value);
+                const selected = selectedTimeframe === tf.value;
                 return (
                   <button
                     key={tf.value}
                     type="button"
-                    className={`gm-btn${on ? " is-active" : ""}`}
-                    onClick={() =>
-                      setTimeframes((prev) =>
-                        prev.includes(tf.value)
-                          ? prev.filter((x) => x !== tf.value)
-                          : [...prev, tf.value]
-                      )
-                    }
+                    className={`gm-tv-tf-btn${selected ? " is-selected" : ""}`}
+                    aria-pressed={selected}
+                    data-testid={`tv-timeframe-${tf.shortLabel}`}
+                    data-selected={selected ? "true" : "false"}
+                    onClick={() => selectTimeframe(tf.value)}
+                    onPointerUp={(e) => {
+                      // Touch + pen: ensure selection even if click synthesis is flaky.
+                      if (e.pointerType === "touch" || e.pointerType === "pen") {
+                        selectTimeframe(tf.value);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectTimeframe(tf.value);
+                      }
+                    }}
                   >
-                    {tf.label}
+                    <span className="gm-tv-tf-check" aria-hidden>
+                      {selected ? "✓" : ""}
+                    </span>
+                    <span className="gm-tv-tf-label">{tf.shortLabel}</span>
+                    <span className="gm-tv-tf-sub">{tf.label}</span>
                   </button>
                 );
               })}
             </div>
+
+            <p className="gm-meta" data-testid="tv-selected-timeframe-summary">
+              Selected: <strong>{selectedTfLabel}</strong>
+              {alertRole ? (
+                <>
+                  {" "}
+                  · Role <strong>{alertRole}</strong>
+                </>
+              ) : null}
+            </p>
+
             <div className="gm-tv-step-nav">
-              <button type="button" className="gm-btn" onClick={() => setStep(2)}>
+              <button
+                type="button"
+                className="gm-btn"
+                data-testid="tv-timeframe-back"
+                onClick={() => setStep(2)}
+              >
                 Back
               </button>
               <button
                 type="button"
                 className="gm-btn gm-btn-primary"
+                data-testid="tv-timeframe-continue"
+                disabled={!timeframeReady}
                 onClick={() => {
+                  if (!timeframeReady) return;
                   void savePrefs();
                   setStep(4);
                 }}
@@ -479,7 +600,8 @@ export function TradingViewSetupPage() {
           <div className="gm-tv-step">
             <h3>Copy private webhook URL</h3>
             <p className="gm-meta">
-              This URL is only for your account. Never share it. It is not the admin webhook.
+              This URL is only for your account. Never share it. It is not the admin webhook. The
+              same URL is used for PLAN_15M, CONFIRM_5M and QUOTE_1M.
             </p>
             {!webhookUrl ? (
               <button
@@ -646,16 +768,31 @@ export function TradingViewSetupPage() {
             </label>
           </div>
           <div className="gm-tv-actions">
-            <button type="button" className="gm-btn" disabled={busy} onClick={() => void saveCustomMapping()}>
+            <button
+              type="button"
+              className="gm-btn"
+              disabled={busy}
+              onClick={() => void saveCustomMapping()}
+            >
               Validate mapping
             </button>
             <button type="button" className="gm-btn" disabled={busy} onClick={() => void sendTest()}>
               Send test payload
             </button>
-            <button type="button" className="gm-btn" disabled={busy} onClick={() => void restoreStandard()}>
+            <button
+              type="button"
+              className="gm-btn"
+              disabled={busy}
+              onClick={() => void restoreStandard()}
+            >
               Use standard setup
             </button>
-            <button type="button" className="gm-btn" disabled={busy || !webhookUrl} onClick={() => void rotate()}>
+            <button
+              type="button"
+              className="gm-btn"
+              disabled={busy || !webhookUrl}
+              onClick={() => void rotate()}
+            >
               Rotate webhook
             </button>
           </div>
