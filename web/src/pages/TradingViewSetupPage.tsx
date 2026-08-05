@@ -522,40 +522,69 @@ export function TradingViewSetupPage() {
 
             <div
               className="gm-tv-tf-grid"
-              role="group"
+              role="radiogroup"
               aria-label="Chart timeframe"
               data-testid="tv-timeframe-grid"
             >
               {tfOptions.map((tf) => {
                 const selected = selectedTimeframe === tf.value;
+                const pick = () => selectTimeframe(tf.value);
                 return (
-                  <button
+                  <label
                     key={tf.value}
-                    type="button"
                     className={`gm-tv-tf-btn${selected ? " is-selected" : ""}`}
-                    aria-pressed={selected}
                     data-testid={`tv-timeframe-${tf.shortLabel}`}
                     data-selected={selected ? "true" : "false"}
-                    onClick={() => selectTimeframe(tf.value)}
-                    onPointerUp={(e) => {
-                      // Touch + pen: ensure selection even if click synthesis is flaky.
-                      if (e.pointerType === "touch" || e.pointerType === "pen") {
-                        selectTimeframe(tf.value);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        selectTimeframe(tf.value);
-                      }
+                    style={{
+                      position: "relative",
+                      display: "inline-flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      justifyContent: "center",
+                      gap: 2,
+                      minWidth: 88,
+                      minHeight: 48,
+                      padding: "10px 28px 10px 14px",
+                      border: selected ? "2px solid #1d3557" : "2px solid #c5d0de",
+                      borderRadius: 12,
+                      background: selected ? "rgba(29, 53, 87, 0.12)" : "#f4f7fb",
+                      boxShadow: selected ? "inset 0 0 0 1px rgba(29, 53, 87, 0.25)" : "none",
+                      color: "#12263a",
+                      cursor: "pointer",
+                      pointerEvents: "auto",
+                      touchAction: "manipulation",
+                      userSelect: "none",
+                      zIndex: 2
                     }}
                   >
-                    <span className="gm-tv-tf-check" aria-hidden>
+                    <input
+                      type="radio"
+                      name="tv-setup-timeframe"
+                      value={tf.value}
+                      checked={selected}
+                      aria-checked={selected}
+                      onChange={pick}
+                      onClick={pick}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        opacity: 0,
+                        margin: 0,
+                        cursor: "pointer",
+                        pointerEvents: "auto",
+                        zIndex: 3
+                      }}
+                    />
+                    <span className="gm-tv-tf-check" aria-hidden style={{ pointerEvents: "none" }}>
                       {selected ? "✓" : ""}
                     </span>
-                    <span className="gm-tv-tf-label">{tf.shortLabel}</span>
-                    <span className="gm-tv-tf-sub">{tf.label}</span>
-                  </button>
+                    <span className="gm-tv-tf-label" style={{ pointerEvents: "none", fontWeight: 700 }}>
+                      {tf.shortLabel}
+                    </span>
+                    <span className="gm-tv-tf-sub" style={{ pointerEvents: "none", fontSize: "0.78rem" }}>
+                      {tf.label}
+                    </span>
+                  </label>
                 );
               })}
             </div>
