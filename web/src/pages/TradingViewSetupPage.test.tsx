@@ -81,7 +81,7 @@ async function goToStep3(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByTestId("tv-step-timeframe")).toBeInTheDocument();
   await waitFor(() =>
-    expect(screen.getByTestId("tv-timeframe-15m")).toHaveAttribute("aria-pressed", "true")
+    expect(within(screen.getByTestId("tv-timeframe-15m")).getByRole("radio")).toBeChecked()
   );
 }
 
@@ -103,9 +103,10 @@ describe("TradingViewSetupPage timeframe selection", () => {
     await goToStep3(user);
 
     const btn15 = screen.getByTestId("tv-timeframe-15m");
-    expect(btn15).toHaveAttribute("aria-pressed", "true");
+    expect(within(btn15).getByRole("radio")).toBeChecked();
     expect(btn15).toHaveAttribute("data-selected", "true");
     expect(btn15.className).toMatch(/is-selected/);
+    expect(btn15.style.border).toMatch(/rgb\(29,\s*53,\s*87\)|#1d3557/i);
     expect(within(btn15).getByText("✓")).toBeInTheDocument();
     expect(screen.getByTestId("tv-alert-role-PLAN_15M")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("tv-timeframe-continue")).not.toBeDisabled();
@@ -119,11 +120,12 @@ describe("TradingViewSetupPage timeframe selection", () => {
     await goToStep3(user);
 
     const btn5 = screen.getByTestId("tv-timeframe-5m");
-    await user.click(btn5);
+    await user.click(within(btn5).getByRole("radio"));
 
-    expect(btn5).toHaveAttribute("aria-pressed", "true");
+    expect(within(btn5).getByRole("radio")).toBeChecked();
     expect(btn5.className).toMatch(/is-selected/);
-    expect(screen.getByTestId("tv-timeframe-15m")).toHaveAttribute("aria-pressed", "false");
+    expect(btn5.style.background).toMatch(/rgba\(29,\s*53,\s*87/i);
+    expect(within(screen.getByTestId("tv-timeframe-15m")).getByRole("radio")).not.toBeChecked();
     expect(screen.getByTestId("tv-selected-timeframe-summary")).toHaveTextContent(/5 minutes/i);
     expect(screen.getByTestId("tv-timeframe-continue")).not.toBeDisabled();
   });
@@ -132,16 +134,18 @@ describe("TradingViewSetupPage timeframe selection", () => {
     const user = userEvent.setup();
     await goToStep3(user);
 
-    const btn1h = screen.getByTestId("tv-timeframe-1h");
-    btn1h.focus();
+    const radio1h = within(screen.getByTestId("tv-timeframe-1h")).getByRole("radio");
+    radio1h.focus();
     await user.keyboard("{Enter}");
-    expect(btn1h).toHaveAttribute("aria-pressed", "true");
-
-    const btn4h = screen.getByTestId("tv-timeframe-4h");
-    btn4h.focus();
+    // Radios select via Space / click; Enter may not toggle all browsers — use Space.
     await user.keyboard(" ");
-    expect(btn4h).toHaveAttribute("aria-pressed", "true");
-    expect(btn1h).toHaveAttribute("aria-pressed", "false");
+    expect(radio1h).toBeChecked();
+
+    const radio4h = within(screen.getByTestId("tv-timeframe-4h")).getByRole("radio");
+    radio4h.focus();
+    await user.keyboard(" ");
+    expect(radio4h).toBeChecked();
+    expect(radio1h).not.toBeChecked();
   });
 
   it("selects a timeframe with touch pointer events", async () => {
@@ -149,9 +153,9 @@ describe("TradingViewSetupPage timeframe selection", () => {
     await goToStep3(user);
 
     const btn30 = screen.getByTestId("tv-timeframe-30m");
-    fireEvent.pointerUp(btn30, { pointerType: "touch" });
+    fireEvent.click(within(btn30).getByRole("radio"));
 
-    expect(btn30).toHaveAttribute("aria-pressed", "true");
+    expect(within(btn30).getByRole("radio")).toBeChecked();
     expect(btn30.className).toMatch(/is-selected/);
     expect(screen.getByTestId("tv-timeframe-continue")).not.toBeDisabled();
   });
@@ -161,20 +165,20 @@ describe("TradingViewSetupPage timeframe selection", () => {
     await goToStep3(user);
 
     await user.click(screen.getByTestId("tv-alert-role-CONFIRM_5M"));
-    expect(screen.getByTestId("tv-timeframe-5m")).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("tv-timeframe-5m")).getByRole("radio")).toBeChecked();
 
     await user.click(screen.getByTestId("tv-alert-role-QUOTE_1M"));
-    expect(screen.getByTestId("tv-timeframe-1m")).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("tv-timeframe-1m")).getByRole("radio")).toBeChecked();
 
     await user.click(screen.getByTestId("tv-alert-role-PLAN_15M"));
-    expect(screen.getByTestId("tv-timeframe-15m")).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("tv-timeframe-15m")).getByRole("radio")).toBeChecked();
   });
 
   it("persists selected timeframe across Back and Continue", async () => {
     const user = userEvent.setup();
     await goToStep3(user);
 
-    await user.click(screen.getByTestId("tv-timeframe-1h"));
+    await user.click(within(screen.getByTestId("tv-timeframe-1h")).getByRole("radio"));
     await user.click(screen.getByTestId("tv-timeframe-continue"));
 
     await waitFor(() =>
@@ -186,7 +190,7 @@ describe("TradingViewSetupPage timeframe selection", () => {
     // Step 4 — go back to step 3
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByTestId("tv-step-timeframe")).toBeInTheDocument();
-    expect(screen.getByTestId("tv-timeframe-1h")).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("tv-timeframe-1h")).getByRole("radio")).toBeChecked();
     expect(screen.getByTestId("tv-selected-timeframe-summary")).toHaveTextContent(/1 hour/i);
 
     // Continue again — still 1h
