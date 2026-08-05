@@ -36,10 +36,25 @@ const main = async () => {
 
   const jsRes = await fetch(`${base}/assets/${js}`);
   const jsType = jsRes.headers.get("content-type") || "";
+  const jsBody = await jsRes.text();
   if (jsRes.status !== 200 || !(jsType.includes("javascript") || jsType.includes("ecmascript"))) {
     fail(`JS MIME/status: ${jsRes.status} ${jsType}`);
   } else {
     console.log(`JS OK: ${jsType}`);
+  }
+
+  // Release gate: live production must never ship an unconfigured Firebase bundle.
+  const hasApiKey = /AIza[0-9A-Za-z_-]{20,}/.test(jsBody);
+  const hasAuthDomain = jsBody.includes("goldmeta-web.firebaseapp.com");
+  const hasProject = /projectId:\s*[`"']goldmeta-web[`"']/.test(jsBody);
+  if (!hasApiKey || !hasAuthDomain || !hasProject) {
+    fail(
+      `Live bundle ${js} is missing Firebase web config ` +
+        `(apiKey=${hasApiKey}, authDomain=${hasAuthDomain}, projectId=${hasProject}). ` +
+        'This serves "GoldMeta is not configured for this environment."'
+    );
+  } else {
+    console.log(`Firebase config OK in ${js}`);
   }
 
   const missing = await fetch(`${base}/assets/definitely-missing-${Date.now()}.js`);

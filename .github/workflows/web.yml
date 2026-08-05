@@ -52,8 +52,14 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Production Firebase env gate
+        run: npm run gate:production-config:env
+
       - name: Build (production)
         run: npm run build
+
+      - name: Production Firebase bundle gate
+        run: npm run gate:production-config:dist
 
       - name: Production bundle fixture-leak check
         run: npm run test:production-bundle
