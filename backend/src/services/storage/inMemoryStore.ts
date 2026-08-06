@@ -14,16 +14,20 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "../../models/types";
 import type { SessionPlanRecord } from "../decision/sessionPlanTypes";
 import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
+  CreateInAppNotificationInput,
   CreateWebhookConnectionInput,
   DecisionEnvironment,
   GoldMetaStore,
+  InAppNotification,
   ProcessingJob,
   RawEventRecord,
   SaveRawEventOptions,
+  SharedMarketFeedState,
   WebhookConnection,
   WebhookRejectLog
 } from "./types";
@@ -40,6 +44,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private journalEntries = new Map<string, JournalEntry>();
   private settings = new Map<string, UserSettings>();
   private notifications = new Set<string>();
+  private inAppNotifications = new Map<string, InAppNotification>();
+  private sharedMarketFeedState: SharedMarketFeedState | undefined;
   private webhookConnections = new Map<string, WebhookConnection>();
   private processingJobs = new Map<string, ProcessingJob>();
   private eventDedupes = new Set<string>();
@@ -353,7 +359,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     const created: UserSettings = {
       userId,
       aiEnabled: false,
-      notificationsEnabled: true,
+      notificationsEnabled: false,
+      notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
       provisionalSignalsEnabled: false,
       riskProfile: "BALANCED",
       liveForwardAckAt: null,
@@ -369,6 +376,11 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     const updated: UserSettings = {
       ...this.getSettings(userId),
       ...patch,
+      notificationPreferences: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES,
+        ...this.getSettings(userId).notificationPreferences,
+        ...patch.notificationPreferences
+      },
       updatedAt: nowIso()
     };
     this.settings.set(userId, updated);
@@ -415,6 +427,58 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     }
     this.notifications.add(scopedKey);
     return true;
+  }
+
+  getSharedMarketFeedState(): SharedMarketFeedState | undefined {
+    return this.sharedMarketFeedState;
+  }
+
+  saveSharedMarketFeedState(state: SharedMarketFeedState): SharedMarketFeedState {
+    this.sharedMarketFeedState = JSON.parse(JSON.stringify(state)) as SharedMarketFeedState;
+    return this.sharedMarketFeedState;
+  }
+
+  createInAppNotification(
+    userId: string,
+    input: CreateInAppNotificationInput
+  ): InAppNotification {
+    const createdAt = nowIso();
+    const notification: InAppNotification = {
+      id: randomUUID(),
+      userId,
+      event: input.event,
+      direction: input.direction,
+      title: input.title,
+      message: input.message,
+      planId: input.planId,
+      read: false,
+      createdAt,
+      data: input.data
+    };
+    this.inAppNotifications.set(userScopedKey(userId, notification.id), notification);
+    return notification;
+  }
+
+  listInAppNotifications(userId: string, limit = 50): InAppNotification[] {
+    return [...this.inAppNotifications.values()]
+      .filter((notification) => notification.userId === userId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, limit);
+  }
+
+  markInAppNotificationsRead(userId: string, notificationIds?: string[]): number {
+    const wanted = notificationIds ? new Set(notificationIds) : null;
+    let count = 0;
+    for (const [key, notification] of this.inAppNotifications.entries()) {
+      if (notification.userId !== userId || (wanted && !wanted.has(notification.id))) {
+        continue;
+      }
+      if (!notification.read) {
+        this.inAppNotifications.set(key, { ...notification, read: true });
+        count += 1;
+      }
+    }
+    return count;
   }
 
   createWebhookConnection(input: CreateWebhookConnectionInput): WebhookConnection {
@@ -600,6 +664,8 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
     this.journalEntries.clear();
     this.settings.clear();
     this.notifications.clear();
+    this.inAppNotifications.clear();
+    this.sharedMarketFeedState = undefined;
     this.webhookConnections.clear();
     this.processingJobs.clear();
     this.eventDedupes.clear();

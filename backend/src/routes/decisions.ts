@@ -7,6 +7,8 @@ import {
   sanitizeSessionPlanForApi
 } from "../services/decision/sessionPlanLifecycle";
 import { resolveMarketStructureView } from "../services/decision/strategySignal";
+import { evaluateSharedFeedHealth, publicMarketFeedHealth } from "../services/marketFeed/feedHealth";
+import { resolveSharedFeedUserId } from "../services/marketFeed/sharedFeed";
 import type { GoldMetaStore } from "../services/storage/types";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
@@ -16,14 +18,18 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
   router.get("/v1/decisions/latest", requireAuth, ...approvedAccountGate, async (req, res) => {
-    const userId = getAuthenticatedUserId(req);
+    const feedUserId = resolveSharedFeedUserId();
+    const marketFeedHealth = publicMarketFeedHealth(await evaluateSharedFeedHealth(store));
     // Prefer non-test decisions so TradingView TEST fixture OHLC (~2408) cannot
     // become the LIVE dashboard "live price" next to a real ~4050 alert profile.
-    const recent = await store.listDecisions(userId, 40);
+    const recent = await store.listDecisions(feedUserId, 40);
     const view = resolveMarketStructureView(recent);
     const latest = view.quoteDecision ?? recent[0];
     if (!latest) {
-      res.status(404).json({ error: { code: "NOT_FOUND", message: "No decisions found" } });
+      res.status(404).json({
+        error: { code: "NOT_FOUND", message: "No shared feed decisions found" },
+        marketFeedHealth
+      });
       return;
     }
     const intradayPlan = buildIntradayPlan({
@@ -33,7 +39,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       quoteAgeSeconds: view.diagnostics.quoteAgeSeconds,
       signalAgeSeconds: view.diagnostics.signalAgeSeconds
     });
-    const rawSessionPlan = await getOrEmptySessionPlan(store, userId);
+    const rawSessionPlan = await getOrEmptySessionPlan(store, feedUserId);
     // Central geometry gate — never return actionable levels that fail safety validation.
     const sessionPlan = sanitizeSessionPlanForApi(rawSessionPlan);
     const actionable =
@@ -51,6 +57,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       structureDecisionId: view.structureDecision?.decisionId ?? null,
       intradayPlan,
       sessionPlan,
+      marketFeedHealth,
       /** Stable plan fields for web consumers (Pine 3.0 lifecycle). */
       stablePlan: sessionPlan
         ? {

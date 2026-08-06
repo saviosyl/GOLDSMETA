@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { getAuthenticatedUserId, requireAuth } from "../middleware/auth";
 import { approvedAccountGate } from "../middleware/accountAccess";
-import { settingsPatchSchema, type UserSettings } from "../models/types";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  settingsPatchSchema,
+  type UserSettings
+} from "../models/types";
 import { DEFAULT_MANUAL_RISK } from "../models/manualRisk";
 import type { GoldMetaStore } from "../services/storage/types";
 import { nowIso } from "../utils/time";
@@ -28,6 +32,10 @@ export const buildSettingsRouter = (store: GoldMetaStore): Router => {
     }
     if (settings.liveForwardAckAt === undefined) settings.liveForwardAckAt = null;
     if (!settings.manualRiskLimitChangeLog) settings.manualRiskLimitChangeLog = [];
+    settings.notificationPreferences = {
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+      ...settings.notificationPreferences
+    };
     res.json({ settings });
   });
 
@@ -43,7 +51,11 @@ export const buildSettingsRouter = (store: GoldMetaStore): Router => {
       ...current,
       liveForwardAckAt: current.liveForwardAckAt ?? null,
       manualRisk: current.manualRisk ?? { ...DEFAULT_MANUAL_RISK },
-      manualRiskLimitChangeLog: current.manualRiskLimitChangeLog ?? []
+      manualRiskLimitChangeLog: current.manualRiskLimitChangeLog ?? [],
+      notificationPreferences: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES,
+        ...current.notificationPreferences
+      }
     };
 
     const changeLog = [...base.manualRiskLimitChangeLog];
@@ -61,6 +73,12 @@ export const buildSettingsRouter = (store: GoldMetaStore): Router => {
 
     const patch: Partial<Omit<UserSettings, "userId" | "updatedAt">> = {
       ...parsed.data,
+      notificationPreferences: parsed.data.notificationPreferences
+        ? {
+            ...base.notificationPreferences,
+            ...parsed.data.notificationPreferences
+          }
+        : base.notificationPreferences,
       manualRisk: nextManual,
       manualRiskLimitChangeLog: changeLog.slice(0, 100),
       liveForwardAckAt:

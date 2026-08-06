@@ -6,6 +6,11 @@ import type { GoldMetaStore } from "../services/storage/types";
 import { enqueueWebhookEvent } from "../services/webhook/enqueueWebhookEvent";
 import { validateWebhookPayload, WebhookValidationError } from "../services/webhook/validatePayload";
 import { saveUserTradingViewConnection } from "../services/tradingview/userTradingViewConnection";
+import {
+  isSharedFeedSourceUser,
+  recordSharedFeedAccepted,
+  recordSharedFeedRejected
+} from "../services/marketFeed/sharedFeed";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -35,6 +40,20 @@ export const buildWebhooksRouter = (
           aiExplainer
         });
 
+        try {
+          await recordSharedFeedAccepted({
+            store,
+            userId: validated.userId,
+            webhookId: validated.webhookId,
+            payload: validated.payload,
+            eventId: validated.stableEventId
+          });
+        } catch (recordError: unknown) {
+          logger.warn("Shared market feed accepted diagnostics write failed", {
+            error: recordError instanceof Error ? recordError.message : "unknown"
+          });
+        }
+
         // Per-user connection health — never cross-user
         try {
           const nowIso = new Date().toISOString();
@@ -57,6 +76,19 @@ export const buildWebhooksRouter = (
             if (wid) {
               const conn = await store.getWebhookConnectionById(wid);
               if (conn) {
+                if (isSharedFeedSourceUser(conn.userId)) {
+                  try {
+                    await recordSharedFeedRejected({
+                      store,
+                      userId: conn.userId,
+                      webhookId: wid,
+                      reason: error.code,
+                      payload: req.body
+                    });
+                  } catch {
+                    /* diagnostics write is best-effort */
+                  }
+                }
                 await saveUserTradingViewConnection(conn.userId, {
                   lastRejectedSignalAt: new Date().toISOString(),
                   lastRejectReason: error.code,

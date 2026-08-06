@@ -15,6 +15,7 @@ import { addMsIso, nowIso } from "../../utils/time";
 import { AiExplainer } from "../ai/explainer";
 import { buildFallbackExplanation } from "../ai/fallback";
 import { sendDecisionPushIfMeaningful } from "../notifications/push";
+import { sendPlanLifecycleNotifications } from "../notifications/planLifecycleNotifications";
 import { evaluateDataQuality } from "../snapshot/dataQuality";
 import { mergeSnapshot } from "../snapshot/mergeSnapshot";
 import type { DecisionEnvironment, GoldMetaStore } from "../storage/types";
@@ -28,6 +29,7 @@ import { logger } from "../logging/logger";
 import { runV4ShadowLifecycle } from "../v4/shadowOrchestrator";
 import { processSessionPlanLifecycle } from "./sessionPlanLifecycle";
 import { resolveAlertRole, isQuoteAlert, isConfirmAlert } from "./alertRole";
+import { isSharedFeedSourceUser } from "../marketFeed/sharedFeed";
 
 const disclaimer =
   "GoldMeta provides market analysis and decision support only. Trading involves substantial risk.";
@@ -316,12 +318,24 @@ export const processDecisionPipeline = async (
       }
     }
 
-    await processSessionPlanLifecycle({
+    const previousSessionPlan = isSharedFeedSourceUser(userId)
+      ? (await store.getActiveSessionPlan?.(userId)) ?? null
+      : null;
+    const sessionPlan = await processSessionPlanLifecycle({
       userId,
       payload,
       decision,
       store
     });
+    if (isSharedFeedSourceUser(userId)) {
+      await sendPlanLifecycleNotifications({
+        store,
+        previousPlan: previousSessionPlan,
+        plan: sessionPlan,
+        decision,
+        sourceEventId: stableEventId
+      });
+    }
   } catch (error: unknown) {
     logger.warn("Session plan lifecycle failed (non-fatal)", {
       decisionId: decision.decisionId,

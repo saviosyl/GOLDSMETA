@@ -1,4 +1,5 @@
 import type {
+  AlertRole,
   DecisionRecord,
   DeviceRecord,
   JournalCreate,
@@ -106,6 +107,50 @@ export interface WebhookRejectLog {
   details?: string[];
 }
 
+export interface SharedMarketFeedRoleTraffic {
+  at: string;
+  schemaVersion: "1.0" | "1.1" | string;
+  scriptVersion: string | null;
+  timeframe: string | null;
+  chartMatchesRole: boolean | null;
+  planSourceKey: string | null;
+  accepted: boolean;
+  eventId: string | null;
+}
+
+export interface SharedMarketFeedState {
+  feedUserId: string;
+  webhookId?: string | null;
+  lastByRole: Partial<Record<AlertRole, SharedMarketFeedRoleTraffic>>;
+  lastAcceptedAt?: string | null;
+  lastRejectedAt?: string | null;
+  lastRejectReason?: string | null;
+  lastLegacyAt?: string | null;
+  updatedAt: string;
+}
+
+export interface InAppNotification {
+  id: string;
+  userId: string;
+  event: string;
+  direction: DecisionRecord["decision"] | null;
+  title: string;
+  message: string;
+  planId: string | null;
+  read: boolean;
+  createdAt: string;
+  data?: Record<string, string>;
+}
+
+export interface CreateInAppNotificationInput {
+  event: string;
+  direction: DecisionRecord["decision"] | null;
+  title: string;
+  message: string;
+  planId: string | null;
+  data?: Record<string, string>;
+}
+
 export interface GoldMetaStore {
   saveRawEvent(
     userId: string,
@@ -197,6 +242,16 @@ export interface GoldMetaStore {
   listJournalEntries(userId: string): Awaitable<JournalEntry[]>;
 
   markNotification(userId: string, key: string): Awaitable<boolean>;
+
+  getSharedMarketFeedState?(): Awaitable<SharedMarketFeedState | undefined>;
+  saveSharedMarketFeedState?(state: SharedMarketFeedState): Awaitable<SharedMarketFeedState>;
+
+  createInAppNotification?(
+    userId: string,
+    input: CreateInAppNotificationInput
+  ): Awaitable<InAppNotification>;
+  listInAppNotifications?(userId: string, limit?: number): Awaitable<InAppNotification[]>;
+  markInAppNotificationsRead?(userId: string, notificationIds?: string[]): Awaitable<number>;
 
   createWebhookConnection(input: CreateWebhookConnectionInput): Awaitable<WebhookConnection>;
   getWebhookConnection(userId: string, webhookId: string): Awaitable<WebhookConnection | undefined>;
