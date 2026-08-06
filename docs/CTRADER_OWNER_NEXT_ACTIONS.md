@@ -3,7 +3,7 @@
 Branch: `cursor/ctrader-demo-autotrade-ux-c2c2` (PR #43)  
 Canonical architecture: [`MULTI_USER_AUTOTRADE_ARCHITECTURE.md`](./MULTI_USER_AUTOTRADE_ARCHITECTURE.md)
 
-**Temporary preview locks (not permanent product design):** AutoTrade OFF, `scope=accounts` only, Demo/Live order submission disabled. Production unchanged.
+**Demo start (in progress):** Pepperstone Demo order submission can be enabled via `CTRADER_DEMO_ORDER_SUBMISSION_ENABLED=true` on `apiCTraderPreview`. Live execution stays hard-locked. Users still need `scope=trading` + a Demo account before Demo Auto activates.
 
 ## Checkpoint A — Owner OAuth (accounts scope only)
 

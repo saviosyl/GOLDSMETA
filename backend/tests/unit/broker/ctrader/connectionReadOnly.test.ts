@@ -456,14 +456,16 @@ describe("symbol suffix variants + refresh helper + friendly errors", () => {
     expect(friendlyCTraderError("OAUTH_STATE_REPLAY").nextStep).toMatch(/fresh/i);
   });
 
-  it("keeps mutations and AutoTrade hard-disabled", () => {
+  it("allows Demo submission env while Live stays hard-disabled", () => {
     expect(() => cTraderOrderApi.placeMarketBuy()).toThrow();
     const flags = snapshotCTraderFlags({
       CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: "true",
       CTRADER_LIVE_ENABLED: "true",
       BROKER_EXECUTION_ENABLED: "true"
     });
-    expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
+    expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(true);
+    expect(flags.CTRADER_LIVE_ENABLED).toBe(false);
+    expect(flags.BROKER_EXECUTION_ENABLED).toBe(false);
   });
 
   it("createOAuthState expires within 10 minutes", () => {

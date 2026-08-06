@@ -164,7 +164,7 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-mode-pill")).toHaveTextContent("OFF");
     expect(screen.getByTestId("autotrade-broker-badge")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-readonly-banner")).toHaveTextContent(
-      /Order submission is currently disabled/i
+      /Demo Auto is available|Live execution stays locked/i
     );
     expect(screen.getByTestId("autotrade-tab-demo")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-tab-live")).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("AutoTradePage", () => {
     expect(screen.queryByText(/IG Demo/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Parked — temporarily unavailable/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("autotrade-view-diagnostics")).toBeInTheDocument();
-    expect(screen.getByTestId("autotrade-enable-demo-auto")).toBeDisabled();
+    expect(screen.getByTestId("autotrade-enable-demo-auto")).toBeEnabled();
   });
 
   it("keeps technical modes behind View diagnostics", async () => {

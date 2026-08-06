@@ -251,7 +251,7 @@ export interface BrokerHealthStatus {
   automationMode: AutomationMode;
   oauthHealthy: boolean | null;
   authIntegrityHealthy: boolean | null;
-  executionEnabled: false;
+  executionEnabled: boolean;
   liveEnabled: false;
   lastErrorCode: string | null;
   notes: string[];

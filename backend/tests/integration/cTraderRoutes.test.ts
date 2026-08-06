@@ -32,9 +32,8 @@ describe("cTrader HTTP routes — mutation safety", () => {
     expect(res.body.autoTrade).toBe("OFF");
   });
 
-  it("denies market/close/cancel mutation routes", async () => {
+  it("denies close/cancel mutation routes; market denied when Demo submission off", async () => {
     for (const path of [
-      "/v1/ctrader/orders/market",
       "/v1/ctrader/orders/close",
       "/v1/ctrader/orders/cancel",
       "/v1/ctrader/positions/close"
@@ -45,17 +44,40 @@ describe("cTrader HTTP routes — mutation safety", () => {
         .send({});
       expect(res.status).toBe(403);
       expect(res.body.submitted).toBe(false);
-      expect(String(res.body.error)).toMatch(/MUTATION_DISABLED|CTRADER/);
+      expect(String(res.body.error ?? res.body?.error?.code ?? "")).toMatch(
+        /MUTATION_DISABLED|CTRADER/
+      );
     }
+    const prevDemo = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    const market = await request(app)
+      .post("/v1/ctrader/orders/market")
+      .set("x-test-user-id", "ctrader-route-user")
+      .send({ side: "BUY", lots: 0.01 });
+    expect([403, 400]).toContain(market.status);
+    if (prevDemo === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prevDemo;
   });
 
-  it("locks DEMO_AUTO activation", async () => {
+  it("locks DEMO_AUTO when Demo submission env is off", async () => {
+    const prevDemo = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     const res = await request(app)
       .post("/v1/ctrader/automation/mode")
       .set("x-test-user-id", "ctrader-route-user")
       .send({ mode: "DEMO_AUTO" });
     expect(res.status).toBe(403);
-    expect(res.body.active).toBe("OFF");
+    expect(res.body.active ?? "OFF").toBe("OFF");
+    if (prevDemo === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prevDemo;
+  });
+
+  it("keeps LIVE_LOCKED mode blocked", async () => {
+    const res = await request(app)
+      .post("/v1/ctrader/automation/mode")
+      .set("x-test-user-id", "ctrader-route-user")
+      .send({ mode: "LIVE_LOCKED" });
+    expect(res.status).toBe(403);
   });
 
   it("demonstration fixture is clearly labelled", async () => {

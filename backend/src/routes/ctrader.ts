@@ -1,6 +1,6 @@
 /**
  * Pepperstone cTrader routes — per-user Demo/Live account selection, read + preview.
- * Order submission remains hard-disabled. AutoTrade remains OFF for this phase.
+ * Demo order submission may be enabled; Live execution stays locked.
  */
 
 import { Router } from "express";
@@ -21,8 +21,13 @@ import {
   labelMissingConfiguration,
   loadCTraderConfig
 } from "../services/broker/ctrader/config";
-import { assertCTraderMutationsDisabled, snapshotCTraderFlags } from "../services/broker/ctrader/flags";
+import {
+  assertCTraderLiveMutationsDisabled,
+  isCTraderDemoOrderSubmissionEnabled,
+  snapshotCTraderFlags
+} from "../services/broker/ctrader/flags";
 import { CTraderMutationDisabledError } from "../services/broker/ctrader/mutationGuard";
+import { submitDemoMarketOrder } from "../services/broker/ctrader/demoOrderExecution";
 import { approveTradePreview, buildTradePreview } from "../services/broker/ctrader/preview";
 import {
   fixtureQuote,
@@ -376,9 +381,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           purpose: "authorise_demo_trading",
           environment: "DEMO",
           autoTrade: "OFF",
-          orderSubmissionEnabled: false,
+          orderSubmissionEnabled: isCTraderDemoOrderSubmissionEnabled(),
           warning:
-            "You are about to grant trading permission on cTrader. Confirm Demo account only after return. Live accounts must not be selected. AutoTrade stays OFF.",
+            "You are about to grant trading permission on cTrader. Confirm Demo account only after return. Live accounts must not be selected. Live execution stays locked.",
           message:
             "Complete cTrader consent personally. GoldMeta will encrypt and store the returned token pair under your user id only."
         });
@@ -901,7 +906,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
 
   const deny = (action: string) => async (_req: unknown, res: import("express").Response) => {
     try {
-      assertCTraderMutationsDisabled();
+      assertCTraderLiveMutationsDisabled();
       cTraderOrderApi.placeMarketBuy();
     } catch (e) {
       const err = e as CTraderMutationDisabledError;
@@ -914,31 +919,152 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
   };
 
-  router.post("/v1/ctrader/orders/market", requireAuth, ...brokerGate, deny("market"));
+  router.post("/v1/ctrader/orders/market", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      assertCTraderLiveMutationsDisabled();
+      if (!isCTraderDemoOrderSubmissionEnabled()) {
+        throw new CTraderMutationDisabledError("placeMarketOrder");
+      }
+      const body = (req.body ?? {}) as {
+        side?: string;
+        lots?: number;
+        stopLoss?: number;
+        takeProfit?: number;
+        entryHint?: number;
+        symbolId?: string;
+      };
+      const side = String(body.side ?? "").toUpperCase();
+      if (side !== "BUY" && side !== "SELL") {
+        res.status(400).json({ error: "INVALID_SIDE", submitted: false });
+        return;
+      }
+      const lots = Number(body.lots);
+      if (!Number.isFinite(lots) || lots <= 0) {
+        res.status(400).json({ error: "INVALID_LOTS", submitted: false });
+        return;
+      }
+      const conn = await getConnection(uid);
+      if (conn?.selectedAccountIsLive) {
+        res.status(403).json({
+          error: "CTRADER_DEMO_ONLY_LIVE_ACCOUNT_FORBIDDEN",
+          submitted: false,
+          message: "Live accounts cannot place orders while Live execution is locked."
+        });
+        return;
+      }
+      const result = await submitDemoMarketOrder({
+        ownerUid: uid,
+        side: side as "BUY" | "SELL",
+        lots,
+        stopLoss: body.stopLoss ?? null,
+        takeProfit: body.takeProfit ?? null,
+        entryHint: body.entryHint ?? null,
+        symbolId: body.symbolId ?? conn?.symbolId ?? null
+      });
+      res.json({
+        submitted: result.accepted,
+        environment: "DEMO",
+        liveEnabled: false,
+        orderSubmissionEnabled: true,
+        result
+      });
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      const code =
+        err instanceof CTraderMutationDisabledError
+          ? err.code
+          : err.message || "CTRADER_ORDER_FAILED";
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e) || code);
+    }
+  });
   router.post("/v1/ctrader/orders/close", requireAuth, ...brokerGate, deny("close"));
   router.post("/v1/ctrader/orders/cancel", requireAuth, ...brokerGate, deny("cancel"));
   router.post("/v1/ctrader/positions/close", requireAuth, ...brokerGate, deny("closePosition"));
 
   router.post("/v1/ctrader/automation/mode", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
     const mode = String((req.body as { mode?: string })?.mode ?? "OFF").toUpperCase();
-    if (mode === "DEMO_AUTO" || mode === "LIVE_LOCKED" || mode === "DEMO_AUTO_LOCKED") {
+    if (mode === "LIVE_LOCKED" || mode === "DEMO_AUTO_LOCKED") {
       res.status(403).json({
         error: "AUTOMATION_MODE_LOCKED",
         mode,
         active: "OFF",
-        message: "Demo Auto and Live modes cannot be activated."
+        message: "Live Auto remains locked."
       });
       return;
     }
+    if (mode === "DEMO_AUTO") {
+      try {
+        assertCTraderLiveMutationsDisabled();
+        if (!isCTraderDemoOrderSubmissionEnabled()) {
+          res.status(403).json({
+            error: "DEMO_SUBMISSION_DISABLED",
+            mode,
+            active: "OFF",
+            message: "Demo order submission is not enabled."
+          });
+          return;
+        }
+        const conn = await getConnection(uid);
+        if (!conn?.selectedAccountId || conn.selectedAccountIsLive) {
+          res.status(409).json({
+            error: "CTRADER_DEMO_ACCOUNT_REQUIRED",
+            mode,
+            active: "OFF",
+            message: "Select a Pepperstone Demo account before enabling Demo Auto."
+          });
+          return;
+        }
+        if (conn.oauthScope !== "trading") {
+          res.status(409).json({
+            error: "CTRADER_TRADING_SCOPE_REQUIRED",
+            mode,
+            active: "OFF",
+            message: "Authorise Demo Trading (trading scope) before enabling Demo Auto."
+          });
+          return;
+        }
+        await saveUserAutoTradeSettings(uid, "demo", {
+          autoTradeEnabledIntent: true,
+          emergencyStopActive: false
+        });
+        res.json({
+          mode: "DEMO_AUTO",
+          autoTrade: "ON",
+          environment: "DEMO",
+          orderSubmissionEnabled: true,
+          liveEnabled: false,
+          note: "Demo Auto enabled for Pepperstone Demo. Live execution stays locked."
+        });
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+      return;
+    }
     if (mode === "CONFIRM" || mode === "MANUAL" || mode === "OFF") {
+      if (mode === "OFF") {
+        try {
+          await saveUserAutoTradeSettings(uid, "demo", {
+            autoTradeEnabledIntent: false
+          });
+        } catch {
+          /* settings optional */
+        }
+      }
       res.json({
         mode: mode === "CONFIRM" ? "CONFIRM" : mode === "MANUAL" ? "MANUAL" : "OFF",
         autoTrade: "OFF",
-        orderSubmissionEnabled: false,
+        orderSubmissionEnabled: isCTraderDemoOrderSubmissionEnabled(),
+        liveEnabled: false,
         note:
           mode === "CONFIRM"
-            ? "CONFIRM allows preview approval only — no submission."
-            : "AutoTrade remains OFF."
+            ? "CONFIRM allows preview approval — Demo submission uses the market order route."
+            : mode === "OFF"
+              ? "Demo Auto disabled."
+              : "Manual mode — no automatic submission."
       });
       return;
     }

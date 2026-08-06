@@ -1010,6 +1010,39 @@ export class ApiClient {
     });
   }
 
+  async setCTraderAutomationMode(
+    mode: "OFF" | "MANUAL" | "CONFIRM" | "DEMO_AUTO"
+  ): Promise<{
+    mode: string;
+    autoTrade: string;
+    orderSubmissionEnabled?: boolean;
+    liveEnabled?: boolean;
+    note?: string;
+  }> {
+    return this.requestCTrader("/v1/ctrader/automation/mode", {
+      method: "POST",
+      body: JSON.stringify({ mode })
+    });
+  }
+
+  async placeCTraderDemoMarketOrder(args: {
+    side: "BUY" | "SELL";
+    lots: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    entryHint?: number;
+    symbolId?: string;
+  }): Promise<{
+    submitted: boolean;
+    environment: string;
+    result: Record<string, unknown>;
+  }> {
+    return this.requestCTrader("/v1/ctrader/orders/market", {
+      method: "POST",
+      body: JSON.stringify(args)
+    });
+  }
+
   async disconnectCTrader(): Promise<{ disconnected: boolean }> {
     return this.requestCTrader("/v1/ctrader/disconnect", { method: "POST", body: "{}" });
   }

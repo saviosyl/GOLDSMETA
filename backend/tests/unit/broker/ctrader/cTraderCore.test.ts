@@ -40,25 +40,35 @@ import { createPaperSimulator, PAPER_LABEL } from "../../../../src/services/brok
 import { CTraderMutationDisabledError } from "../../../../src/services/broker/ctrader/mutationGuard";
 
 describe("cTrader flags", () => {
-  it("keeps mutation flags hard-false even if env tries to enable", () => {
+  it("allows Demo submission via env while Live stays hard-false", () => {
     const flags = snapshotCTraderFlags({
       CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: "true",
       CTRADER_LIVE_ENABLED: "true",
       BROKER_EXECUTION_ENABLED: "true"
     });
-    expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
+    expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(true);
     expect(flags.CTRADER_LIVE_ENABLED).toBe(false);
     expect(flags.BROKER_EXECUTION_ENABLED).toBe(false);
     expect(flags.mutationFlagsHardFalse).toBe(true);
     expect(() => assertCTraderMutationsDisabled({})).not.toThrow();
   });
 
-  it("fails closed when source env attempts mutation enablement", () => {
+  it("fails closed when Live / broker-execution env tries to enable", () => {
+    expect(() =>
+      assertCTraderMutationsDisabled({
+        CTRADER_LIVE_ENABLED: "true"
+      })
+    ).toThrow(/MUST_REMAIN_FALSE/);
+    expect(() =>
+      assertCTraderMutationsDisabled({
+        BROKER_EXECUTION_ENABLED: "true"
+      })
+    ).toThrow(/MUST_REMAIN_FALSE/);
     expect(() =>
       assertCTraderMutationsDisabled({
         CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: "true"
       })
-    ).toThrow(/MUST_REMAIN_FALSE/);
+    ).not.toThrow();
   });
 
   it("exposes server risk caps", () => {
@@ -466,7 +476,9 @@ describe("preview engine", () => {
 });
 
 describe("qualification", () => {
-  it("keeps Demo Auto locked even when gates pass", () => {
+  it("keeps Demo Auto inactive when Demo submission env is off", () => {
+    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     const r = evaluateDemoAutoQualification({
       authHealthy: true,
       pinnedOwnerVerified: true,
@@ -485,6 +497,33 @@ describe("qualification", () => {
     });
     expect(r.unlocked).toBe(true);
     expect(r.canActivate).toBe(false);
+    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
+  });
+
+  it("allows Demo Auto activate when Demo submission is enabled", () => {
+    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
+    const r = evaluateDemoAutoQualification({
+      authHealthy: true,
+      pinnedOwnerVerified: true,
+      oauthHealthy: true,
+      pepperstoneDemoConfirmed: true,
+      xauusdMetadataComplete: true,
+      completedPreviews: 0,
+      approvedControlledDemoTrades: 0,
+      firstDemoTradeAt: null,
+      unresolvedUnknownOrders: 0,
+      duplicateOrders: 0,
+      restartRecoveryTested: false,
+      emergencyStopTested: false,
+      dailyLossLockTested: false,
+      ownerUnlockedDemoAuto: true,
+      tradingScopeGranted: true
+    });
+    expect(r.canActivate).toBe(true);
+    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
   });
 });
 
@@ -501,7 +540,7 @@ describe("mutation guard + service", () => {
     expect(readiness.orderSubmissionEnabled).toBe(false);
     expect(readiness.wizardSteps).toHaveLength(8);
     expect(readiness.wizardSteps[0]?.title).toMatch(/Create Pepperstone/i);
-    expect(readiness.wizardSteps[7]?.title).toMatch(/Demo trading approval/i);
+    expect(readiness.wizardSteps[7]?.title).toMatch(/Enable Demo Auto/i);
     expect(readiness.label).toMatch(/Pepperstone connection required/i);
     const centre = getBrokerControlCentreSnapshot();
     expect(centre.autoTrade).toBe("OFF");
