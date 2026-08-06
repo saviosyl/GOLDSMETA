@@ -5,7 +5,6 @@ type Props = {
   onRefresh: () => void;
   refreshing?: boolean;
   validPlan?: boolean;
-  notifySupported?: boolean;
 };
 
 /**
@@ -15,8 +14,7 @@ type Props = {
 export function StickyMobileActionBar({
   onRefresh,
   refreshing = false,
-  validPlan = false,
-  notifySupported = false
+  validPlan = false
 }: Props) {
   return (
     <div
@@ -43,30 +41,21 @@ export function StickyMobileActionBar({
         >
           Open Risk Planner
         </Link>
-      ) : notifySupported ? (
-        <Link
-          className="gm-btn-outline gm-action-bar-btn"
-          to="/settings"
-          data-testid="action-bar-notify"
-        >
-          Notify me
-        </Link>
       ) : (
         <button
           type="button"
           className="gm-btn-outline gm-action-bar-btn"
           data-testid="action-bar-notify"
-          title="In-app reminder preferences — push notifications are not active."
+          title="Jump to phone alerts"
           onClick={() => {
-            const el = document.querySelector('[data-testid="notify-preference-note"]');
+            const el = document.querySelector('[data-testid="phone-alerts-control"]');
             el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
             if (el instanceof HTMLElement) {
-              el.hidden = false;
               el.focus();
             }
           }}
         >
-          Notify me
+          Enable alerts
         </button>
       )}
       <ExplainThisPage compact />

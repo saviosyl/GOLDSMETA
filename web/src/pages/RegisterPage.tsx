@@ -118,6 +118,8 @@ export function RegisterPage() {
             Email verification is required. Account approval may be required before full access.
             Broker trading is <strong>not</strong> enabled by registration. CFDs are high risk.
             Demo and Live trading are separate. AutoTrade is disabled by default.
+            GoldMeta&apos;s market feed is centrally managed; no TradingView setup is required for
+            normal users.
           </p>
 
           {error && (
@@ -271,7 +273,8 @@ export function RegisterPage() {
             </Link>
           </p>
           <p className="gm-auth-trust">
-            Broker access is not enabled by registration. AutoTrade remains OFF.
+            Broker access is not enabled by registration. AutoTrade remains OFF. Start with the
+            current plan, market-feed health, optional phone alerts, risk preferences, and Journal.
           </p>
         </div>
       </div>

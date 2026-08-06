@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
+import { NotificationCentre } from "../decision/NotificationCentre";
 
 type NavItem = { to: string; label: string; end?: boolean; staffOnly?: boolean };
 
@@ -26,7 +27,7 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: "Tools",
     items: [
       { to: "/planner", label: "Risk Planner" },
-      { to: "/tradingview", label: "TradingView" }
+      { to: "/tradingview", label: "TradingView", staffOnly: true }
     ]
   },
   {
@@ -75,7 +76,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
     heading: "Trading tools",
     items: [
       { to: "/planner", label: "Risk Planner" },
-      { to: "/tradingview", label: "TradingView Setup" }
+      { to: "/tradingview", label: "TradingView Setup", staffOnly: true }
     ]
   },
   {
@@ -232,6 +233,7 @@ export function AppShell({
               </div>
             </div>
             <div className="gm-topbar-actions">
+              <NotificationCentre />
               <span className="gm-badge neutral" data-testid="topbar-autotrade-off">
                 AutoTrade OFF
               </span>

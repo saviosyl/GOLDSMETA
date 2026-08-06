@@ -365,6 +365,41 @@ export interface SystemStatus {
   manualRisk?: ManualRiskSettings | null;
 }
 
+export type MarketFeedHealthStatus = "green" | "amber" | "red";
+export type MarketFeedQuoteStatus = "live" | "limited" | "unknown";
+
+export interface MarketFeedHealth {
+  status: MarketFeedHealthStatus;
+  title: string;
+  subtitle: string;
+  quoteStatus: MarketFeedQuoteStatus;
+  lastVerifiedAt: string | null;
+  lastVerifiedLabel: string | null;
+}
+
+export interface AdminMarketFeedStatus {
+  health: MarketFeedHealth;
+  checklist?: Array<{
+    id: string;
+    label: string;
+    status: "pass" | "warn" | "fail" | string;
+    detail?: string | null;
+  }>;
+  sharedWebhookUrl?: string | null;
+  timeframes?: string[];
+  lastAlerts?: Array<{
+    timeframe: string;
+    lastReceivedAt: string | null;
+    status?: string | null;
+  }>;
+  legacyTraffic?: {
+    recentDetected: boolean;
+    label?: string | null;
+    lastDetectedAt?: string | null;
+  } | null;
+  [key: string]: unknown;
+}
+
 export interface AdminDiagnostics {
   apiHealth: string;
   backendVersion: string;
@@ -465,6 +500,31 @@ export interface WebPushSubscriptionPayload {
     auth: string;
   };
   userAgent?: string;
+}
+
+export type NotificationEventGroup =
+  | "VALID_PLAN_CREATED"
+  | "ENTRY_ZONE_APPROACHING"
+  | "ENTRY_ZONE_REACHED"
+  | "CONFIRM_5M"
+  | "PLAN_INVALIDATED"
+  | "TARGETS_REACHED";
+
+export type NotificationPreferences = Record<NotificationEventGroup, boolean>;
+
+export interface InAppNotification {
+  id: string;
+  event: NotificationEventGroup | string;
+  direction?: "BUY" | "SELL" | "WAIT" | "NONE" | string | null;
+  createdAt: string;
+  message: string;
+  shortMessage?: string | null;
+  planId?: string | null;
+  decisionId?: string | null;
+  setupId?: string | null;
+  readAt?: string | null;
+  read?: boolean;
+  [key: string]: unknown;
 }
 
 

@@ -218,7 +218,6 @@ export const LEGACY_PLAN_BANNER =
 
 /** @deprecated Prefer WAIT_NO_VALID_PLAN_LABEL — kept for diagnostics only. */
 export const NO_VALID_PLAN_TITLE = "WAIT — NO VALID PLAN";
-export const NO_VALID_PLAN_NEXT =
-  "The 15-minute trade structure is incomplete. Wait for the next verified 15-minute signal.";
+export const NO_VALID_PLAN_NEXT = "No valid trade plan yet";
 export const NO_VALID_PLAN_SAFETY_REASON = "Trade levels failed safety validation.";
-export const WAIT_NO_VALID_PLAN_LABEL = "WAIT — NO VALID PLAN";
+export const WAIT_NO_VALID_PLAN_LABEL = "WAIT";

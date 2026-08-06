@@ -200,7 +200,7 @@ export function applyStablePlanToIntraday(
   return {
     ...plan,
     action: failedGeometry ? "PREPARE" : plan.action,
-    actionLabel: failedGeometry ? "WAIT — NO VALID PLAN" : plan.actionLabel,
+    actionLabel: failedGeometry ? "WAIT" : plan.actionLabel,
     planStatus,
     planUnchanged,
     planSourceKey: stable.planSourceKey ?? plan.planSourceKey ?? null,

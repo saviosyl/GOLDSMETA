@@ -11,11 +11,13 @@ export function HelpPage() {
       <SectionCard title="How to use GoldMeta today">
         <ol className="gm-help-steps" data-testid="first-use-guide">
           <li>
-            Open <Link to="/">Plan</Link>.
+            Sign in and open <Link to="/">Plan</Link>.
           </li>
           <li>Read BUY / SELL / WAIT / NO TRADE.</li>
-          <li>Check Entry, Stop and TP1 when the plan is valid.</li>
+          <li>Review market-feed health at the top of the dashboard.</li>
+          <li>Check Entry, Stop and TP1 when the plan is potential or ready.</li>
           <li>Wait for 5-minute confirmation that matches the plan.</li>
+          <li>Optionally enable phone alerts.</li>
           <li>
             Calculate risk in the <Link to="/planner">Risk Planner</Link>.
           </li>
@@ -76,8 +78,9 @@ export function HelpPage() {
             },
             {
               id: "pine",
-              term: "Pine setup",
-              detail: "Install PLAN 15M and CONFIRM 5M alerts. QUOTE 1M is optional."
+              term: "Market feed",
+              detail:
+                "GoldMeta's market feed is centrally managed. No TradingView setup is required for normal users."
             },
             {
               id: "risk",
@@ -126,9 +129,7 @@ export function HelpPage() {
           <li>
             <Link to="/intelligence">Markets</Link> for session context.
           </li>
-          <li>
-            <Link to="/tradingview">TradingView Setup</Link> for alert roles.
-          </li>
+          <li>GoldMeta's market feed is centrally managed. No TradingView setup is required.</li>
           <li>
             <Link to="/legal/risk">Risk disclosure</Link> — CFDs are high risk.
           </li>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import type { Decision, SetupRecord } from "../types/models";
+import type { Decision, MarketFeedHealth, SetupRecord } from "../types/models";
 import type { IntradayPlan } from "../types/intradayPlan";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 import { describeClientError } from "../lib/errors";
@@ -22,8 +22,6 @@ import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
 import { OvernightReviewCard } from "../components/v5/OvernightReviewCard";
 import { PromoSnapshotButton } from "../components/v5/PromoSnapshotButton";
 import { PromoSnapshotModal } from "../components/v5/PromoSnapshotModal";
-import { IntradayHeaderCard } from "../components/intraday/IntradayHeaderCard";
-import { PrimaryPlanCard } from "../components/intraday/PrimaryPlanCard";
 import { SetupChecklist } from "../components/intraday/SetupChecklist";
 import { Confirmation5MCard } from "../components/intraday/Confirmation5MCard";
 import { TimeframeAlignmentPanel } from "../components/intraday/TimeframeAlignmentPanel";
@@ -36,8 +34,9 @@ import { SystemStatusCollapse } from "../components/intraday/SystemStatusCollaps
 import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
-import { PlanStageStepper } from "../components/intraday/PlanStageStepper";
 import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
+import { DecisionDashboard } from "../components/decision/DecisionDashboard";
+import { DetailedReportSections } from "../components/decision/DetailedReportSections";
 import { resolveDisplayAction } from "../lib/planDisplay";
 import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 import {
@@ -223,6 +222,7 @@ export function OverviewPage() {
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
   const [intradayPlan, setIntradayPlan] = useState<IntradayPlan | null>(null);
+  const [marketFeedHealth, setMarketFeedHealth] = useState<MarketFeedHealth | null>(null);
   const [marketStructureMode, setMarketStructureMode] = useState<
     "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE" | null
   >(null);
@@ -243,7 +243,6 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
-  const [previousPrice, setPreviousPrice] = useState<number | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
@@ -259,14 +258,7 @@ export function OverviewPage() {
       ]);
       const latest = pack?.decision ?? null;
       const complete = pack?.latestCompleteStrategySignal ?? null;
-      setDecision((prev) => {
-        const nextPrice = latest?.lastKnownPrice ?? latest?.ohlcv?.close ?? null;
-        const prevPrice = prev?.lastKnownPrice ?? prev?.ohlcv?.close ?? null;
-        if (prevPrice != null && nextPrice != null && prevPrice !== nextPrice) {
-          setPreviousPrice(prevPrice);
-        }
-        return latest;
-      });
+      setDecision(latest);
       setStructureDecision(complete);
       setIntradayPlan(
         applyStablePlanToIntraday(
@@ -278,6 +270,7 @@ export function OverviewPage() {
       setMarketStructureDiagnostics(
         (pack?.marketStructureDiagnostics as Record<string, unknown> | null | undefined) ?? null
       );
+      setMarketFeedHealth(pack?.marketFeedHealth ?? null);
       setRecent(recentSetups.slice(0, 3));
       setOvernightSetups(overnight);
       setBriefing(b as Briefing | null);
@@ -478,13 +471,6 @@ export function OverviewPage() {
         </div>
       )}
 
-      <CockpitAlerts
-        marketStructureMode={marketStructureMode}
-        loading={loading && !intradayPlan}
-        signedOut={!user && !loading}
-        apiError={Boolean(errorDetail) && !intradayPlan}
-      />
-
       {loading && !intradayPlan && <PlanSkeleton />}
 
       {intradayPlan ? (
@@ -496,25 +482,30 @@ export function OverviewPage() {
             trigger={intradayPlan.trigger}
             triggerPrice={intradayPlan.triggerPrice}
           />
-          <IntradayHeaderCard
-            plan={intradayPlan}
-            livePrice={livePrice}
-            previousPrice={previousPrice}
-            sessionLabel={sessionLabel}
-            freshness={freshness}
-            source={source}
-            marketStructureMode={marketStructureMode}
-            compactTime={compactTime}
-          />
-          <PlanStageStepper plan={intradayPlan} marketStructureMode={mode} />
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
-            <PrimaryPlanCard
+            <DecisionDashboard
               plan={intradayPlan}
+              marketFeedHealth={marketFeedHealth}
               marketStructureMode={mode}
-              planQuality={intradayPlan.planQuality ?? null}
               livePrice={livePrice}
             />
           </div>
+
+          <CockpitAlerts
+            marketStructureMode={marketStructureMode}
+            loading={loading && !intradayPlan}
+            signedOut={!user && !loading}
+            apiError={Boolean(errorDetail) && !intradayPlan}
+          />
+
+          {/* Detailed research remains below the quick decision dashboard. */}
+          <DetailedReportSections
+            plan={intradayPlan}
+            marketStructureMode={marketStructureMode}
+            marketStructureDiagnostics={marketStructureDiagnostics}
+            decision={structureDecision ?? decision}
+            score={score}
+          />
 
           {/* Valid-plan fold only — never contradict NO VALID / NO TRADE */}
           {!hideTradeActions && (
@@ -812,15 +803,6 @@ export function OverviewPage() {
             </div>
           </details>
 
-          <p
-            className="gm-meta"
-            data-testid="notify-preference-note"
-            tabIndex={-1}
-            hidden
-          >
-            Notify me opens reminder preferences only. Push notifications are not active in this
-            build.
-          </p>
         </div>
       ) : (
         !loading && (

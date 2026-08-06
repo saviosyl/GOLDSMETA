@@ -6011,3 +6011,344 @@ a {
     position: static;
   }
 }
+
+/* Decision Dashboard V3 */
+.gm-decision-dashboard {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--neutral);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.gm-decision-dashboard.tone-buy { border-left-color: var(--buy); }
+.gm-decision-dashboard.tone-sell { border-left-color: var(--sell); }
+.gm-decision-dashboard.tone-wait { border-left-color: var(--wait); }
+.gm-decision-dashboard.tone-notrade { border-left-color: #7f1d1d; }
+
+.gm-market-feed-status,
+.gm-phone-alerts,
+.gm-next-action,
+.gm-decision-facts > div {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-alt);
+  padding: 12px;
+}
+
+.gm-market-feed-status {
+  display: grid;
+  gap: 8px;
+}
+
+.gm-market-feed-status.tone-green { border-color: rgba(22, 101, 52, 0.32); background: rgba(240, 253, 244, 0.72); }
+.gm-market-feed-status.tone-amber { border-color: rgba(180, 83, 9, 0.34); background: rgba(255, 251, 235, 0.86); }
+.gm-market-feed-status.tone-red { border-color: rgba(153, 27, 27, 0.34); background: rgba(254, 242, 242, 0.86); }
+
+.gm-feed-status-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.gm-feed-status-pill {
+  min-width: 58px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.gm-market-feed-status h2,
+.gm-phone-alerts h2 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 0.98rem;
+}
+
+.gm-market-feed-status p,
+.gm-phone-alerts p,
+.gm-feed-quote-line {
+  margin: 0;
+}
+
+.gm-decision-hero {
+  display: grid;
+  gap: 4px;
+}
+
+.gm-decision-hero h1 {
+  margin: 0;
+  color: var(--navy);
+  font-size: clamp(2.25rem, 12vw, 4.75rem);
+  line-height: 0.95;
+  letter-spacing: -0.055em;
+}
+
+.gm-decision-state {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.05rem, 4vw, 1.45rem);
+  font-weight: 750;
+}
+
+.gm-decision-level-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gm-decision-level-grid > div,
+.gm-nearest-sr > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+
+.gm-decision-level-grid strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--navy);
+  font-size: clamp(1.15rem, 5vw, 1.8rem);
+  line-height: 1.05;
+  word-break: break-word;
+}
+
+.gm-decision-level-wide {
+  grid-column: 1 / -1;
+}
+
+.gm-decision-facts {
+  display: grid;
+  gap: 10px;
+}
+
+.gm-decision-facts strong,
+.gm-next-action strong {
+  display: block;
+  color: var(--navy);
+}
+
+.gm-decision-facts p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.gm-wait-context {
+  display: grid;
+  gap: 10px;
+}
+
+.gm-wait-context > p {
+  margin: 0;
+}
+
+.gm-wait-reason {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.gm-wait-reason summary,
+.gm-detailed-report-section summary {
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: 750;
+  color: var(--navy);
+}
+
+.gm-phone-alerts {
+  display: grid;
+  gap: 10px;
+}
+
+.gm-phone-alerts:focus-visible,
+.gm-notification-bell:focus-visible,
+.gm-phone-alert-button:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.gm-phone-alerts.tone-green { border-color: rgba(22, 101, 52, 0.32); }
+.gm-phone-alerts.tone-amber { border-color: rgba(180, 83, 9, 0.34); }
+.gm-phone-alerts.tone-red { border-color: rgba(153, 27, 27, 0.34); }
+
+.gm-phone-alert-steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.gm-phone-alert-button {
+  min-height: 44px;
+  width: 100%;
+}
+
+.gm-decision-safety {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+}
+
+.gm-detailed-report {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.gm-detailed-report > h2 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 1.05rem;
+}
+
+.gm-detailed-report-section {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.gm-detailed-report-body {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.gm-notification-centre {
+  position: relative;
+}
+
+.gm-notification-bell {
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--navy);
+  font-weight: 750;
+}
+
+.gm-notification-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  min-height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--sell);
+  color: #fff;
+  font-size: 0.7rem;
+}
+
+.gm-notification-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(680px, calc(100dvh - 96px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+.gm-notification-list,
+.gm-admin-feed-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.gm-notification-list li,
+.gm-admin-feed-checklist li {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--surface-alt);
+}
+
+.gm-notification-list li.is-unread {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+}
+
+.gm-notification-list li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gm-notification-list p {
+  margin: 6px 0 0;
+}
+
+.gm-notification-prefs {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.gm-admin-feed-status {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gm-central-feed-message {
+  display: grid;
+  gap: 12px;
+}
+
+.gm-skel-line {
+  height: 14px;
+}
+
+@media (min-width: 721px) {
+  .gm-decision-dashboard {
+    padding: 20px;
+  }
+
+  .gm-decision-level-grid,
+  .gm-decision-facts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .gm-decision-level-wide {
+    grid-column: auto;
+  }
+
+  .gm-phone-alerts {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .gm-phone-alert-button {
+    width: auto;
+    min-width: 180px;
+  }
+}

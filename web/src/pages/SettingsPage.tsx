@@ -12,6 +12,7 @@ import {
 import { cacheKeys, saveCache } from "../lib/offlineCache";
 import { formatWhen } from "../lib/format";
 import { formatClientError } from "../lib/errors";
+import { AdminMarketFeedStatus } from "../components/decision/AdminMarketFeedStatus";
 import {
   detectBrowserTimezone,
   loadTimezonePreference,
@@ -105,7 +106,7 @@ const notificationUx = (
 };
 
 export function SettingsPage() {
-  const { api, signOut, user } = useAuth();
+  const { api, signOut, user, account } = useAuth();
   const [settings, setSettings] = useState<BackendSettings | null>(null);
   const [connections, setConnections] = useState<TradingViewConnection[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export function SettingsPage() {
 
   const installed = isProbablyInstalledPwa();
   const pushSupported = isWebPushSupported();
+  const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
   const notif = useMemo(
     () => notificationUx(pushStatus, installed, pushSupported, online),
     [pushStatus, installed, pushSupported, online]
@@ -133,7 +135,7 @@ export function SettingsPage() {
   const reload = async () => {
     const [nextSettings, nextConnections] = await Promise.all([
       api.getSettings(),
-      api.listTradingViewConnections()
+      isStaff ? api.listTradingViewConnections() : Promise.resolve([])
     ]);
     setSettings(nextSettings);
     setConnections(nextConnections);
@@ -142,7 +144,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     void reload().catch((err) => setError(formatClientError(err, "Failed to load settings")));
-  }, [api]);
+  }, [api, isStaff]);
 
   useEffect(() => {
     const sync = () => setOnline(navigator.onLine);
@@ -301,7 +303,7 @@ export function SettingsPage() {
   const SETTINGS_TABS = [
     { id: "account", label: "Account" },
     { id: "notifications", label: "Notifications" },
-    { id: "tradingview", label: "TradingView" },
+    ...(isStaff ? [{ id: "tradingview", label: "TradingView" }] : []),
     { id: "risk", label: "Risk preferences" },
     { id: "timezone", label: "Timezone" },
     { id: "appearance", label: "Appearance" },
@@ -360,6 +362,11 @@ export function SettingsPage() {
               Request account deletion
             </a>
           </p>
+          {!isStaff && (
+            <p className="settings-meta" data-testid="centrally-managed-feed-settings">
+              GoldMeta's market feed is centrally managed. No TradingView setup is required.
+            </p>
+          )}
         </div>
       )}
 
@@ -496,6 +503,7 @@ export function SettingsPage() {
 
       {settingsTab === "tradingview" && (
         <div className="card settings-card">
+          <AdminMarketFeedStatus />
           <h2>TradingView connection</h2>
           <p className="muted settings-help">
             New users start on <strong>GoldMeta Standard Setup</strong>. Open the guided wizard for
