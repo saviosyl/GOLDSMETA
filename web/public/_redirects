@@ -1,7 +1,3 @@
-# Missing hashed assets must 404 — never SPA-fallback to index.html (that poisons
-# the custom-domain edge as text/html for a day and leaves clients on old UI).
-/gm/*    /gm/404.html   404
-/assets/*    /gm/404.html   404
-
-# SPA client routes
+# SPA client routes. Missing /gm/* assets use public/gm/404.html (nearest 404)
+# so they do not SPA-fallback to index.html and poison the CDN as text/html.
 /*    /index.html   200
