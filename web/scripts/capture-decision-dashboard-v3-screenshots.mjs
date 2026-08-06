@@ -37,7 +37,7 @@ function dashboard({ mode, feed = "green", levels = false }) {
       <section class="card ${mode === "wait" ? "wait" : "buy"}">
         <div class="feed ${feed}">
           <span class="pill">${feed.toUpperCase()}</span>
-          <h2>GoldMeta Market Feed</h2>
+          <h2>${feed === "green" ? "GoldMeta Market Feed" : feed === "amber" ? "Market feed partially available" : "Market feed unavailable"}</h2>
           <p class="muted">${feed === "green" ? "All systems operational" : "Live quote updates limited"}</p>
           <p>Live price updates ${feed === "green" ? "active" : "limited"}</p>
         </div>
@@ -61,7 +61,7 @@ const pages = {
   "ready-mobile.png": dashboard({ mode: "ready", feed: "green", levels: true }),
   "admin-feed-status.png": `
     <main class="admin"><section class="wide"><h1 style="font-size:38px">Admin market-feed status</h1>
-    <div class="feed green"><span class="pill">GREEN</span><h2>GoldMeta Market Feed</h2><p>All systems operational</p><p class="muted">Shared webhook URL for 1M / 5M / 15M</p></div>
+    <div class="feed green"><span class="pill">GREEN</span><h2>${feed === "green" ? "GoldMeta Market Feed" : feed === "amber" ? "Market feed partially available" : "Market feed unavailable"}</h2><p>All systems operational</p><p class="muted">Shared webhook URL for 1M / 5M / 15M</p></div>
     <div class="fact"><strong>No recent legacy traffic detected</strong><p class="muted">Checklist from admin feed API</p></div></section></main>`,
   "notification-preferences.png": `
     <main class="phone"><section class="card"><h1 style="font-size:42px">Notifications</h1><div class="fact"><strong>VALID PLAN CREATED - BUY</strong><p>Potential buy plan created.</p><p class="muted">Plan ID: plan-1 - Unread</p></div>
