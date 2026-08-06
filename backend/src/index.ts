@@ -17,6 +17,7 @@ import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
 import { createAutoTradeService } from "./services/autoTrade/runtime";
 import { processDecisionForAutoTrade } from "./services/autoTrade/decisionTrigger";
+import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
@@ -135,6 +136,29 @@ export const retryOutcomeMonitorJobs = onSchedule(
   },
   async () => {
     await runOutcomeMonitorRetryPass();
+  }
+);
+
+/**
+ * Keep Pepperstone XAUUSD quotes fresh on the backend while the PWA/browser is closed.
+ * Frontend short-poll delivers sub-second display; this pass sustains the authoritative store.
+ */
+export const refreshCTraderLiveQuotes = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: env.FIREBASE_REGION,
+    timeoutSeconds: 120,
+    secrets: [
+      "CTRADER_CLIENT_ID",
+      "CTRADER_CLIENT_SECRET",
+      "CTRADER_REDIRECT_URI",
+      "CTRADER_TOKEN_ENCRYPTION_KEY",
+      "CTRADER_ENVIRONMENT"
+    ]
+  },
+  async () => {
+    applyProductionCTraderRuntimeEnv();
+    await runQuoteKeepalivePass();
   }
 );
 

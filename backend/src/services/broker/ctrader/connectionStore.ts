@@ -43,6 +43,10 @@ export type CTraderConnectionRecord = {
   balance: number | null;
   symbolId: string | null;
   symbolName: string | null;
+  /** Official cTrader catalogue digits for the verified XAUUSD symbol. */
+  symbolDigits: number | null;
+  /** Official cTrader catalogue pip position for the verified XAUUSD symbol. */
+  symbolPipPosition: number | null;
   lastSyncAt: string | null;
   lastQuoteAt: string | null;
   lastErrorCode: string | null;

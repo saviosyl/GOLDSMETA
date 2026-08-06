@@ -84,6 +84,8 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
 
   if (!input.quote || input.quote.bid == null || input.quote.ask == null) {
     failed.push("QUOTE_UNAVAILABLE");
+  } else if (input.quote.bid > input.quote.ask) {
+    failed.push("QUOTE_BID_ASK_REVERSED");
   } else if (input.quote.stale || input.quote.source === "FIXTURE") {
     if (demo) passed.push("FIXTURE_QUOTE_DEMO_ONLY");
     else failed.push("QUOTE_NOT_LIVE");
@@ -170,12 +172,13 @@ export function buildTradePreview(input: PreviewInput): TradePreview {
           ? "NONE"
           : "FLAT";
 
+  // BUY/OPEN_LONG → ask; SELL/OPEN_SHORT → bid. Never mid for execution.
   const entry =
     input.quote == null
       ? null
-      : mapped.brokerMutation === "OPEN_LONG"
+      : mapped.brokerMutation === "OPEN_LONG" || mapped.action === "BUY"
         ? input.quote.ask
-        : mapped.brokerMutation === "OPEN_SHORT"
+        : mapped.brokerMutation === "OPEN_SHORT" || mapped.action === "SELL"
           ? input.quote.bid
           : input.quote.bid;
 

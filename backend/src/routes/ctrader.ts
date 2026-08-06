@@ -41,7 +41,6 @@ import {
   completeOAuthCallback,
   disconnectOwner,
   listAuthorisedAccountsForUser,
-  readQuoteForOwner,
   selectBrokerAccountForUser,
   startDemoTradingOAuth,
   startOAuthForOwner
@@ -53,6 +52,7 @@ import {
 import { sendFriendlyError } from "../services/broker/ctrader/friendlyErrors";
 import { loadTokenEncryptionSecret } from "../services/broker/ctrader/connectionStore";
 import { buildFirstDemoOrderCheckpoint } from "../services/broker/ctrader/firstDemoOrderCheckpoint";
+import { getLiveQuoteSnapshot } from "../services/broker/ctrader/quoteService";
 import {
   confirmLiveActivation,
   getUserAutoTradeSettings,
@@ -640,21 +640,120 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const uid = requireUid(req, res);
     if (!uid) return;
     try {
-      const quote = await readQuoteForOwner(uid);
+      const snap = await getLiveQuoteSnapshot({ ownerUid: uid, refreshIfNeeded: true });
       const connection = await getConnection(uid);
+      if (!snap.quote) {
+        res.json({
+          available: false,
+          quote: null,
+          mid: null,
+          freshness: "UNAVAILABLE",
+          livePriceHealth: "UNAVAILABLE",
+          label: "Price unavailable",
+          orderSubmissionEnabled: false,
+          autoTrade: "OFF",
+          // Explicit: plan health is separate — never hide price behind WAIT/stale plan.
+          planIndependent: true
+        });
+        return;
+      }
       res.json({
-        quote,
-        label: connection?.selectedAccountIsLive ? "Live account quote" : "Demo account quote",
+        available: true,
+        quote: {
+          symbolId: snap.quote.symbolId,
+          symbolName: snap.quote.symbolName,
+          digits: snap.quote.digits,
+          pipPosition: snap.quote.pipPosition,
+          bid: snap.quote.bid,
+          ask: snap.quote.ask,
+          mid: snap.quote.mid,
+          spread: snap.quote.spread,
+          timestamp: snap.quote.brokerTimestamp,
+          brokerTimestamp: snap.quote.brokerTimestamp,
+          receivedAt: snap.quote.receivedAt,
+          quoteSequence: snap.quote.quoteSequence,
+          marketStatus: snap.quote.marketStatus,
+          stale: snap.quote.freshness === "STALE" || snap.quote.freshness === "DELAYED",
+          freshness: snap.quote.freshness,
+          ageMs: snap.quote.ageMs,
+          executable: snap.quote.executable,
+          source: "LIVE",
+          environment: snap.quote.environment
+        },
+        mid: snap.quote.mid,
+        freshness: snap.quote.freshness,
+        livePriceHealth: snap.livePriceHealth,
+        thresholds: snap.thresholds,
+        label: connection?.selectedAccountIsLive
+          ? "Pepperstone Live account quote"
+          : "Pepperstone Demo account quote",
         orderSubmissionEnabled: false,
-        autoTrade: "OFF"
+        autoTrade: "OFF",
+        planIndependent: true
       });
     } catch (e) {
       const code = codeOf(e);
+      // Display path: prefer last verified snapshot over hard failure when possible.
+      try {
+        const cached = await getLiveQuoteSnapshot({
+          ownerUid: uid,
+          refreshIfNeeded: false
+        });
+        if (cached.quote) {
+          res.json({
+            available: true,
+            quote: {
+              ...cached.quote,
+              timestamp: cached.quote.brokerTimestamp,
+              stale:
+                cached.quote.freshness === "STALE" ||
+                cached.quote.freshness === "DELAYED",
+              source: "CACHED"
+            },
+            mid: cached.quote.mid,
+            freshness: cached.quote.freshness,
+            livePriceHealth: cached.livePriceHealth,
+            thresholds: cached.thresholds,
+            label: "Last verified Pepperstone quote",
+            orderSubmissionEnabled: false,
+            autoTrade: "OFF",
+            planIndependent: true,
+            refreshError: code
+          });
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
       const extra =
         code === "CTRADER_QUOTE_STALE" && e && typeof e === "object" && "quote" in e
           ? { quote: (e as { quote: unknown }).quote, stale: true }
           : undefined;
       sendFriendlyError(res, statusFor(code), code, extra);
+    }
+  });
+
+  /**
+   * Immediate snapshot for dashboard open / reconnect.
+   * Does not wait for a new stream event when a verified quote is already stored.
+   */
+  router.get("/v1/ctrader/live-quote", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const forceRefresh = String(req.query.refresh ?? "") === "1";
+    try {
+      const snap = await getLiveQuoteSnapshot({
+        ownerUid: uid,
+        refreshIfNeeded: forceRefresh || true
+      });
+      res.json({
+        ...snap,
+        planIndependent: true,
+        // Secrets never included — browser is a viewer of the backend price stream.
+        orderSubmissionEnabled: false
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
     }
   });
 

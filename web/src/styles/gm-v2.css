@@ -370,6 +370,25 @@ body,
   box-shadow: 0 0 0 3px rgba(32, 168, 91, 0.18);
 }
 
+.gm-fresh-dot.is-delayed {
+  background: #d4a017;
+  box-shadow: 0 0 0 3px rgba(212, 160, 23, 0.2);
+}
+
+.gm-fresh-dot.is-stale {
+  background: var(--danger, #c0392b);
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.16);
+}
+
+.gm-quote-ba {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+
 /* ===== Mobile bottom nav ===== */
 .gm-mobile-nav {
   position: fixed;

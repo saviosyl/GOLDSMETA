@@ -1,7 +1,7 @@
 /**
- * cTrader Open API client — Demo read + Demo market order submit.
+ * cTrader Open API client — Demo/Live quote read + Demo market order submit.
  * Uses Spotware HTTP helpers for account discovery and WebSocket for symbols/quotes/orders.
- * Never logs tokens. Live hosts / Live execution are not wired.
+ * Never logs tokens. Live *order submission* remains unwired; Live quotes use the Live host.
  */
 
 import { CTraderConnection } from "@reiryoku/ctrader-layer";
@@ -20,6 +20,8 @@ import { parseCTraderVolumeRules } from "./volumeUnits";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;
+const LIVE_HOST = "live.ctraderapi.com";
+const LIVE_PORT = 5035;
 /** Spotware relative price unit — bid/ask are in 1/100000 of price. */
 const SPOT_PRICE_SCALE = 100_000;
 const SPOT_EVENT_TIMEOUT_MS = 8_000;
@@ -103,6 +105,8 @@ export interface CTraderOpenApiClient {
     clientId: string;
     clientSecret: string;
     ctidTraderAccountId: string;
+    /** When true, use Pepperstone Live Open API host for symbol catalogue. */
+    isLive?: boolean;
   }): Promise<BrokerSymbol | null>;
   fetchQuote(args: {
     accessToken: string;
@@ -110,6 +114,8 @@ export interface CTraderOpenApiClient {
     clientSecret: string;
     ctidTraderAccountId: string;
     symbolId: string;
+    /** When true, use Pepperstone Live Open API host for quotes. */
+    isLive?: boolean;
   }): Promise<BrokerQuote>;
   /** Demo host only — never call for Live accounts. */
   placeDemoMarketOrder?(args: DemoMarketOrderRequest): Promise<DemoMarketOrderResult>;
@@ -151,12 +157,15 @@ function mapDiscovered(raw: Record<string, unknown>): DiscoveredAccount {
   };
 }
 
-async function withDemoConnection<T>(
+async function withOpenApiConnection<T>(
+  args: {
+    isLive?: boolean;
+  },
   fn: (connection: InstanceType<typeof CTraderConnection>) => Promise<T>
 ): Promise<T> {
   const connection = new CTraderConnection({
-    host: DEMO_HOST,
-    port: DEMO_PORT
+    host: args.isLive ? LIVE_HOST : DEMO_HOST,
+    port: args.isLive ? LIVE_PORT : DEMO_PORT
   });
   await connection.open();
   try {
@@ -168,6 +177,13 @@ async function withDemoConnection<T>(
       /* ignore close errors */
     }
   }
+}
+
+/** @deprecated Prefer withOpenApiConnection — Demo host helper kept for call sites. */
+async function withDemoConnection<T>(
+  fn: (connection: InstanceType<typeof CTraderConnection>) => Promise<T>
+): Promise<T> {
+  return withOpenApiConnection({ isLive: false }, fn);
 }
 
 /**
@@ -287,7 +303,8 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
     },
 
     async discoverXauUsd(args) {
-      return withDemoConnection(async (connection) => {
+      const isLive = Boolean(args.isLive);
+      return withOpenApiConnection({ isLive }, async (connection) => {
         await connection.sendCommand("ProtoOAApplicationAuthReq", {
           clientId: args.clientId,
           clientSecret: args.clientSecret
@@ -414,7 +431,11 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
                 : undefined
         };
 
-        const resolved = resolveXauUsdFromCatalogue([enriched]);
+        const resolved = resolveXauUsdFromCatalogue(
+          [enriched],
+          "pepperstone_ctrader",
+          isLive ? "LIVE" : "DEMO"
+        );
         if (!resolved) return null;
         const tz =
           typeof detail.scheduleTimeZone === "string"
@@ -428,7 +449,8 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
     },
 
     async fetchQuote(args) {
-      return withDemoConnection(async (connection) => {
+      const isLive = Boolean(args.isLive);
+      return withOpenApiConnection({ isLive }, async (connection) => {
         await connection.sendCommand("ProtoOAApplicationAuthReq", {
           clientId: args.clientId,
           clientSecret: args.clientSecret
@@ -439,6 +461,7 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         });
 
         let marketStatus: BrokerQuote["marketStatus"] = "UNKNOWN";
+        let symbolName = "XAUUSD";
         try {
           const detailRes = (await connection.sendCommand(
             "ProtoOASymbolByIdReq",
@@ -453,6 +476,9 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
               ? [detailRes.symbol]
               : [];
           const detail = detailList[0] ?? {};
+          if (typeof detail.symbolName === "string" && detail.symbolName.trim()) {
+            symbolName = detail.symbolName.trim();
+          }
           marketStatus = marketStatusFromSchedule({
             schedule: parseScheduleIntervals(detail.schedule),
             timeZone:
@@ -493,8 +519,11 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         const spot = await spotPromise;
         const bid = spotPriceFromRelative(spot.bid);
         const ask = spotPriceFromRelative(spot.ask);
-        if (bid == null || ask == null || !(ask >= bid)) {
+        if (bid == null || ask == null) {
           throw new Error("CTRADER_QUOTE_UNAVAILABLE");
+        }
+        if (!(ask >= bid)) {
+          throw new Error("CTRADER_QUOTE_BID_ASK_REVERSED");
         }
         const spread = Number((ask - bid).toFixed(6));
         const tsMs = asNumber(spot.timestamp);
@@ -503,7 +532,7 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           : new Date().toISOString();
         return {
           symbolId: args.symbolId,
-          symbolName: "XAUUSD",
+          symbolName,
           bid,
           ask,
           spread,

@@ -2,6 +2,7 @@ import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { QuoteProvider } from "./lib/quoteContext";
+import { LiveQuoteBridge } from "./components/LiveQuoteBridge";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { AppShell } from "./components/layout/AppShell";
 import { PublicPageShell } from "./components/layout/PublicPageShell";
@@ -192,6 +193,7 @@ function ProtectedApp() {
   return (
     <AccountAccessGate>
       <QuoteProvider>
+      <LiveQuoteBridge />
       <AppShell>
         <Routes>
           <Route path="/ui-review/*" element={<UiReviewGate />} />

@@ -1054,17 +1054,64 @@ export class ApiClient {
   }
 
   async getCTraderQuote(): Promise<{
+    available?: boolean;
     quote: {
+      symbolId?: string;
+      symbolName?: string;
+      digits?: number | null;
+      pipPosition?: number | null;
       bid: number | null;
       ask: number | null;
+      mid?: number | null;
       spread: number | null;
       timestamp?: string;
+      brokerTimestamp?: string;
+      receivedAt?: string;
+      quoteSequence?: number;
       marketStatus?: string;
       stale?: boolean;
-    };
+      freshness?: string;
+      ageMs?: number;
+      executable?: boolean;
+      environment?: string;
+      source?: string;
+    } | null;
+    mid?: number | null;
+    freshness?: string;
+    livePriceHealth?: string;
     label: string;
+    planIndependent?: boolean;
   }> {
     return this.requestCTrader("/v1/ctrader/quote");
+  }
+
+  /** Authoritative live XAUUSD snapshot — independent of plan generation. */
+  async getCTraderLiveQuote(opts?: { refresh?: boolean }): Promise<{
+    available: boolean;
+    quote: {
+      symbolId: string;
+      symbolName: string;
+      digits: number | null;
+      pipPosition: number | null;
+      bid: number;
+      ask: number;
+      mid: number;
+      spread: number;
+      brokerTimestamp: string;
+      receivedAt: string;
+      quoteSequence: number;
+      freshness: string;
+      marketStatus: string;
+      ageMs: number;
+      executable: boolean;
+      environment: string;
+    } | null;
+    livePriceHealth: string;
+    label: string;
+    planIndependent?: boolean;
+  }> {
+    const q = opts?.refresh ? "?refresh=1" : "";
+    return this.requestCTrader(`/v1/ctrader/live-quote${q}`);
   }
 
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {
