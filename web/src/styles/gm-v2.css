@@ -1421,3 +1421,10 @@ body.gm-drawer-open {
   border-color: var(--navy-800);
   outline: none;
 }
+
+/* cache-bust 20260806091631 */
+
+/* production cache-bust rule */
+.gm-premium-v2[data-cache-bust="v2"] {
+  --gm-cache-bust: 1;
+}
