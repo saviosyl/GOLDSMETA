@@ -82,8 +82,8 @@ describe("DecisionDashboard", () => {
   it("shows Entry Stop and targets prominently for potential plans", () => {
     render(wrap(<DecisionDashboard plan={potentialBuy()} marketFeedHealth={greenFeed} livePrice={4039} />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("POTENTIAL BUY");
-    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(/Waiting for 5-minute confirmation/i);
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("PREPARE");
+    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(/Watch for reclaim|confirmation/i);
     expect(screen.getByTestId("plan-level-entry")).toHaveTextContent(/4,040/);
     expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4,036/);
     expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4,048/);
@@ -146,7 +146,7 @@ describe("DecisionDashboard", () => {
 
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY PLAN READY");
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY");
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
     expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
   });

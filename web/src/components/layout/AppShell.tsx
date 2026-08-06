@@ -11,6 +11,8 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: "Daily",
     items: [
       { to: "/", label: "Today's Plan", end: true },
+      { to: "/levels", label: "Levels" },
+      { to: "/alerts", label: "Alerts & Setup" },
       { to: "/intelligence", label: "Markets" },
       { to: "/journal", label: "Journal" }
     ]
@@ -68,6 +70,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
     heading: "Review",
     items: [
+      { to: "/levels", label: "Levels" },
       { to: "/history", label: "History" },
       { to: "/replay", label: "Replay" }
     ]
@@ -75,6 +78,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
     heading: "Trading tools",
     items: [
+      { to: "/alerts", label: "Alerts & Setup" },
       { to: "/planner", label: "Risk Planner" },
       { to: "/tradingview", label: "TradingView Setup", staffOnly: true }
     ]

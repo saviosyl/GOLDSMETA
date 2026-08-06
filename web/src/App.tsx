@@ -22,6 +22,8 @@ import {
   TermsPage
 } from "./pages/legal/LegalPages";
 import { OverviewPage } from "./pages/OverviewPage";
+import { KeyLevelsPage } from "./pages/KeyLevelsPage";
+import { AlertsSetupPage } from "./pages/AlertsSetupPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
@@ -200,6 +202,8 @@ function ProtectedApp() {
           <Route path="/legal/privacy" element={<PrivacyPage />} />
           <Route path="/legal/risk" element={<RiskDisclosurePage />} />
           <Route path="/" element={<OverviewPage />} />
+          <Route path="/levels" element={<KeyLevelsPage />} />
+          <Route path="/alerts" element={<AlertsSetupPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
