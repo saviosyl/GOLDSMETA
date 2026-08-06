@@ -128,6 +128,9 @@ export function premiumStatusLabel(
   return "Monitoring";
 }
 
+/** Build stamp helper — forces a fresh hashed asset after CDN poison recoveries. */
+export const PREMIUM_STATUS_COPY_VERSION = "hold-v3";
+
 export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRONG" | "MINOR" {
   const s = strength.toUpperCase();
   if (s === "MAJOR" || s === "STRONG") return "STRONG";
