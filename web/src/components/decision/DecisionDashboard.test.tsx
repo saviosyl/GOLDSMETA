@@ -179,4 +179,34 @@ describe("DecisionDashboard", () => {
     expect(screen.getByTestId("premium-hero-status")).toHaveTextContent(/Forming|Active/i);
     expect(screen.queryByText(/Blocked/i)).not.toBeInTheDocument();
   });
+
+  it("shows BUY lean next to confidence while on HOLD", () => {
+    const plan = basePlan();
+    plan.action = "NO_TRADE";
+    plan.actionLabel = "NO TRADE";
+    plan.confidence = 94;
+    plan.directionBias = "BULLISH";
+    plan.tradePlan = {
+      ...plan.tradePlan,
+      direction: "NONE",
+      entryZone: "4270",
+      stopLoss: 4265,
+      tp1: 4280,
+      actionable: false
+    };
+    plan.geometryReasonCodes = ["INVALID_TARGET_ORDER", "WRONG_SIDE"];
+    plan.confirmation5m = {
+      state: "BREAKOUT_CONFIRMED",
+      label: "BREAKOUT CONFIRMED",
+      meaningful: true,
+      detail: "5M breakout"
+    };
+
+    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4270} />));
+
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("HOLD");
+    expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/94%\s*confidence\s*·\s*BUY lean/i);
+    expect(screen.getByTestId("hero-direction-lean")).toHaveTextContent(/Bullish lean/i);
+    expect(screen.queryByText(/Blocked/i)).not.toBeInTheDocument();
+  });
 });

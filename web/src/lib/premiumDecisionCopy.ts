@@ -93,6 +93,15 @@ export function premiumDecisionSubtitle(
         ? "Bearish plan active — review entry carefully"
         : state.nextRequiredCondition || "Bearish bias — review levels before any manual entry";
     case "HOLD":
+      if (state.nextRequiredCondition && !looksLikeReasonCode(state.nextRequiredCondition)) {
+        return state.nextRequiredCondition;
+      }
+      if (state.direction === "BUY") {
+        return "Bullish lean — stay flat until 15M and 5M agree.";
+      }
+      if (state.direction === "SELL") {
+        return "Bearish lean — stay flat until 15M and 5M agree.";
+      }
       return plainReason(state.reason) || "Stand aside until the setup is clear";
     case "NO TRADE":
       return "Stand aside until the setup is clear";
@@ -129,7 +138,7 @@ export function premiumStatusLabel(
 }
 
 /** Build stamp helper — forces a fresh hashed asset after CDN poison recoveries. */
-export const PREMIUM_STATUS_COPY_VERSION = "hold-v3";
+export const PREMIUM_STATUS_COPY_VERSION = "hold-lean-v4";
 
 export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRONG" | "MINOR" {
   const s = strength.toUpperCase();
