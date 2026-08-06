@@ -125,9 +125,11 @@ export function premiumStatusLabel(
     return "Monitoring";
   }
   if (chip === "HOLD") return "On hold";
-  // Keep STATUS soft — never surface the old "Blocked" label on the hero.
   return "Monitoring";
 }
+
+/** Build stamp helper — forces a fresh hashed asset after CDN poison recoveries. */
+export const PREMIUM_STATUS_COPY_VERSION = "hold-v3";
 
 export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRONG" | "MINOR" {
   const s = strength.toUpperCase();
