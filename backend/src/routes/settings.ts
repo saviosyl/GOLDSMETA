@@ -70,15 +70,21 @@ export const buildSettingsRouter = (store: GoldMetaStore): Router => {
         }
       }
     }
-
-    const patch: Partial<Omit<UserSettings, "userId" | "updatedAt">> = {
-      ...parsed.data,
-      notificationPreferences: parsed.data.notificationPreferences
+    const nextNotificationPreferences: NonNullable<UserSettings["notificationPreferences"]> =
+      parsed.data.notificationPreferences
         ? {
+            ...DEFAULT_NOTIFICATION_PREFERENCES,
             ...base.notificationPreferences,
             ...parsed.data.notificationPreferences
           }
-        : base.notificationPreferences,
+        : {
+            ...DEFAULT_NOTIFICATION_PREFERENCES,
+            ...base.notificationPreferences
+          };
+
+    const patch: Partial<Omit<UserSettings, "userId" | "updatedAt">> = {
+      ...parsed.data,
+      notificationPreferences: nextNotificationPreferences,
       manualRisk: nextManual,
       manualRiskLimitChangeLog: changeLog.slice(0, 100),
       liveForwardAckAt:
