@@ -10,6 +10,7 @@ import { deriveDecisionDashboardState } from "../../lib/decisionDashboardState";
 import { fmtPrice } from "../../lib/intradayFormat";
 import { sanitizePlanText } from "../../lib/planTextFormat";
 import {
+  PREMIUM_STATUS_COPY_VERSION,
   premiumDecisionChip,
   premiumDecisionSubtitle,
   premiumStatusLabel
@@ -139,6 +140,7 @@ export function DecisionDashboard({
       className={`gm-decision-dashboard gm-decision-premium tone-${state.tone}`}
       data-testid="todays-intraday-plan"
       data-state={state.mode}
+      data-copy-version={PREMIUM_STATUS_COPY_VERSION}
       aria-label={`Today's XAUUSD decision: ${chip}`}
     >
       <FeedStatusStrip health={marketFeedHealth} detailsHref="/alerts" />
