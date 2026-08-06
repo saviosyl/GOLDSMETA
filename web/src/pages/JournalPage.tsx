@@ -75,9 +75,26 @@ export function JournalPage() {
     }
   };
 
+  const wins = entries.filter((e) => /win|profit|followed/i.test(e.tags?.join(" ") ?? "")).length;
+  const winRate = entries.length ? Math.round((wins / entries.length) * 100) : 0;
+
   return (
-    <div data-testid="journal-page" className="gm-journal-page">
+    <div data-testid="journal-page" className="gm-journal-page gm-premium-v2">
       <PageHeader title="Journal" freshness="Review workspace" />
+      <div className="gm-insight-strip" style={{ marginBottom: 16 }} data-testid="journal-overview">
+        <div>
+          <span className="gm-label">Entries</span>
+          <strong>{entries.length}</strong>
+        </div>
+        <div>
+          <span className="gm-label">Win rate</span>
+          <strong>{entries.length ? `${winRate}%` : "—"}</strong>
+        </div>
+        <div>
+          <span className="gm-label">Filter</span>
+          <strong>{dirFilter}</strong>
+        </div>
+      </div>
       <p className="gm-meta">
         Record outcomes and lessons. Notes never alter engine outcomes.{" "}
         <Link to="/history">Open read-only History archive</Link>.

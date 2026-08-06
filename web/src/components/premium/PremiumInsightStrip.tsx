@@ -1,3 +1,5 @@
+import { Activity, CalendarDays, TrendingUp } from "lucide-react";
+
 type Props = {
   trendBias?: string | null;
   volatility?: string | null;
@@ -15,18 +17,21 @@ export function PremiumInsightStrip({ trendBias, volatility, newsImpact }: Props
   const news = pretty(newsImpact, "Low");
 
   return (
-    <div className="gm-premium-insight-strip" data-testid="premium-insight-strip">
+    <div className="gm-insight-strip" data-testid="premium-insight-strip">
       <div>
+        <TrendingUp aria-hidden />
         <span className="gm-label">Trend Bias</span>
         <strong data-testid="insight-trend">{bias}</strong>
       </div>
       <div>
+        <Activity aria-hidden />
         <span className="gm-label">Volatility</span>
         <strong data-testid="insight-volatility" className="tone-amber">
           {vol}
         </strong>
       </div>
       <div>
+        <CalendarDays aria-hidden />
         <span className="gm-label">News Impact</span>
         <strong data-testid="insight-news" className="tone-green">
           {news}

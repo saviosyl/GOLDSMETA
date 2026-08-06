@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import type { DecisionDashboardState } from "../../lib/decisionDashboardState";
 import { fmtPrice } from "../../lib/intradayFormat";
 import { premiumDecisionChip } from "../../lib/premiumDecisionCopy";
@@ -15,7 +16,7 @@ export function PremiumPlanCard({ plan, state, updatedLabel }: Props) {
   const instruction =
     chip === "WAIT"
       ? "GoldMeta is watching for a valid setup"
-      : plan.oneSentence || state.nextAction || state.planState;
+      : sanitize(plan.oneSentence) || state.nextAction || state.planState;
   const nextTarget = state.levels.tp1 != null ? fmtPrice(state.levels.tp1) : "—";
   const invalidation =
     state.levels.stop != null
@@ -28,15 +29,15 @@ export function PremiumPlanCard({ plan, state, updatedLabel }: Props) {
     : state.confirmationLabel || "Pending";
 
   return (
-    <article className="gm-premium-plan-card" data-testid="premium-plan-card">
+    <article className="gm-plan-summary-card" data-testid="premium-plan-card">
       <div className="gm-premium-plan-card-head">
-        <span className={`gm-premium-chip tone-${state.tone}`} data-testid="premium-plan-chip">
+        <span className={`gm-status-badge tone-${state.tone}`} data-testid="premium-plan-chip">
           {chip}
         </span>
         {updatedLabel ? <span className="gm-meta">Updated {updatedLabel}</span> : null}
       </div>
       <h3 data-testid="premium-plan-instruction">{instruction}</h3>
-      <div className="gm-premium-plan-grid">
+      <div className="gm-plan-summary-grid">
         <div>
           <span className="gm-label">Next Target</span>
           <strong className="tone-green" data-testid="premium-plan-target">
@@ -49,16 +50,22 @@ export function PremiumPlanCard({ plan, state, updatedLabel }: Props) {
             {invalidation}
           </strong>
         </div>
-        <div className="gm-premium-plan-wide">
+        <div>
           <span className="gm-label">Confirmation</span>
           <strong data-testid="premium-plan-confirmation">{confirmation}</strong>
         </div>
       </div>
-      <div className="gm-premium-plan-foot">
+      <div className="gm-plan-summary-foot">
+        <span className="gm-meta">{updatedLabel ? `Updated ${updatedLabel}` : "Manual plan only"}</span>
         <Link className="gm-linkish" to="/levels" data-testid="premium-view-full-plan">
-          View full plan →
+          View full plan <ChevronRight size={14} aria-hidden />
         </Link>
       </div>
     </article>
   );
+}
+
+function sanitize(value: string | null | undefined): string {
+  if (!value) return "";
+  return value.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
 }

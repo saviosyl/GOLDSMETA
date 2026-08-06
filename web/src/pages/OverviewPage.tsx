@@ -37,10 +37,10 @@ import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
 import { DecisionDashboard } from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
-import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumInsightStrip } from "../components/premium/PremiumInsightStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
+import { useShellQuote } from "../lib/quoteContext";
 import { resolveDisplayAction } from "../lib/planDisplay";
 import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 import {
@@ -217,6 +217,7 @@ function PlanSkeleton() {
 /** Compact interactive intraday research cockpit — Mobile Plan V2. */
 export function OverviewPage() {
   const { api, user } = useAuth();
+  const { setQuote } = useShellQuote();
   const isDesktop = useIsDesktop();
   const [structureOpen, setStructureOpen] = useState(false);
   const [researchTab, setResearchTab] = useState<ResearchTab>("plan");
@@ -357,6 +358,17 @@ export function OverviewPage() {
     intradayPlan?.session ?? briefing?.session ?? decision?.currentSession
   );
   const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+
+  useEffect(() => {
+    setQuote({
+      price: livePrice,
+      updatedLabel: compactTime,
+      sessionLabel,
+      fresh: source === "live" && livePrice != null
+    });
+    return () => setQuote(null);
+  }, [livePrice, compactTime, sessionLabel, source, setQuote]);
+
   const liveRangeOnly = marketStructureMode === "LIVE_RANGE_ONLY";
   const poc = liveRangeOnly
     ? null
@@ -443,7 +455,7 @@ export function OverviewPage() {
   return (
     <div
       data-testid="overview-page"
-      className="gm-dashboard gm-cockpit gm-plan-page gm-plan-v2-page gm-premium-home"
+      className="gm-dashboard gm-cockpit gm-plan-page gm-plan-v2-page gm-premium-home gm-premium-v2"
     >
       <div
         className="gm-page-header-row gm-plan-header-compact"
@@ -463,13 +475,6 @@ export function OverviewPage() {
         </button>
       </div>
 
-      <PremiumMarketStrip
-        livePrice={livePrice}
-        updatedLabel={compactTime}
-        sessionLabel={sessionLabel}
-        feedHealth={marketFeedHealth}
-        fresh={source === "live"}
-      />
       <p className="gm-meta gm-sr-only" data-testid="dashboard-last-refresh">
         Last refresh:{" "}
         {lastSuccessAt
@@ -530,7 +535,7 @@ export function OverviewPage() {
             apiError={Boolean(errorDetail) && !intradayPlan}
           />
 
-          <div className="gm-premium-detail-tabs" data-testid="premium-detail-tabs" role="tablist">
+          <div className="gm-segmented-tabs" data-testid="premium-detail-tabs" role="tablist">
             {tabItems.map((tab) => (
               <button
                 key={tab.id}
@@ -553,6 +558,14 @@ export function OverviewPage() {
                 state={decisionState}
                 updatedLabel={compactTime}
               />
+              <div className="gm-confirm-strip" data-testid="confirm-5m-strip">
+                <span>5M Confirmation</span>
+                <strong>
+                  {decisionState.confirmationPassed
+                    ? "Confirmed"
+                    : decisionState.confirmationLabel || "Pending"}
+                </strong>
+              </div>
               <SetupChecklist plan={intradayPlan} />
               {!hideTradeActions && (
                 <>

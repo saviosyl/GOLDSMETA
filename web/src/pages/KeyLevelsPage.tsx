@@ -1,45 +1,53 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronLeft, Info, Lightbulb, Shield, Target } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { applyStablePlanToIntraday } from "../lib/sessionPlanBridge";
 import { fmtPrice } from "../lib/intradayFormat";
 import { strengthBadgeLabel } from "../lib/premiumDecisionCopy";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
 import { formatCompactLocalTime, loadTimezonePreference } from "../lib/timezone";
+import { useShellQuote } from "../lib/quoteContext";
 import type { IntradayPlan, ImportantLevel } from "../types/intradayPlan";
 import type { Decision } from "../types/models";
 import { PremiumLevelMap } from "../components/premium/PremiumLevelMap";
 import { FriendlyErrorBanner } from "../components/FriendlyErrorBanner";
 import { describeClientError } from "../lib/errors";
 
-function LevelRows({ title, tone, levels }: { title: string; tone: "up" | "down"; levels: ImportantLevel[] }) {
+function LevelRows({
+  title,
+  tone,
+  levels
+}: {
+  title: string;
+  tone: "up" | "down";
+  levels: ImportantLevel[];
+}) {
   return (
-    <section className={`gm-premium-levels-block tone-${tone}`} data-testid={`levels-${tone}`}>
+    <section className={`gm-levels-block tone-${tone}`} data-testid={`levels-${tone}`}>
       <h2>
-        <span aria-hidden>{tone === "up" ? "↑" : "↓"}</span> {title}
+        {tone === "up" ? "↑ Upside Levels" : "↓ Downside Levels"}
       </h2>
       {levels.length === 0 ? (
         <p className="gm-meta">No {title.toLowerCase()} published yet.</p>
       ) : (
-        <ul>
-          {levels.map((level) => {
-            const badge = strengthBadgeLabel(level.strength);
-            return (
-              <li key={level.id}>
-                <div className="gm-premium-level-row-main">
-                  <strong>{fmtPrice(level.price)}</strong>
-                  <span className={`gm-premium-strength badge-${badge.toLowerCase()}`}>{badge}</span>
-                </div>
-                <p className="gm-premium-level-name">
-                  {level.shortMeaning || level.kind.replace(/_/g, " ")}
-                </p>
-                <p className="gm-meta">
-                  {level.simpleExplanation || level.reasons[0]?.explanation || "Key reference level."}
-                </p>
-              </li>
-            );
-          })}
-        </ul>
+        levels.map((level) => {
+          const badge = strengthBadgeLabel(level.strength);
+          return (
+            <article key={level.id} className="gm-level-row">
+              <strong>{fmtPrice(level.price)}</strong>
+              <span className={`gm-strength badge-${badge.toLowerCase()}`}>{badge}</span>
+              <p className="gm-level-name">
+                {level.shortMeaning || level.kind.replace(/_/g, " ")}
+              </p>
+              <p className="gm-meta">
+                {level.simpleExplanation ||
+                  level.reasons[0]?.explanation ||
+                  "Key reference level."}
+              </p>
+            </article>
+          );
+        })
       )}
     </section>
   );
@@ -47,11 +55,14 @@ function LevelRows({ title, tone, levels }: { title: string; tone: "up" | "down"
 
 export function KeyLevelsPage() {
   const { api } = useAuth();
+  const { setQuote } = useShellQuote();
   const tzPref = loadTimezonePreference();
   const [plan, setPlan] = useState<IntradayPlan | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [mode, setMode] = useState<string | null>(null);
-  const [errorDetail, setErrorDetail] = useState<ReturnType<typeof describeClientError> | null>(null);
+  const [errorDetail, setErrorDetail] = useState<ReturnType<typeof describeClientError> | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -85,28 +96,43 @@ export function KeyLevelsPage() {
     ? deriveDecisionDashboardState({ plan, marketStructureMode: mode, livePrice })
     : null;
 
+  useEffect(() => {
+    setQuote({
+      price: livePrice,
+      updatedLabel: updated,
+      fresh: livePrice != null
+    });
+    return () => setQuote(null);
+  }, [livePrice, updated, setQuote]);
+
   return (
-    <div className="gm-premium-levels-page" data-testid="key-levels-page">
-      <header className="gm-premium-page-hero" data-testid="levels-page-hero">
+    <div className="gm-premium-levels-page gm-premium-v2" data-testid="key-levels-page">
+      <header className="gm-page-hero-navy" data-testid="levels-page-hero">
         <div>
-          <span className="gm-label">XAUUSD</span>
-          <strong data-testid="levels-live-price">{livePrice != null ? fmtPrice(livePrice) : "—"}</strong>
+          <span className="gm-label" style={{ color: "rgba(255,255,255,0.65)" }}>
+            XAUUSD
+          </span>
+          <strong data-testid="levels-live-price" style={{ fontSize: "1.6rem", fontWeight: 800 }}>
+            {livePrice != null ? fmtPrice(livePrice) : "—"}
+          </strong>
         </div>
-        <div className="gm-premium-page-hero-meta">
-          <span className="gm-premium-fresh is-fresh">
-            <span className="gm-premium-dot" aria-hidden />
+        <div>
+          <span className="gm-premium-fresh is-fresh" style={{ color: "rgba(255,255,255,0.85)" }}>
+            <span className="gm-fresh-dot is-fresh" aria-hidden />
             Updated {updated}
           </span>
         </div>
       </header>
 
-      <div className="gm-premium-page-toolbar">
+      <div className="gm-page-toolbar">
         <Link to="/" className="gm-linkish" data-testid="levels-back">
-          ← Plan
+          <ChevronLeft size={16} aria-hidden /> Plan
         </Link>
         <h1>All Key Levels</h1>
         <details className="gm-premium-why-levels">
-          <summary>Why these levels?</summary>
+          <summary>
+            <Info size={14} aria-hidden /> Why these levels?
+          </summary>
           <p>
             These are structured reference levels from the GoldMeta plan — not automatic entry
             orders. Use them with the current decision on Today&apos;s Plan.
@@ -115,7 +141,7 @@ export function KeyLevelsPage() {
       </div>
 
       {errorDetail && <FriendlyErrorBanner detail={errorDetail} onRetry={() => void load()} />}
-      {loading && !plan && <p className="gm-meta">Loading levels…</p>}
+      {loading && !plan && <div className="gm-skeleton" style={{ height: 180 }} />}
 
       {plan && (
         <>
@@ -124,14 +150,14 @@ export function KeyLevelsPage() {
           <PremiumLevelMap livePrice={livePrice} upside={upside} downside={downside} />
 
           {state && (
-            <section className="gm-premium-trade-summary" data-testid="levels-trade-summary">
+            <section className="gm-card-v2" data-testid="levels-trade-summary">
               <div className="gm-premium-trade-summary-head">
-                <h2>Trade Plan Summary</h2>
+                <h2 style={{ margin: 0, fontWeight: 800 }}>Trade Plan Summary</h2>
                 <Link to="/" className="gm-linkish">
                   View full plan
                 </Link>
               </div>
-              <div className="gm-premium-trade-grid">
+              <div className="gm-plan-summary-grid" style={{ marginTop: 12 }}>
                 <div>
                   <span className="gm-label">Entry Zone</span>
                   <strong>{state.levels.entry ?? "—"}</strong>
@@ -156,7 +182,7 @@ export function KeyLevelsPage() {
                 </div>
                 <div>
                   <span className="gm-label">Plan Status</span>
-                  <strong className={`gm-premium-chip tone-${state.tone}`}>
+                  <strong className={`gm-status-badge tone-${state.tone}`}>
                     {state.mode === "WAIT" ? "WAIT" : state.primaryDecision}
                   </strong>
                 </div>
@@ -164,12 +190,21 @@ export function KeyLevelsPage() {
             </section>
           )}
 
-          <section className="gm-premium-howto" data-testid="levels-howto">
-            <h2>How to use this</h2>
-            <ul>
-              <li>Treat upside levels as resistance / targets above price.</li>
-              <li>Treat downside levels as support / invalidation below price.</li>
-              <li>Only act when Today&apos;s Plan shows a valid BUY or SELL setup.</li>
+          <section className="gm-card-v2" data-testid="levels-howto" style={{ marginTop: 14 }}>
+            <h2 style={{ margin: "0 0 10px", fontWeight: 800 }}>How to use this</h2>
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+              <li style={{ display: "flex", gap: 10 }}>
+                <Target size={18} color="var(--gold-600)" aria-hidden />
+                Use levels to plan entries and exits, not to predict direction.
+              </li>
+              <li style={{ display: "flex", gap: 10 }}>
+                <Shield size={18} color="var(--gold-600)" aria-hidden />
+                Respect the stop loss to manage risk.
+              </li>
+              <li style={{ display: "flex", gap: 10 }}>
+                <Lightbulb size={18} color="var(--gold-600)" aria-hidden />
+                Focus on price reaction and confirmation.
+              </li>
             </ul>
           </section>
         </>

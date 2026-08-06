@@ -1,3 +1,9 @@
+import {
+  CircleHelp,
+  RefreshCw,
+  Bell,
+  Timer
+} from "lucide-react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
 import { deriveDecisionDashboardState } from "../../lib/decisionDashboardState";
@@ -9,7 +15,7 @@ import {
   premiumStatusLabel
 } from "../../lib/premiumDecisionCopy";
 import { NextPlanUpdate } from "../intraday/NextPlanUpdate";
-import { MarketFeedStatus } from "./MarketFeedStatus";
+import { FeedStatusStrip } from "../gm/FeedStatusStrip";
 import { PhoneAlertsControl } from "./PhoneAlertsControl";
 
 type Props = {
@@ -59,31 +65,36 @@ function WhyWaiting({
   state: ReturnType<typeof deriveDecisionDashboardState>;
 }) {
   return (
-    <details className="gm-wait-reason" data-testid="why-waiting" id="why-waiting">
-      <summary>Why waiting?</summary>
-      <p data-testid="wait-monitoring-copy">
-        GoldMeta is monitoring XAUUSD. You can be notified when a valid opportunity becomes ready.
-      </p>
-      <p>{state.reason || "No valid trade plan yet."}</p>
-      <p className="gm-meta" data-testid="analysis-timing-disclaimer">
-        Next check is the next analysis review, not a guaranteed signal time.
-      </p>
-      <p className="gm-meta" data-testid="no-valid-bias-note">
-        Market bias and support/resistance are context only — not an entry signal.
-      </p>
-      {state.technicalDetails.length > 0 && (
-        <details>
-          <summary>Technical details</summary>
-          <ul>
-            {state.technicalDetails.map((detail, idx) => (
-              <li key={`${detail}-${idx}`}>{detail}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {sanitizePlanText(plan.disclaimer) && (
-        <p className="gm-meta">{sanitizePlanText(plan.disclaimer)}</p>
-      )}
+    <details className="gm-wait-reason gm-accordion-card" data-testid="why-waiting" id="why-waiting">
+      <summary>
+        <CircleHelp aria-hidden />
+        Why waiting?
+      </summary>
+      <div className="gm-collapse-body">
+        <p data-testid="wait-monitoring-copy">
+          GoldMeta is monitoring XAUUSD. You can be notified when a valid opportunity becomes ready.
+        </p>
+        <p>{state.reason || "No valid trade plan yet."}</p>
+        <p className="gm-meta" data-testid="analysis-timing-disclaimer">
+          Next check is the next analysis review, not a guaranteed signal time.
+        </p>
+        <p className="gm-meta" data-testid="no-valid-bias-note">
+          Market bias and support/resistance are context only — not an entry signal.
+        </p>
+        {state.technicalDetails.length > 0 && (
+          <details>
+            <summary>Technical details</summary>
+            <ul>
+              {state.technicalDetails.map((detail, idx) => (
+                <li key={`${detail}-${idx}`}>{detail}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {sanitizePlanText(plan.disclaimer) && (
+          <p className="gm-meta">{sanitizePlanText(plan.disclaimer)}</p>
+        )}
+      </div>
     </details>
   );
 }
@@ -104,7 +115,10 @@ export function DecisionDashboard({
   const isReady = state.mode === "BUY_READY" || state.mode === "SELL_READY";
   const isPotential = state.mode === "POTENTIAL_BUY" || state.mode === "POTENTIAL_SELL";
   const isNoTrade = state.mode === "NO_TRADE";
-  const showWhy = isWaiting || (isNoTrade && chip !== "PREPARE");
+  const showWhy = isWaiting || (isNoTrade && chip !== "PREPARE") || chip === "PREPARE";
+  const heroTone =
+    chip === "PREPARE" ? "prepare" : chip === "BUY" ? "buy" : chip === "SELL" ? "sell" : state.tone;
+  const feedFresh = marketFeedHealth?.status === "green";
 
   return (
     <section
@@ -113,25 +127,25 @@ export function DecisionDashboard({
       data-state={state.mode}
       aria-label={`Today's XAUUSD decision: ${chip}`}
     >
-      <div className="gm-premium-hero" data-testid="intraday-action-card" data-tone={state.tone}>
-        <div className="gm-premium-hero-top">
-          <span className="gm-premium-hero-kicker">XAUUSD Decision</span>
-          <span className="gm-premium-hero-icon" aria-hidden>
-            ⏱
-          </span>
+      <FeedStatusStrip health={marketFeedHealth} detailsHref="/alerts" />
+
+      <div
+        className="gm-decision-hero-v2"
+        data-testid="intraday-action-card"
+        data-tone={heroTone}
+      >
+        <div className="gm-hero-top">
+          <span className="gm-hero-kicker">XAUUSD Decision</span>
+          <Timer className="gm-hero-icon" aria-hidden strokeWidth={1.75} />
         </div>
         <h1 data-testid="intraday-action-label">
           <span data-testid="intraday-action-short">{chip}</span>
         </h1>
-        <p className="gm-decision-state" data-testid="decision-plan-state">
+        <p className="gm-hero-instruction" data-testid="decision-plan-state">
           {isWaiting ? "No valid plan yet" : subtitle}
         </p>
-        {/* Keep WAIT-compatible test surface when prepare maps from NO_TRADE */}
-        <span className="gm-sr-only" data-testid="premium-decision-chip">
-          {chip}
-        </span>
 
-        <div className="gm-premium-hero-metrics">
+        <div className="gm-hero-metrics">
           <div>
             <span className="gm-label">Next 15M Check</span>
             <div className="gm-decision-next-row">
@@ -148,14 +162,42 @@ export function DecisionDashboard({
           </div>
           <div>
             <span className="gm-label">Status</span>
-            <strong className="gm-premium-status-live" data-testid="premium-hero-status">
-              <span className="gm-premium-dot" aria-hidden />
+            <strong
+              className={feedFresh ? "gm-hero-status" : undefined}
+              data-testid="premium-hero-status"
+            >
+              {feedFresh ? <span className="gm-fresh-dot is-fresh" aria-hidden /> : null}
               {statusLabel}
             </strong>
           </div>
         </div>
 
-        <p className="gm-premium-hero-foot">GoldMeta is monitoring XAUUSD</p>
+        <p className="gm-hero-foot">GoldMeta is monitoring XAUUSD</p>
+      </div>
+
+      <div className="gm-action-row" data-testid="premium-quick-actions">
+        <button
+          type="button"
+          className="gm-action-btn"
+          onClick={onRefresh}
+          disabled={refreshing}
+          data-testid="premium-refresh"
+        >
+          <RefreshCw aria-hidden />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
+          <Bell aria-hidden />
+          Enable alerts
+        </a>
+        <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
+          <CircleHelp aria-hidden />
+          Explain
+        </a>
+        <a className="gm-action-btn gm-why-wait" href="#why-waiting">
+          <CircleHelp aria-hidden />
+          Why wait?
+        </a>
       </div>
 
       {!isWaiting && !isNoTrade && <LevelGrid state={state} />}
@@ -187,42 +229,14 @@ export function DecisionDashboard({
         </p>
       )}
 
-      <div className="gm-premium-quick-actions" data-testid="premium-quick-actions">
-        <button
-          type="button"
-          className="gm-premium-action-btn"
-          onClick={onRefresh}
-          disabled={refreshing}
-          data-testid="premium-refresh"
-        >
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-        <a className="gm-premium-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
-          Enable alerts
-        </a>
-        <a className="gm-premium-action-btn" href="#why-waiting" data-testid="premium-explain-link">
-          Explain
-        </a>
-      </div>
-
       <div className="gm-next-action gm-next-action-compact" data-testid="decision-next-action">
         <span className="gm-label">Next</span>
         <strong>{state.nextAction}</strong>
       </div>
 
-      <MarketFeedStatus health={marketFeedHealth} compact />
       <PhoneAlertsControl compact />
 
       {showWhy && <WhyWaiting plan={plan} state={state} />}
-      {chip === "PREPARE" && (
-        <details className="gm-wait-reason" data-testid="why-waiting" id="why-waiting">
-          <summary>Explain</summary>
-          <p data-testid="wait-monitoring-copy">
-            GoldMeta is monitoring XAUUSD. You can be notified when a valid opportunity becomes ready.
-          </p>
-          <p>{sanitizePlanText(plan.oneSentence) || subtitle}</p>
-        </details>
-      )}
 
       <p className="gm-decision-safety" data-testid="dashboard-safety">
         Manual only · Review your risk · AutoTrade OFF
@@ -237,14 +251,13 @@ export function DecisionDashboard({
 export function DecisionDashboardSkeleton() {
   return (
     <div
-      className="gm-decision-dashboard gm-decision-dashboard-skeleton gm-decision-premium"
+      className="gm-decision-dashboard gm-decision-dashboard-skeleton"
       data-testid="decision-dashboard-skeleton"
       aria-busy="true"
-      aria-live="polite"
     >
-      <div className="gm-skel-block gm-skel-line" />
-      <div className="gm-skel-block gm-skel-bar" />
-      <div className="gm-skel-block gm-skel-card" />
+      <div className="gm-skeleton" style={{ height: 48, marginBottom: 12 }} />
+      <div className="gm-skeleton" style={{ height: 220, marginBottom: 12 }} />
+      <div className="gm-skeleton" style={{ height: 48 }} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Bell, X } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import type { InAppNotification, NotificationEventGroup, NotificationPreferences } from "../../types/models";
 
@@ -138,13 +139,13 @@ export function NotificationCentre() {
     <div className="gm-notification-centre" data-testid="notification-centre">
       <button
         type="button"
-        className="gm-notification-bell"
+        className="gm-icon-btn gm-notification-bell"
         aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
         aria-expanded={open}
         aria-controls="gm-notification-drawer"
         onClick={() => setOpen((v) => !v)}
       >
-        <span aria-hidden="true">Bell</span>
+        <Bell size={18} aria-hidden strokeWidth={2} />
         {unread > 0 && <span className="gm-notification-count">{unread}</span>}
       </button>
 
@@ -166,6 +167,7 @@ export function NotificationCentre() {
             data-testid="notification-drawer"
             ref={panelRef}
           >
+            <div className="gm-notification-grab" aria-hidden />
             <div className="gm-notification-drawer-head">
               <div>
                 <h2>Notifications</h2>
@@ -183,12 +185,12 @@ export function NotificationCentre() {
                 <button
                   ref={closeRef}
                   type="button"
-                  className="gm-drawer-close-btn"
+                  className="gm-icon-btn gm-drawer-close-btn"
                   data-testid="notification-close"
                   aria-label="Close notifications"
                   onClick={() => setOpen(false)}
                 >
-                  Close
+                  <X size={18} aria-hidden />
                 </button>
               </div>
             </div>

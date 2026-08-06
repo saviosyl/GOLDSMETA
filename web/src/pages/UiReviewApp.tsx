@@ -20,6 +20,7 @@ import { TradingViewSetupPage } from "./TradingViewSetupPage";
 import { TradingViewTemplateAdminPage } from "./admin/TradingViewTemplateAdminPage";
 import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
+import { QuoteProvider } from "../lib/quoteContext";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
 import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
 import { ApiError } from "../types/models";
@@ -1390,6 +1391,7 @@ export default function UiReviewApp() {
 
   return (
     <ReviewAuthProvider value={value}>
+      <QuoteProvider>
       <div data-testid="ui-review-shell" data-review-mode="1">
         <AppShell linkPrefix="/ui-review">
           <Routes>
@@ -1438,6 +1440,7 @@ export default function UiReviewApp() {
           </Routes>
         </AppShell>
       </div>
+      </QuoteProvider>
     </ReviewAuthProvider>
   );
 }

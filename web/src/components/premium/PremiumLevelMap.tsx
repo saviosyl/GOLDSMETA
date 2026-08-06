@@ -13,31 +13,31 @@ export function PremiumLevelMap({ livePrice, upside, downside }: Props) {
   const down = downside.slice(0, 3);
 
   return (
-    <section className="gm-premium-level-map" data-testid="premium-level-map" aria-label="Level map">
+    <section className="gm-level-map-v2" data-testid="premium-level-map" aria-label="Level map">
       <h3>Level Map</h3>
-      <div className="gm-premium-level-map-rail">
+      <div className="gm-level-map-rail">
         {up.map((level) => (
-          <div key={level.id} className="gm-premium-map-row upside">
-            <span className="gm-premium-map-dot upside" aria-hidden />
+          <div key={level.id} className="gm-map-row upside">
+            <span className="gm-map-dot upside" aria-hidden />
             <div>
               <strong>{fmtPrice(level.price)}</strong>
-              <span>
+              <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.75 }}>
                 {level.shortMeaning || level.kind.replace(/_/g, " ")} ·{" "}
                 {strengthBadgeLabel(level.strength)}
               </span>
             </div>
           </div>
         ))}
-        <div className="gm-premium-map-current" data-testid="premium-map-current">
-          <span className="gm-label">Current price</span>
+        <div className="gm-map-current" data-testid="premium-map-current">
+          <span>CURRENT PRICE</span>
           <strong>{livePrice != null ? fmtPrice(livePrice) : "—"}</strong>
         </div>
         {down.map((level) => (
-          <div key={level.id} className="gm-premium-map-row downside">
-            <span className="gm-premium-map-dot downside" aria-hidden />
+          <div key={level.id} className="gm-map-row downside">
+            <span className="gm-map-dot downside" aria-hidden />
             <div>
               <strong>{fmtPrice(level.price)}</strong>
-              <span>
+              <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.75 }}>
                 {level.shortMeaning || level.kind.replace(/_/g, " ")} ·{" "}
                 {strengthBadgeLabel(level.strength)}
               </span>

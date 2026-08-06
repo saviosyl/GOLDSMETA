@@ -107,7 +107,7 @@ describe("AppShell navigation", () => {
     expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Journal").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("More").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/More/i).length).toBeGreaterThan(0);
   });
 
   it("opens More sheet with secondary destinations", async () => {
@@ -122,7 +122,7 @@ describe("AppShell navigation", () => {
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
   });
 });
@@ -183,6 +183,6 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
   });
 });

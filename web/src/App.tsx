@@ -1,6 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { QuoteProvider } from "./lib/quoteContext";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { AppShell } from "./components/layout/AppShell";
 import { PublicPageShell } from "./components/layout/PublicPageShell";
@@ -190,6 +191,7 @@ function ProtectedApp() {
 
   return (
     <AccountAccessGate>
+      <QuoteProvider>
       <AppShell>
         <Routes>
           <Route path="/ui-review/*" element={<UiReviewGate />} />
@@ -314,6 +316,7 @@ function ProtectedApp() {
           />
         </Routes>
       </AppShell>
+      </QuoteProvider>
     </AccountAccessGate>
   );
 }
