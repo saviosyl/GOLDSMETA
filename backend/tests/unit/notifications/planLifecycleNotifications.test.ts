@@ -255,7 +255,10 @@ describe("plan lifecycle notifications", () => {
 
   it("enforces ENTRY_ZONE_APPROACHING cooldown across different source events", async () => {
     await enable("ENTRY_ZONE_APPROACHING");
-    const now = Date.now();
+    const now =
+      Math.floor(Date.now() / __constantsForTests.APPROACHING_COOLDOWN_MS) *
+        __constantsForTests.APPROACHING_COOLDOWN_MS +
+      1_000;
     const previous = plan({
       planMutation: "PLAN_UNCHANGED",
       planStabilityLabel: "PLAN UNCHANGED",
