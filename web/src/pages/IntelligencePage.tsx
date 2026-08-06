@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Clock3, TrendingDown, TrendingUp } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { GlossaryTerm } from "../components/v5/GlossaryTerm";
 import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
@@ -10,6 +11,9 @@ import {
   SectionCard,
   StatusBadge
 } from "../components/ui/primitives";
+import { fmtPrice } from "../lib/intradayFormat";
+import { formatSession } from "../lib/plainLanguage";
+import type { Decision } from "../types/models";
 
 type Answer = {
   question?: string;
@@ -40,6 +44,7 @@ export function IntelligencePage() {
   const [busy, setBusy] = useState(false);
   const [coach, setCoach] = useState<Record<string, unknown> | null>(null);
   const [personal, setPersonal] = useState<Record<string, unknown> | null>(null);
+  const [decision, setDecision] = useState<Decision | null>(null);
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
 
   useEffect(() => {
@@ -61,16 +66,37 @@ export function IntelligencePage() {
     const ac = new AbortController();
     void (async () => {
       try {
-        const [c, p] = await Promise.all([api.v5WeeklyCoach("LIVE"), api.v5Personal()]);
+        const [c, p, pack] = await Promise.all([
+          api.v5WeeklyCoach("LIVE"),
+          api.v5Personal(),
+          typeof api.latestDecisionPack === "function"
+            ? api.latestDecisionPack().catch(() => null)
+            : Promise.resolve(null)
+        ]);
         if (ac.signal.aborted) return;
         setCoach(c);
         setPersonal(p);
+        setDecision((pack as { decision?: Decision } | null)?.decision ?? null);
       } catch {
         /* non-fatal */
       }
     })();
     return () => ac.abort();
   }, [api]);
+
+  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const openPrice = decision?.ohlcv?.open ?? null;
+  const changePts =
+    livePrice != null && openPrice != null && Number.isFinite(livePrice) && Number.isFinite(openPrice)
+      ? livePrice - openPrice
+      : null;
+  const changePct =
+    changePts != null && openPrice != null && openPrice !== 0
+      ? (changePts / openPrice) * 100
+      : null;
+  const sessionLabel = formatSession(decision?.currentSession);
+  const changeTone =
+    changePts == null ? "" : changePts > 0 ? "tone-green" : changePts < 0 ? "tone-red" : "";
 
   const onAsk = async (e: FormEvent) => {
     e.preventDefault();
@@ -89,7 +115,43 @@ export function IntelligencePage() {
   return (
     <div className="v5-page gm-markets-page gm-premium-v2" data-testid="intelligence-page">
       <PageHeader title="Markets" environment="LIVE" freshness={online ? "Online" : "Offline"} />
-      <SectionCard title="Market in plain English">
+
+      <header className="gm-page-hero-navy gm-markets-summary" data-testid="markets-xauusd-summary">
+        <div>
+          <span className="gm-label" style={{ color: "rgba(255,255,255,0.65)" }}>
+            XAUUSD
+          </span>
+          <strong data-testid="markets-live-price" style={{ fontSize: "1.6rem", fontWeight: 800 }}>
+            {livePrice != null ? fmtPrice(livePrice) : "—"}
+          </strong>
+          <p
+            className={`gm-markets-change ${changeTone}`.trim()}
+            data-testid="markets-price-change"
+            style={{ margin: "6px 0 0", fontWeight: 700 }}
+          >
+            {changePts != null && changePct != null ? (
+              <>
+                {changePts > 0 ? (
+                  <TrendingUp size={16} aria-hidden />
+                ) : changePts < 0 ? (
+                  <TrendingDown size={16} aria-hidden />
+                ) : null}{" "}
+                {changePts > 0 ? "+" : ""}
+                {changePts.toFixed(2)} ({changePct > 0 ? "+" : ""}
+                {changePct.toFixed(2)}%)
+              </>
+            ) : (
+              "Change unavailable"
+            )}
+          </p>
+        </div>
+        <div className="gm-markets-session" data-testid="markets-session">
+          <Clock3 size={16} aria-hidden />
+          <span>{sessionLabel}</span>
+        </div>
+      </header>
+
+      <SectionCard title="Market in plain English" className="gm-card-v2">
         <p data-testid="markets-plain-english" style={{ marginTop: 0 }}>
           {answer?.answer
             ? answer.answer

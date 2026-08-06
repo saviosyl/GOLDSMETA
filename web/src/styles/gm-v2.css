@@ -1290,3 +1290,134 @@ body.gm-drawer-open {
     padding: 8px 6px;
   }
 }
+
+/* Markets summary */
+.gm-markets-summary .gm-markets-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+}
+
+.gm-markets-summary .gm-markets-change.tone-green {
+  color: #86efac !important;
+}
+
+.gm-markets-summary .gm-markets-change.tone-red {
+  color: #fca5a5 !important;
+}
+
+.gm-markets-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Risk planner layout */
+.gm-risk-planner-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 900px) {
+  .gm-risk-planner-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    align-items: start;
+  }
+}
+
+.gm-risk-inputs {
+  margin: 0;
+}
+
+.gm-risk-results-navy {
+  background: linear-gradient(160deg, var(--navy-900), var(--navy-800));
+  color: #fff;
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-risk-results-navy .gm-section-title {
+  color: #fff;
+  margin: 0 0 var(--space-3);
+}
+
+.gm-risk-results-navy .label {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.gm-risk-results-navy .value {
+  color: #fff;
+  font-weight: 800;
+}
+
+.gm-risk-results-navy .estimate-note {
+  color: rgba(255, 255, 255, 0.7);
+  margin: var(--space-3) 0 0;
+  font-size: 0.85rem;
+}
+
+.gm-risk-results-navy .danger-text {
+  color: #fca5a5;
+}
+
+.gm-help-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Settings more nav */
+.gm-settings-more-nav {
+  margin-bottom: var(--space-4);
+}
+
+.gm-settings-nav-list {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--space-3);
+}
+
+.gm-settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  color: var(--navy-900);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.gm-settings-nav-item svg:first-child {
+  color: var(--gold-600);
+  flex: 0 0 auto;
+}
+
+.gm-settings-nav-item .gm-chevron {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.gm-settings-nav-item.active {
+  border-color: var(--navy-900);
+  background: rgba(10, 37, 64, 0.04);
+}
+
+.gm-settings-nav-item:hover,
+.gm-settings-nav-item:focus-visible {
+  border-color: var(--navy-800);
+  outline: none;
+}

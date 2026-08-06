@@ -9,7 +9,7 @@ Hybrid navy + light design system matching approved mockups.
 - Font: Plus Jakarta Sans
 
 ## Routes redesigned
-`/` Plan · `/levels` · `/alerts` · `/intelligence` · `/journal` · shared shell
+`/` Plan · `/levels` · `/alerts` · `/intelligence` · `/journal` · `/planner` · `/settings` · `/v4` · `/analytics` · shared shell
 
 ## Safety
 Auth untouched · AutoTrade OFF · Demo OFF · Live OFF · no orders

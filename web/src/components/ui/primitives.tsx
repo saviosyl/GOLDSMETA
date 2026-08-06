@@ -83,9 +83,22 @@ export function SectionCard({
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body?: string }) {
+export function EmptyState({
+  title,
+  body,
+  icon
+}: {
+  title: string;
+  body?: string;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="gm-empty" data-testid="empty-state" role="status">
+    <div
+      className={`gm-empty${icon ? " gm-empty-state" : ""}`.trim()}
+      data-testid="empty-state"
+      role="status"
+    >
+      {icon}
       <strong>{title}</strong>
       {body && <p className="gm-meta">{body}</p>}
     </div>

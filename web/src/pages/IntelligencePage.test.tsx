@@ -17,7 +17,14 @@ vi.mock("../lib/auth", () => ({
       v5WeeklyCoach,
       v5Personal,
       v5ScreenshotAnalyse,
-      v5GlossaryTerm
+      v5GlossaryTerm,
+      latestDecisionPack: vi.fn(async () => ({
+        decision: {
+          lastKnownPrice: 4265.31,
+          currentSession: "LONDON",
+          ohlcv: { open: 4250.1, close: 4265.31 }
+        }
+      }))
     }
   })
 }));

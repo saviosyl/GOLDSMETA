@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  Bell,
+  ChevronRight,
+  HelpCircle,
+  LogOut,
+  Monitor,
+  Scale,
+  Shield,
+  Target,
+  UserRound
+} from "lucide-react";
 import { useAuth } from "../lib/auth";
 import type { BackendSettings, ManualRiskSettings, TradingViewConnection } from "../types/models";
 import {
@@ -311,8 +322,26 @@ export function SettingsPage() {
     { id: "advanced", label: "Advanced" }
   ];
 
+  const MORE_NAV: Array<{
+    id: string;
+    label: string;
+    icon: typeof UserRound;
+    tab?: string;
+    href?: string;
+    action?: "signout";
+  }> = [
+    { id: "profile", label: "Profile", icon: UserRound, tab: "account" },
+    { id: "notifications", label: "Notifications", icon: Bell, tab: "notifications" },
+    { id: "display", label: "Display", icon: Monitor, tab: "appearance" },
+    { id: "risk", label: "Risk", icon: Target, tab: "risk" },
+    { id: "security", label: "Security", icon: Shield, tab: "advanced" },
+    { id: "help", label: "Help", icon: HelpCircle, href: "/help" },
+    { id: "legal", label: "Legal", icon: Scale, href: "/legal/terms" },
+    { id: "signout", label: "Sign out", icon: LogOut, action: "signout" }
+  ];
+
   return (
-    <div className="settings-page" data-testid="settings-page">
+    <div className="settings-page gm-premium-v2" data-testid="settings-page">
       <h1 className="gm-page-title">Settings</h1>
       <p className="gm-meta" style={{ marginBottom: 16 }}>
         Grouped preferences. Webhook URLs stay hidden until you reveal them.
@@ -327,6 +356,62 @@ export function SettingsPage() {
           {error}
         </div>
       )}
+
+      <section
+        className="gm-card-v2 gm-settings-more-nav"
+        data-testid="settings-more-nav"
+        aria-label="More / Settings"
+      >
+        <h2 className="gm-section-title">More / Settings</h2>
+        <nav className="gm-settings-nav-list">
+          {MORE_NAV.map((item) => {
+            const Icon = item.icon;
+            if (item.href) {
+              return (
+                <Link key={item.id} to={item.href} className="gm-settings-nav-item">
+                  <Icon size={18} aria-hidden />
+                  <span>{item.label}</span>
+                  <ChevronRight className="gm-chevron" size={18} aria-hidden />
+                </Link>
+              );
+            }
+            if (item.action === "signout") {
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="gm-settings-nav-item"
+                  onClick={() => void signOut()}
+                >
+                  <Icon size={18} aria-hidden />
+                  <span>{item.label}</span>
+                  <ChevronRight className="gm-chevron" size={18} aria-hidden />
+                </button>
+              );
+            }
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`gm-settings-nav-item${settingsTab === item.tab ? " active" : ""}`}
+                onClick={() => {
+                  if (item.tab) {
+                    setSettingsTab(item.tab);
+                    document.getElementById(`settings-${item.tab}`)?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start"
+                    });
+                  }
+                }}
+              >
+                <Icon size={18} aria-hidden />
+                <span>{item.label}</span>
+                <ChevronRight className="gm-chevron" size={18} aria-hidden />
+              </button>
+            );
+          })}
+        </nav>
+      </section>
 
       <div className="gm-tabs" role="tablist" aria-label="Settings sections" data-testid="settings-tabs">
         {SETTINGS_TABS.map((t) => (
@@ -344,7 +429,7 @@ export function SettingsPage() {
       </div>
 
       {settingsTab === "account" && (
-        <div className="card settings-card">
+        <div className="card settings-card" id="settings-account">
           <h2>Account</h2>
           <p className="settings-email" data-testid="account-email">
             {user?.email ?? "Signed in"}
@@ -371,7 +456,7 @@ export function SettingsPage() {
       )}
 
       {settingsTab === "notifications" && (
-        <div className="card settings-card">
+        <div className="card settings-card" id="settings-notifications">
           <h2>Notifications</h2>
           <p className="settings-status-headline" data-testid="notif-headline">
             {notif.headline}
@@ -630,7 +715,7 @@ export function SettingsPage() {
       )}
 
       {settingsTab === "risk" && (
-        <div className="card settings-card" data-testid="manual-risk-settings">
+        <div className="card settings-card" id="settings-risk" data-testid="manual-risk-settings">
           <h2>Risk preferences</h2>
           <p className="muted settings-help">
             Editable safety limits for manual trading. Changes are logged. GoldMeta never places
@@ -843,7 +928,7 @@ export function SettingsPage() {
       )}
 
       {settingsTab === "appearance" && (
-        <div className="card settings-card">
+        <div className="card settings-card" id="settings-appearance">
           <h2>Appearance</h2>
           <p className="muted settings-help">
             GoldMeta uses the approved navy + gold light theme. Brand assets use the official logo.
@@ -865,7 +950,7 @@ export function SettingsPage() {
       )}
 
       {settingsTab === "advanced" && (
-        <div className="card settings-card">
+        <div className="card settings-card" id="settings-advanced">
           <h2>Advanced</h2>
           <p className="muted settings-help">
             Diagnostics are available only to operators with the admin claim. Broker mode remains

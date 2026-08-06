@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Activity, ChevronDown, FlaskConical, Layers3 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 type AnyRec = Record<string, unknown>;
@@ -43,11 +44,11 @@ export function V4ResearchPage() {
   const flags = (status?.flags as AnyRec | undefined) ?? {};
 
   return (
-    <div className="v4-research-page">
-      <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-        GoldMeta V4
-      </h1>
-      <p className="subtitle">Separate strategyVersion=4 research engine. Production remains V3.</p>
+    <div className="v4-research-page gm-premium-v2" data-testid="v4-research-page">
+      <h1 className="gm-page-title">Research</h1>
+      <p className="gm-meta" style={{ marginBottom: 16 }}>
+        Separate strategyVersion=4 research engine. Production remains V3. AutoTrade OFF.
+      </p>
 
       <div className="banner stale" role="status" data-testid="v4-shadow-banner">
         V4 RESEARCH — LIVE SHADOW ONLY
@@ -61,8 +62,8 @@ export function V4ResearchPage() {
         </div>
       )}
 
-      <section className="card" data-testid="v4-status">
-        <h2 className="section-title">Shadow deployment</h2>
+      <section className="gm-card-v2" data-testid="v4-status">
+        <h2 className="gm-section-title">Summary · Shadow deployment</h2>
         <div className="grid-2">
           <div className="metric">
             <span className="label">Strategy</span>
@@ -100,8 +101,8 @@ export function V4ResearchPage() {
         <p className="muted">{String(status?.note ?? "")}</p>
       </section>
 
-      <section className="card" data-testid="v4-latest-analysis">
-        <h2 className="section-title">Latest V4 analysis</h2>
+      <section className="gm-card-v2" data-testid="v4-latest-analysis">
+        <h2 className="gm-section-title">Latest V4 analysis</h2>
         {!latest ? (
           <p className="muted">No LIVE shadow analyses yet. Waiting for confirmed market events.</p>
         ) : (
@@ -144,189 +145,219 @@ export function V4ResearchPage() {
         )}
       </section>
 
-      <section className="card" data-testid="v4-candidates">
-        <h2 className="section-title">Strategy A/B candidates</h2>
-        <p className="muted">Non-actionable. Expire / cancel without creating trades.</p>
-        {candidates.length === 0 ? (
-          <p className="muted">No candidates.</p>
-        ) : (
-          <ul className="list">
-            {candidates.slice(0, 8).map((c) => (
-              <li key={String(c.candidateId)}>
-                <strong>
-                  {String(c.strategyFamily)} · {String(c.direction)} · {String(c.status)}
-                </strong>
-                <div className="muted">
-                  confirm {String(c.confirmationBarsSeen)}/{String(c.confirmationBarsRequired)} ·{" "}
-                  {c.cancelReason ? String(c.cancelReason) : "open"}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <details className="gm-accordion-card" data-testid="v4-candidates">
+        <summary>
+          <Layers3 aria-hidden />
+          Strategy A/B candidates
+          <ChevronDown className="gm-chevron" aria-hidden />
+        </summary>
+        <div className="gm-collapse-body">
+          <p className="muted">Non-actionable. Expire / cancel without creating trades.</p>
+          {candidates.length === 0 ? (
+            <p className="muted">No candidates.</p>
+          ) : (
+            <ul className="list">
+              {candidates.slice(0, 8).map((c) => (
+                <li key={String(c.candidateId)}>
+                  <strong>
+                    {String(c.strategyFamily)} · {String(c.direction)} · {String(c.status)}
+                  </strong>
+                  <div className="muted">
+                    confirm {String(c.confirmationBarsSeen)}/{String(c.confirmationBarsRequired)} ·{" "}
+                    {c.cancelReason ? String(c.cancelReason) : "open"}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </details>
 
-      <section className="card" data-testid="v4-locked-plan">
-        <h2 className="section-title">Shadow locked plan</h2>
-        <p className="muted">Immutable levels. Not a trade ticket. No BUY NOW / SELL NOW.</p>
-        {!openPlan ? (
-          <p className="muted">No open shadow plan.</p>
-        ) : (
-          <div className="grid-2">
-            <div className="metric">
-              <span className="label">Status</span>
-              <span className="value">{String(openPlan.status)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Family</span>
-              <span className="value">{String(openPlan.strategyFamily)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Direction</span>
-              <span className="value">{String(openPlan.direction)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Entry</span>
-              <span className="value">{String(openPlan.entry)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Stop</span>
-              <span className="value">{String(openPlan.stopLoss)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">TP1 / TP2 / TP3</span>
-              <span className="value">
-                {String(openPlan.tp1)} / {String(openPlan.tp2)} / {String(openPlan.tp3)}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="label">Risk distance</span>
-              <span className="value">{String(openPlan.riskDistance)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Quality</span>
-              <span className="value">
-                {String((openPlan.quality as AnyRec | undefined)?.total ?? "—")}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="label">Gross / Net R</span>
-              <span className="value">
-                {String(openPlan.grossR ?? "—")} / {String(openPlan.netR ?? "—")}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="label">Est. costs (R)</span>
-              <span className="value">
-                {String((openPlan.costs as AnyRec | undefined)?.totalCostR ?? "—")}
-              </span>
-            </div>
-          </div>
-        )}
-        {plans.filter((p) => p.resolvedAt).length > 0 && (
-          <p className="muted">
-            Resolved plans in view: {plans.filter((p) => p.resolvedAt).length} (shadow lifecycle only)
-          </p>
-        )}
-      </section>
-
-      <section className="card" data-testid="v4-analytics">
-        <h2 className="section-title">Shadow analytics (separate from V3)</h2>
-        {!analytics ? (
-          <p className="muted">No analytics yet.</p>
-        ) : (
-          <>
-            <div className="banner stale" role="status">
-              {String(analytics.sampleSizeWarning ?? "Sample too small for conclusions.")}
-            </div>
+      <details className="gm-accordion-card" data-testid="v4-locked-plan" open>
+        <summary>
+          <FlaskConical aria-hidden />
+          Shadow locked plan
+          <ChevronDown className="gm-chevron" aria-hidden />
+        </summary>
+        <div className="gm-collapse-body">
+          <p className="muted">Immutable levels. Not a trade ticket. No BUY NOW / SELL NOW.</p>
+          {!openPlan ? (
+            <p className="muted">No open shadow plan.</p>
+          ) : (
             <div className="grid-2">
               <div className="metric">
-                <span className="label">Analyses</span>
-                <span className="value">{String(analytics.totalAnalyses ?? 0)}</span>
+                <span className="label">Status</span>
+                <span className="value">{String(openPlan.status)}</span>
               </div>
               <div className="metric">
-                <span className="label">Candidates</span>
-                <span className="value">{String(analytics.candidates ?? 0)}</span>
+                <span className="label">Family</span>
+                <span className="value">{String(openPlan.strategyFamily)}</span>
               </div>
               <div className="metric">
-                <span className="label">Rejected</span>
-                <span className="value">{String(analytics.rejectedCandidates ?? 0)}</span>
+                <span className="label">Direction</span>
+                <span className="value">{String(openPlan.direction)}</span>
               </div>
               <div className="metric">
-                <span className="label">Validated plans</span>
-                <span className="value">{String(analytics.validatedShadowPlans ?? 0)}</span>
+                <span className="label">Entry</span>
+                <span className="value">{String(openPlan.entry)}</span>
               </div>
               <div className="metric">
-                <span className="label">Resolved sample</span>
-                <span className="value">{String(analytics.sampleSize ?? 0)}</span>
-              </div>
-              <div className="metric">
-                <span className="label">Entries</span>
-                <span className="value">{String(analytics.entriesTriggered ?? 0)}</span>
+                <span className="label">Stop</span>
+                <span className="value">{String(openPlan.stopLoss)}</span>
               </div>
               <div className="metric">
                 <span className="label">TP1 / TP2 / TP3</span>
                 <span className="value">
-                  {String(analytics.tp1 ?? 0)} / {String(analytics.tp2 ?? 0)} /{" "}
-                  {String(analytics.tp3 ?? 0)}
+                  {String(openPlan.tp1)} / {String(openPlan.tp2)} / {String(openPlan.tp3)}
                 </span>
               </div>
               <div className="metric">
-                <span className="label">SL / Ambiguous</span>
+                <span className="label">Risk distance</span>
+                <span className="value">{String(openPlan.riskDistance)}</span>
+              </div>
+              <div className="metric">
+                <span className="label">Quality</span>
                 <span className="value">
-                  {String(analytics.stopLosses ?? 0)} / {String(analytics.ambiguous ?? 0)}
+                  {String((openPlan.quality as AnyRec | undefined)?.total ?? "—")}
                 </span>
               </div>
               <div className="metric">
-                <span className="label">Gross / Net expectancy R</span>
+                <span className="label">Gross / Net R</span>
                 <span className="value">
-                  {String(analytics.grossExpectancyR ?? "—")} / {String(analytics.netExpectancyR ?? "—")}
+                  {String(openPlan.grossR ?? "—")} / {String(openPlan.netR ?? "—")}
                 </span>
               </div>
               <div className="metric">
-                <span className="label">Profit factor</span>
-                <span className="value">{String(analytics.profitFactor ?? "—")}</span>
-              </div>
-              <div className="metric">
-                <span className="label">Unsafe-plan count</span>
-                <span className="value">{String(analytics.unsafePlanCount ?? 0)}</span>
-              </div>
-              <div className="metric">
-                <span className="label">Mutation-attempt count</span>
-                <span className="value">{String(analytics.planMutationCount ?? 0)}</span>
+                <span className="label">Est. costs (R)</span>
+                <span className="value">
+                  {String((openPlan.costs as AnyRec | undefined)?.totalCostR ?? "—")}
+                </span>
               </div>
             </div>
-          </>
-        )}
-      </section>
+          )}
+          {plans.filter((p) => p.resolvedAt).length > 0 && (
+            <p className="muted">
+              Resolved plans in view: {plans.filter((p) => p.resolvedAt).length} (shadow lifecycle
+              only)
+            </p>
+          )}
+        </div>
+      </details>
 
-      <section className="card" data-testid="v4-gc">
-        <h2 className="section-title">COMEX GC profile</h2>
-        <p className="muted">
-          {gc?.profileQuality === "UNAVAILABLE"
-            ? "GC CONFIRMATION UNAVAILABLE — quality penalty applied; analysis continues."
-            : String(gc?.note ?? "GC status")}
-        </p>
-        <div className="grid-2">
-          <div className="metric">
-            <span className="label">Provider</span>
-            <span className="value">{String(gc?.provider ?? "none")}</span>
-          </div>
-          <div className="metric">
-            <span className="label">Quality</span>
-            <span className="value">{String(gc?.profileQuality ?? "UNAVAILABLE")}</span>
+      <details className="gm-accordion-card" data-testid="v4-analytics">
+        <summary>
+          <Activity aria-hidden />
+          Shadow analytics (separate from V3)
+          <ChevronDown className="gm-chevron" aria-hidden />
+        </summary>
+        <div className="gm-collapse-body">
+          {!analytics ? (
+            <p className="muted">No analytics yet.</p>
+          ) : (
+            <>
+              <div className="banner stale" role="status">
+                {String(analytics.sampleSizeWarning ?? "Sample too small for conclusions.")}
+              </div>
+              <div className="grid-2">
+                <div className="metric">
+                  <span className="label">Analyses</span>
+                  <span className="value">{String(analytics.totalAnalyses ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Candidates</span>
+                  <span className="value">{String(analytics.candidates ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Rejected</span>
+                  <span className="value">{String(analytics.rejectedCandidates ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Validated plans</span>
+                  <span className="value">{String(analytics.validatedShadowPlans ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Resolved sample</span>
+                  <span className="value">{String(analytics.sampleSize ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Entries</span>
+                  <span className="value">{String(analytics.entriesTriggered ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">TP1 / TP2 / TP3</span>
+                  <span className="value">
+                    {String(analytics.tp1 ?? 0)} / {String(analytics.tp2 ?? 0)} /{" "}
+                    {String(analytics.tp3 ?? 0)}
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="label">SL / Ambiguous</span>
+                  <span className="value">
+                    {String(analytics.stopLosses ?? 0)} / {String(analytics.ambiguous ?? 0)}
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="label">Gross / Net expectancy R</span>
+                  <span className="value">
+                    {String(analytics.grossExpectancyR ?? "—")} /{" "}
+                    {String(analytics.netExpectancyR ?? "—")}
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="label">Profit factor</span>
+                  <span className="value">{String(analytics.profitFactor ?? "—")}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Unsafe-plan count</span>
+                  <span className="value">{String(analytics.unsafePlanCount ?? 0)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Mutation-attempt count</span>
+                  <span className="value">{String(analytics.planMutationCount ?? 0)}</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </details>
+
+      <details className="gm-accordion-card" data-testid="v4-gc">
+        <summary>
+          COMEX GC profile
+          <ChevronDown className="gm-chevron" aria-hidden />
+        </summary>
+        <div className="gm-collapse-body">
+          <p className="muted">
+            {gc?.profileQuality === "UNAVAILABLE"
+              ? "GC CONFIRMATION UNAVAILABLE — quality penalty applied; analysis continues."
+              : String(gc?.note ?? "GC status")}
+          </p>
+          <div className="grid-2">
+            <div className="metric">
+              <span className="label">Provider</span>
+              <span className="value">{String(gc?.provider ?? "none")}</span>
+            </div>
+            <div className="metric">
+              <span className="label">Quality</span>
+              <span className="value">{String(gc?.profileQuality ?? "UNAVAILABLE")}</span>
+            </div>
           </div>
         </div>
-      </section>
+      </details>
 
-      <section className="card" data-testid="v4-v3-compare">
-        <h2 className="section-title">V3 versus V4</h2>
-        <p className="muted">
-          V3 remains the production decision path (strategyVersion=3). V4 runs after V3 is stored,
-          in SHADOW mode only. V4 errors never change the webhook response or V3 records. Broker
-          execution stays DISABLED.
-        </p>
-      </section>
+      <details className="gm-accordion-card" data-testid="v4-v3-compare">
+        <summary>
+          V3 versus V4
+          <ChevronDown className="gm-chevron" aria-hidden />
+        </summary>
+        <div className="gm-collapse-body">
+          <p className="muted">
+            V3 remains the production decision path (strategyVersion=3). V4 runs after V3 is stored,
+            in SHADOW mode only. V4 errors never change the webhook response or V3 records. Broker
+            execution stays DISABLED.
+          </p>
+        </div>
+      </details>
 
       <p className="disclaimer-footer">
         Do not enable broker execution. Do not treat early V4 shadow results as proof of edge. Manual

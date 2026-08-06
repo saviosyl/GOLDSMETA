@@ -82,11 +82,25 @@ export function PremiumAnalyticsPage() {
   const sampleTooSmall = (data?.sampleSize ?? 0) < 20 && (data?.shadowPlans ?? 0) < 5;
 
   return (
-    <div data-testid="premium-analytics-page">
+    <div data-testid="premium-analytics-page" className="gm-premium-v2 gm-reports-page">
       <PageHeader title="Analytics" environment="LIVE" freshness="V4 shadow only" />
       <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
         Filterable V4 shadow intelligence. Not proof of edge. Broker execution remains disabled.
+        AutoTrade OFF.
       </p>
+
+      {data && (
+        <div data-testid="analytics-summary">
+          <SectionCard title="Summary" className="gm-card-v2">
+            <div className="gm-metrics-grid">
+              <MetricCard label="Analyses" value={data.totalAnalyses ?? 0} />
+              <MetricCard label="Shadow plans" value={data.shadowPlans ?? 0} />
+              <MetricCard label="Sample size" value={data.sampleSize ?? 0} />
+              <MetricCard label="Rejected" value={data.rejected ?? 0} />
+            </div>
+          </SectionCard>
+        </div>
+      )}
 
       <SectionCard>
         <div className="gm-tabs" role="group" aria-label="Session filters">
