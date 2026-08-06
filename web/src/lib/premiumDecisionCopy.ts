@@ -125,6 +125,7 @@ export function premiumStatusLabel(
     return "Monitoring";
   }
   if (chip === "HOLD") return "On hold";
+  // Keep STATUS soft — never surface the old "Blocked" label on the hero.
   return "Monitoring";
 }
 
