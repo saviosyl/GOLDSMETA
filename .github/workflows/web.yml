@@ -13,6 +13,8 @@ on:
     branches:
       - main
       - cursor/production-connection
+      - cursor/live-xauusd-price-e1a2
+  workflow_dispatch:
 
 defaults:
   run:

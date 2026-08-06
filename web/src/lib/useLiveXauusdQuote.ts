@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { api } from "./api";
+import { useAuth } from "./auth";
 import {
   formatCompactLocalTime,
   formatCompactLocalTimeWithSeconds,
@@ -70,6 +70,7 @@ function toShellQuote(payload: QuoteApiResponse): ShellQuote | null {
  */
 export function useLiveXauusdQuote(opts?: { enabled?: boolean }): void {
   const enabled = opts?.enabled !== false;
+  const { api } = useAuth();
   const { quote, setQuote } = useShellQuote();
   const lastFlushAt = useRef(0);
   const lastMid = useRef<number | null>(null);
@@ -168,7 +169,7 @@ export function useLiveXauusdQuote(opts?: { enabled?: boolean }): void {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
     };
-  }, [enabled, setQuote]);
+  }, [enabled, setQuote, api]);
 }
 
 /** @deprecated — keep named export for tests that assert compact time helpers. */

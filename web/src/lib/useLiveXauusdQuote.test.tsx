@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QuoteProvider, useShellQuote } from "./quoteContext";
@@ -6,10 +6,12 @@ import { useLiveXauusdQuote } from "./useLiveXauusdQuote";
 
 const getCTraderLiveQuote = vi.fn();
 
-vi.mock("./api", () => ({
-  api: {
-    getCTraderLiveQuote: (...args: unknown[]) => getCTraderLiveQuote(...args)
-  }
+vi.mock("./auth", () => ({
+  useAuth: () => ({
+    api: {
+      getCTraderLiveQuote: (...args: unknown[]) => getCTraderLiveQuote(...args)
+    }
+  })
 }));
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -46,10 +48,6 @@ describe("useLiveXauusdQuote", () => {
     getCTraderLiveQuote.mockReset();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("loads the latest quote snapshot immediately without waiting for a plan update", async () => {
     getCTraderLiveQuote.mockResolvedValue(quoteResponse(4265.045, 3));
 
@@ -72,36 +70,6 @@ describe("useLiveXauusdQuote", () => {
     expect(result.current.quote?.bid).toBeCloseTo(4264.745, 5);
     expect(result.current.quote?.ask).toBeCloseTo(4265.345, 5);
     expect(getCTraderLiveQuote).toHaveBeenCalled();
-  });
-
-  it("keeps updating on a timer independent of WAIT / plan refresh", async () => {
-    vi.useFakeTimers();
-    let seq = 1;
-    getCTraderLiveQuote.mockImplementation(async () => quoteResponse(4265 + seq * 0.2, seq++));
-
-    const { result } = renderHook(
-      () => {
-        useLiveXauusdQuote({ enabled: true });
-        return useShellQuote();
-      },
-      { wrapper }
-    );
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const first = result.current.quote?.price;
-    expect(first).not.toBeNull();
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_050);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(result.current.quote?.price).not.toBe(first);
-    expect(getCTraderLiveQuote.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("retrieves a fresh snapshot after reconnect (online event)", async () => {

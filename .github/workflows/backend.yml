@@ -2,7 +2,7 @@ name: Backend
 
 on:
   push:
-    branches: [main, cursor/production-connection]
+    branches: [main, cursor/production-connection, cursor/live-xauusd-price-e1a2]
   pull_request:
     branches:
       - main
@@ -11,6 +11,7 @@ on:
       - cursor/phase3-stage3-live-forward-c2c2
       - cursor/goldmeta-v4-stage-b-c2c2
       - cursor/v5-4-3-approved-base-c2c2
+  workflow_dispatch:
 
 jobs:
   # A. Required CI — always runs; no production secrets required.

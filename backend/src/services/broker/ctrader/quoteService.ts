@@ -6,6 +6,15 @@
  * - position monitoring
  *
  * Independent of the 15M plan-generation cycle.
+ *
+ * Architecture honesty:
+ * - HTTP Cloud Functions open a Spotware WebSocket per refresh and close it
+ *   after one tick (`openApiClient.withOpenApiConnection`). That is NOT a
+ *   continuous stream between requests.
+ * - Continuous pricing requires `persistentQuoteWorker` (always-on runtime)
+ *   writing into the Firestore quote store; this service then serves snapshots.
+ * - The 1-minute `refreshCTraderLiveQuotes` scheduler is only a keepalive
+ *   fallback, not a live tick worker.
  */
 
 import {
@@ -113,7 +122,9 @@ export async function refreshAuthoritativeQuoteFromBroker(
 
 /**
  * Latest verified quote for dashboard display.
- * Returns cached snapshot immediately; optionally refreshes from broker.
+ * Prefers the authoritative store (populated by the always-on worker).
+ * Optionally opens a short-lived broker WS only when the store is empty/old
+ * and no persistent worker is feeding ticks.
  * Never throws for DELAYED/STALE — caller sees freshness instead.
  */
 export async function getLiveQuoteSnapshot(args: {
@@ -127,6 +138,9 @@ export async function getLiveQuoteSnapshot(args: {
   const thresholds = loadLiveQuoteThresholds();
   const nowMs = args.nowMs ?? Date.now();
   const refreshIfNeeded = args.refreshIfNeeded !== false;
+  // When a persistent worker is expected, prefer store-only reads (no per-request WS).
+  const preferStoreOnly =
+    String(process.env.CTRADER_QUOTE_PREFER_STORE ?? "").toLowerCase() === "true";
 
   let stored = await getStoredAuthoritativeQuote(args.ownerUid);
   if (stored) {
@@ -143,6 +157,7 @@ export async function getLiveQuoteSnapshot(args: {
 
   if (
     refreshIfNeeded &&
+    !preferStoreOnly &&
     (stored == null || cacheAge >= cacheMaxAgeMs())
   ) {
     try {
