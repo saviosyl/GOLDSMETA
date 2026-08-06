@@ -20,6 +20,8 @@ const REQUIRED_PATHS = [
   "/account-suspended",
   "/account/delete-request",
   "/",
+  "/levels",
+  "/alerts",
   "/analysis",
   "/history",
   "/history/:decisionId",

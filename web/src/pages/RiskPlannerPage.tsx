@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ShieldAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { ManualRiskPlanner } from "../components/ManualRiskPlanner";
 import type { ManualRiskSettings, SetupRecord } from "../types/models";
@@ -42,7 +43,7 @@ export function RiskPlannerPage() {
   }, [api]);
 
   return (
-    <div data-testid="risk-planner-page" className="gm-risk-planner-page">
+    <div data-testid="risk-planner-page" className="gm-risk-planner-page gm-premium-v2">
       <PageHeader title="Risk Planner" environment="LIVE" freshness="Manual only" />
       <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
         Size the trade from balance, risk, entry and stop. GoldMeta never places orders and never
@@ -52,7 +53,10 @@ export function RiskPlannerPage() {
         </Link>
       </p>
       <ul className="gm-help-list" data-testid="risk-planner-warnings">
-        <li>Warns when entry equals stop or stop is on the wrong side.</li>
+        <li>
+          <ShieldAlert size={16} aria-hidden /> Warns when entry equals stop or stop is on the wrong
+          side.
+        </li>
         <li>Warns when the target is invalid or risk is above your limit.</li>
         <li>No averaging down · no martingale · AutoTrade OFF.</li>
       </ul>
@@ -61,7 +65,7 @@ export function RiskPlannerPage() {
           {error}
         </div>
       )}
-      <SectionCard>
+      <SectionCard className="gm-risk-planner-shell">
         <ManualRiskPlanner risk={risk} setup={setup} />
       </SectionCard>
     </div>

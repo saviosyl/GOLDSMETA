@@ -16,16 +16,20 @@ import type {
   UserSettings,
   WebPushSubscriptionRecord
 } from "../../models/types";
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "../../models/types";
 import type { SessionPlanRecord } from "../decision/sessionPlanTypes";
 import { nowIso } from "../../utils/time";
 import type {
   CreateProcessingJobInput,
+  CreateInAppNotificationInput,
   CreateWebhookConnectionInput,
   DecisionEnvironment,
   GoldMetaStore,
+  InAppNotification,
   ProcessingJob,
   RawEventRecord,
   SaveRawEventOptions,
+  SharedMarketFeedState,
   WebhookConnection,
   WebhookRejectLog
 } from "./types";
@@ -97,7 +101,8 @@ const toFirestoreData = <T>(value: T): FirebaseFirestore.DocumentData =>
 const defaultSettings = (userId: string): UserSettings => ({
   userId,
   aiEnabled: false,
-  notificationsEnabled: true,
+  notificationsEnabled: false,
+  notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
   provisionalSignalsEnabled: false,
   riskProfile: "BALANCED",
   liveForwardAckAt: null,
@@ -600,6 +605,11 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
     const updated: UserSettings = {
       ...(await this.getSettings(userId)),
       ...patch,
+      notificationPreferences: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES,
+        ...(await this.getSettings(userId)).notificationPreferences,
+        ...patch.notificationPreferences
+      },
       updatedAt: nowIso()
     };
     await this.db
@@ -669,6 +679,73 @@ export class FirestoreGoldMetaStore implements GoldMetaStore {
       }
       throw error;
     }
+  }
+
+  async getSharedMarketFeedState(): Promise<SharedMarketFeedState | undefined> {
+    const snap = await this.db.collection("sharedMarketFeed").doc("current").get();
+    return snap.exists ? (snap.data() as SharedMarketFeedState) : undefined;
+  }
+
+  async saveSharedMarketFeedState(state: SharedMarketFeedState): Promise<SharedMarketFeedState> {
+    await this.db.collection("sharedMarketFeed").doc("current").set(toFirestoreData(state), {
+      merge: true
+    });
+    return state;
+  }
+
+  async createInAppNotification(
+    userId: string,
+    input: CreateInAppNotificationInput
+  ): Promise<InAppNotification> {
+    const notification: InAppNotification = {
+      id: randomUUID(),
+      userId,
+      event: input.event,
+      direction: input.direction,
+      title: input.title,
+      message: input.message,
+      planId: input.planId,
+      read: false,
+      createdAt: nowIso(),
+      data: input.data
+    };
+    await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("inAppNotifications")
+      .doc(notification.id)
+      .set(toFirestoreData(notification));
+    return notification;
+  }
+
+  async listInAppNotifications(userId: string, limit = 50): Promise<InAppNotification[]> {
+    const snap = await this.db
+      .collection("users")
+      .doc(userId)
+      .collection("inAppNotifications")
+      .orderBy("createdAt", "desc")
+      .limit(Math.min(Math.max(limit, 1), 100))
+      .get();
+    return snap.docs.map((doc) => doc.data() as InAppNotification);
+  }
+
+  async markInAppNotificationsRead(userId: string, notificationIds?: string[]): Promise<number> {
+    const collection = this.db.collection("users").doc(userId).collection("inAppNotifications");
+    const ids = notificationIds?.filter((id) => id.trim().length > 0);
+    const docs = ids?.length
+      ? await Promise.all(ids.map(async (id) => collection.doc(id).get()))
+      : (await collection.where("read", "==", false).limit(100).get()).docs;
+    const batch = this.db.batch();
+    let count = 0;
+    for (const doc of docs) {
+      if (!doc.exists) continue;
+      batch.set(doc.ref, { read: true }, { merge: true });
+      count += 1;
+    }
+    if (count > 0) {
+      await batch.commit();
+    }
+    return count;
   }
 
   async createWebhookConnection(input: CreateWebhookConnectionInput): Promise<WebhookConnection> {

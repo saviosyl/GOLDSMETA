@@ -166,9 +166,12 @@ export function PrimaryPlanCard({
         <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-next">
           {NO_VALID_PLAN_NEXT}
         </p>
-        <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-reason">
-          <strong>Reason:</strong> {reason}
-        </p>
+        <details className="gm-wait-reason" data-testid="why-waiting">
+          <summary>Why am I waiting?</summary>
+          <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-reason">
+            {reason}
+          </p>
+        </details>
         <NextPlanUpdate plan={plan} />
         <div className="gm-nearest-sr" data-testid="no-valid-nearest-sr">
           <div>

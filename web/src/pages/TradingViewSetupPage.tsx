@@ -95,7 +95,8 @@ async function copyText(value: string): Promise<boolean> {
  * All alert roles share the same user webhook URL.
  */
 export function TradingViewSetupPage() {
-  const { api } = useAuth();
+  const { api, account } = useAuth();
+  const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
   const [data, setData] = useState<SetupResponse | null>(null);
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<SetupMode>("standard");
@@ -126,6 +127,7 @@ export function TradingViewSetupPage() {
   };
 
   const load = useCallback(async () => {
+    if (!isStaff) return;
     try {
       const res = (await api.getTradingViewSetup()) as SetupResponse;
       setData(res);
@@ -142,7 +144,7 @@ export function TradingViewSetupPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load TradingView setup");
     }
-  }, [api]);
+  }, [api, isStaff]);
 
   useEffect(() => {
     void load();
@@ -275,6 +277,25 @@ export function TradingViewSetupPage() {
   const selectedTfLabel =
     tfOptions.find((t) => t.value === selectedTimeframe)?.label ??
     (selectedTimeframe ? `${selectedTimeframe} minutes` : "Not selected");
+
+  if (!isStaff) {
+    return (
+      <section className="gm-section gm-central-feed-message" data-testid="central-feed-message">
+        <h1>Market feed managed by GoldMeta</h1>
+        <p>
+          GoldMeta&apos;s market feed is centrally managed. No TradingView setup is required for your
+          account.
+        </p>
+        <p className="gm-meta">
+          Open Today&apos;s Plan to review the current XAUUSD decision, feed health, and optional
+          phone alerts.
+        </p>
+        <Link className="gm-btn-primary" to="/">
+          Open Today&apos;s Plan
+        </Link>
+      </section>
+    );
+  }
 
   return (
     <div className="gm-tv-setup" data-testid="tradingview-setup-page">

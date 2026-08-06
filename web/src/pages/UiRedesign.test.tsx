@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppShell } from "../components/layout/AppShell";
 import { OverviewPage } from "./OverviewPage";
@@ -107,7 +107,7 @@ describe("AppShell navigation", () => {
     expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Journal").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("More").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/More/i).length).toBeGreaterThan(0);
   });
 
   it("opens More sheet with secondary destinations", async () => {
@@ -122,7 +122,7 @@ describe("AppShell navigation", () => {
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
   });
 });
@@ -140,19 +140,17 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/WAIT/i);
+    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE|WAIT/i);
     expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
-    expect(screen.getByTestId("setup-checklist")).toBeInTheDocument();
+    expect(screen.getAllByTestId("setup-checklist").length).toBeGreaterThan(0);
     expect(screen.getByTestId("research-tab-plan")).toBeInTheDocument();
-    expect(screen.getByTestId("plan-stage-stepper")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("cockpit-bias")).toHaveTextContent(/Market bias:/i);
+    expect(screen.getByTestId("premium-insight-strip")).toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("view-research-btn"));
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
-    expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toHaveTextContent(/AutoTrade OFF/i);
     expect(screen.getByTestId("advanced-diagnostics-section")).not.toHaveAttribute("open");
     expect(screen.queryByText("SHADOW")).not.toBeInTheDocument();
   });
@@ -165,12 +163,14 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("overview-page");
-    await user.click(screen.getByText(/ADVANCED DIAGNOSTICS/i));
-    await user.click(screen.getByText(/System status/i));
-    expect(screen.getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
-    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
-    expect(screen.getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
-    expect(screen.getByTestId("goldmeta-score")).toBeInTheDocument();
+    const advanced = screen.getByTestId("advanced-diagnostics-section");
+    await user.click(advanced.querySelector("summary")!);
+    const system = within(advanced).getByTestId("system-status-collapse");
+    await user.click(system.querySelector("summary")!);
+    expect(within(advanced).getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
+    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toHaveTextContent(/AutoTrade OFF/i);
+    expect(within(advanced).getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
+    expect(within(advanced).getByTestId("goldmeta-score")).toBeInTheDocument();
   });
 
   it("includes Help in mobile navigation", async () => {
@@ -183,6 +183,6 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
   });
 });

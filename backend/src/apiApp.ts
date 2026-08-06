@@ -10,6 +10,8 @@ import { buildDecisionsRouter } from "./routes/decisions";
 import { buildDevicesRouter } from "./routes/devices";
 import { buildHealthRouter } from "./routes/health";
 import { buildJournalRouter } from "./routes/journal";
+import { buildMarketFeedRouter } from "./routes/marketFeed";
+import { buildNotificationsRouter } from "./routes/notifications";
 import { buildPushRouter } from "./routes/push";
 import { buildSettingsRouter } from "./routes/settings";
 import { buildSystemRouter } from "./routes/system";
@@ -120,6 +122,8 @@ export const createApiApp = (
   app.use(buildTradingViewRouter(store, aiExplainer));
   app.use(buildDevicesRouter(store));
   app.use(buildPushRouter(store));
+  app.use(buildNotificationsRouter(store));
+  app.use(buildMarketFeedRouter(store));
   app.use(buildDecisionsRouter(store));
   app.use(buildSetupsRouter(store));
   app.use(buildV4Router(store));

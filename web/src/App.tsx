@@ -1,6 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { QuoteProvider } from "./lib/quoteContext";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { AppShell } from "./components/layout/AppShell";
 import { PublicPageShell } from "./components/layout/PublicPageShell";
@@ -22,6 +23,8 @@ import {
   TermsPage
 } from "./pages/legal/LegalPages";
 import { OverviewPage } from "./pages/OverviewPage";
+import { KeyLevelsPage } from "./pages/KeyLevelsPage";
+import { AlertsSetupPage } from "./pages/AlertsSetupPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
@@ -188,6 +191,7 @@ function ProtectedApp() {
 
   return (
     <AccountAccessGate>
+      <QuoteProvider>
       <AppShell>
         <Routes>
           <Route path="/ui-review/*" element={<UiReviewGate />} />
@@ -200,6 +204,8 @@ function ProtectedApp() {
           <Route path="/legal/privacy" element={<PrivacyPage />} />
           <Route path="/legal/risk" element={<RiskDisclosurePage />} />
           <Route path="/" element={<OverviewPage />} />
+          <Route path="/levels" element={<KeyLevelsPage />} />
+          <Route path="/alerts" element={<AlertsSetupPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
@@ -310,6 +316,7 @@ function ProtectedApp() {
           />
         </Routes>
       </AppShell>
+      </QuoteProvider>
     </AccountAccessGate>
   );
 }

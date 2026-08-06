@@ -36,10 +36,12 @@ export function RegistrationCompletePage() {
       <ol className="gm-help-steps">
         <li>Open the verification email we sent.</li>
         <li>Return here and sign in after verifying.</li>
-        <li>Open the Dashboard — broker trading stays locked separately.</li>
+        <li>View the current plan and market-feed health.</li>
+        <li>Optionally enable phone alerts, then set risk preferences and journal outcomes.</li>
       </ol>
       <p className="gm-auth-trust">
-        Broker trading is not enabled by registration. AutoTrade remains OFF.
+        GoldMeta's market feed is centrally managed. Broker trading is not enabled by
+        registration. AutoTrade remains OFF.
       </p>
       <Link className="gm-auth-submit" to="/" style={{ display: "inline-block", textAlign: "center" }}>
         Go to Sign In
@@ -103,12 +105,16 @@ export function AccountReadyPage() {
         Your email has been verified and your GoldMeta account is now active.
       </p>
       <ol className="gm-help-steps">
-        <li>Dashboard and market analysis are available.</li>
+        <li>View the current plan.</li>
+        <li>Review market-feed health.</li>
+        <li>Optionally enable phone alerts.</li>
+        <li>Set risk preferences and record outcomes in Journal.</li>
         <li>Broker connection and trading stay locked until separately enabled.</li>
         <li>AutoTrade remains OFF.</li>
       </ol>
       <p className="gm-auth-trust">
-        Registration never enables broker orders, Demo trading, or Live trading.
+        GoldMeta's market feed is centrally managed. Registration never enables broker orders,
+        Demo trading, or Live trading.
       </p>
       <Link
         className="gm-auth-submit"

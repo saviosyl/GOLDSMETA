@@ -1,103 +1,142 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Bot,
+  ChevronRight,
+  FileText,
+  Gauge,
+  Globe2,
+  HelpCircle,
+  History,
+  Home,
+  Layers3,
+  MoreHorizontal,
+  Radio,
+  Settings,
+  Shield,
+  Target
+} from "lucide-react";
 import { useAuth } from "../../lib/auth";
+import { useShellQuote } from "../../lib/quoteContext";
+import { NotificationCentre } from "../decision/NotificationCentre";
+import { QuoteHeader } from "../gm/QuoteHeader";
 
-type NavItem = { to: string; label: string; end?: boolean; staffOnly?: boolean };
+type NavItem = {
+  to: string;
+  label: string;
+  end?: boolean;
+  staffOnly?: boolean;
+  icon: typeof Home;
+};
 
-/** Desktop grouped navigation — Daily / Research / Tools / Account / Admin */
 const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
   {
-    heading: "Daily",
+    heading: "Main",
     items: [
-      { to: "/", label: "Today's Plan", end: true },
-      { to: "/intelligence", label: "Markets" },
-      { to: "/journal", label: "Journal" }
+      { to: "/", label: "Plan", end: true, icon: Home },
+      { to: "/levels", label: "Levels", icon: Layers3 },
+      { to: "/intelligence", label: "Markets", icon: Globe2 },
+      { to: "/journal", label: "Journal", icon: BookOpen },
+      { to: "/alerts", label: "Alerts", icon: Bell }
     ]
   },
   {
-    heading: "Research",
+    heading: "Reports",
     items: [
-      { to: "/v4", label: "Research" },
-      { to: "/analytics", label: "Performance" },
-      { to: "/replay", label: "Replay" }
+      { to: "/v4", label: "Research", icon: BarChart3 },
+      { to: "/analytics", label: "Performance", icon: Activity },
+      { to: "/history", label: "History", icon: History },
+      { to: "/replay", label: "Replay", icon: FileText }
     ]
   },
   {
     heading: "Tools",
     items: [
-      { to: "/planner", label: "Risk Planner" },
-      { to: "/tradingview", label: "TradingView" }
+      { to: "/planner", label: "Risk Planner", icon: Target },
+      { to: "/autotrade", label: "AutoTrade", icon: Bot },
+      { to: "/brokers", label: "Brokers", icon: Radio },
+      { to: "/tradingview", label: "TradingView", staffOnly: true, icon: Gauge }
     ]
   },
   {
     heading: "Account",
     items: [
-      { to: "/settings", label: "Settings" },
-      { to: "/help", label: "Help" }
+      { to: "/settings", label: "Settings", icon: Settings },
+      { to: "/help", label: "Help & Guides", icon: HelpCircle }
     ]
   },
   {
     heading: "Admin",
     items: [
-      { to: "/admin/users", label: "Users", staffOnly: true },
-      { to: "/admin/tradingview-template", label: "TradingView Template", staffOnly: true },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true }
+      { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
+      {
+        to: "/admin/tradingview-template",
+        label: "TV Template",
+        staffOnly: true,
+        icon: Gauge
+      },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   }
 ];
 
-/** Mobile primary: Plan · Markets · Journal · More */
 const MOBILE_PRIMARY: NavItem[] = [
-  { to: "/", label: "Plan", end: true },
-  { to: "/intelligence", label: "Markets" },
-  { to: "/journal", label: "Journal" }
+  { to: "/", label: "Plan", end: true, icon: Home },
+  { to: "/intelligence", label: "Markets", icon: Globe2 },
+  { to: "/journal", label: "Journal", icon: BookOpen },
+  { to: "/alerts", label: "Alerts", icon: Bell }
 ];
 
 type MoreGroup = { heading: string; items: NavItem[] };
 
 const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
-    heading: "Research",
+    heading: "Daily",
     items: [
-      { to: "/v4", label: "Research" },
-      { to: "/analytics", label: "Analytics" },
-      { to: "/signal-performance", label: "Performance" }
+      { to: "/levels", label: "Levels", icon: Layers3 },
+      { to: "/history", label: "History", icon: History },
+      { to: "/replay", label: "Replay", icon: FileText }
     ]
   },
   {
-    heading: "Review",
+    heading: "Reports",
     items: [
-      { to: "/history", label: "History" },
-      { to: "/replay", label: "Replay" }
+      { to: "/v4", label: "Research", icon: BarChart3 },
+      { to: "/analytics", label: "Performance", icon: Activity },
+      { to: "/signal-performance", label: "Signals", icon: Gauge }
     ]
   },
   {
-    heading: "Trading tools",
+    heading: "Tools",
     items: [
-      { to: "/planner", label: "Risk Planner" },
-      { to: "/tradingview", label: "TradingView Setup" }
+      { to: "/planner", label: "Risk Planner", icon: Target },
+      { to: "/autotrade", label: "AutoTrade", icon: Bot },
+      { to: "/brokers", label: "Brokers", icon: Radio },
+      { to: "/tradingview", label: "TradingView Setup", staffOnly: true, icon: Gauge }
     ]
   },
   {
     heading: "Account",
     items: [
-      { to: "/settings", label: "Settings" },
-      { to: "/help", label: "Help" }
-    ]
-  },
-  {
-    heading: "System",
-    items: [
-      { to: "/brokers", label: "Brokers" },
-      { to: "/autotrade", label: "AutoTrade" }
+      { to: "/settings", label: "Settings", icon: Settings },
+      { to: "/help", label: "Help & Guides", icon: HelpCircle }
     ]
   },
   {
     heading: "Admin",
     items: [
-      { to: "/admin/users", label: "Users", staffOnly: true },
-      { to: "/admin/tradingview-template", label: "TradingView Template", staffOnly: true },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true }
+      { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
+      {
+        to: "/admin/tradingview-template",
+        label: "TV Template",
+        staffOnly: true,
+        icon: Gauge
+      },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   }
 ];
@@ -122,6 +161,7 @@ export function AppShell({
   linkPrefix?: string;
 }) {
   const { user, account } = useAuth();
+  const { quote } = useShellQuote();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -182,35 +222,43 @@ export function AppShell({
   }, [location.pathname]);
 
   return (
-    <div className="gm-shell" data-testid="app-shell-redesign">
+    <div className="gm-shell gm-premium-v2" data-testid="app-shell-redesign">
       <aside className="gm-sidebar" aria-label="Desktop navigation" data-testid="desktop-sidebar">
         <div className="gm-sidebar-brand">
           <img src="/brand/mark-official.png" alt="" width={36} height={36} />
           <div>
             <strong>GOLDMETA</strong>
-            <span className="gm-meta">by MetaMech Solutions</span>
+            <span className="gm-meta">Daily trading assistant</span>
           </div>
         </div>
         <nav className="gm-sidebar-nav">
           {desktopGroups.map((group) => (
-            <div key={group.heading} className="gm-nav-group" data-testid={`nav-group-${group.heading.toLowerCase()}`}>
+            <div
+              key={group.heading}
+              className="gm-nav-group"
+              data-testid={`nav-group-${group.heading.toLowerCase()}`}
+            >
               <p className="gm-nav-heading">{group.heading}</p>
-              {group.items.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={withPrefix(link.to)}
-                  end={link.end}
-                  className={({ isActive }) => (isActive ? "active" : undefined)}
-                >
-                  {link.label}
-                </NavLink>
-              ))}
+              {group.items.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <NavLink
+                    key={link.to}
+                    to={withPrefix(link.to)}
+                    end={link.end}
+                    className={({ isActive }) => (isActive ? "active" : undefined)}
+                  >
+                    <Icon aria-hidden strokeWidth={2} />
+                    <span>{link.label}</span>
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
         </nav>
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
-            <p>Analysis only. Broker execution stays disabled.</p>
+            <p>Analysis only. AutoTrade OFF · Demo OFF · Live OFF.</p>
           </div>
         </div>
       </aside>
@@ -231,10 +279,22 @@ export function AppShell({
                 <span>Daily trading assistant</span>
               </div>
             </div>
+
+            <QuoteHeader
+              className="gm-topbar-quote"
+              price={quote?.price ?? null}
+              updatedLabel={quote?.updatedLabel ?? "—"}
+              sessionLabel={quote?.sessionLabel}
+              fresh={quote?.fresh}
+              desktopOnly
+            />
+
             <div className="gm-topbar-actions">
-              <span className="gm-badge neutral" data-testid="topbar-autotrade-off">
+              <span className="gm-badge gm-autotrade-pill" data-testid="topbar-autotrade-off">
+                <Bot size={14} aria-hidden />
                 AutoTrade OFF
               </span>
+              <NotificationCentre />
               <div className="gm-profile-menu" ref={profileRef}>
                 <button
                   type="button"
@@ -249,9 +309,6 @@ export function AppShell({
                     {initials(email)}
                   </span>
                 </button>
-                <span className="gm-meta gm-topbar-email" data-testid="topbar-email-desktop">
-                  {email}
-                </span>
                 {profileOpen && (
                   <div
                     id="gm-profile-popover"
@@ -270,33 +327,46 @@ export function AppShell({
                       className="gm-linkish"
                       onClick={() => setProfileOpen(false)}
                     >
-                      Settings
+                      Settings <ChevronRight size={14} aria-hidden />
                     </NavLink>
                   </div>
                 )}
               </div>
             </div>
           </header>
+
+          <QuoteHeader
+            className="gm-mobile-quote"
+            price={quote?.price ?? null}
+            updatedLabel={quote?.updatedLabel ?? "—"}
+            sessionLabel={quote?.sessionLabel}
+            fresh={quote?.fresh}
+          />
+
           {children ?? <Outlet />}
         </div>
       </div>
 
       <nav
-        className="gm-mobile-nav gm-mobile-nav-4"
+        className="gm-mobile-nav"
         aria-label="Mobile primary"
         data-testid="mobile-bottom-nav"
       >
-        {MOBILE_PRIMARY.map((link) => (
-          <NavLink
-            key={link.to}
-            to={withPrefix(link.to)}
-            end={link.end}
-            className={({ isActive }) => (isActive ? "active" : undefined)}
-            onClick={() => setMoreOpen(false)}
-          >
-            {link.label}
-          </NavLink>
-        ))}
+        {MOBILE_PRIMARY.map((link) => {
+          const Icon = link.icon;
+          return (
+            <NavLink
+              key={link.to}
+              to={withPrefix(link.to)}
+              end={link.end}
+              className={({ isActive }) => (isActive ? "active" : undefined)}
+              onClick={() => setMoreOpen(false)}
+            >
+              <Icon aria-hidden strokeWidth={2} />
+              <span>{link.label}</span>
+            </NavLink>
+          );
+        })}
         <button
           type="button"
           className={moreOpen || moreActive ? "active" : undefined}
@@ -305,32 +375,41 @@ export function AppShell({
           data-testid="mobile-more-btn"
           onClick={() => setMoreOpen((v) => !v)}
         >
-          More
+          <MoreHorizontal aria-hidden strokeWidth={2} />
+          <span>More</span>
         </button>
       </nav>
 
       {moreOpen && (
         <div className="gm-more-sheet" id="gm-more-sheet" data-testid="mobile-more-sheet">
           <div className="gm-more-sheet-card">
-            <div className="gm-section-head">
+            <div className="gm-section-head" style={{ display: "flex", justifyContent: "space-between" }}>
               <h2 className="gm-section-title">More</h2>
               <button type="button" className="gm-linkish" onClick={() => setMoreOpen(false)}>
                 Close
               </button>
             </div>
             {mobileMoreGroups.map((group) => (
-              <div key={group.heading} className="gm-more-group" data-testid={`more-group-${group.heading.toLowerCase().replace(/\s+/g, "-")}`}>
+              <div
+                key={group.heading}
+                className="gm-more-group"
+                data-testid={`more-group-${group.heading.toLowerCase().replace(/\s+/g, "-")}`}
+              >
                 <p className="gm-nav-heading">{group.heading}</p>
                 <div className="gm-more-links">
-                  {group.items.map((link) => (
-                    <NavLink
-                      key={link.to}
-                      to={withPrefix(link.to)}
-                      onClick={() => setMoreOpen(false)}
-                    >
-                      {link.label}
-                    </NavLink>
-                  ))}
+                  {group.items.map((link) => {
+                    const Icon = link.icon;
+                    return (
+                      <NavLink
+                        key={link.to}
+                        to={withPrefix(link.to)}
+                        onClick={() => setMoreOpen(false)}
+                      >
+                        <Icon size={18} aria-hidden />
+                        {link.label}
+                      </NavLink>
+                    );
+                  })}
                 </div>
               </div>
             ))}

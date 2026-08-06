@@ -8,6 +8,8 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { ScrollToTop } from "./components/ScrollToTop";
 import "./styles/global.css";
 import "./styles/redesign.css";
+import "./styles/premium-dashboard.css";
+import "./styles/gm-v2.css";
 
 const UPDATE_EVENT = "goldmeta:sw-update";
 

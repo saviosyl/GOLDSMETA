@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { BookOpen, Filter, Percent, ScrollText } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import type { Decision, JournalEntry, JournalTag } from "../types/models";
 import { formatWhen } from "../lib/format";
-import { PageHeader, SectionCard } from "../components/ui/primitives";
+import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 
 const TAG_OPTIONS: Array<{ id: JournalTag; label: string }> = [
   { id: "followed", label: "Followed plan: YES" },
@@ -75,9 +76,29 @@ export function JournalPage() {
     }
   };
 
+  const wins = entries.filter((e) => /win|profit|followed/i.test(e.tags?.join(" ") ?? "")).length;
+  const winRate = entries.length ? Math.round((wins / entries.length) * 100) : 0;
+
   return (
-    <div data-testid="journal-page" className="gm-journal-page">
+    <div data-testid="journal-page" className="gm-journal-page gm-premium-v2">
       <PageHeader title="Journal" freshness="Review workspace" />
+      <div className="gm-insight-strip" style={{ marginBottom: 16 }} data-testid="journal-overview">
+        <div>
+          <ScrollText aria-hidden />
+          <span className="gm-label">Entries</span>
+          <strong>{entries.length}</strong>
+        </div>
+        <div>
+          <Percent aria-hidden />
+          <span className="gm-label">Win rate</span>
+          <strong>{entries.length ? `${winRate}%` : "—"}</strong>
+        </div>
+        <div>
+          <Filter aria-hidden />
+          <span className="gm-label">Filter</span>
+          <strong>{dirFilter}</strong>
+        </div>
+      </div>
       <p className="gm-meta">
         Record outcomes and lessons. Notes never alter engine outcomes.{" "}
         <Link to="/history">Open read-only History archive</Link>.
@@ -172,18 +193,25 @@ export function JournalPage() {
       </SectionCard>
 
       <SectionCard title="Recent">
-        <ul className="list" data-testid="journal-recent-list">
-          {filtered.length === 0 && <li>No journal entries yet.</li>}
-          {filtered.map((entry) => (
-            <li key={entry.journalId ?? entry.id ?? `${entry.createdAt}-${entry.direction}`}>
-              <strong>{entry.direction}</strong> · {entry.outcome} · {formatWhen(entry.createdAt)}
-              {entry.tags && entry.tags.length > 0 ? (
-                <div className="muted">{entry.tags.join(", ")}</div>
-              ) : null}
-              {entry.notes ? <div className="muted">{entry.notes}</div> : null}
-            </li>
-          ))}
-        </ul>
+        {filtered.length === 0 ? (
+          <EmptyState
+            title="No journal entries yet."
+            body="Save your first outcome above. Notes never change engine decisions."
+            icon={<BookOpen aria-hidden />}
+          />
+        ) : (
+          <ul className="list" data-testid="journal-recent-list">
+            {filtered.map((entry) => (
+              <li key={entry.journalId ?? entry.id ?? `${entry.createdAt}-${entry.direction}`}>
+                <strong>{entry.direction}</strong> · {entry.outcome} · {formatWhen(entry.createdAt)}
+                {entry.tags && entry.tags.length > 0 ? (
+                  <div className="muted">{entry.tags.join(", ")}</div>
+                ) : null}
+                {entry.notes ? <div className="muted">{entry.notes}</div> : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </SectionCard>
     </div>
   );

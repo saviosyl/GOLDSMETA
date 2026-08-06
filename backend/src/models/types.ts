@@ -420,6 +420,17 @@ export const settingsPatchSchema = z
   .object({
     aiEnabled: z.boolean().optional(),
     notificationsEnabled: z.boolean().optional(),
+    notificationPreferences: z
+      .object({
+        VALID_PLAN_CREATED: z.boolean().optional(),
+        ENTRY_ZONE_APPROACHING: z.boolean().optional(),
+        ENTRY_ZONE_REACHED: z.boolean().optional(),
+        CONFIRM_5M: z.boolean().optional(),
+        PLAN_INVALIDATED: z.boolean().optional(),
+        TARGETS_REACHED: z.boolean().optional()
+      })
+      .strict()
+      .optional(),
     provisionalSignalsEnabled: z.boolean().optional(),
     riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional(),
     liveForwardAckAt: z.string().datetime().nullable().optional(),
@@ -442,6 +453,7 @@ export interface UserSettings {
   userId: string;
   aiEnabled: boolean;
   notificationsEnabled: boolean;
+  notificationPreferences?: NotificationPreferences;
   provisionalSignalsEnabled: boolean;
   riskProfile: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE";
   /** ISO timestamp when user acknowledged LIVE forward-testing banner; null = not yet. */
@@ -466,3 +478,25 @@ export interface UserSettings {
   }>;
   updatedAt: string;
 }
+
+export const notificationPreferenceSchema = z
+  .object({
+    VALID_PLAN_CREATED: z.boolean(),
+    ENTRY_ZONE_APPROACHING: z.boolean(),
+    ENTRY_ZONE_REACHED: z.boolean(),
+    CONFIRM_5M: z.boolean(),
+    PLAN_INVALIDATED: z.boolean(),
+    TARGETS_REACHED: z.boolean()
+  })
+  .strict();
+
+export type NotificationPreferences = z.infer<typeof notificationPreferenceSchema>;
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  VALID_PLAN_CREATED: false,
+  ENTRY_ZONE_APPROACHING: false,
+  ENTRY_ZONE_REACHED: false,
+  CONFIRM_5M: false,
+  PLAN_INVALIDATED: false,
+  TARGETS_REACHED: false
+};

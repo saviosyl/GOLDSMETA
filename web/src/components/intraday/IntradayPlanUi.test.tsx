@@ -153,13 +153,13 @@ describe("Today's Intraday Plan UI", () => {
     const plan = structuredClone(chartExampleIntradayPlanFixture);
     plan.planStatus = "NO_VALID_PLAN";
     render(wrap(<PrimaryPlanCard plan={plan} marketStructureMode="LIVE_RANGE_ONLY" />));
-    expect(screen.getByTestId("no-valid-plan-title")).toHaveTextContent(/WAIT — NO VALID PLAN/i);
-    expect(screen.getByTestId("no-valid-plan-next")).toHaveTextContent(/15-minute/i);
+    expect(screen.getByTestId("no-valid-plan-title")).toHaveTextContent(/^WAIT$/i);
+    expect(screen.getByTestId("no-valid-plan-next")).toHaveTextContent(/No valid trade plan yet/i);
     expect(screen.getByTestId("no-valid-plan-reason")).toBeInTheDocument();
     expect(screen.queryByTestId("plan-level-entry")).not.toBeInTheDocument();
     expect(screen.getByTestId("todays-intraday-plan")).not.toHaveTextContent(/LABELLED FIXTURE/i);
     expect(screen.getByTestId("todays-intraday-plan")).not.toHaveTextContent(/PREPARE/i);
-    expect(screen.getByTestId("todays-intraday-plan").textContent?.match(/NO VALID PLAN/gi)?.length).toBe(1);
+    expect(screen.getByTestId("todays-intraday-plan").textContent?.match(/NO VALID PLAN/gi)?.length ?? 0).toBe(0);
   });
 
   it("legacy plan data shows enhanced-pending banner", () => {

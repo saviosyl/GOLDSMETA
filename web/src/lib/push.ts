@@ -25,7 +25,7 @@ export const getNotificationPermission = (): NotificationPermission | "unsupport
 
 export const isProbablyInstalledPwa = (): boolean => {
   if (typeof window === "undefined") return false;
-  const standalone = window.matchMedia("(display-mode: standalone)").matches;
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches ?? false;
   const iosStandalone = "standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return standalone || iosStandalone;
 };

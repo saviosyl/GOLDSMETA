@@ -6,6 +6,10 @@ import type {
   JournalEntry,
   JournalTag,
   ManualExecutionAction,
+  AdminMarketFeedStatus,
+  InAppNotification,
+  MarketFeedHealth,
+  NotificationPreferences,
   SetupAnalyticsSummary,
   SetupRecord,
   SystemStatus,
@@ -157,6 +161,7 @@ export class ApiClient {
     latestCompleteStrategySignal?: Decision | null;
     marketStructureMode?: "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE";
     marketStructureDiagnostics?: Record<string, unknown> | null;
+    marketFeedHealth?: MarketFeedHealth | null;
     structureDecisionId?: string | null;
     /** Server-built Issue #50 intraday plan — UI must not invent levels. */
     intradayPlan?: import("../types/intradayPlan").IntradayPlan | null;
@@ -317,6 +322,64 @@ export class ApiClient {
   async adminDiagnostics(): Promise<AdminDiagnostics> {
     const body = await this.request<{ diagnostics: AdminDiagnostics }>("/v1/admin/diagnostics");
     return body.diagnostics;
+  }
+
+  async marketFeedHealth(): Promise<MarketFeedHealth> {
+    const body = await this.request<{ health?: MarketFeedHealth; marketFeedHealth?: MarketFeedHealth }>(
+      "/v1/market-feed/health"
+    );
+    return body.health ?? body.marketFeedHealth ?? (body as MarketFeedHealth);
+  }
+
+  async adminMarketFeedStatus(): Promise<AdminMarketFeedStatus> {
+    const body = await this.request<{
+      status?: AdminMarketFeedStatus;
+      marketFeed?: AdminMarketFeedStatus;
+    }>("/v1/admin/market-feed/status");
+    return body.status ?? body.marketFeed ?? (body as AdminMarketFeedStatus);
+  }
+
+  async notificationPreferences(): Promise<NotificationPreferences> {
+    const body = await this.request<{
+      preferences?: NotificationPreferences;
+      notificationPreferences?: NotificationPreferences;
+    }>("/v1/notifications/preferences");
+    return body.preferences ?? body.notificationPreferences ?? (body as NotificationPreferences);
+  }
+
+  async updateNotificationPreferences(
+    patch: Partial<NotificationPreferences>
+  ): Promise<NotificationPreferences> {
+    const body = await this.request<{
+      preferences?: NotificationPreferences;
+      notificationPreferences?: NotificationPreferences;
+    }>("/v1/notifications/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    });
+    return body.preferences ?? body.notificationPreferences ?? (body as NotificationPreferences);
+  }
+
+  async listNotifications(limit = 20): Promise<InAppNotification[]> {
+    const body = await this.request<{
+      notifications?: InAppNotification[];
+      items?: InAppNotification[];
+    }>(`/v1/notifications?limit=${encodeURIComponent(String(limit))}`);
+    return body.notifications ?? body.items ?? [];
+  }
+
+  async markNotificationsRead(notificationIds?: string[]): Promise<{ ok: boolean }> {
+    return this.request("/v1/notifications/read", {
+      method: "POST",
+      body: JSON.stringify(notificationIds ? { notificationIds } : {})
+    });
+  }
+
+  async sendTestNotification(): Promise<{ ok: boolean; message?: string }> {
+    return this.request("/v1/notifications/test", {
+      method: "POST",
+      body: "{}"
+    });
   }
 
   async listTradingViewConnections(): Promise<TradingViewConnection[]> {
