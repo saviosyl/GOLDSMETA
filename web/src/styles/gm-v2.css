@@ -1428,3 +1428,5 @@ body.gm-drawer-open {
 .gm-premium-v2[data-cache-bust="v2"] {
   --gm-cache-bust: 1;
 }
+
+.gm-premium-v2 { --gm-deploy-rev: "b001de8"; }
