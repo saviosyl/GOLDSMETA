@@ -58,7 +58,8 @@ export function premiumDecisionSubtitle(
 
 function sanitizeOneLine(value: string | null | undefined): string {
   if (!value) return "";
-  const trimmed = value.replace(/\(LABELLED FIXTURE[^)]*\)/gi, "").trim();
+  // Drop parenthetical notes (fixtures / disclaimers) for compact hero copy.
+  const trimmed = value.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
   return trimmed.length > 90 ? `${trimmed.slice(0, 87)}…` : trimmed;
 }
 
