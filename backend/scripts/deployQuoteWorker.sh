@@ -14,11 +14,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "Building image ${IMAGE}"
+# Cloud Build expects a file named Dockerfile in the upload context.
+ln -sfn Dockerfile.quote-worker Dockerfile
+cleanup() { rm -f Dockerfile; }
+trap cleanup EXIT
 gcloud builds submit \
   --project="$PROJECT" \
   --tag="$IMAGE" \
   --timeout=1200s \
-  -f Dockerfile.quote-worker \
   .
 
 echo "Deploying Cloud Run service ${SERVICE}"
