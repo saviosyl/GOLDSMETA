@@ -70,11 +70,13 @@
 }
 
 .gm-topbar-actions .gm-badge {
+  display: inline-flex !important;
   background: rgba(17, 40, 74, 0.08);
   color: var(--navy);
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   padding: 4px 8px;
   min-height: 28px;
+  white-space: nowrap;
 }
 
 /* Market strip */
