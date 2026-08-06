@@ -589,6 +589,14 @@ body,
   color: var(--gold-500);
 }
 
+.gm-decision-hero-v2 .gm-hero-confidence {
+  margin: 6px 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(245, 247, 251, 0.88);
+}
+
 .gm-decision-hero-v2 .gm-hero-instruction {
   margin: 8px 0 16px;
   font-size: 1rem;

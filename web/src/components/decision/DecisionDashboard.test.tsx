@@ -82,7 +82,9 @@ describe("DecisionDashboard", () => {
   });
 
   it("shows Entry Stop and targets prominently for potential plans", () => {
-    render(wrap(<DecisionDashboard plan={potentialBuy()} marketFeedHealth={greenFeed} livePrice={4039} />));
+    const plan = potentialBuy();
+    plan.confidence = 58;
+    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/PREPARE/i);
     expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(
@@ -143,6 +145,7 @@ describe("DecisionDashboard", () => {
   it("shows ready plan language only after confirmation passed", () => {
     const plan = potentialBuy();
     plan.action = "BUY_NOW";
+    plan.confidence = 82;
     plan.confirmation5m = {
       state: "BREAKOUT_CONFIRMED",
       label: "BREAKOUT CONFIRMED",
@@ -153,7 +156,27 @@ describe("DecisionDashboard", () => {
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY");
+    expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
     expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+  });
+
+  it("shows BUY with confidence from 65% instead of BLOCKED", () => {
+    const plan = potentialBuy();
+    plan.confidence = 75;
+    plan.planQuality = { grade: "B", reasons: ["SOFT_DISAGREEMENT"] };
+    plan.confirmation5m = {
+      state: "BREAKOUT_CONFIRMED",
+      label: "BREAKOUT CONFIRMED",
+      meaningful: true,
+      detail: "5M close held"
+    };
+
+    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
+
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY");
+    expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/75%\s*confidence/i);
+    expect(screen.getByTestId("premium-hero-status")).toHaveTextContent(/Forming|Active/i);
+    expect(screen.queryByText(/Blocked/i)).not.toBeInTheDocument();
   });
 });

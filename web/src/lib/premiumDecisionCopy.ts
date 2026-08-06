@@ -1,9 +1,10 @@
 import type { DecisionDashboardState } from "./decisionDashboardState";
+import { DIRECTION_DISPLAY_THRESHOLD } from "./decisionDashboardState";
 import { fmtPrice } from "./intradayFormat";
 import type { IntradayPlan } from "../types/intradayPlan";
 import { looksLikeReasonCode, plainReason } from "./reasonCodePlain";
 
-/** Display chip for the premium hero — beginner-friendly, mockup-aligned. */
+/** Display chip for the premium hero — beginner-friendly. */
 export type PremiumDecisionChip =
   | "BUY"
   | "SELL"
@@ -12,19 +13,32 @@ export type PremiumDecisionChip =
   | "PREPARE"
   | "PREPARE BUY"
   | "PREPARE SELL"
-  | "BLOCKED"
+  | "HOLD"
   | "NO TRADE";
 
 export function premiumDecisionChip(
   state: DecisionDashboardState,
   plan?: IntradayPlan | null
 ): PremiumDecisionChip {
+  // From 65% setup quality, prefer clear BUY/SELL on the dashboard.
+  if (
+    state.direction &&
+    state.confidencePercent != null &&
+    state.confidencePercent >= DIRECTION_DISPLAY_THRESHOLD &&
+    (state.mode === "BUY_READY" ||
+      state.mode === "SELL_READY" ||
+      state.mode === "POTENTIAL_BUY" ||
+      state.mode === "POTENTIAL_SELL")
+  ) {
+    return state.direction;
+  }
+
   if (state.mode === "BUY_READY") return "BUY";
   if (state.mode === "SELL_READY") return "SELL";
-  if (state.mode === "BLOCKED") return "BLOCKED";
+  if (state.mode === "HOLD") return "HOLD";
   if (state.mode === "WATCHING") return "WATCHING";
   if (state.mode === "WAIT") return "WAIT";
-  if (state.mode === "NO_TRADE") return "NO TRADE";
+  if (state.mode === "NO_TRADE") return "HOLD";
   if (state.mode === "POTENTIAL_BUY") return "PREPARE BUY";
   if (state.mode === "POTENTIAL_SELL") return "PREPARE SELL";
 
@@ -71,13 +85,17 @@ export function premiumDecisionSubtitle(
         ? `Watch for breakdown below ${price}`
         : sanitizeOneLine(plan?.oneSentence) || "Bearish setup forming — confirmation still needed";
     case "BUY":
-      return "Plan confirmed — look for entry zone";
+      return state.mode === "BUY_READY"
+        ? "Plan confirmed — look for entry zone"
+        : state.nextRequiredCondition || "Bullish bias — review levels before any manual entry";
     case "SELL":
-      return "Bearish plan active — wait for confirmation";
-    case "BLOCKED":
-      return plainReason(state.reason) || "A hard safety or data issue is blocking entry";
+      return state.mode === "SELL_READY"
+        ? "Bearish plan active — review entry carefully"
+        : state.nextRequiredCondition || "Bearish bias — review levels before any manual entry";
+    case "HOLD":
+      return plainReason(state.reason) || "Stand aside until the setup is clear";
     case "NO TRADE":
-      return "The plan failed. Do not enter.";
+      return "Stand aside until the setup is clear";
     default:
       return state.planState;
   }
@@ -94,11 +112,20 @@ export function premiumStatusLabel(
   plan?: IntradayPlan | null
 ): string {
   const chip = premiumDecisionChip(state, plan);
-  if (chip === "WAIT" || chip === "WATCHING" || chip === "PREPARE" || chip === "PREPARE BUY" || chip === "PREPARE SELL") {
+  if (chip === "BUY" || chip === "SELL") {
+    return state.mode === "BUY_READY" || state.mode === "SELL_READY" ? "Active" : "Forming";
+  }
+  if (
+    chip === "WAIT" ||
+    chip === "WATCHING" ||
+    chip === "PREPARE" ||
+    chip === "PREPARE BUY" ||
+    chip === "PREPARE SELL"
+  ) {
     return "Monitoring";
   }
-  if (chip === "BUY" || chip === "SELL") return "Active";
-  return "Blocked";
+  if (chip === "HOLD") return "On hold";
+  return "Monitoring";
 }
 
 export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRONG" | "MINOR" {
@@ -109,11 +136,11 @@ export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRON
   return "MINOR";
 }
 
-/** Rename confidence presentation to setup quality (not probability of profit). */
+/** Full setup-quality line for secondary facts (not the hero). */
 export function setupQualityLabel(
   confidence: number | null | undefined,
-  readyThreshold = 80
+  readyThreshold = DIRECTION_DISPLAY_THRESHOLD
 ): string | null {
   if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
-  return `Setup quality: ${Math.round(confidence)}% · Required for ready: ${readyThreshold}%`;
+  return `Setup quality: ${Math.round(confidence)}% · Direction from ${readyThreshold}%`;
 }
