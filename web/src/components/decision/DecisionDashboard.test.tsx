@@ -71,8 +71,10 @@ describe("DecisionDashboard", () => {
 
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} marketStructureMode="LIVE_RANGE_ONLY" />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("WAIT");
-    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent("No valid plan yet");
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/WAIT|WATCHING/i);
+    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(
+      /No meaningful setup|No valid plan|Waiting for|approaching/i
+    );
     expect(screen.getByTestId("wait-monitoring-copy")).toHaveTextContent(/monitoring XAUUSD/i);
     expect(screen.getByTestId("no-valid-nearest-sr")).toBeInTheDocument();
     expect(screen.getByTestId("why-waiting")).toBeInTheDocument();
@@ -82,12 +84,16 @@ describe("DecisionDashboard", () => {
   it("shows Entry Stop and targets prominently for potential plans", () => {
     render(wrap(<DecisionDashboard plan={potentialBuy()} marketFeedHealth={greenFeed} livePrice={4039} />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("PREPARE");
-    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(/Watch for reclaim|confirmation/i);
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/PREPARE/i);
+    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(
+      /Watch for reclaim|confirmation|5M candle|Waiting for/i
+    );
     expect(screen.getByTestId("plan-level-entry")).toHaveTextContent(/4,040/);
     expect(screen.getByTestId("plan-level-stop")).toHaveTextContent(/4,036/);
     expect(screen.getByTestId("plan-level-tp1")).toHaveTextContent(/4,048/);
-    expect(screen.getByTestId("potential-not-ready")).toHaveTextContent(/not ready/i);
+    expect(screen.getByTestId("potential-not-ready")).toHaveTextContent(
+      /not ready|Waiting for|5M candle|confirmation/i
+    );
   });
 
   it("does not present market bias as a valid entry", () => {

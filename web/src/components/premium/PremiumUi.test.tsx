@@ -104,8 +104,10 @@ describe("Premium UI redesign", () => {
         />
       )
     );
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("WAIT");
-    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(/No valid plan yet/i);
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/WAIT|WATCHING/i);
+    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(
+      /No meaningful setup|No valid plan|Waiting for|approaching/i
+    );
     expect(screen.getByTestId("nearest-support")).toBeInTheDocument();
     expect(screen.getByTestId("nearest-resistance")).toBeInTheDocument();
     expect(screen.getByTestId("premium-quick-actions")).toBeInTheDocument();

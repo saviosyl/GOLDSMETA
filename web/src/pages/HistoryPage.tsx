@@ -12,6 +12,8 @@ import {
   trendLabel,
   type HistoryFilter
 } from "../lib/decisionDisplay";
+import { formatWaitGroupLabel, groupHistoryItems } from "../lib/historyGrouping";
+import { plainReason } from "../lib/reasonCodePlain";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 
 const FILTERS: Array<{ id: HistoryFilter; label: string }> = [
@@ -168,6 +170,20 @@ export function HistoryPage() {
     [items, filter, setupsByDecisionId]
   );
 
+  const grouped = useMemo(
+    () =>
+      groupHistoryItems(
+        visible.map((item) => ({
+          decisionId: item.decisionId,
+          decision: item.decision,
+          generatedAt: item.generatedAt,
+          reasonCodes: item.reasonCodes,
+          oneLineReason: plainReason(primaryReason(item))
+        }))
+      ),
+    [visible]
+  );
+
   return (
     <div className="history-page" data-testid="signal-history-page">
       <div className="history-header-row">
@@ -179,8 +195,8 @@ export function HistoryPage() {
         </Link>
       </div>
       <p className="muted history-disclaimer" data-testid="hypothetical-disclaimer">
-        Past hypothetical results do not guarantee future trading performance. Confidence is a
-        setup-confidence score, not the probability of profit.
+        Past hypothetical results do not guarantee future trading performance. Setup quality is a
+        structure score, not the probability of profit.
       </p>
       {(error || offline) && (
         <div className="banner stale" role="status">
@@ -208,7 +224,38 @@ export function HistoryPage() {
           <p className="muted">No signals yet.</p>
         ) : (
           <ul className="history-list">
-            {visible.map((item) => {
+            {grouped.map((row) => {
+              if (row.kind === "wait_group") {
+                return (
+                  <li key={row.id}>
+                    <div
+                      className="history-item history-wait-group"
+                      data-testid={`history-wait-group-${row.id}`}
+                    >
+                      <div className="history-item-top">
+                        <strong className="history-decision WAIT">WAIT</strong>
+                        <span className="badge">Grouped</span>
+                      </div>
+                      <div className="history-item-reason">{formatWaitGroupLabel(row)}</div>
+                      <div className="history-item-meta muted">
+                        {plainReason(row.reason)} · {row.count} identical checks collapsed
+                      </div>
+                      <details className="history-diagnostics">
+                        <summary>View diagnostics</summary>
+                        <ul>
+                          {row.items.map((item) => (
+                            <li key={item.decisionId}>
+                              {formatWhen(item.generatedAt)} · {item.decisionId}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </div>
+                  </li>
+                );
+              }
+              const item = visible.find((d) => d.decisionId === row.item.decisionId);
+              if (!item) return null;
               const quality = displayQualityLabel(item);
               const setup = setupsByDecisionId.get(item.decisionId);
               const outcome = outcomesByDecisionId.get(item.decisionId);
@@ -222,7 +269,9 @@ export function HistoryPage() {
                   >
                     <div className="history-item-top">
                       <strong className={`history-decision ${item.decision}`}>{item.decision}</strong>
-                      <span className="history-confidence">{formatPercent(item.confidence)}</span>
+                      <span className="history-confidence" title="Setup quality score">
+                        {formatPercent(item.confidence)}
+                      </span>
                       <span
                         className={`badge history-env ${item.environment === "TEST" ? "test" : ""}`}
                         data-testid={`env-badge-${item.decisionId}`}
@@ -246,7 +295,11 @@ export function HistoryPage() {
                       {item.currentSession ? ` · ${item.currentSession}` : ""}
                     </div>
                     <div className="history-item-meta muted">Trend {trendLabel(item)}</div>
-                    <div className="history-item-reason">{primaryReason(item)}</div>
+                    <div className="history-item-reason">{plainReason(primaryReason(item))}</div>
+                    <details className="history-diagnostics">
+                      <summary>View diagnostics</summary>
+                      <pre className="muted">{(item.reasonCodes ?? []).join(", ") || "—"}</pre>
+                    </details>
                     {outcomeBlock(outcome, item)}
                   </button>
                 </li>

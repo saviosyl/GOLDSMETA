@@ -123,11 +123,10 @@ export const evaluateDataQuality = (
   }
 
   if (hasDirectionalConflict(snapshot)) {
-    return {
-      quality: "CONFLICTED",
-      warnings: ["Trend and confirmation candle conflict"],
-      missingInputs
-    };
+    // Soft disagreement — 15M vs 5M direction conflict is a forming delay,
+    // not corrupt / mismatched price-source data.
+    warnings.push("SOFT_DISAGREEMENT");
+    warnings.push("Trend and confirmation candle disagree — setup may still be forming");
   }
 
   const profile = resolveVolumeProfile(snapshot);

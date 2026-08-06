@@ -44,8 +44,18 @@ function buildReviewApi() {
     decisionOverride === "BUY" || decisionOverride === "SELL" ? decisionOverride : "WAIT";
   const scenario = params.get("scenario") ?? "";
   const signalOutcomes = scenario === "signal-outcomes";
-  const marketMismatch = scenario === "market-mismatch";
+  const marketMismatch = scenario === "market-mismatch" || scenario === "blocked";
   const marketMatch = scenario === "market-match";
+  const formingScenario = [
+    "watching",
+    "prepare-buy",
+    "prepare-sell",
+    "buy-ready",
+    "sell-ready",
+    "wait-group"
+  ].includes(scenario)
+    ? scenario
+    : "";
   const issue50Id = scenario.startsWith("issue50-")
     ? scenario.slice("issue50-".length)
     : scenario === "issue50"
@@ -397,11 +407,16 @@ function buildReviewApi() {
               : null,
         marketStructureMode: marketMismatch
           ? "MISMATCH"
-          : marketMatch
+          : formingScenario === "buy-ready" ||
+              formingScenario === "sell-ready" ||
+              formingScenario === "prepare-buy" ||
+              formingScenario === "prepare-sell" ||
+              decisionCode === "BUY" ||
+              decisionCode === "SELL" ||
+              marketMatch ||
+              decision.marketStructure?.poc != null
             ? "COMPLETE"
-            : decision.marketStructure?.poc != null
-              ? "COMPLETE"
-              : "LIVE_RANGE_ONLY",
+            : "LIVE_RANGE_ONLY",
         marketStructureDiagnostics: {
           lastWebhookOrDecisionAt: decision.generatedAt,
           lastCompleteSignalAt:
@@ -483,12 +498,131 @@ function buildReviewApi() {
                 },
                 importantLevels: []
               }
-            : chartExampleIntradayPlanFixture,
+            : formingScenario === "watching"
+              ? {
+                  ...chartExampleIntradayPlanFixture,
+                  action: "NO_TRADE" as const,
+                  actionLabel: "WATCHING",
+                  planStatus: "NO_VALID_PLAN",
+                  geometryValid: false,
+                  oneSentence: "Price is approaching support — watching for a setup.",
+                  whyNotReady: "AWAITING_5M_CONFIRMATION",
+                  zones: {
+                    ...chartExampleIntradayPlanFixture.zones,
+                    nearestSupport: 4031.1,
+                    nearestResistance: 4037.31
+                  },
+                  tradePlan: {
+                    ...chartExampleIntradayPlanFixture.tradePlan,
+                    actionable: false,
+                    direction: "NONE" as const
+                  }
+                }
+              : formingScenario === "prepare-buy"
+                ? {
+                    ...chartExampleIntradayPlanFixture,
+                    action: "PREPARE" as const,
+                    actionLabel: "PREPARE BUY",
+                    planStatus: "WAITING_FOR_ENTRY_ZONE",
+                    geometryValid: true,
+                    confidence: 74,
+                    confirmation5m: {
+                      state: "PENDING",
+                      label: "Pending"
+                    } as typeof chartExampleIntradayPlanFixture.confirmation5m,
+                    tradePlan: {
+                      ...chartExampleIntradayPlanFixture.tradePlan,
+                      direction: "BUY" as const,
+                      actionable: true,
+                      entryZone: "4,034.80 – 4,035.40",
+                      stopLoss: 4031.1,
+                      tp1: 4048.2,
+                      tp2: 4053.7
+                    },
+                    planQuality: {
+                      ...(chartExampleIntradayPlanFixture.planQuality as object),
+                      reasons: ["AWAITING_5M_CONFIRMATION"]
+                    } as typeof chartExampleIntradayPlanFixture.planQuality
+                  }
+                : formingScenario === "prepare-sell"
+                  ? {
+                      ...chartExampleIntradayPlanFixture,
+                      action: "PREPARE" as const,
+                      actionLabel: "PREPARE SELL",
+                      planStatus: "WAITING_FOR_ENTRY_ZONE",
+                      geometryValid: true,
+                      confidence: 71,
+                      confirmation5m: {
+                        state: "PENDING",
+                        label: "Pending"
+                      } as typeof chartExampleIntradayPlanFixture.confirmation5m,
+                      tradePlan: {
+                        ...chartExampleIntradayPlanFixture.tradePlan,
+                        direction: "SELL" as const,
+                        actionable: true,
+                        entryZone: "4,036.80 – 4,037.40",
+                        stopLoss: 4041.2,
+                        tp1: 4028.5,
+                        tp2: 4024.0
+                      },
+                      planQuality: {
+                        ...(chartExampleIntradayPlanFixture.planQuality as object),
+                        reasons: ["AWAITING_5M_CONFIRMATION", "SOFT_DISAGREEMENT"]
+                      } as typeof chartExampleIntradayPlanFixture.planQuality
+                    }
+                  : formingScenario === "buy-ready" || decisionCode === "BUY"
+                    ? {
+                        ...chartExampleIntradayPlanFixture,
+                        action: "BUY" as const,
+                        actionLabel: "BUY PLAN READY",
+                        planStatus: "ARMED",
+                        geometryValid: true,
+                        confidence: 86,
+                        confirmation5m: {
+                          state: "BREAKOUT_CONFIRMED",
+                          label: "Confirmed"
+                        } as typeof chartExampleIntradayPlanFixture.confirmation5m,
+                        tradePlan: {
+                          ...chartExampleIntradayPlanFixture.tradePlan,
+                          direction: "BUY" as const,
+                          actionable: true,
+                          entryZone: "4,034.80 – 4,035.40",
+                          stopLoss: 4031.1,
+                          tp1: 4048.2,
+                          tp2: 4053.7,
+                          tp3: 4058.0
+                        }
+                      }
+                    : formingScenario === "sell-ready" || decisionCode === "SELL"
+                      ? {
+                          ...chartExampleIntradayPlanFixture,
+                          action: "SELL" as const,
+                          actionLabel: "SELL PLAN READY",
+                          planStatus: "ARMED",
+                          geometryValid: true,
+                          confidence: 84,
+                          confirmation5m: {
+                            state: "REJECTION_CONFIRMED",
+                            label: "Confirmed"
+                          } as typeof chartExampleIntradayPlanFixture.confirmation5m,
+                          tradePlan: {
+                            ...chartExampleIntradayPlanFixture.tradePlan,
+                            direction: "SELL" as const,
+                            actionable: true,
+                            entryZone: "4,036.80 – 4,037.40",
+                            stopLoss: 4041.2,
+                            tp1: 4028.5,
+                            tp2: 4024.0
+                          }
+                        }
+                      : chartExampleIntradayPlanFixture,
         marketFeedHealth: {
-          status: "green" as const,
-          title: "GoldMeta Market Feed",
-          subtitle: "15M plan and 5M confirmation active",
-          quoteStatus: "live" as const,
+          status: marketMismatch ? ("red" as const) : ("green" as const),
+          title: marketMismatch ? "Market feed unavailable" : "GoldMeta Market Feed",
+          subtitle: marketMismatch
+            ? "15M and 5M data did not belong to the same decision window."
+            : "15M plan and 5M confirmation active",
+          quoteStatus: marketMismatch ? ("unknown" as const) : ("live" as const),
           lastVerifiedAt: nowIso,
           lastVerifiedLabel: "12 seconds ago"
         }
@@ -680,7 +814,21 @@ function buildReviewApi() {
     getVapidPublicKey: async () => "",
     registerWebPushSubscription: async () => ({}),
     deleteWebPushSubscription: async () => ({}),
-    decisionHistory: async () => (soFixtures ? soFixtures.decisions : empty ? [] : [decision]),
+    decisionHistory: async () => {
+      if (soFixtures) return soFixtures.decisions;
+      if (empty) return [];
+      if (formingScenario === "wait-group") {
+        return Array.from({ length: 8 }, (_, i) => ({
+          ...decision,
+          decisionId: `wait_group_${i}`,
+          decision: "WAIT" as const,
+          generatedAt: new Date(Date.parse("2026-08-06T10:00:00.000Z") + i * 12 * 60_000).toISOString(),
+          reasonCodes: ["AWAITING_5M_CONFIRMATION", "WAIT_ONLY"],
+          confidence: 40 + i
+        }));
+      }
+      return [decision];
+    },
     listSignalOutcomes: async () => (soFixtures ? soFixtures.outcomes : []),
     signalPerformance: async () =>
       soFixtures

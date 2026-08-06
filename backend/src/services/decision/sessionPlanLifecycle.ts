@@ -796,6 +796,30 @@ export const processSessionPlanLifecycle = async (
       await store.saveSessionPlan?.(plan);
       return plan;
     }
+    // Reject confirmations that belong to a different 15M plan window.
+    const confirmKey = extractPlanSourceKey(payload);
+    const activeKey = existing.planSourceKey ?? null;
+    if (confirmKey && activeKey && confirmKey !== activeKey) {
+      const rejected: SessionPlanRecord = {
+        ...existing,
+        planMutation: "STATUS_UPDATED",
+        planStabilityLabel: "STATUS UPDATED",
+        alertRole: "CONFIRM_5M",
+        updatedAt: nowIso(),
+        planQuality: {
+          ...existing.planQuality,
+          reasons: [
+            ...new Set([
+              ...(existing.planQuality?.reasons ?? []),
+              "CONFIRM_PLAN_SOURCE_KEY_MISMATCH",
+              "OUT_OF_ORDER_DATA"
+            ])
+          ]
+        }
+      };
+      await store.saveSessionPlan?.(rejected);
+      return rejected;
+    }
     const confirmationState =
       extractConfirmationState(payload) ?? existing.confirmationState;
     const price = positive(decision.lastKnownPrice) ?? positive(payload.ohlcv?.close);

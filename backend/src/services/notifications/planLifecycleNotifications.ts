@@ -11,10 +11,13 @@ import { sendWebPushToUser } from "./webPush";
 
 export type PlanLifecycleNotificationEvent =
   | "VALID_PLAN_CREATED"
+  | "SETUP_FORMING"
   | "ENTRY_ZONE_APPROACHING"
   | "ENTRY_ZONE_REACHED"
   | "CONFIRM_5M_PASSED"
   | "CONFIRM_5M_FAILED"
+  | "CONFIRMATION_PENDING"
+  | "STALE_FEED_BLOCK"
   | "PLAN_INVALIDATED"
   | "PLAN_EXPIRED"
   | "TP1_REACHED"
@@ -97,6 +100,8 @@ export const mapPlanLifecycleNotificationEvent = (
     (plan.planMutation === "CREATED" || plan.planMutation === "REPLACED") &&
     strategyChanged(previous, plan)
   ) {
+    // Forming (levels present, confirmation not yet passed) vs ready plan.
+    if (!confirmationPassed(plan.confirmationState)) return "SETUP_FORMING";
     return "VALID_PLAN_CREATED";
   }
 
@@ -111,6 +116,18 @@ export const mapPlanLifecycleNotificationEvent = (
   ) {
     if (confirmationPassed(plan.confirmationState)) return "CONFIRM_5M_PASSED";
     if (confirmationFailed(plan.confirmationState)) return "CONFIRM_5M_FAILED";
+    return "CONFIRMATION_PENDING";
+  }
+
+  if (
+    (plan.planQuality?.reasons ?? []).some((r) =>
+      /STALE|CONFIRM_PLAN_SOURCE_KEY_MISMATCH|OUT_OF_ORDER/i.test(r)
+    ) &&
+    !(previous?.planQuality?.reasons ?? []).some((r) =>
+      /STALE|CONFIRM_PLAN_SOURCE_KEY_MISMATCH|OUT_OF_ORDER/i.test(r)
+    )
+  ) {
+    return "STALE_FEED_BLOCK";
   }
 
   if (
@@ -138,6 +155,7 @@ const preferenceKeyForEvent = (
 ): keyof NotificationPreferences => {
   switch (event) {
     case "VALID_PLAN_CREATED":
+    case "SETUP_FORMING":
       return "VALID_PLAN_CREATED";
     case "ENTRY_ZONE_APPROACHING":
       return "ENTRY_ZONE_APPROACHING";
@@ -145,7 +163,9 @@ const preferenceKeyForEvent = (
       return "ENTRY_ZONE_REACHED";
     case "CONFIRM_5M_PASSED":
     case "CONFIRM_5M_FAILED":
+    case "CONFIRMATION_PENDING":
       return "CONFIRM_5M";
+    case "STALE_FEED_BLOCK":
     case "PLAN_INVALIDATED":
     case "PLAN_EXPIRED":
       return "PLAN_INVALIDATED";
@@ -171,6 +191,23 @@ const contentForEvent = (
         message: `Entry ${formatPrice(plan.entry?.price ?? plan.entry?.zoneLow)} | Stop ${formatPrice(
           plan.stopLoss?.price
         )} | TP1 ${formatPrice(tp1)}. Waiting for 5-minute confirmation.`
+      };
+    case "SETUP_FORMING":
+      return {
+        title: `GoldMeta — ${direction} setup forming`,
+        message: `A ${direction} setup is starting to form. Entry ${formatPrice(
+          plan.entry?.price ?? plan.entry?.zoneLow
+        )} · Trigger pending 5M confirmation.`
+      };
+    case "CONFIRMATION_PENDING":
+      return {
+        title: "GoldMeta — Confirmation pending",
+        message: `Waiting for the current 5M candle to confirm the ${direction} setup.`
+      };
+    case "STALE_FEED_BLOCK":
+      return {
+        title: "GoldMeta — Setup blocked by stale data",
+        message: "15M and 5M data are not in the same decision window, or a feed role is stale."
       };
     case "ENTRY_ZONE_APPROACHING":
       return {

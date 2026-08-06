@@ -2,14 +2,21 @@ import type { IntradayPlan } from "../types/intradayPlan";
 import { resolveAuthoritativeConfirmation } from "./confirmationAuthority";
 import { fmtPrice } from "./intradayFormat";
 import { isNoValidIntradayPlan, sanitizePlanText } from "./planTextFormat";
-import { plainReason } from "./reasonCodePlain";
+import { looksLikeReasonCode, plainReason } from "./reasonCodePlain";
+
+function setupQualityLabel(confidence: number | null | undefined, readyThreshold = 80): string | null {
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
+  return `Setup quality: ${Math.round(confidence)}% · Required for ready: ${readyThreshold}%`;
+}
 
 export type DecisionDashboardMode =
   | "WAIT"
+  | "WATCHING"
   | "POTENTIAL_BUY"
   | "POTENTIAL_SELL"
   | "BUY_READY"
   | "SELL_READY"
+  | "BLOCKED"
   | "NO_TRADE";
 
 export type DecisionDashboardLevelSet = {
@@ -22,10 +29,11 @@ export type DecisionDashboardLevelSet = {
 
 export type DecisionDashboardState = {
   mode: DecisionDashboardMode;
-  primaryDecision: "BUY" | "SELL" | "WAIT" | "NO TRADE";
+  primaryDecision: "BUY" | "SELL" | "WAIT" | "NO TRADE" | "BLOCKED" | "WATCHING";
   headline: string;
   planState: string;
   nextAction: string;
+  nextRequiredCondition: string | null;
   direction: "BUY" | "SELL" | null;
   tone: "buy" | "sell" | "wait" | "notrade";
   levels: DecisionDashboardLevelSet;
@@ -41,6 +49,7 @@ export type DecisionDashboardState = {
   nearestResistance: number | null;
   priceVsEntryZone: string | null;
   reviewKind: "15M" | "5M";
+  freshnessLines: string[];
 };
 
 function directionFromPlan(plan: IntradayPlan): "BUY" | "SELL" | null {
@@ -108,6 +117,81 @@ function technicalDetails(plan: IntradayPlan): string[] {
     .filter(Boolean);
 }
 
+function isHardBlocked(plan: IntradayPlan, marketStructureMode?: string | null): boolean {
+  const codes = [
+    ...(plan.geometryReasonCodes ?? []),
+    ...(plan.planQuality?.reasons ?? [])
+  ].map((c) => String(c).toUpperCase());
+  const mode = String(marketStructureMode ?? plan.freshness?.marketStructureMode ?? "").toUpperCase();
+  if (mode === "MISMATCH") return true;
+  return codes.some((c) =>
+    /HARD_CONFLICT|PRICE_SOURCE_MISMATCH|INVALID_TARGET_ORDER|CONFIRM_PLAN_SOURCE_KEY_MISMATCH|OUT_OF_ORDER_DATA|MISSING_REQUIRED|STOP_TOO_TIGHT|WRONG_SIDE/.test(
+      c
+    )
+  );
+}
+
+function nextCondition(
+  plan: IntradayPlan,
+  direction: "BUY" | "SELL" | null,
+  authSupports: boolean,
+  livePrice?: number | null
+): string | null {
+  const codes = (plan.planQuality?.reasons ?? []).map((c) => String(c).toUpperCase());
+  if (codes.some((c) => /AWAITING_5M|MISSING_CONFIRMATION/.test(c)) || !authSupports) {
+    const level =
+      plan.triggerPrice != null
+        ? fmtPrice(plan.triggerPrice)
+        : plan.zones?.nearestResistance != null && direction === "BUY"
+          ? fmtPrice(plan.zones.nearestResistance)
+          : plan.zones?.nearestSupport != null && direction === "SELL"
+            ? fmtPrice(plan.zones.nearestSupport)
+            : null;
+    if (direction === "BUY" && level) {
+      return `Waiting for the current 5M candle to close above ${level}.`;
+    }
+    if (direction === "SELL" && level) {
+      return `Waiting for the current 5M candle to close below ${level}.`;
+    }
+    return "Waiting for 15M and 5M trend direction to agree.";
+  }
+  if (codes.some((c) => /SOFT_DISAGREEMENT/.test(c))) {
+    return "Waiting for 15M and 5M trend direction to agree.";
+  }
+  const support = plan.zones?.nearestSupport;
+  if (direction === "BUY" && support != null && livePrice != null && livePrice > support + 0.5) {
+    return `Waiting for price to return to support at ${fmtPrice(support)}.`;
+  }
+  const resistance = plan.zones?.nearestResistance;
+  if (
+    direction === "SELL" &&
+    resistance != null &&
+    livePrice != null &&
+    livePrice < resistance - 0.5
+  ) {
+    return `Waiting for price to return to resistance at ${fmtPrice(resistance)}.`;
+  }
+  const plain = waitReason(plan);
+  return looksLikeReasonCode(plain) ? null : plain;
+}
+
+function approachingSetup(
+  plan: IntradayPlan,
+  livePrice: number | null | undefined,
+  direction: "BUY" | "SELL" | null
+): boolean {
+  if (livePrice == null || !Number.isFinite(livePrice)) return false;
+  const support = plan.zones?.nearestSupport;
+  const resistance = plan.zones?.nearestResistance;
+  if (direction === "BUY" && support != null && Math.abs(livePrice - support) <= 8) return true;
+  if (direction === "SELL" && resistance != null && Math.abs(livePrice - resistance) <= 8) {
+    return true;
+  }
+  if (!direction && support != null && Math.abs(livePrice - support) <= 5) return true;
+  if (!direction && resistance != null && Math.abs(livePrice - resistance) <= 5) return true;
+  return false;
+}
+
 export function deriveDecisionDashboardState(args: {
   plan: IntradayPlan;
   marketStructureMode?: string | null;
@@ -117,6 +201,7 @@ export function deriveDecisionDashboardState(args: {
   const noValid = isNoValidIntradayPlan(plan, marketStructureMode);
   const direction = directionFromPlan(plan);
   const levels = resolveLevels(plan);
+  const hardBlocked = isHardBlocked(plan, marketStructureMode);
   const noTrade =
     !noValid &&
     (String(plan.action).toUpperCase() === "NO_TRADE" ||
@@ -128,66 +213,99 @@ export function deriveDecisionDashboardState(args: {
     direction: direction ?? plan.tradePlan?.direction,
     action: plan.action
   });
-  const confidenceLabel =
-    typeof plan.confidence === "number" ? `${Math.round(plan.confidence)}% confidence` : null;
+  const confidenceLabel = setupQualityLabel(plan.confidence, 80);
   const lifecycleLabel = plan.planStatus ? String(plan.planStatus).replace(/_/g, " ") : null;
+  const freshnessLines: string[] = [];
+  const base = {
+    levels,
+    confirmationLabel: auth.label,
+    confirmationDetail: auth.detail,
+    confirmationPassed: false,
+    confidenceLabel,
+    lifecycleLabel,
+    reason: waitReason(plan),
+    technicalDetails: technicalDetails(plan),
+    nearestSupport: plan.zones?.nearestSupport ?? null,
+    nearestResistance: plan.zones?.nearestResistance ?? null,
+    priceVsEntryZone: null as string | null,
+    reviewKind: "15M" as const,
+    freshnessLines
+  };
+
+  if (hardBlocked && (hasUsefulLevels(levels) || noTrade)) {
+    const next = nextCondition(plan, direction, false, livePrice);
+    return {
+      ...base,
+      mode: "BLOCKED",
+      primaryDecision: "BLOCKED",
+      headline: "BLOCKED",
+      planState: "Setup blocked by a hard safety or data issue",
+      nextAction: next || "Do not enter until the blocking issue is resolved.",
+      nextRequiredCondition: next,
+      direction,
+      tone: "notrade",
+      showLevels: false,
+      confirmationPassed: false
+    };
+  }
 
   if (noValid) {
+    const watching = approachingSetup(plan, livePrice, direction);
+    const next = nextCondition(plan, direction, false, livePrice);
+    if (watching) {
+      return {
+        ...base,
+        mode: "WATCHING",
+        primaryDecision: "WATCHING",
+        headline: "WATCHING",
+        planState: "Price is approaching a potential setup",
+        nextAction: next || "GoldMeta is watching XAUUSD for a clearer trigger.",
+        nextRequiredCondition: next,
+        direction,
+        tone: "wait",
+        showLevels: false
+      };
+    }
     return {
+      ...base,
       mode: "WAIT",
       primaryDecision: "WAIT",
       headline: "WAIT",
-      planState: "No valid trade plan yet",
+      planState: "No meaningful setup is forming yet",
       nextAction:
+        next ||
         "GoldMeta is monitoring XAUUSD. You can be notified when a valid opportunity becomes ready.",
+      nextRequiredCondition: next,
       direction: null,
       tone: "wait",
-      levels,
       showLevels: false,
       confirmationLabel: "5M confirmation not required yet",
-      confirmationDetail: "A valid 15M plan must appear before entry confirmation matters.",
-      confirmationPassed: false,
-      confidenceLabel,
-      lifecycleLabel,
-      reason: waitReason(plan),
-      technicalDetails: technicalDetails(plan),
-      nearestSupport: plan.zones?.nearestSupport ?? null,
-      nearestResistance: plan.zones?.nearestResistance ?? null,
-      priceVsEntryZone: null,
-      reviewKind: "15M"
+      confirmationDetail: "A valid 15M plan must appear before entry confirmation matters."
     };
   }
 
   if (noTrade || !direction) {
     return {
+      ...base,
       mode: "NO_TRADE",
       primaryDecision: "NO TRADE",
       headline: "NO TRADE",
       planState: "Conditions do not support a trade",
       nextAction: "Stay flat until market structure and confirmation agree.",
+      nextRequiredCondition: "Waiting for 15M and 5M trend direction to agree.",
       direction: null,
       tone: "notrade",
-      levels,
-      showLevels: false,
-      confirmationLabel: auth.label,
-      confirmationDetail: auth.detail,
-      confirmationPassed: false,
-      confidenceLabel,
-      lifecycleLabel,
-      reason: waitReason(plan),
-      technicalDetails: technicalDetails(plan),
-      nearestSupport: plan.zones?.nearestSupport ?? null,
-      nearestResistance: plan.zones?.nearestResistance ?? null,
-      priceVsEntryZone: null,
-      reviewKind: "15M"
+      showLevels: false
     };
   }
 
-  const ready = auth.supportsPlan && hasUsefulLevels(levels);
+  const ready = auth.supportsPlan && hasUsefulLevels(levels) && !hardBlocked;
   const mode: DecisionDashboardMode =
     direction === "BUY" ? (ready ? "BUY_READY" : "POTENTIAL_BUY") : ready ? "SELL_READY" : "POTENTIAL_SELL";
+  const next = nextCondition(plan, direction, auth.supportsPlan, livePrice);
 
   return {
+    ...base,
     mode,
     primaryDecision: direction,
     headline: ready
@@ -195,26 +313,18 @@ export function deriveDecisionDashboardState(args: {
         ? "BUY PLAN READY"
         : "SELL PLAN READY"
       : direction === "BUY"
-        ? "POTENTIAL BUY"
-        : "POTENTIAL SELL",
-    planState: ready ? "5-minute confirmation passed" : "Waiting for 5-minute confirmation",
+        ? "PREPARE BUY"
+        : "PREPARE SELL",
+    planState: ready ? "5-minute confirmation passed" : "Setup forming — confirmation still needed",
     nextAction: ready
       ? "Review your own risk before any manual entry."
-      : "Wait for 5M confirmation. Do not enter just because bias or support/resistance is nearby.",
+      : next || "Wait for 5M confirmation. Do not enter just because bias or levels are nearby.",
+    nextRequiredCondition: ready ? null : next,
     direction,
     tone: direction === "BUY" ? "buy" : "sell",
-    levels,
     showLevels: hasUsefulLevels(levels),
-    confirmationLabel: auth.label,
-    confirmationDetail: auth.detail,
     confirmationPassed: ready,
-    confidenceLabel,
-    lifecycleLabel,
-    reason: sanitizePlanText(plan.oneSentence) || sanitizePlanText(plan.whyNotReady),
-    technicalDetails: technicalDetails(plan),
-    nearestSupport: plan.zones?.nearestSupport ?? null,
-    nearestResistance: plan.zones?.nearestResistance ?? null,
     priceVsEntryZone: priceVsEntry(livePrice, levels.entry),
-    reviewKind: ready ? "5M" : "5M"
+    reviewKind: "5M"
   };
 }

@@ -36,7 +36,6 @@ export type GeometryReasonCode =
 export const SOFT_GEOMETRY_CODES: ReadonlySet<GeometryReasonCode> = new Set([
   "QUICK_TARGET_FAILED",
   "STRUCTURE_INCOMPLETE",
-  "INVALID_TARGET_ORDER", // only when caused by optional TP2 — handled separately
   "TP1_ROOM_INSUFFICIENT",
   "TP1_RR_INSUFFICIENT"
 ]);
@@ -47,6 +46,7 @@ export const HARD_GEOMETRY_CODES: ReadonlySet<GeometryReasonCode> = new Set([
   "TP1_WRONG_SIDE",
   "TP1_EQUALS_ENTRY",
   "ZERO_RISK",
+  "INVALID_TARGET_ORDER",
   "MISSING_REQUIRED_LEVEL",
   "PRICE_ALREADY_AT_TARGET",
   "INVALIDATION_STOP_MISMATCH",
@@ -65,6 +65,7 @@ export type GeometryInput = {
   stop?: number | null;
   tp1?: number | null;
   tp2?: number | null;
+  tp3?: number | null;
   currentPrice?: number | null;
   /** Display invalidation sentence — must agree with numeric stop when both present. */
   invalidationText?: string | null;
@@ -196,6 +197,7 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
   const stop = pos(input.stop);
   const tp1 = pos(input.tp1);
   const tp2 = pos(input.tp2);
+  const tp3 = pos(input.tp3);
   const current = pos(input.currentPrice);
 
   if (entryPrice == null || stop == null || tp1 == null) {
@@ -247,15 +249,18 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
         reasons.push("TP1_WRONG_SIDE");
       }
     }
-    // Optional TP2: only validate order when present — never require TP2.
+    // Optional TP2/TP3: when present must satisfy entry < TP1 < TP2 < TP3.
     if (tp2 != null && tp2 + eps < tp1) reasons.push("INVALID_TARGET_ORDER");
+    if (tp3 != null) {
+      if (tp2 == null || tp3 + eps < tp2) reasons.push("INVALID_TARGET_ORDER");
+    }
     if (!input.confirmed && current != null && current >= tp1 - eps) {
       reasons.push("PRICE_ALREADY_AT_TARGET");
     }
   }
 
   if (direction === "SELL" && entryPrice != null && stop != null && tp1 != null) {
-    // SELL: TP1 < entryZoneLow <= entryPrice <= entryZoneHigh < stop ; TP2 optional and <= TP1
+    // SELL: TP1 < entryZoneLow <= entryPrice <= entryZoneHigh < stop ; TP2/TP3 optional descending
     const low = zoneLow ?? entryPrice;
     const high = zoneHigh ?? entryPrice;
     if (!(high + eps / 2 < stop)) reasons.push("STOP_WRONG_SIDE");
@@ -267,6 +272,9 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
       reasons.push("ENTRY_ZONE_INVALID");
     }
     if (tp2 != null && tp2 - eps > tp1) reasons.push("INVALID_TARGET_ORDER");
+    if (tp3 != null) {
+      if (tp2 == null || tp3 - eps > tp2) reasons.push("INVALID_TARGET_ORDER");
+    }
     if (!input.confirmed && current != null && current <= tp1 + eps) {
       reasons.push("PRICE_ALREADY_AT_TARGET");
     }
@@ -285,11 +293,9 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
   }
 
   const unique = [...new Set(reasons)];
-  // Optional TP2 order issues are soft when TP1 geometry is otherwise valid.
+  // Invalid TP ordering is a hard reject (BUY: TP1<TP2<TP3; SELL reverse).
   const hardReasonCodes = unique.filter((c) => {
-    if (c === "INVALID_TARGET_ORDER" && tp1 != null && entryPrice != null && stop != null) {
-      return false;
-    }
+    if (c === "INVALID_TARGET_ORDER") return true;
     if (c === "TP1_ROOM_INSUFFICIENT" || c === "TP1_RR_INSUFFICIENT") {
       // Soft caution — do not wipe levels; UI can show cautious status.
       return false;

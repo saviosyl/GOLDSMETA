@@ -10,6 +10,27 @@ export const decisionConfig = {
     minConfidenceForTrade: 45,
     staleAfterMs: 5 * 60 * 1000
   },
+  /** Per-role freshness (configurable; used by snapshot + feed health). */
+  freshness: {
+    quoteFreshMs: 90 * 1000,
+    quoteDelayedMs: 3 * 60 * 1000,
+    quoteStaleMs: 3 * 60 * 1000,
+    confirm5mStaleMs: 12 * 60 * 1000,
+    plan15mStaleMs: 20 * 60 * 1000,
+    confirmBarMs: 5 * 60 * 1000,
+    planBarMs: 15 * 60 * 1000,
+    confirmGraceMs: 90 * 1000,
+    planGraceMs: 120 * 1000
+  },
+  stopDistance: {
+    minStopPoints: 1.5,
+    minAtrMultiple: 0.35,
+    wideAtrMultiple: 2.5,
+    spreadBufferPoints: 0.3
+  },
+  setupQuality: {
+    readyThreshold: 80
+  },
   scoringWeights: {
     trendDirection: 28,
     trendComponent: 18,
