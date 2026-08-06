@@ -6,7 +6,10 @@ import {
 } from "lucide-react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
-import { deriveDecisionDashboardState } from "../../lib/decisionDashboardState";
+import {
+  deriveDecisionDashboardState,
+  leanConfidenceLabel
+} from "../../lib/decisionDashboardState";
 import { fmtPrice } from "../../lib/intradayFormat";
 import { sanitizePlanText } from "../../lib/planTextFormat";
 import {
@@ -159,7 +162,13 @@ export function DecisionDashboard({
         </h1>
         {showHeroConfidence ? (
           <p className="gm-hero-confidence" data-testid="hero-confidence">
-            {Math.round(state.confidencePercent!)}% confidence
+            {leanConfidenceLabel(state.confidencePercent, state.direction) ??
+              `${Math.round(state.confidencePercent!)}% confidence`}
+          </p>
+        ) : null}
+        {chip === "HOLD" && state.direction ? (
+          <p className="gm-hero-lean" data-testid="hero-direction-lean">
+            {state.direction === "BUY" ? "Bullish lean" : "Bearish lean"} — not an entry yet
           </p>
         ) : null}
         <p className="gm-hero-instruction" data-testid="decision-plan-state">

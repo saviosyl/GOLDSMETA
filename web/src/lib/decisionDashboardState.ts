@@ -56,11 +56,40 @@ export type DecisionDashboardState = {
   freshnessLines: string[];
 };
 
-function directionFromPlan(plan: IntradayPlan): "BUY" | "SELL" | null {
+/** Infer BUY/SELL lean from plan fields — never invents levels, only reads verified bias/confirmation. */
+export function directionFromPlan(plan: IntradayPlan): "BUY" | "SELL" | null {
   const raw = `${plan.tradePlan?.direction ?? ""} ${plan.action ?? ""} ${plan.actionLabel ?? ""}`.toUpperCase();
   if (raw.includes("BUY") || raw.includes("BULL")) return "BUY";
   if (raw.includes("SELL") || raw.includes("BEAR")) return "SELL";
+
+  const scenario = String(plan.primaryScenarioSide ?? "").toLowerCase();
+  if (scenario === "bullish") return "BUY";
+  if (scenario === "bearish") return "SELL";
+
+  const bias = String(plan.directionBias ?? "").toUpperCase();
+  if (bias.includes("BULL")) return "BUY";
+  if (bias.includes("BEAR")) return "SELL";
+
+  const confirm = String(
+    plan.confirmation5m?.state ?? plan.confirmation5m?.label ?? ""
+  ).toUpperCase();
+  // Breakout without an explicit bearish tag leans long; rejection leans short.
+  if (confirm.includes("REJECTION") && !confirm.includes("BULLISH")) return "SELL";
+  if (confirm.includes("BREAKOUT") && !confirm.includes("BEARISH")) return "BUY";
+
   return null;
+}
+
+/** Short lean text for HOLD/WAIT heroes — bias only, not an entry signal. */
+export function leanConfidenceLabel(
+  confidencePercent: number | null | undefined,
+  direction: "BUY" | "SELL" | null | undefined
+): string | null {
+  if (typeof confidencePercent !== "number" || !Number.isFinite(confidencePercent)) return null;
+  const pct = `${Math.round(confidencePercent)}% confidence`;
+  if (direction === "BUY") return `${pct} · BUY lean`;
+  if (direction === "SELL") return `${pct} · SELL lean`;
+  return pct;
 }
 
 function resolveLevels(plan: IntradayPlan): DecisionDashboardLevelSet {
@@ -361,15 +390,22 @@ export function deriveDecisionDashboardState(args: {
   }
 
   if (noTrade || !direction) {
+    const next = nextCondition(plan, direction, auth.supportsPlan, livePrice);
     return {
       ...base,
       mode: "HOLD",
       primaryDecision: "HOLD",
       headline: "HOLD",
-      planState: "Stand aside until the setup is clear",
-      nextAction: "Stay flat until market structure and confirmation agree.",
-      nextRequiredCondition: "Waiting for 15M and 5M trend direction to agree.",
-      direction: null,
+      planState: direction
+        ? direction === "BUY"
+          ? "Bullish lean — stay flat until confirmation agrees"
+          : "Bearish lean — stay flat until confirmation agrees"
+        : "Stand aside until the setup is clear",
+      nextAction: next || "Stay flat until market structure and confirmation agree.",
+      nextRequiredCondition:
+        next || "Waiting for 15M and 5M trend direction to agree.",
+      // Keep lean when known so the hero can show “94% confidence · BUY lean”.
+      direction,
       tone: "wait",
       showLevels: false
     };

@@ -597,6 +597,13 @@ body,
   color: rgba(245, 247, 251, 0.88);
 }
 
+.gm-decision-hero-v2 .gm-hero-lean {
+  margin: 4px 0 0;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: rgba(245, 247, 251, 0.72);
+}
+
 .gm-decision-hero-v2 .gm-hero-instruction {
   margin: 8px 0 16px;
   font-size: 1rem;

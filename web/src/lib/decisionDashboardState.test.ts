@@ -44,6 +44,40 @@ describe("deriveDecisionDashboardState forming states", () => {
     expect(state.mode).toBe("HOLD");
     expect(premiumDecisionChip(state, plan)).toBe("HOLD");
     expect(premiumStatusLabel(state, plan)).toBe("On hold");
+    expect(state.direction).toBe("BUY");
+  });
+
+  it("keeps BUY lean on high-confidence HOLD when only bias/confirmation is available", () => {
+    const plan = clonePlan();
+    plan.action = "NO_TRADE";
+    plan.actionLabel = "NO TRADE";
+    plan.confidence = 94;
+    plan.directionBias = "BULLISH";
+    plan.primaryScenarioSide = "bullish";
+    plan.tradePlan = {
+      ...plan.tradePlan,
+      direction: "NONE",
+      entryZone: null,
+      stopLoss: null,
+      tp1: null,
+      actionable: false
+    };
+    plan.confirmation5m = {
+      state: "BREAKOUT_CONFIRMED",
+      label: "BREAKOUT CONFIRMED",
+      meaningful: true,
+      detail: "5M breakout"
+    } as IntradayPlan["confirmation5m"];
+    plan.geometryReasonCodes = ["INVALID_TARGET_ORDER", "WRONG_SIDE"];
+    const state = deriveDecisionDashboardState({
+      plan,
+      marketStructureMode: "COMPLETE",
+      livePrice: 4270
+    });
+    expect(state.mode).toBe("HOLD");
+    expect(state.direction).toBe("BUY");
+    expect(state.confidencePercent).toBe(94);
+    expect(premiumDecisionChip(state, plan)).toBe("HOLD");
   });
 
   it("shows BUY at 65%+ even when soft trend disagreement remains", () => {
