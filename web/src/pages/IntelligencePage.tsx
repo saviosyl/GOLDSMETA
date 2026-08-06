@@ -87,7 +87,7 @@ export function IntelligencePage() {
   };
 
   return (
-    <div className="v5-page gm-markets-page" data-testid="intelligence-page">
+    <div className="v5-page gm-markets-page gm-premium-v2" data-testid="intelligence-page">
       <PageHeader title="Markets" environment="LIVE" freshness={online ? "Online" : "Offline"} />
       <SectionCard title="Market in plain English">
         <p data-testid="markets-plain-english" style={{ marginTop: 0 }}>
