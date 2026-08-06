@@ -2,6 +2,8 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useMemo } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { OverviewPage } from "./OverviewPage";
+import { KeyLevelsPage } from "./KeyLevelsPage";
+import { AlertsSetupPage } from "./AlertsSetupPage";
 import { IntelligencePage } from "./IntelligencePage";
 import { PremiumAnalyticsPage } from "./PremiumAnalyticsPage";
 import { ReplayPage } from "./ReplayPage";
@@ -1292,7 +1294,60 @@ function buildReviewApi() {
         }
       ]
     }),
-    adminUserAction: async () => ({ ok: true })
+    adminUserAction: async () => ({ ok: true }),
+    marketFeedHealth: async () => ({
+      status: "green",
+      title: "GoldMeta Market Feed",
+      subtitle: "All systems operational",
+      quoteStatus: "live",
+      lastVerifiedAt: new Date().toISOString(),
+      lastVerifiedLabel: "12 seconds ago"
+    }),
+    notificationPreferences: async () => ({
+      VALID_PLAN_CREATED: true,
+      ENTRY_ZONE_APPROACHING: true,
+      ENTRY_ZONE_REACHED: true,
+      CONFIRM_5M: true,
+      PLAN_INVALIDATED: true,
+      TARGETS_REACHED: true
+    }),
+    updateNotificationPreferences: async (patch: Record<string, boolean>) => ({
+      VALID_PLAN_CREATED: true,
+      ENTRY_ZONE_APPROACHING: true,
+      ENTRY_ZONE_REACHED: true,
+      CONFIRM_5M: true,
+      PLAN_INVALIDATED: true,
+      TARGETS_REACHED: true,
+      ...patch
+    }),
+    listNotifications: async () => [
+      {
+        id: "n1",
+        event: "VALID_PLAN_CREATED",
+        direction: "BUY",
+        createdAt: new Date().toISOString(),
+        message: "Valid buy plan ready — review entry zone before acting.",
+        read: false
+      }
+    ],
+    adminMarketFeedStatus: async () => ({
+      health: {
+        status: "green",
+        title: "GoldMeta Market Feed",
+        subtitle: "All systems operational",
+        quoteStatus: "live",
+        lastVerifiedAt: new Date().toISOString(),
+        lastVerifiedLabel: "12 seconds ago"
+      },
+      checklist: [
+        { id: "pine30", label: "Pine 3.0 installed", status: "pass" },
+        { id: "plan15m", label: "PLAN_15M received", status: "pass" },
+        { id: "confirm5m", label: "CONFIRM_5M received", status: "pass" },
+        { id: "quote1m", label: "QUOTE_1M optional", status: "optional" },
+        { id: "legacy", label: "Old Pine 2.1 alert disabled", status: "pass" }
+      ],
+      sharedWebhookUrl: "https://example.test/webhook/shared"
+    })
   };
 }
 
@@ -1339,6 +1394,8 @@ export default function UiReviewApp() {
         <AppShell linkPrefix="/ui-review">
           <Routes>
             <Route index element={<OverviewPage />} />
+            <Route path="levels" element={<KeyLevelsPage />} />
+            <Route path="alerts" element={<AlertsSetupPage />} />
             <Route path="intelligence" element={<IntelligencePage />} />
             <Route path="analytics" element={<PremiumAnalyticsPage />} />
             <Route path="replay" element={<ReplayPage />} />
