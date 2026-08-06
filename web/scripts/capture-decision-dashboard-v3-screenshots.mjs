@@ -23,6 +23,18 @@ const baseCss = `
   .wide { display:grid; gap:14px; max-width:820px; }
 `;
 
+function feedTitle(feed) {
+  if (feed === "green") return "GoldMeta Market Feed";
+  if (feed === "amber") return "Market feed partially available";
+  return "Market feed unavailable";
+}
+
+function feedSubtitle(feed) {
+  if (feed === "green") return "All systems operational";
+  if (feed === "amber") return "15-minute plan is live; 5-minute confirmation is missing or stale.";
+  return "Required 15-minute plan feed is missing, stale, or unsafe.";
+}
+
 function dashboard({ mode, feed = "green", levels = false }) {
   const title =
     mode === "ready" ? "BUY PLAN READY" : mode === "potential" ? "POTENTIAL BUY" : "WAIT";
@@ -32,14 +44,17 @@ function dashboard({ mode, feed = "green", levels = false }) {
       : mode === "potential"
         ? "Waiting for 5-minute confirmation"
         : "No valid trade plan yet";
+  const quote =
+    feed === "green" ? "Live price updates active" : "Live quote updates limited";
   return `
     <main class="phone">
       <section class="card ${mode === "wait" ? "wait" : "buy"}">
         <div class="feed ${feed}">
           <span class="pill">${feed.toUpperCase()}</span>
-          <h2>${feed === "green" ? "GoldMeta Market Feed" : feed === "amber" ? "Market feed partially available" : "Market feed unavailable"}</h2>
-          <p class="muted">${feed === "green" ? "All systems operational" : "Live quote updates limited"}</p>
-          <p>Live price updates ${feed === "green" ? "active" : "limited"}</p>
+          <h2>${feedTitle(feed)}</h2>
+          <p class="muted">${feedSubtitle(feed)}</p>
+          <p>${quote}</p>
+          <p class="muted">Last verified: 30 seconds ago</p>
         </div>
         <div><p class="label">XAUUSD decision</p><h1>${title}</h1><p><strong>${state}</strong></p></div>
         ${
@@ -61,8 +76,8 @@ const pages = {
   "ready-mobile.png": dashboard({ mode: "ready", feed: "green", levels: true }),
   "admin-feed-status.png": `
     <main class="admin"><section class="wide"><h1 style="font-size:38px">Admin market-feed status</h1>
-    <div class="feed green"><span class="pill">GREEN</span><h2>${feed === "green" ? "GoldMeta Market Feed" : feed === "amber" ? "Market feed partially available" : "Market feed unavailable"}</h2><p>All systems operational</p><p class="muted">Shared webhook URL for 1M / 5M / 15M</p></div>
-    <div class="fact"><strong>No recent legacy traffic detected</strong><p class="muted">Checklist from admin feed API</p></div></section></main>`,
+    <div class="feed green"><span class="pill">GREEN</span><h2>GoldMeta Market Feed</h2><p>All systems operational</p><p class="muted">Shared webhook URL for 1M / 5M / 15M</p><p class="muted">No recent legacy traffic detected</p></div>
+    <div class="fact"><strong>Admin checklist</strong><p class="muted">Pine Bridge 3.0 · schema 1.1 · PLAN_15M · CONFIRM_5M · QUOTE_1M · geometry safety gate</p></div></section></main>`,
   "notification-preferences.png": `
     <main class="phone"><section class="card"><h1 style="font-size:42px">Notifications</h1><div class="fact"><strong>VALID PLAN CREATED - BUY</strong><p>Potential buy plan created.</p><p class="muted">Plan ID: plan-1 - Unread</p></div>
     ${["Valid plan created","Entry zone approaching","Entry zone reached","5M confirmation","Plan invalidated","Targets reached"].map((x) => `<label class="fact"><input type="checkbox"> ${x}</label>`).join("")}
@@ -77,3 +92,4 @@ for (const [filename, body] of Object.entries(pages)) {
   await page.locator("main").screenshot({ path: path.join(outDir, filename) });
 }
 await browser.close();
+console.log(`Wrote screenshots to ${outDir}`);
