@@ -1,0 +1,59 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { AlertsSetupPage } from "./AlertsSetupPage";
+
+vi.mock("../lib/auth", () => ({
+  useAuth: () => ({
+    api: {
+      marketFeedHealth: vi.fn(async () => ({
+        status: "green",
+        title: "Operational",
+        subtitle: "Live",
+        quoteStatus: "live",
+        lastVerifiedAt: null,
+        lastVerifiedLabel: "now"
+      })),
+      listNotifications: vi.fn(async () => []),
+      notificationPreferences: vi.fn(async () => ({
+        VALID_PLAN_CREATED: true,
+        ENTRY_ZONE_APPROACHING: true,
+        ENTRY_ZONE_REACHED: true,
+        CONFIRM_5M: true,
+        PLAN_INVALIDATED: true,
+        TARGETS_REACHED: true
+      })),
+      updateNotificationPreferences: vi.fn(),
+      adminMarketFeedStatus: vi.fn(async () => ({
+        checklist: [
+          { id: "legacy", label: "Old Pine 2.1 alert disabled", status: "pass" }
+        ],
+        sharedWebhookUrl: "https://example.test/webhook/secret"
+      }))
+    },
+    account: { role: "USER" },
+    user: { email: "user@example.com" }
+  })
+}));
+
+vi.mock("../lib/push", () => ({
+  getNotificationPermission: () => "default",
+  isProbablyInstalledPwa: () => true,
+  isWebPushSupported: () => true,
+  subscribeWebPush: vi.fn()
+}));
+
+describe("AlertsSetupPage ordinary user", () => {
+  it("hides webhook URL and derives healthy checklist without admin diagnostics", async () => {
+    render(
+      <MemoryRouter>
+        <AlertsSetupPage />
+      </MemoryRouter>
+    );
+    expect(await screen.findByTestId("premium-setup-health")).toHaveTextContent(/Setup complete/i);
+    expect(screen.queryByTestId("standard-webhook-url")).not.toBeInTheDocument();
+    expect(screen.queryByText(/example\.test\/webhook/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Pine 3\.0 detected/i)).toBeInTheDocument();
+    expect(screen.getByText(/No recent legacy Bridge traffic/i)).toBeInTheDocument();
+  });
+});

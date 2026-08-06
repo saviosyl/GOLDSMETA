@@ -53,7 +53,15 @@ function StandardSetupChecklist({
     { id: "legacy", label: "No recent legacy Bridge traffic", status: "warn" }
   ];
 
-  const rows = checklist.length > 0 ? checklist : defaults;
+  const normalizeLabel = (label: string) => {
+    if (/pine\s*3\.0/i.test(label)) return "Pine 3.0 detected";
+    if (/pine\s*2\.1|old alert|legacy/i.test(label)) return "No recent legacy Bridge traffic";
+    return label;
+  };
+  const rows = (checklist.length > 0 ? checklist : defaults).map((item) => ({
+    ...item,
+    label: normalizeLabel(item.label)
+  }));
   const allRequiredPass =
     checklist.length > 0 &&
     rows
@@ -157,7 +165,44 @@ export function AlertsSetupPage() {
     }
   };
 
-  const checklist = (admin?.checklist as ChecklistItem[] | undefined) ?? [];
+  const checklistFromHealth = (feed: MarketFeedHealth | null): ChecklistItem[] => {
+    if (!feed) return [];
+    const green = feed.status === "green";
+    const amber = feed.status === "amber";
+    return [
+      {
+        id: "pine30",
+        label: "Pine 3.0 detected",
+        status: green || amber ? "pass" : "warn"
+      },
+      {
+        id: "plan15m",
+        label: "PLAN_15M received",
+        status: green || amber ? "pass" : "warn"
+      },
+      {
+        id: "confirm5m",
+        label: "CONFIRM_5M received",
+        status: green ? "pass" : amber ? "warn" : "fail"
+      },
+      {
+        id: "quote1m",
+        label: "QUOTE_1M optional",
+        status: feed.quoteStatus === "live" ? "pass" : "optional"
+      },
+      {
+        id: "legacy",
+        label: "No recent legacy Bridge traffic",
+        // Prefer verified feed health — never claim “old alert disabled” from a checkbox alone.
+        status: green || amber ? "pass" : "warn"
+      }
+    ];
+  };
+
+  const checklist =
+    (admin?.checklist as ChecklistItem[] | undefined)?.length
+      ? (admin!.checklist as ChecklistItem[])
+      : checklistFromHealth(health);
 
   return (
     <div className="gm-premium-alerts-page gm-premium-v2" data-testid="alerts-setup-page">

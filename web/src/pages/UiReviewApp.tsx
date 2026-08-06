@@ -9,6 +9,8 @@ import { PremiumAnalyticsPage } from "./PremiumAnalyticsPage";
 import { ReplayPage } from "./ReplayPage";
 import { SettingsPage } from "./SettingsPage";
 import { RiskPlannerPage } from "./RiskPlannerPage";
+import { JournalPage } from "./JournalPage";
+import { V4ResearchPage } from "./V4ResearchPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
 import { HistoryPage } from "./HistoryPage";
 import { SignalPerformancePage } from "./SignalPerformancePage";
@@ -481,7 +483,15 @@ function buildReviewApi() {
                 },
                 importantLevels: []
               }
-            : chartExampleIntradayPlanFixture
+            : chartExampleIntradayPlanFixture,
+        marketFeedHealth: {
+          status: "green" as const,
+          title: "GoldMeta Market Feed",
+          subtitle: "15M plan and 5M confirmation active",
+          quoteStatus: "live" as const,
+          lastVerifiedAt: nowIso,
+          lastVerifiedLabel: "12 seconds ago"
+        }
       };
     },
     listActiveSetups: async () =>
@@ -1341,11 +1351,11 @@ function buildReviewApi() {
         lastVerifiedLabel: "12 seconds ago"
       },
       checklist: [
-        { id: "pine30", label: "Pine 3.0 installed", status: "pass" },
+        { id: "pine30", label: "Pine 3.0 detected", status: "pass" },
         { id: "plan15m", label: "PLAN_15M received", status: "pass" },
         { id: "confirm5m", label: "CONFIRM_5M received", status: "pass" },
         { id: "quote1m", label: "QUOTE_1M optional", status: "optional" },
-        { id: "legacy", label: "Old Pine 2.1 alert disabled", status: "pass" }
+        { id: "legacy", label: "No recent legacy Bridge traffic", status: "pass" }
       ],
       sharedWebhookUrl: "https://example.test/webhook/shared"
     })
@@ -1356,6 +1366,9 @@ export default function UiReviewApp() {
   const location = useLocation();
   const value = useMemo<AuthContextValue>(() => {
     const api = buildReviewApi();
+    const staffPreview =
+      new URLSearchParams(location.search).get("staff") === "1" ||
+      new URLSearchParams(location.search).get("role") === "OWNER";
     return {
       user: { email: "review@goldmeta.preview" } as AuthContextValue["user"],
       loading: false,
@@ -1367,7 +1380,9 @@ export default function UiReviewApp() {
       },
       registrationEnabled: false,
       account: {
-        role: "OWNER",
+        // Default review role matches ordinary approved users (webhook URL hidden).
+        // Use ?staff=1 or ?role=OWNER for admin chrome in UI review.
+        role: staffPreview ? "OWNER" : "USER",
         profile: { brokerMessage: "Broker access is separate from account approval." }
       } as AuthContextValue["account"],
       refreshAccount: async () => null,
@@ -1412,8 +1427,8 @@ export default function UiReviewApp() {
             <Route path="brand" element={<BrandConceptsPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="signal-performance" element={<SignalPerformancePage />} />
-            <Route path="journal" element={<OverviewPage />} />
-            <Route path="v4" element={<OverviewPage />} />
+            <Route path="journal" element={<JournalPage />} />
+            <Route path="v4" element={<V4ResearchPage />} />
             <Route
               path="account-ready"
               element={
