@@ -113,12 +113,12 @@ export function DecisionDashboard({
   const statusLabel = premiumStatusLabel(state, plan);
   const isWaiting = state.mode === "WAIT" || state.mode === "WATCHING";
   const isPotential = state.mode === "POTENTIAL_BUY" || state.mode === "POTENTIAL_SELL";
-  const isNoTrade = state.mode === "NO_TRADE" || state.mode === "BLOCKED";
+  const isHold = state.mode === "HOLD" || state.mode === "NO_TRADE";
   const showWhy =
     isWaiting ||
     state.mode === "WATCHING" ||
-    state.mode === "BLOCKED" ||
-    (isNoTrade && !String(chip).startsWith("PREPARE")) ||
+    state.mode === "HOLD" ||
+    (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
   const heroTone =
     chip === "PREPARE" || chip === "PREPARE BUY" || chip === "PREPARE SELL" || chip === "WATCHING"
@@ -127,9 +127,11 @@ export function DecisionDashboard({
         ? "buy"
         : chip === "SELL"
           ? "sell"
-          : chip === "BLOCKED"
-            ? "notrade"
+          : chip === "HOLD"
+            ? "wait"
             : state.tone;
+  const showHeroConfidence =
+    state.confidencePercent != null && (chip === "BUY" || chip === "SELL" || chip === "HOLD");
   const feedFresh = marketFeedHealth?.status === "green";
 
   return (
@@ -153,6 +155,11 @@ export function DecisionDashboard({
         <h1 data-testid="intraday-action-label">
           <span data-testid="intraday-action-short">{chip}</span>
         </h1>
+        {showHeroConfidence ? (
+          <p className="gm-hero-confidence" data-testid="hero-confidence">
+            {Math.round(state.confidencePercent!)}% confidence
+          </p>
+        ) : null}
         <p className="gm-hero-instruction" data-testid="decision-plan-state">
           {subtitle}
         </p>
@@ -212,7 +219,7 @@ export function DecisionDashboard({
         </a>
       </div>
 
-      {!isWaiting && !isNoTrade && <LevelGrid state={state} />}
+      {!isWaiting && !isHold && <LevelGrid state={state} />}
 
       {!isWaiting && (
         <div className="gm-decision-facts gm-decision-facts-compact">

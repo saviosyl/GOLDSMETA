@@ -71,8 +71,8 @@ export function wizardStatusLabel(status: string | null | undefined): string {
     PARTIALLY_COMPLETE: "Partially complete",
     COMPLETE: "Complete",
     COMPLETED: "Complete",
-    BLOCKED: "Blocked",
-    LOCKED: "Blocked"
+    BLOCKED: "On hold",
+    LOCKED: "On hold"
   };
   return map[s] ?? status?.replace(/_/g, " ") ?? "Not started";
 }

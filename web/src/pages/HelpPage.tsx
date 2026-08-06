@@ -47,9 +47,9 @@ export function HelpPage() {
               detail: "Conditions are incomplete. Stay flat until the next verified signal."
             },
             {
-              id: "no-trade",
-              term: "What NO TRADE means",
-              detail: "Do not enter. Data mismatch, unsafe geometry, or blocked conditions."
+              id: "hold",
+              term: "What HOLD means",
+              detail: "Stand aside for now. Structure is unclear or confirmation is still incomplete."
             },
             {
               id: "entry",

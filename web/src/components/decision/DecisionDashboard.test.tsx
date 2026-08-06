@@ -82,7 +82,9 @@ describe("DecisionDashboard", () => {
   });
 
   it("shows Entry Stop and targets prominently for potential plans", () => {
-    render(wrap(<DecisionDashboard plan={potentialBuy()} marketFeedHealth={greenFeed} livePrice={4039} />));
+    const plan = potentialBuy();
+    plan.confidence = 58;
+    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/PREPARE/i);
     expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(

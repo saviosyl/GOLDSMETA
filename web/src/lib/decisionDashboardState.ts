@@ -4,9 +4,12 @@ import { fmtPrice } from "./intradayFormat";
 import { isNoValidIntradayPlan, sanitizePlanText } from "./planTextFormat";
 import { looksLikeReasonCode, plainReason } from "./reasonCodePlain";
 
-function setupQualityLabel(confidence: number | null | undefined, readyThreshold = 80): string | null {
+/** Show BUY/SELL on the hero once setup quality reaches this (not a profit probability). */
+export const DIRECTION_DISPLAY_THRESHOLD = 65;
+
+function setupQualityLabel(confidence: number | null | undefined): string | null {
   if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
-  return `Setup quality: ${Math.round(confidence)}% · Required for ready: ${readyThreshold}%`;
+  return `${Math.round(confidence)}% confidence`;
 }
 
 export type DecisionDashboardMode =
@@ -16,7 +19,7 @@ export type DecisionDashboardMode =
   | "POTENTIAL_SELL"
   | "BUY_READY"
   | "SELL_READY"
-  | "BLOCKED"
+  | "HOLD"
   | "NO_TRADE";
 
 export type DecisionDashboardLevelSet = {
@@ -29,7 +32,7 @@ export type DecisionDashboardLevelSet = {
 
 export type DecisionDashboardState = {
   mode: DecisionDashboardMode;
-  primaryDecision: "BUY" | "SELL" | "WAIT" | "NO TRADE" | "BLOCKED" | "WATCHING";
+  primaryDecision: "BUY" | "SELL" | "WAIT" | "NO TRADE" | "HOLD" | "WATCHING";
   headline: string;
   planState: string;
   nextAction: string;
@@ -42,6 +45,7 @@ export type DecisionDashboardState = {
   confirmationDetail: string;
   confirmationPassed: boolean;
   confidenceLabel: string | null;
+  confidencePercent: number | null;
   lifecycleLabel: string | null;
   reason: string;
   technicalDetails: string[];
@@ -117,7 +121,20 @@ function technicalDetails(plan: IntradayPlan): string[] {
     .filter(Boolean);
 }
 
-function isHardBlocked(plan: IntradayPlan, marketStructureMode?: string | null): boolean {
+/** True hard safety that must not advertise a tradeable BUY/SELL. */
+function isFatalGeometry(plan: IntradayPlan): boolean {
+  const codes = [
+    ...(plan.geometryReasonCodes ?? []),
+    ...(plan.planQuality?.reasons ?? [])
+  ].map((c) => String(c).toUpperCase());
+  return codes.some((c) =>
+    /INVALID_TARGET_ORDER|WRONG_SIDE|STOP_TOO_TIGHT|MISSING_REQUIRED_LEVEL|ENTRY_EQUALS_STOP|ZERO_RISK/.test(
+      c
+    )
+  );
+}
+
+function isDataConflict(plan: IntradayPlan, marketStructureMode?: string | null): boolean {
   const codes = [
     ...(plan.geometryReasonCodes ?? []),
     ...(plan.planQuality?.reasons ?? [])
@@ -125,10 +142,19 @@ function isHardBlocked(plan: IntradayPlan, marketStructureMode?: string | null):
   const mode = String(marketStructureMode ?? plan.freshness?.marketStructureMode ?? "").toUpperCase();
   if (mode === "MISMATCH") return true;
   return codes.some((c) =>
-    /HARD_CONFLICT|PRICE_SOURCE_MISMATCH|INVALID_TARGET_ORDER|CONFIRM_PLAN_SOURCE_KEY_MISMATCH|OUT_OF_ORDER_DATA|MISSING_REQUIRED|STOP_TOO_TIGHT|WRONG_SIDE/.test(
-      c
-    )
+    /HARD_CONFLICT|PRICE_SOURCE_MISMATCH|CONFIRM_PLAN_SOURCE_KEY_MISMATCH|OUT_OF_ORDER_DATA/.test(c)
   );
+}
+
+function qualityPercent(plan: IntradayPlan): number | null {
+  return typeof plan.confidence === "number" && Number.isFinite(plan.confidence)
+    ? plan.confidence
+    : null;
+}
+
+function meetsDirectionThreshold(plan: IntradayPlan): boolean {
+  const q = qualityPercent(plan);
+  return q != null && q >= DIRECTION_DISPLAY_THRESHOLD;
 }
 
 function nextCondition(
@@ -201,7 +227,9 @@ export function deriveDecisionDashboardState(args: {
   const noValid = isNoValidIntradayPlan(plan, marketStructureMode);
   const direction = directionFromPlan(plan);
   const levels = resolveLevels(plan);
-  const hardBlocked = isHardBlocked(plan, marketStructureMode);
+  const fatalGeometry = isFatalGeometry(plan);
+  const dataConflict = isDataConflict(plan, marketStructureMode);
+  const showDirection = Boolean(direction && meetsDirectionThreshold(plan) && !fatalGeometry);
   const noTrade =
     !noValid &&
     (String(plan.action).toUpperCase() === "NO_TRADE" ||
@@ -213,7 +241,8 @@ export function deriveDecisionDashboardState(args: {
     direction: direction ?? plan.tradePlan?.direction,
     action: plan.action
   });
-  const confidenceLabel = setupQualityLabel(plan.confidence, 80);
+  const confidencePercent = qualityPercent(plan);
+  const confidenceLabel = setupQualityLabel(plan.confidence);
   const lifecycleLabel = plan.planStatus ? String(plan.planStatus).replace(/_/g, " ") : null;
   const freshnessLines: string[] = [];
   const base = {
@@ -222,6 +251,7 @@ export function deriveDecisionDashboardState(args: {
     confirmationDetail: auth.detail,
     confirmationPassed: false,
     confidenceLabel,
+    confidencePercent,
     lifecycleLabel,
     reason: waitReason(plan),
     technicalDetails: technicalDetails(plan),
@@ -232,18 +262,64 @@ export function deriveDecisionDashboardState(args: {
     freshnessLines
   };
 
-  if (hardBlocked && (hasUsefulLevels(levels) || noTrade)) {
+  // At 65%+ with a direction: prefer BUY/SELL on the hero — never "BLOCKED".
+  if (showDirection && direction) {
+    const ready =
+      auth.supportsPlan && hasUsefulLevels(levels) && !fatalGeometry && !dataConflict;
+    const next = nextCondition(plan, direction, auth.supportsPlan, livePrice);
+    const caution =
+      dataConflict || noTrade
+        ? "Stay cautious — structure sources still need to agree before acting."
+        : next;
+
+    if (ready) {
+      return {
+        ...base,
+        mode: direction === "BUY" ? "BUY_READY" : "SELL_READY",
+        primaryDecision: direction,
+        headline: direction === "BUY" ? "BUY" : "SELL",
+        planState: "5-minute confirmation passed",
+        nextAction: "Review your own risk before any manual entry.",
+        nextRequiredCondition: null,
+        direction,
+        tone: direction === "BUY" ? "buy" : "sell",
+        showLevels: hasUsefulLevels(levels),
+        confirmationPassed: true,
+        priceVsEntryZone: priceVsEntry(livePrice, levels.entry),
+        reviewKind: "5M"
+      };
+    }
+
+    return {
+      ...base,
+      mode: direction === "BUY" ? "POTENTIAL_BUY" : "POTENTIAL_SELL",
+      primaryDecision: direction,
+      headline: direction,
+      planState: caution || "Setup forming — review levels before acting",
+      nextAction: caution || "Wait for confirmation. Do not enter on bias alone.",
+      nextRequiredCondition: caution,
+      direction,
+      tone: direction === "BUY" ? "buy" : "sell",
+      showLevels: hasUsefulLevels(levels),
+      confirmationPassed: auth.supportsPlan,
+      priceVsEntryZone: priceVsEntry(livePrice, levels.entry),
+      reviewKind: "5M"
+    };
+  }
+
+  // Soft hold — only when we cannot show a direction (no 65%+ bias).
+  if ((fatalGeometry || dataConflict) && (hasUsefulLevels(levels) || noTrade) && !showDirection) {
     const next = nextCondition(plan, direction, false, livePrice);
     return {
       ...base,
-      mode: "BLOCKED",
-      primaryDecision: "BLOCKED",
-      headline: "BLOCKED",
-      planState: "Setup blocked by a hard safety or data issue",
-      nextAction: next || "Do not enter until the blocking issue is resolved.",
+      mode: "HOLD",
+      primaryDecision: "HOLD",
+      headline: "HOLD",
+      planState: "Stand aside until the setup is clear",
+      nextAction: next || "Stay flat until structure and confirmation agree.",
       nextRequiredCondition: next,
       direction,
-      tone: "notrade",
+      tone: "wait",
       showLevels: false,
       confirmationPassed: false
     };
@@ -287,19 +363,20 @@ export function deriveDecisionDashboardState(args: {
   if (noTrade || !direction) {
     return {
       ...base,
-      mode: "NO_TRADE",
-      primaryDecision: "NO TRADE",
-      headline: "NO TRADE",
-      planState: "Conditions do not support a trade",
+      mode: "HOLD",
+      primaryDecision: "HOLD",
+      headline: "HOLD",
+      planState: "Stand aside until the setup is clear",
       nextAction: "Stay flat until market structure and confirmation agree.",
       nextRequiredCondition: "Waiting for 15M and 5M trend direction to agree.",
       direction: null,
-      tone: "notrade",
+      tone: "wait",
       showLevels: false
     };
   }
 
-  const ready = auth.supportsPlan && hasUsefulLevels(levels) && !hardBlocked;
+  // Direction below 65% — show PREPARE path, not HOLD/BLOCKED.
+  const ready = auth.supportsPlan && hasUsefulLevels(levels) && !fatalGeometry;
   const mode: DecisionDashboardMode =
     direction === "BUY" ? (ready ? "BUY_READY" : "POTENTIAL_BUY") : ready ? "SELL_READY" : "POTENTIAL_SELL";
   const next = nextCondition(plan, direction, auth.supportsPlan, livePrice);
@@ -308,13 +385,7 @@ export function deriveDecisionDashboardState(args: {
     ...base,
     mode,
     primaryDecision: direction,
-    headline: ready
-      ? direction === "BUY"
-        ? "BUY PLAN READY"
-        : "SELL PLAN READY"
-      : direction === "BUY"
-        ? "PREPARE BUY"
-        : "PREPARE SELL",
+    headline: ready ? direction : direction === "BUY" ? "PREPARE BUY" : "PREPARE SELL",
     planState: ready ? "5-minute confirmation passed" : "Setup forming — confirmation still needed",
     nextAction: ready
       ? "Review your own risk before any manual entry."
