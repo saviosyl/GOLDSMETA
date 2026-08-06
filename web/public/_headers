@@ -20,3 +20,6 @@
 # Hashed assets: long cache, but revalidate so a poisoned HTML fallback cannot stick forever.
 /assets/*
   Cache-Control: public, max-age=86400, must-revalidate
+
+/gm/*
+  Cache-Control: public, max-age=86400, must-revalidate

@@ -22,6 +22,11 @@ function stripUiReviewFromProduction(): Plugin {
 }
 
 export default defineConfig({
+  build: {
+    // Avoid /assets/* on the custom domain while zone cache may still hold
+    // poisoned SPA HTML responses for that path from an earlier deploy miss.
+    assetsDir: "gm"
+  },
   plugins: [
     react(),
     stripUiReviewFromProduction(),
@@ -112,7 +117,7 @@ export default defineConfig({
       },
       workbox: {
         // Bump on layout-critical deploys so outdated precaches are cleaned.
-        cacheId: "goldmeta-decision-dashboard-v3",
+        cacheId: "goldmeta-premium-ui-v2",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses
