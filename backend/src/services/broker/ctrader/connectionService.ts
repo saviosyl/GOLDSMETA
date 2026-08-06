@@ -521,7 +521,8 @@ export async function selectBrokerAccountForUser(args: {
     accessToken,
     clientId,
     clientSecret,
-    ctidTraderAccountId: match.ctidTraderAccountId
+    ctidTraderAccountId: match.ctidTraderAccountId,
+    isLive: match.isLive
   });
 
   const pepperstone =
@@ -682,7 +683,8 @@ export async function buildDiagnostics(
             accessToken,
             clientId,
             clientSecret,
-            ctidTraderAccountId: match.ctidTraderAccountId
+            ctidTraderAccountId: match.ctidTraderAccountId,
+            isLive: match.isLive
           });
           account = toSafeBrokerAccount(match, snap);
           marginMeta = snap.freeMargin != null || snap.usedMargin != null;
@@ -808,7 +810,8 @@ export async function buildLiveDemoPreview(args: {
     accessToken,
     clientId,
     clientSecret,
-    ctidTraderAccountId: connectionFresh.selectedAccountId!
+    ctidTraderAccountId: connectionFresh.selectedAccountId!,
+    isLive: Boolean(connectionFresh.selectedAccountIsLive)
   });
 
   const envKey = connectionFresh.selectedAccountIsLive ? "live" : "demo";

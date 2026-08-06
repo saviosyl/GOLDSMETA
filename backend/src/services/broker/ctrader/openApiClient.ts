@@ -99,6 +99,8 @@ export interface CTraderOpenApiClient {
     clientId: string;
     clientSecret: string;
     ctidTraderAccountId: string;
+    /** When true, use Pepperstone Live Open API host. */
+    isLive?: boolean;
   }): Promise<AccountSnapshot>;
   discoverXauUsd(args: {
     accessToken: string;
@@ -226,7 +228,8 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
     },
 
     async fetchAccountSnapshot(args) {
-      return withDemoConnection(async (connection) => {
+      const isLive = Boolean(args.isLive);
+      return withOpenApiConnection({ isLive }, async (connection) => {
         await connection.sendCommand("ProtoOAApplicationAuthReq", {
           clientId: args.clientId,
           clientSecret: args.clientSecret
