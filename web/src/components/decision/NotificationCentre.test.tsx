@@ -60,7 +60,7 @@ describe("NotificationCentre", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: /Notifications, 1 unread/i }));
-    expect(screen.getByText(/VALID PLAN CREATED/i)).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: /Recent notifications/i })).getByText(/VALID PLAN CREATED/i)).toBeInTheDocument();
     expect(screen.getByText(/Potential buy plan created/i)).toBeInTheDocument();
     expect(screen.getByText(/Plan ID: plan-1/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open plan/i })).toHaveAttribute("href", "/history/plan-1");
