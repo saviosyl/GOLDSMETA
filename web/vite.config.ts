@@ -31,7 +31,9 @@ export default defineConfig({
     react(),
     stripUiReviewFromProduction(),
     VitePWA({
-      registerType: "prompt",
+      // Auto-apply deploys so wording/status fixes (e.g. HOLD vs BLOCKED) are not
+      // stuck behind a dismissed "Update now" banner or a cached old sw.js.
+      registerType: "autoUpdate",
       includeAssets: [
         "favicon.svg",
         "favicon.ico",
@@ -117,7 +119,7 @@ export default defineConfig({
       },
       workbox: {
         // Bump on layout-critical deploys so outdated precaches are cleaned.
-        cacheId: "goldmeta-premium-ui-v2",
+        cacheId: "goldmeta-hold-ui-v3",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses
@@ -126,7 +128,7 @@ export default defineConfig({
         runtimeCaching: [],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: false,
+        skipWaiting: true,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         importScripts: ["push-handler.js"]
       },

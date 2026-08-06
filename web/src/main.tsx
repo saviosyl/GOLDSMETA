@@ -49,12 +49,22 @@ function Root() {
 
 const updateSW = registerSW({
   immediate: true,
+  // autoUpdate still fires onNeedRefresh in some browsers — keep the banner
+  // as a fallback, but skipWaiting means most clients refresh themselves.
   onNeedRefresh() {
     window.dispatchEvent(
       new CustomEvent<UpdateDetail>(UPDATE_EVENT, {
         detail: { update: updateSW }
       })
     );
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return;
+    // Poll for a new sw.js frequently — custom-domain edges have cached sw.js
+    // aggressively before, which left STATUS stuck on "Blocked".
+    window.setInterval(() => {
+      void registration.update();
+    }, 60_000);
   }
 });
 
