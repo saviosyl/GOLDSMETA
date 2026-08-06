@@ -163,8 +163,8 @@ export function DetailedReportSections({
         <SystemStatusCollapse
           plan={plan}
           score={score ?? null}
-          marketStructureMode={marketStructureMode}
-          diagnostics={marketStructureDiagnostics}
+          marketStructureMode={marketStructureMode ?? null}
+          diagnostics={marketStructureDiagnostics ?? null}
           decisionId={decision?.decisionId}
         >
           <p className="gm-meta" data-testid="system-status-reasons">
