@@ -65,6 +65,22 @@
 - Compact WAIT / feed / enable-alerts copy  
 - Keyboard / screen-reader labels on close + backdrop  
 
+## Test results
+
+```text
+vitest: DecisionDashboard MarketFeedStatus PhoneAlertsControl
+        NotificationCentre MobileCompactLayout
+→ 5 files, 19 tests passed
+```
+
+Production smoke (after deploy `a842d974`):
+
+- Live bundle: `index-pHHUSyOk.js` / `index-O1KFIuiD.css`
+- Firebase config present in live JS
+- Compact strings present: `No valid plan yet`, `Why waiting?`, `Enable alerts`, `notification-close`
+- API health: `ok` / production
+- Known pre-existing: missing `/assets/*` still SPA-falls-back HTML 200
+
 ## Safety unchanged
 
 AutoTrade OFF · Demo OFF · Live OFF · no trading-logic / Pine / webhook / Auth changes.
