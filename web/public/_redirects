@@ -1,1 +1,6 @@
+# Prefer real static assets. Never SPA-fallback hashed bundles to index.html
+# (a prior miss + CDN cache can otherwise poison CSS/JS MIME types).
+/assets/*  /assets/:splat  200
+
+# SPA fallback for app routes only
 /*    /index.html   200
