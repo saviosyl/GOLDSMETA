@@ -28,4 +28,5 @@
   Cache-Control: public, max-age=86400, must-revalidate
 
 /gm/*
-  Cache-Control: public, max-age=86400, must-revalidate
+  Cache-Control: public, max-age=300, must-revalidate
+  CDN-Cache-Control: max-age=60

@@ -11,13 +11,27 @@
  *   node scripts/deploy-cloudflare-production.mjs
  */
 import { spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
+import { join } from "path";
 
 const run = (cmd, args, opts = {}) => {
   const res = spawnSync(cmd, args, { stdio: "inherit", ...opts });
   if (res.status !== 0) {
     process.exit(res.status ?? 1);
   }
+  return res;
+};
+
+const runCapture = (cmd, args, opts = {}) => {
+  const res = spawnSync(cmd, args, { encoding: "utf8", ...opts });
+  if (res.status !== 0) {
+    if (res.stdout) process.stdout.write(res.stdout);
+    if (res.stderr) process.stderr.write(res.stderr);
+    process.exit(res.status ?? 1);
+  }
+  if (res.stdout) process.stdout.write(res.stdout);
+  if (res.stderr) process.stderr.write(res.stderr);
+  return res.stdout || "";
 };
 
 process.env.GOLD_META_PRODUCTION_GATE = "1";
@@ -59,8 +73,35 @@ if (commit) {
 }
 deployArgs.push("--commit-message", message);
 
-run("npx", deployArgs);
+const deployOut = runCapture("npx", deployArgs);
+const deployUrlMatch = deployOut.match(/https:\/\/[a-z0-9]+\.goldmeta-web\.pages\.dev/i);
+const deployUrl = deployUrlMatch?.[0] ?? null;
+
+if (deployUrl) {
+  console.log(`== warm deploy assets at ${deployUrl} ==`);
+  const gmDir = join("dist", "gm");
+  const files = existsSync(gmDir)
+    ? readdirSync(gmDir).filter((f) => /\.(js|css)$/i.test(f))
+    : [];
+  const html = readFileSync("dist/index.html", "utf8");
+  const refs = Array.from(html.matchAll(/gm\/[A-Za-z0-9._-]+\.(?:js|css)/g)).map((m) => m[0]);
+  const targets = Array.from(new Set([...refs, ...files.map((f) => `gm/${f}`), "sw.js", "index.html"]));
+  for (const path of targets) {
+    try {
+      const res = spawnSync(
+        "curl",
+        ["-sS", "-o", "/dev/null", "-w", "%{http_code} %{content_type}", `${deployUrl}/${path}`],
+        { encoding: "utf8" }
+      );
+      console.log(`warm ${path}: ${(res.stdout || "").trim()}`);
+    } catch {
+      /* ignore warm failures */
+    }
+  }
+}
 
 console.log("== post-deploy check ==");
+// Give the custom-domain alias a moment to point at the new deployment.
+spawnSync("sleep", ["4"], { stdio: "inherit" });
 run("node", ["scripts/post-deploy-check.mjs", "https://goldmeta.metamechsolutions.com"]);
 console.log("Production deploy finished.");
