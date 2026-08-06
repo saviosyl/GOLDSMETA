@@ -42,12 +42,13 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.AUTOTRADE_STORE = "firestore";
   process.env.AUTOTRADE_FIRESTORE_ROOT = "autoTradeCTraderPreview";
 
-  // cTrader preview capabilities — mutations hard-false
+  // cTrader preview — Demo submission ON for owner Demo Auto start; Live stays hard-off
   process.env.CTRADER_CONNECTOR_ENABLED = "true";
   process.env.CTRADER_DEMO_READ_ENABLED = "true";
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED = "true";
-  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
+  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
   process.env.CTRADER_LIVE_ENABLED = "false";
+  process.env.BROKER_EXECUTION_ENABLED = "false";
   process.env.GOLDMETA_PINNED_OWNER_UID = pinnedOwnerUid.value();
 
   // Inject owner-supplied Open API secrets (never invent placeholders)
@@ -113,13 +114,10 @@ export const apiCTraderPreview = onRequest(
       applyCTraderPreviewRuntimeEnv();
       assertCTraderMutationsDisabled();
       const flags = snapshotCTraderFlags();
-      if (
-        flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED ||
-        flags.CTRADER_LIVE_ENABLED ||
-        flags.BROKER_EXECUTION_ENABLED
-      ) {
+      // Demo submission may be on; Live + generic broker execution must stay off.
+      if (flags.CTRADER_LIVE_ENABLED || flags.BROKER_EXECUTION_ENABLED) {
         res.status(403).json({
-          error: "CTRADER_MUTATION_FLAGS_BLOCKED",
+          error: "CTRADER_LIVE_MUTATION_FLAGS_BLOCKED",
           flags
         });
         return;

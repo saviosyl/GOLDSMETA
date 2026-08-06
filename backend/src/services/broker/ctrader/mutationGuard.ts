@@ -1,8 +1,12 @@
 /**
- * Hard fail-closed guards for any cTrader mutation path.
+ * Fail-closed guards for cTrader mutation paths.
+ * Demo market orders go through {@link submitDemoMarketOrder}; other mutations stay denied.
  */
 
-import { assertCTraderMutationsDisabled } from "./flags";
+import {
+  assertCTraderLiveMutationsDisabled,
+  isCTraderDemoOrderSubmissionEnabled
+} from "./flags";
 
 export class CTraderMutationDisabledError extends Error {
   readonly code = "CTRADER_MUTATION_DISABLED";
@@ -13,8 +17,16 @@ export class CTraderMutationDisabledError extends Error {
 }
 
 export function denyCTraderMutation(action: string): never {
-  assertCTraderMutationsDisabled();
+  assertCTraderLiveMutationsDisabled();
   throw new CTraderMutationDisabledError(action);
+}
+
+/** Deny unless Demo submission is intentionally enabled (still never Live). */
+export function assertDemoMarketOrderAllowed(): void {
+  assertCTraderLiveMutationsDisabled();
+  if (!isCTraderDemoOrderSubmissionEnabled()) {
+    throw new CTraderMutationDisabledError("placeMarketOrder");
+  }
 }
 
 export const DISABLED_ORDER_METHODS = {

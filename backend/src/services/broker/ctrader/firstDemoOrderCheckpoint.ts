@@ -17,11 +17,11 @@ export type CheckpointCheck = {
 
 export type FirstDemoOrderCheckpoint = {
   checkpoint: "FIRST_DEMO_ORDER";
-  status: "READY_FOR_OWNER_APPROVAL" | "BLOCKED";
-  autoTrade: "OFF";
-  orderSubmissionEnabled: false;
-  submissionArmed: false;
-  requiresOwnerReply: "APPROVE FIRST DEMO ORDER";
+  status: "READY_FOR_OWNER_APPROVAL" | "BLOCKED" | "READY_TO_SUBMIT";
+  autoTrade: "OFF" | "READY";
+  orderSubmissionEnabled: boolean;
+  submissionArmed: boolean;
+  requiresOwnerReply: "APPROVE FIRST DEMO ORDER" | null;
   account: {
     masked: string | null;
     isLive: boolean;
@@ -193,35 +193,49 @@ export async function buildFirstDemoOrderCheckpoint(args: {
       detail: settings?.emergencyStopActive ? "STOP active" : "STOP inactive"
     },
     {
-      id: "submission_still_off",
-      label: "Order submission still OFF (checkpoint)",
-      ok: !isCTraderDemoOrderSubmissionEnabled(),
-      detail: "Submission stays OFF until owner replies APPROVE FIRST DEMO ORDER"
+      id: "demo_submission_enabled",
+      label: "Demo order submission enabled",
+      ok: isCTraderDemoOrderSubmissionEnabled(),
+      detail: isCTraderDemoOrderSubmissionEnabled()
+        ? "Demo submission ON — Live still locked"
+        : "Demo submission OFF"
+    },
+    {
+      id: "trading_scope",
+      label: "Trading OAuth scope granted",
+      ok: connection?.oauthScope === "trading",
+      detail: connection?.oauthScope === "trading" ? "trading" : "accounts only"
     }
   ];
 
   const blocked = checks.some(
     (c) =>
       !c.ok &&
-      c.id !== "submission_still_off" &&
       c.id !== "market_open" &&
-      c.id !== "fresh_quote"
+      c.id !== "fresh_quote" &&
+      c.id !== "demo_submission_enabled"
   );
+  const submitReady =
+    isCTraderDemoOrderSubmissionEnabled() &&
+    connection?.oauthScope === "trading" &&
+    !connection?.selectedAccountIsLive;
   // Market-closed on weekend is an expected BLOCKED state for the checkpoint.
   const status: FirstDemoOrderCheckpoint["status"] =
     blocked || !marketOpen || Boolean(quote?.stale)
       ? "BLOCKED"
-      : checks.every((c) => c.id === "submission_still_off" || c.ok)
-        ? "READY_FOR_OWNER_APPROVAL"
-        : "BLOCKED";
+      : submitReady && checks.every((c) => c.ok || c.id === "market_open" || c.id === "fresh_quote")
+        ? "READY_TO_SUBMIT"
+        : checks.filter((c) => c.id !== "demo_submission_enabled" && c.id !== "trading_scope").every((c) => c.ok || c.id === "market_open" || c.id === "fresh_quote")
+          ? "READY_FOR_OWNER_APPROVAL"
+          : "BLOCKED";
 
   return {
     checkpoint: "FIRST_DEMO_ORDER",
     status,
-    autoTrade: "OFF",
-    orderSubmissionEnabled: false,
-    submissionArmed: false,
-    requiresOwnerReply: "APPROVE FIRST DEMO ORDER",
+    autoTrade: submitReady ? "READY" : "OFF",
+    orderSubmissionEnabled: isCTraderDemoOrderSubmissionEnabled(),
+    submissionArmed: status === "READY_TO_SUBMIT",
+    requiresOwnerReply: status === "READY_TO_SUBMIT" ? null : "APPROVE FIRST DEMO ORDER",
     account: {
       masked: connection?.selectedAccountMasked ?? diagnostics?.connection?.accountMasked ?? null,
       isLive: Boolean(connection?.selectedAccountIsLive),

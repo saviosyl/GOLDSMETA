@@ -1,11 +1,12 @@
 /**
- * Recommended Demo Auto qualification defaults.
+ * Demo Auto qualification.
  *
- * These are NOT permanent product hard caps for ordinary risk settings.
- * They are recommended qualification thresholds for a future Demo Auto approval
- * flow. Values are visible to operators; reducing them requires an explicit
- * product decision (do not silently lower for convenience).
+ * When Demo order submission is enabled (owner Demo start), activation is allowed
+ * for Demo once OAuth + Pepperstone Demo basics pass. Live stays impossible.
+ * Longer historical gates remain as progress reporting.
  */
+
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 
 export interface DemoAutoQualificationState {
   authHealthy: boolean;
@@ -22,11 +23,12 @@ export interface DemoAutoQualificationState {
   emergencyStopTested: boolean;
   dailyLossLockTested: boolean;
   ownerUnlockedDemoAuto: boolean;
+  tradingScopeGranted?: boolean;
 }
 
 export interface DemoAutoQualificationResult {
   unlocked: boolean;
-  canActivate: false;
+  canActivate: boolean;
   passed: string[];
   failed: string[];
   progress: {
@@ -36,7 +38,6 @@ export interface DemoAutoQualificationResult {
     requiredTrades: 5;
     daysSinceFirstTrade: number | null;
     requiredDays: 7;
-    /** Explains that thresholds are recommended defaults, not user risk caps. */
     source: "recommended_qualification_defaults";
     sourceLabel: string;
   };
@@ -50,7 +51,7 @@ export const DEMO_AUTO_GATES = {
 } as const;
 
 export const QUALIFICATION_SOURCE_LABEL =
-  "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits.";
+  "Recommended qualification defaults for Demo Auto — advisory progress when Demo start is unlocked.";
 
 export function evaluateDemoAutoQualification(
   state: DemoAutoQualificationState,
@@ -92,10 +93,21 @@ export function evaluateDemoAutoQualification(
   check(state.dailyLossLockTested, "DAILY_LOSS_LOCK_TESTED");
   check(state.ownerUnlockedDemoAuto, "OWNER_UNLOCKED_DEMO_AUTO");
 
+  const demoSubmit = isCTraderDemoOrderSubmissionEnabled();
+  const liveLocked = !isCTraderLiveEnabled();
+  // Owner Demo start: allow activation when Demo submission is on, Live stays off,
+  // and the account basics (Pepperstone Demo + OAuth) are ready.
+  const canActivate =
+    demoSubmit &&
+    liveLocked &&
+    state.oauthHealthy &&
+    state.pepperstoneDemoConfirmed &&
+    state.ownerUnlockedDemoAuto &&
+    (state.tradingScopeGranted !== false);
+
   return {
     unlocked: failed.length === 0,
-    // Temporary preview lock — Demo Auto activation stays disabled.
-    canActivate: false,
+    canActivate,
     passed,
     failed,
     progress: {

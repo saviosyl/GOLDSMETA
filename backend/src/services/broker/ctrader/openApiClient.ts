@@ -1,7 +1,7 @@
 /**
- * cTrader Open API client — Demo read-only.
- * Uses Spotware HTTP helpers for account discovery and WebSocket for symbols/quotes.
- * Never logs tokens. Never submits orders.
+ * cTrader Open API client — Demo read + Demo market order submit.
+ * Uses Spotware HTTP helpers for account discovery and WebSocket for symbols/quotes/orders.
+ * Never logs tokens. Live hosts / Live execution are not wired.
  */
 
 import { CTraderConnection } from "@reiryoku/ctrader-layer";
@@ -64,6 +64,32 @@ export type AccountSnapshot = {
   leverage: number | null;
 };
 
+export type DemoMarketOrderRequest = {
+  accessToken: string;
+  clientId: string;
+  clientSecret: string;
+  ctidTraderAccountId: string;
+  symbolId: string;
+  side: "BUY" | "SELL";
+  /** Protocol volume cents (100 = 1.00 lot). */
+  volume: number;
+  relativeStopLoss?: number;
+  relativeTakeProfit?: number;
+  clientOrderId?: string;
+  label?: string;
+  comment?: string;
+};
+
+export type DemoMarketOrderResult = {
+  accepted: boolean;
+  executionType: string | null;
+  orderId: string | null;
+  positionId: string | null;
+  errorCode: string | null;
+  clientOrderId: string | null;
+  raw?: Record<string, unknown>;
+};
+
 export interface CTraderOpenApiClient {
   listAccountsByAccessToken(accessToken: string): Promise<DiscoveredAccount[]>;
   fetchAccountSnapshot(args: {
@@ -85,6 +111,8 @@ export interface CTraderOpenApiClient {
     ctidTraderAccountId: string;
     symbolId: string;
   }): Promise<BrokerQuote>;
+  /** Demo host only — never call for Live accounts. */
+  placeDemoMarketOrder?(args: DemoMarketOrderRequest): Promise<DemoMarketOrderResult>;
 }
 
 function mapDiscovered(raw: Record<string, unknown>): DiscoveredAccount {
@@ -485,6 +513,94 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           source: "LIVE"
         } satisfies BrokerQuote;
       });
+    },
+
+    async placeDemoMarketOrder(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+
+        const clientOrderId =
+          args.clientOrderId ?? `gm_${Date.now().toString(36)}`.slice(0, 50);
+
+        const executionPromise = new Promise<Record<string, unknown>>(
+          (resolve, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error("CTRADER_ORDER_TIMEOUT")),
+              15_000
+            );
+            connection.on(
+              "ProtoOAExecutionEvent",
+              (event: { descriptor?: Record<string, unknown> }) => {
+                const descriptor = event?.descriptor ?? {};
+                clearTimeout(timer);
+                resolve(descriptor);
+              }
+            );
+            connection.on(
+              "ProtoOAErrorRes",
+              (event: { descriptor?: Record<string, unknown> }) => {
+                const descriptor = event?.descriptor ?? {};
+                clearTimeout(timer);
+                reject(
+                  new Error(
+                    String(
+                      descriptor.errorCode ??
+                        descriptor.description ??
+                        "CTRADER_ORDER_ERROR"
+                    )
+                  )
+                );
+              }
+            );
+          }
+        );
+
+        // ProtoOAOrderType.MARKET = 1, ProtoOATradeSide BUY=1 SELL=2
+        await connection.sendCommand("ProtoOANewOrderReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          symbolId: Number(args.symbolId),
+          orderType: 1,
+          tradeSide: args.side === "BUY" ? 1 : 2,
+          volume: args.volume,
+          relativeStopLoss: args.relativeStopLoss,
+          relativeTakeProfit: args.relativeTakeProfit,
+          clientOrderId,
+          label: args.label ?? "GoldMeta Demo",
+          comment: args.comment ?? "GoldMeta Demo"
+        });
+
+        const execution = await executionPromise;
+        const order = (execution.order ?? {}) as Record<string, unknown>;
+        const position = (execution.position ?? {}) as Record<string, unknown>;
+        const errorCode =
+          typeof execution.errorCode === "string" ? execution.errorCode : null;
+        const executionType =
+          execution.executionType != null
+            ? String(execution.executionType)
+            : null;
+        return {
+          accepted: !errorCode,
+          executionType,
+          orderId:
+            order.orderId != null
+              ? String(order.orderId)
+              : execution.orderId != null
+                ? String(execution.orderId)
+                : null,
+          positionId:
+            position.positionId != null ? String(position.positionId) : null,
+          errorCode,
+          clientOrderId,
+          raw: execution
+        } satisfies DemoMarketOrderResult;
+      });
     }
   };
 }
@@ -561,6 +677,17 @@ export function createMockOpenApiClient(opts?: {
           source: "LIVE"
         }
       );
+    },
+    async placeDemoMarketOrder(args) {
+      return {
+        accepted: true,
+        executionType: "ORDER_FILLED",
+        orderId: "mock-order-1",
+        positionId: "mock-pos-1",
+        errorCode: null,
+        clientOrderId: args.clientOrderId ?? "mock-client-order",
+        raw: { mock: true, side: args.side, volume: args.volume }
+      };
     }
   };
 }

@@ -438,7 +438,7 @@ export function AutoTradePage() {
           <p className="gm-autotrade-kicker">GoldMeta</p>
           <h1 className="gm-page-title gm-autotrade-title">AutoTrade</h1>
           <p className="gm-meta gm-autotrade-lead">
-            Execution is disabled. Analysis and manual planning remain available.
+            Pepperstone Demo Auto can be enabled. Live execution stays locked.
           </p>
         </div>
       </header>
@@ -523,9 +523,9 @@ export function AutoTradePage() {
       )}
 
       <div className="gm-autotrade-readonly-banner" data-testid="autotrade-readonly-banner">
-        Order submission is currently disabled in this preview. AutoTrade stays OFF. You can
-        select Demo or Live accounts, save settings, and run previews — no Demo or Live order is
-        submitted.
+        {mode === "live"
+          ? "Live execution stays locked. Select Demo to enable Pepperstone Demo AutoTrade."
+          : "Demo Auto is available after Authorise Demo Trading + a Pepperstone Demo account. Live orders stay locked."}
       </div>
 
       <section
@@ -618,9 +618,35 @@ export function AutoTradePage() {
         <button
           type="button"
           className="gm-btn"
-          disabled
-          title="Order submission is currently disabled in this preview"
+          disabled={busy || mode === "live"}
+          title={
+            mode === "live"
+              ? "Switch to Demo — Live Auto stays locked"
+              : "Enable Pepperstone Demo AutoTrade"
+          }
           data-testid="autotrade-enable-demo-auto"
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const result = await api.setCTraderAutomationMode("DEMO_AUTO");
+                setPreviewNote(
+                  result.note ??
+                    "Demo Auto enabled for Pepperstone Demo. Live stays locked."
+                );
+                setMode("demo");
+                await reload();
+                await loadSettings("demo");
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Could not enable Demo Auto"
+                );
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
         >
           Enable Demo Auto
         </button>
@@ -959,8 +985,7 @@ export function AutoTradePage() {
       ) : null}
 
       <p className="gm-meta gm-at-locked-note" data-testid="autotrade-demo-auto-note">
-        Demo and Live AutoTrade interfaces are available to every verified active user. Execution
-        remains OFF while order submission is disabled.
+        Demo Auto places Pepperstone Demo orders only. Live Auto and real-money execution stay locked.
       </p>
 
       <section className="gm-at-cards" aria-label="Daily overview">

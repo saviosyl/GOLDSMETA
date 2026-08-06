@@ -386,12 +386,16 @@ describe("lot sizing modes", () => {
 });
 
 describe("preview phase safety", () => {
-  it("keeps order submission disabled and mutations impossible", () => {
+  it("keeps Live hard-disabled; Demo submission stays env-gated", () => {
+    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     const flags = snapshotCTraderFlags();
     expect(flags.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
     expect(flags.CTRADER_LIVE_ENABLED).toBe(false);
     expect(flags.BROKER_EXECUTION_ENABLED).toBe(false);
     expect(flags.mutationFlagsHardFalse).toBe(true);
     expect(() => cTraderOrderApi.placeMarketBuy()).toThrow();
+    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
   });
 });

@@ -1,6 +1,6 @@
 /**
- * Pepperstone cTrader Demo orchestration — read/preview only.
- * AutoTrade remains OFF. Order submission impossible.
+ * Pepperstone cTrader Demo orchestration.
+ * Demo order submission may be enabled; Live execution stays locked.
  */
 
 import type { AutomationMode, BrokerHealthStatus, TradePreview } from "../domain";
@@ -45,8 +45,8 @@ export interface CTraderReadinessReport {
   connected: boolean;
   demonstrationAvailable: true;
   automationMode: AutomationMode;
-  autoTrade: "OFF";
-  orderSubmissionEnabled: false;
+  autoTrade: "OFF" | "READY";
+  orderSubmissionEnabled: boolean;
   liveEnabled: false;
   flags: ReturnType<typeof snapshotCTraderFlags>;
   config: ReturnType<typeof loadCTraderConfig>;
@@ -141,6 +141,7 @@ export function buildCTraderReadiness(args?: {
   const quoteOk = Boolean(conn?.liveQuoteReceived);
   const marginOk = Boolean(conn?.marginMetadataAvailable);
 
+  const demoSubmit = snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
   const qualState: DemoAutoQualificationState = {
     ...DEFAULT_QUAL,
     ...args?.qualification,
@@ -148,7 +149,10 @@ export function buildCTraderReadiness(args?: {
     pinnedOwnerVerified: Boolean(auth.pinnedOwnerExists && auth.emailMapsToPinned),
     oauthHealthy: oauthConnected,
     pepperstoneDemoConfirmed: pepperstone && demoSelected,
-    xauusdMetadataComplete: goldFound
+    xauusdMetadataComplete: goldFound,
+    // Owner Demo start unlocks Demo Auto intent when submission is enabled.
+    ownerUnlockedDemoAuto:
+      args?.qualification?.ownerUnlockedDemoAuto ?? demoSubmit
   };
   const qualification = evaluateDemoAutoQualification(qualState);
   const authSetupRequired = auth.status !== "HEALTHY";
@@ -228,21 +232,27 @@ export function buildCTraderReadiness(args?: {
       step: 7,
       title: "Run trade previews",
       status: quoteOk ? "AVAILABLE" : "SETUP_REQUIRED",
-      detail:
-        "Preview BUY/SELL sizing only. Order submission is currently disabled in this preview."
+      detail: demoSubmit
+        ? "Preview BUY/SELL sizing, then place controlled Demo orders when trading scope is granted."
+        : "Preview BUY/SELL sizing only until Demo order submission is enabled."
     },
     {
       step: 8,
-      title: "Request Demo trading approval",
-      status: "BLOCKED",
-      detail:
-        "Order submission disabled in this preview. Demo Auto stays OFF until a separate approved activation."
+      title: "Enable Demo Auto",
+      status: qualification.canActivate ? "AVAILABLE" : demoSubmit ? "IN_PROGRESS" : "BLOCKED",
+      detail: qualification.canActivate
+        ? "Demo Auto can be activated for Pepperstone Demo (Live stays locked)."
+        : demoSubmit
+          ? "Authorise Demo Trading (trading scope), select a Pepperstone Demo account, then Enable Demo Auto."
+          : "Demo order submission is off — Demo Auto stays locked."
     }
   ];
 
   const setupRequired = !(oauthConnected && demoSelected && goldFound);
   const label = oauthConnected
-    ? "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
+    ? demoSubmit
+      ? "Pepperstone Demo — order submission enabled — Live execution locked — AutoTrade ready when activated"
+      : "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
     : oauthConfigured
       ? "Pepperstone OAuth ready — Authorise Demo Trading available — AutoTrade OFF"
       : "Pepperstone connection required — preview mode — AutoTrade OFF";
@@ -255,8 +265,8 @@ export function buildCTraderReadiness(args?: {
     connected: oauthConnected,
     demonstrationAvailable: true,
     automationMode: "OFF",
-    autoTrade: "OFF",
-    orderSubmissionEnabled: false,
+    autoTrade: qualification.canActivate ? "READY" : "OFF",
+    orderSubmissionEnabled: demoSubmit,
     liveEnabled: false,
     flags: snapshotCTraderFlags(),
     config,
@@ -417,17 +427,19 @@ export function getBrokerControlCentreSnapshot(
       {
         id: "DEMO_AUTO_LOCKED",
         available: false,
-        note: "Temporarily locked — not a permanent product limitation"
+        note: "Use DEMO_AUTO when Demo submission is enabled"
       },
       {
         id: "DEMO_AUTO",
-        available: false,
-        note: "Temporarily locked pending owner approval"
+        available: snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED,
+        note: snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED
+          ? "Pepperstone Demo Auto — Live remains locked"
+          : "Enable CTRADER_DEMO_ORDER_SUBMISSION_ENABLED to unlock"
       },
       {
         id: "LIVE_LOCKED",
         available: false,
-        note: "Temporarily locked — Live selection exists; execution disabled"
+        note: "Live execution remains hard-disabled"
       }
     ],
     limits: CTRADER_RECOMMENDED_DEFAULTS,
@@ -443,10 +455,12 @@ export function getBrokerControlCentreSnapshot(
       automationMode: "OFF",
       oauthHealthy: readiness.connected ? true : null,
       authIntegrityHealthy: auth?.status === "HEALTHY",
-      executionEnabled: false,
+      executionEnabled: snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED,
       liveEnabled: false,
       lastErrorCode: null,
-      notes: ["No broker order may be submitted."]
+      notes: snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED
+        ? ["Pepperstone Demo order submission enabled. Live execution locked."]
+        : ["No broker order may be submitted."]
     } satisfies BrokerHealthStatus
   };
 }
