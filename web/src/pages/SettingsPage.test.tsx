@@ -31,11 +31,24 @@ vi.mock("../lib/auth", () => ({
       updateSettings: vi.fn(),
       getVapidPublicKey: vi.fn(),
       registerWebPushSubscription: vi.fn(),
-      deleteWebPushSubscription: vi.fn()
+      deleteWebPushSubscription: vi.fn(),
+      adminMarketFeedStatus: vi.fn(async () => ({
+        health: {
+          status: "green",
+          title: "Operational",
+          subtitle: "Live",
+          quoteStatus: "live",
+          lastVerifiedAt: null,
+          lastVerifiedLabel: "now"
+        },
+        checklist: [],
+        sharedWebhookUrl: null
+      }))
     },
     signOut: vi.fn(),
     apiBaseUrl: "https://us-central1-goldmeta-web.cloudfunctions.net/api",
-    user: { email: "tester@example.com" }
+    user: { email: "tester@example.com" },
+    account: { role: "OWNER" }
   })
 }));
 
