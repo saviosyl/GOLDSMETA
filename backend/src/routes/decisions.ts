@@ -18,11 +18,21 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
   router.get("/v1/decisions/latest", requireAuth, ...approvedAccountGate, async (req, res) => {
-    const feedUserId = resolveSharedFeedUserId();
+    const requestUserId = getAuthenticatedUserId(req);
+    const sharedFeedUserId = resolveSharedFeedUserId();
     const marketFeedHealth = publicMarketFeedHealth(await evaluateSharedFeedHealth(store));
+    // Shared authoritative feed first; fall back to the caller's own store only when
+    // the shared feed has never received decisions (release-safe cutover).
+    let feedUserId = sharedFeedUserId;
+    let recent = await store.listDecisions(feedUserId, 40);
+    if (recent.length === 0 && requestUserId !== sharedFeedUserId) {
+      recent = await store.listDecisions(requestUserId, 40);
+      if (recent.length > 0) {
+        feedUserId = requestUserId;
+      }
+    }
     // Prefer non-test decisions so TradingView TEST fixture OHLC (~2408) cannot
     // become the LIVE dashboard "live price" next to a real ~4050 alert profile.
-    const recent = await store.listDecisions(feedUserId, 40);
     const view = resolveMarketStructureView(recent);
     const latest = view.quoteDecision ?? recent[0];
     if (!latest) {

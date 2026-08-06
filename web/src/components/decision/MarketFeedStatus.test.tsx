@@ -6,11 +6,11 @@ import { MarketFeedStatus } from "./MarketFeedStatus";
 function health(status: MarketFeedHealth["status"], quoteStatus: MarketFeedHealth["quoteStatus"]): MarketFeedHealth {
   return {
     status,
-    title: "GoldMeta Market Feed",
-    subtitle: status === "green" ? "All systems operational" : "Partial",
+    title: "ignored-api-title",
+    subtitle: "ignored-api-subtitle",
     quoteStatus,
-    lastVerifiedAt: "2026-08-06T06:00:00.000Z",
-    lastVerifiedLabel: "30 seconds ago"
+    lastVerifiedAt: new Date(Date.now() - 30_000).toISOString(),
+    lastVerifiedLabel: "Plan + 5M confirmation"
   };
 }
 
@@ -19,7 +19,10 @@ describe("MarketFeedStatus", () => {
     render(<MarketFeedStatus health={health("green", "live")} />);
     expect(screen.getByTestId("market-feed-status")).toHaveAttribute("data-status", "green");
     expect(screen.getByText(/GoldMeta Market Feed/i)).toBeInTheDocument();
+    expect(screen.getByText(/All systems operational/i)).toBeInTheDocument();
     expect(screen.getByText(/Live price updates active/i)).toBeInTheDocument();
+    expect(screen.getByTestId("market-feed-last-verified")).toHaveTextContent(/Last verified:/i);
+    expect(screen.getByTestId("market-feed-last-verified")).toHaveTextContent(/seconds ago|minutes ago/i);
   });
 
   it("shows amber feed with partial availability text", () => {

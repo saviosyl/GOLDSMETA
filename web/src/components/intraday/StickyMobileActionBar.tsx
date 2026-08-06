@@ -9,7 +9,7 @@ type Props = {
 
 /**
  * Sticky mobile actions above bottom nav.
- * Notify opens an in-app preference note only — never claims push is active.
+ * Notify scrolls to the phone-alerts control (permission is never requested automatically).
  */
 export function StickyMobileActionBar({
   onRefresh,

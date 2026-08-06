@@ -47,7 +47,7 @@ function statusCopy(args: {
   }
   if (!args.supported || args.result?.status === "unsupported") {
     return {
-      label: "Unsupported",
+      label: "Unsupported on this browser",
       detail: "This browser does not support Web Push. In-app notifications still work from the bell.",
       canEnable: false,
       tone: "red",
@@ -107,11 +107,13 @@ export function PhoneAlertsControl() {
         <p>{copy.detail}</p>
       </div>
       {copy.showIosSteps && (
-        <ol className="gm-phone-alert-steps">
-          <li>Open GoldMeta in Safari.</li>
-          <li>Tap Share.</li>
-          <li>Choose Add to Home Screen.</li>
-          <li>Open GoldMeta from the new icon, then enable alerts.</li>
+        <ol className="gm-phone-alert-steps" data-testid="iphone-alert-steps">
+          <li>Open GoldMeta in Safari</li>
+          <li>Tap Share</li>
+          <li>Add to Home Screen</li>
+          <li>Open GoldMeta from the new Home Screen icon</li>
+          <li>Tap Enable phone alerts</li>
+          <li>Tap Allow</li>
         </ol>
       )}
       {error && (

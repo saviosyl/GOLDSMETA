@@ -55,7 +55,7 @@ describe("PhoneAlertsControl", () => {
   it("shows unsupported browser state", () => {
     pushMocks.isWebPushSupported.mockReturnValue(false);
     render(<PhoneAlertsControl />);
-    expect(screen.getByText(/Unsupported/i)).toBeInTheDocument();
+    expect(screen.getByText(/Unsupported on this browser/i)).toBeInTheDocument();
     expect(screen.getByText(/In-app notifications still work/i)).toBeInTheDocument();
   });
 
@@ -64,6 +64,6 @@ describe("PhoneAlertsControl", () => {
     pushMocks.isProbablyInstalledPwa.mockReturnValue(false);
     render(<PhoneAlertsControl />);
     expect(screen.getByText(/Add GoldMeta to Home Screen/i)).toBeInTheDocument();
-    expect(screen.getByText(/Choose Add to Home Screen/i)).toBeInTheDocument();
+    expect(screen.getByTestId("iphone-alert-steps")).toHaveTextContent(/Tap Allow/i);
   });
 });

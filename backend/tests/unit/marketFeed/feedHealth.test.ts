@@ -70,6 +70,8 @@ describe("shared market feed health", () => {
     expect(health.confirm5m.healthy).toBe(true);
     expect(health.quote1m.healthy).toBe(false);
     expect(publicMarketFeedHealth(health).quoteStatus).toBe("limited");
+    expect(publicMarketFeedHealth(health).title).toBe("GoldMeta Market Feed");
+    expect(publicMarketFeedHealth(health).subtitle).toBe("All systems operational");
     expect(health.sharedWebhookActive).toBe(true);
   });
 

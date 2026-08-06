@@ -174,8 +174,8 @@ const publicCopy = (
   if (status === "green") {
     return {
       status,
-      title: "Market feed operational",
-      subtitle: "Shared XAUUSD plan and 5-minute confirmation are live.",
+      title: "GoldMeta Market Feed",
+      subtitle: "All systems operational",
       quoteStatus,
       lastVerifiedAt,
       lastVerifiedLabel

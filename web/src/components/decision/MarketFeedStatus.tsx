@@ -6,8 +6,7 @@ type Props = {
   error?: string | null;
 };
 
-function relativeLabel(iso: string | null | undefined, fallback: string | null | undefined): string {
-  if (fallback) return fallback;
+function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "not verified yet";
   const at = Date.parse(iso);
   if (!Number.isFinite(at)) return "not verified yet";
@@ -21,16 +20,18 @@ function relativeLabel(iso: string | null | undefined, fallback: string | null |
 
 function titleFor(health: MarketFeedHealth | null | undefined): string {
   if (!health) return "GoldMeta Market Feed";
-  if (health.status === "green") return health.title || "GoldMeta Market Feed";
+  if (health.status === "green") return "GoldMeta Market Feed";
   if (health.status === "amber") return "Market feed partially available";
   return "Market feed unavailable";
 }
 
 function subtitleFor(health: MarketFeedHealth | null | undefined): string {
   if (!health) return "Feed status unknown";
-  if (health.status === "green") return health.subtitle || "All systems operational";
-  if (health.status === "amber") return health.subtitle || "Live quote updates may be limited";
-  return health.subtitle || "Decision updates may be delayed";
+  if (health.status === "green") return "All systems operational";
+  if (health.status === "amber") {
+    return health.subtitle || "15-minute plan is live; 5-minute confirmation is missing or stale.";
+  }
+  return health.subtitle || "Required 15-minute plan feed is missing, stale, or unsafe.";
 }
 
 function quoteLine(health: MarketFeedHealth | null | undefined): string {
@@ -74,7 +75,10 @@ export function MarketFeedStatus({ health, loading = false, error = null }: Prop
         </div>
       </div>
       <p className="gm-feed-quote-line">{quoteLine(health)}</p>
-      <p className="gm-meta">Last verified: {relativeLabel(health?.lastVerifiedAt, health?.lastVerifiedLabel)}</p>
+      <p className="gm-meta" data-testid="market-feed-last-verified">
+        Last verified: {relativeTime(health?.lastVerifiedAt)}
+        {health?.lastVerifiedLabel ? ` · ${health.lastVerifiedLabel}` : ""}
+      </p>
     </section>
   );
 }
