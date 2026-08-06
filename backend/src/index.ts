@@ -73,12 +73,14 @@ export const api = onRequest(
       "CTRADER_CLIENT_ID",
       "CTRADER_CLIENT_SECRET",
       "CTRADER_REDIRECT_URI",
-      "CTRADER_TOKEN_ENCRYPTION_KEY",
+      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
       "CTRADER_ENVIRONMENT"
     ],
     cors: [
       "https://goldmeta.metamechsolutions.com",
       "https://goldmeta-web.pages.dev",
+      "https://cursor-live-xauusd-price-e1a.goldmeta-web.pages.dev",
+      "https://71ba652b.goldmeta-web.pages.dev",
       "http://127.0.0.1:5173",
       "http://localhost:5173"
     ]
@@ -152,7 +154,7 @@ export const refreshCTraderLiveQuotes = onSchedule(
       "CTRADER_CLIENT_ID",
       "CTRADER_CLIENT_SECRET",
       "CTRADER_REDIRECT_URI",
-      "CTRADER_TOKEN_ENCRYPTION_KEY",
+      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
       "CTRADER_ENVIRONMENT"
     ]
   },

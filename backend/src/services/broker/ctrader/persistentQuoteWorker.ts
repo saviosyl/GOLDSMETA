@@ -392,7 +392,12 @@ export function startWorkerHealthServer(
   port = Number(process.env.PORT ?? 8080)
 ): http.Server {
   const server = http.createServer((req, res) => {
-    if (req.url === "/healthz" || req.url === "/v1/ctrader/worker-health") {
+    const path = (req.url || "/").split("?")[0];
+    if (
+      path === "/healthz" ||
+      path === "/" ||
+      path === "/v1/ctrader/worker-health"
+    ) {
       const status = worker.getStatus();
       const ok = status.running && status.connected;
       res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
@@ -435,6 +440,6 @@ export function startWorkerHealthServer(
     res.writeHead(404);
     res.end("not found");
   });
-  server.listen(port);
+  server.listen(port, "0.0.0.0");
   return server;
 }

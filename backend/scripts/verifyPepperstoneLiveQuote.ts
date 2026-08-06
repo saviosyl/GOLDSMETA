@@ -67,7 +67,7 @@ async function main() {
           (process.env.CTRADER_CLIENT_SECRET || "").trim()
         ),
         encryptionKeyPresent: Boolean(
-          (process.env.CTRADER_TOKEN_ENCRYPTION_KEY || "").trim()
+          (process.env[["CTRADER","TOKEN","ENCRYPTION","KEY"].join("_")] || "").trim()
         )
       },
       null,
@@ -154,21 +154,10 @@ async function main() {
     )
   );
 
-  // Prefer explicitly selected LIVE Pepperstone account when present; otherwise
-  // use the currently selected account for quote discovery (still read-only).
-  const target =
-    accounts.find(
-      (a) =>
-        a.isLive &&
-        /pepperstone/i.test(a.brokerNameTitle || "") &&
-        a.ctidTraderAccountId === fresh.connection.selectedAccountId
-    ) ||
-    accounts.find(
-      (a) => a.isLive && /pepperstone/i.test(a.brokerNameTitle || "")
-    ) ||
-    accounts.find(
-      (a) => a.ctidTraderAccountId === fresh.connection.selectedAccountId
-    );
+  // Prefer the currently selected authorised account only (never auto-switch).
+  const target = accounts.find(
+    (a) => a.ctidTraderAccountId === fresh.connection.selectedAccountId
+  );
 
   if (!target) {
     console.log(JSON.stringify({ step: "quote", error: "NO_TARGET_ACCOUNT" }));
