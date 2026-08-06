@@ -22,11 +22,16 @@ import {
   loadLiveQuoteThresholds,
   type AuthoritativeQuote
 } from "./liveQuote";
-import { nextQuoteSequence, saveAuthoritativeQuote } from "./quoteStore";
+import { nextQuoteSequence, saveAuthoritativeQuote, getStoredAuthoritativeQuote } from "./quoteStore";
 import {
   marketStatusFromSchedule,
   parseScheduleIntervals
 } from "./marketSchedule";
+import {
+  assertAccountAllowlisted,
+  requireLiveAllowlist
+} from "./accountAllowlist";
+import { acquireWorkerLock, type WorkerLockHandle } from "./workerLock";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const LIVE_HOST = "live.ctraderapi.com";
@@ -35,6 +40,7 @@ const SPOT_PRICE_SCALE = 100_000;
 const DEFAULT_PERSIST_MIN_MS = 250;
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 60_000;
+const LOCK_RENEW_MS = 15_000;
 
 export type PersistentWorkerStatus = {
   running: boolean;
@@ -47,6 +53,8 @@ export type PersistentWorkerStatus = {
   lastError: string | null;
   startedAt: string | null;
   reconnectAttempts: number;
+  lockHeld: boolean;
+  lastHeartbeatAt: string | null;
   /** True only while the Spotware WS is open and subscribed. */
   websocketPersistent: true;
 };
@@ -78,6 +86,8 @@ export class PersistentXauUsdQuoteWorker {
   private stopping = false;
   private persistMinMs = DEFAULT_PERSIST_MIN_MS;
   private lastPersistAt = 0;
+  private lock: WorkerLockHandle | null = null;
+  private lockRenewTimer: ReturnType<typeof setInterval> | null = null;
   private status: PersistentWorkerStatus = {
     running: false,
     ownerUid: null,
@@ -89,6 +99,8 @@ export class PersistentXauUsdQuoteWorker {
     lastError: null,
     startedAt: null,
     reconnectAttempts: 0,
+    lockHeld: false,
+    lastHeartbeatAt: null,
     websocketPersistent: true
   };
 
@@ -106,6 +118,31 @@ export class PersistentXauUsdQuoteWorker {
     if (Number.isFinite(persistEnv) && persistEnv >= 0) {
       this.persistMinMs = persistEnv;
     }
+
+    // Startup reconciliation — surface last stored quote immediately in health.
+    try {
+      const stored = await getStoredAuthoritativeQuote(ownerUid);
+      if (stored) this.status.lastQuote = stored;
+    } catch {
+      /* best-effort */
+    }
+
+    this.lock = await acquireWorkerLock(ownerUid);
+    if (!this.lock) {
+      throw new Error("CTRADER_QUOTE_WORKER_LOCK_HELD");
+    }
+    this.status.lockHeld = true;
+    this.status.lastHeartbeatAt = new Date().toISOString();
+    this.lockRenewTimer = setInterval(() => {
+      void this.lock?.renew().then((ok) => {
+        if (ok) this.status.lastHeartbeatAt = new Date().toISOString();
+        else {
+          this.status.lockHeld = false;
+          this.status.lastError = "CTRADER_QUOTE_WORKER_LOCK_LOST";
+        }
+      });
+    }, LOCK_RENEW_MS);
+
     await this.loop(ownerUid);
   }
 
@@ -113,7 +150,16 @@ export class PersistentXauUsdQuoteWorker {
     this.stopping = true;
     this.status.running = false;
     this.status.connected = false;
+    if (this.lockRenewTimer) {
+      clearInterval(this.lockRenewTimer);
+      this.lockRenewTimer = null;
+    }
     await this.closeConnection();
+    if (this.lock) {
+      await this.lock.release().catch(() => undefined);
+      this.lock = null;
+      this.status.lockHeld = false;
+    }
   }
 
   private async closeConnection(): Promise<void> {
@@ -153,6 +199,10 @@ export class PersistentXauUsdQuoteWorker {
     const stored = await getConnection(ownerUid);
     if (!stored?.selectedAccountId || !stored.symbolId) {
       throw new Error("CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED");
+    }
+    assertAccountAllowlisted(String(stored.selectedAccountId));
+    if (requireLiveAllowlist() && !stored.selectedAccountIsLive) {
+      throw new Error("CTRADER_QUOTE_LIVE_ACCOUNT_REQUIRED");
     }
     const { accessToken, connection: fresh } = await ensureFreshAccessToken(stored);
     const { clientId, clientSecret } = clientCreds();
@@ -349,7 +399,30 @@ export function startWorkerHealthServer(
       res.end(
         JSON.stringify({
           ok,
-          ...status,
+          running: status.running,
+          connected: status.connected,
+          lockHeld: status.lockHeld,
+          environment: status.environment,
+          symbolId: status.symbolId,
+          symbolName: status.symbolName,
+          reconnectAttempts: status.reconnectAttempts,
+          startedAt: status.startedAt,
+          lastHeartbeatAt: status.lastHeartbeatAt,
+          lastError: status.lastError,
+          websocketPersistent: status.websocketPersistent,
+          lastQuote: status.lastQuote
+            ? {
+                bid: status.lastQuote.bid,
+                ask: status.lastQuote.ask,
+                mid: status.lastQuote.mid,
+                freshness: status.lastQuote.freshness,
+                quoteSequence: status.lastQuote.quoteSequence,
+                brokerTimestamp: status.lastQuote.brokerTimestamp,
+                receivedAt: status.lastQuote.receivedAt,
+                marketStatus: status.lastQuote.marketStatus,
+                environment: status.lastQuote.environment
+              }
+            : null,
           // Never expose tokens.
           secretsPresent: Boolean(
             (process.env.CTRADER_CLIENT_ID ?? "").trim() &&

@@ -9,6 +9,7 @@ describe("persistent quote worker contract", () => {
     expect(status.websocketPersistent).toBe(true);
     expect(status.connected).toBe(false);
     expect(status.running).toBe(false);
+    expect(status.lockHeld).toBe(false);
     expect(status.lastQuote).toBeNull();
   });
 

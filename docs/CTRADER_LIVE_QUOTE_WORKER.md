@@ -30,6 +30,17 @@ Optional:
 
 - `CTRADER_QUOTE_PERSIST_MIN_MS` (default 250) — throttle Firestore writes
 - `CTRADER_QUOTE_PREFER_STORE=true` on API — serve store only (no per-request WS)
+- `CTRADER_QUOTE_ACCOUNT_ALLOWLIST` — comma-separated ctidTraderAccountId values; worker refuses any other selected account
+- `CTRADER_QUOTE_REQUIRE_LIVE=true` — worker refuses DEMO selection (PR #73 LIVE verification)
+
+Deploy:
+
+```bash
+# After LIVE account is selected in Brokers (or via selectPepperstoneLiveAccount.ts)
+bash backend/scripts/deployQuoteWorker.sh
+```
+
+Cloud Run target: `goldmeta-quote-worker` in `us-central1`, min=1 max=1, secrets from Secret Manager.
 
 ## Official authorisation
 
