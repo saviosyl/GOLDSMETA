@@ -262,7 +262,7 @@ export function deriveDecisionDashboardState(args: {
     freshnessLines
   };
 
-  // At 65%+ with a direction: prefer BUY/SELL on the hero — never "BLOCKED".
+  // At 65%+ with a direction: prefer BUY/SELL on the hero — never the old "Blocked" status.
   if (showDirection && direction) {
     const ready =
       auth.supportsPlan && hasUsefulLevels(levels) && !fatalGeometry && !dataConflict;
