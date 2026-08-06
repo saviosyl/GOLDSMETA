@@ -72,8 +72,10 @@ describe("DecisionDashboard", () => {
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} marketStructureMode="LIVE_RANGE_ONLY" />));
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("WAIT");
-    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent("No valid trade plan yet");
+    expect(screen.getByTestId("decision-plan-state")).toHaveTextContent("No valid plan yet");
     expect(screen.getByTestId("wait-monitoring-copy")).toHaveTextContent(/monitoring XAUUSD/i);
+    expect(screen.getByTestId("no-valid-nearest-sr")).toBeInTheDocument();
+    expect(screen.getByTestId("why-waiting")).toBeInTheDocument();
     expect(screen.queryByTestId("plan-level-entry")).not.toBeInTheDocument();
   });
 

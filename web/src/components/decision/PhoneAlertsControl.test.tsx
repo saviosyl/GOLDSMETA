@@ -40,30 +40,32 @@ describe("PhoneAlertsControl", () => {
     render(<PhoneAlertsControl />);
 
     expect(pushMocks.subscribeWebPush).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: /Enable phone alerts/i }));
+    await user.click(screen.getByTestId("enable-phone-alerts"));
     expect(pushMocks.subscribeWebPush).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/Phone alerts active/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("phone-alerts-label")).toHaveTextContent(/Phone alerts active/i);
   });
 
   it("shows blocked when browser permission is denied", () => {
     pushMocks.getNotificationPermission.mockReturnValue("denied");
     render(<PhoneAlertsControl />);
-    expect(screen.getByText(/Notifications blocked/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Enable phone alerts/i })).toBeDisabled();
+    expect(screen.getByTestId("phone-alerts-label")).toHaveTextContent(/Notifications blocked/i);
+    expect(screen.queryByTestId("enable-phone-alerts")).not.toBeInTheDocument();
   });
 
   it("shows unsupported browser state", () => {
     pushMocks.isWebPushSupported.mockReturnValue(false);
-    render(<PhoneAlertsControl />);
-    expect(screen.getByText(/Unsupported on this browser/i)).toBeInTheDocument();
+    render(<PhoneAlertsControl compact={false} />);
+    expect(screen.getByTestId("phone-alerts-label")).toHaveTextContent(/Unsupported on this browser/i);
     expect(screen.getByText(/In-app notifications still work/i)).toBeInTheDocument();
   });
 
-  it("shows iPhone install instructions before enabling", () => {
+  it("shows iPhone install instructions before enabling", async () => {
+    const user = userEvent.setup();
     setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)");
     pushMocks.isProbablyInstalledPwa.mockReturnValue(false);
     render(<PhoneAlertsControl />);
-    expect(screen.getByText(/Add GoldMeta to Home Screen/i)).toBeInTheDocument();
+    expect(screen.getByTestId("phone-alerts-label")).toHaveTextContent(/Add to Home Screen for iPhone alerts/i);
+    await user.click(screen.getByText(/iPhone setup/i));
     expect(screen.getByTestId("iphone-alert-steps")).toHaveTextContent(/Tap Allow/i);
   });
 });

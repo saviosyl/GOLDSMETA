@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { MarketFeedHealth } from "../../types/models";
 import { MarketFeedStatus } from "./MarketFeedStatus";
 
-function health(status: MarketFeedHealth["status"], quoteStatus: MarketFeedHealth["quoteStatus"]): MarketFeedHealth {
+function health(
+  status: MarketFeedHealth["status"],
+  quoteStatus: MarketFeedHealth["quoteStatus"]
+): MarketFeedHealth {
   return {
     status,
     title: "ignored-api-title",
@@ -15,27 +19,26 @@ function health(status: MarketFeedHealth["status"], quoteStatus: MarketFeedHealt
 }
 
 describe("MarketFeedStatus", () => {
-  it("shows green feed with live quote text", () => {
+  it("shows compact green feed status", async () => {
+    const user = userEvent.setup();
     render(<MarketFeedStatus health={health("green", "live")} />);
     expect(screen.getByTestId("market-feed-status")).toHaveAttribute("data-status", "green");
-    expect(screen.getByText(/GoldMeta Market Feed/i)).toBeInTheDocument();
-    expect(screen.getByText(/All systems operational/i)).toBeInTheDocument();
-    expect(screen.getByText(/Live price updates active/i)).toBeInTheDocument();
+    expect(screen.getByText(/Market feed: Operational/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live quotes/i)).toBeInTheDocument();
+    await user.click(screen.getByText(/Details/i));
     expect(screen.getByTestId("market-feed-last-verified")).toHaveTextContent(/Last verified:/i);
-    expect(screen.getByTestId("market-feed-last-verified")).toHaveTextContent(/seconds ago|minutes ago/i);
   });
 
-  it("shows amber feed with partial availability text", () => {
+  it("shows amber feed as Limited", () => {
     render(<MarketFeedStatus health={health("amber", "limited")} />);
     expect(screen.getByTestId("market-feed-status")).toHaveAttribute("data-status", "amber");
-    expect(screen.getByText(/Market feed partially available/i)).toBeInTheDocument();
-    expect(screen.getByText(/Live quote updates limited/i)).toBeInTheDocument();
+    expect(screen.getByText(/Market feed: Limited/i)).toBeInTheDocument();
+    expect(screen.getByText(/Quotes limited/i)).toBeInTheDocument();
   });
 
-  it("shows red feed with unavailable text", () => {
+  it("shows red feed as Unavailable", () => {
     render(<MarketFeedStatus health={health("red", "unknown")} />);
     expect(screen.getByTestId("market-feed-status")).toHaveAttribute("data-status", "red");
-    expect(screen.getByText(/Market feed unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/Quote status unknown/i)).toBeInTheDocument();
+    expect(screen.getByText(/Market feed: Unavailable/i)).toBeInTheDocument();
   });
 });

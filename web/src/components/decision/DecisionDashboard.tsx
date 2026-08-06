@@ -19,7 +19,7 @@ function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboard
   return (
     <div className="gm-decision-level-grid" data-testid="plan-levels-strip">
       <div data-testid="plan-level-entry">
-        <span className="gm-label">Entry zone</span>
+        <span className="gm-label">Entry</span>
         <strong>{state.levels.entry ?? "--"}</strong>
       </div>
       <div data-testid="plan-level-stop">
@@ -32,11 +32,11 @@ function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboard
       </div>
       <div data-testid="plan-level-tp2">
         <span className="gm-label">TP2</span>
-        <strong>{state.levels.tp2 != null ? fmtPrice(state.levels.tp2) : "Optional"}</strong>
+        <strong>{state.levels.tp2 != null ? fmtPrice(state.levels.tp2) : "—"}</strong>
       </div>
       {state.levels.rr && (
         <div className="gm-decision-level-wide" data-testid="plan-level-rr">
-          <span className="gm-label">Risk : Reward</span>
+          <span className="gm-label">R:R</span>
           <strong>{state.levels.rr}</strong>
         </div>
       )}
@@ -44,44 +44,61 @@ function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboard
   );
 }
 
-function WaitingContext({ plan, state }: { plan: IntradayPlan; state: ReturnType<typeof deriveDecisionDashboardState> }) {
+function SupportResistance({
+  state,
+  testId
+}: {
+  state: ReturnType<typeof deriveDecisionDashboardState>;
+  testId: string;
+}) {
   return (
-    <div className="gm-wait-context">
+    <div className="gm-nearest-sr gm-sr-compact" data-testid={testId}>
+      <div>
+        <span className="gm-label">Support</span>
+        <strong data-testid="nearest-support">{fmtPrice(state.nearestSupport)}</strong>
+      </div>
+      <div>
+        <span className="gm-label">Resistance</span>
+        <strong data-testid="nearest-resistance">{fmtPrice(state.nearestResistance)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function WhyWaiting({
+  plan,
+  state
+}: {
+  plan: IntradayPlan;
+  state: ReturnType<typeof deriveDecisionDashboardState>;
+}) {
+  return (
+    <details className="gm-wait-reason" data-testid="why-waiting">
+      <summary>Why waiting?</summary>
       <p data-testid="wait-monitoring-copy">
         GoldMeta is monitoring XAUUSD. You can be notified when a valid opportunity becomes ready.
       </p>
-      <NextPlanUpdate plan={plan} />
+      <p>{state.reason || "No valid trade plan yet."}</p>
       <p className="gm-meta" data-testid="analysis-timing-disclaimer">
-        This is the next analysis review, not a guaranteed signal time.
+        Next check is the next analysis review, not a guaranteed signal time.
       </p>
-      <div className="gm-nearest-sr" data-testid="no-valid-nearest-sr">
-        <div>
-          <span className="gm-label">Nearest support</span>
-          <strong data-testid="nearest-support">{fmtPrice(state.nearestSupport)}</strong>
-        </div>
-        <div>
-          <span className="gm-label">Nearest resistance</span>
-          <strong data-testid="nearest-resistance">{fmtPrice(state.nearestResistance)}</strong>
-        </div>
-      </div>
       <p className="gm-meta" data-testid="no-valid-bias-note">
-        Market bias and support/resistance are context only - not an entry signal.
+        Market bias and support/resistance are context only — not an entry signal.
       </p>
-      <details className="gm-wait-reason" data-testid="why-waiting">
-        <summary>Why am I waiting?</summary>
-        <p>{state.reason || "No valid trade plan yet."}</p>
-        {state.technicalDetails.length > 0 && (
-          <details>
-            <summary>Technical details</summary>
-            <ul>
-              {state.technicalDetails.map((detail, idx) => (
-                <li key={`${detail}-${idx}`}>{detail}</li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </details>
-    </div>
+      {state.technicalDetails.length > 0 && (
+        <details>
+          <summary>Technical details</summary>
+          <ul>
+            {state.technicalDetails.map((detail, idx) => (
+              <li key={`${detail}-${idx}`}>{detail}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {sanitizePlanText(plan.disclaimer) && (
+        <p className="gm-meta">{sanitizePlanText(plan.disclaimer)}</p>
+      )}
+    </details>
   );
 }
 
@@ -90,81 +107,79 @@ export function DecisionDashboard({ plan, marketFeedHealth, marketStructureMode,
   const isWaiting = state.mode === "WAIT";
   const isReady = state.mode === "BUY_READY" || state.mode === "SELL_READY";
   const isPotential = state.mode === "POTENTIAL_BUY" || state.mode === "POTENTIAL_SELL";
+  const isNoTrade = state.mode === "NO_TRADE";
 
   return (
     <section
-      className={`gm-decision-dashboard tone-${state.tone}`}
+      className={`gm-decision-dashboard gm-decision-compact tone-${state.tone}`}
       data-testid="todays-intraday-plan"
       data-state={state.mode}
       aria-label={`Today's XAUUSD decision: ${state.headline}`}
     >
-      <MarketFeedStatus health={marketFeedHealth} />
+      <MarketFeedStatus health={marketFeedHealth} compact />
 
       <div className="gm-decision-hero" data-testid="intraday-action-card" data-tone={state.tone}>
-        <p className="gm-label">XAUUSD decision</p>
         <h1 data-testid="intraday-action-label">
           <span data-testid="intraday-action-short">{state.headline}</span>
         </h1>
         <p className="gm-decision-state" data-testid="decision-plan-state">
-          {state.planState}
+          {isWaiting ? "No valid plan yet" : state.planState}
         </p>
       </div>
 
-      {isWaiting ? (
-        <WaitingContext plan={plan} state={state} />
-      ) : (
-        <>
-          <LevelGrid state={state} />
-          <div className="gm-decision-facts">
-            <div data-testid="decision-confirmation">
-              <span className="gm-label">5M confirmation</span>
-              <strong>{state.confirmationPassed ? "Passed" : state.confirmationLabel}</strong>
-              <p>{state.confirmationDetail}</p>
-            </div>
-            {state.priceVsEntryZone && (
-              <div data-testid="decision-price-vs-entry">
-                <span className="gm-label">Price vs entry</span>
-                <strong>{state.priceVsEntryZone}</strong>
-              </div>
-            )}
-            {isReady && state.confidenceLabel && (
-              <div data-testid="decision-confidence">
-                <span className="gm-label">Confidence</span>
-                <strong>{state.confidenceLabel}</strong>
-              </div>
-            )}
-            {state.lifecycleLabel && (
-              <div data-testid="decision-lifecycle">
-                <span className="gm-label">Lifecycle</span>
-                <strong>{state.lifecycleLabel}</strong>
-              </div>
-            )}
+      {!isWaiting && !isNoTrade && <LevelGrid state={state} />}
+
+      {!isWaiting && (
+        <div className="gm-decision-facts gm-decision-facts-compact">
+          <div data-testid="decision-confirmation">
+            <span className="gm-label">5M confirm</span>
+            <strong>{state.confirmationPassed ? "Passed" : state.confirmationLabel}</strong>
           </div>
-          {isPotential && (
-            <p className="gm-meta" data-testid="potential-not-ready">
-              This plan is not ready yet. Wait for 5M confirmation before considering any manual
-              entry.
-            </p>
+          {state.priceVsEntryZone && (
+            <div data-testid="decision-price-vs-entry">
+              <span className="gm-label">vs entry</span>
+              <strong>{state.priceVsEntryZone}</strong>
+            </div>
           )}
-        </>
+          {isReady && state.confidenceLabel && (
+            <div data-testid="decision-confidence">
+              <span className="gm-label">Confidence</span>
+              <strong>{state.confidenceLabel}</strong>
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="gm-next-action" data-testid="decision-next-action">
-        <span className="gm-label">Next useful action</span>
+      {isPotential && (
+        <p className="gm-meta gm-potential-note" data-testid="potential-not-ready">
+          Not ready — wait for 5M confirmation.
+        </p>
+      )}
+
+      <div className="gm-decision-next-row">
+        <NextPlanUpdate plan={plan} />
+      </div>
+
+      <SupportResistance
+        state={state}
+        testId={isWaiting ? "no-valid-nearest-sr" : "wait-nearest-sr"}
+      />
+
+      <div className="gm-next-action gm-next-action-compact" data-testid="decision-next-action">
+        <span className="gm-label">Next</span>
         <strong>{state.nextAction}</strong>
       </div>
 
-      <PhoneAlertsControl />
+      <PhoneAlertsControl compact />
+
+      {(isWaiting || isNoTrade) && <WhyWaiting plan={plan} state={state} />}
 
       <p className="gm-decision-safety" data-testid="dashboard-safety">
-        Manual plan only {"\u00b7"} Review your own risk before entering {"\u00b7"} Analysis only
+        Manual only · Review your risk · AutoTrade OFF
       </p>
-      <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
+      <span className="gm-sr-only" data-testid="dashboard-autotrade-off">
         AutoTrade OFF
       </span>
-      {sanitizePlanText(plan.disclaimer) && (
-        <p className="gm-sr-only">{sanitizePlanText(plan.disclaimer)}</p>
-      )}
     </section>
   );
 }
@@ -172,13 +187,13 @@ export function DecisionDashboard({ plan, marketFeedHealth, marketStructureMode,
 export function DecisionDashboardSkeleton() {
   return (
     <div
-      className="gm-decision-dashboard gm-decision-dashboard-skeleton"
+      className="gm-decision-dashboard gm-decision-dashboard-skeleton gm-decision-compact"
       data-testid="decision-dashboard-skeleton"
       aria-busy="true"
       aria-live="polite"
     >
+      <div className="gm-skel-block gm-skel-line" />
       <div className="gm-skel-block gm-skel-bar" />
-      <div className="gm-skel-block gm-skel-card" />
       <div className="gm-skel-block gm-skel-card" />
     </div>
   );

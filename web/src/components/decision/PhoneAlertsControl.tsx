@@ -38,7 +38,7 @@ function statusCopy(args: {
   }
   if (isIosDevice() && !args.installed) {
     return {
-      label: "Add GoldMeta to Home Screen to enable iPhone notifications",
+      label: "Add to Home Screen for iPhone alerts",
       detail: "iPhone Web Push works from the installed Home Screen app.",
       canEnable: false,
       tone: "amber",
@@ -56,14 +56,14 @@ function statusCopy(args: {
   }
   return {
     label: "Permission required",
-    detail: "Tap Enable phone alerts to request notification permission on this device.",
+    detail: "Tap Enable alerts to request notification permission.",
     canEnable: true,
     tone: "amber",
     showIosSteps: false
   };
 }
 
-export function PhoneAlertsControl() {
+export function PhoneAlertsControl({ compact = true }: { compact?: boolean }) {
   const { api } = useAuth();
   const [permission, setPermission] = useState(getNotificationPermission());
   const [result, setResult] = useState<PushResult>(null);
@@ -96,39 +96,45 @@ export function PhoneAlertsControl() {
 
   return (
     <section
-      className={`gm-phone-alerts tone-${copy.tone}`}
+      className={`gm-phone-alerts tone-${copy.tone}${compact ? " gm-phone-alerts-compact" : ""}`}
       id="phone-alerts"
       data-testid="phone-alerts-control"
       tabIndex={-1}
       aria-label="Phone alerts"
     >
-      <div>
-        <h2>{copy.label}</h2>
-        <p>{copy.detail}</p>
+      <div className="gm-phone-alerts-copy">
+        <h2 data-testid="phone-alerts-label">{copy.label}</h2>
+        {(!compact || copy.showIosSteps) && <p>{copy.detail}</p>}
       </div>
       {copy.showIosSteps && (
-        <ol className="gm-phone-alert-steps" data-testid="iphone-alert-steps">
-          <li>Open GoldMeta in Safari</li>
-          <li>Tap Share</li>
-          <li>Add to Home Screen</li>
-          <li>Open GoldMeta from the new Home Screen icon</li>
-          <li>Tap Enable phone alerts</li>
-          <li>Tap Allow</li>
-        </ol>
+        <details className="gm-phone-alert-help">
+          <summary>iPhone setup</summary>
+          <ol className="gm-phone-alert-steps" data-testid="iphone-alert-steps">
+            <li>Open GoldMeta in Safari</li>
+            <li>Tap Share</li>
+            <li>Add to Home Screen</li>
+            <li>Open GoldMeta from the new Home Screen icon</li>
+            <li>Tap Enable alerts</li>
+            <li>Tap Allow</li>
+          </ol>
+        </details>
       )}
       {error && (
         <p className="gm-meta" role="status" data-testid="phone-alerts-message">
           {error}
         </p>
       )}
-      <button
-        type="button"
-        className="gm-btn-primary gm-phone-alert-button"
-        onClick={() => void enable()}
-        disabled={!copy.canEnable || busy}
-      >
-        {busy ? "Enabling..." : "Enable phone alerts"}
-      </button>
+      {copy.canEnable ? (
+        <button
+          type="button"
+          className="gm-btn-primary gm-phone-alert-button"
+          onClick={() => void enable()}
+          disabled={busy}
+          data-testid="enable-phone-alerts"
+        >
+          {busy ? "Enabling…" : "Enable alerts"}
+        </button>
+      ) : null}
     </section>
   );
 }

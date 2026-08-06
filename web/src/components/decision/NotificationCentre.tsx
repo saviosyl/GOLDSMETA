@@ -40,7 +40,8 @@ export function NotificationCentre() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const unread = useMemo(() => items.filter((item) => !item.read && !item.readAt).length, [items]);
 
@@ -71,22 +72,25 @@ export function NotificationCentre() {
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.classList.add("gm-drawer-open");
+    closeRef.current?.focus();
+
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.body.style.overflow = prevOverflow;
+      document.body.classList.remove("gm-drawer-open");
       window.removeEventListener("keydown", onKey);
     };
   }, [open]);
 
   const togglePref = async (key: NotificationEventGroup, checked: boolean) => {
     if (!api || typeof api.updateNotificationPreferences !== "function") return;
+    const previous = prefs;
     const next = { ...prefs, [key]: checked };
     setPrefs(next);
     setBusy(true);
@@ -95,7 +99,7 @@ export function NotificationCentre() {
       setMessage("Notification preferences updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Preference update failed.");
-      setPrefs(prefs);
+      setPrefs(previous);
     } finally {
       setBusy(false);
     }
@@ -106,7 +110,9 @@ export function NotificationCentre() {
     setBusy(true);
     try {
       await api.markNotificationsRead(items.map((item) => item.id));
-      setItems((prev) => prev.map((item) => ({ ...item, read: true, readAt: item.readAt ?? new Date().toISOString() })));
+      setItems((prev) =>
+        prev.map((item) => ({ ...item, read: true, readAt: item.readAt ?? new Date().toISOString() }))
+      );
     } finally {
       setBusy(false);
     }
@@ -129,12 +135,13 @@ export function NotificationCentre() {
   };
 
   return (
-    <div className="gm-notification-centre" data-testid="notification-centre" ref={ref}>
+    <div className="gm-notification-centre" data-testid="notification-centre">
       <button
         type="button"
         className="gm-notification-bell"
         aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
         aria-expanded={open}
+        aria-controls="gm-notification-drawer"
         onClick={() => setOpen((v) => !v)}
       >
         <span aria-hidden="true">Bell</span>
@@ -142,64 +149,121 @@ export function NotificationCentre() {
       </button>
 
       {open && (
-        <div className="gm-notification-popover" role="dialog" aria-label="Notifications">
-          <div className="gm-section-head">
-            <h2>Notifications</h2>
-            <button type="button" className="gm-linkish" onClick={() => void markAllRead()} disabled={busy || unread === 0}>
-              Mark read
-            </button>
-          </div>
-          {message && <p className="gm-meta" role="status">{message}</p>}
-          {error && <p className="gm-meta error" role="alert">{error}</p>}
+        <>
+          <button
+            type="button"
+            className="gm-notification-backdrop"
+            aria-label="Close notifications"
+            data-testid="notification-backdrop"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            id="gm-notification-drawer"
+            className="gm-notification-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notifications"
+            data-testid="notification-drawer"
+            ref={panelRef}
+          >
+            <div className="gm-notification-drawer-head">
+              <div>
+                <h2>Notifications</h2>
+                {unread > 0 && <p className="gm-meta">{unread} unread</p>}
+              </div>
+              <div className="gm-notification-drawer-actions">
+                <button
+                  type="button"
+                  className="gm-linkish"
+                  onClick={() => void markAllRead()}
+                  disabled={busy || unread === 0}
+                >
+                  Mark read
+                </button>
+                <button
+                  ref={closeRef}
+                  type="button"
+                  className="gm-drawer-close-btn"
+                  data-testid="notification-close"
+                  aria-label="Close notifications"
+                  onClick={() => setOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
 
-          <ul className="gm-notification-list" aria-label="Recent notifications">
-            {items.length === 0 ? (
-              <li className="gm-meta">No notifications yet.</li>
-            ) : (
-              items.map((item) => {
-                const planId = item.planId ?? item.decisionId ?? item.setupId ?? null;
-                const unreadItem = !item.read && !item.readAt;
-                return (
-                  <li key={item.id} className={unreadItem ? "is-unread" : undefined}>
-                    <div>
-                      <strong>
-                        {String(item.event).replace(/_/g, " ")}
-                        {item.direction ? ` - ${item.direction}` : ""}
-                      </strong>
-                      <span>{shortTime(item.createdAt)}</span>
-                    </div>
-                    <p>{notificationMessage(item)}</p>
-                    <p className="gm-meta">
-                      Plan ID: {planId ?? "--"} {unreadItem ? "Unread" : "Read"}
-                    </p>
-                    {planId && (
-                      <Link className="gm-linkish" to={`/history/${encodeURIComponent(planId)}`} onClick={() => setOpen(false)}>
-                        Open plan
-                      </Link>
-                    )}
-                  </li>
-                );
-              })
-            )}
-          </ul>
+            <div className="gm-notification-drawer-body">
+              {message && (
+                <p className="gm-meta" role="status">
+                  {message}
+                </p>
+              )}
+              {error && (
+                <p className="gm-meta error" role="alert">
+                  {error}
+                </p>
+              )}
 
-          <h3>Phone alert preferences</h3>
-          <div className="gm-notification-prefs">
-            {EVENT_GROUPS.map((group) => (
-              <label key={group.key} className="gm-check-row">
-                <input
-                  type="checkbox"
-                  checked={Boolean(prefs[group.key])}
-                  onChange={(event) => void togglePref(group.key, event.target.checked)}
-                />
-                {group.label}
-              </label>
-            ))}
+              <ul className="gm-notification-list" aria-label="Recent notifications">
+                {items.length === 0 ? (
+                  <li className="gm-meta">No notifications yet.</li>
+                ) : (
+                  items.map((item) => {
+                    const planId = item.planId ?? item.decisionId ?? item.setupId ?? null;
+                    const unreadItem = !item.read && !item.readAt;
+                    return (
+                      <li key={item.id} className={unreadItem ? "is-unread" : undefined}>
+                        <div className="gm-notification-item-top">
+                          <strong className="gm-notification-event">
+                            {String(item.event).replace(/_/g, " ")}
+                            {item.direction ? ` · ${item.direction}` : ""}
+                          </strong>
+                          <span className="gm-notification-time">{shortTime(item.createdAt)}</span>
+                        </div>
+                        <p className="gm-notification-message">{notificationMessage(item)}</p>
+                        <p className="gm-meta gm-notification-meta">
+                          {planId ? `Plan ${planId}` : "No plan id"} · {unreadItem ? "Unread" : "Read"}
+                        </p>
+                        {planId && (
+                          <Link
+                            className="gm-linkish"
+                            to={`/?planId=${encodeURIComponent(planId)}`}
+                            onClick={() => setOpen(false)}
+                          >
+                            Open plan
+                          </Link>
+                        )}
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+
+              <h3>Alert preferences</h3>
+              <div className="gm-notification-prefs">
+                {EVENT_GROUPS.map((group) => (
+                  <label key={group.key} className="gm-check-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(prefs[group.key])}
+                      onChange={(event) => void togglePref(group.key, event.target.checked)}
+                    />
+                    <span>{group.label}</span>
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="gm-btn-outline gm-notification-test-btn"
+                onClick={() => void sendTest()}
+                disabled={busy}
+              >
+                Send test notification
+              </button>
+            </div>
           </div>
-          <button type="button" className="gm-btn-outline" onClick={() => void sendTest()} disabled={busy}>
-            Send test notification
-          </button>
-        </div>
+        </>
       )}
     </div>
   );
