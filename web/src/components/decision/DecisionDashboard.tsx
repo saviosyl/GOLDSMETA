@@ -111,13 +111,25 @@ export function DecisionDashboard({
   const chip = premiumDecisionChip(state, plan);
   const subtitle = premiumDecisionSubtitle(state, livePrice, plan);
   const statusLabel = premiumStatusLabel(state, plan);
-  const isWaiting = state.mode === "WAIT";
-  const isReady = state.mode === "BUY_READY" || state.mode === "SELL_READY";
+  const isWaiting = state.mode === "WAIT" || state.mode === "WATCHING";
   const isPotential = state.mode === "POTENTIAL_BUY" || state.mode === "POTENTIAL_SELL";
-  const isNoTrade = state.mode === "NO_TRADE";
-  const showWhy = isWaiting || (isNoTrade && chip !== "PREPARE") || chip === "PREPARE";
+  const isNoTrade = state.mode === "NO_TRADE" || state.mode === "BLOCKED";
+  const showWhy =
+    isWaiting ||
+    state.mode === "WATCHING" ||
+    state.mode === "BLOCKED" ||
+    (isNoTrade && !String(chip).startsWith("PREPARE")) ||
+    String(chip).startsWith("PREPARE");
   const heroTone =
-    chip === "PREPARE" ? "prepare" : chip === "BUY" ? "buy" : chip === "SELL" ? "sell" : state.tone;
+    chip === "PREPARE" || chip === "PREPARE BUY" || chip === "PREPARE SELL" || chip === "WATCHING"
+      ? "prepare"
+      : chip === "BUY"
+        ? "buy"
+        : chip === "SELL"
+          ? "sell"
+          : chip === "BLOCKED"
+            ? "notrade"
+            : state.tone;
   const feedFresh = marketFeedHealth?.status === "green";
 
   return (
@@ -142,7 +154,7 @@ export function DecisionDashboard({
           <span data-testid="intraday-action-short">{chip}</span>
         </h1>
         <p className="gm-hero-instruction" data-testid="decision-plan-state">
-          {isWaiting ? "No valid plan yet" : subtitle}
+          {subtitle}
         </p>
 
         <div className="gm-hero-metrics">
@@ -214,9 +226,9 @@ export function DecisionDashboard({
               <strong>{state.priceVsEntryZone}</strong>
             </div>
           )}
-          {isReady && state.confidenceLabel && (
+          {state.confidenceLabel && (
             <div data-testid="decision-confidence">
-              <span className="gm-label">Confidence</span>
+              <span className="gm-label">Setup quality</span>
               <strong>{state.confidenceLabel}</strong>
             </div>
           )}
@@ -225,7 +237,7 @@ export function DecisionDashboard({
 
       {isPotential && (
         <p className="gm-meta gm-potential-note" data-testid="potential-not-ready">
-          Not ready — wait for 5M confirmation.
+          {state.nextRequiredCondition || "Not ready — wait for 5M confirmation."}
         </p>
       )}
 

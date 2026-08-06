@@ -120,14 +120,21 @@ export const evaluateHardGuards = (
     reasonCodes.push("INVALID_DATA");
   }
   if (dataQuality.quality === "CONFLICTED") {
-    reasonCodes.push("CONFLICTED_DATA");
-    if (dataQuality.warnings.some((w) => /PRICE_SOURCE_MISMATCH/i.test(w))) {
+    // Only hard-conflict when price-source / fixture leak is present.
+    if (dataQuality.warnings.some((w) => /PRICE_SOURCE_MISMATCH|TEST_FIXTURE_LEAK/i.test(w))) {
+      reasonCodes.push("HARD_CONFLICT");
       reasonCodes.push("PRICE_SOURCE_MISMATCH");
+    } else {
+      warnings.push("SOFT_DISAGREEMENT");
     }
+  }
+  if (dataQuality.warnings.some((w) => /SOFT_DISAGREEMENT/i.test(w))) {
+    warnings.push("SOFT_DISAGREEMENT");
   }
   if (dataQuality.quality === "PARTIAL") {
     // Soft: partial optional inputs (profile/TPO) must not alone erase a valid plan.
     warnings.push("INCOMPLETE_DATA");
+    warnings.push("MISSING_OPTIONAL_DATA");
   }
 
   if (dataQuality.missingInputs.includes("volumeProfile")) {

@@ -1,3 +1,4 @@
+import { decisionConfig } from "../../config/decisionConfig";
 import type { AlertRole } from "../../models/types";
 import type {
   GoldMetaStore,
@@ -6,9 +7,9 @@ import type {
 } from "../storage/types";
 import { loadSharedFeedState, resolveSharedFeedUserId } from "./sharedFeed";
 
-export const PLAN_15M_STALE_MS = 20 * 60 * 1000;
-export const CONFIRM_5M_STALE_MS = 12 * 60 * 1000;
-export const QUOTE_1M_STALE_MS = 3 * 60 * 1000;
+export const PLAN_15M_STALE_MS = decisionConfig.freshness.plan15mStaleMs;
+export const CONFIRM_5M_STALE_MS = decisionConfig.freshness.confirm5mStaleMs;
+export const QUOTE_1M_STALE_MS = decisionConfig.freshness.quoteStaleMs;
 export const LEGACY_MONITORING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type MarketFeedStatus = "green" | "amber" | "red";
@@ -185,7 +186,8 @@ const publicCopy = (
     return {
       status,
       title: "Market feed partially available",
-      subtitle: "The 15-minute plan feed is live; 5-minute confirmation is missing or stale.",
+      subtitle:
+        "15M plan active · 5M confirmation missing, stale, or from a different plan window.",
       quoteStatus,
       lastVerifiedAt,
       lastVerifiedLabel

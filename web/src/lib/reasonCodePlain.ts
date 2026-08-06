@@ -9,7 +9,7 @@ const MAP: Record<string, string> = {
   TP1_WRONG_SIDE: "TP1 is on the wrong side of entry.",
   TP1_EQUALS_ENTRY: "TP1 is too close to entry.",
   ZERO_RISK: "Risk distance is zero or invalid.",
-  INVALID_TARGET_ORDER: "Targets are not in a valid order.",
+  INVALID_TARGET_ORDER: "Targets are not in a valid order for this direction.",
   MISSING_REQUIRED_LEVEL: "Complete trade levels are not available yet.",
   PRICE_ALREADY_AT_TARGET: "Price has already reached TP1.",
   INVALIDATION_STOP_MISMATCH: "Displayed invalidation does not match the stop.",
@@ -31,7 +31,19 @@ const MAP: Record<string, string> = {
   MISSING_TP1: "TP1 is missing.",
   MISSING_4H_CONTEXT: "4H context is not available yet.",
   AWAITING_5M_CONFIRMATION: "Waiting for 5-minute confirmation.",
-  WEAK_OR_NEUTRAL_TREND: "Trend is weak or neutral."
+  WEAK_OR_NEUTRAL_TREND: "Trend is weak or neutral.",
+  CONFLICTED_DATA: "15M and 5M data did not belong to the same decision window.",
+  MISSING_CONFIRMATION: "The latest 5M candle has not confirmed the setup.",
+  WAIT_ONLY: "No trade was opened because the setup remained incomplete.",
+  STALE_DATA: "Some market data is stale — waiting for a fresh update.",
+  STALE: "Some market data is stale — waiting for a fresh update.",
+  HARD_CONFLICT: "A hard data or safety conflict is blocking this plan.",
+  SOFT_DISAGREEMENT: "Timeframes disagree softly — setup may still be forming.",
+  MISSING_REQUIRED_DATA: "Required plan fields are missing, so entry is blocked.",
+  MISSING_OPTIONAL_DATA: "Optional context is incomplete — continuing with a freshness caution.",
+  OUT_OF_ORDER_DATA: "15M and 5M data did not belong to the same decision window.",
+  CONFIRM_PLAN_SOURCE_KEY_MISMATCH: "15M and 5M data did not belong to the same decision window.",
+  STOP_TOO_TIGHT: "Stop is too tight for current volatility and spread."
 };
 
 export function plainReason(code: string | null | undefined): string {
