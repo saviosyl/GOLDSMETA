@@ -12,6 +12,22 @@ export type LiveShadowOutcome =
   | "SHADOW_SKIPPED"
   | "SHADOW_DUPLICATE";
 
+export type SignalFreshnessClass = "FRESH_SIGNAL" | "STALE_SIGNAL";
+
+/** Exact ProtoOANewOrderReq-shaped payload that WOULD be sent — never submitted. */
+export type CTraderWouldBeOrderPayload = {
+  ctidTraderAccountIdMasked: string;
+  symbolId: number;
+  orderType: 1; // MARKET
+  tradeSide: 1 | 2; // BUY=1 SELL=2
+  volume: number; // protocol cents
+  relativeStopLoss: number | null;
+  relativeTakeProfit: number | null;
+  clientOrderId: string;
+  label: string;
+  comment: string;
+};
+
 export type LiveShadowWouldSubmitOrder = {
   side: "BUY" | "SELL";
   symbolId: string;
@@ -21,6 +37,7 @@ export type LiveShadowWouldSubmitOrder = {
   entry: number;
   stopLoss: number | null;
   takeProfit: number | null;
+  takeProfits: Array<{ label: string; price: number }>;
   relativeStopLoss: number | null;
   relativeTakeProfit: number | null;
   accountMasked: string;
@@ -31,6 +48,26 @@ export type LiveShadowWouldSubmitOrder = {
   quoteFreshness: string | null;
   quoteSequence: number | null;
   brokerTimestamp: string | null;
+  plannedEntry: number | null;
+  slippage: number | null;
+  riskAmount: number | null;
+  riskPercent: number | null;
+  stopDistance: number | null;
+  rawLotSize: number | null;
+  roundedLotSize: number | null;
+  ctraderOrderPayload: CTraderWouldBeOrderPayload | null;
+};
+
+export type LiveShadowPlanSnapshot = {
+  plannedEntry: number | null;
+  stopLoss: number | null;
+  takeProfit1: number | null;
+  takeProfit2: number | null;
+  takeProfit3: number | null;
+  confidence: number | null;
+  confidenceLabel: string | null;
+  setupScore: number | null;
+  generatedAt: string | null;
 };
 
 export type LiveShadowExecutionRecord = {
@@ -43,16 +80,38 @@ export type LiveShadowExecutionRecord = {
   mode: "SHADOW";
   liveOrderEndpointCalled: false;
   isCTraderLiveEnabled: false;
+  isCTraderLiveExecutionOwnerApproved: false;
+  protoOANewOrderReqCallCount: 0;
   accountMasked: string | null;
   symbolId: string | null;
   symbolName: string | null;
   wouldSubmit: LiveShadowWouldSubmitOrder | null;
+  plan: LiveShadowPlanSnapshot | null;
+  signalFreshnessClass: SignalFreshnessClass | null;
+  decisionTimestamp: string | null;
+  quoteTimestamp: string | null;
+  executableEntry: number | null;
+  calculatedSlippage: number | null;
+  maxSlippageAllowed: number | null;
+  riskAmount: number | null;
+  riskPercent: number | null;
+  stopDistance: number | null;
+  rawLotSize: number | null;
+  roundedLotSize: number | null;
+  volumeUnits: number | null;
+  marginEligible: boolean | null;
+  duplicateCheck: "NEW" | "DUPLICATE" | "UNKNOWN";
+  reconcileOk: boolean | null;
+  marketOpen: boolean | null;
   passedGates: string[];
   failedGates: string[];
   rejectionReasons: string[];
   balance: number | null;
   equity: number | null;
   freeMargin: number | null;
+  usedMargin: number | null;
+  currency: string | null;
+  leverage: number | null;
   openPositionsCount: number | null;
   pendingOrdersCount: number | null;
   createdAt: string;
@@ -87,9 +146,10 @@ export async function persistLiveShadowExecution(
   return getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (snap.exists) {
+      const existing = snap.data() as LiveShadowExecutionRecord;
       return {
         created: false,
-        record: snap.data() as LiveShadowExecutionRecord
+        record: { ...existing, duplicateCheck: "DUPLICATE" }
       };
     }
     tx.set(ref, record);
@@ -113,10 +173,24 @@ export async function getLiveShadowExecution(
 
 export async function listRecentLiveShadowExecutions(
   ownerUid: string,
-  limit = 20
+  limit = 50
 ): Promise<LiveShadowExecutionRecord[]> {
   const snap = await getFirestore()
     .collection(`users/${ownerUid}/ctraderLiveShadowExecutions`)
+    .orderBy("createdAt", "desc")
+    .limit(limit)
+    .get();
+  return snap.docs.map((d) => d.data() as LiveShadowExecutionRecord);
+}
+
+export async function listLiveShadowSince(
+  ownerUid: string,
+  sinceIso: string,
+  limit = 100
+): Promise<LiveShadowExecutionRecord[]> {
+  const snap = await getFirestore()
+    .collection(`users/${ownerUid}/ctraderLiveShadowExecutions`)
+    .where("createdAt", ">=", sinceIso)
     .orderBy("createdAt", "desc")
     .limit(limit)
     .get();

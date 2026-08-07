@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import {
   isCTraderLiveEnabled,
   isCTraderLiveExecutionOwnerApproved,
@@ -6,60 +6,12 @@ import {
 } from "../../../../src/services/broker/ctrader/flags";
 import { buildIntentKey } from "../../../../src/services/broker/ctrader/preview";
 import { lotsToOrderVolumeUnits } from "../../../../src/services/broker/ctrader/volumeUnits";
-
-vi.mock("firebase-admin/firestore", () => {
-  const store = new Map<string, Record<string, unknown>>();
-  return {
-    getFirestore: () => ({
-      doc: (path: string) => ({
-        get: async () => ({
-          exists: store.has(path),
-          data: () => store.get(path)
-        }),
-        set: async (data: Record<string, unknown>) => {
-          store.set(path, { ...(store.get(path) ?? {}), ...data });
-        }
-      }),
-      collection: (path: string) => ({
-        doc: () => ({
-          set: async (data: Record<string, unknown>) => {
-            store.set(`${path}/${Math.random()}`, data);
-          }
-        }),
-        orderBy: () => ({
-          limit: () => ({
-            get: async () => ({ docs: [] })
-          })
-        })
-      }),
-      runTransaction: async (
-        fn: (tx: {
-          get: (ref: { path?: string }) => Promise<{
-            exists: boolean;
-            data: () => Record<string, unknown> | undefined;
-          }>;
-          set: (ref: { path?: string }, data: Record<string, unknown>) => void;
-        }) => Promise<unknown>
-      ) => {
-        const tx = {
-          get: async (ref: { path?: string }) => {
-            const path = String((ref as { _path?: string })._path ?? "");
-            return {
-              exists: store.has(path),
-              data: () => store.get(path)
-            };
-          },
-          set: (ref: { path?: string }, data: Record<string, unknown>) => {
-            const path = String((ref as { _path?: string })._path ?? Math.random());
-            store.set(path, data);
-          }
-        };
-        return fn(tx as never);
-      }
-    }),
-    FieldValue: { serverTimestamp: () => "SERVER_TS" }
-  };
-});
+import {
+  validateStopTpLadder,
+  resolveRiskFromSettings,
+  extractPlanSnapshot
+} from "../../../../src/services/broker/ctrader/liveShadowExecution";
+import type { DecisionRecord } from "../../../../src/models/types";
 
 describe("LIVE shadow flags / hard locks", () => {
   beforeEach(() => {
@@ -132,46 +84,100 @@ describe("LIVE shadow order payload math", () => {
   });
 });
 
-describe("stop/TP ordering helpers via preview", async () => {
-  const { buildTradePreview } = await import(
-    "../../../../src/services/broker/ctrader/preview"
-  );
-  const { fixtureXauUsdSymbol } = await import(
-    "../../../../src/services/broker/ctrader/fixtures"
-  );
-
-  it("BUY with inverted stop is blocked by sizing/gates path", () => {
-    const symbol = fixtureXauUsdSymbol();
-    const preview = buildTradePreview({
-      decisionId: "d-buy",
-      decision: "BUY",
-      confidence: 90,
-      generatedAt: new Date().toISOString(),
-      candleConfirmed: true,
-      stopLoss: 4300,
-      takeProfits: [4280],
-      symbol,
-      quote: {
-        symbolId: symbol.symbolId,
-        symbolName: "XAUUSD",
-        bid: 4290,
-        ask: 4290.2,
-        spread: 0.2,
-        timestamp: new Date().toISOString(),
-        marketStatus: "OPEN",
-        stale: false,
-        source: "LIVE"
-      },
-      position: null,
-      pendingOrdersCount: 0,
-      equity: 5000,
-      freeMargin: 4500,
-      accountCurrency: "EUR",
-      riskAmountEur: 20,
-      maxSpread: 2
+describe("TP ladder validation (no repair)", () => {
+  it("blocks BUY when TP1 is below executable entry (example 4307.75 / 4306.43)", () => {
+    const failed = validateStopTpLadder({
+      side: "BUY",
+      entry: 4307.75,
+      stopLoss: 4293.19,
+      takeProfit1: 4306.43,
+      takeProfit2: null,
+      takeProfit3: null
     });
-    // inverted levels still produce a preview; shadow layer adds STOP_ORDERING_INVALID
-    expect(preview.intendedEntry).toBe(4290.2);
-    expect(preview.orderSubmissionEnabled).toBe(false);
+    expect(failed).toContain("TP_ORDERING_INVALID");
+  });
+
+  it("accepts BUY with SL < entry < TP1 < TP2 < TP3", () => {
+    const failed = validateStopTpLadder({
+      side: "BUY",
+      entry: 4300,
+      stopLoss: 4290,
+      takeProfit1: 4310,
+      takeProfit2: 4320,
+      takeProfit3: 4330
+    });
+    expect(failed).toEqual([]);
+  });
+
+  it("accepts SELL with SL > entry > TP1 > TP2 > TP3", () => {
+    const failed = validateStopTpLadder({
+      side: "SELL",
+      entry: 4300,
+      stopLoss: 4310,
+      takeProfit1: 4290,
+      takeProfit2: 4280,
+      takeProfit3: 4270
+    });
+    expect(failed).toEqual([]);
+  });
+
+  it("blocks SELL when TP1 is above executable entry", () => {
+    const failed = validateStopTpLadder({
+      side: "SELL",
+      entry: 4300,
+      stopLoss: 4310,
+      takeProfit1: 4305,
+      takeProfit2: null,
+      takeProfit3: null
+    });
+    expect(failed).toContain("TP_ORDERING_INVALID");
+  });
+
+  it("extracts originating plan values without modification", () => {
+    const decision = {
+      decisionId: "d1",
+      confidence: 88,
+      confidenceLabel: "HIGH",
+      setupScore: 72,
+      generatedAt: "2026-08-07T09:00:00.000Z",
+      entry: { price: 4307.75 },
+      stopLoss: { price: 4293.19 },
+      takeProfits: [
+        { label: "TP1", price: 4306.43, reason: "r1" },
+        { label: "TP2", price: 4320, reason: "r2" }
+      ]
+    } as unknown as DecisionRecord;
+    const plan = extractPlanSnapshot(decision);
+    expect(plan.plannedEntry).toBe(4307.75);
+    expect(plan.stopLoss).toBe(4293.19);
+    expect(plan.takeProfit1).toBe(4306.43);
+    expect(plan.takeProfit2).toBe(4320);
+    expect(plan.takeProfit3).toBeNull();
+  });
+});
+
+describe("risk configuration", () => {
+  it("returns RISK_CONFIGURATION_MISSING when both fixed and percent absent", () => {
+    const r = resolveRiskFromSettings({
+      fixedRiskAmount: null,
+      percentageRisk: null,
+      equity: 1000,
+      sizingMode: "automatic_risk"
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("RISK_CONFIGURATION_MISSING");
+  });
+
+  it("uses existing fixedRiskAmount as cash risk", () => {
+    const r = resolveRiskFromSettings({
+      fixedRiskAmount: 20,
+      percentageRisk: 0.5,
+      equity: 10000,
+      sizingMode: "automatic_risk"
+    });
+    expect(r.ok).toBe(true);
+    expect(r.riskAmount).toBe(20);
+    expect(r.riskPercent).toBe(0.5);
+    expect(r.maxCashRisk).toBe(20);
   });
 });
