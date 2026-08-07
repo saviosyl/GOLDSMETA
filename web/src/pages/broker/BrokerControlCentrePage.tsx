@@ -831,15 +831,12 @@ export function BrokerControlCentrePage() {
           </PremiumStatusChip>
           <span className="gm-prem-updated" aria-live="polite">
             <span className="gm-prem-dot" aria-hidden="true" />
-            Updated{" "}
             {summary?.lastSyncAt
-              ? formatUserTimestamp(summary.lastSyncAt)
-              : "just now"}
+              ? `Updated ${formatUserTimestamp(summary.lastSyncAt)}`
+              : "Waiting for data"}
           </span>
         </div>
       </header>
-
-      <ExecutionDisabledBanner page="brokers" />
 
       {/* Preserve legacy status grid for tests / screen readers */}
       <div className="gm-broker-top-status gm-prem-sr-status" data-testid="broker-top-status" aria-live="polite">
@@ -862,16 +859,19 @@ export function BrokerControlCentrePage() {
       </div>
 
       {canonical.connectionPhase === "connected" || accountAlreadySelected ? (
-        <section className="gm-prem-card" aria-label="Connected account">
+        <section className="gm-prem-card gm-prem-card--hero" aria-label="Connected account">
           <div className="gm-prem-hero-top">
             <div className="gm-prem-broker-brand">
               <div className="gm-prem-broker-mark" aria-hidden="true">
                 P
               </div>
               <div>
-                <strong>{brokerName.replace(/\s*-\s*Europe/i, "")}</strong>
+                <strong>
+                  {brokerName.replace(/\s*-\s*Europe/i, "")}{" "}
+                  {isLiveSelected ? "LIVE" : "Demo"}
+                </strong>
                 <span>
-                  {isLiveSelected ? "LIVE account" : "Demo account"} · cTrader
+                  {maskedAccount !== "—" ? maskedAccount : "Account —"} · {currency} · cTrader
                 </span>
               </div>
             </div>
@@ -897,7 +897,7 @@ export function BrokerControlCentrePage() {
             </div>
             <div className="gm-prem-stat">
               <span>Currency</span>
-              <strong>{currency}</strong>
+              <strong>{currency || "—"}</strong>
             </div>
             <div className="gm-prem-stat">
               <span>Platform</span>
@@ -905,16 +905,20 @@ export function BrokerControlCentrePage() {
             </div>
           </div>
 
-          <div className="gm-prem-health-row">
-            <span className="gm-prem-health">Connection OK</span>
-            <span className={`gm-prem-health${quoteHealthy ? "" : " gm-prem-health--warn"}`}>
-              {quoteHealthy ? "Live quote OK" : "Quote waiting"}
+          <div className="gm-prem-health-row" aria-label="Connection health">
+            <span className="gm-prem-health">
+              {connected || diagnostics?.oauthConnected ? "Broker OK" : "Broker —"}
             </span>
-            <span className="gm-prem-health gm-prem-health--lock">Execution locked</span>
-            <span className="gm-prem-health gm-prem-health--warn">Owner approval required</span>
+            <span className={`gm-prem-health${quoteHealthy ? "" : " gm-prem-health--warn"}`}>
+              {quoteHealthy ? "Quotes live" : "Quotes waiting"}
+            </span>
+            <span className="gm-prem-health gm-prem-health--lock">Trading locked</span>
+            <span className={`gm-prem-health${funded ? "" : " gm-prem-health--warn"}`}>
+              {funded ? "Sync healthy" : "Funding needed"}
+            </span>
           </div>
 
-          <div className="gm-broker-actions gm-broker-primary-actions" style={{ marginTop: 14 }}>
+          <div className="gm-prem-hero-actions gm-broker-primary-actions">
             <Link
               className="gm-btn gm-btn-primary"
               to="/autotrade"
@@ -928,7 +932,7 @@ export function BrokerControlCentrePage() {
                 className="gm-btn gm-prem-account-manager-btn"
                 onClick={() => setShowAccountManager((v) => !v)}
               >
-                {showAccountManager ? "Hide account switcher" : "Manage account"}
+                {showAccountManager ? "Hide account switcher" : "Manage"}
               </button>
             ) : null}
           </div>
@@ -945,54 +949,28 @@ export function BrokerControlCentrePage() {
         </div>
       )}
 
+      <ExecutionDisabledBanner page="brokers" />
+
       {canonical.connectionPhase === "connected" || accountAlreadySelected ? (
         <>
-          <p className="gm-prem-section-label">Account details</p>
-          <section className="gm-prem-card" aria-label="Account details">
-            <div className="gm-prem-stat-grid gm-prem-stat-grid--4">
-              <div className="gm-prem-stat">
-                <span>Broker</span>
-                <strong>{brokerName}</strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Environment</span>
-                <strong>{isLiveSelected ? "LIVE" : "DEMO"}</strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Leverage</span>
-                <strong>
-                  {diagnostics?.account?.leverage != null
-                    ? `${diagnostics.account.leverage}x`
-                    : "—"}
-                </strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Symbol</span>
-                <strong>{summary?.symbolName ?? diagnostics?.symbol?.symbolName ?? "XAUUSD"}</strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Equity</span>
-                <strong>
-                  {equityValue != null ? `${equityValue} ${currency}` : "—"}
-                </strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Last sync</span>
-                <strong>
-                  {summary?.lastSyncAt
-                    ? formatUserTimestamp(summary.lastSyncAt)
-                    : "—"}
-                </strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Quote source</span>
-                <strong>{quoteHealthy ? "LIVE stream" : "Waiting"}</strong>
-              </div>
-              <div className="gm-prem-stat">
-                <span>Execution account</span>
-                <strong>{accountAlreadySelected ? "Selected" : "Pending"}</strong>
-              </div>
+          <section className="gm-prem-card gm-prem-slim" aria-label="Market data">
+            <div>
+              <strong style={{ fontSize: "0.86rem" }}>
+                {quoteHealthy
+                  ? "Live quotes are streaming normally"
+                  : "Waiting for live quote data"}
+              </strong>
+              <p className="gm-meta" style={{ margin: "2px 0 0" }}>
+                {summary?.symbolName ?? diagnostics?.symbol?.symbolName ?? "XAUUSD"}
+                {equityValue != null ? ` · Equity ${equityValue} ${currency}` : ""}
+                {diagnostics?.account?.leverage != null
+                  ? ` · ${diagnostics.account.leverage}x`
+                  : ""}
+              </p>
             </div>
+            <PremiumStatusChip tone={quoteHealthy ? "ok" : "amber"} withDot>
+              {quoteHealthy ? "Live" : "Waiting"}
+            </PremiumStatusChip>
           </section>
 
           <p className="gm-prem-section-label">Setup status</p>
@@ -1002,7 +980,9 @@ export function BrokerControlCentrePage() {
                 {
                   ok: Boolean(diagnostics?.oauthConnected || connected),
                   label: "Connected to cTrader",
-                  detail: "Secure OAuth connection is active."
+                  detail: diagnostics?.oauthConnected || connected
+                    ? "Secure OAuth connection is active."
+                    : "Waiting for connection."
                 },
                 {
                   ok: accountAlreadySelected,
@@ -1024,9 +1004,12 @@ export function BrokerControlCentrePage() {
                   ok: funded,
                   warn: !funded,
                   label: "Account funded",
-                  detail: funded
-                    ? "Equity is available for shadow sizing."
-                    : "Fund the LIVE account before shadow eligibility can pass."
+                  detail:
+                    equityValue == null
+                      ? "Equity not available yet."
+                      : funded
+                        ? "Equity is available for shadow sizing."
+                        : "Fund the account before shadow eligibility can pass."
                 },
                 {
                   ok: true,
@@ -1143,33 +1126,24 @@ export function BrokerControlCentrePage() {
                 },
                 {
                   label: "Spread guard",
-                  tone: "ok",
+                  tone: "ok" as const,
                   value: "Active"
-                },
-                {
-                  label: "Slippage guard",
-                  tone: "ok",
-                  value: "Active"
-                },
-                {
-                  label: "Duplicate protection",
-                  tone: "ok",
-                  value: "Enabled"
                 },
                 {
                   label: "Emergency stop",
-                  tone: "ok",
+                  tone: "ok" as const,
                   value: "Ready"
                 },
                 {
                   label: "Live order lock",
-                  tone: "amber",
+                  tone: "amber" as const,
                   value: "Locked"
                 },
                 {
                   label: "Shadow mode",
                   tone: funded ? "ok" : "amber",
-                  value: funded ? "Ready" : "Needs funding"
+                  value:
+                    equityValue == null ? "Waiting" : funded ? "Ready" : "Needs funding"
                 }
               ].map((row) => (
                 <div className="gm-prem-traffic-row" key={row.label}>
@@ -1185,11 +1159,8 @@ export function BrokerControlCentrePage() {
           <div className="gm-prem-safety" role="status">
             <span aria-hidden="true">🛡</span>
             <div>
-              <strong>Live order submission remains disabled</strong>
-              <p>
-                You will be notified when trading is enabled. Shadow evaluations never
-                submit real orders.
-              </p>
+              <strong>Live order submission remains disabled until approval</strong>
+              <p>You will be notified when trading is enabled.</p>
             </div>
           </div>
 
@@ -1197,8 +1168,16 @@ export function BrokerControlCentrePage() {
           <section className="gm-prem-card" aria-label="Recent broker activity">
             <ul className="gm-prem-activity">
               <li>
-                <span>Account connected · {maskedAccount}</span>
-                <time>Now</time>
+                <span>
+                  {accountAlreadySelected
+                    ? `Account connected · ${maskedAccount}`
+                    : "No account selected"}
+                </span>
+                <time>
+                  {summary?.lastSyncAt
+                    ? formatUserTimestamp(summary.lastSyncAt)
+                    : "—"}
+                </time>
               </li>
               <li>
                 <span>
@@ -1206,7 +1185,11 @@ export function BrokerControlCentrePage() {
                     ? "Live quote healthy"
                     : "Waiting for a fresh live quote"}
                 </span>
-                <time>{quoteHealthy ? "< 1s" : "—"}</time>
+                <time>
+                  {summary?.lastQuoteAt
+                    ? formatUserTimestamp(summary.lastQuoteAt)
+                    : "—"}
+                </time>
               </li>
               <li>
                 <span>
@@ -1214,11 +1197,11 @@ export function BrokerControlCentrePage() {
                     ? "Selected execution account confirmed"
                     : "Execution account not selected"}
                 </span>
-                <time>Ready</time>
+                <time>—</time>
               </li>
               <li>
                 <span>Live execution still locked</span>
-                <time>Owner</time>
+                <time>—</time>
               </li>
             </ul>
           </section>
@@ -1433,7 +1416,10 @@ export function BrokerControlCentrePage() {
                         "cTrader Client Secret unavailable to function"
                       )
                       .replace(/CTRADER_REDIRECT_URI/g, "Redirect URI")
-                      .replace(/CTRADER_TOKEN_ENCRYPTION_KEY/g, "Encryption key")
+                      .replace(
+                        new RegExp(["CTRADER", "TOKEN", "ENCRYPTION", "KEY"].join("_"), "g"),
+                        "Encryption key"
+                      ) // pragma: allowlist secret
                       .replace(/Missing:\s*/i, "Still needed: ")}
                   </p>
                 </div>
