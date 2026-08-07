@@ -103,7 +103,7 @@ describe("LIVE shadow order payload math", () => {
     const a = buildIntentKey({
       ownerUid: "u1",
       broker: "pepperstone_ctrader",
-      accountId: "48014706",
+      accountId: "12345606",
       environment: "LIVE",
       decisionId: "d1",
       symbolId: "41",
@@ -112,7 +112,7 @@ describe("LIVE shadow order payload math", () => {
     const b = buildIntentKey({
       ownerUid: "u1",
       broker: "pepperstone_ctrader",
-      accountId: "48014706",
+      accountId: "12345606",
       environment: "LIVE",
       decisionId: "d1",
       symbolId: "41",
@@ -121,7 +121,7 @@ describe("LIVE shadow order payload math", () => {
     const c = buildIntentKey({
       ownerUid: "u1",
       broker: "pepperstone_ctrader",
-      accountId: "48014706",
+      accountId: "12345606",
       environment: "LIVE",
       decisionId: "d2",
       symbolId: "41",
