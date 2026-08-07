@@ -505,7 +505,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     try {
       const accounts = await listAuthorisedAccountsForUser(uid);
       const existing = await getConnection(uid);
-      // Auto-select only when exactly one Pepperstone Demo — never auto-select Live.
+      // Auto-select only when nothing is selected (or the prior selection is no
+      // longer authorised). Never overwrite an intentional Live selection with
+      // the sole Pepperstone Demo — that caused DEMO …10 to clobber LIVE …06.
       let autoSelected: {
         accountIdMasked: string;
         brokerNameTitle: string | null;
@@ -514,30 +516,29 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       const pepperstoneDemos = accounts.filter(
         (a) => !a.isLive && /pepperstone/i.test(a.brokerNameTitle ?? "")
       );
-      if (pepperstoneDemos.length === 1) {
+      const selectedStillAuthorised = Boolean(
+        existing?.selectedAccountId &&
+          accounts.some((a) => a.ctidTraderAccountId === existing.selectedAccountId)
+      );
+      if (pepperstoneDemos.length === 1 && !selectedStillAuthorised) {
         const only = pepperstoneDemos[0]!;
-        if (
-          !existing?.selectedAccountId ||
-          existing.selectedAccountId !== only.ctidTraderAccountId
-        ) {
-          const selected = await selectBrokerAccountForUser({
-            ownerUid: uid,
-            ctidTraderAccountId: only.ctidTraderAccountId,
-            confirmPepperstone: true,
-            confirmLiveSelection: false
-          });
-          autoSelected = {
-            accountIdMasked: selected.account.accountIdMasked,
-            brokerNameTitle: selected.account.brokerName,
-            accountType: "Demo"
-          };
-        } else {
-          autoSelected = {
-            accountIdMasked: existing.selectedAccountMasked ?? only.accountIdMasked,
-            brokerNameTitle: existing.brokerName,
-            accountType: existing.selectedAccountIsLive ? "Live" : "Demo"
-          };
-        }
+        const selected = await selectBrokerAccountForUser({
+          ownerUid: uid,
+          ctidTraderAccountId: only.ctidTraderAccountId,
+          confirmPepperstone: true,
+          confirmLiveSelection: false
+        });
+        autoSelected = {
+          accountIdMasked: selected.account.accountIdMasked,
+          brokerNameTitle: selected.account.brokerName,
+          accountType: "Demo"
+        };
+      } else if (existing?.selectedAccountId && selectedStillAuthorised) {
+        autoSelected = {
+          accountIdMasked: existing.selectedAccountMasked ?? "—",
+          brokerNameTitle: existing.brokerName,
+          accountType: existing.selectedAccountIsLive ? "Live" : "Demo"
+        };
       }
       const selectedId = (await getConnection(uid))?.selectedAccountId ?? null;
       res.json({
