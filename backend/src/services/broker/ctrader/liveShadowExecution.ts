@@ -330,9 +330,13 @@ export async function processDecisionForLiveShadow(args: {
       equity = snap.equity;
       freeMargin = snap.freeMargin;
 
-      if (balance == null || equity == null || !(equity > 0)) {
+      if (balance == null || equity == null) {
         failedGates.push("BALANCE_EQUITY_INVALID");
-      } else passedGates.push("BALANCE_EQUITY_OK");
+      } else if (!(equity > 0)) {
+        failedGates.push("ACCOUNT_EQUITY_ZERO");
+      } else {
+        passedGates.push("BALANCE_EQUITY_OK");
+      }
 
       let recon: TradingReconcileState | null = null;
       try {
@@ -451,70 +455,77 @@ export async function processDecisionForLiveShadow(args: {
       if (!failedGates.includes(g)) failedGates.push(g);
     }
 
-    // Volume conversion + optional would-submit payload (even when blocked, for evidence)
-    if (preview.proposedVolume != null && symbol && entry != null) {
-      try {
-        const step = symbol.volumeStep ?? 0.01;
-        const minLots = symbol.minVolume ?? step;
-        const maxLots = symbol.maxVolume ?? 100;
-        const rules = validateLotsAgainstRules(preview.proposedVolume, {
-          rawMinVolume: minLots * 100,
-          rawMaxVolume: maxLots * 100,
-          rawStepVolume: step * 100,
-          rawLotSize: (symbol.lotSize ?? 100) * 100,
-          apiVolumeScalingFactor: 100,
-          minLots,
-          maxLots,
-          stepLots: step,
-          contractSize: symbol.lotSize ?? 100,
-          orderVolumeUnitsPerLot: 100
-        });
-        if (!rules.ok || rules.orderVolumeUnits == null || rules.roundedLots == null) {
-          failedGates.push(rules.rejectionReason ?? "VOLUME_CONVERSION_INVALID");
-        } else {
-          passedGates.push("VOLUME_CONVERSION_OK");
-          const prot = relativeProtection({
-            side,
-            entry,
-            stopLoss,
-            takeProfit
+    // Always capture the calculated order shape for audit (even when blocked).
+    if (symbol && entry != null) {
+      const prot = relativeProtection({ side, entry, stopLoss, takeProfit });
+      let lots = preview.proposedVolume;
+      let volumeUnits: number | null = null;
+      if (lots != null) {
+        try {
+          const step = symbol.volumeStep ?? 0.01;
+          const minLots = symbol.minVolume ?? step;
+          const maxLots = symbol.maxVolume ?? 100;
+          const rules = validateLotsAgainstRules(lots, {
+            rawMinVolume: minLots * 100,
+            rawMaxVolume: maxLots * 100,
+            rawStepVolume: step * 100,
+            rawLotSize: (symbol.lotSize ?? 100) * 100,
+            apiVolumeScalingFactor: 100,
+            minLots,
+            maxLots,
+            stepLots: step,
+            contractSize: symbol.lotSize ?? 100,
+            orderVolumeUnitsPerLot: 100
           });
-          wouldSubmit = {
-            side,
-            symbolId: symbol.symbolId,
-            symbolName: symbol.symbolName,
-            lots: rules.roundedLots,
-            volumeUnits: rules.orderVolumeUnits,
-            entry,
-            stopLoss,
-            takeProfit,
-            relativeStopLoss: prot.relativeStopLoss,
-            relativeTakeProfit: prot.relativeTakeProfit,
-            accountMasked:
-              accountMasked ?? maskAccountId(connection.selectedAccountId),
-            environment: "LIVE",
-            spread: quote?.spread ?? null,
-            bid: quote?.bid ?? null,
-            ask: quote?.ask ?? null,
-            quoteFreshness,
-            quoteSequence,
-            brokerTimestamp
-          };
+          if (!rules.ok || rules.orderVolumeUnits == null || rules.roundedLots == null) {
+            failedGates.push(rules.rejectionReason ?? "VOLUME_CONVERSION_INVALID");
+          } else {
+            passedGates.push("VOLUME_CONVERSION_OK");
+            lots = rules.roundedLots;
+            volumeUnits = rules.orderVolumeUnits;
+          }
+        } catch {
+          failedGates.push("VOLUME_CONVERSION_INVALID");
         }
-      } catch {
-        failedGates.push("VOLUME_CONVERSION_INVALID");
       }
-    } else if (d === "BUY" || d === "SELL") {
-      // Still attempt volume units check when sizing failed
-      if (preview.proposedVolume == null) {
-        /* sizing failure already in failedGates */
-      }
+      wouldSubmit = {
+        side,
+        symbolId: symbol.symbolId,
+        symbolName: symbol.symbolName,
+        lots: lots ?? 0,
+        volumeUnits: volumeUnits ?? 0,
+        entry,
+        stopLoss,
+        takeProfit,
+        relativeStopLoss: prot.relativeStopLoss,
+        relativeTakeProfit: prot.relativeTakeProfit,
+        accountMasked:
+          accountMasked ?? maskAccountId(connection.selectedAccountId),
+        environment: "LIVE",
+        spread: quote?.spread ?? null,
+        bid: quote?.bid ?? null,
+        ask: quote?.ask ?? null,
+        quoteFreshness,
+        quoteSequence,
+        brokerTimestamp
+      };
+    }
+
+    // SHADOW_WOULD_SUBMIT only when every gate passes and volume is positive.
+    if (
+      wouldSubmit &&
+      (!(wouldSubmit.lots > 0) || !(wouldSubmit.volumeUnits > 0))
+    ) {
+      // keep payload for evidence; outcome stays blocked via failedGates
     }
 
     const finalFailed = [...new Set(failedGates)];
     const uniqPassed = [...new Set(passedGates)];
     const outcome: LiveShadowExecutionRecord["outcome"] =
-      finalFailed.length === 0 && wouldSubmit != null
+      finalFailed.length === 0 &&
+      wouldSubmit != null &&
+      wouldSubmit.lots > 0 &&
+      wouldSubmit.volumeUnits > 0
         ? "SHADOW_WOULD_SUBMIT"
         : "SHADOW_BLOCKED";
 
