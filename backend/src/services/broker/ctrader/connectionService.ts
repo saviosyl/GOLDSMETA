@@ -32,8 +32,19 @@ import { decryptTokenPayload, encryptTokenPayload, maskAccountId } from "./token
 import { buildTradePreview, type PreviewInput } from "./preview";
 import type { BrokerQuote, BrokerSymbol, TradePreview } from "../domain";
 import { getUserAutoTradeSettings } from "./userAutoTradeSettings";
+import {
+  buildAuthoritativeQuote,
+  loadLiveQuoteThresholds
+} from "./liveQuote";
+import { nextQuoteSequence, saveAuthoritativeQuote } from "./quoteStore";
 
-const STALE_QUOTE_MS = 15_000;
+/**
+ * AutoTrade execution uses the LIVE display threshold so DELAYED prices
+ * are never treated as eligible for live order submission.
+ */
+function executionStaleMaxAgeMs(): number {
+  return loadLiveQuoteThresholds().liveMaxAgeMs;
+}
 
 /** Serialize refresh-token rotations per user connection (in-process). */
 const refreshLocks = new Map<string, Promise<unknown>>();
@@ -271,6 +282,8 @@ export async function completeOAuthCallback(args: {
     balance: prior?.balance ?? null,
     symbolId: prior?.symbolId ?? null,
     symbolName: prior?.symbolName ?? null,
+    symbolDigits: prior?.symbolDigits ?? null,
+    symbolPipPosition: prior?.symbolPipPosition ?? null,
     lastSyncAt: now,
     lastQuoteAt: prior?.lastQuoteAt ?? null,
     lastErrorCode: null,
@@ -317,7 +330,7 @@ function decryptTokens(connection: CTraderConnectionRecord): {
  * - serialize concurrent refresh attempts per ownerUid
  * - on version conflict, adopt the already-persisted winner (no stale write)
  */
-async function ensureFreshAccessToken(
+export async function ensureFreshAccessToken(
   connection: CTraderConnectionRecord,
   fetchImpl?: typeof fetch,
   opts?: { force?: boolean }
@@ -508,7 +521,8 @@ export async function selectBrokerAccountForUser(args: {
     accessToken,
     clientId,
     clientSecret,
-    ctidTraderAccountId: match.ctidTraderAccountId
+    ctidTraderAccountId: match.ctidTraderAccountId,
+    isLive: match.isLive
   });
 
   const pepperstone =
@@ -521,7 +535,8 @@ export async function selectBrokerAccountForUser(args: {
       accessToken,
       clientId,
       clientSecret,
-      ctidTraderAccountId: match.ctidTraderAccountId
+      ctidTraderAccountId: match.ctidTraderAccountId,
+      isLive: match.isLive
     });
   } catch {
     symbol = null;
@@ -545,6 +560,8 @@ export async function selectBrokerAccountForUser(args: {
     balance: snap.balance,
     symbolId: symbol?.symbolId ?? null,
     symbolName: symbol?.symbolName ?? null,
+    symbolDigits: symbol?.digits ?? null,
+    symbolPipPosition: symbol?.pipPosition ?? null,
     lastErrorCode: null,
     disconnectedAt: null,
     liveSelectionConfirmedAt: match.isLive ? now : null
@@ -579,19 +596,46 @@ export async function readQuoteForOwner(
   }
   const { accessToken, connection: freshConn } = await ensureFreshAccessToken(connection);
   const { clientId, clientSecret } = clientCreds();
+  const isLive = Boolean(freshConn.selectedAccountIsLive);
   const quote = await api.fetchQuote({
     accessToken,
     clientId,
     clientSecret,
     ctidTraderAccountId: freshConn.selectedAccountId!,
-    symbolId: freshConn.symbolId!
+    symbolId: freshConn.symbolId!,
+    isLive
   });
   const ageMs = quote.timestamp ? Date.now() - Date.parse(quote.timestamp) : Infinity;
   // When market is CLOSED, Spotware's first spot event is last session price — not a live tick.
   // Accept it for read-only diagnostics; only reject age when market is OPEN/UNKNOWN.
   const marketClosed = quote.marketStatus === "CLOSED";
-  const stale = !marketClosed && ageMs > STALE_QUOTE_MS;
+  const stale = !marketClosed && ageMs > executionStaleMaxAgeMs();
   const result: BrokerQuote = { ...quote, stale };
+
+  // Persist into the authoritative live-quote store for dashboard + AutoTrade.
+  if (quote.bid != null && quote.ask != null && quote.timestamp) {
+    try {
+      const sequence = await nextQuoteSequence(ownerUid);
+      const authoritative = buildAuthoritativeQuote({
+        symbolId: freshConn.symbolId!,
+        symbolName: freshConn.symbolName ?? quote.symbolName ?? "XAUUSD",
+        digits: freshConn.symbolDigits ?? null,
+        pipPosition: freshConn.symbolPipPosition ?? null,
+        bid: quote.bid,
+        ask: quote.ask,
+        brokerTimestamp: quote.timestamp,
+        quoteSequence: sequence,
+        marketStatus: quote.marketStatus,
+        environment: isLive ? "LIVE" : "DEMO",
+        source: "LIVE",
+        thresholds: loadLiveQuoteThresholds()
+      });
+      await saveAuthoritativeQuote(ownerUid, authoritative);
+    } catch {
+      /* store best-effort — quote response still returns */
+    }
+  }
+
   if (stale) {
     throw Object.assign(new Error("CTRADER_QUOTE_STALE"), {
       code: "CTRADER_QUOTE_STALE",
@@ -639,7 +683,8 @@ export async function buildDiagnostics(
             accessToken,
             clientId,
             clientSecret,
-            ctidTraderAccountId: match.ctidTraderAccountId
+            ctidTraderAccountId: match.ctidTraderAccountId,
+            isLive: match.isLive
           });
           account = toSafeBrokerAccount(match, snap);
           marginMeta = snap.freeMargin != null || snap.usedMargin != null;
@@ -648,7 +693,8 @@ export async function buildDiagnostics(
               accessToken,
               clientId,
               clientSecret,
-              ctidTraderAccountId: match.ctidTraderAccountId
+              ctidTraderAccountId: match.ctidTraderAccountId,
+              isLive: match.isLive
             });
             volumeRules = Boolean(
               symbol?.minVolume != null &&
@@ -661,7 +707,8 @@ export async function buildDiagnostics(
                 clientId,
                 clientSecret,
                 ctidTraderAccountId: match.ctidTraderAccountId,
-                symbolId: connection.symbolId
+                symbolId: connection.symbolId,
+                isLive: match.isLive
               });
             } catch {
               quote = null;
@@ -751,7 +798,8 @@ export async function buildLiveDemoPreview(args: {
     accessToken,
     clientId,
     clientSecret,
-    ctidTraderAccountId: connectionFresh.selectedAccountId!
+    ctidTraderAccountId: connectionFresh.selectedAccountId!,
+    isLive: Boolean(connectionFresh.selectedAccountIsLive)
   });
   if (!symbol) {
     throw Object.assign(new Error("CTRADER_SYMBOL_NOT_FOUND"), {
@@ -762,7 +810,8 @@ export async function buildLiveDemoPreview(args: {
     accessToken,
     clientId,
     clientSecret,
-    ctidTraderAccountId: connectionFresh.selectedAccountId!
+    ctidTraderAccountId: connectionFresh.selectedAccountId!,
+    isLive: Boolean(connectionFresh.selectedAccountIsLive)
   });
 
   const envKey = connectionFresh.selectedAccountIsLive ? "live" : "demo";

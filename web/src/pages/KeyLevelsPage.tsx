@@ -97,12 +97,15 @@ export function KeyLevelsPage() {
     : null;
 
   useEffect(() => {
-    setQuote({
-      price: livePrice,
-      updatedLabel: updated,
-      fresh: livePrice != null
+    setQuote((prev) => {
+      if (prev?.source === "broker") return prev;
+      return {
+        price: livePrice,
+        updatedLabel: updated,
+        fresh: livePrice != null,
+        source: "decision"
+      };
     });
-    return () => setQuote(null);
   }, [livePrice, updated, setQuote]);
 
   return (

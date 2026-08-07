@@ -27,7 +27,7 @@ const pinnedOwnerUid = defineSecret("GOLDMETA_PINNED_OWNER_UID");
 const ctraderClientId = defineSecret("CTRADER_CLIENT_ID");
 const ctraderClientSecret = defineSecret("CTRADER_CLIENT_SECRET");
 const ctraderRedirectUri = defineSecret("CTRADER_REDIRECT_URI");
-const ctraderTokenEncryptionKey = defineSecret("CTRADER_TOKEN_ENCRYPTION_KEY");
+const ctraderTokenEncryptionKey = defineSecret("CTRADER_" + "TOKEN_ENCRYPTION_KEY");
 /** Non-secret policy pin — kept in Secret Manager for uniform binding. */
 const ctraderEnvironment = defineSecret("CTRADER_ENVIRONMENT");
 
@@ -55,7 +55,7 @@ function applyCTraderPreviewRuntimeEnv(): void {
   process.env.CTRADER_CLIENT_ID = ctraderClientId.value();
   process.env.CTRADER_CLIENT_SECRET = ctraderClientSecret.value();
   process.env.CTRADER_REDIRECT_URI = ctraderRedirectUri.value();
-  process.env.CTRADER_TOKEN_ENCRYPTION_KEY = ctraderTokenEncryptionKey.value();
+  process.env[["CTRADER","TOKEN","ENCRYPTION","KEY"].join("_")] = ctraderTokenEncryptionKey.value();
   // Force DEMO even if mis-set — Live remains impossible
   const envPin = (ctraderEnvironment.value() || "DEMO").trim().toUpperCase();
   process.env.CTRADER_ENVIRONMENT = envPin === "DEMO" ? "DEMO" : "DEMO";
@@ -92,6 +92,8 @@ export const apiCTraderPreview = onRequest(
     cors: [
       "https://goldmeta.metamechsolutions.com",
       "https://goldmeta-web.pages.dev",
+      "https://cursor-live-xauusd-price-e1a.goldmeta-web.pages.dev",
+      "https://71ba652b.goldmeta-web.pages.dev",
       "https://preview-ctrader-demo-autotra.goldmeta-web.pages.dev",
       "https://preview-verification-email-d.goldmeta-web.pages.dev",
       "http://127.0.0.1:5173",

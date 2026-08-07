@@ -360,13 +360,18 @@ export function OverviewPage() {
   const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
 
   useEffect(() => {
-    setQuote({
-      price: livePrice,
-      updatedLabel: compactTime,
-      sessionLabel,
-      fresh: source === "live" && livePrice != null
+    // Informational TV fallback only when no Pepperstone broker quote is driving the shell.
+    // Never overwrite an authoritative broker mid-price with plan/decision close.
+    setQuote((prev) => {
+      if (prev?.source === "broker") return prev;
+      return {
+        price: livePrice,
+        updatedLabel: compactTime,
+        sessionLabel,
+        fresh: source === "live" && livePrice != null,
+        source: "decision"
+      };
     });
-    return () => setQuote(null);
   }, [livePrice, compactTime, sessionLabel, source, setQuote]);
 
   const liveRangeOnly = marketStructureMode === "LIVE_RANGE_ONLY";

@@ -81,7 +81,7 @@ export function pickXauUsdCandidate(
 export function resolveXauUsdFromCatalogue(
   symbols: RawCTraderSymbol[],
   brokerId: "pepperstone_ctrader" = "pepperstone_ctrader",
-  environment: "DEMO" = "DEMO"
+  environment: "DEMO" | "LIVE" = "DEMO"
 ): BrokerSymbol | null {
   const raw = pickXauUsdCandidate(symbols);
   if (!raw) return null;

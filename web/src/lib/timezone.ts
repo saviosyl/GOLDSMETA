@@ -116,6 +116,24 @@ export function formatCompactLocalTime(
   }).format(d);
 }
 
+/** Quote-update time with seconds — must reflect broker quote time, not page render. */
+export function formatCompactLocalTimeWithSeconds(
+  iso: string | null | undefined,
+  pref: TimezonePreference = loadTimezonePreference()
+): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const timeZone = resolveDisplayTimezone(pref);
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone
+  }).format(d);
+}
+
 /** Short date + time for lists */
 export function formatLocalDateTime(
   iso: string | null | undefined,

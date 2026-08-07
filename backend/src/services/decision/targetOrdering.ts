@@ -13,7 +13,7 @@ export type TargetOrderingResult = {
 const eps = 1e-6;
 
 export const validateTargetOrdering = (input: {
-  direction: "BUY" | "SELL" | string | null | undefined;
+  direction: string | null | undefined;
   entry: number | null | undefined;
   stop: number | null | undefined;
   tp1: number | null | undefined;

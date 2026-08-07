@@ -286,6 +286,10 @@ export function AppShell({
               updatedLabel={quote?.updatedLabel ?? "—"}
               sessionLabel={quote?.sessionLabel}
               fresh={quote?.fresh}
+              freshness={quote?.freshness}
+              unavailable={quote?.unavailable}
+              bid={quote?.bid}
+              ask={quote?.ask}
               desktopOnly
             />
 
@@ -341,6 +345,10 @@ export function AppShell({
             updatedLabel={quote?.updatedLabel ?? "—"}
             sessionLabel={quote?.sessionLabel}
             fresh={quote?.fresh}
+            freshness={quote?.freshness}
+            unavailable={quote?.unavailable}
+            bid={quote?.bid}
+            ask={quote?.ask}
           />
 
           {children ?? <Outlet />}
