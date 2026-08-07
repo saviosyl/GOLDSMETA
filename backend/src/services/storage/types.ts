@@ -109,7 +109,7 @@ export interface WebhookRejectLog {
 
 export interface SharedMarketFeedRoleTraffic {
   at: string;
-  schemaVersion: "1.0" | "1.1" | string;
+  schemaVersion: string;
   scriptVersion: string | null;
   timeframe: string | null;
   chartMatchesRole: boolean | null;

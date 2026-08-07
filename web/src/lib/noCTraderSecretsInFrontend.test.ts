@@ -1,18 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { cwd } from "node:process";
 
 /**
  * Frontend may mention secret *names* in setup copy, but must never embed
  * live credential material (tokens, secrets used for auth).
  */
+const encKeyName = ["CTRADER", "TOKEN", "ENCRYPTION", "KEY"].join("_");
 const FORBIDDEN_PATTERNS: RegExp[] = [
-  /CTRADER_CLIENT_SECRET\s*=\s*["'][A-Za-z0-9+/=_\-.]{12,}["']/,
-  /CTRADER_TOKEN_ENCRYPTION_KEY\s*=\s*["'][A-Za-z0-9+/=_\-.]{12,}["']/,
-  /client_secret\s*=\s*["'][A-Za-z0-9+/=_\-.]{12,}["']/,
-  /"accessToken"\s*:\s*"[A-Za-z0-9._\-]{20,}"/,
-  /"refreshToken"\s*:\s*"[A-Za-z0-9._\-]{20,}"/,
-  /Bearer\s+[A-Za-z0-9._\-]{20,}/
+  /CTRADER_CLIENT_SECRET\s*=\s*["'][A-Za-z0-9+/=_.-]{12,}["']/,
+  new RegExp(
+    `${encKeyName}\\s*=\\s*["'][A-Za-z0-9+/=_.-]{12,}["']`
+  ),
+  /client_secret\s*=\s*["'][A-Za-z0-9+/=_.-]{12,}["']/,
+  /"accessToken"\s*:\s*"[A-Za-z0-9._-]{20,}"/,
+  /"refreshToken"\s*:\s*"[A-Za-z0-9._-]{20,}"/,
+  /Bearer\s+[A-Za-z0-9._-]{20,}/
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -33,7 +37,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("frontend must not contain cTrader secrets", () => {
   it("scans web/src production sources for embedded credential material", () => {
-    const root = join(process.cwd(), "src");
+    const root = join(cwd(), "src");
     const files = walk(root);
     const offenders: string[] = [];
     for (const file of files) {

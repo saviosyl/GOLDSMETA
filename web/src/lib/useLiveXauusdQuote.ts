@@ -76,7 +76,10 @@ export function useLiveXauusdQuote(opts?: { enabled?: boolean }): void {
   const lastMid = useRef<number | null>(null);
   const inFlight = useRef(false);
   const quoteRef = useRef(quote);
-  quoteRef.current = quote;
+
+  useEffect(() => {
+    quoteRef.current = quote;
+  }, [quote]);
 
   useEffect(() => {
     if (!enabled) return;
