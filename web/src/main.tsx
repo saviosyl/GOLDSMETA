@@ -10,6 +10,7 @@ import "./styles/global.css";
 import "./styles/redesign.css";
 import "./styles/premium-dashboard.css";
 import "./styles/gm-v2.css";
+import "./styles/premium-broker-autotrade.css";
 
 const UPDATE_EVENT = "goldmeta:sw-update";
 
