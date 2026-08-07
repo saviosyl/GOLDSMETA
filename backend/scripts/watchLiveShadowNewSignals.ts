@@ -13,8 +13,51 @@ import {
   snapshotCTraderFlags
 } from "../src/services/broker/ctrader/flags";
 import { getConnection } from "../src/services/broker/ctrader/connectionStore";
+import {
+  ensureFreshAccessToken,
+  selectBrokerAccountForUser
+} from "../src/services/broker/ctrader/connectionService";
+import { createOpenApiClient } from "../src/services/broker/ctrader/openApiClient";
 import { buildIntentKey } from "../src/services/broker/ctrader/preview";
 import { writeFileSync } from "node:fs";
+
+/** If OAuth/token refresh flipped selection to DEMO, restore LIVE …06. */
+async function ensureLiveAccount06(ownerUid: string): Promise<void> {
+  const conn = await getConnection(ownerUid);
+  if (
+    conn?.selectedAccountIsLive &&
+    conn.environment === "LIVE" &&
+    String(conn.selectedAccountId ?? "").endsWith("06")
+  ) {
+    return;
+  }
+  const fresh = await ensureFreshAccessToken(conn!);
+  const api = createOpenApiClient();
+  const accounts = await api.listAccountsByAccessToken(fresh.accessToken);
+  const target = accounts.find(
+    (a) =>
+      a.isLive &&
+      a.ctidTraderAccountId.endsWith("06") &&
+      /pepperstone/i.test(a.brokerNameTitle || "")
+  );
+  if (!target) {
+    throw new Error("LIVE_ACCOUNT_06_NOT_FOUND_FOR_WATCH");
+  }
+  await selectBrokerAccountForUser({
+    ownerUid,
+    ctidTraderAccountId: target.ctidTraderAccountId,
+    confirmPepperstone: true,
+    confirmLiveSelection: true,
+    api
+  });
+  console.log(
+    JSON.stringify({
+      step: "restored_live_06",
+      selectedMasked: "48…06",
+      environment: "LIVE"
+    })
+  );
+}
 
 type DecisionRow = {
   decisionId?: string;
