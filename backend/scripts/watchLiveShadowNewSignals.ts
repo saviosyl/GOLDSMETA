@@ -12,6 +12,8 @@ import {
   isCTraderLiveExecutionOwnerApproved,
   snapshotCTraderFlags
 } from "../src/services/broker/ctrader/flags";
+import { getConnection } from "../src/services/broker/ctrader/connectionStore";
+import { buildIntentKey } from "../src/services/broker/ctrader/preview";
 import { writeFileSync } from "node:fs";
 
 type DecisionRow = {
@@ -83,6 +85,33 @@ async function main() {
       if (code !== "BUY" && code !== "SELL") continue;
       if (seen.has(decisionId)) continue;
       seen.add(decisionId);
+
+      // Prefer local hardened SHADOW eval over an older cloud-function write.
+      // Delete prior intent doc only — audit collection retains history.
+      // Never touches Live NewOrder.
+      if (process.env.SHADOW_WATCH_REEVAL === "true") {
+        try {
+          const conn = await getConnection(ownerUid);
+          if (conn?.selectedAccountId) {
+            const intentKey = buildIntentKey({
+              ownerUid,
+              broker: "pepperstone_ctrader",
+              accountId: conn.selectedAccountId,
+              environment: "LIVE",
+              decisionId,
+              symbolId: conn.symbolId ?? "unknown",
+              action: code
+            });
+            await db
+              .doc(
+                `users/${ownerUid}/ctraderLiveShadowExecutions/${intentKey}`
+              )
+              .delete();
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
 
       const r = await processDecisionForLiveShadow({
         userId: ownerUid,

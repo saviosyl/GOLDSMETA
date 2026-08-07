@@ -622,6 +622,22 @@ export async function processDecisionForLiveShadow(args: {
             failedGates.push("CONFLICTING_GOLDMETA_POSITION");
           }
         }
+
+        // Pepperstone Live often omits freeMargin/usedMargin on ProtoOATrader /
+        // ProtoOAReconcile when the account is flat. When flat + equity > 0,
+        // free margin equals equity (used margin 0). Do not invent when equity
+        // is missing/zero or when positions are open.
+        if (
+          freeMargin == null &&
+          usedMargin == null &&
+          recon.openPositionsCount === 0 &&
+          equity != null &&
+          equity > 0
+        ) {
+          freeMargin = equity;
+          usedMargin = 0;
+          passedGates.push("FREE_MARGIN_INFERRED_FLAT_ACCOUNT");
+        }
       } catch {
         reconcileOk = false;
         failedGates.push("RECONCILE_FAILED");
