@@ -729,6 +729,9 @@ export async function processDecisionForLiveShadow(args: {
       passedGates.push("STALE_SIGNAL_CLASSIFIED");
     }
 
+    // Never invent position size when equity is missing or zero.
+    const equityAllowsSizing = equity != null && equity > 0;
+
     const preview = buildTradePreview({
       decisionId: decision.decisionId,
       decision: d,
@@ -746,7 +749,8 @@ export async function processDecisionForLiveShadow(args: {
       equity,
       freeMargin,
       accountCurrency: currency ?? "EUR",
-      riskAmountEur: riskAmount ?? 0,
+      // When equity is zero, pass 0 risk into preview so it cannot fabricate lots.
+      riskAmountEur: equityAllowsSizing ? (riskAmount ?? 0) : 0,
       maxSpread: settings.maxSpread,
       demonstration: false,
       eurToAccountRate: 1,
@@ -760,11 +764,23 @@ export async function processDecisionForLiveShadow(args: {
       confirmationCandleRequired: settings.confirmationCandleRequired
     });
 
+    const volumeCascadeGates = new Set([
+      "VOLUME_BELOW_MINIMUM_AFTER_ROUNDING",
+      "VOLUME_BELOW_MINIMUM",
+      "VOLUME_ABOVE_MAXIMUM",
+      "VOLUME_STEP_MISMATCH",
+      "VOLUME_CONVERSION_INVALID",
+      "ENTRY_PRICE_UNAVAILABLE",
+      "STOP_DISTANCE_INVALID"
+    ]);
+
     for (const g of preview.passedGates) {
       if (!passedGates.includes(g)) passedGates.push(g);
     }
     for (const g of preview.failedGates) {
-      // Avoid double-counting SIGNAL_STALE from preview when already classified.
+      // When equity is zero, ignore volume/sizing cascade from preview — we do
+      // not invent position size, so those are not independent failures.
+      if (!equityAllowsSizing && volumeCascadeGates.has(g)) continue;
       if (!failedGates.includes(g)) failedGates.push(g);
     }
 
@@ -779,6 +795,7 @@ export async function processDecisionForLiveShadow(args: {
     }
 
     // Always capture the calculated order shape for audit (even when blocked).
+
     if (symbol && entry != null) {
       const prot = relativeProtection({
         side,
@@ -787,49 +804,59 @@ export async function processDecisionForLiveShadow(args: {
         takeProfit: takeProfit1
       });
 
-      // Raw lot size from existing risk formula (evidence) — never invent when equity=0.
-      if (
-        riskAmount != null &&
-        riskAmount > 0 &&
-        equity != null &&
-        equity > 0 &&
-        stopDistance != null &&
-        stopDistance > 0 &&
-        symbol.lotSize != null &&
-        symbol.volumeStep != null
-      ) {
-        rawLotSize = riskAmount / (symbol.lotSize * stopDistance);
-        roundedLotSize = roundDownLotsToStep(rawLotSize, symbol.volumeStep);
-      }
+      let lots: number | null = null;
+      if (equityAllowsSizing) {
+        // Raw lot size from existing risk formula — only when equity > 0.
+        if (
+          riskAmount != null &&
+          riskAmount > 0 &&
+          stopDistance != null &&
+          stopDistance > 0 &&
+          symbol.lotSize != null &&
+          symbol.volumeStep != null
+        ) {
+          rawLotSize = riskAmount / (symbol.lotSize * stopDistance);
+          roundedLotSize = roundDownLotsToStep(rawLotSize, symbol.volumeStep);
+        }
 
-      let lots = preview.proposedVolume ?? roundedLotSize;
-      if (lots != null) {
-        try {
-          const step = symbol.volumeStep ?? 0.01;
-          const minLots = symbol.minVolume ?? step;
-          const maxLots = symbol.maxVolume ?? 100;
-          const rules = validateLotsAgainstRules(lots, {
-            rawMinVolume: minLots * 100,
-            rawMaxVolume: maxLots * 100,
-            rawStepVolume: step * 100,
-            rawLotSize: (symbol.lotSize ?? 100) * 100,
-            apiVolumeScalingFactor: 100,
-            minLots,
-            maxLots,
-            stepLots: step,
-            contractSize: symbol.lotSize ?? 100,
-            orderVolumeUnitsPerLot: 100
-          });
-          if (!rules.ok || rules.orderVolumeUnits == null || rules.roundedLots == null) {
-            failedGates.push(rules.rejectionReason ?? "VOLUME_CONVERSION_INVALID");
-          } else {
-            passedGates.push("VOLUME_CONVERSION_OK");
-            lots = rules.roundedLots;
-            roundedLotSize = rules.roundedLots;
-            volumeUnits = rules.orderVolumeUnits;
+        lots = preview.proposedVolume ?? roundedLotSize;
+        if (lots != null) {
+          try {
+            const step = symbol.volumeStep ?? 0.01;
+            const minLots = symbol.minVolume ?? step;
+            const maxLots = symbol.maxVolume ?? 100;
+            const rules = validateLotsAgainstRules(lots, {
+              rawMinVolume: minLots * 100,
+              rawMaxVolume: maxLots * 100,
+              rawStepVolume: step * 100,
+              rawLotSize: (symbol.lotSize ?? 100) * 100,
+              apiVolumeScalingFactor: 100,
+              minLots,
+              maxLots,
+              stepLots: step,
+              contractSize: symbol.lotSize ?? 100,
+              orderVolumeUnitsPerLot: 100
+            });
+            if (!rules.ok || rules.orderVolumeUnits == null || rules.roundedLots == null) {
+              failedGates.push(rules.rejectionReason ?? "VOLUME_CONVERSION_INVALID");
+            } else {
+              passedGates.push("VOLUME_CONVERSION_OK");
+              lots = rules.roundedLots;
+              roundedLotSize = rules.roundedLots;
+              volumeUnits = rules.orderVolumeUnits;
+            }
+          } catch {
+            failedGates.push("VOLUME_CONVERSION_INVALID");
           }
-        } catch {
-          failedGates.push("VOLUME_CONVERSION_INVALID");
+        }
+      } else {
+        // Explicit: zero/missing equity ⇒ no sized order (do not use preview volume).
+        lots = 0;
+        rawLotSize = null;
+        roundedLotSize = null;
+        volumeUnits = 0;
+        if (!failedGates.includes("ACCOUNT_EQUITY_ZERO")) {
+          failedGates.push("ACCOUNT_EQUITY_ZERO");
         }
       }
 
