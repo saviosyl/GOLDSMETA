@@ -66,6 +66,17 @@ export type AccountSnapshot = {
   leverage: number | null;
 };
 
+/** Read-only reconcile snapshot — never mutates orders/positions. */
+export type TradingReconcileState = {
+  openPositionsCount: number;
+  pendingOrdersCount: number;
+  /** Symbol ids with open positions (masked counts only in logs). */
+  openSymbolIds: string[];
+  equity: number | null;
+  freeMargin: number | null;
+  usedMargin: number | null;
+};
+
 export type DemoMarketOrderRequest = {
   accessToken: string;
   clientId: string;
@@ -102,6 +113,14 @@ export interface CTraderOpenApiClient {
     /** When true, use Pepperstone Live Open API host. */
     isLive?: boolean;
   }): Promise<AccountSnapshot>;
+  /** Read-only positions/orders reconcile — never submits or modifies. */
+  reconcileTradingState(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    isLive?: boolean;
+  }): Promise<TradingReconcileState>;
   discoverXauUsd(args: {
     accessToken: string;
     clientId: string;
@@ -302,6 +321,58 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
               ? leverageInCents / 100
               : asNumber(t.leverage)
         };
+      });
+    },
+
+    async reconcileTradingState(args) {
+      const isLive = Boolean(args.isLive);
+      return withOpenApiConnection({ isLive }, async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        })) as Record<string, unknown>;
+        const positions = (recon.position ??
+          recon.positions ??
+          []) as Array<Record<string, unknown>>;
+        const orders = (recon.order ??
+          recon.orders ??
+          []) as Array<Record<string, unknown>>;
+        const openPositions = positions.filter((p) => {
+          const tradeData = (p.tradeData ?? {}) as Record<string, unknown>;
+          const vol = asNumber(p.volume ?? tradeData.volume);
+          return vol == null || vol !== 0;
+        });
+        const pending = orders.filter((o) => {
+          const status = String(o.orderStatus ?? o.status ?? "");
+          // Spotware: ORDER_STATUS_ACCEPTED/FILLED vary; treat non-terminal as pending.
+          return !/CANCELLED|REJECTED|EXPIRED|FILLED/i.test(status);
+        });
+        const openSymbolIds = [
+          ...new Set(
+            openPositions
+              .map((p) => {
+                const tradeData = (p.tradeData ?? {}) as Record<string, unknown>;
+                return String(tradeData.symbolId ?? p.symbolId ?? "");
+              })
+              .filter(Boolean)
+          )
+        ];
+        const moneyDigits = 2;
+        return {
+          openPositionsCount: openPositions.length,
+          pendingOrdersCount: pending.length,
+          openSymbolIds,
+          equity: moneyFromCenti(recon.equity, moneyDigits),
+          freeMargin: moneyFromCenti(recon.freeMargin, moneyDigits),
+          usedMargin: moneyFromCenti(recon.usedMargin, moneyDigits)
+        } satisfies TradingReconcileState;
       });
     },
 
@@ -672,6 +743,16 @@ export function createMockOpenApiClient(opts?: {
           leverage: 100
         }
       );
+    },
+    async reconcileTradingState() {
+      return {
+        openPositionsCount: 0,
+        pendingOrdersCount: 0,
+        openSymbolIds: [],
+        equity: opts?.snapshot?.equity ?? 10000,
+        freeMargin: opts?.snapshot?.freeMargin ?? 9500,
+        usedMargin: opts?.snapshot?.usedMargin ?? 500
+      } satisfies TradingReconcileState;
     },
     async discoverXauUsd() {
       return (

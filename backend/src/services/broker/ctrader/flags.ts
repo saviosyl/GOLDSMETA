@@ -34,9 +34,37 @@ export function isCTraderDemoOrderSubmissionEnabled(
 /**
  * Live *execution* stays hard-disabled.
  * Live *account selection* and Live settings storage are implemented separately.
+ *
+ * Changing this to return true requires ALL of:
+ * 1. Explicit owner approval in a dedicated follow-up change
+ * 2. {@link isCTraderLiveExecutionOwnerApproved} returning true
+ * 3. Separate PR review — never flip casually for connectivity tests
  */
 export function isCTraderLiveEnabled(_source?: NodeJS.ProcessEnv): boolean {
   return false;
+}
+
+/**
+ * Separate guarded owner-approval latch for Live execution.
+ * Remains hard-false until a dedicated owner-approved change.
+ * Even if env tries to set CTRADER_LIVE_EXECUTION_OWNER_APPROVED=true,
+ * this function ignores env until the hard-coded return is changed.
+ */
+export function isCTraderLiveExecutionOwnerApproved(
+  _source?: NodeJS.ProcessEnv
+): boolean {
+  return false;
+}
+
+/**
+ * LIVE AutoTrade SHADOW mode — evaluate real production decisions and
+ * persist the exact order that WOULD be submitted, without calling NewOrder.
+ * Env-gated via CTRADER_LIVE_SHADOW_ENABLED. Never enables Live submission.
+ */
+export function isCTraderLiveShadowEnabled(
+  source: NodeJS.ProcessEnv = process.env
+): boolean {
+  return envTrue("CTRADER_LIVE_SHADOW_ENABLED", source);
 }
 
 /**
@@ -83,10 +111,14 @@ export function snapshotCTraderFlags(source?: NodeJS.ProcessEnv) {
     CTRADER_DEMO_ORDER_PREVIEW_ENABLED: isCTraderDemoOrderPreviewEnabled(source),
     CTRADER_DEMO_ORDER_SUBMISSION_ENABLED: demoSubmit,
     CTRADER_LIVE_ENABLED: isCTraderLiveEnabled(source),
+    CTRADER_LIVE_SHADOW_ENABLED: isCTraderLiveShadowEnabled(source),
+    CTRADER_LIVE_EXECUTION_OWNER_APPROVED: isCTraderLiveExecutionOwnerApproved(source),
     BROKER_EXECUTION_ENABLED: isBrokerExecutionEnabled(source),
     /** True only while Live + generic broker execution remain hard-false. */
     mutationFlagsHardFalse: !isCTraderLiveEnabled(source) && !isBrokerExecutionEnabled(source),
-    demoOrderSubmissionEnabled: demoSubmit
+    demoOrderSubmissionEnabled: demoSubmit,
+    liveShadowEnabled: isCTraderLiveShadowEnabled(source),
+    liveOrderSubmissionHardLocked: true
   };
 }
 
