@@ -1114,6 +1114,38 @@ export class ApiClient {
     return this.requestCTrader(`/v1/ctrader/live-quote${q}`);
   }
 
+  /**
+   * Shared XAUUSD market quote for every approved user.
+   * Does not require the viewer's personal cTrader connection.
+   */
+  async getMarketXauusdQuote(opts?: { refresh?: boolean }): Promise<{
+    available: boolean;
+    symbol?: string;
+    quote: {
+      symbolName?: string;
+      bid: number;
+      ask: number;
+      mid: number;
+      spread?: number;
+      brokerTimestamp?: string;
+      receivedAt?: string;
+      timestamp?: string;
+      freshness: string;
+      marketStatus: string;
+      ageMs?: number;
+    } | null;
+    mid?: number | null;
+    freshness?: string;
+    livePriceHealth: string;
+    marketStatus?: string;
+    label: string;
+    source?: string;
+    planIndependent?: boolean;
+  }> {
+    const q = opts?.refresh ? "?refresh=1" : "";
+    return this.request(`/v1/market/xauusd/quote${q}`);
+  }
+
   /** Display-only XAUUSD OHLC candles for Plan chart — never used by trading logic. */
   async getCTraderCandles(opts?: {
     timeframe?: string;
@@ -1154,6 +1186,35 @@ export class ApiClient {
       }
       throw err;
     }
+  }
+
+  /**
+   * Shared XAUUSD OHLC for Plan chart — all approved users.
+   * Does not require the viewer's personal cTrader connection.
+   */
+  async getMarketXauusdCandles(opts?: {
+    timeframe?: string;
+    count?: number;
+  }): Promise<{
+    symbol: string;
+    timeframe: string;
+    bars: Array<{
+      time: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume?: number | null;
+    }>;
+    source: string;
+    cached?: boolean;
+    marketStatus?: string;
+    updatedAt?: string;
+    planIndependent?: boolean;
+  }> {
+    const tf = encodeURIComponent(opts?.timeframe ?? "M15");
+    const count = opts?.count ?? 120;
+    return this.request(`/v1/market/xauusd/candles?tf=${tf}&count=${count}`);
   }
 
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {

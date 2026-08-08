@@ -18,7 +18,7 @@ export function useXauusdCandles(timeframe: ChartTimeframe, enabled = true) {
       if (inFlight.current && !force) return;
       inFlight.current = true;
       try {
-        const res = (await api.getCTraderCandles({
+        const res = (await api.getMarketXauusdCandles({
           timeframe,
           count: 120
         })) as CandlesResponse;

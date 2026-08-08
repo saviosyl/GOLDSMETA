@@ -11,6 +11,7 @@ import { buildDevicesRouter } from "./routes/devices";
 import { buildHealthRouter } from "./routes/health";
 import { buildJournalRouter } from "./routes/journal";
 import { buildMarketFeedRouter } from "./routes/marketFeed";
+import { buildMarketDataRouter } from "./routes/marketData";
 import { buildNotificationsRouter } from "./routes/notifications";
 import { buildPushRouter } from "./routes/push";
 import { buildSettingsRouter } from "./routes/settings";
@@ -124,6 +125,7 @@ export const createApiApp = (
   app.use(buildPushRouter(store));
   app.use(buildNotificationsRouter(store));
   app.use(buildMarketFeedRouter(store));
+  app.use(buildMarketDataRouter());
   app.use(buildDecisionsRouter(store));
   app.use(buildSetupsRouter(store));
   app.use(buildV4Router(store));

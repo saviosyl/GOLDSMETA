@@ -108,6 +108,11 @@ export async function getXauusdCandles(args: {
   count?: number;
   api?: CTraderOpenApiClient;
   nowMs?: number;
+  /**
+   * `shared` → process cache key XAUUSD:{tf}:{count} for multi-user market feed.
+   * `user` (default) → per-UID broker cache (personal diagnostics only).
+   */
+  cacheScope?: "shared" | "user";
 }): Promise<{
   symbol: "XAUUSD";
   timeframe: TrendbarPeriodKey;
@@ -127,7 +132,11 @@ export async function getXauusdCandles(args: {
   }
 
   const count = Math.min(Math.max(args.count ?? 120, 20), 300);
-  const cacheKey = `${args.ownerUid}:${args.timeframe}:${count}:${connection.symbolId}`;
+  const cacheScope = args.cacheScope ?? "user";
+  const cacheKey =
+    cacheScope === "shared"
+      ? `XAUUSD:${args.timeframe}:${count}`
+      : `${args.ownerUid}:${args.timeframe}:${count}:${connection.symbolId}`;
   const nowMs = args.nowMs ?? Date.now();
   const hit = cache.get(cacheKey);
   if (hit && hit.expiresAt > nowMs && hit.bars.length > 0) {

@@ -28,13 +28,13 @@ const { mockApi } = vi.hoisted(() => {
     listSetups: vi.fn(),
     v5Briefing: vi.fn(),
     v5Score: vi.fn(),
-    getCTraderCandles: vi.fn().mockResolvedValue({
+    getMarketXauusdCandles: vi.fn().mockResolvedValue({
       symbol: "XAUUSD",
       timeframe: "M15",
       bars: [
         { time: 1_720_000_000, open: 2380, high: 2385, low: 2378, close: 2383 }
       ],
-      source: "CTRADER_TRENDBARS"
+      source: "SHARED_CTRADER_TRENDBARS"
     })
   };
   return { mockApi };

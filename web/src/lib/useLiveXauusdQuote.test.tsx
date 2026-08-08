@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 import { QuoteProvider, useShellQuote } from "./quoteContext";
 import { useLiveXauusdQuote } from "./useLiveXauusdQuote";
 
-const getCTraderLiveQuote = vi.fn();
+const getMarketXauusdQuote = vi.fn();
 
 vi.mock("./auth", () => ({
   useAuth: () => ({
     api: {
-      getCTraderLiveQuote: (...args: unknown[]) => getCTraderLiveQuote(...args)
+      getMarketXauusdQuote: (...args: unknown[]) => getMarketXauusdQuote(...args)
     }
   })
 }));
@@ -45,11 +45,11 @@ function quoteResponse(mid: number, seq: number) {
 
 describe("useLiveXauusdQuote", () => {
   beforeEach(() => {
-    getCTraderLiveQuote.mockReset();
+    getMarketXauusdQuote.mockReset();
   });
 
   it("loads the latest quote snapshot immediately without waiting for a plan update", async () => {
-    getCTraderLiveQuote.mockResolvedValue(quoteResponse(4265.045, 3));
+    getMarketXauusdQuote.mockResolvedValue(quoteResponse(4265.045, 3));
 
     const { result } = renderHook(
       () => {
@@ -69,29 +69,29 @@ describe("useLiveXauusdQuote", () => {
     expect(result.current.quote?.freshness).toBe("LIVE");
     expect(result.current.quote?.bid).toBeCloseTo(4264.745, 5);
     expect(result.current.quote?.ask).toBeCloseTo(4265.345, 5);
-    expect(getCTraderLiveQuote).toHaveBeenCalled();
+    expect(getMarketXauusdQuote).toHaveBeenCalled();
   });
 
   it("retrieves a fresh snapshot after reconnect (online event)", async () => {
-    getCTraderLiveQuote.mockResolvedValue(quoteResponse(1.5, 1));
+    getMarketXauusdQuote.mockResolvedValue(quoteResponse(1.5, 1));
 
     renderHook(() => useLiveXauusdQuote({ enabled: true }), { wrapper });
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const callsAfterMount = getCTraderLiveQuote.mock.calls.length;
+    const callsAfterMount = getMarketXauusdQuote.mock.calls.length;
 
     await act(async () => {
       window.dispatchEvent(new Event("online"));
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(getCTraderLiveQuote.mock.calls.length).toBeGreaterThan(callsAfterMount);
+    expect(getMarketXauusdQuote.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 
   it("does not clear broker quote when decision fallback would overwrite", async () => {
-    getCTraderLiveQuote.mockResolvedValue(quoteResponse(4265.1, 1));
+    getMarketXauusdQuote.mockResolvedValue(quoteResponse(4265.1, 1));
     const { result } = renderHook(
       () => {
         useLiveXauusdQuote({ enabled: true });

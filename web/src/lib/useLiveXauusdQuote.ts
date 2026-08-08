@@ -138,13 +138,14 @@ export function useLiveXauusdQuote(opts?: { enabled?: boolean }): void {
       }
       inFlight.current = true;
       try {
-        const res = (await api.getCTraderLiveQuote(
+        // Shared market quote — not the viewer's personal cTrader connection.
+        const res = (await api.getMarketXauusdQuote(
           force ? { refresh: true } : undefined
         )) as QuoteApiResponse;
         const shell = toShellQuote(res);
         if (shell) apply(shell);
       } catch {
-        // Keep last verified broker quote visible; mark delayed if we had one.
+        // Keep last verified market quote visible; preserve MARKET_CLOSED.
         const current = quoteRef.current;
         if (current?.source === "broker" && current.price != null) {
           apply({
