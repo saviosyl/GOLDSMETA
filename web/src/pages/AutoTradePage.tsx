@@ -2027,7 +2027,6 @@ export function AutoTradePage() {
       </section>
 
       <section className="gm-at-card gm-news-guard" data-testid="news-guard-card">
-        {/* Safety patch: truthful calendar provider status (cache-bust deploy). */}
         <h3>Economic calendar</h3>
         <p className="gm-meta" data-testid="news-protection-status">
           News protection:{" "}
