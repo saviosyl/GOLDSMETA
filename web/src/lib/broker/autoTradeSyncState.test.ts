@@ -132,4 +132,29 @@ describe("autoTradeSyncState", () => {
     });
     expect(sync.marketLabel).not.toMatch(/status unknown/i);
   });
+
+  it("keeps Demo connected from control-centre alone when diagnostics is null (gateway timeout)", () => {
+    const sync = deriveAutoTradeSyncSummary({
+      mode: "demo",
+      centre: connectedCentre,
+      diagnostics: null,
+      accounts: [
+        {
+          ctidTraderAccountId: "demo-4810",
+          accountIdMasked: "****4810",
+          isLive: false,
+          selected: true,
+          brokerNameTitle: "Pepperstone"
+        } as never
+      ],
+      settings: null
+    });
+    expect(sync.connected).toBe(true);
+    expect(sync.accountSelected).toBe(true);
+    expect(sync.accountMasked).toBe("****4810");
+    expect(sync.connectionLabel).toBe("Connected");
+    expect(sync.checksOk).toBe(true);
+    expect(sync.goldOk).toBe(true);
+    expect(sync.quoteLabel).toBe("Previous-session quote");
+  });
 });

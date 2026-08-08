@@ -82,8 +82,13 @@ export class ApiClient {
      * when the env var is omitted so Broker Control Centre cannot silently hit
      * production `api` without secrets and show false "Setup required".
      */
+    /**
+     * Prefer the Cloud Run Function URL: the cloudfunctions.net gateway can 504
+     * long Open-API diagnostics while control-centre / qualification stay healthy.
+     * CORS allows the production origin on this host.
+     */
     const productionCTraderFallback =
-      "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview";
+      "https://apictraderpreview-j7lu3gvotq-uc.a.run.app";
     const useProdFallback =
       !ctraderEnv &&
       import.meta.env.PROD &&

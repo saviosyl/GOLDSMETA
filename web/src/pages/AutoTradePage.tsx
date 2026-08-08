@@ -115,6 +115,8 @@ export function AutoTradePage() {
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
   const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
+  const [qualificationError, setQualificationError] = useState<string | null>(null);
+  const [qualificationLoading, setQualificationLoading] = useState(true);
   const reloadGenRef = useRef(0);
   const shellQuote = useShellQuote().quote;
 
@@ -138,9 +140,11 @@ export function AutoTradePage() {
   }, []);
 
   const reload = useCallback(async () => {
-    // Parallel fetch of the same authoritative cTrader sources Broker uses.
-    // latest-request-wins via generation so a slow stale response cannot overwrite.
+    // Mirror Broker Control Centre: paint from control-centre + accounts + qualification
+    // first. Diagnostics is optional enrichment and must NEVER block connection/qualification UI
+    // (Cloud Functions gateway can 504 buildDiagnostics while Broker still shows CONNECTED).
     const gen = ++reloadGenRef.current;
+    setQualificationLoading(true);
     try {
       const next = await api.autoTradeStatus();
       if (gen !== reloadGenRef.current) return;
@@ -152,31 +156,57 @@ export function AutoTradePage() {
       const code = typeof err === "object" && err && "code" in err ? String((err as { code?: string }).code ?? "") : "";
       setError(code ? friendlyApiCode(code, msg).message : friendlyBrokerReason(msg, msg));
     }
-    const [centreResult, diagResult, accountsResult, qualResult] = await Promise.allSettled([
+
+    const [centreResult, accountsResult, qualResult] = await Promise.allSettled([
       api.getBrokerControlCentre(),
-      api.getCTraderDiagnostics(),
       api.listCTraderAccounts(),
       api.getAutoTradeQualification()
     ]);
     if (gen !== reloadGenRef.current) return;
+
     if (centreResult.status === "fulfilled") {
       setCentre(centreResult.value);
-    }
-    if (diagResult.status === "fulfilled") {
-      const d = diagResult.value;
-      setDiagnostics(d);
-      if (d.selectedAccountIsLive || d.environment === "LIVE") setMode("live");
-      else if (d.demoAccountSelected || d.accountSelected) setMode("demo");
-    } else {
-      // Keep prior diagnostics if a transient failure occurs — do not wipe
-      // a valid Broker-selected account because one diagnostics call failed.
     }
     if (accountsResult.status === "fulfilled") {
       setAccounts(accountsResult.value.accounts ?? []);
     }
     if (qualResult.status === "fulfilled") {
       setQualification(qualResult.value);
+      setQualificationError(null);
+    } else {
+      const reason =
+        qualResult.reason instanceof Error
+          ? qualResult.reason.message
+          : "Unable to load qualification status";
+      const code =
+        typeof qualResult.reason === "object" &&
+        qualResult.reason &&
+        "code" in qualResult.reason
+          ? String((qualResult.reason as { code?: string }).code ?? "")
+          : "";
+      // Safe diagnostic only — never tokens / account numbers beyond already-masked UI state.
+      console.warn("[AutoTrade] qualification load failed", {
+        code: code || undefined,
+        message: reason
+      });
+      setQualificationError(
+        code ? friendlyApiCode(code, reason).message : friendlyBrokerReason(reason, reason)
+      );
     }
+    setQualificationLoading(false);
+
+    // Optional diagnostics — apply only if this reload generation is still current.
+    void (async () => {
+      try {
+        const d = await api.getCTraderDiagnostics();
+        if (gen !== reloadGenRef.current) return;
+        setDiagnostics(d);
+        if (d.selectedAccountIsLive || d.environment === "LIVE") setMode("live");
+        else if (d.demoAccountSelected || d.accountSelected) setMode("demo");
+      } catch {
+        // Keep prior diagnostics — do not wipe a Broker-selected account.
+      }
+    })();
   }, [api]);
 
   const loadSettings = useCallback(
@@ -265,6 +295,11 @@ export function AutoTradePage() {
   const modeLabel = sync.modeLabel;
   const fundsLabel = sync.fundsLabel;
 
+  const tradingAuthorised = Boolean(
+    diagnostics?.connection?.oauthScope === "trading" ||
+      qualification?.blockers?.some((b) => b.id === "trading_scope" && b.ok)
+  );
+
   const onboarding = useMemo(
     () =>
       buildOnboardingSteps({
@@ -276,7 +311,7 @@ export function AutoTradePage() {
         settingsSaved,
         checksOk: sync.checksOk,
         previewOk,
-        tradingAuthorised: diagnostics?.connection?.oauthScope === "trading",
+        tradingAuthorised,
         autoTradeOn: false
       }),
     [
@@ -288,7 +323,7 @@ export function AutoTradePage() {
       mode,
       settingsSaved,
       previewOk,
-      diagnostics?.connection?.oauthScope
+      tradingAuthorised
     ]
   );
 
@@ -478,13 +513,16 @@ export function AutoTradePage() {
   );
   const brokerQuoteLive =
     brokerQuoteHealthy &&
-    (Boolean(diagnostics?.liveQuoteReceived) ||
-      (!diagnostics?.quote?.stale && diagnostics?.quote?.bid != null));
+    Boolean(diagnostics?.liveQuoteReceived) &&
+    !diagnostics?.quote?.stale &&
+    diagnostics?.quote?.bid != null &&
+    (diagnostics?.quote?.marketStatus || "").toUpperCase().includes("OPEN");
   const marketDataConnected = Boolean(
     (shellQuote && !shellQuote.unavailable && shellQuote.price != null) ||
       sync.marketStatusRaw ||
       sync.bid != null ||
-      sync.checksOk
+      sync.checksOk ||
+      centre?.readiness?.connectionSummary?.symbolName
   );
   const marketDataLabel = !marketDataConnected
     ? "Waiting"
@@ -498,7 +536,8 @@ export function AutoTradePage() {
     sync.connected ||
     Boolean(centre?.readiness?.connected) ||
     Boolean(diagnostics?.oauthConnected) ||
-    Boolean(qualification?.accountIdPresent && qualification.accountMasked);
+    Boolean(qualification?.accountIdPresent && qualification.accountMasked) ||
+    Boolean(accounts.some((a) => a.selected));
   const heroState = isLiveEnv
     ? "SHADOW"
     : display === "SHADOW"
@@ -582,9 +621,9 @@ export function AutoTradePage() {
             <span>Personal broker quotes</span>
             <strong className={brokerQuoteHealthy ? "is-ok" : "is-warn"}>
               {brokerQuoteLive
-                ? "Connected"
+                ? "Live"
                 : brokerQuoteHealthy
-                  ? "Connected · session quote"
+                  ? "Active"
                   : brokerConnected
                     ? "Waiting"
                     : "Unavailable"}
@@ -612,6 +651,7 @@ export function AutoTradePage() {
               setBusy(true);
               try {
                 setQualification(await api.startAutoTradeQualification());
+                setQualificationError(null);
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Could not start qualification");
               } finally {
@@ -672,6 +712,48 @@ export function AutoTradePage() {
             })();
           }}
         />
+      ) : qualificationError ? (
+        <section
+          className="gm-qual-dash gm-qual-dash--error"
+          data-testid="autotrade-qualification-error"
+          aria-label="AutoTrade qualification"
+        >
+          <div className="gm-qual-dash__head">
+            <div>
+              <p className="gm-label">AutoTrade qualification</p>
+              <h2>Unable to load qualification status</h2>
+            </div>
+          </div>
+          <p className="gm-meta" data-testid="qual-load-error-detail">
+            {qualificationError}
+          </p>
+          <div className="gm-qual-actions">
+            <button
+              type="button"
+              className="gm-btn gm-btn-primary"
+              disabled={busy || qualificationLoading}
+              data-testid="qual-retry"
+              onClick={() => {
+                void reload();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </section>
+      ) : qualificationLoading ? (
+        <section
+          className="gm-qual-dash"
+          data-testid="autotrade-qualification-loading"
+          aria-label="AutoTrade qualification"
+        >
+          <div className="gm-qual-dash__head">
+            <div>
+              <p className="gm-label">AutoTrade qualification</p>
+              <h2>Loading qualification…</h2>
+            </div>
+          </div>
+        </section>
       ) : !brokerConnected ? (
         <section
           className="gm-at-setup-required"

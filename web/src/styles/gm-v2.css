@@ -1969,6 +1969,10 @@ body.gm-drawer-open {
 }
 
 /* —— AutoTrade qualification dashboard —— */
+.gm-qual-dash--error {
+  border-color: color-mix(in srgb, var(--gm-danger, #c45c4a) 45%, transparent);
+}
+
 .gm-qual-dash {
   background: #fff;
   border: 1px solid var(--border);

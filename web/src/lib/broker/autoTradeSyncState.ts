@@ -54,32 +54,34 @@ export function deriveAutoTradeSyncSummary(args: {
   const summary = centre?.readiness?.connectionSummary;
   const selectedListed = accounts.find((a) => a.selected) ?? null;
 
+  // Prefer Broker Control Centre + account list first — diagnostics is optional and
+  // may 504 on the Cloud Functions gateway without meaning the broker is disconnected.
   const accountMasked =
-    diagnostics?.connection?.accountMasked ??
     summary?.accountMasked ??
     selectedListed?.accountIdMasked ??
+    diagnostics?.connection?.accountMasked ??
     centre?.readiness?.connectionSummary?.accountMasked ??
     null;
 
   // Account type comes from server selection — never from the UI mode tab alone.
   const accountIsLive = Boolean(
-    diagnostics?.selectedAccountIsLive ||
-      diagnostics?.environment === "LIVE" ||
-      selectedListed?.isLive
+    selectedListed?.isLive ||
+      diagnostics?.selectedAccountIsLive ||
+      diagnostics?.environment === "LIVE"
   );
 
   const accountSelected = Boolean(
-    diagnostics?.accountSelected ||
+    summary?.accountMasked ||
+      selectedListed ||
+      diagnostics?.accountSelected ||
       diagnostics?.demoAccountSelected ||
       diagnostics?.selectedAccountIsLive ||
-      selectedListed ||
-      summary?.accountMasked ||
       settings?.selectedAccountId
   );
 
   const connected = Boolean(
-    diagnostics?.oauthConnected ||
-      centre?.readiness?.connected ||
+    centre?.readiness?.connected ||
+      diagnostics?.oauthConnected ||
       (accountSelected && accountMasked)
   );
 
@@ -120,26 +122,34 @@ export function deriveAutoTradeSyncSummary(args: {
       : `${symbolName} · status unknown`;
 
   const quoteStale = Boolean(diagnostics?.quote?.stale);
-  const quoteLabel = !diagnostics?.quote
-    ? "No quote yet"
-    : marketOpen && !quoteStale
+  const hasCentreQuote = Boolean(summary?.lastQuoteAt);
+  const quoteLabel = diagnostics?.quote
+    ? marketOpen && !quoteStale
       ? "Live quote"
-      : "Previous-session quote";
+      : "Previous-session quote"
+    : hasCentreQuote
+      ? "Previous-session quote"
+      : "No quote yet";
 
   const executionLabel =
     !accountSelected
       ? "Not eligible — select a broker account"
-      : !marketOpen
+      : diagnostics?.quote && !marketOpen
         ? "Not eligible — market closed"
         : quoteStale
           ? "Not eligible — quote stale"
-          : "Quote not eligible for execution";
+          : hasCentreQuote && !diagnostics?.quote
+            ? "Not eligible — diagnostics pending"
+            : "Quote not eligible for execution";
 
-  const goldOk = Boolean(diagnostics?.goldSymbolFound || summary?.symbolName);
+  const goldOk = Boolean(
+    summary?.symbolName || diagnostics?.goldSymbolFound || diagnostics?.symbol?.symbolName
+  );
   const checksOk = Boolean(
     diagnostics?.liveQuoteReceived ||
       diagnostics?.quote ||
-      diagnostics?.marketStatusAvailable
+      diagnostics?.marketStatusAvailable ||
+      hasCentreQuote
   );
 
   return {

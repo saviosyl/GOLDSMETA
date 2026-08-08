@@ -37,7 +37,9 @@ export function buildSetupBlockers(s: SetupSnapshot): QualificationBlocker[] {
     },
     {
       id: "oauth",
-      label: "Pepperstone Demo connected",
+      label: s.accountMasked
+        ? `Pepperstone Demo ${s.accountMasked} connected`
+        : "Pepperstone Demo connected",
       ok: s.oauthConnected && s.demoAccountSelected && !s.accountIsLive
     },
     {
@@ -53,12 +55,12 @@ export function buildSetupBlockers(s: SetupSnapshot): QualificationBlocker[] {
     },
     {
       id: "broker_quotes",
-      label: "Personal broker account checks",
+      label: "Broker quotes available",
       ok: s.brokerQuoteHealthy
     },
     {
       id: "risk",
-      label: "Risk limits configured",
+      label: "Risk settings configured",
       ok: s.riskConfigured
     },
     {

@@ -447,6 +447,7 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
     expect(screen.getByTestId("qual-start")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-connection-label")).toHaveTextContent("Connected");
+    expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(/Active|Live/i);
     expect(screen.getByTestId("autotrade-market-label")).toHaveTextContent(
       /XAUUSD · Market closed/i
     );
@@ -459,7 +460,9 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-step-4-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-5-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-6-status")).toHaveTextContent("Complete");
-    expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Current");
+    expect(screen.getByTestId("autotrade-step-9-status")).toHaveTextContent("Current");
+    // Trading scope comes from qualification blockers when diagnostics omit oauthScope.
+    expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-11-status")).toHaveTextContent("Locked");
     expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Demo · \*\*\*\*4810/);
     expect(screen.getByTestId("autotrade-live-execution-stat")).toHaveTextContent(/Not selected/i);
@@ -473,5 +476,172 @@ describe("AutoTradePage", () => {
     if (reconnectIdx >= 0) {
       expect(connectedIdx).toBeLessThan(reconnectIdx);
     }
+  });
+
+  it("does not wait on hanging diagnostics to show Broker Demo + qualification", async () => {
+    api.getBrokerControlCentre.mockResolvedValue({
+      defaultBroker: "pepperstone_ctrader",
+      autoTrade: "OFF",
+      brokers: [],
+      automationModes: [],
+      readiness: {
+        setupRequired: false,
+        authSetupRequired: false,
+        oauthConfigured: true,
+        connected: true,
+        demonstrationAvailable: true,
+        automationMode: "OFF",
+        autoTrade: "OFF",
+        orderSubmissionEnabled: false,
+        liveEnabled: false,
+        wizardSteps: [],
+        label: "Connected",
+        connectionSummary: {
+          accountMasked: "48…10",
+          brokerName: "Pepperstone",
+          pepperstoneConfirmed: true,
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        },
+        auth: { status: "HEALTHY", brokerSetupEnabled: true, notes: [] },
+        qualification: {
+          unlocked: false,
+          canActivate: false,
+          failed: [],
+          progress: {
+            completedPreviews: 0,
+            requiredPreviews: 20,
+            approvedControlledDemoTrades: 0,
+            requiredTrades: 5,
+            daysSinceFirstTrade: null,
+            requiredDays: 7
+          }
+        }
+      }
+    });
+    api.listCTraderAccounts.mockResolvedValue({
+      accounts: [
+        {
+          ctidTraderAccountId: "48014710",
+          accountIdMasked: "48…10",
+          isLive: false,
+          selected: true,
+          brokerNameTitle: "Pepperstone",
+          depositCurrency: "EUR"
+        }
+      ]
+    });
+    api.getAutoTradeQualification.mockResolvedValue({
+      state: "SETUP_REQUIRED",
+      overallLabel: "Setup required",
+      accountMasked: "48…10",
+      accountIdPresent: true,
+      environment: "DEMO",
+      nextAction: "Authorise Demo Trading",
+      nextRequirement: "Demo trading permission",
+      blockers: [
+        { id: "oauth", label: "Pepperstone Demo 48…10 connected", ok: true },
+        { id: "symbol", label: "XAUUSD verified", ok: true },
+        { id: "trading_scope", label: "Demo trading permission", ok: false, action: "Authorise Demo Trading" },
+        { id: "broker_quotes", label: "Broker quotes available", ok: true },
+        { id: "risk", label: "Risk settings configured", ok: true }
+      ],
+      canStart: false,
+      canPause: false,
+      canResume: false,
+      canEnableDemoAuto: false,
+      canBeginLiveActivation: false,
+      preview: { completed: 0, required: 20 },
+      controlledDemo: { completed: 0, required: 5, open: 0, blockedAttempts: 0 },
+      observation: { day: null, requiredDays: 7, firstTradeAt: null, remainingMs: null },
+      safety: { completed: 0, required: 6, checks: [] },
+      liveEligibility: {
+        demoAutoTrades: 0,
+        requiredTrades: 20,
+        observationDay: null,
+        requiredDays: 7,
+        criticalSafetyFailures: 0,
+        status: "LOCKED"
+      },
+      demoAuto: { enabled: false, ready: false },
+      liveOrders: "LOCKED",
+      recentPreviews: [],
+      recentControlledTrades: [],
+      startedAt: null,
+      updatedAt: null
+    });
+    // Diagnostics hangs — historically blocked Promise.allSettled and hid qualification.
+    api.getCTraderDiagnostics.mockImplementation(
+      () => new Promise(() => {
+        /* never resolves */
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Demo · 48…10/)
+    );
+    expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Connected/i);
+    expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(/Active|Live/i);
+    expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
+    expect(screen.getByTestId("qual-next-action")).toHaveTextContent(/Authorise Demo Trading/i);
+    expect(screen.getByTestId("qual-authorise-trading")).toBeInTheDocument();
+    expect(screen.queryByTestId("autotrade-setup-required")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("qual-start")).not.toBeInTheDocument();
+  });
+
+  it("shows qualification retry UI when qualification API fails", async () => {
+    api.getBrokerControlCentre.mockResolvedValue({
+      defaultBroker: "pepperstone_ctrader",
+      autoTrade: "OFF",
+      brokers: [],
+      automationModes: [],
+      readiness: {
+        setupRequired: false,
+        connected: true,
+        connectionSummary: {
+          accountMasked: "48…10",
+          brokerName: "Pepperstone",
+          pepperstoneConfirmed: true,
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        }
+      }
+    });
+    api.listCTraderAccounts.mockResolvedValue({
+      accounts: [
+        {
+          ctidTraderAccountId: "48014710",
+          accountIdMasked: "48…10",
+          isLive: false,
+          selected: true
+        }
+      ]
+    });
+    api.getCTraderDiagnostics.mockRejectedValue(new Error("gateway timeout"));
+    api.getAutoTradeQualification.mockRejectedValue(
+      Object.assign(new Error("Unable to load qualification status"), {
+        code: "INTERNAL"
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-qualification-error")).toBeInTheDocument()
+    );
+    expect(screen.getByTestId("qual-retry")).toBeInTheDocument();
+    expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/48…10/);
   });
 });
