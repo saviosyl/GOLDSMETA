@@ -62,6 +62,9 @@ function applyProductionCTraderRuntimeEnv(): void {
 export const api = onRequest(
   {
     region: env.FIREBASE_REGION,
+    // Display candle fetches open a short-lived cTrader WS — allow headroom.
+    timeoutSeconds: 120,
+    memory: "512MiB",
     // Pinned owner UID for Auth integrity; T212 Practice DEMO secrets for
     // read-only / dry-run Invest diagnostics only. Never bind T212_LIVE_*.
     // CTRADER_* secrets enable Pepperstone OAuth on production `api` as well as

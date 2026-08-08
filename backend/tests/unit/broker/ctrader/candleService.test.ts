@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeCandleTimeframe,
-  clearCandleCacheForTests
+  clearCandleCacheForTests,
+  classifyCandleFailure
 } from "../../../../src/services/broker/ctrader/candleService";
 import { parseTrendbarCandles } from "../../../../src/services/broker/ctrader/openApiClient";
 
@@ -12,6 +13,18 @@ describe("normalizeCandleTimeframe", () => {
     expect(normalizeCandleTimeframe("1H")).toBe("H1");
     expect(normalizeCandleTimeframe("240")).toBe("H4");
     expect(normalizeCandleTimeframe("bad")).toBeNull();
+  });
+});
+
+describe("classifyCandleFailure", () => {
+  it("maps safe diagnostic categories", () => {
+    expect(classifyCandleFailure(Object.assign(new Error("x"), { code: "CANDLE_CTRADER_TIMEOUT" }))).toBe(
+      "CANDLE_CTRADER_TIMEOUT"
+    );
+    expect(classifyCandleFailure(Object.assign(new Error("x"), { code: "CANDLE_EMPTY_RESPONSE" }))).toBe(
+      "CANDLE_EMPTY_RESPONSE"
+    );
+    expect(classifyCandleFailure(new Error("ETIMEDOUT"))).toBe("CANDLE_CTRADER_TIMEOUT");
   });
 });
 
