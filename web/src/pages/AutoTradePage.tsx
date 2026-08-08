@@ -2038,7 +2038,9 @@ export function AutoTradePage() {
             : ""}
         </p>
         {!news?.configured ? (
-          <p className="gm-meta">ECONOMIC CALENDAR · Not configured</p>
+          <p className="gm-meta" data-testid="economic-calendar-not-configured">
+            ECONOMIC CALENDAR · Not configured
+          </p>
         ) : null}
         {news?.active ? (
           <p className="gm-news-guard__blocked" data-testid="news-guard-blocked">
