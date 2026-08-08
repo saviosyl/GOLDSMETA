@@ -163,7 +163,9 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("overview-page");
-    const advanced = screen.getByTestId("advanced-diagnostics-section");
+    // Wait for pack load — advanced diagnostics only mounts with an intraday plan.
+    await screen.findByTestId("todays-intraday-plan");
+    const advanced = await screen.findByTestId("advanced-diagnostics-section");
     await user.click(advanced.querySelector("summary")!);
     const system = within(advanced).getByTestId("system-status-collapse");
     await user.click(system.querySelector("summary")!);
