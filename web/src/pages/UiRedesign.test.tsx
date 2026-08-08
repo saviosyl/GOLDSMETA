@@ -148,13 +148,17 @@ describe("OverviewPage redesign", () => {
       </MemoryRouter>
     );
     expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE|WAIT/i);
+    expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE|WAIT|HOLD/i);
     expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-status-card")).toBeInTheDocument();
+    expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("premium-insight-strip")).not.toBeInTheDocument();
+    expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
+    const analysis = screen.getByTestId("advanced-analysis-section");
+    expect(analysis).not.toHaveAttribute("open");
+    await user.click(analysis.querySelector("summary")!);
     expect(screen.getAllByTestId("setup-checklist").length).toBeGreaterThan(0);
     expect(screen.getByTestId("research-tab-plan")).toBeInTheDocument();
-    expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("premium-insight-strip")).toBeInTheDocument();
-    expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
@@ -173,6 +177,8 @@ describe("OverviewPage redesign", () => {
     await screen.findByTestId("overview-page");
     // Wait for pack load — advanced diagnostics only mounts with an intraday plan.
     await screen.findByTestId("todays-intraday-plan");
+    const analysis = await screen.findByTestId("advanced-analysis-section");
+    await user.click(analysis.querySelector("summary")!);
     const advanced = await screen.findByTestId("advanced-diagnostics-section");
     await user.click(advanced.querySelector("summary")!);
     const system = within(advanced).getByTestId("system-status-collapse");
