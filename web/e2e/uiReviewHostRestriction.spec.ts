@@ -11,7 +11,12 @@ test.describe("UI review host / production isolation", () => {
     await page.goto("/ui-review/?scenario=issue50-below-val");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("intraday-action-card")).toBeVisible();
-    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/AutoTrade OFF/i);
+    // Premium DecisionDashboard uses dashboard-autotrade-off; legacy header used
+    // intraday-autotrade-off. Accept either so ui-review stays host-gated.
+    const autoTradeOff = page
+      .getByTestId("dashboard-autotrade-off")
+      .or(page.getByTestId("intraday-autotrade-off"));
+    await expect(autoTradeOff.first()).toContainText(/AutoTrade OFF/i);
     await expect(page.locator("body")).toContainText(/LABELLED|PREVIEW|FIXTURE/i);
   });
 
