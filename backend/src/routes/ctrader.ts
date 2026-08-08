@@ -505,9 +505,10 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     try {
       const accounts = await listAuthorisedAccountsForUser(uid);
       const existing = await getConnection(uid);
-      // Auto-select only when nothing is selected (or the prior selection is no
-      // longer authorised). Never overwrite an intentional Live selection with
-      // the sole Pepperstone Demo — that caused DEMO …10 to clobber LIVE …06.
+      // Auto-select the sole Pepperstone Demo only when nothing is selected.
+      // Never overwrite an existing selection (including Live …06) even if the
+      // Live account is temporarily missing from the authorised list — that
+      // previously clobbered LIVE …06 with DEMO …10 after accounts refresh.
       let autoSelected: {
         accountIdMasked: string;
         brokerNameTitle: string | null;
@@ -516,11 +517,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       const pepperstoneDemos = accounts.filter(
         (a) => !a.isLive && /pepperstone/i.test(a.brokerNameTitle ?? "")
       );
-      const selectedStillAuthorised = Boolean(
-        existing?.selectedAccountId &&
-          accounts.some((a) => a.ctidTraderAccountId === existing.selectedAccountId)
-      );
-      if (pepperstoneDemos.length === 1 && !selectedStillAuthorised) {
+      if (pepperstoneDemos.length === 1 && !existing?.selectedAccountId) {
         const only = pepperstoneDemos[0]!;
         const selected = await selectBrokerAccountForUser({
           ownerUid: uid,
@@ -533,7 +530,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           brokerNameTitle: selected.account.brokerName,
           accountType: "Demo"
         };
-      } else if (existing?.selectedAccountId && selectedStillAuthorised) {
+      } else if (existing?.selectedAccountId) {
         autoSelected = {
           accountIdMasked: existing.selectedAccountMasked ?? "—",
           brokerNameTitle: existing.brokerName,
