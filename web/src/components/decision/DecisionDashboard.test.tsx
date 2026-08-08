@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { chartExampleIntradayPlanFixture } from "../../fixtures/intradayPlanFixture";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
-import { DecisionDashboard } from "./DecisionDashboard";
+import { DecisionDashboard, DecisionSecondaryPanel } from "./DecisionDashboard";
 import { DetailedReportSections } from "./DetailedReportSections";
 import { TradePlanSummary } from "./TradePlanSummary";
 
@@ -70,7 +70,14 @@ describe("DecisionDashboard", () => {
     plan.geometryValid = false;
     plan.geometryMessage = "Trade levels failed safety validation.";
 
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} marketStructureMode="LIVE_RANGE_ONLY" />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} marketStructureMode="LIVE_RANGE_ONLY" />
+          <DecisionSecondaryPanel plan={plan} marketStructureMode="LIVE_RANGE_ONLY" />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/WAIT|WATCHING/i);
     expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(
@@ -90,6 +97,7 @@ describe("DecisionDashboard", () => {
         <>
           <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />
           <TradePlanSummary plan={plan} livePrice={4039} />
+          <DecisionSecondaryPanel plan={plan} livePrice={4039} />
         </>
       )
     );
@@ -112,7 +120,14 @@ describe("DecisionDashboard", () => {
     plan.geometryValid = false;
     plan.directionBias = "BULLISH";
 
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />
+          <DecisionSecondaryPanel plan={plan} />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("no-valid-bias-note")).toHaveTextContent(/not an entry signal/i);
     expect(screen.queryByText(/enter on bias/i)).not.toBeInTheDocument();
@@ -123,7 +138,14 @@ describe("DecisionDashboard", () => {
     plan.planStatus = "NO_VALID_PLAN";
     plan.geometryValid = false;
 
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />
+          <DecisionSecondaryPanel plan={plan} />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("analysis-timing-disclaimer")).toHaveTextContent(/not a guaranteed signal time/i);
     expect(screen.getByTestId("next-plan-update")).toHaveAttribute("title", expect.stringContaining("not guaranteed"));
@@ -136,6 +158,7 @@ describe("DecisionDashboard", () => {
       wrap(
         <>
           <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />
+          <DecisionSecondaryPanel plan={plan} />
           <DetailedReportSections plan={plan} />
         </>
       )
@@ -161,7 +184,14 @@ describe("DecisionDashboard", () => {
       detail: "5M close held"
     };
 
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />
+          <DecisionSecondaryPanel plan={plan} />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
@@ -180,7 +210,14 @@ describe("DecisionDashboard", () => {
       detail: "5M close held"
     };
 
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />
+          <DecisionSecondaryPanel plan={plan} livePrice={4039} />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY|PREPARE/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/75%\s*confidence/i);

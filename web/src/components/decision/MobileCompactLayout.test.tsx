@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { chartExampleIntradayPlanFixture } from "../../fixtures/intradayPlanFixture";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { DecisionDashboard } from "./DecisionDashboard";
+import { DecisionDashboard, DecisionSecondaryPanel } from "./DecisionDashboard";
 import { NotificationCentre } from "./NotificationCentre";
 
 const apiMock = vi.hoisted(() => ({
@@ -66,17 +66,20 @@ describe("Mobile compact layout contracts", () => {
   it("keeps WAIT fold compact with support/resistance and no long top paragraphs", () => {
     render(
       <MemoryRouter>
-        <DecisionDashboard
-          plan={waitPlan()}
-          marketFeedHealth={{
-            status: "amber",
-            title: "Market feed partially available",
-            subtitle: "Limited",
-            quoteStatus: "limited",
-            lastVerifiedAt: new Date().toISOString(),
-            lastVerifiedLabel: null
-          }}
-        />
+        <>
+          <DecisionDashboard
+            plan={waitPlan()}
+            marketFeedHealth={{
+              status: "amber",
+              title: "Market feed partially available",
+              subtitle: "Limited",
+              quoteStatus: "limited",
+              lastVerifiedAt: new Date().toISOString(),
+              lastVerifiedLabel: null
+            }}
+          />
+          <DecisionSecondaryPanel plan={waitPlan()} />
+        </>
       </MemoryRouter>
     );
 

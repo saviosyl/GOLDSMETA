@@ -29,8 +29,11 @@ type Props = {
   livePrice?: number | null;
   onRefresh?: () => void;
   refreshing?: boolean;
-  /** When true, omit secondary chrome so chart can sit immediately below. */
-  compact?: boolean;
+  /**
+   * hero = compact decision card only (chart sits immediately below).
+   * full = include secondary controls/details under the hero.
+   */
+  density?: "hero" | "full";
 };
 
 function WhyWaiting({
@@ -75,19 +78,21 @@ function WhyWaiting({
   );
 }
 
-export function DecisionDashboard({
+export function DecisionSecondaryPanel({
   plan,
-  marketFeedHealth,
   marketStructureMode,
   livePrice,
   onRefresh,
-  refreshing,
-  compact = true
-}: Props) {
+  refreshing
+}: {
+  plan: IntradayPlan;
+  marketStructureMode?: string | null;
+  livePrice?: number | null;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}) {
   const state = deriveDecisionDashboardState({ plan, marketStructureMode, livePrice });
   const chip = premiumDecisionChip(state, plan);
-  const subtitle = premiumDecisionSubtitle(state, livePrice, plan);
-  const statusLabel = premiumStatusLabel(state, plan);
   const isWaiting = state.mode === "WAIT" || state.mode === "WATCHING";
   const isPotential = state.mode === "POTENTIAL_BUY" || state.mode === "POTENTIAL_SELL";
   const isHold = state.mode === "HOLD" || state.mode === "NO_TRADE";
@@ -97,6 +102,88 @@ export function DecisionDashboard({
     state.mode === "HOLD" ||
     (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
+
+  return (
+    <div className="gm-decision-secondary" data-testid="decision-secondary-panel">
+      <div className="gm-action-row gm-action-row-compact" data-testid="premium-quick-actions">
+        <button
+          type="button"
+          className="gm-action-btn"
+          onClick={onRefresh}
+          disabled={refreshing}
+          data-testid="premium-refresh"
+        >
+          <RefreshCw aria-hidden />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
+          <Bell aria-hidden />
+          Alerts
+        </a>
+        <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
+          <CircleHelp aria-hidden />
+          Why wait?
+        </a>
+      </div>
+
+      {!isWaiting && (
+        <div className="gm-decision-facts gm-decision-facts-compact">
+          <div data-testid="decision-confirmation">
+            <span className="gm-label">5M confirm</span>
+            <strong>{state.confirmationPassed ? "Passed" : state.confirmationLabel}</strong>
+          </div>
+          {state.priceVsEntryZone && (
+            <div data-testid="decision-price-vs-entry">
+              <span className="gm-label">vs entry</span>
+              <strong>{state.priceVsEntryZone}</strong>
+            </div>
+          )}
+          {state.confidenceLabel && (
+            <div data-testid="decision-confidence">
+              <span className="gm-label">Setup quality</span>
+              <strong>{state.confidenceLabel}</strong>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPotential && (
+        <p className="gm-meta gm-potential-note" data-testid="potential-not-ready">
+          {state.nextRequiredCondition || "Not ready — wait for 5M confirmation."}
+        </p>
+      )}
+
+      <div className="gm-next-action gm-next-action-compact" data-testid="decision-next-action">
+        <span className="gm-label">Next</span>
+        <strong>{state.nextAction}</strong>
+      </div>
+
+      <PhoneAlertsControl compact />
+      {showWhy && <WhyWaiting plan={plan} state={state} />}
+      <p className="gm-decision-safety" data-testid="dashboard-safety">
+        Manual only · Review your risk · AutoTrade OFF
+      </p>
+      <span className="gm-sr-only" data-testid="dashboard-autotrade-off">
+        AutoTrade OFF
+      </span>
+    </div>
+  );
+}
+
+export function DecisionDashboard({
+  plan,
+  marketFeedHealth,
+  marketStructureMode,
+  livePrice,
+  onRefresh,
+  refreshing,
+  density = "hero"
+}: Props) {
+  const state = deriveDecisionDashboardState({ plan, marketStructureMode, livePrice });
+  const chip = premiumDecisionChip(state, plan);
+  const subtitle = premiumDecisionSubtitle(state, livePrice, plan);
+  const statusLabel = premiumStatusLabel(state, plan);
+  const isWaiting = state.mode === "WAIT" || state.mode === "WATCHING";
   const heroTone =
     chip === "PREPARE" ||
     chip === "PREPARE BUY" ||
@@ -187,92 +274,15 @@ export function DecisionDashboard({
         </div>
       </div>
 
-      {!compact ? (
-        <div className="gm-action-row" data-testid="premium-quick-actions">
-          <button
-            type="button"
-            className="gm-action-btn"
-            onClick={onRefresh}
-            disabled={refreshing}
-            data-testid="premium-refresh"
-          >
-            <RefreshCw aria-hidden />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-          <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
-            <Bell aria-hidden />
-            Enable alerts
-          </a>
-          <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
-            <CircleHelp aria-hidden />
-            Explain
-          </a>
-        </div>
-      ) : (
-        <div className="gm-action-row gm-action-row-compact" data-testid="premium-quick-actions">
-          <button
-            type="button"
-            className="gm-action-btn"
-            onClick={onRefresh}
-            disabled={refreshing}
-            data-testid="premium-refresh"
-          >
-            <RefreshCw aria-hidden />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-          <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
-            <Bell aria-hidden />
-            Alerts
-          </a>
-          <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
-            <CircleHelp aria-hidden />
-            Why wait?
-          </a>
-        </div>
-      )}
-
-      {!isWaiting && (
-        <div className="gm-decision-facts gm-decision-facts-compact">
-          <div data-testid="decision-confirmation">
-            <span className="gm-label">5M confirm</span>
-            <strong>{state.confirmationPassed ? "Passed" : state.confirmationLabel}</strong>
-          </div>
-          {state.priceVsEntryZone && (
-            <div data-testid="decision-price-vs-entry">
-              <span className="gm-label">vs entry</span>
-              <strong>{state.priceVsEntryZone}</strong>
-            </div>
-          )}
-          {state.confidenceLabel && (
-            <div data-testid="decision-confidence">
-              <span className="gm-label">Setup quality</span>
-              <strong>{state.confidenceLabel}</strong>
-            </div>
-          )}
-        </div>
-      )}
-
-      {isPotential && (
-        <p className="gm-meta gm-potential-note" data-testid="potential-not-ready">
-          {state.nextRequiredCondition || "Not ready — wait for 5M confirmation."}
-        </p>
-      )}
-
-      <div className="gm-next-action gm-next-action-compact" data-testid="decision-next-action">
-        <span className="gm-label">Next</span>
-        <strong>{state.nextAction}</strong>
-      </div>
-
-      <PhoneAlertsControl compact />
-
-      {showWhy && <WhyWaiting plan={plan} state={state} />}
-
-      <p className="gm-decision-safety" data-testid="dashboard-safety">
-        Manual only · Review your risk · AutoTrade OFF
-      </p>
-      <span className="gm-sr-only" data-testid="dashboard-autotrade-off">
-        AutoTrade OFF
-      </span>
+      {density === "full" ? (
+        <DecisionSecondaryPanel
+          plan={plan}
+          marketStructureMode={marketStructureMode}
+          livePrice={livePrice}
+          onRefresh={onRefresh}
+          refreshing={refreshing}
+        />
+      ) : null}
     </section>
   );
 }

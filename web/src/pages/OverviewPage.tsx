@@ -35,7 +35,10 @@ import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
-import { DecisionDashboard } from "../components/decision/DecisionDashboard";
+import {
+  DecisionDashboard,
+  DecisionSecondaryPanel
+} from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
 import { TradePlanSummary } from "../components/decision/TradePlanSummary";
 import { XauusdChartCard } from "../components/decision/XauusdChartCard";
@@ -570,7 +573,7 @@ export function OverviewPage() {
               livePrice={livePrice}
               onRefresh={refresh}
               refreshing={refreshing}
-              compact
+              density="hero"
             />
           </div>
 
@@ -589,6 +592,14 @@ export function OverviewPage() {
             livePrice={livePrice}
             marketStructureMode={mode}
             state={decisionState}
+          />
+
+          <DecisionSecondaryPanel
+            plan={intradayPlan}
+            marketStructureMode={mode}
+            livePrice={livePrice}
+            onRefresh={refresh}
+            refreshing={refreshing}
           />
 
           <PremiumInsightStrip

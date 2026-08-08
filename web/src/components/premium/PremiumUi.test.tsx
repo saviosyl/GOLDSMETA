@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { chartExampleIntradayPlanFixture } from "../../fixtures/intradayPlanFixture";
 import type { IntradayPlan } from "../../types/intradayPlan";
-import { DecisionDashboard } from "../decision/DecisionDashboard";
+import { DecisionDashboard, DecisionSecondaryPanel } from "../decision/DecisionDashboard";
 import { PremiumMarketStrip } from "./PremiumMarketStrip";
 import { PremiumInsightStrip } from "./PremiumInsightStrip";
 import { PremiumPlanCard } from "./PremiumPlanCard";
@@ -97,11 +97,14 @@ describe("Premium UI redesign", () => {
   it("renders premium WAIT hero with support/resistance and quick actions", () => {
     render(
       wrap(
-        <DecisionDashboard
-          plan={waitPlan()}
-          marketStructureMode="LIVE_RANGE_ONLY"
-          livePrice={4265.31}
-        />
+        <>
+          <DecisionDashboard
+            plan={waitPlan()}
+            marketStructureMode="LIVE_RANGE_ONLY"
+            livePrice={4265.31}
+          />
+          <DecisionSecondaryPanel plan={waitPlan()} marketStructureMode="LIVE_RANGE_ONLY" livePrice={4265.31} />
+        </>
       )
     );
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/WAIT|WATCHING/i);
