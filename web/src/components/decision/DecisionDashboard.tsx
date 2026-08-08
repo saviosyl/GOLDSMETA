@@ -6,7 +6,9 @@ import {
   Crosshair,
   Shield,
   Flag,
-  Scale
+  Scale,
+  Wallet,
+  Percent
 } from "lucide-react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
@@ -25,23 +27,40 @@ import {
 import { NextPlanUpdate } from "../intraday/NextPlanUpdate";
 import { FeedStatusStrip } from "../gm/FeedStatusStrip";
 import { PhoneAlertsControl } from "./PhoneAlertsControl";
+import { PlanMarketCard } from "./PlanMarketCard";
 
 type Props = {
   plan: IntradayPlan;
   marketFeedHealth?: MarketFeedHealth | null;
   marketStructureMode?: string | null;
   livePrice?: number | null;
+  vah?: number | null;
+  poc?: number | null;
+  val?: number | null;
   onRefresh?: () => void;
   refreshing?: boolean;
 };
 
-function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboardState> }) {
+function LevelGrid({
+  state,
+  tp3,
+  positionSizeNote,
+  accountRiskNote
+}: {
+  state: ReturnType<typeof deriveDecisionDashboardState>;
+  tp3?: number | null;
+  positionSizeNote?: string | null;
+  accountRiskNote?: string | null;
+}) {
   if (!state.showLevels) return null;
   return (
     <div className="gm-decision-level-grid gm-trade-plan-summary" data-testid="plan-levels-strip">
+      <div className="gm-trade-plan-summary__head">
+        <h2>Trade plan summary</h2>
+      </div>
       <div data-testid="plan-level-entry">
         <span className="gm-label">
-          <Crosshair size={13} aria-hidden /> Entry Zone
+          <Crosshair size={13} aria-hidden /> Entry
         </span>
         <strong>{state.levels.entry ?? "--"}</strong>
       </div>
@@ -63,14 +82,38 @@ function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboard
         </span>
         <strong>{state.levels.tp2 != null ? fmtPrice(state.levels.tp2) : "—"}</strong>
       </div>
-      {state.levels.rr && (
+      {tp3 != null && Number.isFinite(tp3) ? (
+        <div data-testid="plan-level-tp3">
+          <span className="gm-label">
+            <Flag size={13} aria-hidden /> TP3
+          </span>
+          <strong>{fmtPrice(tp3)}</strong>
+        </div>
+      ) : null}
+      {state.levels.rr ? (
         <div className="gm-decision-level-wide" data-testid="plan-level-rr">
           <span className="gm-label">
             <Scale size={13} aria-hidden /> Risk / Reward
           </span>
           <strong>{state.levels.rr}</strong>
         </div>
-      )}
+      ) : null}
+      {positionSizeNote ? (
+        <div data-testid="plan-position-size">
+          <span className="gm-label">
+            <Wallet size={13} aria-hidden /> Position Size
+          </span>
+          <strong>{positionSizeNote}</strong>
+        </div>
+      ) : null}
+      {accountRiskNote ? (
+        <div data-testid="plan-account-risk">
+          <span className="gm-label">
+            <Percent size={13} aria-hidden /> Account Risk
+          </span>
+          <strong>{accountRiskNote}</strong>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -122,6 +165,9 @@ export function DecisionDashboard({
   marketFeedHealth,
   marketStructureMode,
   livePrice,
+  vah = null,
+  poc = null,
+  val = null,
   onRefresh,
   refreshing
 }: Props) {
@@ -139,7 +185,11 @@ export function DecisionDashboard({
     (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
   const heroTone =
-    chip === "PREPARE" || chip === "PREPARE BUY" || chip === "PREPARE SELL" || chip === "WATCHING"
+    chip === "PREPARE" ||
+    chip === "PREPARE BUY" ||
+    chip === "PREPARE SELL" ||
+    chip === "WATCHING" ||
+    chip === "WAIT"
       ? "prepare"
       : chip === "BUY" || chip === "BUY READY"
         ? "buy"
@@ -258,7 +308,23 @@ export function DecisionDashboard({
         </a>
       </div>
 
-      {!isWaiting && !isHold && <LevelGrid state={state} />}
+      <PlanMarketCard
+        livePrice={livePrice}
+        vah={vah}
+        poc={poc}
+        val={val}
+        support={state.nearestSupport}
+        resistance={state.nearestResistance}
+      />
+
+      {!isWaiting && !isHold && (
+        <LevelGrid
+          state={state}
+          tp3={plan.tradePlan?.tp3 ?? null}
+          positionSizeNote={plan.tradePlan?.positionSizeNote || null}
+          accountRiskNote={plan.tradePlan?.maxCashRiskNote || null}
+        />
+      )}
 
       {!isWaiting && (
         <div className="gm-decision-facts gm-decision-facts-compact">

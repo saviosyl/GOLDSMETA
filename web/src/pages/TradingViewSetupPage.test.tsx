@@ -14,6 +14,7 @@ const rotateTradingViewConnection = vi.fn();
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
+    account: { role: "OWNER", uid: "owner-test" },
     api: {
       getTradingViewSetup,
       updateTradingViewSetup,

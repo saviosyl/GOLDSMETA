@@ -94,9 +94,36 @@
   flex-wrap: wrap;
 }
 
+.gm-premium-symbol-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
 .gm-premium-market-price .gm-label {
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 0;
+}
+
+.gm-premium-live-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #0f6b38;
+  background: var(--success-soft);
+  border: 1px solid #b7e4c7;
+}
+
+.gm-premium-live-pill.is-off {
+  color: #5b6b82;
+  background: #f2f4f7;
+  border-color: #d0d5dd;
 }
 
 .gm-premium-market-price strong {
@@ -104,6 +131,23 @@
   font-weight: 800;
   color: var(--navy);
   letter-spacing: -0.02em;
+  display: block;
+}
+
+.gm-premium-price-change {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.gm-premium-price-change.is-up {
+  color: #0f6b38;
+}
+
+.gm-premium-price-change.is-down {
+  color: #b42318;
 }
 
 .gm-premium-market-meta {

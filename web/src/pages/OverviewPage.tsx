@@ -38,6 +38,7 @@ import { StickyMobileActionBar } from "../components/intraday/StickyMobileAction
 import { DecisionDashboard } from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
 import { PremiumInsightStrip } from "../components/premium/PremiumInsightStrip";
+import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
 import { useShellQuote } from "../lib/quoteContext";
@@ -217,7 +218,7 @@ function PlanSkeleton() {
 /** Compact interactive intraday research cockpit — Mobile Plan V2. */
 export function OverviewPage() {
   const { api, user } = useAuth();
-  const { setQuote } = useShellQuote();
+  const { quote, setQuote } = useShellQuote();
   const isDesktop = useIsDesktop();
   const [structureOpen, setStructureOpen] = useState(false);
   const [researchTab, setResearchTab] = useState<ResearchTab>("plan");
@@ -357,7 +358,22 @@ export function OverviewPage() {
   const sessionLabel = formatSession(
     intradayPlan?.session ?? briefing?.session ?? decision?.currentSession
   );
-  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const decisionPrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const livePrice =
+    quote?.source === "broker" && quote.price != null ? quote.price : decisionPrice;
+  const displayUpdated =
+    quote?.source === "broker" && quote.updatedLabel ? quote.updatedLabel : compactTime;
+  const displayFresh =
+    quote?.source === "broker" ? Boolean(quote.fresh) : source === "live" && livePrice != null;
+  const ohlcvOpen = decision?.ohlcv?.open ?? null;
+  const priceChange =
+    livePrice != null && ohlcvOpen != null && Number.isFinite(ohlcvOpen)
+      ? livePrice - ohlcvOpen
+      : null;
+  const priceChangePct =
+    priceChange != null && ohlcvOpen != null && ohlcvOpen !== 0
+      ? (priceChange / ohlcvOpen) * 100
+      : null;
 
   useEffect(() => {
     // Informational TV fallback only when no Pepperstone broker quote is driving the shell.
@@ -365,14 +381,14 @@ export function OverviewPage() {
     setQuote((prev) => {
       if (prev?.source === "broker") return prev;
       return {
-        price: livePrice,
+        price: decisionPrice,
         updatedLabel: compactTime,
         sessionLabel,
-        fresh: source === "live" && livePrice != null,
+        fresh: source === "live" && decisionPrice != null,
         source: "decision"
       };
     });
-  }, [livePrice, compactTime, sessionLabel, source, setQuote]);
+  }, [decisionPrice, compactTime, sessionLabel, source, setQuote]);
 
   const liveRangeOnly = marketStructureMode === "LIVE_RANGE_ONLY";
   const poc = liveRangeOnly
@@ -516,12 +532,27 @@ export function OverviewPage() {
             trigger={intradayPlan.trigger}
             triggerPrice={intradayPlan.triggerPrice}
           />
+          <PremiumMarketStrip
+            symbol="XAUUSD"
+            livePrice={livePrice}
+            updatedLabel={displayUpdated}
+            sessionLabel={quote?.sessionLabel ?? sessionLabel}
+            feedHealth={marketFeedHealth}
+            fresh={displayFresh}
+            live={displayFresh || quote?.source === "broker"}
+            priceChange={priceChange}
+            priceChangePct={priceChangePct}
+          />
+
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
             <DecisionDashboard
               plan={intradayPlan}
               marketFeedHealth={marketFeedHealth}
               marketStructureMode={mode}
               livePrice={livePrice}
+              vah={vah}
+              poc={poc}
+              val={val}
               onRefresh={refresh}
               refreshing={refreshing}
             />

@@ -572,6 +572,66 @@ body,
   letter-spacing: -0.02em;
 }
 
+.gm-trade-plan-summary__head {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+}
+
+.gm-trade-plan-summary__head h2 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.gm-plan-market-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(6, 23, 47, 0.05);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.gm-plan-market-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--navy);
+}
+
+.gm-plan-market-card__head h2 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.gm-plan-market-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.gm-plan-market-grid .gm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.gm-plan-market-grid strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.98rem;
+  font-weight: 750;
+  color: var(--navy);
+}
+
 .gm-decision-hero-v2::after {
   content: "";
   position: absolute;

@@ -28,6 +28,8 @@ describe("assert-production-firebase-config", () => {
 
   it("passes --env when required vars are present", () => {
     const res = run(["--env"], {
+      // Do not inherit a host production gate from the agent/CI shell.
+      GOLD_META_PRODUCTION_GATE: "",
       VITE_FIREBASE_API_KEY: "test-api-key",
       VITE_FIREBASE_AUTH_DOMAIN: "example.firebaseapp.com",
       VITE_FIREBASE_PROJECT_ID: "example-project",
