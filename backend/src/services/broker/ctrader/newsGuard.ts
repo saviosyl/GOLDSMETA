@@ -73,13 +73,6 @@ export function loadNewsProviderKind(
   return "NONE";
 }
 
-function impactRank(impact: string): number {
-  const u = impact.toUpperCase();
-  if (u === "HIGH" || u === "3") return 3;
-  if (u === "MEDIUM" || u === "2") return 2;
-  return 1;
-}
-
 function passesImpactFilter(
   eventImpact: "HIGH" | "MEDIUM" | "LOW",
   mode: NewsImpact
@@ -103,7 +96,7 @@ function mapFinnhubImpact(raw: unknown): "HIGH" | "MEDIUM" | "LOW" {
  */
 export function parseFinnhubEconomicCalendar(
   payload: unknown,
-  now = new Date()
+  _now = new Date()
 ): CalendarEvent[] {
   const root = payload as {
     economicCalendar?: unknown[];
@@ -282,7 +275,7 @@ export async function fetchFinnhubEconomicCalendar(args: {
   if (!res.ok) {
     throw new Error(`ECONOMIC_CALENDAR_FETCH_FAILED status=${res.status}`);
   }
-  const json = await res.json();
+  const json: unknown = await res.json();
   return parseFinnhubEconomicCalendar(json);
 }
 
