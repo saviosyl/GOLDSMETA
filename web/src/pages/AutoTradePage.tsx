@@ -45,6 +45,8 @@ import {
 import { friendlyApiCode } from "../lib/plainLanguage";
 import { friendlyActivityMessage } from "../lib/friendlyActivityCopy";
 import { useShellQuote } from "../lib/quoteContext";
+import { QualificationDashboard } from "../components/autotrade/QualificationDashboard";
+import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -112,6 +114,7 @@ export function AutoTradePage() {
   const [previewOk, setPreviewOk] = useState(false);
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
   const reloadGenRef = useRef(0);
   const shellQuote = useShellQuote().quote;
 
@@ -149,10 +152,11 @@ export function AutoTradePage() {
       const code = typeof err === "object" && err && "code" in err ? String((err as { code?: string }).code ?? "") : "";
       setError(code ? friendlyApiCode(code, msg).message : friendlyBrokerReason(msg, msg));
     }
-    const [centreResult, diagResult, accountsResult] = await Promise.allSettled([
+    const [centreResult, diagResult, accountsResult, qualResult] = await Promise.allSettled([
       api.getBrokerControlCentre(),
       api.getCTraderDiagnostics(),
-      api.listCTraderAccounts()
+      api.listCTraderAccounts(),
+      api.getAutoTradeQualification()
     ]);
     if (gen !== reloadGenRef.current) return;
     if (centreResult.status === "fulfilled") {
@@ -169,6 +173,9 @@ export function AutoTradePage() {
     }
     if (accountsResult.status === "fulfilled") {
       setAccounts(accountsResult.value.accounts ?? []);
+    }
+    if (qualResult.status === "fulfilled") {
+      setQualification(qualResult.value);
     }
   }, [api]);
 
@@ -462,8 +469,17 @@ export function AutoTradePage() {
   const equityAt =
     diagnostics?.account?.equity ?? diagnostics?.account?.balance ?? null;
   const fundedAt = equityAt != null && equityAt > 0;
+  // Align with Broker diagnostics: closed-market previous-session quotes still count as healthy.
+  const brokerQuoteHealthy = Boolean(
+    diagnostics?.liveQuoteReceived ||
+      (diagnostics?.quote?.bid != null && diagnostics?.quote?.ask != null) ||
+      centre?.readiness?.connectionSummary?.lastQuoteAt ||
+      sync.bid != null
+  );
   const brokerQuoteLive =
-    Boolean(diagnostics?.liveQuoteReceived) && !diagnostics?.quote?.stale;
+    brokerQuoteHealthy &&
+    (Boolean(diagnostics?.liveQuoteReceived) ||
+      (!diagnostics?.quote?.stale && diagnostics?.quote?.bid != null));
   const marketDataConnected = Boolean(
     (shellQuote && !shellQuote.unavailable && shellQuote.price != null) ||
       sync.marketStatusRaw ||
@@ -478,7 +494,11 @@ export function AutoTradePage() {
           /CLOSE/i.test(sync.marketStatusRaw || "")
         ? "Connected · Market closed"
         : "Connected";
-  const setupIncomplete = !sync.connected || !sync.accountSelected;
+  const brokerConnected =
+    sync.connected ||
+    Boolean(centre?.readiness?.connected) ||
+    Boolean(diagnostics?.oauthConnected) ||
+    Boolean(qualification?.accountIdPresent && qualification.accountMasked);
   const heroState = isLiveEnv
     ? "SHADOW"
     : display === "SHADOW"
@@ -532,14 +552,16 @@ export function AutoTradePage() {
           <div className="gm-prem-stat" data-testid="autotrade-broker-account-stat">
             <span>Broker account</span>
             <strong>
-              {maskedAt
-                ? `${sync.isLive ? "LIVE" : "Demo"} · ${maskedAt}`
-                : sync.connected
+              {maskedAt || qualification?.accountMasked
+                ? `${sync.isLive ? "LIVE" : "Demo"} · ${maskedAt || qualification?.accountMasked}`
+                : brokerConnected
                   ? "Connected · select account"
                   : "Not connected"}
             </strong>
             <em className="gm-prem-stat-note">
-              {sync.connected && sync.accountSelected ? "Connected" : sync.connectionLabel}
+              {brokerConnected && (sync.accountSelected || qualification?.accountIdPresent)
+                ? "Connected"
+                : sync.connectionLabel}
             </em>
           </div>
           <div className="gm-prem-stat">
@@ -558,8 +580,14 @@ export function AutoTradePage() {
           </div>
           <div className="gm-prem-stat" data-testid="autotrade-broker-quotes-stat">
             <span>Personal broker quotes</span>
-            <strong className={brokerQuoteLive ? "is-ok" : "is-warn"}>
-              {brokerQuoteLive ? "Connected" : sync.connected ? "Waiting" : "Unavailable"}
+            <strong className={brokerQuoteHealthy ? "is-ok" : "is-warn"}>
+              {brokerQuoteLive
+                ? "Connected"
+                : brokerQuoteHealthy
+                  ? "Connected · session quote"
+                  : brokerConnected
+                    ? "Waiting"
+                    : "Unavailable"}
             </strong>
           </div>
           <div className="gm-prem-stat" data-testid="autotrade-live-execution-stat">
@@ -575,7 +603,76 @@ export function AutoTradePage() {
         </p>
       </section>
 
-      {setupIncomplete ? (
+      {qualification ? (
+        <QualificationDashboard
+          view={qualification}
+          busy={busy}
+          onStart={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                setQualification(await api.startAutoTradeQualification());
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not start qualification");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+          onPause={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                setQualification(await api.pauseAutoTradeQualification());
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not pause");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+          onResume={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                setQualification(await api.resumeAutoTradeQualification());
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not resume");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+          onEnableDemoAuto={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                setQualification(await api.enableDemoAutoFromQualification());
+                await reload();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not enable Demo Auto");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+          onAuthoriseTrading={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                const res = await api.authoriseCTraderDemoTrading();
+                if (res.authorizationUrl) {
+                  window.location.assign(res.authorizationUrl);
+                }
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not start OAuth");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        />
+      ) : !brokerConnected ? (
         <section
           className="gm-at-setup-required"
           data-testid="autotrade-setup-required"

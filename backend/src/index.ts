@@ -17,6 +17,7 @@ import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
 import { createAutoTradeService } from "./services/autoTrade/runtime";
 import { processDecisionForAutoTrade } from "./services/autoTrade/decisionTrigger";
+import { processDecisionForQualification } from "./services/broker/ctrader/qualificationService";
 import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
 
 const defaultStore = createStore();
@@ -182,6 +183,19 @@ export const onGoldMetaDecisionCreated = onDocumentCreated(
       autoTrade: defaultAutoTradeService,
       store: defaultStore
     });
+    try {
+      await processDecisionForQualification({
+        uid: userId,
+        decisionId,
+        store: defaultStore
+      });
+    } catch (error) {
+      console.error("Qualification decision trigger failed", {
+        userId,
+        decisionId,
+        error: error instanceof Error ? error.message : "unknown"
+      });
+    }
   }
 );
 

@@ -58,6 +58,7 @@ export function deriveAutoTradeSyncSummary(args: {
     diagnostics?.connection?.accountMasked ??
     summary?.accountMasked ??
     selectedListed?.accountIdMasked ??
+    centre?.readiness?.connectionSummary?.accountMasked ??
     null;
 
   // Account type comes from server selection — never from the UI mode tab alone.

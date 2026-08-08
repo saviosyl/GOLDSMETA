@@ -67,6 +67,16 @@ import {
   type AutoTradeEnvironment,
   type UserAutoTradeSettingsPatch
 } from "../services/broker/ctrader/userAutoTradeSettings";
+import {
+  allowsDemoOrderSubmission,
+  enableDemoAutoFromQualification,
+  getQualificationView,
+  markQualificationTradeClosed,
+  onEmergencyStopQualification,
+  pauseQualification,
+  resumeQualification,
+  startQualification
+} from "../services/broker/ctrader/qualificationService";
 
 function codeOf(err: unknown): string {
   if (err && typeof err === "object" && "code" in err) {
@@ -908,6 +918,11 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const active = (req.body as { active?: boolean })?.active !== false;
     try {
       const settings = await setEmergencyStop(uid, environment, active);
+      try {
+        await onEmergencyStopQualification(uid, active);
+      } catch {
+        /* qualification optional */
+      }
       res.json({
         settings,
         emergencyStopActive: settings.emergencyStopActive,
@@ -1078,6 +1093,17 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       if (!isCTraderDemoOrderSubmissionEnabled()) {
         throw new CTraderMutationDisabledError("placeMarketOrder");
       }
+      const qual = await getQualificationView(uid);
+      if (!allowsDemoOrderSubmission(qual.state)) {
+        res.status(403).json({
+          error: "QUALIFICATION_ORDERS_NOT_ARMED",
+          submitted: false,
+          state: qual.state,
+          message:
+            "Demo orders are only allowed during Controlled Demo qualification or Demo Auto."
+        });
+        return;
+      }
       const body = (req.body ?? {}) as {
         side?: string;
         lots?: number;
@@ -1134,6 +1160,96 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   router.post("/v1/ctrader/orders/cancel", requireAuth, ...brokerGate, deny("cancel"));
   router.post("/v1/ctrader/positions/close", requireAuth, ...brokerGate, deny("closePosition"));
 
+  router.get("/v1/ctrader/qualification", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await getQualificationView(uid));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post("/v1/ctrader/qualification/start", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await startQualification(uid));
+    } catch (e) {
+      const err = e as Error & { blockers?: unknown };
+      if (err.message === "QUALIFICATION_NOT_READY") {
+        res.status(409).json({
+          error: "QUALIFICATION_NOT_READY",
+          blockers: err.blockers ?? [],
+          message: "Complete setup requirements before starting qualification."
+        });
+        return;
+      }
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post("/v1/ctrader/qualification/pause", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await pauseQualification(uid));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post("/v1/ctrader/qualification/resume", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await resumeQualification(uid));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post(
+    "/v1/ctrader/qualification/enable-demo-auto",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      try {
+        res.json(await enableDemoAutoFromQualification(uid));
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
+  router.post(
+    "/v1/ctrader/qualification/mark-trade-closed",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      try {
+        const body = (req.body ?? {}) as { correlationId?: string; pnl?: number };
+        if (!body.correlationId) {
+          res.status(400).json({ error: "CORRELATION_ID_REQUIRED" });
+          return;
+        }
+        res.json(
+          await markQualificationTradeClosed({
+            uid,
+            correlationId: String(body.correlationId),
+            pnl: body.pnl ?? null
+          })
+        );
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
   router.post("/v1/ctrader/automation/mode", requireAuth, ...brokerGate, async (req, res) => {
     const uid = requireUid(req, res);
     if (!uid) return;
@@ -1159,35 +1275,14 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           });
           return;
         }
-        const conn = await getConnection(uid);
-        if (!conn?.selectedAccountId || conn.selectedAccountIsLive) {
-          res.status(409).json({
-            error: "CTRADER_DEMO_ACCOUNT_REQUIRED",
-            mode,
-            active: "OFF",
-            message: "Select a Pepperstone Demo account before enabling Demo Auto."
-          });
-          return;
-        }
-        if (conn.oauthScope !== "trading") {
-          res.status(409).json({
-            error: "CTRADER_TRADING_SCOPE_REQUIRED",
-            mode,
-            active: "OFF",
-            message: "Authorise Demo Trading (trading scope) before enabling Demo Auto."
-          });
-          return;
-        }
-        await saveUserAutoTradeSettings(uid, "demo", {
-          autoTradeEnabledIntent: true,
-          emergencyStopActive: false
-        });
+        const qual = await enableDemoAutoFromQualification(uid);
         res.json({
           mode: "DEMO_AUTO",
           autoTrade: "ON",
           environment: "DEMO",
           orderSubmissionEnabled: true,
           liveEnabled: false,
+          qualification: qual,
           note: "Demo Auto enabled for Pepperstone Demo. Live execution stays locked."
         });
       } catch (e) {

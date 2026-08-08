@@ -1018,10 +1018,53 @@ export class ApiClient {
     orderSubmissionEnabled?: boolean;
     liveEnabled?: boolean;
     note?: string;
+    qualification?: import("./broker/qualificationTypes").QualificationPublicView;
   }> {
     return this.requestCTrader("/v1/ctrader/automation/mode", {
       method: "POST",
       body: JSON.stringify({ mode })
+    });
+  }
+
+  async getAutoTradeQualification(): Promise<
+    import("./broker/qualificationTypes").QualificationPublicView
+  > {
+    return this.requestCTrader("/v1/ctrader/qualification");
+  }
+
+  async startAutoTradeQualification(): Promise<
+    import("./broker/qualificationTypes").QualificationPublicView
+  > {
+    return this.requestCTrader("/v1/ctrader/qualification/start", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async pauseAutoTradeQualification(): Promise<
+    import("./broker/qualificationTypes").QualificationPublicView
+  > {
+    return this.requestCTrader("/v1/ctrader/qualification/pause", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async resumeAutoTradeQualification(): Promise<
+    import("./broker/qualificationTypes").QualificationPublicView
+  > {
+    return this.requestCTrader("/v1/ctrader/qualification/resume", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async enableDemoAutoFromQualification(): Promise<
+    import("./broker/qualificationTypes").QualificationPublicView
+  > {
+    return this.requestCTrader("/v1/ctrader/qualification/enable-demo-auto", {
+      method: "POST",
+      body: "{}"
     });
   }
 

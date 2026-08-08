@@ -141,7 +141,47 @@ const api: Record<string, ReturnType<typeof vi.fn>> = {
     },
     recommended: {}
   })),
-  setCTraderEmergencyStop: vi.fn(async () => ({}))
+  setCTraderEmergencyStop: vi.fn(async () => ({})),
+  getAutoTradeQualification: vi.fn(async () => ({
+    state: "SETUP_REQUIRED",
+    overallLabel: "Setup required",
+    accountMasked: null,
+    accountIdPresent: false,
+    environment: "DEMO",
+    nextAction: "Connect Pepperstone Demo",
+    nextRequirement: "Complete setup",
+    blockers: [
+      { id: "oauth", label: "Pepperstone Demo connected", ok: false }
+    ],
+    canStart: false,
+    canPause: false,
+    canResume: false,
+    canEnableDemoAuto: false,
+    canBeginLiveActivation: false,
+    preview: { completed: 0, required: 20 },
+    controlledDemo: { completed: 0, required: 5, open: 0, blockedAttempts: 0 },
+    observation: { day: null, requiredDays: 7, firstTradeAt: null, remainingMs: null },
+    safety: { completed: 0, required: 6, checks: [] },
+    liveEligibility: {
+      demoAutoTrades: 0,
+      requiredTrades: 20,
+      observationDay: null,
+      requiredDays: 7,
+      criticalSafetyFailures: 0,
+      status: "LOCKED"
+    },
+    demoAuto: { enabled: false, ready: false },
+    liveOrders: "LOCKED",
+    recentPreviews: [],
+    recentControlledTrades: [],
+    startedAt: null,
+    updatedAt: null
+  })),
+  startAutoTradeQualification: vi.fn(),
+  pauseAutoTradeQualification: vi.fn(),
+  resumeAutoTradeQualification: vi.fn(),
+  enableDemoAutoFromQualification: vi.fn(),
+  authoriseCTraderDemoTrading: vi.fn()
 };
 
 vi.mock("../lib/auth", () => ({
@@ -355,6 +395,43 @@ describe("AutoTradePage", () => {
       },
       recommended: {}
     });
+    api.getAutoTradeQualification.mockResolvedValue({
+      state: "READY_TO_QUALIFY",
+      overallLabel: "Ready to qualify",
+      accountMasked: "****4810",
+      accountIdPresent: true,
+      environment: "DEMO",
+      nextAction: "Start qualification",
+      nextRequirement: "Complete setup",
+      blockers: [
+        { id: "oauth", label: "Pepperstone Demo connected", ok: true },
+        { id: "trading_scope", label: "Demo trading permission", ok: true },
+        { id: "risk", label: "Risk limits configured", ok: true }
+      ],
+      canStart: true,
+      canPause: false,
+      canResume: false,
+      canEnableDemoAuto: false,
+      canBeginLiveActivation: false,
+      preview: { completed: 0, required: 20 },
+      controlledDemo: { completed: 0, required: 5, open: 0, blockedAttempts: 0 },
+      observation: { day: null, requiredDays: 7, firstTradeAt: null, remainingMs: null },
+      safety: { completed: 4, required: 6, checks: [] },
+      liveEligibility: {
+        demoAutoTrades: 0,
+        requiredTrades: 20,
+        observationDay: null,
+        requiredDays: 7,
+        criticalSafetyFailures: 0,
+        status: "LOCKED"
+      },
+      demoAuto: { enabled: false, ready: false },
+      liveOrders: "LOCKED",
+      recentPreviews: [],
+      recentControlledTrades: [],
+      startedAt: null,
+      updatedAt: new Date().toISOString()
+    });
 
     render(
       <MemoryRouter>
@@ -367,6 +444,8 @@ describe("AutoTradePage", () => {
         /Pepperstone Demo · \*\*\*\*4810/
       )
     );
+    expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
+    expect(screen.getByTestId("qual-start")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-connection-label")).toHaveTextContent("Connected");
     expect(screen.getByTestId("autotrade-market-label")).toHaveTextContent(
       /XAUUSD · Market closed/i

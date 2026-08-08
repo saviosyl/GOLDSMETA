@@ -1967,3 +1967,155 @@ body.gm-drawer-open {
 .gm-prem-nested > summary::-webkit-details-marker {
   display: none;
 }
+
+/* —— AutoTrade qualification dashboard —— */
+.gm-qual-dash {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  margin: 0 0 14px;
+  box-shadow: 0 4px 14px rgba(6, 23, 47, 0.04);
+}
+
+.gm-qual-dash__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.gm-qual-dash__head h2 {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-qual-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.gm-qual-pill--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.gm-qual-pill--amber {
+  background: rgba(212, 160, 23, 0.14);
+  color: #92400e;
+}
+
+.gm-qual-pill--bad {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+.gm-qual-next {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.gm-qual-next strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-qual-meters {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gm-qual-meter__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.gm-qual-meter__track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e8edf3;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.gm-qual-meter__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.gm-qual-meter.is-progress .gm-qual-meter__fill {
+  background: #d4a017;
+}
+
+.gm-qual-meter.is-done .gm-qual-meter__fill {
+  background: #16a34a;
+}
+
+.gm-qual-meter.is-locked .gm-qual-meter__fill {
+  background: #cbd5e1;
+}
+
+.gm-qual-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.gm-qual-live {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #f8fafc;
+}
+
+.gm-qual-live h3 {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-qual-live p {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--navy);
+}
+
+.gm-qual-history {
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+
+.gm-qual-history summary {
+  cursor: pointer;
+  font-weight: 750;
+  color: var(--navy);
+}
+
+.gm-qual-history ul {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  color: var(--navy);
+}
