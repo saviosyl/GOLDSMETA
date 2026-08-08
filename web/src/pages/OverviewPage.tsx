@@ -409,15 +409,14 @@ export function OverviewPage() {
   }, [decisionPrice, compactTime, sessionLabel, source, setQuote]);
 
   const liveRangeOnly = marketStructureMode === "LIVE_RANGE_ONLY";
-  const poc = liveRangeOnly
-    ? null
-    : structure?.marketStructure?.poc ?? briefing?.levels?.poc ?? null;
-  const vah = liveRangeOnly
-    ? null
-    : structure?.marketStructure?.vah ?? briefing?.levels?.vah ?? null;
-  const val = liveRangeOnly
-    ? null
-    : structure?.marketStructure?.val ?? briefing?.levels?.val ?? null;
+  // Chart overlays use real structure levels whenever present — even in LIVE_RANGE_ONLY.
+  // Trade geometry / ladder still respect liveRangeOnly separately below.
+  const chartPoc = structure?.marketStructure?.poc ?? briefing?.levels?.poc ?? null;
+  const chartVah = structure?.marketStructure?.vah ?? briefing?.levels?.vah ?? null;
+  const chartVal = structure?.marketStructure?.val ?? briefing?.levels?.val ?? null;
+  const poc = liveRangeOnly ? null : chartPoc;
+  const vah = liveRangeOnly ? null : chartVah;
+  const val = liveRangeOnly ? null : chartVal;
   const hasPlan = Boolean(
     setup &&
       (setup.levels?.entryPrice != null ||
@@ -579,9 +578,9 @@ export function OverviewPage() {
 
           <XauusdChartCard
             currentPrice={livePrice}
-            vah={vah}
-            poc={poc}
-            val={val}
+            vah={chartVah}
+            poc={chartPoc}
+            val={chartVal}
             support={decisionState?.nearestSupport ?? null}
             resistance={decisionState?.nearestResistance ?? null}
             marketClosed={marketOpen === false}
@@ -991,9 +990,9 @@ export function OverviewPage() {
             </section>
             <XauusdChartCard
               currentPrice={livePrice}
-              vah={vah}
-              poc={poc}
-              val={val}
+              vah={chartVah}
+              poc={chartPoc}
+              val={chartVal}
               marketClosed={marketOpen === false}
             />
           </div>
