@@ -91,6 +91,53 @@ export async function createAutoTradeJournalEntry(
   return { id, created: true };
 }
 
+export type AutoTradeJournalClosePatch = {
+  uid: string;
+  correlationId: string;
+  pnl: number | null;
+  closedAt: string;
+  reasonForExit: string | null;
+  exitPrice?: number | null;
+  managementActions?: string[];
+  durationSeconds?: number | null;
+  slTpOutcome?: string | null;
+};
+
+/**
+ * Update an existing OPEN journal row on close. Never creates a duplicate.
+ * Idempotent when already closed with the same correlationId.
+ */
+export async function updateAutoTradeJournalOnClose(
+  patch: AutoTradeJournalClosePatch
+): Promise<{ id: string; updated: boolean }> {
+  const id = `atj_${patch.correlationId}`;
+  const ref = journalCol(patch.uid).doc(id);
+  const existing = await ref.get();
+  if (!existing.exists) {
+    return { id, updated: false };
+  }
+  const data = existing.data() as Record<string, unknown>;
+  if (data.closedAt && data.pnl != null) {
+    return { id, updated: false };
+  }
+  const pnl = patch.pnl;
+  await ref.set(
+    {
+      pnl,
+      closedAt: patch.closedAt,
+      reasonForExit: patch.reasonForExit,
+      exitPrice: patch.exitPrice ?? null,
+      managementActions: patch.managementActions ?? [],
+      durationSeconds: patch.durationSeconds ?? null,
+      slTpOutcome: patch.slTpOutcome ?? null,
+      outcome: pnl == null ? "OPEN" : pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN",
+      updatedAt: new Date().toISOString()
+    },
+    { merge: true }
+  );
+  return { id, updated: true };
+}
+
 export async function listAutoTradeJournal(
   uid: string,
   opts?: { environment?: "DEMO" | "LIVE"; limit?: number }

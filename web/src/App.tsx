@@ -59,6 +59,11 @@ const HelpPage = lazy(() =>
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
 );
+const AutoTradePerformancePage = lazy(() =>
+  import("./pages/AutoTradePerformancePage").then((m) => ({
+    default: m.AutoTradePerformancePage
+  }))
+);
 const BrokerControlCentrePage = lazy(() =>
   import("./pages/broker/BrokerControlCentrePage").then((m) => ({
     default: m.BrokerControlCentrePage
@@ -255,6 +260,14 @@ function ProtectedApp() {
             element={
               <LazyRoute label="AutoTrade">
                 <AutoTradePage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/autotrade/performance"
+            element={
+              <LazyRoute label="Performance">
+                <AutoTradePerformancePage />
               </LazyRoute>
             }
           />

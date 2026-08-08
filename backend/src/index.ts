@@ -19,6 +19,8 @@ import { createAutoTradeService } from "./services/autoTrade/runtime";
 import { processDecisionForAutoTrade } from "./services/autoTrade/decisionTrigger";
 import { processDecisionForQualification } from "./services/broker/ctrader/qualificationService";
 import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
+import { runDemoPositionManagementPass } from "./services/broker/ctrader/demoPositionLifecycle";
+import { runWeeklyReportPass } from "./services/broker/ctrader/weeklyReportService";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
@@ -165,6 +167,59 @@ export const refreshCTraderLiveQuotes = onSchedule(
   async () => {
     applyProductionCTraderRuntimeEnv();
     await runQuoteKeepalivePass();
+  }
+);
+
+/**
+ * Demo position lifecycle management — SL verify, breakeven, TP tracking.
+ * Runs with PWA closed. Demo mutations enabled for this worker only; Live stays locked.
+ */
+export const manageDemoAutoTradePositions = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: env.FIREBASE_REGION,
+    timeoutSeconds: 240,
+    memory: "512MiB",
+    secrets: [
+      "CTRADER_CLIENT_ID",
+      "CTRADER_CLIENT_SECRET",
+      "CTRADER_REDIRECT_URI",
+      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
+      "CTRADER_ENVIRONMENT"
+    ]
+  },
+  async () => {
+    if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
+    process.env.CTRADER_CONNECTOR_ENABLED = "true";
+    process.env.CTRADER_DEMO_READ_ENABLED = "true";
+    process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
+    process.env.CTRADER_LIVE_ENABLED = "false";
+    process.env.BROKER_EXECUTION_ENABLED = "false";
+    process.env.CTRADER_ENVIRONMENT = "DEMO";
+    await runDemoPositionManagementPass();
+  }
+);
+
+/**
+ * Weekly GoldMeta report — after the trading week closes (Sunday 21:10 UTC).
+ * Idempotent per uid/week/environment.
+ */
+export const generateWeeklyGoldMetaReports = onSchedule(
+  {
+    schedule: "every sunday 21:10",
+    region: env.FIREBASE_REGION,
+    timeoutSeconds: 300,
+    memory: "512MiB",
+    secrets: [
+      "CTRADER_CLIENT_ID",
+      "CTRADER_CLIENT_SECRET",
+      "CTRADER_REDIRECT_URI",
+      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
+      "CTRADER_ENVIRONMENT"
+    ]
+  },
+  async () => {
+    await runWeeklyReportPass();
   }
 );
 

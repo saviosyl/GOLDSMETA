@@ -47,6 +47,7 @@ import { friendlyActivityMessage } from "../lib/friendlyActivityCopy";
 import { useShellQuote } from "../lib/quoteContext";
 import { QualificationDashboard } from "../components/autotrade/QualificationDashboard";
 import { DailySafetyCard } from "../components/autotrade/DailySafetyCard";
+import { OpenPositionCard } from "../components/autotrade/OpenPositionCard";
 import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 import type { DailySafetyPublicView } from "../lib/broker/ctraderTypes";
 
@@ -120,6 +121,8 @@ export function AutoTradePage() {
   const [qualificationError, setQualificationError] = useState<string | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
   const [dailySafety, setDailySafety] = useState<DailySafetyPublicView | null>(null);
+  const [openPositions, setOpenPositions] = useState<Array<Record<string, unknown>>>([]);
+  const [newsGuard, setNewsGuard] = useState<Record<string, unknown> | null>(null);
   const reloadGenRef = useRef(0);
   const shellQuote = useShellQuote().quote;
 
@@ -160,12 +163,15 @@ export function AutoTradePage() {
       setError(code ? friendlyApiCode(code, msg).message : friendlyBrokerReason(msg, msg));
     }
 
-    const [centreResult, accountsResult, qualResult, dailyResult] = await Promise.allSettled([
-      api.getBrokerControlCentre(),
-      api.listCTraderAccounts(),
-      api.getAutoTradeQualification(),
-      api.getDailySafety(mode === "live" ? "live" : "demo")
-    ]);
+    const [centreResult, accountsResult, qualResult, dailyResult, posResult, newsResult] =
+      await Promise.allSettled([
+        api.getBrokerControlCentre(),
+        api.listCTraderAccounts(),
+        api.getAutoTradeQualification(),
+        api.getDailySafety(mode === "live" ? "live" : "demo"),
+        api.getOpenAutoTradePositions(),
+        api.getNewsGuardStatus()
+      ]);
     if (gen !== reloadGenRef.current) return;
 
     if (centreResult.status === "fulfilled") {
@@ -176,6 +182,12 @@ export function AutoTradePage() {
     }
     if (dailyResult.status === "fulfilled") {
       setDailySafety(dailyResult.value);
+    }
+    if (posResult.status === "fulfilled") {
+      setOpenPositions(posResult.value.positions ?? []);
+    }
+    if (newsResult.status === "fulfilled") {
+      setNewsGuard(newsResult.value);
     }
     if (qualResult.status === "fulfilled") {
       setQualification(qualResult.value);
@@ -489,7 +501,9 @@ export function AutoTradePage() {
 
   const demoAccount = diagnostics?.account;
   const quote = diagnostics?.quote;
+  const lifecyclePosition = (openPositions[0] as Record<string, unknown> | undefined) ?? null;
   const position = status?.positions?.[0] ?? null;
+  const news = (newsGuard?.news ?? null) as Record<string, unknown> | null;
   const currency =
     demoAccount?.currency ??
     diagnostics?.connection?.currency ??
@@ -1917,39 +1931,156 @@ export function AutoTradePage() {
           </dl>
         </article>
 
-        <article className="gm-at-card" data-testid="autotrade-card-position">
-          <h3>Current position</h3>
-          {position ? (
-            <dl>
-              <div>
-                <dt>Direction</dt>
-                <dd>{position.direction}</dd>
-              </div>
-              <div>
-                <dt>Size</dt>
-                <dd>{position.size}</dd>
-              </div>
-              <div>
-                <dt>Entry</dt>
-                <dd>{num(position.entry, 3)}</dd>
-              </div>
-              <div>
-                <dt>SL</dt>
-                <dd>{num(position.stop, 3)}</dd>
-              </div>
-              <div>
-                <dt>TP</dt>
-                <dd>{num(position.takeProfit, 3)}</dd>
-              </div>
-              <div>
-                <dt>Floating P/L</dt>
-                <dd>{money(position.unrealisedPnl, currency)}</dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="gm-meta">No open Gold position.</p>
-          )}
-        </article>
+        <OpenPositionCard
+          currency={currency}
+          position={
+            lifecyclePosition
+              ? {
+                  correlationId: String(lifecyclePosition.correlationId ?? ""),
+                  accountMasked:
+                    (lifecyclePosition.accountMasked as string | null) ??
+                    maskedAt,
+                  symbol: String(lifecyclePosition.symbol ?? "XAUUSD"),
+                  side: String(lifecyclePosition.side ?? ""),
+                  entry:
+                    typeof lifecyclePosition.entry === "number"
+                      ? lifecyclePosition.entry
+                      : null,
+                  current:
+                    typeof lifecyclePosition.current === "number"
+                      ? lifecyclePosition.current
+                      : null,
+                  lots:
+                    typeof lifecyclePosition.lots === "number"
+                      ? lifecyclePosition.lots
+                      : null,
+                  stopLoss:
+                    typeof lifecyclePosition.stopLoss === "number"
+                      ? lifecyclePosition.stopLoss
+                      : null,
+                  tp1:
+                    typeof lifecyclePosition.tp1 === "number"
+                      ? lifecyclePosition.tp1
+                      : null,
+                  tp2:
+                    typeof lifecyclePosition.tp2 === "number"
+                      ? lifecyclePosition.tp2
+                      : null,
+                  tp3:
+                    typeof lifecyclePosition.tp3 === "number"
+                      ? lifecyclePosition.tp3
+                      : null,
+                  tp1Status: String(lifecyclePosition.tp1Status ?? "PENDING"),
+                  tp2Status: String(lifecyclePosition.tp2Status ?? "PENDING"),
+                  tp3Status: String(lifecyclePosition.tp3Status ?? "PENDING"),
+                  pnl:
+                    typeof lifecyclePosition.pnl === "number"
+                      ? lifecyclePosition.pnl
+                      : null,
+                  initialRisk:
+                    typeof lifecyclePosition.initialRisk === "number"
+                      ? lifecyclePosition.initialRisk
+                      : null,
+                  currentRisk:
+                    typeof lifecyclePosition.currentRisk === "number"
+                      ? lifecyclePosition.currentRisk
+                      : null,
+                  openedAt:
+                    typeof lifecyclePosition.openedAt === "string"
+                      ? lifecyclePosition.openedAt
+                      : undefined,
+                  durationSeconds:
+                    typeof lifecyclePosition.durationSeconds === "number"
+                      ? lifecyclePosition.durationSeconds
+                      : null,
+                  managementState: String(
+                    lifecyclePosition.managementState ?? "HOLD"
+                  ),
+                  fundsLabel: String(lifecyclePosition.fundsLabel ?? "DEMO FUNDS"),
+                  lastRecommendation:
+                    typeof lifecyclePosition.lastRecommendation === "string"
+                      ? lifecyclePosition.lastRecommendation
+                      : null
+                }
+              : position
+                ? {
+                    side: position.direction,
+                    entry: position.entry,
+                    current: quote?.bid ?? null,
+                    lots: position.size,
+                    stopLoss: position.stop,
+                    tp1: position.takeProfit,
+                    pnl: position.unrealisedPnl,
+                    accountMasked: maskedAt,
+                    fundsLabel: "DEMO FUNDS",
+                    managementState: "HOLD",
+                    symbol: "XAUUSD"
+                  }
+                : null
+          }
+        />
+      </section>
+
+      <section className="gm-at-card gm-news-guard" data-testid="news-guard-card">
+        <h3>Economic calendar</h3>
+        <p className="gm-meta">
+          {String(news?.providerLabel ?? "Not configured")}
+          {news?.provider === "TEMPLATE_PROTECTION"
+            ? " · not a live calendar"
+            : ""}
+        </p>
+        {news?.active ? (
+          <p className="gm-news-guard__blocked" data-testid="news-guard-blocked">
+            NEW ENTRIES PAUSED
+            <br />
+            High-impact USD news protection
+          </p>
+        ) : news?.configured ? (
+          <p className="gm-meta">Trading protection cleared.</p>
+        ) : (
+          <p className="gm-meta">ECONOMIC CALENDAR · Not configured</p>
+        )}
+        {Array.isArray(news?.upcoming) && (news?.upcoming as unknown[]).length > 0 ? (
+          <ul className="gm-news-guard__upcoming">
+            <li className="gm-label">Upcoming high impact</li>
+            {(news?.upcoming as Array<Record<string, unknown>>).slice(0, 3).map((ev) => (
+              <li key={`${ev.name}-${ev.at}`}>
+                <strong>{String(ev.name)}</strong>
+                <span>
+                  {ev.at
+                    ? new Date(String(ev.at)).toLocaleString("en-IE", {
+                        timeZone: "Europe/Dublin",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    : "—"}{" "}
+                  Europe/Dublin
+                </span>
+                <span className="gm-meta">
+                  Trading protection:{" "}
+                  {ev.blackoutFrom
+                    ? new Date(String(ev.blackoutFrom)).toLocaleTimeString("en-IE", {
+                        timeZone: "Europe/Dublin",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    : "—"}
+                  –
+                  {ev.blackoutTo
+                    ? new Date(String(ev.blackoutTo)).toLocaleTimeString("en-IE", {
+                        timeZone: "Europe/Dublin",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    : "—"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <p className="gm-meta">
+          <Link to="/autotrade/performance">Open Performance</Link>
+        </p>
       </section>
 
       <details

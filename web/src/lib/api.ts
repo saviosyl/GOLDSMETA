@@ -1113,12 +1113,30 @@ export class ApiClient {
     );
   }
 
-  async getWeeklyGoldMetaReport(): Promise<Record<string, unknown>> {
-    return this.requestCTrader("/v1/ctrader/weekly-report");
+  async getWeeklyGoldMetaReport(
+    environment: "DEMO" | "LIVE" = "DEMO"
+  ): Promise<Record<string, unknown>> {
+    return this.requestCTrader(
+      `/v1/ctrader/weekly-report?environment=${encodeURIComponent(environment)}`
+    );
   }
 
   async getNewsGuardStatus(): Promise<Record<string, unknown>> {
     return this.requestCTrader("/v1/ctrader/news-guard");
+  }
+
+  async getOpenAutoTradePositions(): Promise<{
+    environment: string;
+    positions: Array<Record<string, unknown>>;
+  }> {
+    return this.requestCTrader("/v1/ctrader/open-positions");
+  }
+
+  async reconcileOpenAutoTradePositions(): Promise<Record<string, unknown>> {
+    return this.requestCTrader("/v1/ctrader/open-positions/reconcile", {
+      method: "POST",
+      body: "{}"
+    });
   }
 
   async placeCTraderDemoMarketOrder(args: {

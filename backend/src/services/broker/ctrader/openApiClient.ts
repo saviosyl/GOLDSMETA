@@ -92,6 +92,50 @@ export type DemoMarketOrderResult = {
   raw?: Record<string, unknown>;
 };
 
+/** Open position snapshot from ProtoOAReconcileRes.position[] */
+export type BrokerOpenPosition = {
+  positionId: string;
+  symbolId: string | null;
+  side: "BUY" | "SELL";
+  /** Lots (1.00 = 1 lot). */
+  volumeLots: number | null;
+  /** Protocol volume cents. */
+  volumeUnits: number | null;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  unrealisedPnl: number | null;
+  openTimestamp: string | null;
+};
+
+export type DemoAmendSlTpRequest = {
+  accessToken: string;
+  clientId: string;
+  clientSecret: string;
+  ctidTraderAccountId: string;
+  positionId: string;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+};
+
+export type DemoClosePositionRequest = {
+  accessToken: string;
+  clientId: string;
+  clientSecret: string;
+  ctidTraderAccountId: string;
+  positionId: string;
+  /** Protocol volume cents to close (partial or full). */
+  volume: number;
+};
+
+export type DemoPositionMutationResult = {
+  accepted: boolean;
+  executionType: string | null;
+  positionId: string | null;
+  errorCode: string | null;
+  raw?: Record<string, unknown>;
+};
+
 /** Display-only OHLC bar from ProtoOAGetTrendbarsRes. */
 export type TrendbarCandle = {
   /** Unix seconds (bar open). */
@@ -186,6 +230,97 @@ export interface CTraderOpenApiClient {
   }): Promise<TrendbarCandle[]>;
   /** Demo host only — never call for Live accounts. */
   placeDemoMarketOrder?(args: DemoMarketOrderRequest): Promise<DemoMarketOrderResult>;
+  /** Demo host only — list open positions via ProtoOAReconcileReq. */
+  reconcileDemoOpenPositions?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+  }): Promise<BrokerOpenPosition[]>;
+  /** Demo host only — amend absolute SL/TP on an open position. */
+  amendDemoPositionSlTp?(
+    args: DemoAmendSlTpRequest
+  ): Promise<DemoPositionMutationResult>;
+  /** Demo host only — full or partial close. */
+  closeDemoPosition?(
+    args: DemoClosePositionRequest
+  ): Promise<DemoPositionMutationResult>;
+}
+
+function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: BrokerOpenPosition[] = [];
+  for (const item of list) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const trade = (row.tradeData ?? row) as Record<string, unknown>;
+    const sideNum = asNumber(trade.tradeSide ?? row.tradeSide);
+    const side: "BUY" | "SELL" = sideNum === 2 ? "SELL" : "BUY";
+    const volumeUnits = asNumber(trade.volume ?? row.volume);
+    const positionId =
+      row.positionId != null
+        ? String(row.positionId)
+        : trade.positionId != null
+          ? String(trade.positionId)
+          : "";
+    if (!positionId) continue;
+    const openTs = asNumber(trade.openTimestamp ?? row.openTimestamp);
+    // ProtoOAPosition price/SL/TP are absolute money prices (not relative spot units).
+    out.push({
+      positionId,
+      symbolId:
+        trade.symbolId != null
+          ? String(trade.symbolId)
+          : row.symbolId != null
+            ? String(row.symbolId)
+            : null,
+      side,
+      volumeUnits,
+      volumeLots:
+        volumeUnits != null ? Number((volumeUnits / 100).toFixed(2)) : null,
+      entryPrice: asNumber(row.price ?? trade.price ?? row.entryPrice),
+      stopLoss: asNumber(row.stopLoss ?? trade.stopLoss),
+      takeProfit: asNumber(row.takeProfit ?? trade.takeProfit),
+      unrealisedPnl: moneyFromCenti(row.unrealizedPnl ?? row.unrealisedPnl, 2),
+      openTimestamp:
+        openTs != null ? new Date(openTs).toISOString() : null
+    });
+  }
+  return out;
+}
+
+async function waitForDemoExecution(
+  connection: InstanceType<typeof CTraderConnection>,
+  timeoutMs = 15_000
+): Promise<Record<string, unknown>> {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("CTRADER_ORDER_TIMEOUT")),
+      timeoutMs
+    );
+    connection.on(
+      "ProtoOAExecutionEvent",
+      (event: { descriptor?: Record<string, unknown> }) => {
+        clearTimeout(timer);
+        resolve(event?.descriptor ?? {});
+      }
+    );
+    connection.on(
+      "ProtoOAErrorRes",
+      (event: { descriptor?: Record<string, unknown> }) => {
+        const descriptor = event?.descriptor ?? {};
+        clearTimeout(timer);
+        reject(
+          new Error(
+            String(
+              descriptor.errorCode ??
+                descriptor.description ??
+                "CTRADER_ORDER_ERROR"
+            )
+          )
+        );
+      }
+    );
+  });
 }
 
 function mapDiscovered(raw: Record<string, unknown>): DiscoveredAccount {
@@ -670,38 +805,7 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         const clientOrderId =
           args.clientOrderId ?? `gm_${Date.now().toString(36)}`.slice(0, 50);
 
-        const executionPromise = new Promise<Record<string, unknown>>(
-          (resolve, reject) => {
-            const timer = setTimeout(
-              () => reject(new Error("CTRADER_ORDER_TIMEOUT")),
-              15_000
-            );
-            connection.on(
-              "ProtoOAExecutionEvent",
-              (event: { descriptor?: Record<string, unknown> }) => {
-                const descriptor = event?.descriptor ?? {};
-                clearTimeout(timer);
-                resolve(descriptor);
-              }
-            );
-            connection.on(
-              "ProtoOAErrorRes",
-              (event: { descriptor?: Record<string, unknown> }) => {
-                const descriptor = event?.descriptor ?? {};
-                clearTimeout(timer);
-                reject(
-                  new Error(
-                    String(
-                      descriptor.errorCode ??
-                        descriptor.description ??
-                        "CTRADER_ORDER_ERROR"
-                    )
-                  )
-                );
-              }
-            );
-          }
-        );
+        const executionPromise = waitForDemoExecution(connection);
 
         // ProtoOAOrderType.MARKET = 1, ProtoOATradeSide BUY=1 SELL=2
         await connection.sendCommand("ProtoOANewOrderReq", {
@@ -741,6 +845,101 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           clientOrderId,
           raw: execution
         } satisfies DemoMarketOrderResult;
+      });
+    },
+
+    async reconcileDemoOpenPositions(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        })) as Record<string, unknown>;
+        return parseBrokerOpenPositions(recon.position ?? recon.positions);
+      });
+    },
+
+    async amendDemoPositionSlTp(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const executionPromise = waitForDemoExecution(connection);
+        const payload: Record<string, unknown> = {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          positionId: Number(args.positionId)
+        };
+        if (args.stopLoss != null && Number.isFinite(args.stopLoss)) {
+          payload.stopLoss = args.stopLoss;
+        }
+        if (args.takeProfit != null && Number.isFinite(args.takeProfit)) {
+          payload.takeProfit = args.takeProfit;
+        }
+        await connection.sendCommand("ProtoOAAmendPositionSLTPReq", payload);
+        const execution = await executionPromise;
+        const position = (execution.position ?? {}) as Record<string, unknown>;
+        const errorCode =
+          typeof execution.errorCode === "string" ? execution.errorCode : null;
+        return {
+          accepted: !errorCode,
+          executionType:
+            execution.executionType != null
+              ? String(execution.executionType)
+              : null,
+          positionId:
+            position.positionId != null
+              ? String(position.positionId)
+              : args.positionId,
+          errorCode,
+          raw: execution
+        } satisfies DemoPositionMutationResult;
+      });
+    },
+
+    async closeDemoPosition(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const executionPromise = waitForDemoExecution(connection);
+        await connection.sendCommand("ProtoOAClosePositionReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          positionId: Number(args.positionId),
+          volume: args.volume
+        });
+        const execution = await executionPromise;
+        const position = (execution.position ?? {}) as Record<string, unknown>;
+        const errorCode =
+          typeof execution.errorCode === "string" ? execution.errorCode : null;
+        return {
+          accepted: !errorCode,
+          executionType:
+            execution.executionType != null
+              ? String(execution.executionType)
+              : null,
+          positionId:
+            position.positionId != null
+              ? String(position.positionId)
+              : args.positionId,
+          errorCode,
+          raw: execution
+        } satisfies DemoPositionMutationResult;
       });
     }
   };
@@ -852,6 +1051,40 @@ export function createMockOpenApiClient(opts?: {
         errorCode: null,
         clientOrderId: args.clientOrderId ?? "mock-client-order",
         raw: { mock: true, side: args.side, volume: args.volume }
+      };
+    },
+    async reconcileDemoOpenPositions() {
+      return [
+        {
+          positionId: "mock-pos-1",
+          symbolId: "41",
+          side: "BUY",
+          volumeLots: 0.01,
+          volumeUnits: 1,
+          entryPrice: 2350.1,
+          stopLoss: 2340,
+          takeProfit: 2370,
+          unrealisedPnl: 1.2,
+          openTimestamp: new Date().toISOString()
+        }
+      ];
+    },
+    async amendDemoPositionSlTp(args) {
+      return {
+        accepted: true,
+        executionType: "ORDER_ACCEPTED",
+        positionId: args.positionId,
+        errorCode: null,
+        raw: { mock: true, stopLoss: args.stopLoss, takeProfit: args.takeProfit }
+      };
+    },
+    async closeDemoPosition(args) {
+      return {
+        accepted: true,
+        executionType: "ORDER_FILLED",
+        positionId: args.positionId,
+        errorCode: null,
+        raw: { mock: true, volume: args.volume }
       };
     }
   };

@@ -48,7 +48,8 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: "Reports",
     items: [
       { to: "/v4", label: "Research", icon: BarChart3 },
-      { to: "/analytics", label: "Performance", icon: Activity },
+      { to: "/analytics", label: "Analytics", icon: Activity },
+      { to: "/autotrade/performance", label: "Performance", icon: Activity },
       { to: "/history", label: "History", icon: History },
       { to: "/replay", label: "Replay", icon: FileText }
     ]
@@ -106,7 +107,8 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
     heading: "Reports",
     items: [
       { to: "/v4", label: "Research", icon: BarChart3 },
-      { to: "/analytics", label: "Performance", icon: Activity },
+      { to: "/analytics", label: "Analytics", icon: Activity },
+      { to: "/autotrade/performance", label: "Performance", icon: Activity },
       { to: "/signal-performance", label: "Signals", icon: Gauge }
     ]
   },

@@ -1,6 +1,7 @@
 /**
  * Fail-closed guards for cTrader mutation paths.
- * Demo market orders go through {@link submitDemoMarketOrder}; other mutations stay denied.
+ * Demo market orders + Demo position management go through dedicated helpers.
+ * Live and generic broker mutation paths stay denied.
  */
 
 import {
@@ -26,6 +27,17 @@ export function assertDemoMarketOrderAllowed(): void {
   assertCTraderLiveMutationsDisabled();
   if (!isCTraderDemoOrderSubmissionEnabled()) {
     throw new CTraderMutationDisabledError("placeMarketOrder");
+  }
+}
+
+/**
+ * Demo-only SL amend / partial close for lifecycle management.
+ * Requires the same Demo submission gate; Live remains impossible.
+ */
+export function assertDemoPositionMutationAllowed(action: string): void {
+  assertCTraderLiveMutationsDisabled();
+  if (!isCTraderDemoOrderSubmissionEnabled()) {
+    throw new CTraderMutationDisabledError(action);
   }
 }
 

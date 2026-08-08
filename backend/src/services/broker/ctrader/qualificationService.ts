@@ -55,8 +55,12 @@ import {
   markTradeOpened
 } from "./dailySafetyService";
 import { sessionAllowed } from "./sessionGuard";
-import { evaluateNewsGuard } from "./newsGuard";
-import { createAutoTradeJournalEntry } from "./autoTradeJournal";
+import { evaluateNewsGuardAsync } from "./newsGuard";
+import {
+  createAutoTradeJournalEntry,
+  updateAutoTradeJournalOnClose
+} from "./autoTradeJournal";
+import { createDemoPositionLifecycle } from "./demoPositionLifecycle";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 
 function buildSha(): string | null {
@@ -506,7 +510,7 @@ export async function processDecisionForQualification(args: {
   });
 
   const session = sessionAllowed(settings.allowedSessions);
-  const news = evaluateNewsGuard({
+  const news = await evaluateNewsGuardAsync({
     mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
     minutesBefore: settings.newsMinutesBefore,
     minutesAfter: settings.newsMinutesAfter
@@ -800,6 +804,30 @@ export async function processDecisionForQualification(args: {
       } catch {
         /* journal must not block */
       }
+      try {
+        await createDemoPositionLifecycle({
+          uid,
+          correlationId: trade.correlationId,
+          brokerOrderId: trade.brokerOrderId,
+          brokerPositionId: trade.brokerPositionId,
+          accountId: setup.accountId,
+          accountMasked: setup.accountMasked,
+          side: trade.direction,
+          entry: trade.entry,
+          stopLoss: trade.stopLoss,
+          takeProfit: trade.takeProfit,
+          lots: trade.lots,
+          qualificationStage: state,
+          decisionId: signalId,
+          source:
+            state === "CONTROLLED_DEMO_QUALIFICATION"
+              ? "qualification_controlled"
+              : "demo_auto",
+          openedAt: trade.at
+        });
+      } catch {
+        /* lifecycle must not block order ack */
+      }
       return { handled: true, message: "order_submitted" };
     } catch (e) {
       doc = {
@@ -877,30 +905,44 @@ export async function markQualificationTradeClosed(args: {
       /* ignore */
     }
     try {
-      await createAutoTradeJournalEntry({
+      const pnl = typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? null;
+      const updated = await updateAutoTradeJournalOnClose({
         uid: args.uid,
-        environment: "DEMO",
-        source: "qualification_controlled",
-        direction: (closed as { direction?: "BUY" | "SELL" }).direction ?? "BUY",
-        entry: (closed as { entry?: number | null }).entry ?? null,
-        stopLoss: (closed as { stopLoss?: number | null }).stopLoss ?? null,
-        takeProfit: (closed as { takeProfit?: number | null }).takeProfit ?? null,
-        lots: (closed as { lots?: number | null }).lots ?? null,
-        cashRisk: null,
-        confidence: null,
-        riskReward: null,
-        session: null,
-        spread: null,
-        pnl: typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? null,
-        reasonForTrade: "Controlled Demo / Demo Auto trade",
-        reasonForExit: "Position closed",
-        qualificationStage: advanced,
-        accountMasked: setup.accountMasked,
-        broker: "Pepperstone cTrader",
         correlationId: args.correlationId,
-        openedAt: closed.at,
-        closedAt: closed.closedAt
+        pnl,
+        closedAt: closed.closedAt ?? now,
+        reasonForExit: "Position closed",
+        exitPrice: null,
+        managementActions: [],
+        durationSeconds: null,
+        slTpOutcome: null
       });
+      if (!updated.updated) {
+        await createAutoTradeJournalEntry({
+          uid: args.uid,
+          environment: "DEMO",
+          source: "qualification_controlled",
+          direction: (closed as { direction?: "BUY" | "SELL" }).direction ?? "BUY",
+          entry: (closed as { entry?: number | null }).entry ?? null,
+          stopLoss: (closed as { stopLoss?: number | null }).stopLoss ?? null,
+          takeProfit: (closed as { takeProfit?: number | null }).takeProfit ?? null,
+          lots: (closed as { lots?: number | null }).lots ?? null,
+          cashRisk: null,
+          confidence: null,
+          riskReward: null,
+          session: null,
+          spread: null,
+          pnl,
+          reasonForTrade: "Controlled Demo / Demo Auto trade",
+          reasonForExit: "Position closed",
+          qualificationStage: advanced,
+          accountMasked: setup.accountMasked,
+          broker: "Pepperstone cTrader",
+          correlationId: args.correlationId,
+          openedAt: closed.at,
+          closedAt: closed.closedAt
+        });
+      }
     } catch {
       /* ignore */
     }

@@ -84,9 +84,15 @@ import {
 import { listRecentEvaluations } from "../services/broker/ctrader/evaluationLogStore";
 import { buildPerformanceSummary } from "../services/broker/ctrader/performanceService";
 import { buildSystemHealth } from "../services/broker/ctrader/systemHealthService";
-import { buildWeeklyReport } from "../services/broker/ctrader/weeklyReportService";
-import { evaluateNewsGuard } from "../services/broker/ctrader/newsGuard";
+import { buildAndPersistWeeklyReport } from "../services/broker/ctrader/weeklyReportService";
+import { listWeeklyReports } from "../services/broker/ctrader/weeklyReportStore";
+import { evaluateNewsGuardAsync } from "../services/broker/ctrader/newsGuard";
 import { currentSessionUtc, sessionAllowed } from "../services/broker/ctrader/sessionGuard";
+import {
+  getOpenPositionsPublicView,
+  manageAllOpenDemoPositionsForUser
+} from "../services/broker/ctrader/demoPositionLifecycle";
+import { LIVE_HARD_CAPS } from "../services/broker/ctrader/liveRiskCaps";
 
 function codeOf(err: unknown): string {
   if (err && typeof err === "object" && "code" in err) {
@@ -1360,7 +1366,22 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const uid = requireUid(req, res);
     if (!uid) return;
     try {
-      res.json(await buildWeeklyReport(uid));
+      const environment = String(req.query.environment ?? "DEMO").toUpperCase() === "LIVE"
+        ? "LIVE"
+        : "DEMO";
+      const listed = await listWeeklyReports(uid, 8);
+      const match = listed.find((r) => r.environment === environment);
+      if (match) {
+        res.json({ report: match, history: listed });
+        return;
+      }
+      const { report } = await buildAndPersistWeeklyReport({
+        uid,
+        environment,
+        week: "current",
+        notify: false
+      });
+      res.json({ report, history: await listWeeklyReports(uid, 8) });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
     }
@@ -1376,16 +1397,56 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
   });
 
+  router.get("/v1/ctrader/open-positions", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await getOpenPositionsPublicView(uid));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post(
+    "/v1/ctrader/open-positions/reconcile",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      try {
+        assertCTraderLiveMutationsDisabled();
+        const result = await manageAllOpenDemoPositionsForUser(uid);
+        res.json({
+          ...result,
+          positions: await getOpenPositionsPublicView(uid),
+          liveOrders: "LOCKED"
+        });
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
+  router.get("/v1/ctrader/risk-caps", requireAuth, ...brokerGate, async (_req, res) => {
+    res.json({
+      live: LIVE_HARD_CAPS,
+      liveExecution: "LOCKED",
+      note: "User Live preferences cannot exceed these absolute server ceilings."
+    });
+  });
+
   router.get("/v1/ctrader/news-guard", requireAuth, ...brokerGate, async (req, res) => {
     const uid = requireUid(req, res);
     if (!uid) return;
     try {
       const settings = await getUserAutoTradeSettings(uid, "demo");
-      const status = evaluateNewsGuard({
-        mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
+      const cfg = {
+        mode: settings.newsFilterEnabled ? settings.newsImpactMode : ("OFF" as const),
         minutesBefore: settings.newsMinutesBefore,
         minutesAfter: settings.newsMinutesAfter
-      });
+      };
+      const status = await evaluateNewsGuardAsync(cfg);
       const session = sessionAllowed(settings.allowedSessions);
       res.json({
         news: status,

@@ -49,11 +49,26 @@ function avg(nums: number[]): number | null {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
+export type RecentTradeRow = {
+  correlationId: string | null;
+  date: string;
+  side: string;
+  entry: number | null;
+  exit: number | null;
+  pnl: number;
+  riskReward: number | null;
+  confidence: number | null;
+  session: string | null;
+  source: string | null;
+  reason: string | null;
+  environment: string | null;
+};
+
 export async function buildPerformanceSummary(args: {
   uid: string;
   environment: "DEMO" | "LIVE" | "ALL";
   period: PerformancePeriod;
-}): Promise<PerformanceSummary> {
+}): Promise<PerformanceSummary & { recentTrades: RecentTradeRow[] }> {
   const envFilter = args.environment === "ALL" ? undefined : args.environment;
   const rows = await listAutoTradeJournal(args.uid, { environment: envFilter, limit: 500 });
   const closed = rows.filter(
@@ -99,6 +114,28 @@ export async function buildPerformanceSummary(args: {
   const grossWin = wins.reduce((a, b) => a + b, 0);
   const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
 
+  const recentTrades: RecentTradeRow[] = sorted
+    .slice()
+    .reverse()
+    .slice(0, 40)
+    .map((r) => ({
+      correlationId:
+        typeof r.correlationId === "string" ? r.correlationId : null,
+      date: String(r.closedAt ?? r.openedAt ?? r.createdAt ?? ""),
+      side: String(r.side ?? "—"),
+      entry: typeof r.entry === "number" ? r.entry : null,
+      exit: typeof r.exitPrice === "number" ? r.exitPrice : null,
+      pnl: Number(r.pnl),
+      riskReward: typeof r.riskReward === "number" ? r.riskReward : null,
+      confidence: typeof r.confidence === "number" ? r.confidence : null,
+      session: r.session != null ? String(r.session) : null,
+      source: r.tradeSource != null ? String(r.tradeSource) : null,
+      reason:
+        (r.reasonForExit != null ? String(r.reasonForExit) : null) ||
+        (r.reasonForTrade != null ? String(r.reasonForTrade) : null),
+      environment: r.environment != null ? String(r.environment) : null
+    }));
+
   return {
     environment: args.environment,
     period: args.period,
@@ -120,6 +157,7 @@ export async function buildPerformanceSummary(args: {
     newYorkTrades: closed.filter((r) => /new/i.test(String(r.session ?? ""))).length,
     avgConfidenceWinners: avg(confW),
     avgConfidenceLosers: avg(confL),
-    cumulativePnl: cumulative
+    cumulativePnl: cumulative,
+    recentTrades
   };
 }

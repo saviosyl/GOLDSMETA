@@ -218,6 +218,20 @@ const api: Record<string, ReturnType<typeof vi.fn>> = {
     currency: "EUR"
   })),
   resumeDailySafety: vi.fn(),
+  getOpenAutoTradePositions: vi.fn(async () => ({
+    environment: "DEMO",
+    positions: []
+  })),
+  getNewsGuardStatus: vi.fn(async () => ({
+    news: {
+      configured: false,
+      provider: "NONE",
+      providerLabel: "Not configured",
+      active: false,
+      upcoming: []
+    },
+    liveOrders: "LOCKED"
+  })),
   getSystemHealth: vi.fn(async () => ({
     marketFeed: { tone: "green", label: "OK" },
     strategyFeed: { tone: "green", label: "OK" },

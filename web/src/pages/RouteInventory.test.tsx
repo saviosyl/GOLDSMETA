@@ -36,6 +36,7 @@ const REQUIRED_PATHS = [
   "/journal",
   "/planner",
   "/autotrade",
+  "/autotrade/performance",
   "/brokers",
   "/tradingview",
   "/admin/users",

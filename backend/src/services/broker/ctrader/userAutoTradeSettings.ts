@@ -9,6 +9,7 @@
 
 import { getFirestore } from "firebase-admin/firestore";
 import { recordSettingsChanges } from "./settingsAuditStore";
+import { hardCapsFor } from "./liveRiskCaps";
 
 export type AutoTradeEnvironment = "demo" | "live";
 
@@ -185,18 +186,20 @@ export function validateSettingsPatch(
     return null;
   };
 
+  // Absolute server ceilings (Live tighter than Demo user-editable ranges).
+  const caps = hardCapsFor(environment);
   for (const [key, min, max] of [
-    ["fixedRiskAmount", 1, 10_000],
-    ["percentageRisk", 0.01, 100],
-    ["manualLotSize", 0.01, 5000],
-    ["maxDailyLoss", 1, 100_000],
+    ["fixedRiskAmount", 1, caps.fixedRiskAmountMax],
+    ["percentageRisk", 0.01, caps.percentageRiskMax],
+    ["manualLotSize", 0.01, caps.manualLotSizeMax],
+    ["maxDailyLoss", 1, caps.maxDailyLossMax],
     // Product: Max trades / day is 1–10 (user-editable).
-    ["maxTradesPerDay", 1, 10],
-    ["maxOpenPositions", 1, 3],
+    ["maxTradesPerDay", 1, Math.min(10, caps.maxTradesPerDayMax)],
+    ["maxOpenPositions", 1, caps.maxOpenPositionsMax],
     ["minConfidence", 50, 100],
     ["minRiskReward", 1, 3],
-    ["maxSpread", 0.01, 20],
-    ["maxSlippage", 0.01, 20],
+    ["maxSpread", 0.01, caps.maxSpreadMax],
+    ["maxSlippage", 0.01, caps.maxSlippageMax],
     ["maxQuoteAgeSeconds", 1, 300],
     ["tradeCooldownMinutes", 0, 1440],
     ["pauseAfterConsecutiveLosses", 1, 10],
@@ -204,14 +207,23 @@ export function validateSettingsPatch(
     ["newsMinutesAfter", 0, 180],
     ["dailyProfitTarget", 1, 1_000_000],
     ["profitProtectionFloor", 0, 1_000_000],
-    ["maxPositionExposureLots", 0.01, 100]
+    ["maxPositionExposureLots", 0.01, caps.maxPositionExposureLotsMax]
   ] as const) {
     const raw = clean[key as keyof UserAutoTradeSettingsPatch];
     if (raw === null && (key === "dailyProfitTarget" || key === "profitProtectionFloor" || key === "maxPositionExposureLots")) {
       continue;
     }
     const err = num(raw, min, max, key);
-    if (err) return { ok: false, code: "SETTINGS_VALIDATION_FAILED", message: err };
+    if (err) {
+      return {
+        ok: false,
+        code:
+          environment === "live"
+            ? "LIVE_HARD_CAP_EXCEEDED"
+            : "SETTINGS_VALIDATION_FAILED",
+        message: err
+      };
+    }
   }
 
   if (
@@ -223,11 +235,22 @@ export function validateSettingsPatch(
     return { ok: false, code: "SETTINGS_VALIDATION_FAILED", message: "Invalid news impact mode" };
   }
 
-  if (clean.maxOpenPositions != null && ![1, 2, 3].includes(clean.maxOpenPositions)) {
+  const allowedOpen =
+    environment === "live" ? [1, 2] : [1, 2, 3];
+  if (
+    clean.maxOpenPositions != null &&
+    !allowedOpen.includes(clean.maxOpenPositions)
+  ) {
     return {
       ok: false,
-      code: "SETTINGS_VALIDATION_FAILED",
-      message: "maxOpenPositions must be 1, 2, or 3"
+      code:
+        environment === "live"
+          ? "LIVE_HARD_CAP_EXCEEDED"
+          : "SETTINGS_VALIDATION_FAILED",
+      message:
+        environment === "live"
+          ? "maxOpenPositions must be 1 or 2 for Live (server hard cap)"
+          : "maxOpenPositions must be 1, 2, or 3"
     };
   }
 
