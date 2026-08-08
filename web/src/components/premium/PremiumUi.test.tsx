@@ -152,7 +152,9 @@ describe("Premium UI redesign", () => {
 
     render(wrap(<AlertsSetupPage />));
     expect(await screen.findByTestId("alerts-setup-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("premium-setup-health")).toHaveTextContent(/Setup complete/i);
+    // Wait for async feed checklist — initial empty state shows "Setup in progress".
+    expect(await screen.findByText(/Setup complete/i)).toBeInTheDocument();
+    expect(screen.getByTestId("premium-setup-health")).toHaveTextContent(/Setup complete/i);
     expect(screen.getByText(/Pine 3\.0 detected/i)).toBeInTheDocument();
     expect(screen.getByText(/No recent legacy Bridge traffic/i)).toBeInTheDocument();
   });
