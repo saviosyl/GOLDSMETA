@@ -1084,8 +1084,8 @@ function buildReviewApi() {
         orderSubmissionEnabled: false,
         liveEnabled: false,
         connectionSummary: {
-          accountMasked: "****4821",
-          brokerName: "Pepperstone",
+          accountMasked: "48…06",
+          brokerName: "Pepperstone - Europe",
           symbolName: "XAUUSD",
           lastSyncAt: new Date().toISOString(),
           lastQuoteAt: new Date().toISOString()
@@ -1163,34 +1163,34 @@ function buildReviewApi() {
     getCTraderDiagnostics: async () => ({
       oauthConnected: true,
       accountSelected: true,
-      demoAccountSelected: true,
+      demoAccountSelected: false,
       credentialsConfigured: true,
       pepperstoneConfirmed: true,
       goldSymbolFound: true,
       liveQuoteReceived: true,
       spreadAvailable: true,
       volumeRulesAvailable: true,
-      marginMetadataAvailable: false,
+      marginMetadataAvailable: true,
       marketStatusAvailable: true,
       tradingSafelyLocked: true,
       autoTrade: "OFF",
-      environment: "DEMO",
-      selectedAccountIsLive: false,
+      environment: "LIVE",
+      selectedAccountIsLive: true,
       connection: {
-        accountMasked: "****4821",
-        brokerName: "Pepperstone",
+        accountMasked: "48…06",
+        brokerName: "Pepperstone - Europe",
         currency: "EUR",
         symbolName: "XAUUSD",
         tokenRefreshHealthy: true
       },
       account: {
-        accountIdMasked: "****4821",
+        accountIdMasked: "48…06",
         currency: "EUR",
-        balance: 10000,
-        equity: 10000,
-        freeMargin: 9500,
-        usedMargin: 120,
-        leverage: 100
+        balance: 50,
+        equity: 50,
+        freeMargin: 50,
+        usedMargin: 0,
+        leverage: 30
       },
       symbol: {
         symbolName: "XAUUSD",
@@ -1198,35 +1198,35 @@ function buildReviewApi() {
         volumeStep: 0.01
       },
       quote: {
-        bid: 4046.35,
-        ask: 4046.64,
-        spread: 0.29,
-        marketStatus: "CLOSED",
-        stale: true,
+        bid: 4265.1,
+        ask: 4265.31,
+        spread: 0.21,
+        marketStatus: "OPEN",
+        stale: false,
         timestamp: new Date().toISOString()
       }
     }),
     listCTraderAccounts: async () => ({
       accounts: [
         {
-          ctidTraderAccountId: "demo-4821",
-          accountIdMasked: "****4821",
-          isLive: false,
+          ctidTraderAccountId: "live-4706",
+          accountIdMasked: "48…06",
+          isLive: true,
           selected: true,
-          brokerNameTitle: "Pepperstone",
+          brokerNameTitle: "Pepperstone - Europe",
           depositCurrency: "EUR",
-          balance: 10000,
+          balance: 50,
           connectionStatus: "Connected",
           tradingPermission: "Read only"
         },
         {
-          ctidTraderAccountId: "live-9910",
-          accountIdMasked: "****9910",
-          isLive: true,
+          ctidTraderAccountId: "demo-4821",
+          accountIdMasked: "****4821",
+          isLive: false,
           selected: false,
           brokerNameTitle: "Pepperstone",
           depositCurrency: "EUR",
-          balance: 2500,
+          balance: 10000,
           connectionStatus: "Connected",
           tradingPermission: "Read only"
         }
@@ -1237,7 +1237,7 @@ function buildReviewApi() {
         uid: "review",
         environment,
         updatedAt: new Date().toISOString(),
-        selectedAccountId: environment === "demo" ? "demo-4821" : null,
+        selectedAccountId: environment === "live" ? "live-4706" : "demo-4821",
         sizingMode: "automatic_risk",
         fixedRiskAmount: 20,
         percentageRisk: 0.5,

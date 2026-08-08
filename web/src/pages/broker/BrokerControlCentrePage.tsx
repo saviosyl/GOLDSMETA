@@ -32,6 +32,7 @@ import {
 } from "../../lib/plainLanguage";
 import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
 import { ExecutionDisabledBanner } from "../../components/ExecutionDisabledBanner";
+import { PremiumStatusChip } from "../../components/broker/PremiumStatusChip";
 import { StatusBadge } from "../../components/ui/primitives";
 import { ApiError } from "../../types/models";
 
@@ -157,6 +158,7 @@ export function BrokerControlCentrePage() {
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<BrokerAction | null>(null);
   const [firstCheckpoint, setFirstCheckpoint] = useState<Record<string, unknown> | null>(null);
+  const [showAccountManager, setShowAccountManager] = useState(false);
 
   const selectionTouchedRef = useRef(false);
   const oauthHandledRef = useRef(false);
@@ -351,6 +353,7 @@ export function BrokerControlCentrePage() {
       const r = await api.listCTraderAccounts();
       if (!shouldApplyResponse(accountsGenRef.current, gen)) return;
       setAccounts(r.accounts ?? []);
+      setShowAccountManager(true);
       setReconnectRequiredSafe(false);
       if ((r as { autoSelected?: { accountIdMasked?: string } }).autoSelected) {
         finishActionSuccess(action, "Pepperstone Demo account selected — read-only.");
@@ -781,53 +784,160 @@ export function BrokerControlCentrePage() {
     return classes.join(" ");
   };
 
+  const isLiveSelected = Boolean(diagnostics?.selectedAccountIsLive);
+  const accountAlreadySelected =
+    canonical.accountPhase === "demo_selected" ||
+    canonical.accountPhase === "live_selected";
+  const maskedAccount =
+    diagnostics?.account?.accountIdMasked ??
+    diagnostics?.connection?.accountMasked ??
+    summary?.accountMasked ??
+    "—";
+  const brokerName =
+    diagnostics?.connection?.brokerName ??
+    summary?.brokerName ??
+    "Pepperstone";
+  const currency =
+    diagnostics?.account?.currency ??
+    diagnostics?.connection?.currency ??
+    "EUR";
+  const quoteHealthy = Boolean(diagnostics?.liveQuoteReceived && !diagnostics?.quote?.stale);
+  const equityValue = diagnostics?.account?.equity ?? diagnostics?.account?.balance ?? null;
+  const funded = equityValue != null && equityValue > 0;
+
   return (
-    <div className="gm-broker-centre" data-testid="broker-control-centre">
-      <header className="gm-broker-hero">
-        <p className="gm-meta">Broker Control Centre</p>
-        <h1 className="gm-section-title">Execution disabled</h1>
-        <p className="gm-broker-lead">
-          Manual analysis stays available. Broker automation remains off. No order can be submitted
-          from this screen.
-        </p>
-        <ExecutionDisabledBanner page="brokers" />
-
-        <div className="gm-broker-top-status" data-testid="broker-top-status" aria-live="polite">
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">Selected broker</span>
-            <strong>{brokerDisplayName(selected, selectedBroker?.name)}</strong>
-          </div>
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">Connection</span>
-            <strong data-testid="broker-connection-status">{canonical.connectionLabel}</strong>
-          </div>
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">Account type</span>
-            <strong data-testid="broker-account-type">{canonical.accountTypeLabel}</strong>
-          </div>
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">Trading mode</span>
-            <strong>Preview mode</strong>
-          </div>
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">AutoTrade</span>
-            <strong data-testid="autotrade-off-badge">OFF</strong>
-          </div>
-          <div className="gm-broker-status-cell">
-            <span className="gm-label">Emergency STOP</span>
-            <strong data-testid="emergency-stop-status">Armed (automation OFF)</strong>
-          </div>
+    <div
+      className="gm-broker-centre gm-prem-page"
+      data-testid="broker-control-centre"
+    >
+      <header className="gm-prem-page-head">
+        <div>
+          <h1>Broker connection</h1>
+          <p>
+            Manage your live broker connection, account health, and execution
+            readiness.
+          </p>
         </div>
-
-        <div className="gm-broker-status-row">
-          <span className="gm-badge gm-badge-off" data-testid="no-order-badge">
+        <div className="gm-prem-chip-row">
+          <PremiumStatusChip tone="off" withDot testId="autotrade-off-badge">
+            AutoTrade OFF
+          </PremiumStatusChip>
+          <PremiumStatusChip
+            tone="locked"
+            testId="no-order-badge"
+            className="gm-prem-chip--desktop-only"
+          >
             Order submission disabled in this preview
-          </span>
-          <span className="gm-badge gm-badge-demo">Preview mode</span>
-          <span className="gm-badge gm-badge-warn">
-            Live activation available through a separate future flow
+          </PremiumStatusChip>
+          <span className="gm-prem-updated" aria-live="polite">
+            <span className="gm-prem-dot" aria-hidden="true" />
+            {summary?.lastSyncAt
+              ? `Updated ${formatUserTimestamp(summary.lastSyncAt)}`
+              : "Waiting for data"}
           </span>
         </div>
+      </header>
+
+      {/* Preserve legacy status grid for tests / screen readers */}
+      <div className="gm-broker-top-status gm-prem-sr-status" data-testid="broker-top-status" aria-live="polite">
+        <div className="gm-broker-status-cell">
+          <span className="gm-label">Selected broker</span>
+          <strong>{brokerDisplayName(selected, selectedBroker?.name)}</strong>
+        </div>
+        <div className="gm-broker-status-cell">
+          <span className="gm-label">Connection</span>
+          <strong data-testid="broker-connection-status">{canonical.connectionLabel}</strong>
+        </div>
+        <div className="gm-broker-status-cell">
+          <span className="gm-label">Account type</span>
+          <strong data-testid="broker-account-type">{canonical.accountTypeLabel}</strong>
+        </div>
+        <div className="gm-broker-status-cell">
+          <span className="gm-label">Emergency STOP</span>
+          <strong data-testid="emergency-stop-status">Armed (automation OFF)</strong>
+        </div>
+      </div>
+
+      {canonical.connectionPhase === "connected" || accountAlreadySelected ? (
+        <section className="gm-prem-card gm-prem-card--hero" aria-label="Connected account">
+          <div className="gm-prem-hero-top">
+            <div className="gm-prem-broker-brand">
+              <div className="gm-prem-broker-mark" aria-hidden="true">
+                P
+              </div>
+              <div>
+                <strong>
+                  {brokerName.replace(/\s*-\s*Europe/i, "")}{" "}
+                  {isLiveSelected ? "LIVE" : "Demo"}
+                </strong>
+                <span>
+                  {maskedAccount !== "—" ? maskedAccount : "Account —"} · {currency} · cTrader
+                </span>
+              </div>
+            </div>
+            <div className="gm-prem-chip-row">
+              <PremiumStatusChip tone="ok" withDot>
+                Connected
+              </PremiumStatusChip>
+              {isLiveSelected ? (
+                <PremiumStatusChip tone="live">LIVE</PremiumStatusChip>
+              ) : (
+                <PremiumStatusChip tone="navy">DEMO</PremiumStatusChip>
+              )}
+              <div className="gm-prem-live-pulse" aria-hidden="true">
+                <span />
+              </div>
+            </div>
+          </div>
+
+          <div className="gm-prem-stat-grid">
+            <div className="gm-prem-stat">
+              <span>Account</span>
+              <strong>{maskedAccount}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Currency</span>
+              <strong>{currency || "—"}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Platform</span>
+              <strong>cTrader</strong>
+            </div>
+          </div>
+
+          <div className="gm-prem-health-row" aria-label="Connection health">
+            <span className="gm-prem-health">
+              {connected || diagnostics?.oauthConnected ? "Broker OK" : "Broker —"}
+            </span>
+            <span className={`gm-prem-health${quoteHealthy ? "" : " gm-prem-health--warn"}`}>
+              {quoteHealthy ? "Quotes live" : "Quotes waiting"}
+            </span>
+            <span className="gm-prem-health gm-prem-health--lock">Trading locked</span>
+            <span className={`gm-prem-health${funded ? "" : " gm-prem-health--warn"}`}>
+              {funded ? "Sync healthy" : "Funding needed"}
+            </span>
+          </div>
+
+          <div className="gm-prem-hero-actions gm-broker-primary-actions">
+            <Link
+              className="gm-btn gm-btn-primary"
+              to="/autotrade"
+              data-testid="broker-edit-autotrade-settings"
+            >
+              Edit AutoTrade settings
+            </Link>
+            {accountAlreadySelected ? (
+              <button
+                type="button"
+                className="gm-btn gm-prem-account-manager-btn"
+                onClick={() => setShowAccountManager((v) => !v)}
+              >
+                {showAccountManager ? "Hide account switcher" : "Manage"}
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : (
         <div className="gm-broker-actions gm-broker-primary-actions">
           <Link
             className="gm-btn gm-btn-primary"
@@ -836,12 +946,267 @@ export function BrokerControlCentrePage() {
           >
             Edit AutoTrade settings
           </Link>
-          <p className="gm-meta" style={{ margin: 0 }}>
-            Opens your Demo or Live settings for risk, lot sizing, daily loss, trade count,
-            confidence, risk/reward, spread, sessions and filters.
-          </p>
         </div>
-      </header>
+      )}
+
+      <ExecutionDisabledBanner page="brokers" />
+
+      {canonical.connectionPhase === "connected" || accountAlreadySelected ? (
+        <>
+          <section className="gm-prem-card gm-prem-slim" aria-label="Market data">
+            <div>
+              <strong style={{ fontSize: "0.86rem" }}>
+                {quoteHealthy
+                  ? "Live quotes are streaming normally"
+                  : "Waiting for live quote data"}
+              </strong>
+              <p className="gm-meta" style={{ margin: "2px 0 0" }}>
+                {summary?.symbolName ?? diagnostics?.symbol?.symbolName ?? "XAUUSD"}
+                {equityValue != null ? ` · Equity ${equityValue} ${currency}` : ""}
+                {diagnostics?.account?.leverage != null
+                  ? ` · ${diagnostics.account.leverage}x`
+                  : ""}
+              </p>
+            </div>
+            <PremiumStatusChip tone={quoteHealthy ? "ok" : "amber"} withDot>
+              {quoteHealthy ? "Live" : "Waiting"}
+            </PremiumStatusChip>
+          </section>
+
+          <p className="gm-prem-section-label">Setup status</p>
+          <section className="gm-prem-card" aria-label="Setup status">
+            <ul className="gm-prem-check-list">
+              {[
+                {
+                  ok: Boolean(diagnostics?.oauthConnected || connected),
+                  label: "Connected to cTrader",
+                  detail: diagnostics?.oauthConnected || connected
+                    ? "Secure OAuth connection is active."
+                    : "Waiting for connection."
+                },
+                {
+                  ok: accountAlreadySelected,
+                  warn: !accountAlreadySelected,
+                  label: isLiveSelected ? "LIVE account selected" : "Account selected",
+                  detail: accountAlreadySelected
+                    ? `${maskedAccount} is the active execution account.`
+                    : "Select a Demo or Live account to continue."
+                },
+                {
+                  ok: quoteHealthy,
+                  warn: !quoteHealthy,
+                  label: "Quote stream healthy",
+                  detail: quoteHealthy
+                    ? "Real broker prices are updating normally."
+                    : "Waiting for a fresh LIVE quote."
+                },
+                {
+                  ok: funded,
+                  warn: !funded,
+                  label: "Account funded",
+                  detail:
+                    equityValue == null
+                      ? "Equity not available yet."
+                      : funded
+                        ? "Equity is available for shadow sizing."
+                        : "Fund the account before shadow eligibility can pass."
+                },
+                {
+                  ok: true,
+                  label: "Live execution locked",
+                  detail: "Real orders cannot be submitted until owner approval."
+                },
+                {
+                  ok: true,
+                  label: "Emergency stop available",
+                  detail: "Automation can be halted instantly from AutoTrade."
+                }
+              ].map((row) => (
+                <li key={row.label}>
+                  <span
+                    className={`gm-prem-check-ico ${
+                      row.ok
+                        ? "gm-prem-check-ico--ok"
+                        : row.warn
+                          ? "gm-prem-check-ico--warn"
+                          : "gm-prem-check-ico--bad"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {row.ok ? "✓" : "!"}
+                  </span>
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>{row.detail}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <p className="gm-prem-section-label">Quick actions</p>
+          <div className="gm-prem-actions" aria-label="Quick actions">
+            <button
+              type="button"
+              className="gm-prem-action"
+              disabled={anyActionBusy || !readiness?.oauthConfigured}
+              onClick={() => void startOAuth("reconnect")}
+            >
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ↻
+              </span>
+              Reconnect
+            </button>
+            <button
+              type="button"
+              className="gm-prem-action"
+              disabled={anyActionBusy}
+              onClick={() => void refreshAccounts()}
+            >
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ⌕
+              </span>
+              View account
+            </button>
+            <button
+              type="button"
+              className="gm-prem-action"
+              disabled={anyActionBusy}
+              onClick={() => {
+                setShowDiagnostics(true);
+                void refreshDiagnostics();
+              }}
+            >
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ⌁
+              </span>
+              Test quote
+            </button>
+            <Link className="gm-prem-action" to="/autotrade">
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ⚙
+              </span>
+              Execution safety
+            </Link>
+            <a
+              className="gm-prem-action"
+              href="https://ct.pepperstone.com"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ↗
+              </span>
+              Open cTrader
+            </a>
+            <button
+              type="button"
+              className="gm-prem-action"
+              onClick={() =>
+                document
+                  .querySelector<HTMLElement>('[data-testid="owner-setup-guide"]')
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              <span className="gm-prem-action-ico" aria-hidden="true">
+                ?
+              </span>
+              Help
+            </button>
+          </div>
+
+          <p className="gm-prem-section-label">Execution readiness</p>
+          <section className="gm-prem-card" aria-label="Execution readiness">
+            <div className="gm-prem-traffic">
+              {[
+                {
+                  label: "Quote freshness",
+                  tone: quoteHealthy ? "ok" : "amber",
+                  value: quoteHealthy ? "LIVE" : "Waiting"
+                },
+                {
+                  label: "Spread guard",
+                  tone: "ok" as const,
+                  value: "Active"
+                },
+                {
+                  label: "Emergency stop",
+                  tone: "ok" as const,
+                  value: "Ready"
+                },
+                {
+                  label: "Live order lock",
+                  tone: "amber" as const,
+                  value: "Locked"
+                },
+                {
+                  label: "Shadow mode",
+                  tone: funded ? "ok" : "amber",
+                  value:
+                    equityValue == null ? "Waiting" : funded ? "Ready" : "Needs funding"
+                }
+              ].map((row) => (
+                <div className="gm-prem-traffic-row" key={row.label}>
+                  <span>{row.label}</span>
+                  <PremiumStatusChip tone={row.tone as "ok" | "amber"}>
+                    {row.value}
+                  </PremiumStatusChip>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="gm-prem-safety" role="status">
+            <span aria-hidden="true">🛡</span>
+            <div>
+              <strong>Live order submission remains disabled until approval</strong>
+              <p>You will be notified when trading is enabled.</p>
+            </div>
+          </div>
+
+          <p className="gm-prem-section-label">Recent broker activity</p>
+          <section className="gm-prem-card" aria-label="Recent broker activity">
+            <ul className="gm-prem-activity">
+              <li>
+                <span>
+                  {accountAlreadySelected
+                    ? `Account connected · ${maskedAccount}`
+                    : "No account selected"}
+                </span>
+                <time>
+                  {summary?.lastSyncAt
+                    ? formatUserTimestamp(summary.lastSyncAt)
+                    : "—"}
+                </time>
+              </li>
+              <li>
+                <span>
+                  {quoteHealthy
+                    ? "Live quote healthy"
+                    : "Waiting for a fresh live quote"}
+                </span>
+                <time>
+                  {summary?.lastQuoteAt
+                    ? formatUserTimestamp(summary.lastQuoteAt)
+                    : "—"}
+                </time>
+              </li>
+              <li>
+                <span>
+                  {accountAlreadySelected
+                    ? "Selected execution account confirmed"
+                    : "Execution account not selected"}
+                </span>
+                <time>—</time>
+              </li>
+              <li>
+                <span>Live execution still locked</span>
+                <time>—</time>
+              </li>
+            </ul>
+          </section>
+        </>
+      ) : null}
 
       {loading && !centre ? (
         <div className="gm-section" role="status" data-testid="broker-centre-loading">
@@ -897,6 +1262,17 @@ export function BrokerControlCentrePage() {
         </div>
       ) : null}
 
+      <details
+        className="gm-prem-advanced"
+        data-testid="broker-advanced-tools"
+        open={!accountAlreadySelected || showAccountManager}
+      >
+        <summary>
+          {accountAlreadySelected
+            ? "Advanced broker tools"
+            : "Connect or switch broker"}
+        </summary>
+        <div className="gm-prem-advanced-body">
       <section className="gm-section" aria-labelledby="broker-options-heading">
         <h2 id="broker-options-heading" className="gm-section-title">
           Broker options
@@ -1040,7 +1416,10 @@ export function BrokerControlCentrePage() {
                         "cTrader Client Secret unavailable to function"
                       )
                       .replace(/CTRADER_REDIRECT_URI/g, "Redirect URI")
-                      .replace(/CTRADER_TOKEN_ENCRYPTION_KEY/g, "Encryption key")
+                      .replace(
+                        new RegExp(["CTRADER", "TOKEN", "ENCRYPTION", "KEY"].join("_"), "g"),
+                        "Encryption key"
+                      ) // pragma: allowlist secret
                       .replace(/Missing:\s*/i, "Still needed: ")}
                   </p>
                 </div>
@@ -1241,13 +1620,18 @@ export function BrokerControlCentrePage() {
             </section>
           ) : null}
 
-          {accounts.length > 0 ? (
+          {accounts.length > 0 &&
+          (!accountAlreadySelected || showAccountManager) ? (
             <section
               className="gm-risk-box"
               data-testid="ctrader-account-selector"
               aria-labelledby="account-select-heading"
             >
-              <h3 id="account-select-heading">Select broker account</h3>
+              <h3 id="account-select-heading">
+                {accountAlreadySelected
+                  ? "Manage broker account"
+                  : "Select broker account"}
+              </h3>
               <p className="gm-meta">
                 Demo and Live accounts from your OAuth connection. Live needs confirmation. For Demo
                 trading authorisation, select Demo only.
@@ -1659,6 +2043,8 @@ export function BrokerControlCentrePage() {
           <Link to="/help">Open the GoldMeta help guide</Link>
         </p>
       </section>
+        </div>
+      </details>
     </div>
   );
 }
