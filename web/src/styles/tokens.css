@@ -93,14 +93,15 @@
     BlinkMacSystemFont, sans-serif;
   --font-display: var(--font-sans);
   --font-body: var(--font-sans);
-  --text-hero: clamp(2.625rem, 6vw, 3.5rem);
-  --text-page: 1.75rem;
-  --text-page-mobile: 1.5rem;
-  --text-section: 1.25rem;
-  --text-card: 1.0625rem;
-  --text-body: 0.9375rem;
-  --text-label: 0.8125rem;
-  --text-meta: 0.75rem;
+  /* Compact premium hierarchy — bold but not oversized */
+  --text-hero: clamp(1.7rem, 4.2vw, 2.15rem);
+  --text-page: 1.35rem;
+  --text-page-mobile: 1.25rem;
+  --text-section: 1.05rem;
+  --text-card: 1rem;
+  --text-body: 0.9rem;
+  --text-label: 0.75rem;
+  --text-meta: 0.72rem;
   --text-decision: var(--text-hero);
   --text-auth: 1.875rem;
   --price-size: 1.5rem;

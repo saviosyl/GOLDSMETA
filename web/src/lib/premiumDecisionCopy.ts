@@ -8,6 +8,8 @@ import { looksLikeReasonCode, plainReason } from "./reasonCodePlain";
 export type PremiumDecisionChip =
   | "BUY"
   | "SELL"
+  | "BUY READY"
+  | "SELL READY"
   | "WAIT"
   | "WATCHING"
   | "PREPARE"
@@ -20,27 +22,18 @@ export function premiumDecisionChip(
   state: DecisionDashboardState,
   plan?: IntradayPlan | null
 ): PremiumDecisionChip {
-  // From 65% setup quality, prefer clear BUY/SELL on the dashboard.
-  if (
-    state.direction &&
-    state.confidencePercent != null &&
-    state.confidencePercent >= DIRECTION_DISPLAY_THRESHOLD &&
-    (state.mode === "BUY_READY" ||
-      state.mode === "SELL_READY" ||
-      state.mode === "POTENTIAL_BUY" ||
-      state.mode === "POTENTIAL_SELL")
-  ) {
-    return state.direction;
-  }
+  // Fully ready plans use explicit READY labels (green/red semantics).
+  if (state.mode === "BUY_READY") return "BUY READY";
+  if (state.mode === "SELL_READY") return "SELL READY";
 
-  if (state.mode === "BUY_READY") return "BUY";
-  if (state.mode === "SELL_READY") return "SELL";
+  // Forming setups stay amber PREPARE — never green READY.
+  if (state.mode === "POTENTIAL_BUY") return "PREPARE BUY";
+  if (state.mode === "POTENTIAL_SELL") return "PREPARE SELL";
+
   if (state.mode === "HOLD") return "HOLD";
   if (state.mode === "WATCHING") return "WATCHING";
   if (state.mode === "WAIT") return "WAIT";
   if (state.mode === "NO_TRADE") return "HOLD";
-  if (state.mode === "POTENTIAL_BUY") return "PREPARE BUY";
-  if (state.mode === "POTENTIAL_SELL") return "PREPARE SELL";
 
   const action = String(plan?.action ?? "").toUpperCase();
   const status = String(plan?.planStatus ?? "").toUpperCase();
@@ -85,10 +78,12 @@ export function premiumDecisionSubtitle(
         ? `Watch for breakdown below ${price}`
         : sanitizeOneLine(plan?.oneSentence) || "Bearish setup forming — confirmation still needed";
     case "BUY":
+    case "BUY READY":
       return state.mode === "BUY_READY"
         ? "Plan confirmed — look for entry zone"
         : state.nextRequiredCondition || "Bullish bias — review levels before any manual entry";
     case "SELL":
+    case "SELL READY":
       return state.mode === "SELL_READY"
         ? "Bearish plan active — review entry carefully"
         : state.nextRequiredCondition || "Bearish bias — review levels before any manual entry";
@@ -121,7 +116,7 @@ export function premiumStatusLabel(
   plan?: IntradayPlan | null
 ): string {
   const chip = premiumDecisionChip(state, plan);
-  if (chip === "BUY" || chip === "SELL") {
+  if (chip === "BUY" || chip === "SELL" || chip === "BUY READY" || chip === "SELL READY") {
     return state.mode === "BUY_READY" || state.mode === "SELL_READY" ? "Active" : "Forming";
   }
   if (
@@ -138,7 +133,7 @@ export function premiumStatusLabel(
 }
 
 /** Build stamp helper — forces a fresh hashed asset after CDN poison recoveries. */
-export const PREMIUM_STATUS_COPY_VERSION = "hold-lean-v4";
+export const PREMIUM_STATUS_COPY_VERSION = "ready-labels-v5";
 
 export function strengthBadgeLabel(strength: string): "MEDIUM" | "HIGH" | "STRONG" | "MINOR" {
   const s = strength.toUpperCase();

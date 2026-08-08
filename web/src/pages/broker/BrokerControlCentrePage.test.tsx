@@ -269,7 +269,7 @@ describe("BrokerControlCentrePage", () => {
     });
     expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("OFF");
     expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
-      /Order submission disabled in this preview/i
+      /Live orders locked|Order submission disabled/i
     );
     expect(screen.getByTestId("broker-edit-autotrade-settings")).toHaveAttribute(
       "href",

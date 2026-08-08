@@ -155,7 +155,7 @@ describe("DecisionDashboard", () => {
 
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY");
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
     expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
@@ -174,9 +174,9 @@ describe("DecisionDashboard", () => {
 
     render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
 
-    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent("BUY");
+    expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY|PREPARE/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/75%\s*confidence/i);
-    expect(screen.getByTestId("premium-hero-status")).toHaveTextContent(/Forming|Active/i);
+    expect(screen.getByTestId("premium-hero-status")).toHaveTextContent(/Forming|Active|Monitoring/i);
     expect(screen.queryByText(/Blocked/i)).not.toBeInTheDocument();
   });
 

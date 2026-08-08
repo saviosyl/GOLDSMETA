@@ -10,6 +10,7 @@
   --prem-amber: var(--warning);
   --prem-amber-soft: var(--warning-soft);
   --prem-red: var(--danger);
+  --prem-blue: var(--info);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -967,4 +968,141 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
+}
+
+.gm-prem-actions--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 720px) {
+  .gm-prem-actions--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.gm-prem-stat strong.is-ok {
+  color: var(--prem-green);
+}
+
+.gm-prem-stat strong.is-warn {
+  color: var(--prem-amber);
+}
+
+.gm-prem-stat strong.is-lock {
+  color: var(--prem-amber);
+}
+
+.gm-prem-how-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 720px) {
+  .gm-prem-how-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+.gm-prem-how-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gm-prem-how-steps li > span:first-child {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--prem-gold-soft);
+  flex-shrink: 0;
+  font-size: 0.9rem;
+}
+
+.gm-prem-how-steps strong {
+  display: block;
+  font-size: 0.86rem;
+  color: var(--prem-navy);
+  line-height: 1.2;
+}
+
+.gm-prem-how-steps p {
+  margin: 2px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.gm-prem-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (min-width: 720px) {
+  .gm-prem-control-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.gm-prem-control-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 4px 8px;
+  align-items: start;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.gm-prem-control-card .gm-prem-control-ico {
+  grid-row: 1 / span 2;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--navy-soft);
+  font-size: 0.9rem;
+}
+
+.gm-prem-control-card strong {
+  font-size: 0.8rem;
+  color: var(--prem-navy);
+  line-height: 1.2;
+}
+
+.gm-prem-control-card p {
+  margin: 0;
+  grid-column: 2;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  line-height: 1.25;
+}
+
+.gm-prem-control-card .gm-prem-chip {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 2px;
+}
+
+.gm-at-control-strip .gm-prem-card__headline {
+  font-size: clamp(1.25rem, 3.8vw, 1.55rem);
+  letter-spacing: -0.02em;
+}
+
+.gm-prem-page-head h1 {
+  font-size: clamp(1.2rem, 3.8vw, 1.45rem);
 }

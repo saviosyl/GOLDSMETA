@@ -28,10 +28,28 @@ export function PremiumPlanCard({ plan, state, updatedLabel }: Props) {
     ? "Confirmation passed"
     : state.confirmationLabel || "Pending";
 
+  const chipTone =
+    chip === "BUY READY" || chip === "BUY"
+      ? "buy"
+      : chip === "SELL READY" || chip === "SELL" || chip === "NO TRADE"
+        ? "sell"
+        : chip === "PREPARE" ||
+            chip === "PREPARE BUY" ||
+            chip === "PREPARE SELL" ||
+            chip === "WAIT" ||
+            chip === "WATCHING"
+          ? "wait"
+          : state.tone;
+
   return (
     <article className="gm-plan-summary-card" data-testid="premium-plan-card">
       <div className="gm-premium-plan-card-head">
-        <span className={`gm-status-badge tone-${state.tone}`} data-testid="premium-plan-chip">
+        {(state.mode === "BUY_READY" || state.mode === "SELL_READY") && (
+          <span className="gm-status-badge tone-buy" data-testid="premium-plan-ready">
+            PLAN READY
+          </span>
+        )}
+        <span className={`gm-status-badge tone-${chipTone}`} data-testid="premium-plan-chip">
           {chip}
         </span>
         {updatedLabel ? <span className="gm-meta">Updated {updatedLabel}</span> : null}

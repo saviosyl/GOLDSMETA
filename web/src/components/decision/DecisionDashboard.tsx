@@ -2,7 +2,11 @@ import {
   CircleHelp,
   RefreshCw,
   Bell,
-  Timer
+  Timer,
+  Crosshair,
+  Shield,
+  Flag,
+  Scale
 } from "lucide-react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
@@ -34,26 +38,36 @@ type Props = {
 function LevelGrid({ state }: { state: ReturnType<typeof deriveDecisionDashboardState> }) {
   if (!state.showLevels) return null;
   return (
-    <div className="gm-decision-level-grid" data-testid="plan-levels-strip">
+    <div className="gm-decision-level-grid gm-trade-plan-summary" data-testid="plan-levels-strip">
       <div data-testid="plan-level-entry">
-        <span className="gm-label">Entry</span>
+        <span className="gm-label">
+          <Crosshair size={13} aria-hidden /> Entry Zone
+        </span>
         <strong>{state.levels.entry ?? "--"}</strong>
       </div>
       <div data-testid="plan-level-stop">
-        <span className="gm-label">Stop</span>
+        <span className="gm-label">
+          <Shield size={13} aria-hidden /> Stop Loss
+        </span>
         <strong>{fmtPrice(state.levels.stop)}</strong>
       </div>
       <div data-testid="plan-level-tp1">
-        <span className="gm-label">TP1</span>
+        <span className="gm-label">
+          <Flag size={13} aria-hidden /> TP1
+        </span>
         <strong>{fmtPrice(state.levels.tp1)}</strong>
       </div>
       <div data-testid="plan-level-tp2">
-        <span className="gm-label">TP2</span>
+        <span className="gm-label">
+          <Flag size={13} aria-hidden /> TP2
+        </span>
         <strong>{state.levels.tp2 != null ? fmtPrice(state.levels.tp2) : "—"}</strong>
       </div>
       {state.levels.rr && (
         <div className="gm-decision-level-wide" data-testid="plan-level-rr">
-          <span className="gm-label">R:R</span>
+          <span className="gm-label">
+            <Scale size={13} aria-hidden /> Risk / Reward
+          </span>
           <strong>{state.levels.rr}</strong>
         </div>
       )}
@@ -127,15 +141,24 @@ export function DecisionDashboard({
   const heroTone =
     chip === "PREPARE" || chip === "PREPARE BUY" || chip === "PREPARE SELL" || chip === "WATCHING"
       ? "prepare"
-      : chip === "BUY"
+      : chip === "BUY" || chip === "BUY READY"
         ? "buy"
-        : chip === "SELL"
+        : chip === "SELL" || chip === "SELL READY"
           ? "sell"
-          : chip === "HOLD"
+          : chip === "HOLD" || chip === "NO TRADE"
             ? "wait"
             : state.tone;
+  const planReady = state.mode === "BUY_READY" || state.mode === "SELL_READY";
   const showHeroConfidence =
-    state.confidencePercent != null && (chip === "BUY" || chip === "SELL" || chip === "HOLD");
+    state.confidencePercent != null &&
+    (chip === "BUY" ||
+      chip === "SELL" ||
+      chip === "BUY READY" ||
+      chip === "SELL READY" ||
+      chip === "HOLD" ||
+      chip === "PREPARE" ||
+      chip === "PREPARE BUY" ||
+      chip === "PREPARE SELL");
   const feedFresh = marketFeedHealth?.status === "green";
 
   return (
@@ -157,6 +180,11 @@ export function DecisionDashboard({
           <span className="gm-hero-kicker">XAUUSD Decision</span>
           <Timer className="gm-hero-icon" aria-hidden strokeWidth={1.75} />
         </div>
+        {planReady ? (
+          <span className="gm-plan-ready-badge" data-testid="plan-ready-badge">
+            PLAN READY
+          </span>
+        ) : null}
         <h1 data-testid="intraday-action-label">
           <span data-testid="intraday-action-short">{chip}</span>
         </h1>

@@ -458,15 +458,15 @@ export function AutoTradePage() {
     >
       <header className="gm-prem-page-head">
         <div>
-          <h1>AutoTrade</h1>
-          <p>Execution control, safety checks, and shadow/live status</p>
+          <h1>AutoTrade Control</h1>
+          <p>Status, readiness, and safeguards</p>
         </div>
         <div className="gm-prem-chip-row">
           <PremiumStatusChip
             tone={heroState === "SHADOW" ? "amber" : "off"}
             withDot
           >
-            {heroState}
+            {heroState === "SHADOW" ? "SHADOW MODE" : "OFF"}
           </PremiumStatusChip>
           <span className="gm-prem-updated" aria-live="polite">
             <span className="gm-prem-dot" aria-hidden="true" />
@@ -475,23 +475,26 @@ export function AutoTradePage() {
         </div>
       </header>
 
-      <section className="gm-prem-card gm-prem-card--navy" aria-label="Execution status">
+      <section className="gm-prem-card gm-prem-card--navy gm-at-control-strip" aria-label="Execution status">
         <div className="gm-prem-hero-top">
           <div>
-            <p className="gm-prem-card__title">Execution status</p>
+            <p className="gm-prem-card__title">Status</p>
             <h2 className="gm-prem-card__headline">
               {heroState === "SHADOW" ? "SHADOW MODE" : "OFF"}
             </h2>
             <p className="gm-prem-card__sub">
               {heroState === "SHADOW"
                 ? "Live ideas are simulated. No orders sent."
-                : "Automation is off. Live execution stays locked until owner approval."}
+                : "Automation is off. Live execution stays locked."}
             </p>
           </div>
+          <PremiumStatusChip tone="locked" withDot>
+            LOCKED
+          </PremiumStatusChip>
         </div>
         <div className="gm-prem-stat-grid gm-prem-stat-grid--4">
           <div className="gm-prem-stat">
-            <span>Selected account</span>
+            <span>Account</span>
             <strong>
               {maskedAt !== "—"
                 ? `${isLiveEnv ? "LIVE" : "Demo"} ${maskedAt}`
@@ -499,78 +502,115 @@ export function AutoTradePage() {
             </strong>
           </div>
           <div className="gm-prem-stat">
-            <span>Environment</span>
-            <strong>
-              {(diagnostics?.connection?.brokerName ?? "Pepperstone").replace(
-                /\s*-\s*Europe/i,
-                ""
-              )}{" "}
-              {isLiveEnv ? "LIVE" : "Demo"}
+            <span>AutoTrade</span>
+            <strong>{display === "OFF" || !status?.mode ? "OFF" : autoTradeLabel}</strong>
+          </div>
+          <div className="gm-prem-stat">
+            <span>Live Orders</span>
+            <strong className="is-lock">LOCKED</strong>
+          </div>
+          <div className="gm-prem-stat">
+            <span>Quotes</span>
+            <strong className={quoteLive ? "is-ok" : "is-warn"}>
+              {quoteLive ? "LIVE" : "Waiting"}
             </strong>
-          </div>
-          <div className="gm-prem-stat">
-            <span>Quote status</span>
-            <strong>{quoteLive ? "LIVE" : marketLabel || "Waiting"}</strong>
-          </div>
-          <div className="gm-prem-stat">
-            <span>Execution</span>
-            <strong>Locked</strong>
-          </div>
-          <div className="gm-prem-stat">
-            <span>Connection</span>
-            <strong>
-              {connectionLabel === "Connected" ? "Connected" : connectionLabel || "—"}
-            </strong>
-          </div>
-          <div className="gm-prem-stat">
-            <span>Emergency stop</span>
-            <strong>{status?.emergencyStopActive ? "Active" : "Ready"}</strong>
           </div>
         </div>
+        {/* Preserve broker badge test id */}
+        <p className="gm-prem-sr-status" data-testid="autotrade-broker-badge">
+          {accountLabel}
+        </p>
       </section>
 
-      <section className="gm-prem-card" aria-label="Execution account">
-        <div className="gm-prem-hero-top">
-          <div className="gm-prem-broker-brand">
-            <div className="gm-prem-broker-mark" aria-hidden="true">
-              P
-            </div>
+      <p className="gm-prem-section-label">Readiness</p>
+      <section className="gm-prem-card" aria-label="Readiness">
+        <ul className="gm-prem-check-list">
+          {[
+            {
+              ok: connectionLabel === "Connected" && maskedAt !== "—",
+              label: "Live account connected",
+              detail: maskedAt !== "—" ? maskedAt : "No account"
+            },
+            {
+              ok: quoteLive,
+              warn: !quoteLive,
+              label: "Live quotes active",
+              detail: quoteLive ? "Streaming" : "Waiting"
+            },
+            {
+              ok: Boolean(settings || status?.limits),
+              label: "Risk rules loaded",
+              detail: "Active"
+            },
+            {
+              ok: !status?.emergencyStopActive,
+              warn: Boolean(status?.emergencyStopActive),
+              label: "Emergency stop ready",
+              detail: status?.emergencyStopActive ? "Active" : "Ready"
+            },
+            {
+              ok: false,
+              pending: true,
+              label: "Owner approval pending",
+              detail: "Required for live"
+            },
+            {
+              ok: false,
+              locked: true,
+              label: "Live execution disabled",
+              detail: "Hard locked"
+            }
+          ].map((row) => (
+            <li key={row.label}>
+              <span
+                className={`gm-prem-check-ico ${
+                  row.ok
+                    ? "gm-prem-check-ico--ok"
+                    : row.pending || row.warn
+                      ? "gm-prem-check-ico--warn"
+                      : row.locked
+                        ? "gm-prem-check-ico--bad"
+                        : "gm-prem-check-ico--warn"
+                }`}
+                aria-hidden="true"
+              >
+                {row.ok ? "✓" : row.locked ? "−" : "○"}
+              </span>
+              <div>
+                <strong>{row.label}</strong>
+                <span>{row.detail}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <p className="gm-prem-section-label">How it works</p>
+      <section className="gm-prem-card" aria-label="How it works">
+        <ol className="gm-prem-how-steps">
+          <li>
+            <span aria-hidden="true">🔎</span>
             <div>
-              <strong>
-                {(diagnostics?.connection?.brokerName ?? "Pepperstone").replace(
-                  /\s*-\s*Europe/i,
-                  ""
-                )}{" "}
-                {isLiveEnv ? "LIVE" : "Demo"}
-              </strong>
-              <span data-testid="autotrade-broker-badge">{accountLabel}</span>
+              <strong>Plan Found</strong>
+              <p>GoldMeta identifies a setup</p>
             </div>
-          </div>
-          <div className="gm-prem-mode-label">
-            <span className="gm-label">MODE</span>
-            <strong>{heroState === "SHADOW" ? "SHADOW" : "OFF"}</strong>
-          </div>
-        </div>
+          </li>
+          <li>
+            <span aria-hidden="true">🛡</span>
+            <div>
+              <strong>Risk Checked</strong>
+              <p>Risk and safeguards validated</p>
+            </div>
+          </li>
+          <li>
+            <span aria-hidden="true">⚖</span>
+            <div>
+              <strong>Execution Decision</strong>
+              <p>Allowed / Blocked / Shadow</p>
+            </div>
+          </li>
+        </ol>
       </section>
-
-      <div className="gm-prem-mini-grid" aria-label="System health">
-        <div className="gm-prem-mini">
-          <span>System health</span>
-          <strong className={quoteLive && connectionLabel === "Connected" ? "" : "is-warn"}>
-            {quoteLive && connectionLabel === "Connected" ? "All good" : "Checking"}
-          </strong>
-        </div>
-        <div className="gm-prem-mini">
-          <span>Emergency stop</span>
-          <strong className={status?.emergencyStopActive ? "is-warn" : ""}>
-            {status?.emergencyStopActive ? "Active" : "Ready"}
-          </strong>
-        </div>
-        <div className="gm-prem-mini">
-          <span>Safeguards</span>
-          <strong className="is-lock">Active</strong>
-        </div>
-      </div>
 
       {/* Preserve status summary testids */}
       <section
@@ -670,9 +710,75 @@ export function AutoTradePage() {
         ) : null}
       </section>
 
-      <p className="gm-prem-section-label">Risk limits</p>
+      <p className="gm-prem-section-label">Controls</p>
+      <div className="gm-prem-control-grid" aria-label="AutoTrade controls">
+        <article className="gm-prem-control-card">
+          <span className="gm-prem-control-ico" aria-hidden="true">
+            🛡
+          </span>
+          <div>
+            <strong>Shadow Mode</strong>
+            <p>Simulate ideas only</p>
+          </div>
+          <PremiumStatusChip tone={heroState === "SHADOW" ? "amber" : "off"}>
+            {heroState === "SHADOW" ? "ON" : "OFF"}
+          </PremiumStatusChip>
+        </article>
+        <article className="gm-prem-control-card">
+          <span className="gm-prem-control-ico" aria-hidden="true">
+            🤖
+          </span>
+          <div>
+            <strong>Live AutoTrade</strong>
+            <p>Owner approval required</p>
+          </div>
+          <PremiumStatusChip tone="locked">LOCKED</PremiumStatusChip>
+        </article>
+        <article className="gm-prem-control-card">
+          <span className="gm-prem-control-ico" aria-hidden="true">
+            🚨
+          </span>
+          <div>
+            <strong>Emergency Stop</strong>
+            <p>Halt automation instantly</p>
+          </div>
+          <PremiumStatusChip tone={status?.emergencyStopActive ? "red" : "ok"}>
+            {status?.emergencyStopActive ? "ACTIVE" : "READY"}
+          </PremiumStatusChip>
+        </article>
+        <article className="gm-prem-control-card">
+          <span className="gm-prem-control-ico" aria-hidden="true">
+            📊
+          </span>
+          <div>
+            <strong>Daily Limits</strong>
+            <p>Risk caps loaded</p>
+          </div>
+          <PremiumStatusChip tone="ok">READY</PremiumStatusChip>
+        </article>
+      </div>
+
+      <p className="gm-prem-section-label">Risk summary</p>
       <section className="gm-prem-card" aria-label="Risk and account controls">
         <div className="gm-prem-stat-grid gm-prem-stat-grid--2">
+          <div className="gm-prem-stat">
+            <span>Max risk / trade</span>
+            <strong>
+              {settings?.fixedRiskAmount != null
+                ? money(settings.fixedRiskAmount, currency)
+                : "—"}
+            </strong>
+          </div>
+          <div className="gm-prem-stat">
+            <span>Max trades / day</span>
+            <strong>
+              {settings?.maxTradesPerDay != null
+                ? String(settings.maxTradesPerDay)
+                : status?.limits?.maxTradesPerDay != null
+                  ? String(status.limits.maxTradesPerDay)
+                  : "—"}
+            </strong>
+          </div>
           <div className="gm-prem-stat">
             <span>Daily loss limit</span>
             <strong>
@@ -684,21 +790,19 @@ export function AutoTradePage() {
             </strong>
           </div>
           <div className="gm-prem-stat">
-            <span>Per trade risk</span>
-            <strong>
-              {settings?.fixedRiskAmount != null
-                ? money(settings.fixedRiskAmount, currency)
-                : "—"}
-            </strong>
-          </div>
-          <div className="gm-prem-stat">
-            <span>Max spread</span>
+            <span>Spread guard</span>
             <strong>
               {settings?.maxSpread != null
                 ? String(settings.maxSpread)
                 : status?.limits?.maxSpread != null
                   ? String(status.limits.maxSpread)
                   : "—"}
+            </strong>
+          </div>
+          <div className="gm-prem-stat">
+            <span>Quote freshness</span>
+            <strong className={quoteLive ? "is-ok" : "is-warn"}>
+              {quoteLive ? "LIVE" : "Waiting"}
             </strong>
           </div>
           <div className="gm-prem-stat">
@@ -713,10 +817,7 @@ export function AutoTradePage() {
             <span aria-hidden="true">!</span>
             <div>
               <strong>Account funding required</strong>
-              <p>
-                Account funding required before any execution can pass shadow
-                eligibility.
-              </p>
+              <p>Fund the account before shadow eligibility can pass.</p>
             </div>
           </div>
         ) : (
@@ -730,7 +831,7 @@ export function AutoTradePage() {
         )}
       </section>
 
-      <p className="gm-prem-section-label">Execution control</p>
+      <p className="gm-prem-section-label">Execution actions</p>
       <section
         className="gm-prem-card"
         aria-label="Execution control"

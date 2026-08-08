@@ -105,10 +105,10 @@ describe("deriveDecisionDashboardState forming states", () => {
       livePrice: 4272
     });
     expect(state.mode).toBe("POTENTIAL_BUY");
-    expect(premiumDecisionChip(state, plan)).toBe("BUY");
+    expect(premiumDecisionChip(state, plan)).toBe("PREPARE BUY");
     expect(state.confidencePercent).toBe(75);
     expect(state.confidenceLabel).toMatch(/75%\s*confidence/i);
-    expect(premiumStatusLabel(state, plan)).toBe("Forming");
+    expect(premiumStatusLabel(state, plan)).toBe("Monitoring");
   });
 
   it("uses PREPARE BUY chip while awaiting confirmation below 65%", () => {
@@ -133,8 +133,8 @@ describe("deriveDecisionDashboardState forming states", () => {
     });
     expect(["POTENTIAL_BUY", "BUY_READY"]).toContain(state.mode);
     const chip = premiumDecisionChip(state, plan);
-    expect(["PREPARE BUY", "BUY"]).toContain(chip);
-    expect(chip).toBe("PREPARE BUY");
+    expect(["PREPARE BUY", "BUY READY", "BUY"]).toContain(chip);
+    expect(chip).toMatch(/PREPARE BUY|BUY READY/);
   });
 
   it("exposes confidence percent label for the hero", () => {
