@@ -52,9 +52,13 @@ import { CTraderMutationDisabledError } from "../../../../src/services/broker/ct
 
 describe("submitDemoMarketOrder", () => {
   const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+  const prevClientId = process.env.CTRADER_CLIENT_ID;
+  const prevClientSecret = process.env.CTRADER_CLIENT_SECRET;
 
   beforeEach(() => {
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
+    process.env.CTRADER_CLIENT_ID = "cid";
+    process.env.CTRADER_CLIENT_SECRET = "csecret";
     vi.mocked(getConnection).mockResolvedValue({
       selectedAccountId: "123",
       selectedAccountIsLive: false,
@@ -74,6 +78,10 @@ describe("submitDemoMarketOrder", () => {
   afterEach(() => {
     if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
+    if (prevClientId === undefined) delete process.env.CTRADER_CLIENT_ID;
+    else process.env.CTRADER_CLIENT_ID = prevClientId;
+    if (prevClientSecret === undefined) delete process.env.CTRADER_CLIENT_SECRET;
+    else process.env.CTRADER_CLIENT_SECRET = prevClientSecret;
   });
 
   it("rejects when Demo submission is off", async () => {

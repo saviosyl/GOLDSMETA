@@ -20,7 +20,7 @@ export function useXauusdCandles(timeframe: ChartTimeframe, enabled = true) {
       try {
         const res = (await api.getCTraderCandles({
           timeframe,
-          count: 220
+          count: 120
         })) as CandlesResponse;
         const next = Array.isArray(res.bars) ? res.bars : [];
         setBars(next);

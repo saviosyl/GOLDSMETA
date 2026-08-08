@@ -1135,8 +1135,25 @@ export class ApiClient {
     planIndependent?: boolean;
   }> {
     const tf = encodeURIComponent(opts?.timeframe ?? "M15");
-    const count = opts?.count ?? 220;
-    return this.requestCTrader(`/v1/ctrader/candles?tf=${tf}&count=${count}`);
+    const count = opts?.count ?? 120;
+    const path = `/v1/ctrader/candles?tf=${tf}&count=${count}`;
+    try {
+      return await this.requestCTrader(path);
+    } catch (err) {
+      // Production browser historically targets apiCTraderPreview for cTrader routes.
+      // If that revision lacks /candles, fall back to the main api host which serves it.
+      const status =
+        err && typeof err === "object" && "status" in err
+          ? Number((err as { status: number }).status)
+          : 0;
+      if (
+        (status === 404 || status === 405) &&
+        this.ctraderBaseUrl !== this.baseUrl
+      ) {
+        return this.request(path);
+      }
+      throw err;
+    }
   }
 
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {

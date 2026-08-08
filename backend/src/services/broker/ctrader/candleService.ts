@@ -15,7 +15,18 @@ import {
   type TrendbarPeriodKey
 } from "./openApiClient";
 
-const CACHE_TTL_MS = 45_000;
+const CACHE_TTL_MS = 90_000;
+const FETCH_TIMEOUT_MS = 25_000;
+
+export type CandleErrorCode =
+  | "CANDLE_AUTH_REQUIRED"
+  | "CANDLE_ACCOUNT_NOT_FOUND"
+  | "CANDLE_SYMBOL_NOT_FOUND"
+  | "CANDLE_CTRADER_TIMEOUT"
+  | "CANDLE_EMPTY_RESPONSE"
+  | "CANDLE_UPSTREAM_ERROR"
+  | "CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED"
+  | "CTRADER_CANDLES_UNAVAILABLE";
 
 type CacheEntry = {
   expiresAt: number;
@@ -34,6 +45,10 @@ function clientCreds(source = process.env) {
   };
 }
 
+function candleError(code: CandleErrorCode, cause?: unknown): Error {
+  return Object.assign(new Error(code), { code, cause });
+}
+
 export function normalizeCandleTimeframe(raw: unknown): TrendbarPeriodKey | null {
   const s = String(raw ?? "")
     .trim()
@@ -44,6 +59,45 @@ export function normalizeCandleTimeframe(raw: unknown): TrendbarPeriodKey | null
   if (s === "60" || s === "H1" || s === "1H") return "H1";
   if (s === "240" || s === "H4" || s === "4H") return "H4";
   return null;
+}
+
+export function classifyCandleFailure(err: unknown): CandleErrorCode {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code: string }).code)
+      : err instanceof Error
+        ? err.message
+        : "";
+  if (/UNAUTHENTICATED|AUTH_REQUIRED|INVALID_TOKEN/i.test(code)) {
+    return "CANDLE_AUTH_REQUIRED";
+  }
+  if (/ACCOUNT_OR_SYMBOL|ACCOUNT_NOT|NOT_SELECTED/i.test(code)) {
+    return "CANDLE_ACCOUNT_NOT_FOUND";
+  }
+  if (/SYMBOL/i.test(code)) return "CANDLE_SYMBOL_NOT_FOUND";
+  if (/TIMEOUT|ETIMEDOUT|ESOCKETTIMEDOUT/i.test(code)) {
+    return "CANDLE_CTRADER_TIMEOUT";
+  }
+  if (/EMPTY|UNAVAILABLE/i.test(code)) return "CANDLE_EMPTY_RESPONSE";
+  if (/^CANDLE_/.test(code)) return code as CandleErrorCode;
+  return "CANDLE_UPSTREAM_ERROR";
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(candleError("CANDLE_CTRADER_TIMEOUT")),
+          ms
+        );
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function getXauusdCandles(args: {
@@ -63,13 +117,14 @@ export async function getXauusdCandles(args: {
 }> {
   assertBrokerUser(args.ownerUid);
   const connection = await getConnection(args.ownerUid);
-  if (!connection?.selectedAccountId || !connection.symbolId) {
-    throw Object.assign(new Error("CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED"), {
-      code: "CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED"
-    });
+  if (!connection?.selectedAccountId) {
+    throw candleError("CANDLE_ACCOUNT_NOT_FOUND");
+  }
+  if (!connection.symbolId) {
+    throw candleError("CANDLE_SYMBOL_NOT_FOUND");
   }
 
-  const count = Math.min(Math.max(args.count ?? 200, 20), 500);
+  const count = Math.min(Math.max(args.count ?? 120, 20), 300);
   const cacheKey = `${args.ownerUid}:${args.timeframe}:${count}:${connection.symbolId}`;
   const nowMs = args.nowMs ?? Date.now();
   const hit = cache.get(cacheKey);
@@ -85,46 +140,77 @@ export async function getXauusdCandles(args: {
     };
   }
 
-  const { accessToken, connection: freshConn } =
-    await ensureFreshAccessToken(connection);
-  const { clientId, clientSecret } = clientCreds();
-  const isLive = Boolean(freshConn.selectedAccountIsLive);
-  const api = args.api ?? createOpenApiClient();
-  const bars = await api.fetchTrendbars({
-    accessToken,
-    clientId,
-    clientSecret,
-    ctidTraderAccountId: freshConn.selectedAccountId!,
-    symbolId: freshConn.symbolId!,
-    period: args.timeframe,
-    count,
-    isLive
-  });
+  try {
+    const { accessToken, connection: freshConn } =
+      await ensureFreshAccessToken(connection);
+    const { clientId, clientSecret } = clientCreds();
+    if (!clientId || !clientSecret) {
+      throw candleError("CANDLE_UPSTREAM_ERROR");
+    }
+    const isLive = Boolean(freshConn.selectedAccountIsLive);
+    const api = args.api ?? createOpenApiClient();
+    const bars = await withTimeout(
+      api.fetchTrendbars({
+        accessToken,
+        clientId,
+        clientSecret,
+        ctidTraderAccountId: freshConn.selectedAccountId!,
+        symbolId: freshConn.symbolId!,
+        period: args.timeframe,
+        count,
+        isLive
+      }),
+      FETCH_TIMEOUT_MS
+    );
 
-  if (!bars.length) {
-    throw Object.assign(new Error("CTRADER_CANDLES_UNAVAILABLE"), {
-      code: "CTRADER_CANDLES_UNAVAILABLE"
+    if (!bars.length) {
+      // Prefer stale cache over empty when market is closed / upstream blank.
+      if (hit?.bars?.length) {
+        return {
+          symbol: "XAUUSD",
+          timeframe: args.timeframe,
+          bars: hit.bars,
+          source: "CTRADER_TRENDBARS",
+          environment: hit.environment,
+          cached: true,
+          marketStatus: "UNKNOWN"
+        };
+      }
+      throw candleError("CANDLE_EMPTY_RESPONSE");
+    }
+
+    const environment: "DEMO" | "LIVE" = isLive ? "LIVE" : "DEMO";
+    cache.set(cacheKey, {
+      expiresAt: nowMs + CACHE_TTL_MS,
+      bars,
+      period: args.timeframe,
+      symbolId: freshConn.symbolId!,
+      environment
     });
+
+    return {
+      symbol: "XAUUSD",
+      timeframe: args.timeframe,
+      bars,
+      source: "CTRADER_TRENDBARS",
+      environment,
+      cached: false,
+      marketStatus: "UNKNOWN"
+    };
+  } catch (err) {
+    if (hit?.bars?.length) {
+      return {
+        symbol: "XAUUSD",
+        timeframe: args.timeframe,
+        bars: hit.bars,
+        source: "CTRADER_TRENDBARS",
+        environment: hit.environment,
+        cached: true,
+        marketStatus: "UNKNOWN"
+      };
+    }
+    throw candleError(classifyCandleFailure(err), err);
   }
-
-  const environment: "DEMO" | "LIVE" = isLive ? "LIVE" : "DEMO";
-  cache.set(cacheKey, {
-    expiresAt: nowMs + CACHE_TTL_MS,
-    bars,
-    period: args.timeframe,
-    symbolId: freshConn.symbolId!,
-    environment
-  });
-
-  return {
-    symbol: "XAUUSD",
-    timeframe: args.timeframe,
-    bars,
-    source: "CTRADER_TRENDBARS",
-    environment,
-    cached: false,
-    marketStatus: "UNKNOWN"
-  };
 }
 
 /** Test helper — clear process-local candle cache. */

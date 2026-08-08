@@ -49,6 +49,9 @@ describe("shared market feed health", () => {
   let store: InMemoryStore;
 
   beforeEach(async () => {
+    // resolveSharedFeedUserId prefers GOLDMETA_PINNED_OWNER_UID — pin it to the
+    // test feed user so accepted traffic is recorded against the same identity.
+    process.env.GOLDMETA_PINNED_OWNER_UID = feedUserId;
     process.env.GOLDMETA_SHARED_FEED_UID = feedUserId;
     __resetSharedFeedMemoryForTests();
     store = new InMemoryStore();

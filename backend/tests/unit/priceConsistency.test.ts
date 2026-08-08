@@ -118,7 +118,7 @@ describe("priceConsistency", () => {
     const guards = evaluateHardGuards(snapshot, "BUY", emptyPlan, dq, 90);
     expect(guards.passed).toBe(false);
     expect(guards.reasonCodes).toContain("PRICE_SOURCE_MISMATCH");
-    expect(guards.reasonCodes).toContain("CONFLICTED_DATA");
+    expect(guards.reasonCodes).toContain("HARD_CONFLICT");
   });
 
   it("hard guards block SELL on PRICE_SOURCE_MISMATCH", () => {
@@ -189,7 +189,8 @@ describe("priceConsistency", () => {
     expect(dq.warnings).toContain("TEST_FIXTURE_LEAK");
     const guards = evaluateHardGuards(snapshot, "BUY", emptyPlan, dq, 90);
     expect(guards.passed).toBe(false);
-    expect(guards.reasonCodes).toContain("CONFLICTED_DATA");
+    expect(guards.reasonCodes).toContain("HARD_CONFLICT");
+    expect(guards.reasonCodes).toContain("PRICE_SOURCE_MISMATCH");
   });
 
   it("allows labelled TEST fixture exchange on TEST eventType", () => {

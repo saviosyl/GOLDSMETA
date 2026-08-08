@@ -804,6 +804,20 @@ body,
   height: 280px;
 }
 
+.gm-xau-chart-host.is-empty {
+  min-height: 120px;
+  height: 140px;
+}
+
+.gm-decision-compact {
+  margin-bottom: 8px;
+}
+
+.gm-decision-secondary {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
 .gm-xau-chart-status {
   margin: 6px 0 0;
 }

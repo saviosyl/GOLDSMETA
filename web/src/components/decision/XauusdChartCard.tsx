@@ -76,18 +76,44 @@ export function XauusdChartCard({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const pendingBarsRef = useRef<
+    Array<{ time: UTCTimestamp; open: number; high: number; low: number; close: number }>
+  >([]);
+  const [chartReady, setChartReady] = useState(0);
 
-  const candleData = useMemo(
-    () =>
-      bars.map((b) => ({
+  const candleData = useMemo(() => {
+    // Deduplicate / sort ascending — Lightweight Charts rejects out-of-order bars.
+    const mapped = bars
+      .filter(
+        (b) =>
+          Number.isFinite(b.time) &&
+          Number.isFinite(b.open) &&
+          Number.isFinite(b.high) &&
+          Number.isFinite(b.low) &&
+          Number.isFinite(b.close)
+      )
+      .map((b) => ({
         time: b.time as UTCTimestamp,
         open: b.open,
         high: b.high,
         low: b.low,
         close: b.close
-      })),
-    [bars]
-  );
+      }))
+      .sort((a, b) => Number(a.time) - Number(b.time));
+    const out: typeof mapped = [];
+    for (const bar of mapped) {
+      if (out.length && Number(out[out.length - 1]!.time) === Number(bar.time)) {
+        out[out.length - 1] = bar;
+      } else {
+        out.push(bar);
+      }
+    }
+    return out;
+  }, [bars]);
+
+  useEffect(() => {
+    pendingBarsRef.current = candleData;
+  }, [candleData]);
 
   useEffect(() => {
     const el = hostRef.current;
@@ -135,6 +161,12 @@ export function XauusdChartCard({
       });
       chartRef.current = chart;
       seriesRef.current = series;
+      // Apply any bars that arrived before the chart finished mounting.
+      if (pendingBarsRef.current.length) {
+        series.setData(pendingBarsRef.current);
+        chart.timeScale().fitContent();
+      }
+      setChartReady((n) => n + 1);
 
       if (typeof ResizeObserver !== "undefined") {
         ro = new ResizeObserver(() => {
@@ -170,7 +202,7 @@ export function XauusdChartCard({
       series.setData(candleData);
       chart.timeScale().fitContent();
     }
-  }, [candleData]);
+  }, [candleData, chartReady]);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -199,7 +231,7 @@ export function XauusdChartCard({
         })
       );
     }
-  }, [resistance, vah, poc, val, support, currentPrice, candleData.length]);
+  }, [resistance, vah, poc, val, support, currentPrice, candleData.length, chartReady]);
 
   const hasBars = candleData.length > 0;
 
@@ -238,8 +270,9 @@ export function XauusdChartCard({
 
       <div
         ref={hostRef}
-        className="gm-xau-chart-host"
+        className={`gm-xau-chart-host${!hasBars ? " is-empty" : ""}`}
         data-testid="xauusd-chart-host"
+        data-has-bars={hasBars ? "1" : "0"}
       />
 
       {!hasBars && loading ? (

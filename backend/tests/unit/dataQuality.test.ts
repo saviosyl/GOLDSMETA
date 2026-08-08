@@ -18,9 +18,12 @@ describe("data quality", () => {
     expect(evaluateDataQuality(snapshot).quality).toBe("STALE");
   });
 
-  it("marks directional contradictions as conflicted", () => {
+  it("marks directional contradictions as soft disagreement (PARTIAL), not hard CONFLICTED", () => {
     const snapshot = mergeSnapshot(freshPayload(conflictedFixture));
-    expect(evaluateDataQuality(snapshot).quality).toBe("CONFLICTED");
+    const result = evaluateDataQuality(snapshot);
+    // 15M vs 5M direction conflict is a forming delay — not corrupt price-source data.
+    expect(result.quality).toBe("PARTIAL");
+    expect(result.warnings.some((w) => /SOFT_DISAGREEMENT/i.test(w))).toBe(true);
   });
 
   it("marks null volume profile as partial with volumeProfile missing", () => {

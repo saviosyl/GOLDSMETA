@@ -179,7 +179,14 @@ describe("plan lifecycle notifications", () => {
   };
 
   it("maps meaningful lifecycle changes and ignores repeated wait/no-plan states", () => {
-    expect(mapPlanLifecycleNotificationEvent(null, plan())).toBe("VALID_PLAN_CREATED");
+    // Levels without 5M confirmation → SETUP_FORMING (not a ready VALID_PLAN).
+    expect(mapPlanLifecycleNotificationEvent(null, plan())).toBe("SETUP_FORMING");
+    expect(
+      mapPlanLifecycleNotificationEvent(
+        null,
+        plan({ confirmationState: "BREAKOUT_CONFIRMED" })
+      )
+    ).toBe("VALID_PLAN_CREATED");
     expect(
       mapPlanLifecycleNotificationEvent(
         plan({ confirmationState: "OUTSIDE_ZONE", planMutation: "PLAN_UNCHANGED" }),
@@ -215,6 +222,7 @@ describe("plan lifecycle notifications", () => {
   });
 
   it("writes one in-app notification per uid/plan/event/source dedupe key", async () => {
+    // SETUP_FORMING shares the VALID_PLAN_CREATED preference key.
     await enable("VALID_PLAN_CREATED");
     const current = plan();
 
@@ -233,7 +241,7 @@ describe("plan lifecycle notifications", () => {
       sourceEventId: "source-event-1"
     });
 
-    expect(first.event).toBe("VALID_PLAN_CREATED");
+    expect(first.event).toBe("SETUP_FORMING");
     expect(first.inAppWritten).toBe(1);
     expect(second.inAppWritten).toBe(0);
     expect(await store.listInAppNotifications(userId)).toHaveLength(1);
@@ -248,7 +256,7 @@ describe("plan lifecycle notifications", () => {
       sourceEventId: "source-event-1"
     });
 
-    expect(result.event).toBe("VALID_PLAN_CREATED");
+    expect(result.event).toBe("SETUP_FORMING");
     expect(result.recipients).toBe(0);
     expect(await store.listInAppNotifications(userId)).toHaveLength(0);
   });

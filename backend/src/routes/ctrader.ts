@@ -54,6 +54,7 @@ import { loadTokenEncryptionSecret } from "../services/broker/ctrader/connection
 import { buildFirstDemoOrderCheckpoint } from "../services/broker/ctrader/firstDemoOrderCheckpoint";
 import { getLiveQuoteSnapshot } from "../services/broker/ctrader/quoteService";
 import {
+  classifyCandleFailure,
   getXauusdCandles,
   normalizeCandleTimeframe
 } from "../services/broker/ctrader/candleService";
@@ -81,7 +82,7 @@ function codeOf(err: unknown): string {
 }
 
 function statusFor(code: string): number {
-  if (code === "UNAUTHENTICATED") return 401;
+  if (code === "UNAUTHENTICATED" || code === "CANDLE_AUTH_REQUIRED") return 401;
   if (code === "CTRADER_OWNER_ONLY") return 403;
   if (code === "AUTH_SETUP_REQUIRED") return 403;
   if (code === "CTRADER_LIVE_SELECTION_CONFIRMATION_REQUIRED") return 409;
@@ -90,6 +91,13 @@ function statusFor(code: string): number {
   }
   if (code === "SETTINGS_VALIDATION_FAILED") return 400;
   if (code.includes("LIVE_ACCOUNT")) return 403;
+  if (
+    code === "CANDLE_CTRADER_TIMEOUT" ||
+    code === "CANDLE_EMPTY_RESPONSE" ||
+    code === "CANDLE_UPSTREAM_ERROR"
+  ) {
+    return 503;
+  }
   if (code.includes("SETUP") || code.includes("MISSING") || code.includes("NOT_CONNECTED")) {
     return 503;
   }
@@ -779,8 +787,8 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       });
       return;
     }
-    const countRaw = Number(req.query.count ?? 200);
-    const count = Number.isFinite(countRaw) ? countRaw : 200;
+    const countRaw = Number(req.query.count ?? 120);
+    const count = Number.isFinite(countRaw) ? countRaw : 120;
     try {
       const payload = await getXauusdCandles({
         ownerUid: uid,
@@ -794,7 +802,10 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         autoTrade: "OFF"
       });
     } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      const code = classifyCandleFailure(e);
+      // Safe diagnostic category only — never log tokens / secrets.
+      console.error("[ctrader/candles]", { code, timeframe, uidHash: uid.slice(0, 6) });
+      sendFriendlyError(res, statusFor(code), code);
     }
   });
 

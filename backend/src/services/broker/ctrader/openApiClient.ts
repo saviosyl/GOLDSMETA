@@ -615,15 +615,25 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
     async fetchTrendbars(args) {
       const isLive = Boolean(args.isLive);
       const period = TRENDBAR_PERIOD[args.period];
-      const count = Math.min(Math.max(args.count ?? 200, 1), 500);
+      const count = Math.min(Math.max(args.count ?? 120, 1), 300);
       const toTimestamp = Date.now();
-      // Stay well inside Spotware window limits per period family.
-      const windowMs =
+      const periodMs =
+        args.period === "M5"
+          ? 5 * 60_000
+          : args.period === "M15"
+            ? 15 * 60_000
+            : args.period === "H1"
+              ? 60 * 60_000
+              : 4 * 60 * 60_000;
+      // Tight window: enough bars + small buffer, still inside Spotware limits.
+      const windowMs = Math.min(
+        periodMs * (count + 20),
         args.period === "M5"
           ? 14 * 24 * 60 * 60 * 1000
           : args.period === "H4"
             ? 180 * 24 * 60 * 60 * 1000
-            : 60 * 24 * 60 * 60 * 1000;
+            : 60 * 24 * 60 * 60 * 1000
+      );
       const fromTimestamp = Math.max(0, toTimestamp - windowMs);
       return withOpenApiConnection({ isLive }, async (connection) => {
         await connection.sendCommand("ProtoOAApplicationAuthReq", {
