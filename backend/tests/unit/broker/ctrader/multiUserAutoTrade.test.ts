@@ -288,7 +288,17 @@ describe("Demo/Live settings separation", () => {
   });
 
   it("does not let Demo activation enable Live", async () => {
-    await saveUserAutoTradeSettings(USER_A, "demo", { autoTradeEnabledIntent: true });
+    await saveUserAutoTradeSettings(USER_A, "demo", {
+      autoTradeEnabledIntent: true,
+      // Explicitly disable news filter so phrase confirmation can be tested
+      // without requiring a configured economic calendar provider.
+      newsFilterEnabled: false,
+      newsImpactMode: "OFF"
+    });
+    await saveUserAutoTradeSettings(USER_A, "live", {
+      newsFilterEnabled: false,
+      newsImpactMode: "OFF"
+    });
     await expect(
       saveUserAutoTradeSettings(USER_A, "live", { autoTradeEnabledIntent: true })
     ).rejects.toThrow(/LIVE_ACTIVATION_REQUIRED|Confirm Live/);
@@ -302,6 +312,16 @@ describe("Demo/Live settings separation", () => {
 
     const demo = await getUserAutoTradeSettings(USER_A, "demo");
     expect(demo.liveActivationPhraseConfirmed).toBe(false);
+  });
+
+  it("blocks Live activation phrase when news filter on and calendar provider NONE", async () => {
+    await saveUserAutoTradeSettings(USER_A, "demo", {
+      newsFilterEnabled: true,
+      newsImpactMode: "HIGH"
+    });
+    await expect(confirmLiveActivation(USER_A, "ENABLE LIVE")).rejects.toThrow(
+      /Economic calendar protection must be configured|LIVE_NEWS_PROVIDER_REQUIRED/
+    );
   });
 
   it("rejects invalid settings with friendly validation", async () => {
