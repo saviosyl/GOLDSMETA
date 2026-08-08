@@ -99,6 +99,23 @@ export type QualificationPublicView = {
   liveOrders: "LOCKED";
   recentPreviews: QualificationPreviewRecord[];
   recentControlledTrades: ControlledDemoTradeRecord[];
+  todayActivity?: {
+    evaluated: number;
+    qualified: number;
+    rejected: number;
+  };
+  recentEvaluations?: Array<{
+    at: string;
+    direction: string;
+    outcome: string;
+    reasonLabel: string;
+    confidence: number | null;
+    spread: number | null;
+    maxSpread: number | null;
+    riskReward: number | null;
+    passed: string[];
+    failed: string[];
+  }>;
   startedAt: string | null;
   updatedAt: string | null;
 };

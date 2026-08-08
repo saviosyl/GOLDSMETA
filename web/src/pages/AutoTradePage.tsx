@@ -46,7 +46,9 @@ import { friendlyApiCode } from "../lib/plainLanguage";
 import { friendlyActivityMessage } from "../lib/friendlyActivityCopy";
 import { useShellQuote } from "../lib/quoteContext";
 import { QualificationDashboard } from "../components/autotrade/QualificationDashboard";
+import { DailySafetyCard } from "../components/autotrade/DailySafetyCard";
 import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
+import type { DailySafetyPublicView } from "../lib/broker/ctraderTypes";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -117,6 +119,7 @@ export function AutoTradePage() {
   const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
   const [qualificationError, setQualificationError] = useState<string | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
+  const [dailySafety, setDailySafety] = useState<DailySafetyPublicView | null>(null);
   const reloadGenRef = useRef(0);
   const shellQuote = useShellQuote().quote;
 
@@ -157,10 +160,11 @@ export function AutoTradePage() {
       setError(code ? friendlyApiCode(code, msg).message : friendlyBrokerReason(msg, msg));
     }
 
-    const [centreResult, accountsResult, qualResult] = await Promise.allSettled([
+    const [centreResult, accountsResult, qualResult, dailyResult] = await Promise.allSettled([
       api.getBrokerControlCentre(),
       api.listCTraderAccounts(),
-      api.getAutoTradeQualification()
+      api.getAutoTradeQualification(),
+      api.getDailySafety(mode === "live" ? "live" : "demo")
     ]);
     if (gen !== reloadGenRef.current) return;
 
@@ -169,6 +173,9 @@ export function AutoTradePage() {
     }
     if (accountsResult.status === "fulfilled") {
       setAccounts(accountsResult.value.accounts ?? []);
+    }
+    if (dailyResult.status === "fulfilled") {
+      setDailySafety(dailyResult.value);
     }
     if (qualResult.status === "fulfilled") {
       setQualification(qualResult.value);
@@ -207,7 +214,7 @@ export function AutoTradePage() {
         // Keep prior diagnostics — do not wipe a Broker-selected account.
       }
     })();
-  }, [api]);
+  }, [api, mode]);
 
   const loadSettings = useCallback(
     async (env: ModeTab) => {
@@ -570,6 +577,20 @@ export function AutoTradePage() {
 
       <ExecutionDisabledBanner page="autotrade" />
 
+      <div
+        className={`gm-prem-card gm-env-banner ${isLiveEnv ? "gm-env-banner--live" : "gm-env-banner--demo"}`}
+        data-testid="autotrade-env-banner"
+      >
+        <strong>{isLiveEnv ? "LIVE · REAL MONEY" : "DEMO · DEMO FUNDS"}</strong>
+        <span>
+          {maskedAt || qualification?.accountMasked
+            ? `Account ${maskedAt || qualification?.accountMasked}`
+            : "No account selected"}{" "}
+          · AutoTrade {display === "OFF" || !status?.mode ? "OFF" : autoTradeLabel} · Live orders
+          LOCKED
+        </span>
+      </div>
+
       <section className="gm-prem-card gm-prem-card--navy gm-at-control-strip" aria-label="Execution status">
         <div className="gm-prem-hero-top">
           <div>
@@ -641,6 +662,25 @@ export function AutoTradePage() {
           {accountLabel}
         </p>
       </section>
+
+      {dailySafety ? (
+        <DailySafetyCard
+          safety={dailySafety}
+          busy={busy}
+          onResume={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                setDailySafety(await api.resumeDailySafety(mode === "live" ? "live" : "demo"));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not resume");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        />
+      ) : null}
 
       {qualification ? (
         <QualificationDashboard
@@ -1457,28 +1497,51 @@ export function AutoTradePage() {
               />
             </label>
             <label>
-              Maximum trades per day
-              <input
-                type="number"
-                value={settings.maxTradesPerDay}
-                onChange={(e) =>
-                  setSettings({ ...settings, maxTradesPerDay: Number(e.target.value) })
-                }
-                onBlur={() => void saveSettingsPatch({ maxTradesPerDay: settings.maxTradesPerDay })}
-              />
+              Maximum trades per day (1–10)
+              <div className="gm-stepper" data-testid="max-trades-stepper">
+                <button
+                  type="button"
+                  className="gm-btn"
+                  aria-label="Decrease max trades"
+                  disabled={busy || settings.maxTradesPerDay <= 1}
+                  onClick={() => {
+                    const next = Math.max(1, settings.maxTradesPerDay - 1);
+                    setSettings({ ...settings, maxTradesPerDay: next });
+                    void saveSettingsPatch({ maxTradesPerDay: next });
+                  }}
+                >
+                  −
+                </button>
+                <strong data-testid="max-trades-value">{settings.maxTradesPerDay}</strong>
+                <button
+                  type="button"
+                  className="gm-btn"
+                  aria-label="Increase max trades"
+                  disabled={busy || settings.maxTradesPerDay >= 10}
+                  onClick={() => {
+                    const next = Math.min(10, settings.maxTradesPerDay + 1);
+                    setSettings({ ...settings, maxTradesPerDay: next });
+                    void saveSettingsPatch({ maxTradesPerDay: next });
+                  }}
+                >
+                  +
+                </button>
+              </div>
             </label>
             <label>
-              Maximum open positions
-              <input
-                type="number"
+              Maximum open Gold positions (1–3)
+              <select
                 value={settings.maxOpenPositions}
-                onChange={(e) =>
-                  setSettings({ ...settings, maxOpenPositions: Number(e.target.value) })
-                }
-                onBlur={() =>
-                  void saveSettingsPatch({ maxOpenPositions: settings.maxOpenPositions })
-                }
-              />
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setSettings({ ...settings, maxOpenPositions: next });
+                  void saveSettingsPatch({ maxOpenPositions: next });
+                }}
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
             </label>
             <label>
               Minimum confidence
@@ -1527,22 +1590,27 @@ export function AutoTradePage() {
               />
             </label>
             <label>
-              Trade cooldown (minutes)
-              <input
-                type="number"
+              Cooldown after losing trade
+              <select
                 value={settings.tradeCooldownMinutes}
-                onChange={(e) =>
-                  setSettings({ ...settings, tradeCooldownMinutes: Number(e.target.value) })
-                }
-                onBlur={() =>
-                  void saveSettingsPatch({ tradeCooldownMinutes: settings.tradeCooldownMinutes })
-                }
-              />
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setSettings({ ...settings, tradeCooldownMinutes: next });
+                  void saveSettingsPatch({ tradeCooldownMinutes: next });
+                }}
+              >
+                <option value={0}>Off</option>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>60 min</option>
+              </select>
             </label>
             <label>
               Pause after consecutive losses
               <input
                 type="number"
+                min={1}
+                max={10}
                 value={settings.pauseAfterConsecutiveLosses}
                 onChange={(e) =>
                   setSettings({
@@ -1557,13 +1625,100 @@ export function AutoTradePage() {
                 }
               />
             </label>
+            <label>
+              Daily profit target
+              <input
+                type="number"
+                value={settings.dailyProfitTarget ?? ""}
+                placeholder="Optional"
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    dailyProfitTarget: e.target.value === "" ? null : Number(e.target.value)
+                  })
+                }
+                onBlur={() =>
+                  void saveSettingsPatch({
+                    dailyProfitTarget: settings.dailyProfitTarget ?? null
+                  })
+                }
+              />
+            </label>
+            <label className="gm-at-switch">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.dailyProfitTargetEnabled)}
+                onChange={(e) =>
+                  void saveSettingsPatch({ dailyProfitTargetEnabled: e.target.checked })
+                }
+              />
+              Stop new trades after daily profit target
+            </label>
+            <label className="gm-at-switch">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.profitProtectionEnabled)}
+                onChange={(e) =>
+                  void saveSettingsPatch({ profitProtectionEnabled: e.target.checked })
+                }
+              />
+              Daily profit protection
+            </label>
+            <label>
+              Protected minimum daily P/L
+              <input
+                type="number"
+                value={settings.profitProtectionFloor ?? ""}
+                placeholder="e.g. 60"
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    profitProtectionFloor: e.target.value === "" ? null : Number(e.target.value)
+                  })
+                }
+                onBlur={() =>
+                  void saveSettingsPatch({
+                    profitProtectionFloor: settings.profitProtectionFloor ?? null
+                  })
+                }
+              />
+            </label>
+            <label>
+              Max slippage
+              <input
+                type="number"
+                step="0.01"
+                value={settings.maxSlippage ?? 1.5}
+                onChange={(e) =>
+                  setSettings({ ...settings, maxSlippage: Number(e.target.value) })
+                }
+                onBlur={() =>
+                  void saveSettingsPatch({ maxSlippage: settings.maxSlippage ?? 1.5 })
+                }
+              />
+            </label>
+            <label>
+              News impact filter
+              <select
+                value={settings.newsImpactMode ?? "HIGH"}
+                onChange={(e) =>
+                  void saveSettingsPatch({
+                    newsImpactMode: e.target.value as "HIGH" | "MEDIUM" | "OFF"
+                  })
+                }
+              >
+                <option value="HIGH">Block High impact</option>
+                <option value="MEDIUM">Block Medium + High</option>
+                <option value="OFF">Off</option>
+              </select>
+            </label>
             <label className="gm-at-switch">
               <input
                 type="checkbox"
                 checked={settings.newsFilterEnabled}
                 onChange={(e) => void saveSettingsPatch({ newsFilterEnabled: e.target.checked })}
               />
-              News filter
+              News filter enabled
             </label>
             <label className="gm-at-switch">
               <input

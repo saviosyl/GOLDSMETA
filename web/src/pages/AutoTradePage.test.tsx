@@ -174,6 +174,8 @@ const api: Record<string, ReturnType<typeof vi.fn>> = {
     liveOrders: "LOCKED",
     recentPreviews: [],
     recentControlledTrades: [],
+    todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
+    recentEvaluations: [],
     startedAt: null,
     updatedAt: null
   })),
@@ -181,7 +183,52 @@ const api: Record<string, ReturnType<typeof vi.fn>> = {
   pauseAutoTradeQualification: vi.fn(),
   resumeAutoTradeQualification: vi.fn(),
   enableDemoAutoFromQualification: vi.fn(),
-  authoriseCTraderDemoTrading: vi.fn()
+  authoriseCTraderDemoTrading: vi.fn(),
+  getDailySafety: vi.fn(async () => ({
+    environment: "demo",
+    tradingDay: "2026-08-08",
+    tradesToday: 0,
+    tradesMax: 6,
+    tradesLimitReached: false,
+    dailyPnl: 0,
+    dailyLossLimit: 50,
+    dailyLossUsed: 0,
+    dailyLossRemaining: 50,
+    dailyLossLimitReached: false,
+    consecutiveLosses: 0,
+    consecutiveLossMax: 3,
+    consecutiveLossPaused: false,
+    openPositions: 0,
+    openPositionsMax: 1,
+    cooldownActive: false,
+    cooldownRemainingMs: null,
+    cooldownLabel: "Ready",
+    emergencyStopActive: false,
+    emergencyStopLabel: "READY",
+    autoTradeLabel: "QUALIFYING",
+    dailyProfitTarget: null,
+    dailyProfitTargetEnabled: false,
+    dailyProfitTargetReached: false,
+    profitProtectionEnabled: false,
+    profitProtectionPaused: false,
+    peakDailyPnl: 0,
+    protectedMinimumPnl: null,
+    entriesBlocked: false,
+    entriesBlockedReason: null,
+    currency: "EUR"
+  })),
+  resumeDailySafety: vi.fn(),
+  getSystemHealth: vi.fn(async () => ({
+    marketFeed: { tone: "green", label: "OK" },
+    strategyFeed: { tone: "green", label: "OK" },
+    broker: { tone: "green", label: "OK" },
+    autoTradeEngine: { tone: "green", label: "OK" },
+    riskEngine: { tone: "green", label: "OK" },
+    notifications: { tone: "green", label: "OK" },
+    qualificationWorker: { tone: "green", label: "OK" },
+    overall: "green",
+    plainSummary: "All systems healthy"
+  }))
 };
 
 vi.mock("../lib/auth", () => ({
@@ -429,6 +476,8 @@ describe("AutoTradePage", () => {
       liveOrders: "LOCKED",
       recentPreviews: [],
       recentControlledTrades: [],
+      todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
+      recentEvaluations: [],
       startedAt: null,
       updatedAt: new Date().toISOString()
     });
@@ -568,6 +617,8 @@ describe("AutoTradePage", () => {
       liveOrders: "LOCKED",
       recentPreviews: [],
       recentControlledTrades: [],
+      todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
+      recentEvaluations: [],
       startedAt: null,
       updatedAt: null
     });

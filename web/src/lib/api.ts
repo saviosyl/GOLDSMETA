@@ -1073,6 +1073,54 @@ export class ApiClient {
     });
   }
 
+  async getDailySafety(
+    environment: "demo" | "live" = "demo"
+  ): Promise<import("./broker/ctraderTypes").DailySafetyPublicView> {
+    return this.requestCTrader(`/v1/ctrader/daily-safety/${environment}`);
+  }
+
+  async resumeDailySafety(
+    environment: "demo" | "live" = "demo"
+  ): Promise<import("./broker/ctraderTypes").DailySafetyPublicView> {
+    return this.requestCTrader(`/v1/ctrader/daily-safety/${environment}/resume`, {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  async pauseAutoTradeEnv(
+    environment: "demo" | "live",
+    reason?: string
+  ): Promise<import("./broker/ctraderTypes").DailySafetyPublicView> {
+    return this.requestCTrader(`/v1/ctrader/autotrade/${environment}/pause`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? "Paused by user" })
+    });
+  }
+
+  async getSystemHealth(): Promise<import("./broker/ctraderTypes").SystemHealthView> {
+    return this.requestCTrader("/v1/ctrader/system-health");
+  }
+
+  async getAutoTradePerformance(opts?: {
+    environment?: "DEMO" | "LIVE" | "ALL";
+    period?: "today" | "7d" | "30d" | "all";
+  }): Promise<Record<string, unknown>> {
+    const environment = opts?.environment ?? "DEMO";
+    const period = opts?.period ?? "7d";
+    return this.requestCTrader(
+      `/v1/ctrader/performance?environment=${encodeURIComponent(environment)}&period=${encodeURIComponent(period)}`
+    );
+  }
+
+  async getWeeklyGoldMetaReport(): Promise<Record<string, unknown>> {
+    return this.requestCTrader("/v1/ctrader/weekly-report");
+  }
+
+  async getNewsGuardStatus(): Promise<Record<string, unknown>> {
+    return this.requestCTrader("/v1/ctrader/news-guard");
+  }
+
   async placeCTraderDemoMarketOrder(args: {
     side: "BUY" | "SELL";
     lots: number;

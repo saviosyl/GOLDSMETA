@@ -8,6 +8,7 @@
  */
 
 import { getFirestore } from "firebase-admin/firestore";
+import { recordSettingsChanges } from "./settingsAuditStore";
 
 export type AutoTradeEnvironment = "demo" | "live";
 
@@ -37,12 +38,27 @@ export type UserAutoTradeSettings = {
   allowedSessions: string[];
   allowedDays: string[];
   newsFilterEnabled: boolean;
+  /** HIGH | MEDIUM | OFF — news impact filter for new entries. */
+  newsImpactMode: "HIGH" | "MEDIUM" | "OFF";
+  newsMinutesBefore: number;
+  newsMinutesAfter: number;
+  maxSlippage: number;
+  /** Optional daily profit target (absolute currency units). */
+  dailyProfitTarget: number | null;
+  dailyProfitTargetEnabled: boolean;
+  /** Pause new entries if daily P/L falls below this floor after a peak. */
+  profitProtectionEnabled: boolean;
+  profitProtectionFloor: number | null;
+  maxPositionExposureLots: number | null;
   confirmationCandleRequired: boolean;
   trendConfirmationRequired: boolean;
   volumeConfirmationRequired: boolean;
   breakEvenEnabled: boolean;
   trailingStopEnabled: boolean;
   partialTakeProfitEnabled: boolean;
+  /** Soft pause (distinct from Emergency Stop). */
+  autoTradePaused: boolean;
+  autoTradePausedReason: string | null;
   /** Live activation — never inherited from Demo. */
   liveActivationConfirmedAt: string | null;
   liveActivationPhraseConfirmed: boolean;
@@ -80,12 +96,23 @@ const RECOMMENDED: Omit<
   allowedSessions: ["London", "NewYork"],
   allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
   newsFilterEnabled: true,
+  newsImpactMode: "HIGH",
+  newsMinutesBefore: 15,
+  newsMinutesAfter: 15,
+  maxSlippage: 1.5,
+  dailyProfitTarget: null,
+  dailyProfitTargetEnabled: false,
+  profitProtectionEnabled: false,
+  profitProtectionFloor: null,
+  maxPositionExposureLots: null,
   confirmationCandleRequired: true,
   trendConfirmationRequired: false,
   volumeConfirmationRequired: false,
   breakEvenEnabled: false,
   trailingStopEnabled: false,
-  partialTakeProfitEnabled: false
+  partialTakeProfitEnabled: false,
+  autoTradePaused: false,
+  autoTradePausedReason: null
 };
 
 function settingsDoc(uid: string, environment: AutoTradeEnvironment) {
@@ -163,17 +190,56 @@ export function validateSettingsPatch(
     ["percentageRisk", 0.01, 100],
     ["manualLotSize", 0.01, 5000],
     ["maxDailyLoss", 1, 100_000],
-    ["maxTradesPerDay", 1, 100],
-    ["maxOpenPositions", 1, 20],
-    ["minConfidence", 0, 100],
-    ["minRiskReward", 0.1, 20],
-    ["maxSpread", 0.01, 100],
+    // Product: Max trades / day is 1–10 (user-editable).
+    ["maxTradesPerDay", 1, 10],
+    ["maxOpenPositions", 1, 3],
+    ["minConfidence", 50, 100],
+    ["minRiskReward", 1, 3],
+    ["maxSpread", 0.01, 20],
+    ["maxSlippage", 0.01, 20],
     ["maxQuoteAgeSeconds", 1, 300],
     ["tradeCooldownMinutes", 0, 1440],
-    ["pauseAfterConsecutiveLosses", 1, 50]
+    ["pauseAfterConsecutiveLosses", 1, 10],
+    ["newsMinutesBefore", 0, 180],
+    ["newsMinutesAfter", 0, 180],
+    ["dailyProfitTarget", 1, 1_000_000],
+    ["profitProtectionFloor", 0, 1_000_000],
+    ["maxPositionExposureLots", 0.01, 100]
   ] as const) {
-    const err = num(clean[key as keyof UserAutoTradeSettingsPatch], min, max, key);
+    const raw = clean[key as keyof UserAutoTradeSettingsPatch];
+    if (raw === null && (key === "dailyProfitTarget" || key === "profitProtectionFloor" || key === "maxPositionExposureLots")) {
+      continue;
+    }
+    const err = num(raw, min, max, key);
     if (err) return { ok: false, code: "SETTINGS_VALIDATION_FAILED", message: err };
+  }
+
+  if (
+    clean.newsImpactMode != null &&
+    clean.newsImpactMode !== "HIGH" &&
+    clean.newsImpactMode !== "MEDIUM" &&
+    clean.newsImpactMode !== "OFF"
+  ) {
+    return { ok: false, code: "SETTINGS_VALIDATION_FAILED", message: "Invalid news impact mode" };
+  }
+
+  if (clean.maxOpenPositions != null && ![1, 2, 3].includes(clean.maxOpenPositions)) {
+    return {
+      ok: false,
+      code: "SETTINGS_VALIDATION_FAILED",
+      message: "maxOpenPositions must be 1, 2, or 3"
+    };
+  }
+
+  if (
+    clean.tradeCooldownMinutes != null &&
+    ![0, 15, 30, 60].includes(clean.tradeCooldownMinutes)
+  ) {
+    return {
+      ok: false,
+      code: "SETTINGS_VALIDATION_FAILED",
+      message: "tradeCooldownMinutes must be 0, 15, 30, or 60"
+    };
   }
 
   if (clean.sizingMode && clean.sizingMode !== "automatic_risk" && clean.sizingMode !== "manual_lots") {
@@ -226,6 +292,17 @@ export async function saveUserAutoTradeSettings(
     next.liveActivationPhraseConfirmed = false;
   }
   await settingsDoc(uid, environment).set(next, { merge: true });
+  try {
+    await recordSettingsChanges({
+      uid,
+      environment,
+      before: current as unknown as Record<string, unknown>,
+      after: next as unknown as Record<string, unknown>,
+      fields: Object.keys(validated.clean)
+    });
+  } catch {
+    /* audit must not block settings save */
+  }
   return next;
 }
 

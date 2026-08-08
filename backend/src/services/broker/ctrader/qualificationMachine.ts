@@ -352,6 +352,8 @@ export function toPublicView(args: {
     liveOrders: "LOCKED",
     recentPreviews: (doc?.previews ?? []).slice(-8).reverse(),
     recentControlledTrades: (doc?.controlledTrades ?? []).slice(-8).reverse(),
+    todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
+    recentEvaluations: [],
     startedAt: doc?.startedAt ?? null,
     updatedAt: doc?.updatedAt ?? null
   };

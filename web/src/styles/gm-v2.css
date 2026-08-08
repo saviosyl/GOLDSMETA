@@ -1973,6 +1973,86 @@ body.gm-drawer-open {
   border-color: color-mix(in srgb, var(--gm-danger, #c45c4a) 45%, transparent);
 }
 
+.gm-qual-today {
+  margin: 0.75rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--gm-navy, #0b1f33) 12%, transparent);
+}
+
+.gm-qual-today h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+}
+
+.gm-qual-today p,
+.gm-health-list span {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.gm-health-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.gm-health-list li {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.gm-health-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  margin-top: 0.35rem;
+  background: #8a93a3;
+}
+
+.gm-health-dot.is-ok {
+  background: #1f9d6c;
+}
+
+.gm-health-dot.is-amber {
+  background: #d4a017;
+}
+
+.gm-health-dot.is-warn {
+  background: #c45c4a;
+}
+
+.gm-today-price {
+  text-align: right;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.gm-today-price strong {
+  font-size: 1.35rem;
+}
+
+.gm-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gm-stepper button {
+  min-width: 2rem;
+}
+
+.gm-env-banner--demo {
+  border-left: 3px solid #1f9d6c;
+}
+
+.gm-env-banner--live {
+  border-left: 3px solid #c45c4a;
+}
+
 .gm-qual-dash {
   background: #fff;
   border: 1px solid var(--border);

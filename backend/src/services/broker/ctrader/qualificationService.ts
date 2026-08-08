@@ -42,6 +42,22 @@ import type {
   SafetyCheckRecord
 } from "./qualificationTypes";
 import { QUALIFICATION_GATES } from "./qualificationTypes";
+import {
+  appendEvaluation,
+  countEvaluationsForDay,
+  listRecentEvaluations,
+  reasonLabelFor
+} from "./evaluationLogStore";
+import { tradingDayKey } from "./dailySafetyStore";
+import {
+  assertEntryAllowed,
+  markTradeClosed,
+  markTradeOpened
+} from "./dailySafetyService";
+import { sessionAllowed } from "./sessionGuard";
+import { evaluateNewsGuard } from "./newsGuard";
+import { createAutoTradeJournalEntry } from "./autoTradeJournal";
+import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 
 function buildSha(): string | null {
   return (process.env.GOLD_META_COMMIT_SHA || process.env.VITE_GOLD_META_COMMIT_SHA || "").trim() || null;
@@ -219,11 +235,36 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
     }
   }
 
-  return toPublicView({
+  const view = toPublicView({
     doc,
     setup,
     stateOverride: !ready && !doc?.startedAt ? "SETUP_REQUIRED" : undefined
   });
+  try {
+    const day = tradingDayKey();
+    const [todayActivity, recent] = await Promise.all([
+      countEvaluationsForDay(uid, day),
+      listRecentEvaluations(uid, 24)
+    ]);
+    return {
+      ...view,
+      todayActivity,
+      recentEvaluations: recent.map((r) => ({
+        at: r.at,
+        direction: r.direction,
+        outcome: r.outcome,
+        reasonLabel: r.reasonLabel,
+        confidence: r.confidence,
+        spread: r.spread,
+        maxSpread: r.maxSpread,
+        riskReward: r.riskReward,
+        passed: r.passed,
+        failed: r.failed
+      }))
+    };
+  } catch {
+    return view;
+  }
 }
 
 export async function startQualification(uid: string): Promise<QualificationPublicView> {
@@ -390,12 +431,41 @@ export async function processDecisionForQualification(args: {
 
   const direction = String(d.decision ?? "WAIT").toUpperCase();
   if (direction !== "BUY" && direction !== "SELL") {
+    try {
+      await appendEvaluation({
+        uid,
+        accountMasked: setup.accountMasked,
+        at: new Date().toISOString(),
+        tradingDay: tradingDayKey(),
+        stage: state,
+        direction,
+        signalId: decisionId,
+        confidence: d.confidence ?? null,
+        entry: null,
+        stopLoss: null,
+        takeProfit: null,
+        riskReward: null,
+        spread: null,
+        maxSpread: null,
+        outcome: "IGNORED",
+        reasonCode: "WAIT_HOLD",
+        reasonLabel: reasonLabelFor("WAIT_HOLD"),
+        passed: [],
+        failed: ["NOT_ACTIONABLE"]
+      });
+    } catch {
+      /* ignore */
+    }
     return { handled: false, message: "wait_hold_ignored" };
   }
 
   const { entry, stopLoss, takeProfit } = decisionGeometry(d);
   const signalId = d.decisionId;
   const settings = await getUserAutoTradeSettings(uid, "demo");
+  if (settings.autoTradePaused || settings.emergencyStopActive) {
+    return { handled: false, message: settings.emergencyStopActive ? "emergency_stop" : "paused" };
+  }
+
   const diagnostics = await buildDiagnostics(uid);
   const quote = diagnostics.quote;
   const quoteAgeSeconds =
@@ -408,6 +478,12 @@ export async function processDecisionForQualification(args: {
     doc.controlledTrades.some((t) => t.signalId === signalId) ||
     doc.demoAutoTrades.some((t) => t.signalId === signalId);
 
+  const risk =
+    entry != null && stopLoss != null ? Math.abs(entry - stopLoss) : null;
+  const reward =
+    entry != null && takeProfit != null ? Math.abs(takeProfit - entry) : null;
+  const riskReward = risk && risk > 0 && reward != null ? reward / risk : null;
+
   const candidate = evaluateQualificationCandidate({
     direction,
     signalId,
@@ -416,6 +492,7 @@ export async function processDecisionForQualification(args: {
     takeProfit,
     confidence: d.confidence ?? null,
     minConfidence: settings.minConfidence,
+    minRiskReward: settings.minRiskReward,
     quoteBid: quote?.bid ?? null,
     quoteAsk: quote?.ask ?? null,
     quoteSpread: quote?.spread ?? null,
@@ -424,11 +501,68 @@ export async function processDecisionForQualification(args: {
     maxSpread: settings.maxSpread,
     maxQuoteAgeSeconds: settings.maxQuoteAgeSeconds,
     quoteAgeSeconds,
-    alreadyCountedSignal: alreadyCounted
+    alreadyCountedSignal: alreadyCounted,
+    requireMarketOpen: true
   });
 
+  const session = sessionAllowed(settings.allowedSessions);
+  const news = evaluateNewsGuard({
+    mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
+    minutesBefore: settings.newsMinutesBefore,
+    minutesAfter: settings.newsMinutesAfter
+  });
+
+  const logEval = async (
+    outcome: "QUALIFIED" | "REJECTED",
+    reasonCode: string,
+    failed: string[],
+    passed: string[]
+  ) => {
+    try {
+      await appendEvaluation({
+        uid,
+        accountMasked: setup.accountMasked,
+        at: new Date().toISOString(),
+        tradingDay: tradingDayKey(),
+        stage: state,
+        direction,
+        signalId,
+        confidence: d.confidence ?? null,
+        entry,
+        stopLoss,
+        takeProfit,
+        riskReward,
+        spread: quote?.spread ?? null,
+        maxSpread: settings.maxSpread,
+        outcome,
+        reasonCode,
+        reasonLabel: reasonLabelFor(reasonCode),
+        passed,
+        failed
+      });
+    } catch {
+      /* never block qualification on log failure */
+    }
+  };
+
   if (state === "PREVIEW_QUALIFICATION") {
-    if (!candidate.ok) return { handled: true, message: `preview_rejected:${candidate.failed[0]}` };
+    if (!session.ok) {
+      await logEval("REJECTED", "SESSION_BLOCKED", ["SESSION_BLOCKED"], candidate.passed);
+      return { handled: true, message: "preview_rejected:SESSION_BLOCKED" };
+    }
+    if (news.active) {
+      await logEval("REJECTED", "NEWS_GUARD", ["NEWS_GUARD"], candidate.passed);
+      return { handled: true, message: "preview_rejected:NEWS_GUARD" };
+    }
+    if (!candidate.ok) {
+      await logEval(
+        "REJECTED",
+        candidate.failed[0] ?? "REJECTED",
+        candidate.failed,
+        candidate.passed
+      );
+      return { handled: true, message: `preview_rejected:${candidate.failed[0]}` };
+    }
     const row: QualificationPreviewRecord = {
       id: newId("prev"),
       signalId,
@@ -444,6 +578,7 @@ export async function processDecisionForQualification(args: {
     const next = tryAddPreview(doc, row);
     if (!next) return { handled: true, message: "preview_duplicate_or_full" };
     doc = next;
+    await logEval("QUALIFIED", "PREVIEW_COUNTED", [], candidate.passed);
     if (doc.previewCount >= QUALIFICATION_GATES.requiredPreviews) {
       doc = await appendTransition(
         doc,
@@ -451,6 +586,21 @@ export async function processDecisionForQualification(args: {
         "previews_complete",
         buildSha()
       );
+      await notifyAutoTradeEvent({
+        uid,
+        kind: "PREVIEWS_COMPLETE",
+        title: "Preview qualification complete",
+        body: "Controlled Demo qualification has started.",
+        dedupeKey: `previews_complete_${setup.accountId}`
+      });
+    } else if (doc.previewCount === 10 || doc.previewCount % 5 === 0) {
+      await notifyAutoTradeEvent({
+        uid,
+        kind: "PREVIEW_PROGRESS",
+        title: "Preview qualification progress",
+        body: `${doc.previewCount} / ${QUALIFICATION_GATES.requiredPreviews} previews complete.`,
+        dedupeKey: `preview_progress_${setup.accountId}_${doc.previewCount}`
+      });
     }
     await saveQualificationDoc(doc);
     return { handled: true, message: "preview_counted" };
@@ -464,12 +614,43 @@ export async function processDecisionForQualification(args: {
     if (!allowsDemoOrderSubmission(state)) {
       return { handled: false, message: "orders_not_allowed" };
     }
+    const entryGate = await assertEntryAllowed(uid, "demo");
+    if (!entryGate.allowed) {
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        entryGate.code ?? "ENTRIES_PAUSED",
+        [entryGate.code ?? "ENTRIES_PAUSED"],
+        candidate.passed
+      );
+      return { handled: true, message: `controlled_blocked:${entryGate.code}` };
+    }
+    if (!session.ok) {
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval("REJECTED", "SESSION_BLOCKED", ["SESSION_BLOCKED"], candidate.passed);
+      return { handled: true, message: "controlled_blocked:SESSION_BLOCKED" };
+    }
+    if (news.active) {
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval("REJECTED", "NEWS_GUARD", ["NEWS_GUARD"], candidate.passed);
+      return { handled: true, message: "controlled_blocked:NEWS_GUARD" };
+    }
     if (!candidate.ok) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        candidate.failed[0] ?? "REJECTED",
+        candidate.failed,
+        candidate.passed
+      );
       return { handled: true, message: `controlled_blocked:${candidate.failed[0]}` };
     }
     if (doc.controlledOpenCount > 0 && state === "CONTROLLED_DEMO_QUALIFICATION") {
+      await logEval("REJECTED", "ONE_POSITION_RULE", ["ONE_POSITION_RULE"], candidate.passed);
       return { handled: true, message: "one_position_rule" };
     }
     if (alreadyCounted) return { handled: true, message: "duplicate_signal" };
@@ -572,6 +753,53 @@ export async function processDecisionForQualification(args: {
         doc = recountDemoAuto(doc);
       }
       await saveQualificationDoc(doc);
+      try {
+        await markTradeOpened({ uid, environment: "demo", tradeId: trade.correlationId });
+      } catch {
+        /* daily counter best-effort */
+      }
+      await logEval("QUALIFIED", "CONTROLLED_OPENED", [], [
+        ...candidate.passed,
+        "ORDER_ACCEPTED"
+      ]);
+      try {
+        await createAutoTradeJournalEntry({
+          uid,
+          environment: "DEMO",
+          source:
+            state === "CONTROLLED_DEMO_QUALIFICATION"
+              ? "qualification_controlled"
+              : "demo_auto",
+          direction: trade.direction,
+          entry: trade.entry,
+          stopLoss: trade.stopLoss,
+          takeProfit: trade.takeProfit,
+          lots: trade.lots,
+          cashRisk: settings.fixedRiskAmount,
+          confidence: d.confidence ?? null,
+          riskReward,
+          session: session.current,
+          spread: quote?.spread ?? null,
+          pnl: null,
+          reasonForTrade: [
+            `${trade.direction} setup`,
+            d.confidence != null ? `Confidence ${Math.round(d.confidence)}%` : null,
+            riskReward != null ? `R:R ${riskReward.toFixed(2)}` : null,
+            "Server safety gates passed"
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          reasonForExit: null,
+          qualificationStage: state,
+          accountMasked: setup.accountMasked,
+          broker: "Pepperstone cTrader",
+          correlationId: trade.correlationId,
+          openedAt: trade.at,
+          closedAt: null
+        });
+      } catch {
+        /* journal must not block */
+      }
       return { handled: true, message: "order_submitted" };
     } catch (e) {
       doc = {
@@ -634,6 +862,49 @@ export async function markQualificationTradeClosed(args: {
     doc = await appendTransition(doc, advanced, "trade_closed", buildSha());
   }
   await saveQualificationDoc(doc);
+  const closed =
+    doc.controlledTrades.find((t) => t.correlationId === args.correlationId) ||
+    doc.demoAutoTrades.find((t) => t.correlationId === args.correlationId);
+  if (closed && closed.status === "CLOSED") {
+    try {
+      await markTradeClosed({
+        uid: args.uid,
+        environment: "demo",
+        tradeId: args.correlationId,
+        pnl: typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? 0
+      });
+    } catch {
+      /* ignore */
+    }
+    try {
+      await createAutoTradeJournalEntry({
+        uid: args.uid,
+        environment: "DEMO",
+        source: "qualification_controlled",
+        direction: (closed as { direction?: "BUY" | "SELL" }).direction ?? "BUY",
+        entry: (closed as { entry?: number | null }).entry ?? null,
+        stopLoss: (closed as { stopLoss?: number | null }).stopLoss ?? null,
+        takeProfit: (closed as { takeProfit?: number | null }).takeProfit ?? null,
+        lots: (closed as { lots?: number | null }).lots ?? null,
+        cashRisk: null,
+        confidence: null,
+        riskReward: null,
+        session: null,
+        spread: null,
+        pnl: typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? null,
+        reasonForTrade: "Controlled Demo / Demo Auto trade",
+        reasonForExit: "Position closed",
+        qualificationStage: advanced,
+        accountMasked: setup.accountMasked,
+        broker: "Pepperstone cTrader",
+        correlationId: args.correlationId,
+        openedAt: closed.at,
+        closedAt: closed.closedAt
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   return getQualificationView(args.uid);
 }
 

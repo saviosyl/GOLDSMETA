@@ -77,6 +77,16 @@ import {
   resumeQualification,
   startQualification
 } from "../services/broker/ctrader/qualificationService";
+import {
+  clearSoftPause,
+  getDailySafetyView
+} from "../services/broker/ctrader/dailySafetyService";
+import { listRecentEvaluations } from "../services/broker/ctrader/evaluationLogStore";
+import { buildPerformanceSummary } from "../services/broker/ctrader/performanceService";
+import { buildSystemHealth } from "../services/broker/ctrader/systemHealthService";
+import { buildWeeklyReport } from "../services/broker/ctrader/weeklyReportService";
+import { evaluateNewsGuard } from "../services/broker/ctrader/newsGuard";
+import { currentSessionUtc, sessionAllowed } from "../services/broker/ctrader/sessionGuard";
 
 function codeOf(err: unknown): string {
   if (err && typeof err === "object" && "code" in err) {
@@ -1249,6 +1259,146 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       }
     }
   );
+
+  router.get("/v1/ctrader/daily-safety/:environment", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const environment = parseEnvironment(req.params.environment);
+    if (!environment) {
+      res.status(400).json({ error: "INVALID_ENVIRONMENT" });
+      return;
+    }
+    try {
+      res.json(await getDailySafetyView(uid, environment));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.post(
+    "/v1/ctrader/daily-safety/:environment/resume",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      const environment = parseEnvironment(req.params.environment);
+      if (!environment) {
+        res.status(400).json({ error: "INVALID_ENVIRONMENT" });
+        return;
+      }
+      try {
+        await clearSoftPause(uid, environment);
+        await saveUserAutoTradeSettings(uid, environment, {
+          autoTradePaused: false,
+          autoTradePausedReason: null
+        });
+        res.json(await getDailySafetyView(uid, environment));
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
+  router.post(
+    "/v1/ctrader/autotrade/:environment/pause",
+    requireAuth,
+    ...brokerGate,
+    async (req, res) => {
+      const uid = requireUid(req, res);
+      if (!uid) return;
+      const environment = parseEnvironment(req.params.environment);
+      if (!environment) {
+        res.status(400).json({ error: "INVALID_ENVIRONMENT" });
+        return;
+      }
+      try {
+        const reason = String((req.body as { reason?: string })?.reason ?? "Paused by user");
+        await saveUserAutoTradeSettings(uid, environment, {
+          autoTradePaused: true,
+          autoTradePausedReason: reason
+        });
+        res.json(await getDailySafetyView(uid, environment));
+      } catch (e) {
+        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+      }
+    }
+  );
+
+  router.get("/v1/ctrader/evaluations/recent", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 40) || 40));
+      res.json({ evaluations: await listRecentEvaluations(uid, limit) });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.get("/v1/ctrader/performance", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      const environment = String(req.query.environment ?? "DEMO").toUpperCase();
+      const period = String(req.query.period ?? "7d") as "today" | "7d" | "30d" | "all";
+      const env =
+        environment === "LIVE" ? "LIVE" : environment === "ALL" ? "ALL" : "DEMO";
+      res.json(
+        await buildPerformanceSummary({
+          uid,
+          environment: env,
+          period: ["today", "7d", "30d", "all"].includes(period) ? period : "7d"
+        })
+      );
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.get("/v1/ctrader/weekly-report", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await buildWeeklyReport(uid));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.get("/v1/ctrader/system-health", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      res.json(await buildSystemHealth({ uid }));
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  router.get("/v1/ctrader/news-guard", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    try {
+      const settings = await getUserAutoTradeSettings(uid, "demo");
+      const status = evaluateNewsGuard({
+        mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
+        minutesBefore: settings.newsMinutesBefore,
+        minutesAfter: settings.newsMinutesAfter
+      });
+      const session = sessionAllowed(settings.allowedSessions);
+      res.json({
+        news: status,
+        session: {
+          ...session,
+          current: session.current || currentSessionUtc()
+        },
+        liveOrders: "LOCKED"
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
 
   router.post("/v1/ctrader/automation/mode", requireAuth, ...brokerGate, async (req, res) => {
     const uid = requireUid(req, res);

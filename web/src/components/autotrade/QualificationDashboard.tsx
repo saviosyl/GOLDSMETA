@@ -128,6 +128,16 @@ export function QualificationDashboard({
         />
       </div>
 
+      {view.todayActivity ? (
+        <div className="gm-qual-today" data-testid="qual-today-activity">
+          <h3>Today&apos;s qualification activity</h3>
+          <p>
+            Setups evaluated: {view.todayActivity.evaluated} · Qualified:{" "}
+            {view.todayActivity.qualified} · Rejected: {view.todayActivity.rejected}
+          </p>
+        </div>
+      ) : null}
+
       {(state === "DEMO_AUTO_ENABLED" ||
         state === "LIVE_QUALIFICATION" ||
         state === "LIVE_AUTO_ELIGIBLE" ||
@@ -224,9 +234,19 @@ export function QualificationDashboard({
       <details className="gm-qual-history" data-testid="qual-history">
         <summary>View qualification history</summary>
         <ul>
+          {(view.recentEvaluations ?? []).slice(0, 12).map((e, i) => (
+            <li key={`${e.at}-${i}`} data-testid="qual-eval-row">
+              {e.direction} · {e.outcome === "QUALIFIED" ? "Passed" : "Blocked"} ·{" "}
+              {e.reasonLabel}
+              {e.confidence != null ? ` · ${Math.round(e.confidence)}%` : ""}
+              {e.failed?.includes("SPREAD_TOO_WIDE") && e.spread != null && e.maxSpread != null
+                ? ` · Spread ${e.spread} (max ${e.maxSpread})`
+                : ""}
+            </li>
+          ))}
           {view.recentPreviews.map((p, i) => (
             <li key={p.id}>
-              #{view.preview.completed - i} {p.direction} Passed
+              Preview #{view.preview.completed - i} {p.direction} Passed
               {p.confidence != null ? ` · ${Math.round(p.confidence)}% confidence` : ""}
             </li>
           ))}
@@ -237,7 +257,9 @@ export function QualificationDashboard({
               {t.pnl != null ? ` · Demo P/L ${t.pnl}` : ""}
             </li>
           ))}
-          {view.recentPreviews.length === 0 && view.recentControlledTrades.length === 0 ? (
+          {(view.recentEvaluations?.length ?? 0) === 0 &&
+          view.recentPreviews.length === 0 &&
+          view.recentControlledTrades.length === 0 ? (
             <li>No qualifying Pepperstone events yet</li>
           ) : null}
         </ul>

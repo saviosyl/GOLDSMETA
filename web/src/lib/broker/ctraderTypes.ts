@@ -174,17 +174,74 @@ export interface UserAutoTradeSettingsDto {
   allowedSessions: string[];
   allowedDays: string[];
   newsFilterEnabled: boolean;
+  newsImpactMode?: "HIGH" | "MEDIUM" | "OFF";
+  newsMinutesBefore?: number;
+  newsMinutesAfter?: number;
+  maxSlippage?: number;
+  dailyProfitTarget?: number | null;
+  dailyProfitTargetEnabled?: boolean;
+  profitProtectionEnabled?: boolean;
+  profitProtectionFloor?: number | null;
+  maxPositionExposureLots?: number | null;
   confirmationCandleRequired: boolean;
   trendConfirmationRequired: boolean;
   volumeConfirmationRequired: boolean;
   breakEvenEnabled: boolean;
   trailingStopEnabled: boolean;
   partialTakeProfitEnabled: boolean;
+  autoTradePaused?: boolean;
+  autoTradePausedReason?: string | null;
   liveActivationConfirmedAt: string | null;
   liveActivationPhraseConfirmed: boolean;
   autoTradeEnabledIntent: boolean;
   emergencyStopActive: boolean;
 }
+
+export type DailySafetyPublicView = {
+  environment: "demo" | "live";
+  tradingDay: string;
+  tradesToday: number;
+  tradesMax: number;
+  tradesLimitReached: boolean;
+  dailyPnl: number;
+  dailyLossLimit: number;
+  dailyLossUsed: number;
+  dailyLossRemaining: number;
+  dailyLossLimitReached: boolean;
+  consecutiveLosses: number;
+  consecutiveLossMax: number;
+  consecutiveLossPaused: boolean;
+  openPositions: number;
+  openPositionsMax: number;
+  cooldownActive: boolean;
+  cooldownRemainingMs: number | null;
+  cooldownLabel: string;
+  emergencyStopActive: boolean;
+  emergencyStopLabel: string;
+  autoTradeLabel: string;
+  dailyProfitTarget: number | null;
+  dailyProfitTargetEnabled: boolean;
+  dailyProfitTargetReached: boolean;
+  profitProtectionEnabled: boolean;
+  profitProtectionPaused: boolean;
+  peakDailyPnl: number;
+  protectedMinimumPnl: number | null;
+  entriesBlocked: boolean;
+  entriesBlockedReason: string | null;
+  currency: string;
+};
+
+export type SystemHealthView = {
+  marketFeed: { tone: string; label: string };
+  strategyFeed: { tone: string; label: string };
+  broker: { tone: string; label: string };
+  autoTradeEngine: { tone: string; label: string };
+  riskEngine: { tone: string; label: string };
+  notifications: { tone: string; label: string };
+  qualificationWorker: { tone: string; label: string };
+  overall: string;
+  plainSummary: string;
+};
 
 export interface CTraderDemonstrationBundle {
   banner: string;

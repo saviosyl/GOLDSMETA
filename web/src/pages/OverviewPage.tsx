@@ -42,6 +42,8 @@ import { SetupStatusCard } from "../components/decision/SetupStatusCard";
 import { XauusdChartCard } from "../components/decision/XauusdChartCard";
 import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
+import { TodayPlanSummary } from "../components/premium/TodayPlanSummary";
+import { SystemHealthStrip } from "../components/premium/SystemHealthStrip";
 import { Bell, CircleHelp, RefreshCw } from "lucide-react";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
 import { useShellQuote } from "../lib/quoteContext";
@@ -53,6 +55,12 @@ import {
   WAIT_NO_VALID_PLAN_LABEL
 } from "../lib/planTextFormat";
 import { fmtPrice } from "../lib/intradayFormat";
+import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
+import type {
+  DailySafetyPublicView,
+  SystemHealthView
+} from "../lib/broker/ctraderTypes";
+import { premiumDecisionChip } from "../lib/premiumDecisionCopy";
 
 type Briefing = {
   session?: string | null;
@@ -254,19 +262,28 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
+  const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
+  const [dailySafety, setDailySafety] = useState<DailySafetyPublicView | null>(null);
+  const [systemHealth, setSystemHealth] = useState<SystemHealthView | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
     setErrorDetail(null);
     try {
-      const [pack, active, recentSetups, overnight, b, s] = await Promise.all([
+      const [pack, active, recentSetups, overnight, b, s, qual, daily, health] = await Promise.all([
         api.latestDecisionPack(),
         api.listActiveSetups().catch(() => [] as SetupRecord[]),
         api.listSetups(6, "LIVE").catch(() => [] as SetupRecord[]),
         api.listSetups(20, "LIVE").catch(() => [] as SetupRecord[]),
         api.v5Briefing("LIVE").catch(() => null),
-        api.v5Score("LIVE").catch(() => null)
+        api.v5Score("LIVE").catch(() => null),
+        api.getAutoTradeQualification().catch(() => null),
+        api.getDailySafety("demo").catch(() => null),
+        api.getSystemHealth().catch(() => null)
       ]);
+      setQualification(qual);
+      setDailySafety(daily);
+      setSystemHealth(health);
       const latest = pack?.decision ?? null;
       const complete = pack?.latestCompleteStrategySignal ?? null;
       setDecision(latest);
@@ -562,6 +579,33 @@ export function OverviewPage() {
             priceChange={priceChange}
             priceChangePct={priceChangePct}
           />
+
+          <TodayPlanSummary
+            marketStatus={
+              marketOpen
+                ? "MARKET OPEN"
+                : quote?.marketStatus
+                  ? String(quote.marketStatus).toUpperCase().includes("CLOSE")
+                    ? "MARKET CLOSED"
+                    : String(quote.marketStatus)
+                  : "MARKET STATUS PENDING"
+            }
+            price={livePrice}
+            bid={quote?.bid ?? null}
+            ask={quote?.ask ?? null}
+            updatedLabel={displayUpdated}
+            decisionLabel={decisionState ? premiumDecisionChip(decisionState) : shortAction}
+            confidence={intradayPlan.confidence ?? decision?.confidence ?? null}
+            nextAction={
+              qualification?.nextAction ||
+              (marketOpen
+                ? "Waiting for valid market setup"
+                : "Qualification will continue when valid market setups resume")
+            }
+            qualification={qualification}
+            daily={dailySafety}
+          />
+          {systemHealth ? <SystemHealthStrip health={systemHealth} /> : null}
 
           <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
             <DecisionDashboard
