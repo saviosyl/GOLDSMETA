@@ -16,7 +16,9 @@ import {
 } from "./openApiClient";
 
 const CACHE_TTL_MS = 90_000;
-const FETCH_TIMEOUT_MS = 25_000;
+/** Function timeout is 120s — leave headroom for auth + one retry. */
+const FETCH_TIMEOUT_MS = 40_000;
+const FETCH_ATTEMPTS = 2;
 
 export type CandleErrorCode =
   | "CANDLE_AUTH_REQUIRED"
@@ -149,19 +151,40 @@ export async function getXauusdCandles(args: {
     }
     const isLive = Boolean(freshConn.selectedAccountIsLive);
     const api = args.api ?? createOpenApiClient();
-    const bars = await withTimeout(
-      api.fetchTrendbars({
-        accessToken,
-        clientId,
-        clientSecret,
-        ctidTraderAccountId: freshConn.selectedAccountId!,
-        symbolId: freshConn.symbolId!,
-        period: args.timeframe,
-        count,
-        isLive
-      }),
-      FETCH_TIMEOUT_MS
-    );
+
+    let bars: TrendbarCandle[] = [];
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+      try {
+        bars = await withTimeout(
+          api.fetchTrendbars({
+            accessToken,
+            clientId,
+            clientSecret,
+            ctidTraderAccountId: freshConn.selectedAccountId!,
+            symbolId: freshConn.symbolId!,
+            period: args.timeframe,
+            count,
+            isLive
+          }),
+          FETCH_TIMEOUT_MS
+        );
+        if (bars.length) break;
+        lastErr = candleError("CANDLE_EMPTY_RESPONSE");
+      } catch (err) {
+        lastErr = err;
+        // Retry once on flaky cTrader WS hangs; do not retry auth/account misses.
+        const code = classifyCandleFailure(err);
+        if (
+          attempt >= FETCH_ATTEMPTS ||
+          (code !== "CANDLE_CTRADER_TIMEOUT" &&
+            code !== "CANDLE_EMPTY_RESPONSE" &&
+            code !== "CANDLE_UPSTREAM_ERROR")
+        ) {
+          throw err;
+        }
+      }
+    }
 
     if (!bars.length) {
       // Prefer stale cache over empty when market is closed / upstream blank.
@@ -176,7 +199,10 @@ export async function getXauusdCandles(args: {
           marketStatus: "UNKNOWN"
         };
       }
-      throw candleError("CANDLE_EMPTY_RESPONSE");
+      throw candleError(
+        classifyCandleFailure(lastErr ?? candleError("CANDLE_EMPTY_RESPONSE")),
+        lastErr
+      );
     }
 
     const environment: "DEMO" | "LIVE" = isLive ? "LIVE" : "DEMO";
