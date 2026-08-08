@@ -92,6 +92,59 @@ export type DemoMarketOrderResult = {
   raw?: Record<string, unknown>;
 };
 
+/** Display-only OHLC bar from ProtoOAGetTrendbarsRes. */
+export type TrendbarCandle = {
+  /** Unix seconds (bar open). */
+  time: number;
+  open: number;
+  high: number;
+  close: number;
+  low: number;
+  volume: number | null;
+};
+
+/** ProtoOATrendbarPeriod numeric values used by Spotware. */
+export const TRENDBAR_PERIOD = {
+  M5: 5,
+  M15: 7,
+  H1: 9,
+  H4: 10
+} as const;
+
+export type TrendbarPeriodKey = keyof typeof TRENDBAR_PERIOD;
+
+export function parseTrendbarCandles(
+  trendbars: unknown,
+  priceScale = SPOT_PRICE_SCALE
+): TrendbarCandle[] {
+  const list = Array.isArray(trendbars) ? trendbars : [];
+  const out: TrendbarCandle[] = [];
+  for (const raw of list) {
+    const bar = (raw ?? {}) as Record<string, unknown>;
+    const lowRel = asNumber(bar.low);
+    const minutes = asNumber(bar.utcTimestampInMinutes);
+    if (lowRel == null || minutes == null) continue;
+    const deltaOpen = asNumber(bar.deltaOpen) ?? 0;
+    const deltaClose = asNumber(bar.deltaClose) ?? 0;
+    const deltaHigh = asNumber(bar.deltaHigh) ?? 0;
+    const low = lowRel / priceScale;
+    const open = (lowRel + deltaOpen) / priceScale;
+    const close = (lowRel + deltaClose) / priceScale;
+    const high = (lowRel + deltaHigh) / priceScale;
+    if (![open, high, low, close].every((n) => Number.isFinite(n))) continue;
+    out.push({
+      time: Math.floor(minutes * 60),
+      open,
+      high,
+      low,
+      close,
+      volume: asNumber(bar.volume)
+    });
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
 export interface CTraderOpenApiClient {
   listAccountsByAccessToken(accessToken: string): Promise<DiscoveredAccount[]>;
   fetchAccountSnapshot(args: {
@@ -119,6 +172,18 @@ export interface CTraderOpenApiClient {
     /** When true, use Pepperstone Live Open API host for quotes. */
     isLive?: boolean;
   }): Promise<BrokerQuote>;
+  /** Display-only historical OHLC — never used by decision/autotrade engines. */
+  fetchTrendbars(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    symbolId: string;
+    period: TrendbarPeriodKey;
+    count?: number;
+    /** When true, use Pepperstone Live Open API host. */
+    isLive?: boolean;
+  }): Promise<TrendbarCandle[]>;
   /** Demo host only — never call for Live accounts. */
   placeDemoMarketOrder?(args: DemoMarketOrderRequest): Promise<DemoMarketOrderResult>;
 }
@@ -547,6 +612,40 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
       });
     },
 
+    async fetchTrendbars(args) {
+      const isLive = Boolean(args.isLive);
+      const period = TRENDBAR_PERIOD[args.period];
+      const count = Math.min(Math.max(args.count ?? 200, 1), 500);
+      const toTimestamp = Date.now();
+      // Stay well inside Spotware window limits per period family.
+      const windowMs =
+        args.period === "M5"
+          ? 14 * 24 * 60 * 60 * 1000
+          : args.period === "H4"
+            ? 180 * 24 * 60 * 60 * 1000
+            : 60 * 24 * 60 * 60 * 1000;
+      const fromTimestamp = Math.max(0, toTimestamp - windowMs);
+      return withOpenApiConnection({ isLive }, async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const res = (await connection.sendCommand("ProtoOAGetTrendbarsReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          fromTimestamp,
+          toTimestamp,
+          period,
+          symbolId: Number(args.symbolId),
+          count
+        })) as { trendbar?: unknown };
+        return parseTrendbarCandles(res.trendbar);
+      });
+    },
+
     async placeDemoMarketOrder(args) {
       return withDemoConnection(async (connection) => {
         await connection.sendCommand("ProtoOAApplicationAuthReq", {
@@ -709,6 +808,30 @@ export function createMockOpenApiClient(opts?: {
           source: "LIVE"
         }
       );
+    },
+    async fetchTrendbars(args) {
+      const count = Math.min(Math.max(args.count ?? 40, 1), 200);
+      const stepSec =
+        args.period === "M5"
+          ? 300
+          : args.period === "M15"
+            ? 900
+            : args.period === "H1"
+              ? 3600
+              : 14400;
+      const now = Math.floor(Date.now() / 1000);
+      const base = 2350;
+      const bars: TrendbarCandle[] = [];
+      for (let i = count; i >= 1; i -= 1) {
+        const t = now - i * stepSec;
+        const drift = Math.sin(i / 5) * 1.2;
+        const open = Number((base + drift).toFixed(2));
+        const close = Number((open + Math.cos(i / 3) * 0.6).toFixed(2));
+        const high = Number((Math.max(open, close) + 0.35).toFixed(2));
+        const low = Number((Math.min(open, close) - 0.35).toFixed(2));
+        bars.push({ time: t, open, high, low, close, volume: 100 + i });
+      }
+      return bars;
     },
     async placeDemoMarketOrder(args) {
       return {

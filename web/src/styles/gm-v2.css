@@ -503,6 +503,18 @@ body,
   font-size: 0.84rem;
 }
 
+.gm-feed-strip--compact {
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+  border-radius: 10px;
+}
+
+.gm-feed-strip--compact strong {
+  font-size: 0.72rem;
+}
+
 .gm-feed-strip[data-status="amber"] {
   background: var(--warning-soft);
   border-color: var(--gold-200);
@@ -680,6 +692,169 @@ body,
   line-height: 1.05;
   font-weight: 800;
   letter-spacing: -0.02em;
+}
+
+.gm-decision-hero-compact {
+  padding: 12px 14px 10px;
+  margin-bottom: 10px;
+}
+
+.gm-decision-hero-compact h1 {
+  font-size: clamp(1.55rem, 6vw, 1.9rem);
+}
+
+.gm-decision-hero-compact .gm-hero-instruction {
+  margin: 6px 0 10px;
+  font-size: 0.9rem;
+}
+
+.gm-decision-hero-compact .gm-hero-confidence {
+  font-size: 0.92rem;
+}
+
+.gm-hero-metrics-compact {
+  gap: 8px 10px;
+}
+
+.gm-hero-metrics-compact .gm-label {
+  font-size: 0.62rem;
+}
+
+.gm-hero-metrics-compact strong {
+  font-size: 0.9rem;
+}
+
+.gm-action-row-compact {
+  margin-bottom: 8px;
+}
+
+.gm-xau-chart-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(6, 23, 47, 0.05);
+  padding: 10px 12px 8px;
+  margin-bottom: 10px;
+}
+
+.gm-xau-chart-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.gm-xau-chart-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--navy);
+}
+
+.gm-xau-chart-card__title strong {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.gm-xau-chart-card__title span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.gm-xau-chart-closed {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.6rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em;
+  color: #8a6d1a !important;
+  background: #fff7e6;
+  border: 1px solid #f0dfb0;
+}
+
+.gm-xau-chart-tfs {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.gm-xau-chart-tfs button {
+  border: 1px solid var(--border);
+  background: #f7f9fc;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.gm-xau-chart-tfs button.is-active {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+.gm-xau-chart-host {
+  width: 100%;
+  min-height: 260px;
+  height: 280px;
+}
+
+.gm-xau-chart-status {
+  margin: 6px 0 0;
+}
+
+.gm-xau-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.gm-xau-chart-legend span {
+  position: relative;
+  padding-left: 10px;
+}
+
+.gm-xau-chart-legend span::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lvl, var(--navy));
+}
+
+.gm-trade-plan-waiting {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(6, 23, 47, 0.05);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.gm-trade-plan-waiting .gm-trade-plan-summary__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.gm-trade-plan-waiting__copy {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: var(--navy);
 }
 
 .gm-decision-hero-v2[data-tone="buy"] h1 {

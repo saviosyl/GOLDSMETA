@@ -128,14 +128,8 @@ describe("Premium UI redesign", () => {
             livePrice={4265.31}
             updatedLabel="07:52"
             sessionLabel="London"
-            feedHealth={{
-              status: "amber",
-              title: "Limited",
-              subtitle: "Quotes limited",
-              quoteStatus: "limited",
-              lastVerifiedAt: null,
-              lastVerifiedLabel: "30s ago"
-            }}
+            marketOpen
+            freshness="LIVE"
           />
           <PremiumInsightStrip trendBias="Neutral" volatility="Moderate" newsImpact="Low" />
           <PremiumPlanCard plan={plan} state={state} updatedLabel="30s ago" />

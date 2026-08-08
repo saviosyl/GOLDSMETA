@@ -8,6 +8,7 @@ import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
 import { DecisionDashboard } from "./DecisionDashboard";
 import { DetailedReportSections } from "./DetailedReportSections";
+import { TradePlanSummary } from "./TradePlanSummary";
 
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({ api: {} })
@@ -84,7 +85,14 @@ describe("DecisionDashboard", () => {
   it("shows Entry Stop and targets prominently for potential plans", () => {
     const plan = potentialBuy();
     plan.confidence = 58;
-    render(wrap(<DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />));
+    render(
+      wrap(
+        <>
+          <DecisionDashboard plan={plan} marketFeedHealth={greenFeed} livePrice={4039} />
+          <TradePlanSummary plan={plan} livePrice={4039} />
+        </>
+      )
+    );
 
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/PREPARE/i);
     expect(screen.getByTestId("decision-plan-state")).toHaveTextContent(

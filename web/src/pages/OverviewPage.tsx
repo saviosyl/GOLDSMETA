@@ -37,6 +37,8 @@ import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
 import { DecisionDashboard } from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
+import { TradePlanSummary } from "../components/decision/TradePlanSummary";
+import { XauusdChartCard } from "../components/decision/XauusdChartCard";
 import { PremiumInsightStrip } from "../components/premium/PremiumInsightStrip";
 import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
@@ -365,6 +367,19 @@ export function OverviewPage() {
     quote?.source === "broker" && quote.updatedLabel ? quote.updatedLabel : compactTime;
   const displayFresh =
     quote?.source === "broker" ? Boolean(quote.fresh) : source === "live" && livePrice != null;
+  const marketOpen: boolean | null =
+    quote?.freshness === "MARKET_CLOSED" || quote?.marketStatus === "CLOSED"
+      ? false
+      : quote?.marketStatus === "OPEN" || quote?.freshness === "LIVE"
+        ? true
+        : quote?.source === "broker"
+          ? null
+          : null;
+  const quotesConnected =
+    quote?.source === "broker" &&
+    quote.price != null &&
+    !quote.unavailable &&
+    quote.freshness !== "UNAVAILABLE";
   const ohlcvOpen = decision?.ohlcv?.open ?? null;
   const priceChange =
     livePrice != null && ohlcvOpen != null && Number.isFinite(ohlcvOpen)
@@ -537,9 +552,12 @@ export function OverviewPage() {
             livePrice={livePrice}
             updatedLabel={displayUpdated}
             sessionLabel={quote?.sessionLabel ?? sessionLabel}
-            feedHealth={marketFeedHealth}
             fresh={displayFresh}
-            live={displayFresh || quote?.source === "broker"}
+            marketOpen={marketOpen}
+            freshness={quote?.freshness}
+            quotesConnected={quotesConnected}
+            bid={quote?.bid ?? null}
+            ask={quote?.ask ?? null}
             priceChange={priceChange}
             priceChangePct={priceChangePct}
           />
@@ -550,13 +568,28 @@ export function OverviewPage() {
               marketFeedHealth={marketFeedHealth}
               marketStructureMode={mode}
               livePrice={livePrice}
-              vah={vah}
-              poc={poc}
-              val={val}
               onRefresh={refresh}
               refreshing={refreshing}
+              compact
             />
           </div>
+
+          <XauusdChartCard
+            currentPrice={livePrice}
+            vah={vah}
+            poc={poc}
+            val={val}
+            support={decisionState?.nearestSupport ?? null}
+            resistance={decisionState?.nearestResistance ?? null}
+            marketClosed={marketOpen === false}
+          />
+
+          <TradePlanSummary
+            plan={intradayPlan}
+            livePrice={livePrice}
+            marketStructureMode={mode}
+            state={decisionState}
+          />
 
           <PremiumInsightStrip
             trendBias={intradayPlan.directionBias ?? briefing?.positionVsPoc ?? "Neutral"}
@@ -911,9 +944,12 @@ export function OverviewPage() {
               livePrice={livePrice}
               updatedLabel={displayUpdated}
               sessionLabel={quote?.sessionLabel ?? sessionLabel}
-              feedHealth={marketFeedHealth}
               fresh={displayFresh}
-              live={displayFresh || quote?.source === "broker"}
+              marketOpen={marketOpen}
+              freshness={quote?.freshness}
+              quotesConnected={quotesConnected}
+              bid={quote?.bid ?? null}
+              ask={quote?.ask ?? null}
               priceChange={priceChange}
               priceChangePct={priceChangePct}
             />
@@ -924,7 +960,7 @@ export function OverviewPage() {
               aria-label="Today's XAUUSD decision: WAIT"
             >
               <div
-                className="gm-decision-hero-v2"
+                className="gm-decision-hero-v2 gm-decision-hero-compact"
                 data-testid="intraday-action-card"
                 data-tone="prepare"
               >
@@ -942,6 +978,13 @@ export function OverviewPage() {
                 </p>
               </div>
             </section>
+            <XauusdChartCard
+              currentPrice={livePrice}
+              vah={vah}
+              poc={poc}
+              val={val}
+              marketClosed={marketOpen === false}
+            />
           </div>
         )
       )}

@@ -1114,6 +1114,31 @@ export class ApiClient {
     return this.requestCTrader(`/v1/ctrader/live-quote${q}`);
   }
 
+  /** Display-only XAUUSD OHLC candles for Plan chart — never used by trading logic. */
+  async getCTraderCandles(opts?: {
+    timeframe?: string;
+    count?: number;
+  }): Promise<{
+    symbol: string;
+    timeframe: string;
+    bars: Array<{
+      time: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume?: number | null;
+    }>;
+    source: string;
+    environment?: string;
+    cached?: boolean;
+    planIndependent?: boolean;
+  }> {
+    const tf = encodeURIComponent(opts?.timeframe ?? "M15");
+    const count = opts?.count ?? 220;
+    return this.requestCTrader(`/v1/ctrader/candles?tf=${tf}&count=${count}`);
+  }
+
   async createCTraderPreview(payload: Record<string, unknown>): Promise<unknown> {
     return this.requestCTrader("/v1/ctrader/preview", {
       method: "POST",

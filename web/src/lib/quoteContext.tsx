@@ -19,6 +19,8 @@ export type ShellQuote = {
   bid?: number | null;
   ask?: number | null;
   unavailable?: boolean;
+  /** Broker schedule status when known. */
+  marketStatus?: "OPEN" | "CLOSED" | "UNKNOWN";
 };
 
 type QuoteContextValue = {

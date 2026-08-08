@@ -2,13 +2,7 @@ import {
   CircleHelp,
   RefreshCw,
   Bell,
-  Timer,
-  Crosshair,
-  Shield,
-  Flag,
-  Scale,
-  Wallet,
-  Percent
+  Timer
 } from "lucide-react";
 import type { IntradayPlan } from "../../types/intradayPlan";
 import type { MarketFeedHealth } from "../../types/models";
@@ -27,96 +21,17 @@ import {
 import { NextPlanUpdate } from "../intraday/NextPlanUpdate";
 import { FeedStatusStrip } from "../gm/FeedStatusStrip";
 import { PhoneAlertsControl } from "./PhoneAlertsControl";
-import { PlanMarketCard } from "./PlanMarketCard";
 
 type Props = {
   plan: IntradayPlan;
   marketFeedHealth?: MarketFeedHealth | null;
   marketStructureMode?: string | null;
   livePrice?: number | null;
-  vah?: number | null;
-  poc?: number | null;
-  val?: number | null;
   onRefresh?: () => void;
   refreshing?: boolean;
+  /** When true, omit secondary chrome so chart can sit immediately below. */
+  compact?: boolean;
 };
-
-function LevelGrid({
-  state,
-  tp3,
-  positionSizeNote,
-  accountRiskNote
-}: {
-  state: ReturnType<typeof deriveDecisionDashboardState>;
-  tp3?: number | null;
-  positionSizeNote?: string | null;
-  accountRiskNote?: string | null;
-}) {
-  if (!state.showLevels) return null;
-  return (
-    <div className="gm-decision-level-grid gm-trade-plan-summary" data-testid="plan-levels-strip">
-      <div className="gm-trade-plan-summary__head">
-        <h2>Trade plan summary</h2>
-      </div>
-      <div data-testid="plan-level-entry">
-        <span className="gm-label">
-          <Crosshair size={13} aria-hidden /> Entry
-        </span>
-        <strong>{state.levels.entry ?? "--"}</strong>
-      </div>
-      <div data-testid="plan-level-stop">
-        <span className="gm-label">
-          <Shield size={13} aria-hidden /> Stop Loss
-        </span>
-        <strong>{fmtPrice(state.levels.stop)}</strong>
-      </div>
-      <div data-testid="plan-level-tp1">
-        <span className="gm-label">
-          <Flag size={13} aria-hidden /> TP1
-        </span>
-        <strong>{fmtPrice(state.levels.tp1)}</strong>
-      </div>
-      <div data-testid="plan-level-tp2">
-        <span className="gm-label">
-          <Flag size={13} aria-hidden /> TP2
-        </span>
-        <strong>{state.levels.tp2 != null ? fmtPrice(state.levels.tp2) : "—"}</strong>
-      </div>
-      {tp3 != null && Number.isFinite(tp3) ? (
-        <div data-testid="plan-level-tp3">
-          <span className="gm-label">
-            <Flag size={13} aria-hidden /> TP3
-          </span>
-          <strong>{fmtPrice(tp3)}</strong>
-        </div>
-      ) : null}
-      {state.levels.rr ? (
-        <div className="gm-decision-level-wide" data-testid="plan-level-rr">
-          <span className="gm-label">
-            <Scale size={13} aria-hidden /> Risk / Reward
-          </span>
-          <strong>{state.levels.rr}</strong>
-        </div>
-      ) : null}
-      {positionSizeNote ? (
-        <div data-testid="plan-position-size">
-          <span className="gm-label">
-            <Wallet size={13} aria-hidden /> Position Size
-          </span>
-          <strong>{positionSizeNote}</strong>
-        </div>
-      ) : null}
-      {accountRiskNote ? (
-        <div data-testid="plan-account-risk">
-          <span className="gm-label">
-            <Percent size={13} aria-hidden /> Account Risk
-          </span>
-          <strong>{accountRiskNote}</strong>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function WhyWaiting({
   plan,
@@ -165,11 +80,9 @@ export function DecisionDashboard({
   marketFeedHealth,
   marketStructureMode,
   livePrice,
-  vah = null,
-  poc = null,
-  val = null,
   onRefresh,
-  refreshing
+  refreshing,
+  compact = true
 }: Props) {
   const state = deriveDecisionDashboardState({ plan, marketStructureMode, livePrice });
   const chip = premiumDecisionChip(state, plan);
@@ -209,11 +122,10 @@ export function DecisionDashboard({
       chip === "PREPARE" ||
       chip === "PREPARE BUY" ||
       chip === "PREPARE SELL");
-  const feedFresh = marketFeedHealth?.status === "green";
 
   return (
     <section
-      className={`gm-decision-dashboard gm-decision-premium tone-${state.tone}`}
+      className={`gm-decision-dashboard gm-decision-premium gm-decision-compact tone-${state.tone}`}
       data-testid="todays-intraday-plan"
       data-state={state.mode}
       data-copy-version={PREMIUM_STATUS_COPY_VERSION}
@@ -222,7 +134,7 @@ export function DecisionDashboard({
       <FeedStatusStrip health={marketFeedHealth} detailsHref="/alerts" />
 
       <div
-        className="gm-decision-hero-v2"
+        className="gm-decision-hero-v2 gm-decision-hero-compact"
         data-testid="intraday-action-card"
         data-tone={heroTone}
       >
@@ -253,77 +165,70 @@ export function DecisionDashboard({
           {subtitle}
         </p>
 
-        <div className="gm-hero-metrics">
+        <div className="gm-hero-metrics gm-hero-metrics-compact">
           <div>
-            <span className="gm-label">Next 15M Check</span>
+            <span className="gm-label">Next 15M</span>
             <div className="gm-decision-next-row">
               <NextPlanUpdate plan={plan} />
             </div>
           </div>
           <div data-testid={isWaiting ? "no-valid-nearest-sr" : "wait-nearest-sr"}>
-            <span className="gm-label">Nearest Support</span>
+            <span className="gm-label">Support</span>
             <strong data-testid="nearest-support">{fmtPrice(state.nearestSupport)}</strong>
           </div>
           <div>
-            <span className="gm-label">Nearest Resistance</span>
+            <span className="gm-label">Resistance</span>
             <strong data-testid="nearest-resistance">{fmtPrice(state.nearestResistance)}</strong>
           </div>
           <div>
             <span className="gm-label">Status</span>
-            <strong
-              className={feedFresh ? "gm-hero-status" : undefined}
-              data-testid="premium-hero-status"
-            >
-              {feedFresh ? <span className="gm-fresh-dot is-fresh" aria-hidden /> : null}
-              {statusLabel}
-            </strong>
+            <strong data-testid="premium-hero-status">{statusLabel}</strong>
           </div>
         </div>
-
-        <p className="gm-hero-foot">GoldMeta is monitoring XAUUSD</p>
       </div>
 
-      <div className="gm-action-row" data-testid="premium-quick-actions">
-        <button
-          type="button"
-          className="gm-action-btn"
-          onClick={onRefresh}
-          disabled={refreshing}
-          data-testid="premium-refresh"
-        >
-          <RefreshCw aria-hidden />
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-        <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
-          <Bell aria-hidden />
-          Enable alerts
-        </a>
-        <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
-          <CircleHelp aria-hidden />
-          Explain
-        </a>
-        <a className="gm-action-btn gm-why-wait" href="#why-waiting">
-          <CircleHelp aria-hidden />
-          Why wait?
-        </a>
-      </div>
-
-      <PlanMarketCard
-        livePrice={livePrice}
-        vah={vah}
-        poc={poc}
-        val={val}
-        support={state.nearestSupport}
-        resistance={state.nearestResistance}
-      />
-
-      {!isWaiting && !isHold && (
-        <LevelGrid
-          state={state}
-          tp3={plan.tradePlan?.tp3 ?? null}
-          positionSizeNote={plan.tradePlan?.positionSizeNote || null}
-          accountRiskNote={plan.tradePlan?.maxCashRiskNote || null}
-        />
+      {!compact ? (
+        <div className="gm-action-row" data-testid="premium-quick-actions">
+          <button
+            type="button"
+            className="gm-action-btn"
+            onClick={onRefresh}
+            disabled={refreshing}
+            data-testid="premium-refresh"
+          >
+            <RefreshCw aria-hidden />
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
+            <Bell aria-hidden />
+            Enable alerts
+          </a>
+          <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
+            <CircleHelp aria-hidden />
+            Explain
+          </a>
+        </div>
+      ) : (
+        <div className="gm-action-row gm-action-row-compact" data-testid="premium-quick-actions">
+          <button
+            type="button"
+            className="gm-action-btn"
+            onClick={onRefresh}
+            disabled={refreshing}
+            data-testid="premium-refresh"
+          >
+            <RefreshCw aria-hidden />
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
+            <Bell aria-hidden />
+            Alerts
+          </a>
+          <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
+            <CircleHelp aria-hidden />
+            Why wait?
+          </a>
+        </div>
       )}
 
       {!isWaiting && (
@@ -379,8 +284,8 @@ export function DecisionDashboardSkeleton() {
       data-testid="decision-dashboard-skeleton"
       aria-busy="true"
     >
-      <div className="gm-skeleton" style={{ height: 48, marginBottom: 12 }} />
-      <div className="gm-skeleton" style={{ height: 220, marginBottom: 12 }} />
+      <div className="gm-skeleton" style={{ height: 120, marginBottom: 12 }} />
+      <div className="gm-skeleton" style={{ height: 280, marginBottom: 12 }} />
       <div className="gm-skeleton" style={{ height: 48 }} />
     </div>
   );

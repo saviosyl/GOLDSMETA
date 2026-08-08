@@ -13,6 +13,7 @@ import {
   type QuoteFreshness
 } from "./liveQuote";
 import { useShellQuote, type ShellQuote } from "./quoteContext";
+// ShellQuote used for marketStatus typing on broker quote bridge.
 
 type QuoteApiResponse = {
   available?: boolean;
@@ -51,6 +52,13 @@ function toShellQuote(payload: QuoteApiResponse): ShellQuote | null {
   const ts = q.brokerTimestamp ?? q.timestamp ?? q.receivedAt ?? null;
   const freshness = (q.freshness ?? payload.freshness ?? "LIVE") as QuoteFreshness;
   const tz = loadTimezonePreference();
+  const marketStatusRaw = String(q.marketStatus ?? "").toUpperCase();
+  const marketStatus: ShellQuote["marketStatus"] =
+    marketStatusRaw === "OPEN" || marketStatusRaw.includes("TRADEABLE")
+      ? "OPEN"
+      : marketStatusRaw === "CLOSED" || freshness === "MARKET_CLOSED"
+        ? "CLOSED"
+        : "UNKNOWN";
   return {
     price: mid,
     bid: q.bid,
@@ -60,7 +68,8 @@ function toShellQuote(payload: QuoteApiResponse): ShellQuote | null {
     freshness,
     fresh: freshness === "LIVE",
     source: "broker",
-    unavailable: false
+    unavailable: false,
+    marketStatus
   };
 }
 

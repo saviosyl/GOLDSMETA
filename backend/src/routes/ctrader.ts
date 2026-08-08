@@ -54,6 +54,10 @@ import { loadTokenEncryptionSecret } from "../services/broker/ctrader/connection
 import { buildFirstDemoOrderCheckpoint } from "../services/broker/ctrader/firstDemoOrderCheckpoint";
 import { getLiveQuoteSnapshot } from "../services/broker/ctrader/quoteService";
 import {
+  getXauusdCandles,
+  normalizeCandleTimeframe
+} from "../services/broker/ctrader/candleService";
+import {
   confirmLiveActivation,
   getUserAutoTradeSettings,
   recommendedAutoTradeSettings,
@@ -749,6 +753,45 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         planIndependent: true,
         // Secrets never included — browser is a viewer of the backend price stream.
         orderSubmissionEnabled: false
+      });
+    } catch (e) {
+      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
+    }
+  });
+
+  /**
+   * Display-only XAUUSD OHLC for the Plan chart.
+   * Independent of plan generation / AutoTrade — never feeds trading logic.
+   */
+  router.get("/v1/ctrader/candles", requireAuth, ...brokerGate, async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const timeframe = normalizeCandleTimeframe(
+      req.query.tf ?? req.query.timeframe ?? "M15"
+    );
+    if (!timeframe) {
+      res.status(400).json({
+        error: "INVALID_TIMEFRAME",
+        message: "Use tf=M5|M15|H1|H4.",
+        planIndependent: true,
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
+      });
+      return;
+    }
+    const countRaw = Number(req.query.count ?? 200);
+    const count = Number.isFinite(countRaw) ? countRaw : 200;
+    try {
+      const payload = await getXauusdCandles({
+        ownerUid: uid,
+        timeframe,
+        count
+      });
+      res.json({
+        ...payload,
+        planIndependent: true,
+        orderSubmissionEnabled: false,
+        autoTrade: "OFF"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));

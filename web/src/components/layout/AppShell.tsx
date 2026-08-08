@@ -201,6 +201,10 @@ export function AppShell({
     );
   }, [location.pathname, prefix, mobileMoreGroups]);
 
+  /** Plan page owns the single premium market strip — hide duplicate mobile quote. */
+  const hideMobileQuote =
+    location.pathname === withPrefix("/") || location.pathname === "/";
+
   useEffect(() => {
     if (!profileOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -339,17 +343,19 @@ export function AppShell({
             </div>
           </header>
 
-          <QuoteHeader
-            className="gm-mobile-quote"
-            price={quote?.price ?? null}
-            updatedLabel={quote?.updatedLabel ?? "—"}
-            sessionLabel={quote?.sessionLabel}
-            fresh={quote?.fresh}
-            freshness={quote?.freshness}
-            unavailable={quote?.unavailable}
-            bid={quote?.bid}
-            ask={quote?.ask}
-          />
+          {!hideMobileQuote ? (
+            <QuoteHeader
+              className="gm-mobile-quote"
+              price={quote?.price ?? null}
+              updatedLabel={quote?.updatedLabel ?? "—"}
+              sessionLabel={quote?.sessionLabel}
+              fresh={quote?.fresh}
+              freshness={quote?.freshness}
+              unavailable={quote?.unavailable}
+              bid={quote?.bid}
+              ask={quote?.ask}
+            />
+          ) : null}
 
           {children ?? <Outlet />}
         </div>
