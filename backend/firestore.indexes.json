@@ -66,6 +66,14 @@
         { "fieldPath": "snapshot.environment", "order": "ASCENDING" },
         { "fieldPath": "snapshot.timeframe", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "autotradePositions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "environment", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
