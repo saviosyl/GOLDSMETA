@@ -1,4 +1,3 @@
-export const GOLD_META_BUILD_STAMP = "v6.0.0-autotrade-hardening-2026-07-22";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -6,15 +5,33 @@ import { registerSW } from "virtual:pwa-register";
 import App from "./App";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ScrollToTop } from "./components/ScrollToTop";
+import { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA } from "./lib/buildIdentity";
 import "./styles/global.css";
 import "./styles/redesign.css";
 import "./styles/premium-dashboard.css";
 import "./styles/gm-v2.css";
 import "./styles/premium-broker-autotrade.css";
 
+export { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA };
+
 const UPDATE_EVENT = "goldmeta:sw-update";
 
 type UpdateDetail = { update: (reloadPage?: boolean) => Promise<void> };
+
+function purgeObsoleteUiCaches() {
+  if (!("caches" in window)) return;
+  void caches.keys().then((keys) => {
+    for (const key of keys) {
+      if (
+        /goldmeta-hold-lean|goldmeta-v[0-4]|workbox-precache.*hold-lean|goldmeta-autotrade-hardening/i.test(
+          key
+        )
+      ) {
+        void caches.delete(key);
+      }
+    }
+  });
+}
 
 function Root() {
   const [updateFn, setUpdateFn] = useState<((reloadPage?: boolean) => Promise<void>) | null>(
@@ -22,6 +39,7 @@ function Root() {
   );
 
   useEffect(() => {
+    purgeObsoleteUiCaches();
     const onUpdate = (e: Event) => {
       const detail = (e as CustomEvent<UpdateDetail>).detail;
       if (detail?.update) setUpdateFn(() => detail.update);
@@ -69,12 +87,13 @@ const updateSW = registerSW({
   }
 });
 
-void GOLD_META_BUILD_STAMP;
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Root />
   </StrictMode>
 );
 document.documentElement.dataset.build = GOLD_META_BUILD_STAMP;
+document.documentElement.dataset.commit = GOLD_META_COMMIT_SHA;
 document.documentElement.dataset.scrollHotfix = "1";
 document.documentElement.dataset.uiRedesign = "1";
+document.documentElement.dataset.premiumUi = "v5";

@@ -6,10 +6,14 @@
 
 # HTML entry must revalidate so clients pick up new hashed asset references quickly.
 /
-  Cache-Control: no-cache
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
 
 /index.html
-  Cache-Control: no-cache
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
 
 # Service worker must never stick on the custom-domain edge (max-age here
 # previously left phones on an old shell that still said "Blocked").
@@ -19,6 +23,16 @@
   Cloudflare-CDN-Cache-Control: no-store
 
 /manifest.webmanifest
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/sw-cache-migrate.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/push-handler.js
   Cache-Control: no-cache, no-store, must-revalidate
   CDN-Cache-Control: no-store
   Cloudflare-CDN-Cache-Control: no-store

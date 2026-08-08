@@ -1,8 +1,33 @@
 /// <reference types="vitest/config" />
+import { execSync } from "node:child_process";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+
+function resolveBuildIdentity() {
+  const fromEnv =
+    process.env.CF_PAGES_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.VITE_BUILD_SHA ||
+    "";
+  let full = fromEnv.trim();
+  if (!full) {
+    try {
+      full = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      full = "unknown";
+    }
+  }
+  const short = full.slice(0, 7);
+  // August premium UI delivery stamp — must change whenever the shell cache bumps.
+  const stamp = `premium-ui-v5-${short}-2026-08-08`;
+  return { full, short, stamp };
+}
+
+const BUILD = resolveBuildIdentity();
+process.env.VITE_GOLD_META_BUILD_STAMP = BUILD.stamp;
+process.env.VITE_GOLD_META_COMMIT_SHA = BUILD.short;
 
 /** Drop any leftover Issue #50 / UiReview chunks from production builds. */
 function stripUiReviewFromProduction(): Plugin {
@@ -22,6 +47,12 @@ function stripUiReviewFromProduction(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    __GOLD_META_BUILD_STAMP__: JSON.stringify(BUILD.stamp),
+    __GOLD_META_COMMIT_SHA__: JSON.stringify(BUILD.short),
+    "import.meta.env.VITE_GOLD_META_BUILD_STAMP": JSON.stringify(BUILD.stamp),
+    "import.meta.env.VITE_GOLD_META_COMMIT_SHA": JSON.stringify(BUILD.short)
+  },
   build: {
     // Avoid /assets/* on the custom domain while zone cache may still hold
     // poisoned SPA HTML responses for that path from an earlier deploy miss.
@@ -119,7 +150,7 @@ export default defineConfig({
       },
       workbox: {
         // Bump on layout-critical deploys so outdated precaches are cleaned.
-        cacheId: "goldmeta-hold-lean-v4",
+        cacheId: "goldmeta-premium-ui-v5",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses
@@ -130,7 +161,7 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        importScripts: ["push-handler.js"]
+        importScripts: ["sw-cache-migrate.js", "push-handler.js"]
       },
       devOptions: {
         enabled: false

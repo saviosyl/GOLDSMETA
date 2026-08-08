@@ -905,22 +905,44 @@ export function OverviewPage() {
         </div>
       ) : (
         !loading && (
-          <section
-            className="gm-primary-plan tone-unavailable gm-primary-plan-unified gm-plan-v2"
-            data-testid="todays-intraday-plan"
-            data-state="NO_VALID_PLAN"
-            aria-label="Today's intraday plan"
-          >
-            <h2 className="gm-no-plan-title" data-testid="no-valid-plan-title">
-              {WAIT_NO_VALID_PLAN_LABEL}
-            </h2>
-            <p className="gm-primary-plan-sentence" data-testid="no-valid-plan-next">
-              {NO_VALID_PLAN_NEXT}
-            </p>
-            <p className="gm-meta">
-              Manual trading only — AutoTrade stays OFF. No actionable entry, stop or targets.
-            </p>
-          </section>
+          <div className="gm-cockpit-main" data-testid="cockpit-main-empty">
+            <PremiumMarketStrip
+              symbol="XAUUSD"
+              livePrice={livePrice}
+              updatedLabel={displayUpdated}
+              sessionLabel={quote?.sessionLabel ?? sessionLabel}
+              feedHealth={marketFeedHealth}
+              fresh={displayFresh}
+              live={displayFresh || quote?.source === "broker"}
+              priceChange={priceChange}
+              priceChangePct={priceChangePct}
+            />
+            <section
+              className="gm-decision-dashboard gm-decision-premium tone-wait"
+              data-testid="todays-intraday-plan"
+              data-state="NO_VALID_PLAN"
+              aria-label="Today's XAUUSD decision: WAIT"
+            >
+              <div
+                className="gm-decision-hero-v2"
+                data-testid="intraday-action-card"
+                data-tone="prepare"
+              >
+                <div className="gm-hero-top">
+                  <span className="gm-hero-kicker">XAUUSD Decision</span>
+                </div>
+                <h1 data-testid="intraday-action-label">
+                  <span data-testid="intraday-action-short">{WAIT_NO_VALID_PLAN_LABEL}</span>
+                </h1>
+                <p className="gm-hero-instruction" data-testid="no-valid-plan-next">
+                  {NO_VALID_PLAN_NEXT}
+                </p>
+                <p className="gm-hero-foot" data-testid="no-valid-plan-title">
+                  Manual trading only — AutoTrade stays OFF.
+                </p>
+              </div>
+            </section>
+          </div>
         )
       )}
 

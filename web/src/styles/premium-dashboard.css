@@ -80,6 +80,18 @@
 }
 
 /* Market strip */
+.gm-settings-about {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft, #dfe5ee);
+}
+
+.gm-settings-about .gm-meta {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #5b6b82);
+}
+
 .gm-premium-market-strip {
   display: grid;
   gap: 8px;

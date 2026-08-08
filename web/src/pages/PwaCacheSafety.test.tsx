@@ -8,6 +8,14 @@ describe("PWA cache safety", () => {
     expect(viteConfig).not.toMatch(/url\.pathname\.includes\("\/v1\/decisions"\)/);
     expect(viteConfig).toMatch(/runtimeCaching:\s*\[\s*\]/);
     expect(viteConfig).toMatch(/cleanupOutdatedCaches:\s*true/);
+    expect(viteConfig).toMatch(/clientsClaim:\s*true/);
+    expect(viteConfig).toMatch(/skipWaiting:\s*true/);
+  });
+
+  it("uses a fresh premium UI Workbox cache namespace", () => {
+    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v5"/);
+    expect(viteConfig).not.toMatch(/goldmeta-hold-lean-v4/);
+    expect(viteConfig).toMatch(/sw-cache-migrate\.js/);
   });
 
   it("SPA redirects keep client routes on the app shell", () => {
@@ -16,6 +24,6 @@ describe("PWA cache safety", () => {
 
   it("HTML / SW headers force revalidation", () => {
     expect(headers).toMatch(/\/index\.html[\s\S]*Cache-Control: no-cache/);
-    expect(headers).toMatch(/\/sw\.js[\s\S]*Cache-Control: no-cache/);
+    expect(headers).toMatch(/\/sw\.js[\s\S]*Cache-Control: no-cache[\s\S]*CDN-Cache-Control: no-store/);
   });
 });

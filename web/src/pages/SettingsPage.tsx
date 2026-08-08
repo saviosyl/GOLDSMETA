@@ -12,6 +12,7 @@ import {
   UserRound
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA } from "../lib/buildIdentity";
 import type { BackendSettings, ManualRiskSettings, TradingViewConnection } from "../types/models";
 import {
   getNotificationPermission,
@@ -964,6 +965,15 @@ export function SettingsPage() {
           </p>
         </div>
       )}
+
+      <footer className="gm-settings-about" data-testid="settings-about-build">
+        <p className="gm-meta">
+          About · Build <span data-testid="settings-build-sha">{GOLD_META_COMMIT_SHA}</span>
+        </p>
+        <p className="gm-meta gm-sr-only" data-testid="settings-build-stamp">
+          {GOLD_META_BUILD_STAMP}
+        </p>
+      </footer>
     </div>
   );
 }
