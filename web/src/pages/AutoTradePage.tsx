@@ -1734,6 +1734,11 @@ export function AutoTradePage() {
               />
               News filter enabled
             </label>
+            {!news?.configured ? (
+              <p className="gm-meta" data-testid="settings-news-protection">
+                News protection: Not configured
+              </p>
+            ) : null}
             <label className="gm-at-switch">
               <input
                 type="checkbox"
@@ -2023,12 +2028,18 @@ export function AutoTradePage() {
 
       <section className="gm-at-card gm-news-guard" data-testid="news-guard-card">
         <h3>Economic calendar</h3>
-        <p className="gm-meta">
-          {String(news?.providerLabel ?? "Not configured")}
+        <p className="gm-meta" data-testid="news-protection-status">
+          News protection:{" "}
+          {news?.configured
+            ? String(news?.providerLabel ?? "Configured")
+            : "Not configured"}
           {news?.provider === "TEMPLATE_PROTECTION"
             ? " · not a live calendar"
             : ""}
         </p>
+        {!news?.configured ? (
+          <p className="gm-meta">ECONOMIC CALENDAR · Not configured</p>
+        ) : null}
         {news?.active ? (
           <p className="gm-news-guard__blocked" data-testid="news-guard-blocked">
             NEW ENTRIES PAUSED
@@ -2038,7 +2049,10 @@ export function AutoTradePage() {
         ) : news?.configured ? (
           <p className="gm-meta">Trading protection cleared.</p>
         ) : (
-          <p className="gm-meta">ECONOMIC CALENDAR · Not configured</p>
+          <p className="gm-meta">
+            High-impact news is not actively monitored. Demo qualification may continue under
+            current product policy.
+          </p>
         )}
         {Array.isArray(news?.upcoming) && (news?.upcoming as unknown[]).length > 0 ? (
           <ul className="gm-news-guard__upcoming">

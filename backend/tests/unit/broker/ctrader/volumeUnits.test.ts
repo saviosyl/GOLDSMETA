@@ -3,6 +3,7 @@ import {
   CTRADER_VOLUME_CENTS_PER_LOT,
   centsToLots,
   lotsToOrderVolumeUnits,
+  lotsToValidatedBrokerVolume,
   parseCTraderVolumeRules,
   roundDownLotsToStep,
   validateLotsAgainstRules
@@ -132,5 +133,23 @@ describe("cTrader volume units (Spotware cents)", () => {
     expect(validated.ok).toBe(true);
     expect(validated.roundedLots).toBe(1);
     expect(validated.orderVolumeUnits).toBe(100);
+  });
+
+  it("lotsToValidatedBrokerVolume central helper enforces Demo XAUUSD metadata", () => {
+    const ok = lotsToValidatedBrokerVolume({
+      lots: 0.01,
+      minLots: 0.01,
+      maxLots: 100,
+      stepLots: 0.01
+    });
+    expect(ok.ok).toBe(true);
+    expect(ok.orderVolumeUnits).toBe(1);
+    const below = lotsToValidatedBrokerVolume({
+      lots: 0.004,
+      minLots: 0.01,
+      maxLots: 100,
+      stepLots: 0.01
+    });
+    expect(below.ok).toBe(false);
   });
 });

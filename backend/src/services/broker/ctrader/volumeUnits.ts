@@ -167,3 +167,48 @@ export function validateLotsAgainstRules(
     rejectionReason: null
   };
 }
+
+/**
+ * Central lots → broker volume conversion using lot-denominated symbol metadata.
+ * Prefer this over ad-hoc `lots * 100` in management/close paths.
+ */
+export function lotsToValidatedBrokerVolume(args: {
+  lots: number;
+  minLots: number;
+  maxLots: number;
+  stepLots: number;
+}): {
+  ok: boolean;
+  roundedLots: number | null;
+  orderVolumeUnits: number | null;
+  rejectionReason: string | null;
+} {
+  if (
+    !(args.minLots > 0) ||
+    !(args.stepLots > 0) ||
+    !(args.maxLots > 0) ||
+    !Number.isFinite(args.minLots) ||
+    !Number.isFinite(args.stepLots) ||
+    !Number.isFinite(args.maxLots)
+  ) {
+    return {
+      ok: false,
+      roundedLots: null,
+      orderVolumeUnits: null,
+      rejectionReason: "VOLUME_METADATA_INVALID"
+    };
+  }
+  const rules: CTraderVolumeRules = {
+    rawMinVolume: lotsToOrderVolumeUnits(args.minLots),
+    rawMaxVolume: lotsToOrderVolumeUnits(args.maxLots),
+    rawStepVolume: lotsToOrderVolumeUnits(args.stepLots),
+    rawLotSize: lotsToOrderVolumeUnits(1),
+    apiVolumeScalingFactor: CTRADER_VOLUME_CENTS_PER_LOT,
+    minLots: args.minLots,
+    maxLots: args.maxLots,
+    stepLots: args.stepLots,
+    contractSize: 1,
+    orderVolumeUnitsPerLot: CTRADER_VOLUME_CENTS_PER_LOT
+  };
+  return validateLotsAgainstRules(args.lots, rules);
+}

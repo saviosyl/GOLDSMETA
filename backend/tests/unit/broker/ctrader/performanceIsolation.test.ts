@@ -21,6 +21,7 @@ describe("performance isolation", () => {
           environment: "DEMO",
           side: "BUY",
           pnl: 10,
+          brokerPnlConfirmed: true,
           closedAt: new Date().toISOString(),
           riskReward: 2,
           confidence: 80,
@@ -35,6 +36,7 @@ describe("performance isolation", () => {
           environment: "LIVE",
           side: "SELL",
           pnl: 999,
+          brokerPnlConfirmed: true,
           closedAt: new Date().toISOString(),
           riskReward: 2,
           confidence: 80,
@@ -72,12 +74,57 @@ describe("performance isolation", () => {
     expect(summary.recentTrades).toEqual([]);
   });
 
+  it("excludes reconciliation-pending trades without broker-confirmed P/L", async () => {
+    mockedList.mockResolvedValue([
+      {
+        environment: "DEMO",
+        side: "BUY",
+        pnl: 10,
+        brokerPnlConfirmed: true,
+        closedAt: "2026-08-02T10:00:00.000Z",
+        riskReward: 1,
+        confidence: 80,
+        session: "London",
+        correlationId: "confirmed"
+      },
+      {
+        environment: "DEMO",
+        side: "SELL",
+        pnl: 0,
+        brokerPnlConfirmed: false,
+        closedAt: "2026-08-02T11:00:00.000Z",
+        riskReward: 1,
+        confidence: 80,
+        session: "London",
+        correlationId: "pending"
+      },
+      {
+        environment: "DEMO",
+        side: "BUY",
+        pnl: 5,
+        closedAt: "2026-08-02T12:00:00.000Z",
+        riskReward: 1,
+        confidence: 80,
+        session: "London",
+        correlationId: "legacy-unconfirmed"
+      }
+    ]);
+    const summary = await buildPerformanceSummary({
+      uid: "u1",
+      environment: "DEMO",
+      period: "all"
+    });
+    expect(summary.totalTrades).toBe(1);
+    expect(summary.netPnl).toBe(10);
+  });
+
   it("plots cumulative P/L in chronological order only", async () => {
     mockedList.mockResolvedValue([
       {
         environment: "DEMO",
         side: "BUY",
         pnl: 5,
+        brokerPnlConfirmed: true,
         closedAt: "2026-08-02T10:00:00.000Z",
         riskReward: 1.5,
         confidence: 70,
@@ -87,6 +134,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "SELL",
         pnl: -2,
+        brokerPnlConfirmed: true,
         closedAt: "2026-08-01T10:00:00.000Z",
         riskReward: 1.2,
         confidence: 60,
@@ -96,6 +144,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "BUY",
         pnl: 3,
+        brokerPnlConfirmed: true,
         closedAt: "2026-08-03T10:00:00.000Z",
         riskReward: 2,
         confidence: 85,
@@ -122,6 +171,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "BUY",
         pnl: 1,
+        brokerPnlConfirmed: true,
         closedAt: new Date(now).toISOString(),
         riskReward: 1,
         confidence: 80,
@@ -131,6 +181,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "BUY",
         pnl: 2,
+        brokerPnlConfirmed: true,
         closedAt: new Date(now - 3 * 86_400_000).toISOString(),
         riskReward: 1,
         confidence: 80,
@@ -140,6 +191,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "BUY",
         pnl: 3,
+        brokerPnlConfirmed: true,
         closedAt: new Date(now - 20 * 86_400_000).toISOString(),
         riskReward: 1,
         confidence: 80,
@@ -149,6 +201,7 @@ describe("performance isolation", () => {
         environment: "DEMO",
         side: "BUY",
         pnl: 4,
+        brokerPnlConfirmed: true,
         closedAt: new Date(now - 100 * 86_400_000).toISOString(),
         riskReward: 1,
         confidence: 80,

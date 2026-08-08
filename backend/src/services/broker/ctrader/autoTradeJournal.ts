@@ -30,6 +30,8 @@ export type AutoTradeJournalInput = {
   correlationId: string;
   openedAt: string;
   closedAt: string | null;
+  brokerPnlConfirmed?: boolean;
+  brokerDealId?: string | null;
 };
 
 function journalCol(uid: string) {
@@ -86,6 +88,8 @@ export async function createAutoTradeJournalEntry(
     correlationId: input.correlationId,
     openedAt: input.openedAt,
     closedAt: input.closedAt,
+    brokerPnlConfirmed: input.brokerPnlConfirmed === true,
+    brokerDealId: input.brokerDealId ?? null,
     tags: ["autotrade", input.environment.toLowerCase(), input.source]
   });
   return { id, created: true };
@@ -101,6 +105,11 @@ export type AutoTradeJournalClosePatch = {
   managementActions?: string[];
   durationSeconds?: number | null;
   slTpOutcome?: string | null;
+  brokerPnlConfirmed?: boolean;
+  brokerDealId?: string | null;
+  grossPnl?: number | null;
+  commission?: number | null;
+  swap?: number | null;
 };
 
 /**
@@ -121,6 +130,10 @@ export async function updateAutoTradeJournalOnClose(
     return { id, updated: false };
   }
   const pnl = patch.pnl;
+  // Never persist fabricated P/L — require broker confirmation for closed stats.
+  if (pnl == null || patch.brokerPnlConfirmed !== true) {
+    return { id, updated: false };
+  }
   await ref.set(
     {
       pnl,
@@ -130,7 +143,12 @@ export async function updateAutoTradeJournalOnClose(
       managementActions: patch.managementActions ?? [],
       durationSeconds: patch.durationSeconds ?? null,
       slTpOutcome: patch.slTpOutcome ?? null,
-      outcome: pnl == null ? "OPEN" : pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN",
+      brokerPnlConfirmed: true,
+      brokerDealId: patch.brokerDealId ?? null,
+      grossPnl: patch.grossPnl ?? null,
+      commission: patch.commission ?? null,
+      swap: patch.swap ?? null,
+      outcome: pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN",
       updatedAt: new Date().toISOString()
     },
     { merge: true }

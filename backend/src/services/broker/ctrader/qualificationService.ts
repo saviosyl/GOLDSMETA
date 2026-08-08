@@ -61,6 +61,8 @@ import {
   updateAutoTradeJournalOnClose
 } from "./autoTradeJournal";
 import { createDemoPositionLifecycle } from "./demoPositionLifecycle";
+import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
+import { newsProtectionBlocksLiveActivation } from "./liveNewsGate";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 
 function buildSha(): string | null {
@@ -192,24 +194,59 @@ async function loadOrInitDoc(
   return null;
 }
 
+async function applyLiveNewsActivationGate(
+  uid: string,
+  view: QualificationPublicView
+): Promise<QualificationPublicView> {
+  if (!view.canBeginLiveActivation) return view;
+  try {
+    const [demo, live] = await Promise.all([
+      getUserAutoTradeSettings(uid, "demo"),
+      getUserAutoTradeSettings(uid, "live")
+    ]);
+    const gate = newsProtectionBlocksLiveActivation({
+      newsFilterEnabled: live.newsFilterEnabled || demo.newsFilterEnabled,
+      newsImpactMode: live.newsFilterEnabled
+        ? live.newsImpactMode
+        : demo.newsImpactMode
+    });
+    if (!gate.blocked) return view;
+    return {
+      ...view,
+      canBeginLiveActivation: false,
+      nextRequirement: gate.reason ?? view.nextRequirement
+    };
+  } catch {
+    return {
+      ...view,
+      canBeginLiveActivation: false,
+      nextRequirement:
+        "Economic calendar protection must be configured before Live Auto."
+    };
+  }
+}
+
 export async function getQualificationView(uid: string): Promise<QualificationPublicView> {
   const setup = await loadSetupSnapshot(uid);
   const blockers = buildSetupBlockers(setup);
   const ready = setupReady(blockers);
 
   if (setup.accountIsLive) {
-    return toPublicView({
-      doc: null,
-      setup,
-      stateOverride: "SETUP_REQUIRED"
-    });
+    return applyLiveNewsActivationGate(
+      uid,
+      toPublicView({
+        doc: null,
+        setup,
+        stateOverride: "SETUP_REQUIRED"
+      })
+    );
   }
 
   let doc = await loadOrInitDoc(uid, setup);
   if (doc && doc.accountId !== setup.accountId && setup.accountId) {
     // Qualification belongs to another Demo account.
     const view = toPublicView({ doc, setup });
-    return {
+    return applyLiveNewsActivationGate(uid, {
       ...view,
       state: "SETUP_REQUIRED",
       overallLabel: "Account mismatch",
@@ -225,7 +262,7 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
         },
         ...view.blockers
       ]
-    };
+    });
   }
 
   if (doc) {
@@ -250,7 +287,7 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
       countEvaluationsForDay(uid, day),
       listRecentEvaluations(uid, 24)
     ]);
-    return {
+    return applyLiveNewsActivationGate(uid, {
       ...view,
       todayActivity,
       recentEvaluations: recent.map((r) => ({
@@ -265,9 +302,9 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
         passed: r.passed,
         failed: r.failed
       }))
-    };
+    });
   } catch {
-    return view;
+    return applyLiveNewsActivationGate(uid, view);
   }
 }
 
@@ -397,11 +434,21 @@ function decisionGeometry(d: DecisionRecord): {
   entry: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
 } {
   const entry = d.entry?.price ?? null;
   const stopLoss = d.stopLoss?.price ?? null;
-  const takeProfit = d.takeProfits?.[0]?.price ?? null;
-  return { entry, stopLoss, takeProfit };
+  const tps = strategyProvidedTakeProfits(d.takeProfits);
+  return {
+    entry,
+    stopLoss,
+    takeProfit: tps.tp1,
+    tp1: tps.tp1,
+    tp2: tps.tp2,
+    tp3: tps.tp3
+  };
 }
 
 /**
@@ -463,7 +510,7 @@ export async function processDecisionForQualification(args: {
     return { handled: false, message: "wait_hold_ignored" };
   }
 
-  const { entry, stopLoss, takeProfit } = decisionGeometry(d);
+  const { entry, stopLoss, takeProfit, tp1, tp2, tp3 } = decisionGeometry(d);
   const signalId = d.decisionId;
   const settings = await getUserAutoTradeSettings(uid, "demo");
   if (settings.autoTradePaused || settings.emergencyStopActive) {
@@ -816,6 +863,9 @@ export async function processDecisionForQualification(args: {
           entry: trade.entry,
           stopLoss: trade.stopLoss,
           takeProfit: trade.takeProfit,
+          tp1,
+          tp2,
+          tp3,
           lots: trade.lots,
           qualificationStage: state,
           decisionId: signalId,
@@ -858,6 +908,11 @@ export async function markQualificationTradeClosed(args: {
   if (!doc) throw Object.assign(new Error("QUALIFICATION_NOT_STARTED"), { code: "QUALIFICATION_NOT_STARTED" });
 
   const now = new Date().toISOString();
+  const confirmedPnl = typeof args.pnl === "number" ? args.pnl : null;
+  // Do not complete qualification closure without a real P/L (never invent 0).
+  if (confirmedPnl == null) {
+    return getQualificationView(args.uid);
+  }
   doc = {
     ...doc,
     controlledTrades: doc.controlledTrades.map((t) =>
@@ -866,7 +921,7 @@ export async function markQualificationTradeClosed(args: {
             ...t,
             status: "CLOSED",
             closedAt: now,
-            pnl: args.pnl ?? t.pnl,
+            pnl: confirmedPnl,
             counted: true
           }
         : t
@@ -877,7 +932,7 @@ export async function markQualificationTradeClosed(args: {
             ...t,
             status: "CLOSED",
             closedAt: now,
-            pnl: args.pnl ?? t.pnl,
+            pnl: confirmedPnl,
             counted: true
           }
         : t
@@ -899,23 +954,23 @@ export async function markQualificationTradeClosed(args: {
         uid: args.uid,
         environment: "demo",
         tradeId: args.correlationId,
-        pnl: typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? 0
+        pnl: confirmedPnl
       });
     } catch {
       /* ignore */
     }
     try {
-      const pnl = typeof closed.pnl === "number" ? closed.pnl : args.pnl ?? null;
       const updated = await updateAutoTradeJournalOnClose({
         uid: args.uid,
         correlationId: args.correlationId,
-        pnl,
+        pnl: confirmedPnl,
         closedAt: closed.closedAt ?? now,
         reasonForExit: "Position closed",
         exitPrice: null,
         managementActions: [],
         durationSeconds: null,
-        slTpOutcome: null
+        slTpOutcome: null,
+        brokerPnlConfirmed: true
       });
       if (!updated.updated) {
         await createAutoTradeJournalEntry({
@@ -932,16 +987,17 @@ export async function markQualificationTradeClosed(args: {
           riskReward: null,
           session: null,
           spread: null,
-          pnl,
-          reasonForTrade: "Controlled Demo / Demo Auto trade",
-          reasonForExit: "Position closed",
-          qualificationStage: advanced,
-          accountMasked: setup.accountMasked,
-          broker: "Pepperstone cTrader",
-          correlationId: args.correlationId,
-          openedAt: closed.at,
-          closedAt: closed.closedAt
-        });
+            pnl: confirmedPnl,
+            reasonForTrade: "Controlled Demo / Demo Auto trade",
+            reasonForExit: "Position closed",
+            qualificationStage: advanced,
+            accountMasked: setup.accountMasked,
+            broker: "Pepperstone cTrader",
+            correlationId: args.correlationId,
+            openedAt: closed.at,
+            closedAt: closed.closedAt,
+            brokerPnlConfirmed: true
+          });
       }
     } catch {
       /* ignore */

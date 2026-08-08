@@ -136,6 +136,20 @@ export type DemoPositionMutationResult = {
   raw?: Record<string, unknown>;
 };
 
+/** Closing deal snapshot from ProtoOADealListByPositionIdRes. */
+export type BrokerClosedDeal = {
+  dealId: string;
+  orderId: string | null;
+  positionId: string;
+  closePrice: number | null;
+  closedAt: string | null;
+  grossPnl: number | null;
+  commission: number | null;
+  swap: number | null;
+  netPnl: number | null;
+  closedVolumeLots: number | null;
+};
+
 /** Display-only OHLC bar from ProtoOAGetTrendbarsRes. */
 export type TrendbarCandle = {
   /** Unix seconds (bar open). */
@@ -245,6 +259,103 @@ export interface CTraderOpenApiClient {
   closeDemoPosition?(
     args: DemoClosePositionRequest
   ): Promise<DemoPositionMutationResult>;
+  /** Demo host only — deals for a position (includes closing deal P/L). */
+  fetchDemoDealsByPositionId?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    positionId: string;
+    fromTimestampMs: number;
+    toTimestampMs: number;
+  }): Promise<BrokerClosedDeal[]>;
+}
+
+function moneyFromDigits(value: unknown, moneyDigits: number): number | null {
+  const n = asNumber(value);
+  if (n == null) return null;
+  return n / Math.pow(10, moneyDigits);
+}
+
+export function parseBrokerClosedDeals(raw: unknown): BrokerClosedDeal[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: BrokerClosedDeal[] = [];
+  for (const item of list) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const close = (row.closePositionDetail ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    if (!close) continue;
+    const dealId = row.dealId != null ? String(row.dealId) : "";
+    const positionId = row.positionId != null ? String(row.positionId) : "";
+    if (!dealId || !positionId) continue;
+    const digits =
+      asNumber(close.moneyDigits) ?? asNumber(row.moneyDigits) ?? 2;
+    const grossPnl = moneyFromDigits(close.grossProfit, digits);
+    const commission = moneyFromDigits(close.commission, digits);
+    const swap = moneyFromDigits(close.swap, digits);
+    const netPnl =
+      grossPnl == null
+        ? null
+        : Number(
+            (
+              grossPnl +
+              (swap ?? 0) -
+              Math.abs(commission ?? 0)
+            ).toFixed(8)
+          );
+    const closedVol = asNumber(close.closedVolume);
+    const execTs = asNumber(row.executionTimestamp ?? row.utcLastUpdateTimestamp);
+    out.push({
+      dealId,
+      orderId: row.orderId != null ? String(row.orderId) : null,
+      positionId,
+      closePrice: asNumber(row.executionPrice),
+      closedAt: execTs != null ? new Date(execTs).toISOString() : null,
+      grossPnl,
+      commission,
+      swap,
+      netPnl,
+      closedVolumeLots:
+        closedVol != null ? Number((closedVol / 100).toFixed(2)) : null
+    });
+  }
+  return out;
+}
+
+/** Aggregate closing deals for one position into a single confirmed result. */
+export function aggregateClosingDeals(
+  deals: BrokerClosedDeal[]
+): BrokerClosedDeal | null {
+  if (!deals.length) return null;
+  const sorted = [...deals].sort(
+    (a, b) => Date.parse(a.closedAt ?? "") - Date.parse(b.closedAt ?? "")
+  );
+  let net = 0;
+  let gross = 0;
+  let commission = 0;
+  let swap = 0;
+  let hasNet = false;
+  for (const d of sorted) {
+    if (d.netPnl != null) {
+      net += d.netPnl;
+      hasNet = true;
+    }
+    if (d.grossPnl != null) gross += d.grossPnl;
+    if (d.commission != null) commission += d.commission;
+    if (d.swap != null) swap += d.swap;
+  }
+  const last = sorted[sorted.length - 1]!;
+  if (!hasNet) return null;
+  return {
+    ...last,
+    dealId: sorted.map((d) => d.dealId).join(","),
+    grossPnl: Number(gross.toFixed(8)),
+    commission: Number(commission.toFixed(8)),
+    swap: Number(swap.toFixed(8)),
+    netPnl: Number(net.toFixed(8))
+  };
 }
 
 function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
@@ -941,6 +1052,36 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           raw: execution
         } satisfies DemoPositionMutationResult;
       });
+    },
+
+    async fetchDemoDealsByPositionId(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        // Spotware: toTimestamp - fromTimestamp <= 7 days.
+        const span = Math.min(
+          Math.max(args.toTimestampMs - args.fromTimestampMs, 1),
+          7 * 86_400_000
+        );
+        const toTimestamp = args.toTimestampMs;
+        const fromTimestamp = toTimestamp - span;
+        const res = (await connection.sendCommand(
+          "ProtoOADealListByPositionIdReq",
+          {
+            ctidTraderAccountId: Number(args.ctidTraderAccountId),
+            positionId: Number(args.positionId),
+            fromTimestamp,
+            toTimestamp
+          }
+        )) as Record<string, unknown>;
+        return parseBrokerClosedDeals(res.deal ?? res.deals);
+      });
     }
   };
 }
@@ -1086,6 +1227,22 @@ export function createMockOpenApiClient(opts?: {
         errorCode: null,
         raw: { mock: true, volume: args.volume }
       };
+    },
+    async fetchDemoDealsByPositionId(args) {
+      return [
+        {
+          dealId: "mock-deal-1",
+          orderId: "mock-order-close",
+          positionId: args.positionId,
+          closePrice: 2360,
+          closedAt: new Date().toISOString(),
+          grossPnl: 12.5,
+          commission: 0.3,
+          swap: 0,
+          netPnl: 12.2,
+          closedVolumeLots: 0.01
+        }
+      ];
     }
   };
 }

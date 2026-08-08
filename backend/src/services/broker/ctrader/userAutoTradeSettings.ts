@@ -10,6 +10,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { recordSettingsChanges } from "./settingsAuditStore";
 import { hardCapsFor } from "./liveRiskCaps";
+import { newsProtectionBlocksLiveActivation } from "./liveNewsGate";
 
 export type AutoTradeEnvironment = "demo" | "live";
 
@@ -348,6 +349,27 @@ export async function confirmLiveActivation(
   if (phrase.trim().toUpperCase() !== "ENABLE LIVE") {
     throw Object.assign(new Error("Type ENABLE LIVE to confirm"), {
       code: "LIVE_CONFIRMATION_PHRASE_MISMATCH"
+    });
+  }
+  const liveSettings = await getUserAutoTradeSettings(uid, "live");
+  // Prefer Live settings news filter; fall back to Demo intent if Live unset.
+  const demoSettings = await getUserAutoTradeSettings(uid, "demo");
+  const newsSettings =
+    liveSettings.newsFilterEnabled != null
+      ? liveSettings
+      : demoSettings;
+  const gate = newsProtectionBlocksLiveActivation({
+    newsFilterEnabled:
+      liveSettings.newsFilterEnabled || demoSettings.newsFilterEnabled,
+    newsImpactMode:
+      liveSettings.newsFilterEnabled
+        ? liveSettings.newsImpactMode
+        : demoSettings.newsImpactMode
+  });
+  void newsSettings;
+  if (gate.blocked) {
+    throw Object.assign(new Error(gate.reason ?? "NEWS_PROVIDER_REQUIRED"), {
+      code: "LIVE_NEWS_PROVIDER_REQUIRED"
     });
   }
   return saveUserAutoTradeSettings(uid, "live", {

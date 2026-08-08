@@ -11,10 +11,13 @@ import {
 } from "./connectionStore";
 import { refreshAccessToken } from "./oauth";
 import {
+  aggregateClosingDeals,
   createOpenApiClient,
+  type BrokerClosedDeal,
   type BrokerOpenPosition,
   type DemoPositionMutationResult
 } from "./openApiClient";
+import type { BrokerSymbol } from "../domain";
 import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
 import { isCTraderLiveEnabled } from "./flags";
 import { assertDemoPositionMutationAllowed } from "./mutationGuard";
@@ -178,4 +181,56 @@ export async function closeDemoBrokerPosition(args: {
     positionId: args.positionId,
     volume: args.volumeUnits
   });
+}
+
+/** Read-only: load lot-denominated XAUUSD volume metadata for the Demo account. */
+export async function loadDemoXauUsdSymbol(
+  ownerUid: string
+): Promise<BrokerSymbol | null> {
+  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+  const { accessToken, connection } = await ensureFreshAccessToken(ownerUid);
+  const accountId = assertDemoAccount(connection);
+  const client = createOpenApiClient();
+  return client.discoverXauUsd({
+    accessToken,
+    clientId,
+    clientSecret,
+    ctidTraderAccountId: accountId,
+    isLive: false
+  });
+}
+
+/**
+ * Query broker closing deals for a position. Returns null when unavailable
+ * (caller must mark CLOSE_RECONCILIATION_PENDING — never invent P/L = 0).
+ */
+export async function fetchConfirmedCloseForPosition(args: {
+  ownerUid: string;
+  positionId: string;
+  openedAt: string;
+}): Promise<BrokerClosedDeal | null> {
+  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+  const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
+  const accountId = assertDemoAccount(connection);
+  const client = createOpenApiClient();
+  if (!client.fetchDemoDealsByPositionId) {
+    return null;
+  }
+  const openedMs = Date.parse(args.openedAt);
+  const fromTimestampMs = Number.isFinite(openedMs)
+    ? Math.max(0, openedMs - 60_000)
+    : Date.now() - 7 * 86_400_000;
+  const toTimestampMs = Date.now() + 60_000;
+  const deals = await client.fetchDemoDealsByPositionId({
+    accessToken,
+    clientId,
+    clientSecret,
+    ctidTraderAccountId: accountId,
+    positionId: args.positionId,
+    fromTimestampMs,
+    toTimestampMs
+  });
+  return aggregateClosingDeals(deals);
 }

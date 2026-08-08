@@ -71,10 +71,12 @@ export async function buildPerformanceSummary(args: {
 }): Promise<PerformanceSummary & { recentTrades: RecentTradeRow[] }> {
   const envFilter = args.environment === "ALL" ? undefined : args.environment;
   const rows = await listAutoTradeJournal(args.uid, { environment: envFilter, limit: 500 });
+  // Only broker-confirmed closed trades. Exclude reconciliation-pending / fabricated P/L.
   const closed = rows.filter(
     (r) =>
       r.closedAt &&
       typeof r.pnl === "number" &&
+      r.brokerPnlConfirmed === true &&
       inPeriod(String(r.closedAt), args.period)
   );
 

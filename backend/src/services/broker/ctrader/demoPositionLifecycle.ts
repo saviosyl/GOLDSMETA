@@ -21,6 +21,8 @@ import {
 import {
   amendDemoStopLoss,
   closeDemoBrokerPosition,
+  fetchConfirmedCloseForPosition,
+  loadDemoXauUsdSymbol,
   reconcileDemoBrokerPositions
 } from "./demoPositionMutations";
 import { updateAutoTradeJournalOnClose } from "./autoTradeJournal";
@@ -28,28 +30,13 @@ import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 import { getExecutableQuoteForAutoTrade } from "./quoteService";
 import { evaluateNewsGuard } from "./newsGuard";
 import { setEmergencyStop } from "./userAutoTradeSettings";
+import { lotsToValidatedBrokerVolume } from "./volumeUnits";
+import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
 
 function riskDistance(entry: number | null, sl: number | null): number | null {
   if (entry == null || sl == null) return null;
   const d = Math.abs(entry - sl);
   return Number.isFinite(d) ? d : null;
-}
-
-function defaultTpLadder(args: {
-  side: "BUY" | "SELL";
-  entry: number | null;
-  stopLoss: number | null;
-  takeProfit: number | null;
-}): { tp1: number | null; tp2: number | null; tp3: number | null } {
-  const risk = riskDistance(args.entry, args.stopLoss);
-  if (args.entry == null || risk == null || risk <= 0) {
-    return { tp1: args.takeProfit, tp2: null, tp3: null };
-  }
-  const sign = args.side === "BUY" ? 1 : -1;
-  const tp1 = args.takeProfit ?? Number((args.entry + sign * risk * 1).toFixed(2));
-  const tp2 = Number((args.entry + sign * risk * 1.5).toFixed(2));
-  const tp3 = Number((args.entry + sign * risk * 2).toFixed(2));
-  return { tp1, tp2, tp3 };
 }
 
 export async function createDemoPositionLifecycle(args: {
@@ -62,7 +49,11 @@ export async function createDemoPositionLifecycle(args: {
   side: "BUY" | "SELL";
   entry: number | null;
   stopLoss: number | null;
-  takeProfit: number | null;
+  /** @deprecated Prefer tp1/tp2/tp3 from strategy — kept as TP1 fallback only. */
+  takeProfit?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
   lots: number | null;
   qualificationStage: string | null;
   decisionId: string | null;
@@ -72,12 +63,14 @@ export async function createDemoPositionLifecycle(args: {
   const existing = await getPositionLifecycle(args.uid, args.correlationId);
   if (existing) return existing;
 
-  const tps = defaultTpLadder({
-    side: args.side,
-    entry: args.entry,
-    stopLoss: args.stopLoss,
-    takeProfit: args.takeProfit
-  });
+  // Only strategy-supplied targets — never invent R-multiple ladders.
+  const tps = strategyProvidedTakeProfits([
+    args.tp1 != null || args.takeProfit != null
+      ? { label: "TP1", price: args.tp1 ?? args.takeProfit ?? null }
+      : null,
+    args.tp2 != null ? { label: "TP2", price: args.tp2 } : null,
+    args.tp3 != null ? { label: "TP3", price: args.tp3 } : null
+  ].filter(Boolean) as Array<{ label: string; price: number | null }>);
   const initialRisk = riskDistance(args.entry, args.stopLoss);
   const doc: DemoPositionLifecycle = {
     id: args.correlationId,
@@ -104,6 +97,13 @@ export async function createDemoPositionLifecycle(args: {
     closedAt: null,
     realisedPnl: null,
     unrealisedPnl: null,
+    brokerPnlConfirmed: false,
+    closePrice: null,
+    grossPnl: null,
+    commission: null,
+    swap: null,
+    netPnl: null,
+    brokerDealId: null,
     initialRisk,
     currentRisk: initialRisk,
     qualificationStage: args.qualificationStage,
@@ -302,15 +302,44 @@ async function verifyAndRepairProtection(
   return next;
 }
 
-async function closeLifecycle(args: {
+async function markCloseReconciliationPending(
+  doc: DemoPositionLifecycle
+): Promise<DemoPositionLifecycle> {
+  const pending = appendLifecycleEvent(doc, {
+    at: new Date().toISOString(),
+    kind: "CLOSE_PENDING",
+    reason:
+      "CLOSE RECONCILIATION PENDING — broker close deal not yet available; P/L not fabricated",
+    brokerAck: false,
+    dedupeKey: `close_pending:${doc.correlationId}`
+  });
+  const next: DemoPositionLifecycle = {
+    ...pending.doc,
+    status: "CLOSE_RECONCILIATION_PENDING",
+    managementState: "CLOSE_RECONCILIATION_PENDING",
+    brokerPnlConfirmed: false,
+    realisedPnl: null,
+    lastRecommendation: "CLOSE RECONCILIATION PENDING"
+  };
+  await savePositionLifecycle(next);
+  return next;
+}
+
+async function closeLifecycleConfirmed(args: {
   doc: DemoPositionLifecycle;
-  pnl: number | null;
+  netPnl: number;
+  grossPnl: number | null;
+  commission: number | null;
+  swap: number | null;
+  closePrice: number | null;
+  closedAt: string | null;
+  brokerDealId: string | null;
   reason: string;
   dedupeKey: string;
 }): Promise<DemoPositionLifecycle> {
-  const { doc, pnl, reason, dedupeKey } = args;
-  if (doc.status === "CLOSED") return doc;
-  const closedAt = new Date().toISOString();
+  const { doc, netPnl, reason, dedupeKey } = args;
+  if (doc.status === "CLOSED" && doc.brokerPnlConfirmed) return doc;
+  const closedAt = args.closedAt ?? new Date().toISOString();
   const appended = appendLifecycleEvent(doc, {
     at: closedAt,
     kind: "CLOSE",
@@ -318,25 +347,33 @@ async function closeLifecycle(args: {
     brokerAck: true,
     dedupeKey
   });
-  if (!appended.applied) return doc;
+  if (!appended.applied && doc.status === "CLOSED" && doc.brokerPnlConfirmed) {
+    return doc;
+  }
   const next: DemoPositionLifecycle = {
-    ...appended.doc,
+    ...(appended.applied ? appended.doc : doc),
     status: "CLOSED",
     closedAt,
-    realisedPnl: pnl,
+    realisedPnl: netPnl,
+    brokerPnlConfirmed: true,
+    closePrice: args.closePrice,
+    grossPnl: args.grossPnl,
+    commission: args.commission,
+    swap: args.swap,
+    netPnl,
+    brokerDealId: args.brokerDealId,
     managementState: "CLOSED",
     currentRisk: 0
   };
   await savePositionLifecycle(next);
   try {
-    // Dynamic import avoids circular dependency with qualificationService.
     const { markQualificationTradeClosed } = await import(
       "./qualificationService.js"
     );
     await markQualificationTradeClosed({
       uid: doc.uid,
       correlationId: doc.correlationId,
-      pnl
+      pnl: netPnl
     });
   } catch {
     /* qualification close best-effort */
@@ -344,15 +381,15 @@ async function closeLifecycle(args: {
   try {
     const openedMs = Date.parse(doc.openedAt);
     const durationSeconds = Number.isFinite(openedMs)
-      ? Math.max(0, Math.round((Date.now() - openedMs) / 1000))
+      ? Math.max(0, Math.round((Date.parse(closedAt) - openedMs) / 1000))
       : null;
     await updateAutoTradeJournalOnClose({
       uid: doc.uid,
       correlationId: doc.correlationId,
-      pnl,
+      pnl: netPnl,
       closedAt,
       reasonForExit: reason,
-      exitPrice: doc.currentPrice,
+      exitPrice: args.closePrice,
       managementActions: next.events.map((e) => e.kind),
       durationSeconds,
       slTpOutcome: [
@@ -360,12 +397,49 @@ async function closeLifecycle(args: {
         `TP2 ${next.tp2Status}`,
         `TP3 ${next.tp3Status}`,
         next.managementState
-      ].join(" · ")
+      ].join(" · "),
+      brokerPnlConfirmed: true,
+      brokerDealId: args.brokerDealId,
+      grossPnl: args.grossPnl,
+      commission: args.commission,
+      swap: args.swap
     });
   } catch {
     /* journal best-effort */
   }
   return next;
+}
+
+async function resolveMissingBrokerPosition(
+  doc: DemoPositionLifecycle
+): Promise<DemoPositionLifecycle> {
+  if (!doc.brokerPositionId) {
+    return markCloseReconciliationPending(doc);
+  }
+  try {
+    const confirmed = await fetchConfirmedCloseForPosition({
+      ownerUid: doc.uid,
+      positionId: doc.brokerPositionId,
+      openedAt: doc.openedAt
+    });
+    if (confirmed && confirmed.netPnl != null) {
+      return closeLifecycleConfirmed({
+        doc,
+        netPnl: confirmed.netPnl,
+        grossPnl: confirmed.grossPnl,
+        commission: confirmed.commission,
+        swap: confirmed.swap,
+        closePrice: confirmed.closePrice,
+        closedAt: confirmed.closedAt,
+        brokerDealId: confirmed.dealId,
+        reason: "Broker closing deal confirmed",
+        dedupeKey: `close_deal:${doc.correlationId}:${confirmed.dealId}`
+      });
+    }
+  } catch {
+    /* fall through to pending */
+  }
+  return markCloseReconciliationPending(doc);
 }
 
 export async function manageOpenDemoPosition(
@@ -374,6 +448,11 @@ export async function manageOpenDemoPosition(
 ): Promise<DemoPositionLifecycle | null> {
   let doc = await getPositionLifecycle(uid, correlationId);
   if (!doc || doc.status === "CLOSED") return doc;
+
+  // Retry pending close reconciliation until broker deal P/L is confirmed.
+  if (doc.status === "CLOSE_RECONCILIATION_PENDING") {
+    return resolveMissingBrokerPosition(doc);
+  }
 
   // First: protection verification
   if (!doc.protectionVerified && !doc.protectionFailure) {
@@ -394,13 +473,8 @@ export async function manageOpenDemoPosition(
     : null;
 
   if (!match) {
-    // Broker no longer has the position — treat as closed once.
-    return closeLifecycle({
-      doc,
-      pnl: doc.realisedPnl ?? doc.unrealisedPnl ?? 0,
-      reason: "Broker position closed (reconcile)",
-      dedupeKey: `close_reconcile:${doc.correlationId}`
-    });
+    // Position gone from broker — require confirmed closing deal P/L.
+    return resolveMissingBrokerPosition(doc);
   }
 
   const quote = await getExecutableQuoteForAutoTrade({ ownerUid: uid }).catch(
@@ -530,31 +604,57 @@ export async function manageOpenDemoPosition(
       doc.remainingLots > 0
     ) {
       const partialLots = Number((doc.remainingLots / 2).toFixed(2));
-      const volumeUnits = Math.max(1, Math.round(partialLots * 100));
       const partialKey = `partial_tp1:${doc.correlationId}`;
       if (!doc.appliedDedupeKeys.includes(partialKey)) {
         try {
-          const result = await closeDemoBrokerPosition({
-            ownerUid: uid,
-            positionId: doc.brokerPositionId,
-            volumeUnits
+          const symbol = await loadDemoXauUsdSymbol(uid);
+          if (
+            !symbol ||
+            symbol.minVolume == null ||
+            symbol.volumeStep == null ||
+            symbol.maxVolume == null
+          ) {
+            throw new Error("VOLUME_METADATA_UNAVAILABLE");
+          }
+          const converted = lotsToValidatedBrokerVolume({
+            lots: partialLots,
+            minLots: symbol.minVolume,
+            maxLots: symbol.maxVolume,
+            stepLots: symbol.volumeStep
           });
-          if (result.accepted) {
-            const ev = appendLifecycleEvent(doc, {
+          if (!converted.ok || converted.orderVolumeUnits == null) {
+            const skip = appendLifecycleEvent(doc, {
               at: new Date().toISOString(),
-              kind: "PARTIAL_CLOSE",
-              reason: "TAKE_PARTIAL — approved management rule (Demo only)",
-              brokerAck: true,
-              dedupeKey: partialKey
+              kind: "RECOMMENDATION",
+              reason: `Partial close skipped — ${converted.rejectionReason ?? "invalid volume"}`,
+              dedupeKey: `partial_skip:${doc.correlationId}:${converted.rejectionReason ?? "invalid"}`
             });
-            doc = {
-              ...ev.doc,
-              tp1Status: "PARTIAL_CLOSED",
-              managementState: "TP1_HIT",
-              remainingLots: Number(
-                ((doc.remainingLots ?? 0) - partialLots).toFixed(2)
-              )
-            };
+            if (skip.applied) doc = skip.doc;
+          } else {
+            const result = await closeDemoBrokerPosition({
+              ownerUid: uid,
+              positionId: doc.brokerPositionId,
+              volumeUnits: converted.orderVolumeUnits
+            });
+            if (result.accepted) {
+              const ev = appendLifecycleEvent(doc, {
+                at: new Date().toISOString(),
+                kind: "PARTIAL_CLOSE",
+                reason: "TAKE_PARTIAL — approved management rule (Demo only)",
+                brokerAck: true,
+                dedupeKey: partialKey
+              });
+              doc = {
+                ...ev.doc,
+                tp1Status: "PARTIAL_CLOSED",
+                managementState: "TP1_HIT",
+                remainingLots: Number(
+                  (
+                    (doc.remainingLots ?? 0) - (converted.roundedLots ?? 0)
+                  ).toFixed(2)
+                )
+              };
+            }
           }
         } catch {
           /* retry next pass */

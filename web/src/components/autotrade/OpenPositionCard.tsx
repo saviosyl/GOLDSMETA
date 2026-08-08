@@ -37,18 +37,22 @@ function num(n: number | null | undefined, digits = 2): string {
   return n.toFixed(digits);
 }
 
+function tpDisplay(
+  level: number | null | undefined,
+  status?: string
+): string {
+  if (level == null || Number.isNaN(level)) return "—";
+  const st =
+    status === "HIT" || status === "PARTIAL_CLOSED" ? "Hit" : "Pending";
+  return `${level.toFixed(2)} · ${st}`;
+}
+
 function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
-}
-
-function tpLabel(status?: string): string {
-  if (!status) return "Pending";
-  if (status === "HIT" || status === "PARTIAL_CLOSED") return "Hit";
-  return "Pending";
 }
 
 function stateLabel(state?: string): string {
@@ -103,21 +107,15 @@ export function OpenPositionCard(props: {
         </div>
         <div>
           <dt>TP1</dt>
-          <dd>
-            {num(p.tp1, 2)} · {tpLabel(p.tp1Status)}
-          </dd>
+          <dd>{tpDisplay(p.tp1, p.tp1Status)}</dd>
         </div>
         <div>
           <dt>TP2</dt>
-          <dd>
-            {num(p.tp2, 2)} · {tpLabel(p.tp2Status)}
-          </dd>
+          <dd>{tpDisplay(p.tp2, p.tp2Status)}</dd>
         </div>
         <div>
           <dt>TP3</dt>
-          <dd>
-            {num(p.tp3, 2)} · {tpLabel(p.tp3Status)}
-          </dd>
+          <dd>{tpDisplay(p.tp3, p.tp3Status)}</dd>
         </div>
         <div>
           <dt>P/L</dt>

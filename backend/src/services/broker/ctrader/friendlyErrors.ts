@@ -85,6 +85,14 @@ const MAP: Record<string, Omit<FriendlyCTraderError, "error">> = {
     impact: "Live AutoTrade was not activated.",
     nextStep: "Type ENABLE LIVE exactly, then confirm again."
   },
+  LIVE_NEWS_PROVIDER_REQUIRED: {
+    message: "Economic calendar protection must be configured before Live Auto.",
+    whatHappened:
+      "News filter is enabled but no reliable economic-calendar provider is configured.",
+    impact: "Live Auto activation stays blocked. Demo qualification is unaffected.",
+    nextStep:
+      "Configure a real economic calendar provider (or turn news filter OFF under an approved Live policy) before enabling Live Auto."
+  },
   SETTINGS_VALIDATION_FAILED: {
     message: "One or more AutoTrade settings are invalid.",
     whatHappened: "A value was outside the allowed range or format.",
