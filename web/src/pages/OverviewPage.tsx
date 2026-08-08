@@ -277,9 +277,15 @@ export function OverviewPage() {
         api.listSetups(20, "LIVE").catch(() => [] as SetupRecord[]),
         api.v5Briefing("LIVE").catch(() => null),
         api.v5Score("LIVE").catch(() => null),
-        api.getAutoTradeQualification().catch(() => null),
-        api.getDailySafety("demo").catch(() => null),
-        api.getSystemHealth().catch(() => null)
+        typeof api.getAutoTradeQualification === "function"
+          ? api.getAutoTradeQualification().catch(() => null)
+          : Promise.resolve(null),
+        typeof api.getDailySafety === "function"
+          ? api.getDailySafety("demo").catch(() => null)
+          : Promise.resolve(null),
+        typeof api.getSystemHealth === "function"
+          ? api.getSystemHealth().catch(() => null)
+          : Promise.resolve(null)
       ]);
       setQualification(qual);
       setDailySafety(daily);
