@@ -209,12 +209,13 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
   }
 
   if (doc) {
+    const before = JSON.stringify(doc.safetyChecks);
     const advanced = deriveAdvancedState(doc);
     if (advanced !== doc.state && doc.state !== "PAUSED" && doc.state !== "BLOCKED") {
       doc = await appendTransition(doc, advanced, "auto_evaluate", buildSha());
       await saveQualificationDoc(doc);
-    } else if (doc) {
-      await saveQualificationDoc(doc); // persist certified safety updates
+    } else if (JSON.stringify(doc.safetyChecks) !== before) {
+      await saveQualificationDoc(doc);
     }
   }
 
