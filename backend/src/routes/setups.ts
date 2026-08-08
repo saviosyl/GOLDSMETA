@@ -9,6 +9,7 @@ import { IG_DEMO_ADAPTER_PLAN, MockBrokerAdapter } from "../services/brokers/moc
 import { manualExecutionSchema } from "../models/manualRisk";
 import { nowIso } from "../utils/time";
 import { v4Config, v4FlagSnapshot } from "../services/v4/config";
+import { loadPlanOpportunityFunnel } from "../services/decision/opportunityFunnel";
 
 const firstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -175,13 +176,15 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/admin/diagnostics", requireAuth, requireAdmin, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const [latest, setups, connections, rejects, skips] = await Promise.all([
-      store.latestDecision(userId),
-      store.listSetups(userId, 20),
-      store.listWebhookConnections(userId),
-      store.listRecentWebhookRejects?.(20) ?? Promise.resolve([]),
-      store.listRecentSetupSkips(userId, 10)
-    ]);
+    const [latest, setups, connections, rejects, skips, planOpportunityFunnel] =
+      await Promise.all([
+        store.latestDecision(userId),
+        store.listSetups(userId, 20),
+        store.listWebhookConnections(userId),
+        store.listRecentWebhookRejects?.(20) ?? Promise.resolve([]),
+        store.listRecentSetupSkips(userId, 10),
+        loadPlanOpportunityFunnel(store, userId)
+      ]);
     const active = connections.filter((c) => c.status === "ACTIVE");
     res.json({
       diagnostics: {
@@ -233,6 +236,7 @@ export const buildSetupsRouter = (store: GoldMetaStore): Router => {
           at: s.at
         })),
         recentRejects: rejects,
+        planOpportunityFunnel,
         igDemoPlan: IG_DEMO_ADAPTER_PLAN,
         mockBrokerReady: new MockBrokerAdapter().name
       }

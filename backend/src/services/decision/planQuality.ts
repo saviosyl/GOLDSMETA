@@ -1,5 +1,6 @@
 /**
  * Plan quality grading A / B / C / NO PLAN with explicit reasons.
+ * Optional profile / TP2 / 5M confirmation gaps are soft (grade B), not NO_PLAN.
  */
 
 import type { DecisionRecord } from "../../models/types";
@@ -23,7 +24,11 @@ export const evaluatePlanQuality = (args: {
   const d = args.decision;
 
   if (!d || args.marketStructureMode === "UNAVAILABLE") {
-    return { grade: "NO_PLAN", reasons: ["NO_VALID_15M_PLAN", "MISSING_STRUCTURE"] };
+    // Soft if we somehow have levels later; hard when decision absent.
+    if (!d) {
+      return { grade: "NO_PLAN", reasons: ["NO_VALID_15M_PLAN", "MISSING_STRUCTURE"] };
+    }
+    reasons.push("STRUCTURE_INCOMPLETE");
   }
   if (args.marketStructureMode === "MISMATCH") {
     return { grade: "NO_PLAN", reasons: ["PRICE_SOURCE_MISMATCH", "NO_TRADE"] };
@@ -42,6 +47,7 @@ export const evaluatePlanQuality = (args: {
   const trend = d.marketStructure?.trend ?? d.higherTimeframeBias;
   const direction = d.decision;
 
+  // Soft limitations — never alone force NO_PLAN when Entry/Stop/TP1 exist.
   if (poc == null || vah == null || val == null) {
     reasons.push("INCOMPLETE_VOLUME_PROFILE");
   }
@@ -54,6 +60,9 @@ export const evaluatePlanQuality = (args: {
   if (entry == null) reasons.push("MISSING_ENTRY");
   if (stop == null) reasons.push("MISSING_STOP");
   if (tp1 == null) reasons.push("MISSING_TP1");
+  if (tp2 == null && (direction === "BUY" || direction === "SELL")) {
+    reasons.push("TP2_OPTIONAL_MISSING");
+  }
   if (!args.quickTargetRrOk && direction !== "WAIT") {
     reasons.push("QUICK_TARGET_RR_WEAK");
   }
@@ -71,11 +80,12 @@ export const evaluatePlanQuality = (args: {
     tp2,
     currentPrice: positive(d.lastKnownPrice),
     invalidationText: d.invalidation,
-    quickTargetOk: args.quickTargetRrOk,
+    quickTargetOk: args.quickTargetRrOk ? true : direction === "WAIT" ? null : false,
     marketStructureMode: args.marketStructureMode
   });
+
   if (!geometry.actionable && (direction === "BUY" || direction === "SELL")) {
-    reasons.push(...geometry.reasonCodes);
+    reasons.push(...geometry.hardReasonCodes);
     reasons.push("TRADE_LEVELS_FAILED_SAFETY_VALIDATION");
     return { grade: "NO_PLAN", reasons: [...new Set(reasons)] };
   }
@@ -89,10 +99,8 @@ export const evaluatePlanQuality = (args: {
     reasons.push("AWAITING_5M_CONFIRMATION");
   }
 
+  // Essentials = hard geometry only (TP2 / profile / 5M optional).
   const essentialsOk =
-    poc != null &&
-    vah != null &&
-    val != null &&
     entry != null &&
     stop != null &&
     tp1 != null &&
@@ -102,11 +110,6 @@ export const evaluatePlanQuality = (args: {
     isPositivePrice(stop) &&
     isPositivePrice(tp1);
 
-  if (!essentialsOk && (poc == null || vah == null || val == null)) {
-    return { grade: "NO_PLAN", reasons: reasons.length ? reasons : ["INCOMPLETE_SETUP"] };
-  }
-
-  // C / STRUCTURE_ONLY must never grade as a tradeable plan — force NO_PLAN.
   if (!essentialsOk) {
     return {
       grade: "NO_PLAN",
@@ -123,17 +126,17 @@ export const evaluatePlanQuality = (args: {
     args.quickTargetRrOk &&
     trend &&
     trend !== "NEUTRAL" &&
+    poc != null &&
+    vah != null &&
+    val != null &&
     !reasons.includes("MISSING_4H_CONTEXT")
   ) {
     grade = "A";
     reasons.unshift("COMPLETE_CONFIRMED_ALIGNED");
-  } else if (essentialsOk && (confirmed || args.quickTargetRrOk)) {
+  } else {
+    // Valid Entry/Stop/TP1 with soft gaps → B (actionable waiting plan).
     grade = "B";
     reasons.unshift("COMPLETE_LEVELS_PARTIAL_CONFIRM");
-  } else {
-    grade = "NO_PLAN";
-    reasons.unshift("STRUCTURE_ONLY_OR_INCOMPLETE_TRADE_PLAN");
-    reasons.push("WAIT_NO_VALID_PLAN");
   }
 
   return { grade, reasons: [...new Set(reasons)] };

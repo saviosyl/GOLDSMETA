@@ -1,12 +1,13 @@
 /**
  * Central trade-plan geometry validator.
  *
- * Runs before saving a session plan, assigning plan quality, changing lifecycle
- * to an actionable state, or returning actionable levels to the web.
+ * Hard blockers → not actionable (NO_VALID_PLAN / NO_TRADE).
+ * Soft limitations → actionable levels preserved (WAITING / ARMED / etc.).
  *
  * Analysis only — never submits broker orders.
  */
 
+import { planRiskConfig } from "../../config/planRiskConfig";
 import { isPositivePrice, roundPrice } from "../../utils/money";
 
 export type GeometryDirection = "BUY" | "SELL";
@@ -25,7 +26,36 @@ export type GeometryReasonCode =
   | "STRUCTURE_INCOMPLETE"
   | "STRUCTURE_MISMATCH"
   | "ENTRY_ZONE_INVALID"
-  | "DIRECTION_NOT_TRADEABLE";
+  | "DIRECTION_NOT_TRADEABLE"
+  | "STOP_DISTANCE_OUT_OF_RANGE"
+  | "TP1_ROOM_INSUFFICIENT"
+  | "TP1_RR_INSUFFICIENT"
+  | "STALE_REQUIRED_DATA";
+
+/** Soft codes never erase an otherwise valid Entry/Stop/TP1 plan. */
+export const SOFT_GEOMETRY_CODES: ReadonlySet<GeometryReasonCode> = new Set([
+  "QUICK_TARGET_FAILED",
+  "STRUCTURE_INCOMPLETE",
+  "INVALID_TARGET_ORDER", // only when caused by optional TP2 — handled separately
+  "TP1_ROOM_INSUFFICIENT",
+  "TP1_RR_INSUFFICIENT"
+]);
+
+export const HARD_GEOMETRY_CODES: ReadonlySet<GeometryReasonCode> = new Set([
+  "ENTRY_EQUALS_STOP",
+  "STOP_WRONG_SIDE",
+  "TP1_WRONG_SIDE",
+  "TP1_EQUALS_ENTRY",
+  "ZERO_RISK",
+  "MISSING_REQUIRED_LEVEL",
+  "PRICE_ALREADY_AT_TARGET",
+  "INVALIDATION_STOP_MISMATCH",
+  "STRUCTURE_MISMATCH",
+  "ENTRY_ZONE_INVALID",
+  "DIRECTION_NOT_TRADEABLE",
+  "STOP_DISTANCE_OUT_OF_RANGE",
+  "STALE_REQUIRED_DATA"
+]);
 
 export type GeometryInput = {
   direction: string | null | undefined;
@@ -44,13 +74,17 @@ export type GeometryInput = {
   confirmed?: boolean;
   /** Absolute epsilon for near-equality (XAUUSD points). */
   epsilon?: number;
+  /** When true, required market data is stale. */
+  staleRequiredData?: boolean;
 };
 
 export type GeometryResult = {
   valid: boolean;
-  /** True only when geometry is valid AND direction is BUY/SELL with complete levels. */
+  /** True when hard geometry is safe — soft limitations may still be listed. */
   actionable: boolean;
   reasonCodes: GeometryReasonCode[];
+  softReasonCodes: GeometryReasonCode[];
+  hardReasonCodes: GeometryReasonCode[];
   primaryReason: GeometryReasonCode | null;
   message: string;
   normalized: {
@@ -62,10 +96,12 @@ export type GeometryResult = {
     tp1: number | null;
     tp2: number | null;
     riskDistance: number | null;
+    rewardDistance: number | null;
+    riskReward: number | null;
   };
 };
 
-const DEFAULT_EPS = 0.05;
+const DEFAULT_EPS = planRiskConfig.geometryEpsilonPoints;
 
 const pos = (n: unknown): number | null =>
   typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
@@ -119,8 +155,12 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
 
   const mode = String(input.marketStructureMode ?? "").toUpperCase();
   if (mode === "MISMATCH") reasons.push("STRUCTURE_MISMATCH");
+  // Incomplete optional profile / live-range-only is a soft limitation when levels exist.
   if (mode === "UNAVAILABLE" || mode === "LIVE_RANGE_ONLY") {
     reasons.push("STRUCTURE_INCOMPLETE");
+  }
+  if (input.staleRequiredData) {
+    reasons.push("STALE_REQUIRED_DATA");
   }
 
   if (!direction) {
@@ -163,16 +203,35 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
   }
 
   let riskDistance: number | null = null;
+  let rewardDistance: number | null = null;
+  let riskReward: number | null = null;
   if (entryPrice != null && stop != null) {
     riskDistance = Math.abs(entryPrice - stop);
     if (riskDistance <= eps) {
       reasons.push("ENTRY_EQUALS_STOP");
       reasons.push("ZERO_RISK");
+    } else if (
+      riskDistance < planRiskConfig.minStopDistancePoints ||
+      riskDistance > planRiskConfig.maxStopDistancePoints
+    ) {
+      reasons.push("STOP_DISTANCE_OUT_OF_RANGE");
+    }
+  }
+  if (entryPrice != null && tp1 != null) {
+    rewardDistance = Math.abs(tp1 - entryPrice);
+    if (rewardDistance + eps < planRiskConfig.minTp1DistancePoints) {
+      reasons.push("TP1_ROOM_INSUFFICIENT");
+    }
+    if (riskDistance != null && riskDistance > eps) {
+      riskReward = rewardDistance / riskDistance;
+      if (riskReward + 1e-9 < planRiskConfig.minTp1RiskReward) {
+        reasons.push("TP1_RR_INSUFFICIENT");
+      }
     }
   }
 
   if (direction === "BUY" && entryPrice != null && stop != null && tp1 != null) {
-    // BUY: stop < entryZoneLow <= entryPrice <= entryZoneHigh < TP1 <= TP2
+    // BUY: stop < entryZoneLow <= entryPrice <= entryZoneHigh < TP1 ; TP2 optional and >= TP1
     const low = zoneLow ?? entryPrice;
     const high = zoneHigh ?? entryPrice;
     if (!(stop < low - eps / 2)) reasons.push("STOP_WRONG_SIDE");
@@ -188,15 +247,15 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
         reasons.push("TP1_WRONG_SIDE");
       }
     }
+    // Optional TP2: only validate order when present — never require TP2.
     if (tp2 != null && tp2 + eps < tp1) reasons.push("INVALID_TARGET_ORDER");
-    // Late entry: already at/through TP1 before confirmation.
     if (!input.confirmed && current != null && current >= tp1 - eps) {
       reasons.push("PRICE_ALREADY_AT_TARGET");
     }
   }
 
   if (direction === "SELL" && entryPrice != null && stop != null && tp1 != null) {
-    // SELL: TP2 <= TP1 < entryZoneLow <= entryPrice <= entryZoneHigh < stop
+    // SELL: TP1 < entryZoneLow <= entryPrice <= entryZoneHigh < stop ; TP2 optional and <= TP1
     const low = zoneLow ?? entryPrice;
     const high = zoneHigh ?? entryPrice;
     if (!(high + eps / 2 < stop)) reasons.push("STOP_WRONG_SIDE");
@@ -213,6 +272,7 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
     }
   }
 
+  // Soft: quick-target failure must not erase a valid engine TP1.
   if (input.quickTargetOk === false && direction) {
     reasons.push("QUICK_TARGET_FAILED");
   }
@@ -225,41 +285,38 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
   }
 
   const unique = [...new Set(reasons)];
-  const fatalCodes: GeometryReasonCode[] = [
-    "ENTRY_EQUALS_STOP",
-    "STOP_WRONG_SIDE",
-    "TP1_WRONG_SIDE",
-    "TP1_EQUALS_ENTRY",
-    "ZERO_RISK",
-    "INVALID_TARGET_ORDER",
-    "MISSING_REQUIRED_LEVEL",
-    "PRICE_ALREADY_AT_TARGET",
-    "INVALIDATION_STOP_MISMATCH",
-    "STRUCTURE_INCOMPLETE",
-    "STRUCTURE_MISMATCH",
-    "ENTRY_ZONE_INVALID",
-    "DIRECTION_NOT_TRADEABLE"
-  ];
-  const hasFatal = unique.some((c) => fatalCodes.includes(c));
-  const valid =
-    direction != null &&
-    entryPrice != null &&
-    stop != null &&
-    tp1 != null &&
-    !hasFatal;
+  // Optional TP2 order issues are soft when TP1 geometry is otherwise valid.
+  const hardReasonCodes = unique.filter((c) => {
+    if (c === "INVALID_TARGET_ORDER" && tp1 != null && entryPrice != null && stop != null) {
+      return false;
+    }
+    if (c === "TP1_ROOM_INSUFFICIENT" || c === "TP1_RR_INSUFFICIENT") {
+      // Soft caution — do not wipe levels; UI can show cautious status.
+      return false;
+    }
+    if (c === "STRUCTURE_INCOMPLETE" || c === "QUICK_TARGET_FAILED") return false;
+    return HARD_GEOMETRY_CODES.has(c);
+  });
+  const softReasonCodes = unique.filter((c) => !hardReasonCodes.includes(c));
 
-  const actionable = valid && input.quickTargetOk !== false;
+  const hasLevels =
+    direction != null && entryPrice != null && stop != null && tp1 != null;
+  const actionable = hasLevels && hardReasonCodes.length === 0;
 
-  const primaryReason = unique[0] ?? null;
+  const primaryReason = hardReasonCodes[0] ?? softReasonCodes[0] ?? null;
   const message = !actionable
     ? "Trade levels failed safety validation."
-    : "Trade plan geometry is valid.";
+    : softReasonCodes.length
+      ? "Valid plan — waiting (soft limitations present)."
+      : "Trade plan geometry is valid.";
 
   return {
     valid: actionable,
     actionable,
     reasonCodes: unique.length ? unique : [],
-    primaryReason: actionable ? null : primaryReason,
+    softReasonCodes,
+    hardReasonCodes,
+    primaryReason: actionable ? softReasonCodes[0] ?? null : primaryReason,
     message,
     normalized: {
       direction,
@@ -269,7 +326,9 @@ export const validateTradePlanGeometry = (input: GeometryInput): GeometryResult 
       stop: stop != null ? roundPrice(stop) : null,
       tp1: tp1 != null ? roundPrice(tp1) : null,
       tp2: tp2 != null ? roundPrice(tp2) : null,
-      riskDistance: riskDistance != null ? roundPrice(riskDistance) : null
+      riskDistance: riskDistance != null ? roundPrice(riskDistance) : null,
+      rewardDistance: rewardDistance != null ? roundPrice(rewardDistance) : null,
+      riskReward: riskReward != null ? roundPrice(riskReward) : null
     }
   };
 };
@@ -309,12 +368,10 @@ export const resolveAuthoritativeConfirmation = (args: {
 
   let supportsPlan = false;
   if (direction === "BUY") {
-    // Bullish confirmation: breakout/held — NOT bare rejection (bearish)
     supportsPlan =
       (isBreakout || (isHeld && !isRejection)) &&
       !isFailed &&
       !state.includes("BEARISH");
-    // Explicit bullish rejection from support may be labelled BULLISH_REJECTION
     if (state.includes("BULLISH") && isRejection && !isFailed) supportsPlan = true;
   } else if (direction === "SELL") {
     supportsPlan =
@@ -365,10 +422,31 @@ export const resolveAuthoritativeConfirmation = (args: {
   };
 };
 
-/** True when quality grade must not be shown as an actionable BUY/SELL plan. */
-export const isNonActionableQuality = (grade: string | null | undefined, reasons: string[] = []): boolean => {
+/**
+ * True when quality grade must not be shown as an actionable BUY/SELL plan.
+ * Grade B with soft awaiting-confirmation / incomplete optional profile remains actionable.
+ */
+export const isNonActionableQuality = (
+  grade: string | null | undefined,
+  reasons: string[] = []
+): boolean => {
   const g = String(grade ?? "").toUpperCase();
-  if (g === "NO_PLAN" || g === "C") return true;
-  if (reasons.some((r) => /STRUCTURE_ONLY|INCOMPLETE_TRADE_PLAN|NO_VALID/i.test(r))) return true;
+  if (g === "C") return true;
+  if (g === "NO_PLAN") {
+    // Only hard NO_PLAN reasons block; soft incompleteness is handled by grade B.
+    const hard = reasons.some((r) =>
+      /PRICE_SOURCE_MISMATCH|CHART_ROLE_MISMATCH|MISSING_REQUIRED_LEVEL|DIRECTION_NOT_TRADEABLE|NO_TRADE/i.test(
+        r
+      )
+    );
+    return hard || reasons.length === 0;
+  }
+  if (
+    reasons.some((r) =>
+      /PRICE_SOURCE_MISMATCH|CHART_ROLE_MISMATCH/i.test(r)
+    )
+  ) {
+    return true;
+  }
   return false;
 };

@@ -179,6 +179,10 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
   private v4Mutations = new Map<string, import("../v4/shadowTypes").V4PlanMutationAudit[]>();
   private sessionPlans = new Map<string, SessionPlanRecord>();
   private activeSessionPlanByUser = new Map<string, string>();
+  private shadowPlanCandidates = new Map<
+    string,
+    import("../decision/shadowPlanCandidate").ShadowPlanCandidate[]
+  >();
 
   saveV4ShadowResult(userId: string, result: Record<string, unknown>): void {
     this.v4Shadows.unshift({ ...result, userId });
@@ -278,6 +282,22 @@ export class InMemoryGoldMetaStore implements GoldMetaStore {
 
   getSessionPlan(userId: string, planId: string): SessionPlanRecord | undefined {
     return this.sessionPlans.get(userScopedKey(userId, planId));
+  }
+
+  async saveShadowPlanCandidate(
+    userId: string,
+    candidate: import("../decision/shadowPlanCandidate").ShadowPlanCandidate
+  ): Promise<void> {
+    const list = this.shadowPlanCandidates.get(userId) ?? [];
+    list.unshift(candidate);
+    this.shadowPlanCandidates.set(userId, list.slice(0, 100));
+  }
+
+  async listShadowPlanCandidates(
+    userId: string,
+    limit = 50
+  ): Promise<Array<import("../decision/shadowPlanCandidate").ShadowPlanCandidate>> {
+    return (this.shadowPlanCandidates.get(userId) ?? []).slice(0, limit);
   }
 
   recordWebhookReject(log: Omit<WebhookRejectLog, "id">): void {

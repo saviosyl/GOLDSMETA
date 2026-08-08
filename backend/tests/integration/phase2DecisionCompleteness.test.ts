@@ -100,7 +100,7 @@ describe("phase2 decision completeness and safety", () => {
     expect(decision.reasonCodes).toContain("STALE_DATA");
   });
 
-  it("forces WAIT with MISSING_VOLUME_PROFILE on partial payload", async () => {
+  it("treats incomplete volume profile as soft warning on partial payload", async () => {
     const payload = freshPayload(partialFixture);
     const snapshot = mergeSnapshot(payload);
     const quality = evaluateDataQuality(snapshot);
@@ -114,9 +114,11 @@ describe("phase2 decision completeness and safety", () => {
       store,
       new AiExplainer()
     );
-    expect(decision.decision).toBe("WAIT");
-    expect(decision.reasonCodes).toEqual(
-      expect.arrayContaining(["MISSING_VOLUME_PROFILE", "INCOMPLETE_DATA"])
+    // Soft limitations must not hard-block solely for missing optional profile.
+    expect(decision.reasonCodes).not.toContain("MISSING_VOLUME_PROFILE");
+    expect(decision.reasonCodes).not.toContain("INCOMPLETE_DATA");
+    expect(decision.warnings ?? []).toEqual(
+      expect.arrayContaining(["MISSING_VOLUME_PROFILE"])
     );
   });
 

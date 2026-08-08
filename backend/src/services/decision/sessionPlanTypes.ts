@@ -80,7 +80,19 @@ export type SessionPlanRecord = {
   lifecycleState: SessionPlanLifecycleState;
   planMutation: PlanMutation;
   /** Human-readable: "PLAN UNCHANGED" when quotes refresh price only. */
-  planStabilityLabel: "PLAN UNCHANGED" | "PLAN CREATED" | "PLAN REPLACED" | "STATUS UPDATED" | "NO VALID PLAN" | "NO TRADE" | "INVALIDATED" | "EXPIRED";
+  planStabilityLabel:
+    | "PLAN UNCHANGED"
+    | "PLAN CREATED"
+    | "PLAN REPLACED"
+    | "STATUS UPDATED"
+    | "NO VALID PLAN"
+    | "NO TRADE"
+    | "INVALIDATED"
+    | "EXPIRED"
+    | "VALID PLAN — WAITING"
+    | "PLAN READY — WAIT FOR ENTRY ZONE";
+  /** Soft geometry / quality limitations that do not erase levels. */
+  softLimitationCodes?: string[];
   direction: DecisionDirection | null;
   entry: EntryPlan | null;
   stopLoss: StopLossPlan | null;
