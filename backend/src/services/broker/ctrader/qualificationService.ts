@@ -52,26 +52,21 @@ function newId(prefix: string): string {
 }
 
 export async function loadSetupSnapshot(uid: string): Promise<SetupSnapshot> {
-  const [connection, diagnostics, settings] = await Promise.all([
+  // Prefer persisted connection + settings for fast qualification UI.
+  // Avoid full Open API diagnostics on every GET (can exceed gateway timeouts).
+  const [connection, settings] = await Promise.all([
     getConnection(uid),
-    buildDiagnostics(uid).catch(() => null),
     getUserAutoTradeSettings(uid, "demo").catch(() => null)
   ]);
 
-  const oauthConnected = Boolean(connection || diagnostics?.oauthConnected);
+  const oauthConnected = Boolean(connection);
   const demoAccountSelected = Boolean(
     connection?.selectedAccountId && !connection.selectedAccountIsLive
   );
   const accountIsLive = Boolean(connection?.selectedAccountIsLive);
   const tradingScope = connection?.oauthScope === "trading";
-  const symbolResolved = Boolean(
-    connection?.symbolId || diagnostics?.goldSymbolFound || diagnostics?.symbol
-  );
-  const brokerQuoteHealthy = Boolean(
-    diagnostics?.liveQuoteReceived ||
-      (diagnostics?.quote?.bid != null && diagnostics?.quote?.ask != null) ||
-      connection?.lastQuoteAt
-  );
+  const symbolResolved = Boolean(connection?.symbolId || connection?.symbolName);
+  const brokerQuoteHealthy = Boolean(connection?.lastQuoteAt);
   const riskConfigured = Boolean(
     settings &&
       settings.fixedRiskAmount > 0 &&
@@ -90,8 +85,7 @@ export async function loadSetupSnapshot(uid: string): Promise<SetupSnapshot> {
     oauthConnected,
     demoAccountSelected,
     accountIsLive,
-    accountMasked:
-      connection?.selectedAccountMasked ?? diagnostics?.connection?.accountMasked ?? null,
+    accountMasked: connection?.selectedAccountMasked ?? null,
     accountId: connection?.selectedAccountId ?? null,
     symbolResolved,
     tradingScope,

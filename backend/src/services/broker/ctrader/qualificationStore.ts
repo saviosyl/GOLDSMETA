@@ -127,8 +127,12 @@ function normalize(raw: Record<string, unknown>, uid: string, accountId: string)
     uid,
     accountId,
     environment: "DEMO",
-    previewSignalIds: Array.isArray(raw.previewSignalIds) ? raw.previewSignalIds : [],
-    previews: Array.isArray(raw.previews) ? (raw.previews as QualificationPreviewRecord[]) : [],
+    previewSignalIds: Array.isArray(raw.previewSignalIds)
+      ? (raw.previewSignalIds as unknown[]).map((v) => String(v))
+      : [],
+    previews: Array.isArray(raw.previews)
+      ? (raw.previews as QualificationPreviewRecord[])
+      : [],
     controlledTrades: Array.isArray(raw.controlledTrades)
       ? (raw.controlledTrades as ControlledDemoTradeRecord[])
       : [],
