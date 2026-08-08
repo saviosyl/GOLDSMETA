@@ -1,24 +1,29 @@
+import { Shield } from "lucide-react";
 import { DisclosurePanel } from "./ui/primitives";
 
-/** Shared banner for Brokers / AutoTrade while execution remains locked. */
+/**
+ * Compact intentional safety notice — not a failure banner.
+ * Live execution locked is expected product behaviour.
+ */
 export function ExecutionDisabledBanner({ page }: { page: "brokers" | "autotrade" }) {
   return (
-    <div className="gm-execution-disabled" data-testid="execution-disabled-banner" role="status">
-      <h2 className="gm-section-title">Execution disabled</h2>
+    <div
+      className="gm-execution-disabled gm-safety-notice"
+      data-testid="execution-disabled-banner"
+      role="status"
+    >
+      <div className="gm-safety-notice__head">
+        <Shield size={16} aria-hidden />
+        <h2 className="gm-section-title">Safety mode</h2>
+      </div>
       <p>
-        GoldMeta remains analysis-only. Manual planning is available. Broker orders are not submitted
-        from this page.
+        Live execution locked · AutoTrade OFF · No live orders can be submitted
       </p>
-      <ul className="gm-help-list">
-        <li>AutoTrade OFF</li>
-        <li>Demo submission OFF</li>
-        <li>Live execution OFF</li>
-      </ul>
-      <DisclosurePanel summary="Technical diagnostics">
+      <DisclosurePanel summary="Technical details">
         <p className="gm-meta" style={{ margin: 0 }} data-testid={`${page}-execution-diagnostics`}>
           {page === "autotrade"
-            ? "AutoTrade controls stay locked. No martingale, grid, or averaging-down paths are enabled."
-            : "Broker Control Centre is read-only / prep only. cTrader setup is not continued in this release."}
+            ? "AutoTrade controls stay locked for live. No martingale, grid, or averaging-down paths are enabled."
+            : "Broker Control Centre keeps live order submission locked. Demo prep and account connection remain available."}
         </p>
       </DisclosurePanel>
     </div>

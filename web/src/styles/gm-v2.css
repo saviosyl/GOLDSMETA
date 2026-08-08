@@ -1741,3 +1741,229 @@ body.gm-drawer-open {
 }
 
 .gm-premium-v2 { --gm-deploy-rev: "b001de8"; }
+
+/* —— Final UX polish: compact Plan setup status —— */
+.gm-setup-status-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(6, 23, 47, 0.04);
+  padding: 12px 14px;
+  margin: 0 0 10px;
+}
+
+.gm-setup-status-card__head h2 {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.gm-setup-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+}
+
+.gm-setup-status-grid dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.gm-setup-status-grid dd {
+  margin: 2px 0 0;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-setup-status-next {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.gm-setup-status-next strong {
+  font-size: 0.86rem;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.3;
+}
+
+.gm-setup-status-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.gm-setup-status-alerts__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.gm-setup-status-why {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.gm-setup-status-why summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--navy);
+  list-style: none;
+}
+
+.gm-setup-status-why summary::-webkit-details-marker {
+  display: none;
+}
+
+.gm-plan-mini-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.gm-plan-mini-actions .gm-action-btn {
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--navy);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+
+.gm-advanced-analysis > summary {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: var(--navy);
+}
+
+.gm-broker-connect-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 6px 18px rgba(6, 23, 47, 0.05);
+  margin-bottom: 12px;
+}
+
+.gm-broker-connect-card h2 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-broker-connect-card .gm-broker-connect-sub {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.gm-broker-connect-benefits {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--navy);
+}
+
+.gm-broker-connect-benefits li.is-ok {
+  color: #15803d;
+}
+
+.gm-broker-connect-benefits li.is-off {
+  color: #64748b;
+}
+
+.gm-at-setup-required {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.gm-at-setup-required h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.gm-at-setup-required ol {
+  margin: 0 0 12px;
+  padding-left: 1.2rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--navy);
+  line-height: 1.45;
+}
+
+.gm-prem-stat-grid--3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+@media (min-width: 720px) {
+  .gm-prem-stat-grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.gm-prem-stat-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 650;
+  color: var(--text-secondary, #64748b);
+}
+
+.gm-prem-nested {
+  margin: 8px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 10px;
+  background: #fafbfc;
+}
+
+.gm-prem-nested > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 2px;
+  font-weight: 750;
+  font-size: 0.84rem;
+  color: var(--navy);
+}
+
+.gm-prem-nested > summary::-webkit-details-marker {
+  display: none;
+}

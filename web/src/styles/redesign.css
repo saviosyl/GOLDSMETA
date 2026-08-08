@@ -5504,18 +5504,41 @@ a {
   font-weight: 650;
 }
 
-.gm-execution-disabled {
-  margin: 12px 0 18px;
-  padding: 16px;
+.gm-execution-disabled,
+.gm-safety-notice {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
   border-radius: var(--radius);
-  border: 1px solid var(--border-strong);
-  background: var(--notrade-soft);
-  color: var(--notrade);
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  background: rgba(212, 160, 23, 0.1);
+  color: var(--navy);
 }
 
-.gm-execution-disabled .gm-section-title {
-  color: var(--notrade);
-  font-weight: 700;
+.gm-execution-disabled .gm-section-title,
+.gm-safety-notice .gm-section-title {
+  color: var(--navy);
+  font-weight: 800;
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+.gm-safety-notice__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gm-safety-notice__head svg {
+  color: #b8860b;
+  flex-shrink: 0;
+}
+
+.gm-safety-notice > p {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--ink-soft, #445);
 }
 
 .gm-tv-role-cards {

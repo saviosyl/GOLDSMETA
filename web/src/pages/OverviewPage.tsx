@@ -35,16 +35,14 @@ import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
 import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
-import {
-  DecisionDashboard,
-  DecisionSecondaryPanel
-} from "../components/decision/DecisionDashboard";
+import { DecisionDashboard } from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
 import { TradePlanSummary } from "../components/decision/TradePlanSummary";
+import { SetupStatusCard } from "../components/decision/SetupStatusCard";
 import { XauusdChartCard } from "../components/decision/XauusdChartCard";
-import { PremiumInsightStrip } from "../components/premium/PremiumInsightStrip";
 import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
+import { Bell, CircleHelp, RefreshCw } from "lucide-react";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
 import { useShellQuote } from "../lib/quoteContext";
 import { resolveDisplayAction } from "../lib/planDisplay";
@@ -230,6 +228,7 @@ export function OverviewPage() {
   const [marketContextOpen, setMarketContextOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [intradayDetailsOpen, setIntradayDetailsOpen] = useState(false);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
@@ -593,19 +592,35 @@ export function OverviewPage() {
             state={decisionState}
           />
 
-          <DecisionSecondaryPanel
+          <SetupStatusCard
             plan={intradayPlan}
             marketStructureMode={mode}
             livePrice={livePrice}
-            onRefresh={refresh}
-            refreshing={refreshing}
-          />
-
-          <PremiumInsightStrip
             trendBias={intradayPlan.directionBias ?? briefing?.positionVsPoc ?? "Neutral"}
             volatility={briefing?.atrLabel ?? briefing?.marketRegime ?? "Moderate"}
             newsImpact="Low"
           />
+
+          <div className="gm-plan-mini-actions" data-testid="premium-quick-actions">
+            <button
+              type="button"
+              className="gm-action-btn"
+              onClick={refresh}
+              disabled={refreshing}
+              data-testid="premium-refresh"
+            >
+              <RefreshCw aria-hidden size={14} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <a className="gm-action-btn" href="#phone-alerts" data-testid="premium-enable-alerts-link">
+              <Bell aria-hidden size={14} />
+              Alerts
+            </a>
+            <a className="gm-action-btn" href="#why-waiting" data-testid="premium-explain-link">
+              <CircleHelp aria-hidden size={14} />
+              Why wait?
+            </a>
+          </div>
 
           <CockpitAlerts
             marketStructureMode={marketStructureMode}
@@ -614,6 +629,14 @@ export function OverviewPage() {
             apiError={Boolean(errorDetail) && !intradayPlan}
           />
 
+          <details
+            className="gm-collapse-section gm-advanced-analysis"
+            data-testid="advanced-analysis-section"
+            open={advancedOpen}
+            onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary>Advanced analysis</summary>
+            <div className="gm-collapse-body">
           <div className="gm-segmented-tabs" data-testid="premium-detail-tabs" role="tablist">
             {tabItems.map((tab) => (
               <button
@@ -632,11 +655,7 @@ export function OverviewPage() {
 
           {researchTab === "plan" && decisionState && (
             <div className="gm-cockpit-tab gm-plan-fold" data-testid="research-tab-plan">
-              <PremiumPlanCard
-                plan={intradayPlan}
-                state={decisionState}
-                updatedLabel={compactTime}
-              />
+              {/* Full setup analysis — not a second competing HOLD hero */}
               <div className="gm-confirm-strip" data-testid="confirm-5m-strip">
                 <span>5M Confirmation</span>
                 <strong>
@@ -672,6 +691,16 @@ export function OverviewPage() {
                   Observation only — trade actions are hidden until a verified plan is available.
                 </p>
               )}
+              <details className="gm-collapse-section" data-testid="full-setup-analysis">
+                <summary>Full setup analysis</summary>
+                <div className="gm-collapse-body">
+                  <PremiumPlanCard
+                    plan={intradayPlan}
+                    state={decisionState}
+                    updatedLabel={compactTime}
+                  />
+                </div>
+              </details>
             </div>
           )}
 
@@ -894,10 +923,10 @@ export function OverviewPage() {
           <details
             className="gm-collapse-section"
             data-testid="advanced-diagnostics-section"
-            open={advancedOpen}
-            onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+            open={diagnosticsOpen}
+            onToggle={(e) => setDiagnosticsOpen((e.currentTarget as HTMLDetailsElement).open)}
           >
-            <summary>ADVANCED DIAGNOSTICS</summary>
+            <summary>Advanced diagnostics</summary>
             <div className="gm-collapse-body">
               <SystemStatusCollapse
                 plan={intradayPlan}
@@ -942,6 +971,12 @@ export function OverviewPage() {
                   </span>
                 </div>
               </SystemStatusCollapse>
+            </div>
+          </details>
+
+          <div className="gm-snapshot-actions-row">
+            <PromoSnapshotButton onClick={snapshot.openModal} disabled={!decision && !briefing} />
+          </div>
             </div>
           </details>
 
@@ -1077,9 +1112,11 @@ export function OverviewPage() {
         </SystemStatusCollapse>
       )}
 
-      <div className="gm-snapshot-actions-row">
-        <PromoSnapshotButton onClick={snapshot.openModal} disabled={!decision && !briefing} />
-      </div>
+      {!intradayPlan ? (
+        <div className="gm-snapshot-actions-row">
+          <PromoSnapshotButton onClick={snapshot.openModal} disabled={!decision && !briefing} />
+        </div>
+      ) : null}
       <PromoSnapshotModal
         open={snapshot.open}
         onClose={snapshot.closeModal}

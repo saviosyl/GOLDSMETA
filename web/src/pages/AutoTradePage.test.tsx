@@ -382,10 +382,17 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-step-6-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Current");
     expect(screen.getByTestId("autotrade-step-11-status")).toHaveTextContent("Locked");
+    expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Demo · \*\*\*\*4810/);
+    expect(screen.getByTestId("autotrade-live-execution-stat")).toHaveTextContent(/Not selected/i);
+    expect(screen.getByTestId("autotrade-market-data-stat")).toHaveTextContent(/Connected|Market closed/i);
+    expect(screen.queryByTestId("autotrade-setup-required")).not.toBeInTheDocument();
     const activity = screen.getByTestId("autotrade-activity");
     expect(activity.textContent).toMatch(/Demo account \*\*\*\*4810 connected\. AutoTrade OFF/);
-    expect(activity.textContent?.indexOf("connected. AutoTrade OFF")).toBeLessThan(
-      activity.textContent?.indexOf("reconnect required") ?? Number.MAX_SAFE_INTEGER
-    );
+    const connectedIdx = activity.textContent?.toLowerCase().indexOf("connected. autotrade off") ?? -1;
+    const reconnectIdx = activity.textContent?.toLowerCase().indexOf("reconnect required") ?? -1;
+    expect(connectedIdx).toBeGreaterThanOrEqual(0);
+    if (reconnectIdx >= 0) {
+      expect(connectedIdx).toBeLessThan(reconnectIdx);
+    }
   });
 });

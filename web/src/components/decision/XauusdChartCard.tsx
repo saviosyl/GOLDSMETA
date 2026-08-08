@@ -39,24 +39,46 @@ type LineSpec = {
 };
 
 function buildLines(levels: LevelOverlays): LineSpec[] {
+  const candidates: Array<{
+    key: string;
+    price: number | null | undefined;
+    color: string;
+    title: string;
+    lineWidth: number;
+    lineStyle: number;
+  }> = [
+    { key: "resistance", price: levels.resistance, color: "#dc2626", title: "Res", lineWidth: 1, lineStyle: 2 },
+    { key: "vah", price: levels.vah, color: "#d4a017", title: "VAH", lineWidth: 1, lineStyle: 2 },
+    { key: "poc", price: levels.poc, color: "#0f2748", title: "POC", lineWidth: 2, lineStyle: 0 },
+    { key: "val", price: levels.val, color: "#d4a017", title: "VAL", lineWidth: 1, lineStyle: 2 },
+    { key: "support", price: levels.support, color: "#16a34a", title: "Sup", lineWidth: 1, lineStyle: 2 },
+    { key: "current", price: levels.currentPrice, color: "#2563eb", title: "Px", lineWidth: 2, lineStyle: 0 }
+  ];
+
+  // Keep real prices; stagger titles only when levels cluster (avoid overlapping axis labels).
+  const sorted = candidates
+    .filter((c) => c.price != null && Number.isFinite(c.price))
+    .map((c) => ({ ...c, price: c.price as number }))
+    .sort((a, b) => b.price - a.price);
+
   const out: LineSpec[] = [];
-  const push = (
-    key: string,
-    price: number | null | undefined,
-    color: string,
-    title: string,
-    lineWidth = 1,
-    lineStyle = 2
-  ) => {
-    if (price == null || !Number.isFinite(price)) return;
-    out.push({ key, price, color, title, lineWidth, lineStyle });
-  };
-  push("resistance", levels.resistance, "#dc2626", "Resistance", 1, 2);
-  push("vah", levels.vah, "#d4a017", "VAH", 1, 2);
-  push("poc", levels.poc, "#0f2748", "POC", 2, 0);
-  push("val", levels.val, "#d4a017", "VAL", 1, 2);
-  push("support", levels.support, "#16a34a", "Support", 1, 2);
-  push("current", levels.currentPrice, "#2563eb", "Price", 2, 0);
+  let prevPrice: number | null = null;
+  let stagger = 0;
+  for (const row of sorted) {
+    const clustered = prevPrice != null && Math.abs(prevPrice - row.price) < 0.35;
+    if (clustered) stagger += 1;
+    else stagger = 0;
+    const pad = stagger > 0 ? "·".repeat(Math.min(stagger, 3)) : "";
+    out.push({
+      key: row.key,
+      price: row.price,
+      color: row.color,
+      title: `${pad}${row.title}`,
+      lineWidth: row.lineWidth,
+      lineStyle: row.lineStyle
+    });
+    prevPrice = row.price;
+  }
   return out;
 }
 

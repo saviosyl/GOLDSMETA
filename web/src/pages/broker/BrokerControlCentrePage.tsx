@@ -159,6 +159,7 @@ export function BrokerControlCentrePage() {
   const [lastFailedAction, setLastFailedAction] = useState<BrokerAction | null>(null);
   const [firstCheckpoint, setFirstCheckpoint] = useState<Record<string, unknown> | null>(null);
   const [showAccountManager, setShowAccountManager] = useState(false);
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
 
   const selectionTouchedRef = useRef(false);
   const oauthHandledRef = useRef(false);
@@ -899,7 +900,7 @@ export function BrokerControlCentrePage() {
               <strong>{currency || "—"}</strong>
             </div>
             <div className="gm-prem-stat">
-              <span>Quotes</span>
+              <span>Broker quotes</span>
               <strong className={quoteHealthy ? "is-ok" : "is-warn"}>
                 {quoteHealthy ? "LIVE" : "Waiting"}
               </strong>
@@ -917,15 +918,57 @@ export function BrokerControlCentrePage() {
           </div>
         </section>
       ) : (
-        <div className="gm-broker-actions gm-broker-primary-actions">
-          <Link
+        <section
+          className="gm-broker-connect-card"
+          data-testid="broker-disconnected-primary"
+          aria-label="Connect broker"
+        >
+          <p className="gm-label" style={{ margin: 0 }}>Broker</p>
+          <h2>Pepperstone cTrader</h2>
+          <PremiumStatusChip tone="off" withDot>
+            Not connected
+          </PremiumStatusChip>
+          <p className="gm-broker-connect-sub">
+            Connect your own Pepperstone cTrader account to enable personal broker features.
+          </p>
+          <button
+            type="button"
             className="gm-btn gm-btn-primary"
-            to="/autotrade"
-            data-testid="broker-edit-autotrade-settings"
+            data-testid="broker-connect-ctrader-primary"
+            onClick={() => {
+              selectionTouchedRef.current = true;
+              setSelected("pepperstone_ctrader");
+              setAdvancedToolsOpen(true);
+              window.setTimeout(() => {
+                const btn = document.querySelector(
+                  '[data-testid="ctrader-connect-btn"], [data-testid="broker-start-oauth"]'
+                ) as HTMLButtonElement | null;
+                btn?.scrollIntoView({ behavior: "smooth", block: "center" });
+                if (btn && !btn.disabled) btn.click();
+              }, 80);
+            }}
           >
-            Edit AutoTrade settings
-          </Link>
-        </div>
+            Connect cTrader
+          </button>
+          <p className="gm-meta" style={{ marginTop: 10 }}>
+            Your broker account and trading permissions remain private to you.
+          </p>
+          <ul className="gm-broker-connect-benefits">
+            <li className="is-ok">✓ GoldMeta market data already available</li>
+            <li className="is-ok">✓ GoldMeta chart already available</li>
+            <li className="is-off">○ Personal broker account not connected</li>
+            <li className="is-off">○ Personal AutoTrade unavailable</li>
+          </ul>
+          <div className="gm-broker-actions gm-broker-primary-actions" style={{ marginTop: 12 }}>
+            <Link
+              className="gm-btn"
+              to="/autotrade"
+              data-testid="broker-edit-autotrade-settings"
+            >
+              Edit AutoTrade settings
+            </Link>
+          </div>
+        </section>
       )}
 
       {canonical.connectionPhase === "connected" || accountAlreadySelected ? (
@@ -942,7 +985,7 @@ export function BrokerControlCentrePage() {
                 {
                   ok: quoteHealthy,
                   warn: !quoteHealthy,
-                  label: "Live Quotes",
+                  label: "Broker quotes",
                   detail: quoteHealthy ? "Active" : "Waiting"
                 },
                 {
@@ -1108,14 +1151,71 @@ export function BrokerControlCentrePage() {
       <details
         className="gm-prem-advanced"
         data-testid="broker-advanced-tools"
-        open={!accountAlreadySelected || showAccountManager}
+        open={advancedToolsOpen || showAccountManager}
+        onToggle={(e) => setAdvancedToolsOpen((e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary>
-          {accountAlreadySelected
-            ? "Advanced broker tools"
-            : "Connect or switch broker"}
+          {accountAlreadySelected ? "Advanced broker tools" : "Advanced setup & help"}
         </summary>
         <div className="gm-prem-advanced-body">
+      {!accountAlreadySelected ? (
+        <details className="gm-prem-nested" data-testid="other-broker-options">
+          <summary>Other broker options</summary>
+          <section className="gm-section" aria-labelledby="broker-options-heading">
+            <h2 id="broker-options-heading" className="gm-section-title">
+              Broker options
+            </h2>
+            <div className="gm-broker-grid">
+              {(centre?.brokers ?? []).map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  className={`gm-broker-card${selected === b.id ? " is-selected" : ""}`}
+                  data-testid={`broker-card-${b.id}`}
+                  aria-pressed={selected === b.id}
+                  disabled={anyActionBusy}
+                  onClick={() => {
+                    selectionTouchedRef.current = true;
+                    setSelected(b.id);
+                  }}
+                >
+                  <StatusBadge
+                    tone={
+                      b.id === "pepperstone_ctrader"
+                        ? canonical.connectionPhase === "connected"
+                          ? "positive"
+                          : "warning"
+                        : b.id === "trading212_invest"
+                          ? "gold"
+                          : "positive"
+                    }
+                  >
+                    {brokerBadgeLabel(b.badge)}
+                  </StatusBadge>
+                  <strong>{brokerDisplayName(b.id, b.name)}</strong>
+                  <span className="gm-broker-card-status">
+                    {connectionStatusLabel(b.status) === b.status
+                      ? b.status.replace(/Auth Setup Required/i, "Connection setup required")
+                      : connectionStatusLabel(b.status)}
+                  </span>
+                  <span className="gm-meta">
+                    {b.detail
+                      .replace(/AutoTrade Locked/gi, "AutoTrade OFF")
+                      .replace(/Live Locked/gi, "Live not active in preview")
+                      .replace(/cTrader Demo workflow/gi, "cTrader AutoTrade workflow")
+                      .replace(/Demo read-only/gi, "preview — order submission disabled")
+                      .replace(/Demo setup only/gi, "Preview mode")
+                      .replace(/order automation unmerged/gi, "practice read-only")}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="gm-meta">
+              Switching brokers keeps AutoTrade OFF. Reconnecting never turns AutoTrade on.
+            </p>
+          </section>
+        </details>
+      ) : (
       <section className="gm-section" aria-labelledby="broker-options-heading">
         <h2 id="broker-options-heading" className="gm-section-title">
           Broker options
@@ -1169,6 +1269,7 @@ export function BrokerControlCentrePage() {
           Switching brokers keeps AutoTrade OFF. Reconnecting never turns AutoTrade on.
         </p>
       </section>
+      )}
 
       {selected === "pepperstone_ctrader" ? (
         <section

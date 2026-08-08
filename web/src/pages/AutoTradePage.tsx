@@ -43,6 +43,8 @@ import {
   deriveAutoTradeSyncSummary
 } from "../lib/broker/autoTradeSyncState";
 import { friendlyApiCode } from "../lib/plainLanguage";
+import { friendlyActivityMessage } from "../lib/friendlyActivityCopy";
+import { useShellQuote } from "../lib/quoteContext";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -109,7 +111,9 @@ export function AutoTradePage() {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [previewOk, setPreviewOk] = useState(false);
   const [pendingLiveAccountId, setPendingLiveAccountId] = useState<string | null>(null);
+  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
   const reloadGenRef = useRef(0);
+  const shellQuote = useShellQuote().quote;
 
   useEffect(() => {
     try {
@@ -286,7 +290,10 @@ export function AutoTradePage() {
       buildAutoTradeActivityFeed({
         activity: status?.activity ?? [],
         summary: sync
-      }),
+      }).map((item) => ({
+        ...item,
+        message: friendlyActivityMessage(item.message)
+      })),
     [status?.activity, sync]
   );
 
@@ -448,14 +455,30 @@ export function AutoTradePage() {
     diagnostics?.environment === "LIVE" ||
     mode === "live";
   const maskedAt =
+    sync.accountMasked ??
     diagnostics?.account?.accountIdMasked ??
     diagnostics?.connection?.accountMasked ??
-    "—";
+    null;
   const equityAt =
     diagnostics?.account?.equity ?? diagnostics?.account?.balance ?? null;
   const fundedAt = equityAt != null && equityAt > 0;
-  const quoteLive =
+  const brokerQuoteLive =
     Boolean(diagnostics?.liveQuoteReceived) && !diagnostics?.quote?.stale;
+  const marketDataConnected = Boolean(
+    (shellQuote && !shellQuote.unavailable && shellQuote.price != null) ||
+      sync.marketStatusRaw ||
+      sync.bid != null ||
+      sync.checksOk
+  );
+  const marketDataLabel = !marketDataConnected
+    ? "Waiting"
+    : sync.marketOpen || shellQuote?.marketStatus === "OPEN"
+      ? "Connected"
+      : shellQuote?.marketStatus === "CLOSED" ||
+          /CLOSE/i.test(sync.marketStatusRaw || "")
+        ? "Connected · Market closed"
+        : "Connected";
+  const setupIncomplete = !sync.connected || !sync.accountSelected;
   const heroState = isLiveEnv
     ? "SHADOW"
     : display === "SHADOW"
@@ -491,9 +514,9 @@ export function AutoTradePage() {
       <section className="gm-prem-card gm-prem-card--navy gm-at-control-strip" aria-label="Execution status">
         <div className="gm-prem-hero-top">
           <div>
-            <p className="gm-prem-card__title">Status</p>
+            <p className="gm-prem-card__title">AutoTrade Control</p>
             <h2 className="gm-prem-card__headline">
-              {heroState === "SHADOW" ? "SHADOW MODE" : "OFF"}
+              {heroState === "SHADOW" ? "SHADOW / OFF" : "OFF"}
             </h2>
             <p className="gm-prem-card__sub">
               {heroState === "SHADOW"
@@ -505,27 +528,44 @@ export function AutoTradePage() {
             LOCKED
           </PremiumStatusChip>
         </div>
-        <div className="gm-prem-stat-grid gm-prem-stat-grid--4">
-          <div className="gm-prem-stat">
-            <span>Account</span>
+        <div className="gm-prem-stat-grid gm-prem-stat-grid--3">
+          <div className="gm-prem-stat" data-testid="autotrade-broker-account-stat">
+            <span>Broker account</span>
             <strong>
-              {maskedAt !== "—"
-                ? `${isLiveEnv ? "LIVE" : "Demo"} ${maskedAt}`
-                : "Not available"}
+              {maskedAt
+                ? `${sync.isLive ? "LIVE" : "Demo"} · ${maskedAt}`
+                : sync.connected
+                  ? "Connected · select account"
+                  : "Not connected"}
             </strong>
+            <em className="gm-prem-stat-note">
+              {sync.connected && sync.accountSelected ? "Connected" : sync.connectionLabel}
+            </em>
           </div>
           <div className="gm-prem-stat">
             <span>AutoTrade</span>
             <strong>{display === "OFF" || !status?.mode ? "OFF" : autoTradeLabel}</strong>
           </div>
           <div className="gm-prem-stat">
-            <span>Live Orders</span>
+            <span>Live orders</span>
             <strong className="is-lock">LOCKED</strong>
           </div>
-          <div className="gm-prem-stat">
-            <span>Quotes</span>
-            <strong className={quoteLive ? "is-ok" : "is-warn"}>
-              {quoteLive ? "LIVE" : "Waiting"}
+          <div className="gm-prem-stat" data-testid="autotrade-market-data-stat">
+            <span>Market data</span>
+            <strong className={marketDataConnected ? "is-ok" : "is-warn"}>
+              {marketDataLabel}
+            </strong>
+          </div>
+          <div className="gm-prem-stat" data-testid="autotrade-broker-quotes-stat">
+            <span>Personal broker quotes</span>
+            <strong className={brokerQuoteLive ? "is-ok" : "is-warn"}>
+              {brokerQuoteLive ? "Connected" : sync.connected ? "Waiting" : "Unavailable"}
+            </strong>
+          </div>
+          <div className="gm-prem-stat" data-testid="autotrade-live-execution-stat">
+            <span>Live execution account</span>
+            <strong className="is-lock">
+              {sync.isLive && sync.accountSelected ? `${maskedAt ?? "Selected"} · Locked` : "Not selected"}
             </strong>
           </div>
         </div>
@@ -534,6 +574,38 @@ export function AutoTradePage() {
           {accountLabel}
         </p>
       </section>
+
+      {setupIncomplete ? (
+        <section
+          className="gm-at-setup-required"
+          data-testid="autotrade-setup-required"
+          aria-label="Setup required"
+        >
+          <h2>Setup required</h2>
+          <ol>
+            <li>Connect cTrader</li>
+            <li>Select account</li>
+            <li>Configure risk</li>
+            <li>Run connection checks</li>
+          </ol>
+          <div className="gm-prem-pill-actions">
+            <Link className="gm-btn gm-btn-primary" to="/brokers" data-testid="autotrade-continue-setup">
+              Continue setup
+            </Link>
+            <button
+              type="button"
+              className="gm-btn"
+              data-testid="autotrade-open-setup-wizard"
+              onClick={() => {
+                setSetupWizardOpen(true);
+                setShowAccounts(true);
+              }}
+            >
+              Full setup wizard
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {/* Preserve status summary testids */}
       <section
@@ -587,18 +659,27 @@ export function AutoTradePage() {
 
       <p className="gm-prem-section-label">Readiness</p>
       <section className="gm-prem-card" aria-label="Readiness">
-        <ul className="gm-prem-check-list">
+        <ul className="gm-prem-check-list" data-testid="autotrade-readiness-list">
           {[
             {
-              ok: connectionLabel === "Connected" && maskedAt !== "—",
-              label: "Live account connected",
-              detail: maskedAt !== "—" ? maskedAt : "No account"
+              ok: marketDataConnected,
+              warn: !marketDataConnected,
+              label: "GoldMeta market data active",
+              detail: marketDataLabel
             },
             {
-              ok: quoteLive,
-              warn: !quoteLive,
-              label: "Live quotes active",
-              detail: quoteLive ? "Streaming" : "Waiting"
+              ok: sync.connected && Boolean(maskedAt) && !sync.isLive,
+              warn: !(sync.connected && Boolean(maskedAt)),
+              label: sync.isLive
+                ? "Pepperstone Live account connected"
+                : sync.connected && maskedAt
+                  ? "Pepperstone Demo account connected"
+                  : "Broker account not connected",
+              detail: maskedAt
+                ? `${sync.isLive ? "LIVE" : "Demo"} · ${maskedAt}`
+                : sync.connected
+                  ? "Select a Demo account"
+                  : "Connect cTrader"
             },
             {
               ok: Boolean(settings || status?.limits),
@@ -614,8 +695,16 @@ export function AutoTradePage() {
             {
               ok: false,
               pending: true,
-              label: "Owner approval pending",
-              detail: "Required for live"
+              label: sync.isLive
+                ? "Owner/live approval pending"
+                : sync.connected && maskedAt
+                  ? "Demo trading permission / execution requirement"
+                  : "AutoTrade setup incomplete",
+              detail: sync.isLive
+                ? "Required for live"
+                : sync.connected && maskedAt
+                  ? "Demo Auto not enabled"
+                  : "Connect and select account"
             },
             {
               ok: false,
@@ -778,14 +867,18 @@ export function AutoTradePage() {
           </div>
           <div className="gm-prem-stat">
             <span>Quote freshness</span>
-            <strong className={quoteLive ? "is-ok" : "is-warn"}>
-              {quoteLive ? "LIVE" : "Waiting"}
+            <strong className={brokerQuoteLive ? "is-ok" : "is-warn"}>
+              {brokerQuoteLive ? "LIVE" : "Waiting"}
             </strong>
           </div>
           <div className="gm-prem-stat">
-            <span>Balance / equity</span>
+            <span>Broker balance</span>
             <strong>
-              {equityAt != null ? money(equityAt, currency) : fundsLabel || "—"}
+              {equityAt != null
+                ? money(equityAt, currency)
+                : sync.connected
+                  ? "Unavailable"
+                  : "Unavailable"}
             </strong>
           </div>
         </div>
@@ -872,7 +965,7 @@ export function AutoTradePage() {
 
       <p className="gm-prem-section-label">Recent evaluations</p>
       <section className="gm-prem-card" aria-label="Recent evaluations">
-        <ul className="gm-prem-activity">
+        <ul className="gm-prem-activity" data-testid="autotrade-recent-evaluations">
           {activityFeed.slice(0, 5).map((item) => (
             <li key={item.id}>
               <span>{item.message}</span>
@@ -924,7 +1017,16 @@ export function AutoTradePage() {
       <details
         className="gm-prem-advanced"
         data-testid="autotrade-advanced-controls"
-        open={showAccounts || showSettings || showDiagnostics || !sync.accountSelected}
+        open={showAccounts || showSettings || showDiagnostics || setupWizardOpen}
+        onToggle={(e) => {
+          const open = (e.currentTarget as HTMLDetailsElement).open;
+          if (!open) {
+            setSetupWizardOpen(false);
+            setShowAccounts(false);
+            setShowSettings(false);
+            setShowDiagnostics(false);
+          }
+        }}
       >
         <summary>Advanced controls &amp; diagnostics</summary>
         <div className="gm-prem-advanced-body">
@@ -967,7 +1069,14 @@ export function AutoTradePage() {
           : "Demo Auto is available after Authorise Demo Trading + a Pepperstone Demo account. Live orders stay locked."}
       </div>
 
-      <AutoTradeOnboarding steps={onboarding} />
+      <details
+        className="gm-prem-nested"
+        data-testid="autotrade-full-setup-wizard"
+        open={setupWizardOpen}
+      >
+        <summary>Full setup wizard</summary>
+        <AutoTradeOnboarding steps={onboarding} />
+      </details>
 
       <section className="gm-at-actions" aria-label="Primary controls">
         <button
