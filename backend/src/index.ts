@@ -78,7 +78,10 @@ export const api = onRequest(
       "CTRADER_CLIENT_SECRET",
       "CTRADER_REDIRECT_URI",
       "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
-      "CTRADER_ENVIRONMENT"
+      "CTRADER_ENVIRONMENT",
+      "VAPID_PUBLIC_KEY",
+      "VAPID_PRIVATE_KEY",
+      "VAPID_SUBJECT"
     ],
     cors: [
       "https://goldmeta.metamechsolutions.com",
@@ -115,7 +118,12 @@ export { apiCTraderPreview } from "./cTraderPreviewApi";
 export { beforeUserCreatedGuard } from "./services/auth/beforeUserCreated";
 
 export const processProcessingJob = onDocumentCreated(
-  { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
+  {
+    document: "processingJobs/{jobId}",
+    region: env.FIREBASE_REGION,
+    // Web Push for plan/decision alerts needs the same VAPID material as `api`.
+    secrets: ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"]
+  },
   async (event) => {
     await processJob(event.params.jobId);
   }

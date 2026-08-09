@@ -150,7 +150,7 @@ export default defineConfig({
       },
       workbox: {
         // Bump on layout-critical deploys so outdated precaches are cleaned.
-        cacheId: "goldmeta-premium-ui-v5",
+        cacheId: "goldmeta-premium-ui-v6",
         navigateFallback: "/index.html",
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses
