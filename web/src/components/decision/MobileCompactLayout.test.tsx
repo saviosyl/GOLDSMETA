@@ -67,7 +67,7 @@ describe("Mobile compact layout contracts", () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 568 });
   });
 
-  it("keeps WAIT fold compact with support/resistance and no long top paragraphs", () => {
+  it("keeps WAIT fold compact with support/resistance and no long top paragraphs", async () => {
     render(
       <MemoryRouter>
         <>
@@ -98,7 +98,8 @@ describe("Mobile compact layout contracts", () => {
     expect(screen.getByTestId("nearest-resistance")).toBeInTheDocument();
     expect(screen.getByTestId("next-plan-update")).toBeInTheDocument();
     expect(screen.getByTestId("phone-alerts-control")).toBeInTheDocument();
-    expect(screen.getByTestId("enable-phone-alerts")).toBeInTheDocument();
+    // Push probe is async — wait until Enable alerts is available.
+    expect(await screen.findByTestId("enable-phone-alerts")).toBeInTheDocument();
     // Monitoring copy stays inside Why waiting, not as a top paragraph card.
     expect(screen.getByTestId("why-waiting").contains(screen.getByTestId("wait-monitoring-copy"))).toBe(true);
   });
