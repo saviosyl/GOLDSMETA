@@ -48,6 +48,9 @@ const SettingsPage = lazy(() =>
 const HelpPage = lazy(() =>
   import("./pages/HelpPage").then((m) => ({ default: m.HelpPage }))
 );
+const LearnPage = lazy(() =>
+  import("./pages/LearnPage").then((m) => ({ default: m.LearnPage }))
+);
 const InsightsPage = lazy(() =>
   import("./pages/InsightsPage").then((m) => ({ default: m.InsightsPage }))
 );
@@ -324,6 +327,22 @@ function ProtectedApp() {
             element={
               <LazyRoute label="Help">
                 <HelpPage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/learn"
+            element={
+              <LazyRoute label="Learn">
+                <LearnPage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/learn/:lessonId"
+            element={
+              <LazyRoute label="Learn">
+                <LearnPage />
               </LazyRoute>
             }
           />

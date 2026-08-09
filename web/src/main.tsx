@@ -11,6 +11,7 @@ import "./styles/redesign.css";
 import "./styles/premium-dashboard.css";
 import "./styles/gm-v2.css";
 import "./styles/premium-broker-autotrade.css";
+import "./styles/learn.css";
 
 export { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA };
 

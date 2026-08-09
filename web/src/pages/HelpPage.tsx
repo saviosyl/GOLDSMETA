@@ -146,6 +146,13 @@ export function HelpPage() {
       </label>
 
       <SectionCard title="Quick start">
+        <p className="gm-meta" style={{ marginTop: 0 }}>
+          New to trading? Start with{" "}
+          <Link to="/learn" data-testid="help-to-learn">
+            Learn GoldMeta
+          </Link>{" "}
+          — simple lessons with audio.
+        </p>
         <ol className="gm-help-steps" data-testid="first-use-guide">
           <li>
             Open <Link to="/">Plan</Link> and read the decision.

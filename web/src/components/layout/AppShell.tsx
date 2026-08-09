@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Gauge,
   Globe2,
+  GraduationCap,
   HelpCircle,
   History,
   Home,
@@ -58,6 +59,7 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: "Account",
     items: [
       { to: "/settings", label: "Settings", icon: Settings },
+      { to: "/learn", label: "Learn", icon: GraduationCap },
       { to: "/help", label: "Help", icon: HelpCircle },
       { to: "/alerts", label: "Alerts", icon: Bell }
     ]
@@ -114,6 +116,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
     items: [
       { to: "/alerts", label: "Alerts", icon: Bell },
       { to: "/settings", label: "Settings", icon: Settings },
+      { to: "/learn", label: "Learn", icon: GraduationCap },
       { to: "/help", label: "Help", icon: HelpCircle }
     ]
   },

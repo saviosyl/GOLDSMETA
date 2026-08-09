@@ -43,6 +43,8 @@ const REQUIRED_PATHS = [
   "/admin/tradingview-template",
   "/settings",
   "/help",
+  "/learn",
+  "/learn/:lessonId",
   "/insights",
   "/insights/:tab",
   "/history-replay",

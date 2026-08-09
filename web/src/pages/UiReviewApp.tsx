@@ -17,6 +17,7 @@ import { SignalPerformancePage } from "./SignalPerformancePage";
 import { AutoTradePage } from "./AutoTradePage";
 import { BrokerControlCentrePage } from "./broker/BrokerControlCentrePage";
 import { HelpPage } from "./HelpPage";
+import { LearnPage } from "./LearnPage";
 import { AdminUsersPage } from "./admin/AdminUsersPage";
 import { TradingViewSetupPage } from "./TradingViewSetupPage";
 import { TradingViewTemplateAdminPage } from "./admin/TradingViewTemplateAdminPage";
@@ -1570,6 +1571,8 @@ export default function UiReviewApp() {
             <Route path="brokers" element={<BrokerControlCentrePage />} />
             <Route path="tradingview" element={<TradingViewSetupPage />} />
             <Route path="help" element={<HelpPage />} />
+            <Route path="learn" element={<LearnPage />} />
+            <Route path="learn/:lessonId" element={<LearnPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/tradingview-template" element={<TradingViewTemplateAdminPage />} />
             <Route path="brand" element={<BrandConceptsPage />} />
