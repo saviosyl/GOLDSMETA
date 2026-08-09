@@ -196,7 +196,6 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only probe
   }, []);
 
   const reload = async () => {

@@ -160,7 +160,6 @@ export function PhoneAlertsControl({ compact = true }: { compact?: boolean }) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only probe
   }, []);
 
   const enable = async () => {
