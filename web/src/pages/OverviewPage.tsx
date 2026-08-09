@@ -55,10 +55,7 @@ import {
 } from "../lib/planTextFormat";
 import { fmtPrice } from "../lib/intradayFormat";
 import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
-import type {
-  DailySafetyPublicView,
-  SystemHealthView
-} from "../lib/broker/ctraderTypes";
+import type { SystemHealthView } from "../lib/broker/ctraderTypes";
 
 type Briefing = {
   session?: string | null;
@@ -261,14 +258,13 @@ export function OverviewPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
   const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
-  const [dailySafety, setDailySafety] = useState<DailySafetyPublicView | null>(null);
   const [systemHealth, setSystemHealth] = useState<SystemHealthView | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
     setErrorDetail(null);
     try {
-      const [pack, active, recentSetups, overnight, b, s, qual, daily, health] = await Promise.all([
+      const [pack, active, recentSetups, overnight, b, s, qual, health] = await Promise.all([
         api.latestDecisionPack(),
         api.listActiveSetups().catch(() => [] as SetupRecord[]),
         api.listSetups(6, "LIVE").catch(() => [] as SetupRecord[]),
@@ -278,15 +274,11 @@ export function OverviewPage() {
         typeof api.getAutoTradeQualification === "function"
           ? api.getAutoTradeQualification().catch(() => null)
           : Promise.resolve(null),
-        typeof api.getDailySafety === "function"
-          ? api.getDailySafety("demo").catch(() => null)
-          : Promise.resolve(null),
         typeof api.getSystemHealth === "function"
           ? api.getSystemHealth().catch(() => null)
           : Promise.resolve(null)
       ]);
       setQualification(qual);
-      setDailySafety(daily);
       setSystemHealth(health);
       const latest = pack?.decision ?? null;
       const complete = pack?.latestCompleteStrategySignal ?? null;

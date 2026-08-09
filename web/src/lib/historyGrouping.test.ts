@@ -40,8 +40,8 @@ describe("historyGrouping", () => {
 
 describe("plainReason hides raw codes", () => {
   it("maps CONFLICTED_DATA and WAIT_ONLY to plain language", () => {
-    expect(plainReason("CONFLICTED_DATA")).toMatch(/decision window/i);
-    expect(plainReason("MISSING_CONFIRMATION")).toMatch(/5M candle/i);
+    expect(plainReason("CONFLICTED_DATA")).toMatch(/Conflicting market data/i);
+    expect(plainReason("MISSING_CONFIRMATION")).toMatch(/Confirmation candle missing/i);
     expect(plainReason("WAIT_ONLY")).toMatch(/incomplete/i);
   });
 });

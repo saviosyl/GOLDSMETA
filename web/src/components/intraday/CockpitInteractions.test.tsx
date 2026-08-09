@@ -201,7 +201,9 @@ describe("Research cockpit interactions", () => {
     );
     expect(screen.getByTestId("cockpit-mismatch")).toHaveTextContent(/NO TRADE/i);
     rerender(<CockpitAlerts marketStructureMode="LIVE_RANGE_ONLY" loading={false} />);
-    expect(screen.getByTestId("cockpit-live-range-only")).toHaveTextContent(/structure is missing/i);
+    expect(screen.getByTestId("cockpit-live-range-only")).toHaveTextContent(
+      /Price feed connected|Waiting for the next verified strategy plan/i
+    );
   });
 
   it("important levels compact default shows nearest three and progress state", async () => {

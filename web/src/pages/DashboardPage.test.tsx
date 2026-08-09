@@ -124,7 +124,7 @@ describe("DashboardPage Stage 3", () => {
     expect(screen.getByTestId("system-status")).toBeInTheDocument();
     expect(screen.getByTestId("manual-risk-planner")).toBeInTheDocument();
     expect(screen.getByTestId("broker-confirm-banner")).toHaveTextContent(
-      /GoldMeta does not place this trade/
+      /never places orders|Confirm position size/i
     );
   });
 

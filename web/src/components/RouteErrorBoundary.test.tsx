@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
+import { GOLD_META_COMMIT_SHA } from "../lib/buildIdentity";
 import { STALE_CHUNK_RECOVERY_KEY } from "../lib/staleChunkRecovery";
 
 function Boom({ message }: { message: string }) {
@@ -35,7 +36,7 @@ describe("RouteErrorBoundary stale-chunk recovery", () => {
   it("shows Update required after a prior recovery attempt for this build", async () => {
     sessionStorage.setItem(
       STALE_CHUNK_RECOVERY_KEY,
-      JSON.stringify({ commit: "dev", at: Date.now() })
+      JSON.stringify({ commit: GOLD_META_COMMIT_SHA, at: Date.now() })
     );
 
     render(

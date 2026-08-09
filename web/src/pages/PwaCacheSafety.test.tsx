@@ -13,7 +13,7 @@ describe("PWA cache safety", () => {
   });
 
   it("uses a fresh premium UI Workbox cache namespace", () => {
-    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v5"/);
+    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v6"/);
     expect(viteConfig).not.toMatch(/goldmeta-hold-lean-v4/);
     expect(viteConfig).toMatch(/sw-cache-migrate\.js/);
   });
@@ -25,5 +25,9 @@ describe("PWA cache safety", () => {
   it("HTML / SW headers force revalidation", () => {
     expect(headers).toMatch(/\/index\.html[\s\S]*Cache-Control: no-cache/);
     expect(headers).toMatch(/\/sw\.js[\s\S]*Cache-Control: no-cache[\s\S]*CDN-Cache-Control: no-store/);
+  });
+
+  it("hashed /gm assets use immutable long-cache headers", () => {
+    expect(headers).toMatch(/\/gm\/\*[\s\S]*immutable/);
   });
 });

@@ -3,7 +3,7 @@
  * Distinguishes hypothetical SIGNAL records from broker Demo/Live results.
  */
 
-import type { Decision, SetupRecord, SignalOutcomeRecord } from "../types/models";
+import type { Decision, SignalOutcomeRecord } from "../types/models";
 
 export type HistoryRecordKind =
   | "SIGNAL"
