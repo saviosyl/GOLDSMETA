@@ -5,6 +5,7 @@
 
 import { buildMarketLevelLadder, nearestLevels, type LadderInput } from "./marketLadder";
 import { buildMarketStory } from "./marketStory";
+import type { MarketReportContext } from "./marketReportModel";
 
 export type SnapshotFormatId = "social" | "story" | "square" | "compact";
 
@@ -38,7 +39,7 @@ export type SnapshotOptions = {
 
 export const DEFAULT_SNAPSHOT_OPTIONS: SnapshotOptions = {
   formatId: "social",
-  theme: "light",
+  theme: "dark",
   showStory: true,
   showPlan: true,
   showScoreBreakdown: false
@@ -78,6 +79,8 @@ export type PromoSnapshotModel = {
   levels: SnapshotLevel[];
   plan: SnapshotPlan | null;
   scoreComponents?: Array<{ label: string; score: number; max: number }>;
+  /** Verified report context for the premium 1080×1350 Market Report. */
+  reportContext?: MarketReportContext | null;
 };
 
 export const SNAPSHOT_DISCLAIMER =
@@ -134,6 +137,7 @@ export type BuildSnapshotInput = {
     } | null;
   } | null;
   scoreComponents?: Array<{ label: string; score: number; max: number; reason?: string }>;
+  reportContext?: MarketReportContext | null;
 };
 
 /** Build snapshot model from verified dashboard fields only. */
@@ -208,7 +212,8 @@ export function buildPromoSnapshotModel(input: BuildSnapshotInput): PromoSnapsho
       label: c.label,
       score: c.score,
       max: c.max
-    }))
+    })),
+    reportContext: input.reportContext ?? null
   };
 }
 

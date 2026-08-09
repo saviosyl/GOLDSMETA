@@ -15,7 +15,10 @@ import {
 } from "../lib/timezone";
 import { buildOvernightReview } from "../lib/overnight";
 import type { BuildSnapshotInput } from "../lib/promoSnapshot";
+import type { MarketReportContext } from "../lib/marketReportModel";
 import { usePromoSnapshot } from "../hooks/usePromoSnapshot";
+import { useXauusdCandles } from "../hooks/useXauusdCandles";
+import { deriveTimeframeAlignment } from "../lib/planDisplay";
 import { useDashboardDecisionPoll } from "../lib/useDashboardDecisionPoll";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 import { MarketLevelLadder } from "../components/v5/MarketLevelLadder";
@@ -81,6 +84,115 @@ type Score = {
 
 type ResearchTab = "plan" | "structure" | "momentum" | "levels" | "history";
 
+function cityLabelFromTimeZone(tz: string): string {
+  const key = tz.toLowerCase();
+  if (key.includes("dublin")) return "Dublin";
+  if (key.includes("london")) return "London";
+  if (key.includes("new_york") || key.includes("new york")) return "New York";
+  if (key.includes("tokyo")) return "Tokyo";
+  if (key.includes("sydney")) return "Sydney";
+  const parts = tz.split("/");
+  return (parts[parts.length - 1] || tz).replace(/_/g, " ");
+}
+
+function clockInZone(iso: string | null | undefined, timeZone: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone
+    }).format(d);
+  } catch {
+    return null;
+  }
+}
+
+function buildReportContext(args: {
+  decision: Decision | null;
+  briefing: Briefing | null;
+  plan: IntradayPlan | null;
+  livePrice: number | null;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  marketOpen: boolean | null;
+  localTs: FormattedTimestamp;
+  stampIso: string | null | undefined;
+  candles: Array<{ open: number; high: number; low: number; close: number }> | null;
+}): MarketReportContext {
+  const { decision, briefing, plan } = args;
+  const tf = plan ? deriveTimeframeAlignment(plan) : null;
+  const tp = plan?.tradePlan;
+  const entryNum =
+    tp?.entryZone != null && Number.isFinite(Number(tp.entryZone)) ? Number(tp.entryZone) : null;
+  const localCity = cityLabelFromTimeZone(args.localTs.timeZone);
+  const localClock = clockInZone(args.stampIso, args.localTs.timeZone);
+  const nyClock = clockInZone(args.stampIso, "America/New_York");
+
+  return {
+    directionBias: plan?.directionBias ?? null,
+    marketType: plan?.marketType ?? null,
+    oneSentence: plan?.oneSentence ?? null,
+    whyNotReady: plan?.whyNotReady ?? null,
+    actionLabel: plan?.actionLabel ?? null,
+    nearestSupport: plan?.zones?.nearestSupport ?? null,
+    nearestResistance: plan?.zones?.nearestResistance ?? null,
+    setupItems: plan?.setupProgress?.items?.map((i) => ({
+      id: i.id,
+      label: i.label,
+      complete: i.complete,
+      detail: i.detail,
+      mark: i.mark
+    })),
+    confirmationLabel: plan?.confirmation5m?.label ?? null,
+    confirmationMeaningful: plan?.confirmation5m?.meaningful ?? null,
+    timeframes: tf?.cells?.map((c) => ({
+      timeframe: c.timeframe,
+      direction: c.direction ?? "—",
+      tone: c.tone
+    })),
+    atrLabel: briefing?.atrLabel ?? null,
+    atrValue: briefing?.atrValue ?? null,
+    positionVsPoc: briefing?.positionVsPoc ?? plan?.valueLocation ?? null,
+    regime: briefing?.marketRegime ?? decision?.marketRegime ?? null,
+    reasonCodes: decision?.reasonCodes,
+    bullishScenario: plan?.bullishScenario
+      ? { label: plan.bullishScenario.label, trigger: plan.bullishScenario.trigger }
+      : null,
+    bearishScenario: plan?.bearishScenario
+      ? { label: plan.bearishScenario.label, trigger: plan.bearishScenario.trigger }
+      : null,
+    tradePlanActionable: tp?.actionable ?? null,
+    tradePlanDirection: tp?.direction ?? null,
+    tradePlanEntry: entryNum,
+    tradePlanStop: tp?.stopLoss ?? null,
+    tradePlanTp1: tp?.tp1 ?? null,
+    tradePlanTp2: tp?.tp2 ?? null,
+    tradePlanTp3: tp?.tp3 ?? null,
+    tradePlanRR:
+      typeof tp?.riskReward === "number"
+        ? tp.riskReward
+        : tp?.riskReward && /^\d+(\.\d+)?$/.test(String(tp.riskReward))
+          ? Number(tp.riskReward)
+          : null,
+    marketStatus:
+      args.marketOpen === true ? "OPEN" : args.marketOpen === false ? "CLOSED" : "UNKNOWN",
+    candles: args.candles,
+    chartTimeframe: args.candles?.length ? "15M" : null,
+    localCityLabel: localCity,
+    secondaryCityLabel: "New York",
+    localClock,
+    secondaryClock: nyClock,
+    poc: args.poc,
+    vah: args.vah,
+    val: args.val
+  };
+}
+
 function buildSnapshotFromPage(args: {
   decision: Decision | null;
   briefing: Briefing | null;
@@ -95,9 +207,13 @@ function buildSnapshotFromPage(args: {
   val: number | null;
   hasPlan: boolean;
   setup: SetupRecord | null;
+  intradayPlan: IntradayPlan | null;
+  marketOpen: boolean | null;
+  stampIso: string | null | undefined;
+  candles: Array<{ open: number; high: number; low: number; close: number }> | null;
 }): BuildSnapshotInput | null {
   const { decision, briefing } = args;
-  if (!decision && !briefing) return null;
+  if (!decision && !briefing && !args.intradayPlan) return null;
   return {
     decision: args.decisionCode,
     scoreTotal: args.score?.total ?? null,
@@ -108,7 +224,7 @@ function buildSnapshotFromPage(args: {
     utcSecondary: args.localTs.secondaryUtc,
     storyInput: {
       decision: args.decisionCode,
-      session: briefing?.session ?? decision?.currentSession,
+      session: briefing?.session ?? decision?.currentSession ?? args.intradayPlan?.session,
       regime: briefing?.marketRegime ?? decision?.marketRegime,
       positionVsPoc: briefing?.positionVsPoc,
       atrLabel: briefing?.atrLabel,
@@ -139,7 +255,20 @@ function buildSnapshotFromPage(args: {
       isUiReviewFixture: false
     },
     plan: args.setup,
-    scoreComponents: args.score?.components
+    scoreComponents: args.score?.components,
+    reportContext: buildReportContext({
+      decision,
+      briefing,
+      plan: args.intradayPlan,
+      livePrice: args.livePrice,
+      poc: args.poc,
+      vah: args.vah,
+      val: args.val,
+      marketOpen: args.marketOpen,
+      localTs: args.localTs,
+      stampIso: args.stampIso,
+      candles: args.candles
+    })
   };
 }
 
@@ -225,6 +354,7 @@ function PlanSkeleton() {
 export function OverviewPage() {
   const { api, user } = useAuth();
   const { quote, setQuote } = useShellQuote();
+  const reportCandles = useXauusdCandles("M15", true);
   const isDesktop = useIsDesktop();
   const [structureOpen, setStructureOpen] = useState(false);
   const [researchTab, setResearchTab] = useState<ResearchTab>("plan");
@@ -438,6 +568,16 @@ export function OverviewPage() {
 
   const overnight = buildOvernightReview(overnightSetups, new Date(), localTs.timeZone);
 
+  const reportCandleBars =
+    reportCandles.bars.length >= 8
+      ? reportCandles.bars.slice(-36).map((b) => ({
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close
+        }))
+      : null;
+
   const snapshotInputRef = useRef<() => BuildSnapshotInput | null>(() => null);
   useEffect(() => {
     snapshotInputRef.current = () =>
@@ -454,7 +594,11 @@ export function OverviewPage() {
         vah,
         val,
         hasPlan,
-        setup
+        setup,
+        intradayPlan,
+        marketOpen,
+        stampIso,
+        candles: reportCandleBars
       });
   });
 

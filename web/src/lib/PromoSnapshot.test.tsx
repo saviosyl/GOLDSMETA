@@ -244,7 +244,7 @@ describe("PromoSnapshotModal UI", () => {
 
   it("exposes accessible trigger label", () => {
     render(<PromoSnapshotButton onClick={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /share market snapshot/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /share market report/i })).toBeInTheDocument();
   });
 });
 
@@ -256,11 +256,16 @@ describe("renderPromoSnapshotPng dimensions", () => {
       lineWidth = 1;
       font = "";
       textAlign = "left";
+      textBaseline = "alphabetic";
+      lineCap = "butt";
+      lineJoin = "miter";
       fillRect() {}
+      strokeRect() {}
       beginPath() {}
       moveTo() {}
       lineTo() {}
       arcTo() {}
+      quadraticCurveTo() {}
       closePath() {}
       fill() {}
       stroke() {}
@@ -269,6 +274,10 @@ describe("renderPromoSnapshotPng dimensions", () => {
       drawImage() {}
       save() {}
       restore() {}
+      setLineDash() {}
+      createLinearGradient() {
+        return { addColorStop() {} };
+      }
       measureText(t: string) {
         return { width: String(t).length * 8 };
       }

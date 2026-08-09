@@ -1,4 +1,4 @@
-/** Compact Share Market Snapshot trigger button. */
+/** Compact Share Market Report trigger button. */
 export function PromoSnapshotButton({
   onClick,
   disabled
@@ -11,14 +11,14 @@ export function PromoSnapshotButton({
       type="button"
       className="gm-snapshot-trigger"
       data-testid="share-market-snapshot"
-      aria-label="Share Market Snapshot"
+      aria-label="Share Market Report"
       disabled={disabled}
       onClick={onClick}
     >
       <span className="gm-snapshot-trigger-icon" aria-hidden>
         ↗
       </span>
-      Share Market Snapshot
+      Share Market Report
     </button>
   );
 }

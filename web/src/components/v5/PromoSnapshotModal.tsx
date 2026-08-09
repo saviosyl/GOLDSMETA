@@ -83,13 +83,13 @@ export function PromoSnapshotModal({
       >
         <div className="gm-snapshot-modal-head">
           <h2 id={titleId} className="gm-section-title">
-            Share Market Snapshot
+            Share Market Report
           </h2>
           <button
             ref={closeRef}
             type="button"
             className="gm-linkish"
-            aria-label="Close snapshot preview"
+            aria-label="Close report preview"
             data-testid="promo-snapshot-close"
             onClick={onClose}
           >

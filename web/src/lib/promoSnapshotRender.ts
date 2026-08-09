@@ -13,6 +13,8 @@ import {
   type PromoSnapshotModel,
   type SnapshotOptions
 } from "./promoSnapshot";
+import { buildMarketReportModel } from "./marketReportModel";
+import { renderMarketReportPng } from "./marketReportRender";
 
 function fmt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "Unavailable";
@@ -107,6 +109,13 @@ export async function renderPromoSnapshotPng(
   logoUrl = "/brand/mark-official.png"
 ): Promise<Blob> {
   const format = getSnapshotFormat(options.formatId);
+
+  // Premium single-page Market Report (approved 1080×1350 layout).
+  if (format.id === "social") {
+    const report = buildMarketReportModel(model, model.reportContext);
+    return renderMarketReportPng(report, logoUrl);
+  }
+
   const { width: W, height: H } = format;
   const palette = options.theme === "dark" ? DARK_PALETTE : LIGHT_PALETTE;
   const canvas = document.createElement("canvas");
