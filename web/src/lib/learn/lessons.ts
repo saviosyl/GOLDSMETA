@@ -476,7 +476,7 @@ Can notify you about important plan events.
 Read the Plan slowly.
 If something is missing, WAIT can be the correct answer.`,
     example:
-      "You open Plan. Decision says WAIT. Why Waiting says 5-minute confirmation is missing. That tells you the structure is incomplete — stay patient.",
+      "You open Plan. Decision says WAIT. Market Structure may already be ready, but Why Waiting says the 5-minute trade confirmation is still missing. GoldMeta waits for that final confirmation instead of forcing a trade.",
     remember: [
       "Plan is the main day screen.",
       "Decision, Score, Price, Story, Structure matter.",
