@@ -222,7 +222,7 @@ export function SignInPage() {
             </p>
           )}
 
-          <p className="gm-auth-trust">Your data is protected. Broker execution remains disabled.</p>
+          <p className="gm-auth-trust">Secure access to your GoldMeta account.</p>
         </div>
       </div>
 

@@ -7,18 +7,18 @@ import { formatWhen } from "../lib/format";
 import { EmptyState, PageHeader, SectionCard } from "../components/ui/primitives";
 
 const TAG_OPTIONS: Array<{ id: JournalTag; label: string }> = [
-  { id: "followed", label: "Followed plan: YES" },
-  { id: "ignored", label: "Followed plan: NO" },
-  { id: "entered_manually", label: "Entered manually" },
+  { id: "followed", label: "Followed plan" },
+  { id: "ignored", label: "Did not follow" },
+  { id: "entered_manually", label: "Manual" },
   { id: "avoided", label: "Avoided" },
   { id: "news_risk", label: "News risk" },
   { id: "poor_spread", label: "Poor spread" },
-  { id: "discretionary_override", label: "Discretionary override" }
+  { id: "discretionary_override", label: "Override" }
 ];
 
 type DirFilter = "ALL" | Decision["decision"];
 
-/** Journal — main review workspace (notes never alter engine outcomes). */
+/** Journal — auto-journal first; manual entry is secondary. */
 export function JournalPage() {
   const { api } = useAuth();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -29,6 +29,7 @@ export function JournalPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirFilter, setDirFilter] = useState<DirFilter>("ALL");
+  const [showManual, setShowManual] = useState(false);
   const offline = !navigator.onLine;
 
   const reload = async () => {
@@ -100,8 +101,8 @@ export function JournalPage() {
         </div>
       </div>
       <p className="gm-meta">
-        Record outcomes and lessons. Notes never alter engine outcomes.{" "}
-        <Link to="/history">Open read-only History archive</Link>.
+        Recent trades, outcomes and lessons. Notes never alter engine outcomes.{" "}
+        <Link to="/history-replay/history">History &amp; Replay</Link>.
       </p>
       {offline && (
         <div className="banner stale" role="status">
@@ -132,87 +133,116 @@ export function JournalPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="New entry">
-        <form onSubmit={onSubmit} data-testid="journal-new-entry">
-          <div className="field">
-            <label htmlFor="direction">Direction</label>
-            <select
-              id="direction"
-              value={direction}
-              onChange={(e) => setDirection(e.target.value as Decision["decision"])}
-              disabled={offline}
-            >
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-              <option value="WAIT">WAIT</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="notes">Notes / outcome</label>
-            <textarea
-              id="notes"
-              rows={3}
-              maxLength={1600}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={offline}
-              placeholder="TP1 hit, invalidated, skipped…"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="lesson">Lesson learned</label>
-            <textarea
-              id="lesson"
-              rows={2}
-              maxLength={400}
-              value={lesson}
-              onChange={(e) => setLesson(e.target.value)}
-              disabled={offline}
-              placeholder="What will you do differently?"
-            />
-          </div>
-          <fieldset className="field tag-fieldset" disabled={offline}>
-            <legend>Followed plan / tags</legend>
-            <div className="tag-grid">
-              {TAG_OPTIONS.map((tag) => (
-                <label key={tag.id} className="tag-option">
-                  <input
-                    type="checkbox"
-                    checked={tags.includes(tag.id)}
-                    onChange={() => toggleTag(tag.id)}
-                  />
-                  {tag.label}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <button className="btn primary block" type="submit" disabled={busy || offline}>
-            {busy ? "Saving…" : "Save entry"}
-          </button>
-        </form>
-      </SectionCard>
-
-      <SectionCard title="Recent">
+      <SectionCard title="Recent trades">
         {filtered.length === 0 ? (
           <EmptyState
-            title="No journal entries yet."
-            body="Save your first outcome above. Notes never change engine decisions."
+            title="No journal entries yet"
+            body="Completed Demo Auto and qualification trades appear here. You can also add a manual note."
             icon={<BookOpen aria-hidden />}
           />
         ) : (
-          <ul className="list" data-testid="journal-recent-list">
+          <ul className="list gm-journal-cards" data-testid="journal-recent-list">
             {filtered.map((entry) => (
-              <li key={entry.journalId ?? entry.id ?? `${entry.createdAt}-${entry.direction}`}>
-                <strong>{entry.direction}</strong> · {entry.outcome} · {formatWhen(entry.createdAt)}
+              <li
+                key={entry.journalId ?? entry.id ?? `${entry.createdAt}-${entry.direction}`}
+                className="gm-journal-card"
+              >
+                <div className="gm-journal-card__top">
+                  <strong>
+                    XAUUSD · {entry.direction}
+                  </strong>
+                  <span className="gm-meta">{formatWhen(entry.createdAt)}</span>
+                </div>
+                <div className="gm-meta">{entry.outcome ?? "—"}</div>
                 {entry.tags && entry.tags.length > 0 ? (
-                  <div className="muted">{entry.tags.join(", ")}</div>
+                  <div className="gm-chip-row">
+                    {entry.tags.map((t) => (
+                      <span key={t} className="gm-chip">
+                        {t.replace(/_/g, " ")}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
-                {entry.notes ? <div className="muted">{entry.notes}</div> : null}
+                {entry.notes ? <p className="gm-meta">{entry.notes}</p> : null}
               </li>
             ))}
           </ul>
         )}
       </SectionCard>
+
+      <div className="gm-journal-manual-toggle">
+        <button
+          type="button"
+          className="gm-btn gm-btn--secondary"
+          data-testid="journal-add-manual"
+          onClick={() => setShowManual((v) => !v)}
+        >
+          {showManual ? "Hide manual entry" : "+ Add manual entry"}
+        </button>
+      </div>
+
+      {showManual ? (
+        <SectionCard title="Manual entry">
+          <form onSubmit={onSubmit} data-testid="journal-new-entry">
+            <div className="field">
+              <label htmlFor="direction">Direction</label>
+              <select
+                id="direction"
+                value={direction}
+                onChange={(e) => setDirection(e.target.value as Decision["decision"])}
+                disabled={offline}
+              >
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="WAIT">WAIT</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="notes">Notes / outcome</label>
+              <textarea
+                id="notes"
+                rows={3}
+                maxLength={1600}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                disabled={offline}
+                placeholder="TP1 hit, invalidated, skipped…"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="lesson">Lesson learned</label>
+              <textarea
+                id="lesson"
+                rows={2}
+                maxLength={400}
+                value={lesson}
+                onChange={(e) => setLesson(e.target.value)}
+                disabled={offline}
+                placeholder="What will you do differently?"
+              />
+            </div>
+            <fieldset className="field tag-fieldset" disabled={offline}>
+              <legend>Tags</legend>
+              <div className="tag-grid gm-chip-select" role="group" aria-label="Journal tags">
+                {TAG_OPTIONS.map((tag) => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className={`gm-chip ${tags.includes(tag.id) ? "is-selected" : ""}`}
+                    aria-pressed={tags.includes(tag.id)}
+                    onClick={() => toggleTag(tag.id)}
+                  >
+                    {tag.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <button className="btn primary block" type="submit" disabled={busy || offline}>
+              {busy ? "Saving…" : "Save entry"}
+            </button>
+          </form>
+        </SectionCard>
+      ) : null}
     </div>
   );
 }

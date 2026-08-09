@@ -358,76 +358,90 @@ export function SettingsPage() {
         </div>
       )}
 
-      <section
-        className="gm-card-v2 gm-settings-more-nav"
-        data-testid="settings-more-nav"
-        aria-label="More / Settings"
-      >
-        <h2 className="gm-section-title">More / Settings</h2>
-        <nav className="gm-settings-nav-list">
-          {MORE_NAV.map((item) => {
-            const Icon = item.icon;
-            if (item.href) {
-              return (
-                <Link key={item.id} to={item.href} className="gm-settings-nav-item">
-                  <Icon size={18} aria-hidden />
-                  <span>{item.label}</span>
-                  <ChevronRight className="gm-chevron" size={18} aria-hidden />
-                </Link>
-              );
-            }
-            if (item.action === "signout") {
+      <div className="gm-settings-layout" data-testid="settings-layout">
+        <section
+          className="gm-card-v2 gm-settings-more-nav"
+          data-testid="settings-more-nav"
+          aria-label="Settings categories"
+        >
+          <h2 className="gm-section-title">Categories</h2>
+          <nav className="gm-settings-nav-list" data-testid="settings-tabs">
+            {MORE_NAV.map((item) => {
+              const Icon = item.icon;
+              if (item.href) {
+                return (
+                  <Link key={item.id} to={item.href} className="gm-settings-nav-item">
+                    <Icon size={18} aria-hidden />
+                    <span>{item.label}</span>
+                    <ChevronRight className="gm-chevron" size={18} aria-hidden />
+                  </Link>
+                );
+              }
+              if (item.action === "signout") {
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="gm-settings-nav-item"
+                    onClick={() => void signOut()}
+                  >
+                    <Icon size={18} aria-hidden />
+                    <span>{item.label}</span>
+                    <ChevronRight className="gm-chevron" size={18} aria-hidden />
+                  </button>
+                );
+              }
               return (
                 <button
                   key={item.id}
                   type="button"
-                  className="gm-settings-nav-item"
-                  onClick={() => void signOut()}
+                  role="tab"
+                  aria-selected={settingsTab === item.tab}
+                  className={`gm-settings-nav-item${settingsTab === item.tab ? " active" : ""}`}
+                  onClick={() => {
+                    if (item.tab) setSettingsTab(item.tab);
+                  }}
                 >
                   <Icon size={18} aria-hidden />
                   <span>{item.label}</span>
                   <ChevronRight className="gm-chevron" size={18} aria-hidden />
                 </button>
               );
-            }
-            return (
+            })}
+            {SETTINGS_TABS.filter(
+              (t) => !MORE_NAV.some((m) => m.tab === t.id) && t.id !== "tradingview"
+            ).map((t) => (
               <button
-                key={item.id}
+                key={t.id}
                 type="button"
-                className={`gm-settings-nav-item${settingsTab === item.tab ? " active" : ""}`}
-                onClick={() => {
-                  if (item.tab) {
-                    setSettingsTab(item.tab);
-                    document.getElementById(`settings-${item.tab}`)?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start"
-                    });
-                  }
-                }}
+                role="tab"
+                aria-selected={settingsTab === t.id}
+                className={`gm-settings-nav-item${settingsTab === t.id ? " active" : ""}`}
+                onClick={() => setSettingsTab(t.id)}
               >
-                <Icon size={18} aria-hidden />
-                <span>{item.label}</span>
+                <span>{t.label}</span>
                 <ChevronRight className="gm-chevron" size={18} aria-hidden />
               </button>
-            );
-          })}
-        </nav>
-      </section>
-
-      <div className="gm-tabs" role="tablist" aria-label="Settings sections" data-testid="settings-tabs">
-        {SETTINGS_TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={settingsTab === t.id}
-            className={settingsTab === t.id ? "active" : undefined}
-            onClick={() => setSettingsTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+            ))}
+            {isStaff ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === "tradingview"}
+                className={`gm-settings-nav-item${settingsTab === "tradingview" ? " active" : ""}`}
+                onClick={() => setSettingsTab("tradingview")}
+              >
+                <span>TradingView</span>
+                <ChevronRight className="gm-chevron" size={18} aria-hidden />
+              </button>
+            ) : null}
+          </nav>
+          <p className="gm-meta" style={{ marginTop: 12 }}>
+            AutoTrade risk settings live under{" "}
+            <Link to="/autotrade">AutoTrade → Risk</Link>.
+          </p>
+        </section>
+        <div className="gm-settings-content">
 
       {settingsTab === "account" && (
         <div className="card settings-card" id="settings-account">
@@ -974,6 +988,8 @@ export function SettingsPage() {
           {GOLD_META_BUILD_STAMP}
         </p>
       </footer>
+        </div>
+      </div>
     </div>
   );
 }

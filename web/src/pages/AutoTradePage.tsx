@@ -50,6 +50,7 @@ import { DailySafetyCard } from "../components/autotrade/DailySafetyCard";
 import { OpenPositionCard } from "../components/autotrade/OpenPositionCard";
 import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 import type { DailySafetyPublicView } from "../lib/broker/ctraderTypes";
+import { deriveAutoTradeHeaderStatus } from "../lib/autoTradeHeaderStatus";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -85,9 +86,11 @@ function statusTone(status: string): string {
 }
 
 type ModeTab = "demo" | "live";
+type AtNavTab = "overview" | "qualification" | "risk" | "activity";
 
 export function AutoTradePage() {
   const { api, account } = useAuth();
+  const [atTab, setAtTab] = useState<AtNavTab>("overview");
   const [status, setStatus] = useState<AutoTradeStatus | null>(null);
   const [centre, setCentre] = useState<BrokerControlCentreResponse | null>(null);
   const [diagnostics, setDiagnostics] = useState<CTraderDiagnosticsReport | null>(null);
@@ -307,6 +310,12 @@ export function AutoTradePage() {
   );
 
   const connectionLabel = sync.connectionLabel;
+  const headerStatus = deriveAutoTradeHeaderStatus({
+    qualification,
+    status,
+    loading: qualificationLoading && !qualification
+  });
+  /** Execution mode pill (OFF / SHADOW / DEMO) — distinct from qualification hero label. */
   const autoTradeLabel = "OFF";
   const marketOpen = sync.marketOpen;
   const marketLabel = sync.marketLabel;
@@ -559,11 +568,12 @@ export function AutoTradePage() {
     Boolean(diagnostics?.oauthConnected) ||
     Boolean(qualification?.accountIdPresent && qualification.accountMasked) ||
     Boolean(accounts.some((a) => a.selected));
-  const heroState = isLiveEnv
-    ? "SHADOW"
-    : display === "SHADOW"
-      ? "SHADOW"
-      : "OFF";
+  const marketClosed =
+    !sync.marketOpen &&
+    (shellQuote?.marketStatus === "CLOSED" ||
+      /CLOSE/i.test(sync.marketStatusRaw || "") ||
+      shellQuote?.freshness === "MARKET_CLOSED");
+  const heroState = display === "SHADOW" || isLiveEnv ? "SHADOW" : "OFF";
 
   return (
     <div
@@ -572,15 +582,23 @@ export function AutoTradePage() {
     >
       <header className="gm-prem-page-head">
         <div>
-          <h1>AutoTrade Control</h1>
-          <p>Status, readiness, and safeguards</p>
+          <h1>AutoTrade</h1>
+          <p>Demo automation, qualification, and daily safety</p>
         </div>
         <div className="gm-prem-chip-row">
           <PremiumStatusChip
-            tone={heroState === "SHADOW" ? "amber" : "off"}
+            tone={
+              headerStatus.tone === "success"
+                ? "ok"
+                : headerStatus.tone === "warning"
+                  ? "amber"
+                  : headerStatus.tone === "danger"
+                    ? "red"
+                    : "off"
+            }
             withDot
           >
-            {heroState === "SHADOW" ? "SHADOW MODE" : "OFF"}
+            {headerStatus.label}
           </PremiumStatusChip>
           <span className="gm-prem-updated" aria-live="polite">
             <span className="gm-prem-dot" aria-hidden="true" />
@@ -591,35 +609,36 @@ export function AutoTradePage() {
 
       <ExecutionDisabledBanner page="autotrade" />
 
-      <div
-        className={`gm-prem-card gm-env-banner ${isLiveEnv ? "gm-env-banner--live" : "gm-env-banner--demo"}`}
+      <section
+        className="gm-prem-card gm-prem-card--navy gm-at-control-strip gm-at-hero"
+        aria-label="AutoTrade status"
         data-testid="autotrade-env-banner"
       >
-        <strong>{isLiveEnv ? "LIVE · REAL MONEY" : "DEMO · DEMO FUNDS"}</strong>
-        <span>
-          {maskedAt || qualification?.accountMasked
-            ? `Account ${maskedAt || qualification?.accountMasked}`
-            : "No account selected"}{" "}
-          · AutoTrade {display === "OFF" || !status?.mode ? "OFF" : autoTradeLabel} · Live orders
-          LOCKED
-        </span>
-      </div>
-
-      <section className="gm-prem-card gm-prem-card--navy gm-at-control-strip" aria-label="Execution status">
         <div className="gm-prem-hero-top">
           <div>
-            <p className="gm-prem-card__title">AutoTrade Control</p>
-            <h2 className="gm-prem-card__headline">
-              {heroState === "SHADOW" ? "SHADOW / OFF" : "OFF"}
+            <p className="gm-prem-card__title">
+              {isLiveEnv ? "LIVE AUTOTRADE" : "DEMO AUTOTRADE"}
+            </p>
+            <h2 className="gm-prem-card__headline" data-testid="autotrade-hero-state">
+              {headerStatus.stateKey === "QUALIFYING"
+                ? "QUALIFYING"
+                : headerStatus.label}
             </h2>
             <p className="gm-prem-card__sub">
-              {heroState === "SHADOW"
-                ? "Live ideas are simulated. No orders sent."
-                : "Automation is off. Live execution stays locked."}
+              {maskedAt || qualification?.accountMasked
+                ? `Pepperstone · ${maskedAt || qualification?.accountMasked}`
+                : brokerConnected
+                  ? "Broker connected · select account"
+                  : "Broker not connected"}
+            </p>
+            <p className="gm-prem-card__sub gm-at-next-action" data-testid="autotrade-next-action">
+              {headerStatus.nextAction ||
+                qualification?.nextAction ||
+                "Waiting for valid market setup"}
             </p>
           </div>
           <PremiumStatusChip tone="locked" withDot>
-            LOCKED
+            LIVE MONEY LOCKED
           </PremiumStatusChip>
         </div>
         <div className="gm-prem-stat-grid gm-prem-stat-grid--3">
@@ -640,7 +659,7 @@ export function AutoTradePage() {
           </div>
           <div className="gm-prem-stat">
             <span>AutoTrade</span>
-            <strong>{display === "OFF" || !status?.mode ? "OFF" : autoTradeLabel}</strong>
+            <strong data-testid="autotrade-canonical-label">{headerStatus.label}</strong>
           </div>
           <div className="gm-prem-stat">
             <span>Live orders</span>
@@ -653,31 +672,61 @@ export function AutoTradePage() {
             </strong>
           </div>
           <div className="gm-prem-stat" data-testid="autotrade-broker-quotes-stat">
-            <span>Personal broker quotes</span>
-            <strong className={brokerQuoteHealthy ? "is-ok" : "is-warn"}>
+            <span>Broker quotes</span>
+            <strong className={brokerQuoteHealthy || marketClosed ? "is-ok" : "is-warn"}>
               {brokerQuoteLive
                 ? "Live"
-                : brokerQuoteHealthy
-                  ? "Active"
-                  : brokerConnected
-                    ? "Waiting"
-                    : "Unavailable"}
+                : marketClosed
+                  ? "Paused — market closed"
+                  : brokerQuoteHealthy
+                    ? "Active"
+                    : brokerConnected
+                      ? "Waiting for market"
+                      : "Unavailable"}
             </strong>
           </div>
           <div className="gm-prem-stat" data-testid="autotrade-live-execution-stat">
-            <span>Live execution account</span>
-            <strong className="is-lock">
-              {sync.isLive && sync.accountSelected ? `${maskedAt ?? "Selected"} · Locked` : "Not selected"}
-            </strong>
+            <span>Live execution</span>
+            <strong className="is-lock">LOCKED</strong>
           </div>
         </div>
-        {/* Preserve broker badge test id */}
         <p className="gm-prem-sr-status" data-testid="autotrade-broker-badge">
           {accountLabel}
         </p>
       </section>
 
-      {dailySafety ? (
+      <div
+        className="gm-tabs gm-at-tabs"
+        role="tablist"
+        aria-label="AutoTrade sections"
+        data-testid="autotrade-section-tabs"
+      >
+        {(
+          [
+            ["overview", "Overview"],
+            ["qualification", "Qualification"],
+            ["risk", "Risk"],
+            ["activity", "Activity"]
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={atTab === id}
+            className={atTab === id ? "active" : undefined}
+            data-testid={`autotrade-section-${id}`}
+            onClick={() => {
+              setAtTab(id);
+              if (id === "risk") setShowSettings(true);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {atTab === "overview" && dailySafety ? (
         <DailySafetyCard
           safety={dailySafety}
           busy={busy}
@@ -696,7 +745,7 @@ export function AutoTradePage() {
         />
       ) : null}
 
-      {qualification ? (
+      {(atTab === "overview" || atTab === "qualification") && qualification ? (
         <QualificationDashboard
           view={qualification}
           busy={busy}
@@ -976,38 +1025,40 @@ export function AutoTradePage() {
         </ul>
       </section>
 
-      <p className="gm-prem-section-label">How it works</p>
-      <section className="gm-prem-card" aria-label="How it works">
-        <ol className="gm-prem-how-steps">
-          <li>
-            <span aria-hidden="true">
-              <Search size={16} />
-            </span>
-            <div>
-              <strong>Plan Found</strong>
-              <p>GoldMeta identifies a setup</p>
-            </div>
-          </li>
-          <li>
-            <span aria-hidden="true">
-              <Shield size={16} />
-            </span>
-            <div>
-              <strong>Risk Checked</strong>
-              <p>Risk and safeguards validated</p>
-            </div>
-          </li>
-          <li>
-            <span aria-hidden="true">
-              <Scale size={16} />
-            </span>
-            <div>
-              <strong>Execution Decision</strong>
-              <p>Allowed / Blocked / Shadow</p>
-            </div>
-          </li>
-        </ol>
-      </section>
+      {atTab === "overview" ? (
+        <details className="gm-disclosure gm-at-how-details" data-testid="autotrade-how-it-works">
+          <summary>How AutoTrade works</summary>
+          <ol className="gm-prem-how-steps">
+            <li>
+              <span aria-hidden="true">
+                <Search size={16} />
+              </span>
+              <div>
+                <strong>Plan found</strong>
+                <p>GoldMeta identifies a setup</p>
+              </div>
+            </li>
+            <li>
+              <span aria-hidden="true">
+                <Shield size={16} />
+              </span>
+              <div>
+                <strong>Risk checked</strong>
+                <p>Risk and safeguards validated</p>
+              </div>
+            </li>
+            <li>
+              <span aria-hidden="true">
+                <Scale size={16} />
+              </span>
+              <div>
+                <strong>Execution decision</strong>
+                <p>Allowed, blocked, or research-only</p>
+              </div>
+            </li>
+          </ol>
+        </details>
+      ) : null}
 
       <p className="gm-prem-section-label">Controls</p>
       <div className="gm-prem-control-grid" aria-label="AutoTrade controls">

@@ -5,7 +5,7 @@ import { useAuth } from "../lib/auth";
 type AnyRec = Record<string, unknown>;
 
 /** V4 Stage B research panel — LIVE SHADOW ONLY. Never actionable. */
-export function V4ResearchPage() {
+export function V4ResearchPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { api } = useAuth();
   const [status, setStatus] = useState<AnyRec | null>(null);
   const [analyses, setAnalyses] = useState<AnyRec[]>([]);
@@ -45,15 +45,27 @@ export function V4ResearchPage() {
 
   return (
     <div className="v4-research-page gm-premium-v2" data-testid="v4-research-page">
-      <h1 className="gm-page-title">Research</h1>
+      {!embedded ? <h1 className="gm-page-title">Research</h1> : null}
       <p className="gm-meta" style={{ marginBottom: 16 }}>
-        Separate strategyVersion=4 research engine. Production remains V3. AutoTrade OFF.
+        {embedded
+          ? "Strategy research in shadow testing — not approved for execution."
+          : "Separate strategy research engine. Production remains V3."}
       </p>
 
       <div className="banner stale" role="status" data-testid="v4-shadow-banner">
-        V4 RESEARCH — LIVE SHADOW ONLY
-        <br />
-        NOT A TRADE RECOMMENDATION
+        {embedded ? (
+          <>
+            V4 RESEARCH — Shadow testing
+            <br />
+            Not approved for execution
+          </>
+        ) : (
+          <>
+            V4 RESEARCH — LIVE SHADOW ONLY
+            <br />
+            NOT A TRADE RECOMMENDATION
+          </>
+        )}
       </div>
 
       {error && (

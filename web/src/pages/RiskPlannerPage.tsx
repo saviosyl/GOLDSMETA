@@ -44,12 +44,12 @@ export function RiskPlannerPage() {
 
   return (
     <div data-testid="risk-planner-page" className="gm-risk-planner-page gm-premium-v2">
-      <PageHeader title="Risk Planner" environment="LIVE" freshness="Manual only" />
-      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
-        Size the trade from balance, risk, entry and stop. GoldMeta never places orders and never
-        connects this calculator to broker execution.{" "}
-        <Link className="gm-linkish" to="/settings">
-          Edit risk preferences
+      <PageHeader title="Risk Planner" environment="DEMO" freshness="Manual calculator" />
+      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }} data-testid="risk-planner-disclaimer">
+        <strong>Manual calculator</strong> — does not place orders. Size the trade from balance,
+        risk, entry and stop.{" "}
+        <Link className="gm-linkish" to="/autotrade" data-testid="manage-autotrade-risk-link">
+          Manage AutoTrade risk →
         </Link>
       </p>
       <ul className="gm-help-list" data-testid="risk-planner-warnings">
@@ -58,7 +58,7 @@ export function RiskPlannerPage() {
           side.
         </li>
         <li>Warns when the target is invalid or risk is above your limit.</li>
-        <li>No averaging down · no martingale · AutoTrade OFF.</li>
+        <li>No averaging down · no martingale · never connected to broker execution.</li>
       </ul>
       {error && (
         <div className="banner error" role="alert">

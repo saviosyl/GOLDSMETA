@@ -204,13 +204,17 @@ export function AlertsSetupPage() {
       ? (admin!.checklist as ChecklistItem[])
       : checklistFromHealth(health);
 
+  const recentMeaningful = events.filter(
+    (e) => !/TEST\s*NOTIFICATION/i.test(String(e.message ?? "")) && !/^TEST_/i.test(String(e.event ?? ""))
+  );
+
   return (
     <div className="gm-premium-alerts-page gm-premium-v2" data-testid="alerts-setup-page">
       <div className="gm-page-toolbar">
         <Link to="/" className="gm-linkish">
           <ChevronLeft size={16} aria-hidden /> Plan
         </Link>
-        <h1>Alerts & Setup</h1>
+        <h1>Alerts</h1>
       </div>
 
       {error ? (
@@ -219,26 +223,15 @@ export function AlertsSetupPage() {
         </p>
       ) : null}
 
-      <StandardSetupChecklist
-        checklist={checklist}
-        sharedWebhookUrl={admin?.sharedWebhookUrl ?? null}
-        isStaff={isStaff}
-      />
-
-      <section className="gm-card-v2" style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: "0 0 10px", fontWeight: 800 }}>Market feed</h2>
-        <MarketFeedStatus health={health ?? admin?.health ?? null} />
-      </section>
-
-      <section className="gm-card-v2" style={{ marginBottom: 14 }} id="phone-alerts">
+      <section className="gm-card-v2" style={{ marginBottom: 14 }} id="phone-alerts" data-testid="notification-status">
         <h2 style={{ margin: "0 0 10px", fontWeight: 800, display: "flex", gap: 8, alignItems: "center" }}>
-          <Bell size={18} aria-hidden /> Phone alerts
+          <Bell size={18} aria-hidden /> Notification status
         </h2>
         <PhoneAlertsControl compact={false} />
       </section>
 
       <section className="gm-card-v2" data-testid="alerts-preferences" style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: "0 0 8px", fontWeight: 800 }}>Notification preferences</h2>
+        <h2 style={{ margin: "0 0 8px", fontWeight: 800 }}>Trading</h2>
         <p className="gm-meta">
           Get notified when a valid plan becomes ready — even if you are not watching the screen.
         </p>
@@ -271,20 +264,20 @@ export function AlertsSetupPage() {
           <Info size={18} color="var(--gold-600)" aria-hidden /> What happens next
         </h2>
         <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text-secondary)" }}>
-          <li>GoldMeta watches for a valid 15M plan.</li>
+          <li>GoldMeta watches for a valid plan.</li>
           <li>You can enable alerts for plan-ready and confirmation events.</li>
           <li>When a plan is ready, review entry, stop and targets yourself.</li>
-          <li>AutoTrade stays OFF — GoldMeta never places orders.</li>
+          <li>AutoTrade only places Demo orders when qualification and safety allow it.</li>
         </ul>
       </section>
 
       <section className="gm-card-v2" data-testid="recent-alerts">
         <h2 style={{ margin: "0 0 10px", fontWeight: 800 }}>Recent alerts</h2>
-        {events.length === 0 ? (
+        {recentMeaningful.length === 0 ? (
           <p className="gm-meta">No recent alerts yet.</p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-            {events.map((event) => (
+            {recentMeaningful.map((event) => (
               <li key={event.id} className="gm-level-row">
                 <strong>{String(event.event).replace(/_/g, " ")}</strong>
                 <span className="gm-meta">
@@ -298,6 +291,21 @@ export function AlertsSetupPage() {
           </ul>
         )}
       </section>
+
+      {isStaff ? (
+        <details className="gm-disclosure" data-testid="alerts-advanced-setup">
+          <summary>Advanced · TradingView feed setup</summary>
+          <StandardSetupChecklist
+            checklist={checklist}
+            sharedWebhookUrl={admin?.sharedWebhookUrl ?? null}
+            isStaff={isStaff}
+          />
+          <section className="gm-card-v2" style={{ marginBottom: 14 }}>
+            <h2 style={{ margin: "0 0 10px", fontWeight: 800 }}>Market feed</h2>
+            <MarketFeedStatus health={health ?? admin?.health ?? null} />
+          </section>
+        </details>
+      ) : null}
     </div>
   );
 }

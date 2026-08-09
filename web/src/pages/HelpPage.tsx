@@ -1,139 +1,201 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GLOSSARY } from "../lib/glossary";
 import { PageHeader, SectionCard } from "../components/ui/primitives";
 
+const TOPIC_GROUPS: Array<{
+  id: string;
+  title: string;
+  items: Array<{ id: string; term: string; detail: string }>;
+}> = [
+  {
+    id: "decisions",
+    title: "Trading decisions",
+    items: [
+      {
+        id: "buy",
+        term: "What BUY means",
+        detail:
+          "GoldMeta sees a bullish plan. Enter only after confirmation and your own risk check."
+      },
+      {
+        id: "wait",
+        term: "What WAIT / HOLD means",
+        detail: "Conditions are incomplete. Stay flat until the next verified signal."
+      },
+      {
+        id: "entry",
+        term: "Entry, stop and targets",
+        detail: "Entry is the area to consider. Stop is invalidation. TP levels are targets, not guarantees."
+      }
+    ]
+  },
+  {
+    id: "risk",
+    title: "Risk",
+    items: [
+      {
+        id: "planner",
+        term: "Risk Planner",
+        detail: "Manual calculator for position size. It never places orders."
+      },
+      {
+        id: "auto-risk",
+        term: "AutoTrade risk",
+        detail: "Daily trade limits, loss limits and cooldowns live under AutoTrade → Risk."
+      }
+    ]
+  },
+  {
+    id: "autotrade",
+    title: "AutoTrade & qualification",
+    items: [
+      {
+        id: "qual",
+        term: "Qualification",
+        detail:
+          "Preview setups, controlled Demo trades, then observation before Demo Auto can be enabled. Live stays locked until separate activation."
+      },
+      {
+        id: "demo-live",
+        term: "Demo vs Live",
+        detail: "Demo uses practice funds. Live money execution remains hard-locked until you complete activation."
+      }
+    ]
+  },
+  {
+    id: "broker",
+    title: "Broker",
+    items: [
+      {
+        id: "pepperstone",
+        term: "Pepperstone cTrader",
+        detail: "Connect a Demo account for qualification. Reconnect only when the connection is unhealthy."
+      }
+    ]
+  },
+  {
+    id: "charts",
+    title: "Charts & levels",
+    items: [
+      {
+        id: "levels",
+        term: "Support, resistance and value",
+        detail: "Plan shows key levels on the chart. Full level maps live under More → Levels."
+      }
+    ]
+  },
+  {
+    id: "notifications",
+    title: "Notifications",
+    items: [
+      {
+        id: "alerts",
+        term: "Alerts",
+        detail: "Use the bell icon for notification preferences. TradingView feed setup is for owners/admins."
+      }
+    ]
+  },
+  {
+    id: "account",
+    title: "Account & security",
+    items: [
+      {
+        id: "settings",
+        term: "Settings",
+        detail: "Profile, appearance, security and legal links live under Settings."
+      }
+    ]
+  }
+];
+
 /** Beginner-friendly help centre — how to use GoldMeta today. */
 export function HelpPage() {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const groups = useMemo(() => {
+    if (!q) return TOPIC_GROUPS;
+    return TOPIC_GROUPS.map((g) => ({
+      ...g,
+      items: g.items.filter(
+        (i) => i.term.toLowerCase().includes(q) || i.detail.toLowerCase().includes(q)
+      )
+    })).filter((g) => g.items.length > 0);
+  }, [q]);
+
   return (
     <div className="gm-help-page" data-testid="help-page">
-      <PageHeader title="Help" freshness="Beginner-friendly guide" />
+      <PageHeader title="Help" freshness="How can we help?" />
 
-      <SectionCard title="How to use GoldMeta today">
+      <label className="gm-help-search" htmlFor="help-search">
+        <span className="gm-label">Search help</span>
+        <input
+          id="help-search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Qualification, risk, broker…"
+          data-testid="help-search"
+        />
+      </label>
+
+      <SectionCard title="Quick start">
         <ol className="gm-help-steps" data-testid="first-use-guide">
           <li>
-            Sign in and open <Link to="/">Plan</Link>.
+            Open <Link to="/">Plan</Link> and read the decision.
           </li>
-          <li>Read BUY / SELL / WAIT / NO TRADE.</li>
-          <li>Review market-feed health at the top of the dashboard.</li>
-          <li>Check Entry, Stop and TP1 when the plan is potential or ready.</li>
-          <li>Wait for 5-minute confirmation that matches the plan.</li>
-          <li>Optionally enable phone alerts.</li>
+          <li>Understand BUY / SELL / HOLD / WAIT and what GoldMeta is waiting for.</li>
           <li>
-            Calculate risk in the <Link to="/planner">Risk Planner</Link>.
+            Review risk in the <Link to="/planner">Risk Planner</Link> or AutoTrade risk settings.
           </li>
-          <li>Place the trade manually only when you are personally satisfied.</li>
           <li>
-            Record the outcome in <Link to="/journal">Journal</Link>.
+            Follow <Link to="/autotrade">AutoTrade</Link> qualification or your manual workflow.
+          </li>
+          <li>
+            Review the outcome in <Link to="/journal">Journal</Link> and{" "}
+            <Link to="/insights">Insights</Link>.
           </li>
         </ol>
         <p className="gm-meta" data-testid="help-analysis-disclaimer">
-          GoldMeta is analysis only. There is no profit guarantee. AutoTrade stays OFF. Broker
-          execution stays disabled.
+          GoldMeta is a trading assistant. There is no profit guarantee. Live execution remains
+          locked until separately activated. Always apply your own risk management.
         </p>
       </SectionCard>
 
-      <SectionCard title="Quick topics">
-        <div className="gm-glossary" data-testid="help-topics">
-          {[
-            {
-              id: "buy",
-              term: "What BUY means",
-              detail:
-                "GoldMeta sees a bullish manual plan. Enter only after confirmation and your own risk check."
-            },
-            {
-              id: "wait",
-              term: "What WAIT means",
-              detail: "Conditions are incomplete. Stay flat until the next verified signal."
-            },
-            {
-              id: "hold",
-              term: "What HOLD means",
-              detail: "Stand aside for now. Structure is unclear or confirmation is still incomplete."
-            },
-            {
-              id: "entry",
-              term: "Entry zone",
-              detail: "The price area where a manual entry is considered. Stay patient until price arrives."
-            },
-            {
-              id: "stop",
-              term: "Stop",
-              detail: "The invalidation price. If price breaks and holds beyond it, the plan ends."
-            },
-            {
-              id: "tp",
-              term: "TP1 and TP2",
-              detail: "First and second targets. TP1 should leave enough room versus the stop."
-            },
-            {
-              id: "quality",
-              term: "Plan quality",
-              detail: "A/B plans may be tradeable when geometry is valid. C / incomplete plans are never actionable."
-            },
-            {
-              id: "tf",
-              term: "4H / 1H / 15M / 5M",
-              detail: "Wider context, session bias, plan structure, and entry confirmation."
-            },
-            {
-              id: "pine",
-              term: "Market feed",
-              detail:
-                "GoldMeta's market feed is centrally managed. No TradingView setup is required for normal users."
-            },
-            {
-              id: "risk",
-              term: "Risk planner",
-              detail: "Size the trade from balance, risk %, entry and stop. Never places orders."
-            },
-            {
-              id: "fail",
-              term: "Why plans can fail",
-              detail: "Markets move. Confirmation can fail. Stops can be hit. Treat every plan as uncertain."
-            }
-          ].map((item) => (
-            <details key={item.id} className="gm-disclosure" data-testid={`help-topic-${item.id}`}>
-              <summary>
-                <span className="gm-glossary-term">{item.term}</span>
-              </summary>
-              <div className="gm-disclosure-body">
-                <p style={{ margin: 0 }}>{item.detail}</p>
-              </div>
-            </details>
-          ))}
-        </div>
-      </SectionCard>
+      {groups.map((group) => (
+        <SectionCard key={group.id} title={group.title}>
+          <div className="gm-glossary" data-testid={`help-topics-${group.id}`}>
+            {group.items.map((item) => (
+              <details key={item.id} className="gm-disclosure" data-testid={`help-topic-${item.id}`}>
+                <summary>
+                  <span className="gm-glossary-term">{item.term}</span>
+                </summary>
+                <div className="gm-disclosure-body">
+                  <p style={{ margin: 0 }}>{item.detail}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        </SectionCard>
+      ))}
 
-      <SectionCard title="Plain-language glossary">
-        <div className="gm-glossary" data-testid="help-glossary">
-          {GLOSSARY.map((item) => (
-            <details key={item.id} className="gm-disclosure" data-testid={`glossary-${item.id}`}>
-              <summary>
-                <span className="gm-glossary-term">{item.term}</span>
-                <span className="gm-meta"> — {item.short}</span>
-              </summary>
-              <div className="gm-disclosure-body">
-                <p style={{ margin: 0 }}>{item.detail}</p>
-              </div>
-            </details>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard title="What to do next">
-        <ul className="gm-help-list">
-          <li>
-            <Link to="/">Open Plan</Link> for today’s gold decision.
-          </li>
-          <li>
-            <Link to="/intelligence">Markets</Link> for session context.
-          </li>
-          <li>GoldMeta's market feed is centrally managed. No TradingView setup is required.</li>
-          <li>
-            <Link to="/legal/risk">Risk disclosure</Link> — CFDs are high risk.
-          </li>
-        </ul>
+      <SectionCard title="Glossary">
+        <details className="gm-disclosure" data-testid="help-glossary" open={Boolean(q)}>
+          <summary>Plain-language glossary</summary>
+          <div className="gm-glossary">
+            {GLOSSARY.map((item) => (
+              <details key={item.id} className="gm-disclosure" data-testid={`glossary-${item.id}`}>
+                <summary>
+                  <span className="gm-glossary-term">{item.term}</span>
+                  <span className="gm-meta"> — {item.short}</span>
+                </summary>
+                <div className="gm-disclosure-body">
+                  <p style={{ margin: 0 }}>{item.detail}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        </details>
       </SectionCard>
     </div>
   );

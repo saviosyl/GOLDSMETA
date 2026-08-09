@@ -21,7 +21,7 @@ type Frame = {
 };
 
 /** Educational candle-by-candle replay — windowed to cap memory. */
-export function ReplayPage() {
+export function ReplayPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { api } = useAuth();
   const [frames, setFrames] = useState<Frame[]>([]);
   const [index, setIndex] = useState(0);
@@ -86,8 +86,10 @@ export function ReplayPage() {
 
   return (
     <div data-testid="replay-page">
-      <PageHeader title="Replay" environment="LIVE" freshness="SHADOW" />
-      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
+      {!embedded ? (
+        <PageHeader title="Replay" environment="LIVE" freshness="SHADOW" />
+      ) : null}
+      <p className="gm-meta" style={{ marginTop: embedded ? 0 : -8, marginBottom: 16 }}>
         Educational only — step through verified shadow history. Shortcuts: ← →
       </p>
       <VerifiedDataMeta

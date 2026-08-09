@@ -231,10 +231,12 @@ export function RegisterPage() {
                 checked={acceptTerms}
                 onChange={(e) => setAcceptTerms(e.target.checked)}
               />
-              I accept the{" "}
-              <a href="/legal/terms" target="_blank" rel="noreferrer">
-                Terms of Service
-              </a>
+              <span>
+                I accept the{" "}
+                <a href="/legal/terms" target="_blank" rel="noreferrer">
+                  Terms of Service
+                </a>
+              </span>
             </label>
             <label className="gm-auth-check">
               <input
@@ -242,23 +244,27 @@ export function RegisterPage() {
                 checked={acceptPrivacy}
                 onChange={(e) => setAcceptPrivacy(e.target.checked)}
               />
-              I accept the{" "}
-              <a href="/legal/privacy" target="_blank" rel="noreferrer">
-                Privacy Policy
-              </a>
+              <span>
+                I accept the{" "}
+                <a href="/legal/privacy" target="_blank" rel="noreferrer">
+                  Privacy Policy
+                </a>
+              </span>
             </label>
-            <label className="gm-auth-check">
+            <label className="gm-auth-check" data-testid="register-risk-check">
               <input
                 type="checkbox"
                 checked={acceptRiskWarning}
                 onChange={(e) => setAcceptRisk(e.target.checked)}
               />
-              I understand the{" "}
-              <a href="/legal/risk" target="_blank" rel="noreferrer">
-                CFD / high-risk disclosure
-              </a>{" "}
-              — leveraged products are high risk and I may lose money. Registration does not enable
-              trading. Financial results are not guaranteed.
+              <span>
+                I understand the{" "}
+                <a href="/legal/risk" target="_blank" rel="noreferrer">
+                  CFD / high-risk disclosure
+                </a>
+                . Leveraged products are high risk and I may lose money. Registration does not
+                enable trading.
+              </span>
             </label>
 
             <button className="gm-auth-submit" type="submit" disabled={busy} data-testid="register-submit">

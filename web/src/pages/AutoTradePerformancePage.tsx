@@ -114,7 +114,7 @@ function CumulativeChart(props: {
   );
 }
 
-export function AutoTradePerformancePage() {
+export function AutoTradePerformancePage({ embedded = false }: { embedded?: boolean } = {}) {
   const { api } = useAuth();
   const [environment, setEnvironment] = useState<"DEMO" | "LIVE">("DEMO");
   const [period, setPeriod] = useState<"today" | "7d" | "30d" | "all">("7d");
@@ -157,18 +157,30 @@ export function AutoTradePerformancePage() {
 
   const empty = !perf || (perf.totalTrades ?? 0) === 0;
 
+  // Single canonical period drives both KPIs and cumulative chart (unless today).
+  useEffect(() => {
+    if (period === "today") return;
+    setChartPeriod(period);
+  }, [period]);
+
   return (
     <div className="gm-page gm-perf-page" data-testid="autotrade-performance-page">
-      <header className="gm-perf-page__head">
-        <div>
-          <p className="gm-label">GoldMeta</p>
-          <h1>Performance</h1>
-          <p className="gm-meta">{envLabel}</p>
-        </div>
-        <Link className="gm-btn gm-btn--ghost" to="/autotrade">
-          AutoTrade
-        </Link>
-      </header>
+      {!embedded ? (
+        <header className="gm-perf-page__head">
+          <div>
+            <p className="gm-label">GoldMeta</p>
+            <h1>Performance</h1>
+            <p className="gm-meta">{envLabel}</p>
+          </div>
+          <Link className="gm-btn gm-btn--ghost" to="/autotrade">
+            AutoTrade
+          </Link>
+        </header>
+      ) : (
+        <p className="gm-meta" data-testid="perf-env-label">
+          {envLabel}
+        </p>
+      )}
 
       <div className="gm-perf-filters" role="group" aria-label="Environment">
         {(["DEMO", "LIVE"] as const).map((e) => (
@@ -185,10 +197,10 @@ export function AutoTradePerformancePage() {
       <div className="gm-perf-filters" role="group" aria-label="Period">
         {(
           [
-            ["today", "TODAY"],
-            ["7d", "7 DAYS"],
-            ["30d", "30 DAYS"],
-            ["all", "ALL"]
+            ["today", "Today"],
+            ["7d", "7D"],
+            ["30d", "30D"],
+            ["all", "All"]
           ] as const
         ).map(([id, label]) => (
           <button
@@ -205,9 +217,16 @@ export function AutoTradePerformancePage() {
       {error ? <p className="gm-error">{error}</p> : null}
 
       {empty ? (
-        <p className="gm-perf-empty" data-testid="perf-empty">
-          No completed trades yet.
-        </p>
+        <div className="gm-empty-state gm-perf-empty" data-testid="perf-empty">
+          <h2>No completed Demo trades yet</h2>
+          <p className="gm-meta">
+            Performance analytics will appear here after your first completed Demo Auto or
+            qualification trade.
+          </p>
+          <Link className="gm-btn gm-btn--primary" to="/autotrade">
+            View AutoTrade Qualification
+          </Link>
+        </div>
       ) : (
         <section className="gm-perf-metrics">
           <div>
@@ -288,24 +307,6 @@ export function AutoTradePerformancePage() {
       <section className="gm-perf-section">
         <div className="gm-perf-section__head">
           <h2>Cumulative P/L</h2>
-          <div className="gm-perf-filters">
-            {(
-              [
-                ["7d", "7D"],
-                ["30d", "30D"],
-                ["all", "All"]
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={chartPeriod === id ? "is-active" : ""}
-                onClick={() => setChartPeriod(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
         </div>
         <CumulativeChart
           points={chart?.cumulativePnl ?? []}

@@ -27,9 +27,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { KeyLevelsPage } from "./pages/KeyLevelsPage";
 import { AlertsSetupPage } from "./pages/AlertsSetupPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
-import { HistoryPage } from "./pages/HistoryPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
-import { SignalPerformancePage } from "./pages/SignalPerformancePage";
 import { JournalPage } from "./pages/JournalPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SetupDetailPage } from "./pages/SetupDetailPage";
@@ -41,12 +39,6 @@ import { UiReviewGate } from "./pages/UiReviewGate";
 const IntelligencePage = lazy(() =>
   import("./pages/IntelligencePage").then((m) => ({ default: m.IntelligencePage }))
 );
-const ReplayPage = lazy(() =>
-  import("./pages/ReplayPage").then((m) => ({ default: m.ReplayPage }))
-);
-const PremiumAnalyticsPage = lazy(() =>
-  import("./pages/PremiumAnalyticsPage").then((m) => ({ default: m.PremiumAnalyticsPage }))
-);
 const V4ResearchPage = lazy(() =>
   import("./pages/V4ResearchPage").then((m) => ({ default: m.V4ResearchPage }))
 );
@@ -56,13 +48,14 @@ const SettingsPage = lazy(() =>
 const HelpPage = lazy(() =>
   import("./pages/HelpPage").then((m) => ({ default: m.HelpPage }))
 );
+const InsightsPage = lazy(() =>
+  import("./pages/InsightsPage").then((m) => ({ default: m.InsightsPage }))
+);
+const HistoryReplayPage = lazy(() =>
+  import("./pages/HistoryReplayPage").then((m) => ({ default: m.HistoryReplayPage }))
+);
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
-);
-const AutoTradePerformancePage = lazy(() =>
-  import("./pages/AutoTradePerformancePage").then((m) => ({
-    default: m.AutoTradePerformancePage
-  }))
 );
 const BrokerControlCentrePage = lazy(() =>
   import("./pages/broker/BrokerControlCentrePage").then((m) => ({
@@ -214,34 +207,50 @@ function ProtectedApp() {
           <Route path="/levels" element={<KeyLevelsPage />} />
           <Route path="/alerts" element={<AlertsSetupPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
-          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/history" element={<Navigate to="/history-replay/history" replace />} />
           <Route path="/history/:decisionId" element={<HistoryDetailPage />} />
-          <Route path="/signal-performance" element={<SignalPerformancePage />} />
-          <Route path="/setups/:setupId" element={<SetupDetailPage />} />
           <Route
-            path="/analytics"
+            path="/signal-performance"
+            element={<Navigate to="/insights/signals" replace />}
+          />
+          <Route path="/setups/:setupId" element={<SetupDetailPage />} />
+          <Route path="/insights" element={<Navigate to="/insights/performance" replace />} />
+          <Route
+            path="/insights/:tab"
             element={
-              <LazyRoute label="Analytics">
-                <PremiumAnalyticsPage />
+              <LazyRoute label="Insights">
+                <InsightsPage />
               </LazyRoute>
             }
+          />
+          <Route
+            path="/history-replay"
+            element={<Navigate to="/history-replay/history" replace />}
+          />
+          <Route
+            path="/history-replay/:tab"
+            element={
+              <LazyRoute label="History & Replay">
+                <HistoryReplayPage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={<Navigate to="/insights/strategy" replace />}
           />
           <Route path="/analytics/v3" element={<AnalyticsPage />} />
           <Route
             path="/intelligence"
             element={
-              <LazyRoute label="Intelligence">
+              <LazyRoute label="Markets">
                 <IntelligencePage />
               </LazyRoute>
             }
           />
           <Route
             path="/replay"
-            element={
-              <LazyRoute label="Replay">
-                <ReplayPage />
-              </LazyRoute>
-            }
+            element={<Navigate to="/history-replay/replay" replace />}
           />
           <Route path="/diagnostics" element={<DiagnosticsPage />} />
           <Route
@@ -265,11 +274,7 @@ function ProtectedApp() {
           />
           <Route
             path="/autotrade/performance"
-            element={
-              <LazyRoute label="Performance">
-                <AutoTradePerformancePage />
-              </LazyRoute>
-            }
+            element={<Navigate to="/insights/performance" replace />}
           />
           <Route
             path="/brokers"

@@ -42,7 +42,11 @@ const REQUIRED_PATHS = [
   "/admin/users",
   "/admin/tradingview-template",
   "/settings",
-  "/help"
+  "/help",
+  "/insights",
+  "/insights/:tab",
+  "/history-replay",
+  "/history-replay/:tab"
 ];
 
 describe("App route inventory", () => {

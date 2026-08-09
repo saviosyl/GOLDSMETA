@@ -151,23 +151,48 @@ export function IntelligencePage() {
         </div>
       </header>
 
-      <SectionCard title="Market in plain English" className="gm-card-v2">
-        <p data-testid="markets-plain-english" style={{ marginTop: 0 }}>
-          {answer?.answer
-            ? answer.answer
-            : "Ask a verified question below, or open Today’s Plan for the actionable levels."}
-        </p>
-        <p className="gm-meta" style={{ marginBottom: 12 }}>
-          XAUUSD · session context · 4H / 1H / 15M bias. Unavailable fields stay Unavailable — never
-          estimated as fact.
-        </p>
-        <Link className="gm-btn-outline" to="/" data-testid="view-todays-plan-btn">
-          View today&apos;s plan
-        </Link>
-      </SectionCard>
+      <section
+        className="gm-markets-env-grid"
+        data-testid="markets-environment"
+        aria-label="Market environment"
+      >
+        <article className="gm-prem-card">
+          <span className="gm-label">Current session</span>
+          <strong>{sessionLabel}</strong>
+        </article>
+        <article className="gm-prem-card">
+          <span className="gm-label">Trend</span>
+          <strong>
+            {decision?.directionBias
+              ? String(decision.directionBias).replace(/_/g, " ")
+              : decision?.decision === "BUY"
+                ? "Bullish lean"
+                : decision?.decision === "SELL"
+                  ? "Bearish lean"
+                  : "Neutral / waiting"}
+          </strong>
+        </article>
+        <article className="gm-prem-card">
+          <span className="gm-label">Market structure</span>
+          <strong data-testid="markets-plain-english">
+            {decision?.oneLineReason ||
+              decision?.primaryReason ||
+              "Open Plan for the full decision context"}
+          </strong>
+        </article>
+        <article className="gm-prem-card">
+          <span className="gm-label">Price location</span>
+          <strong>
+            {livePrice != null ? `XAUUSD ${fmtPrice(livePrice)}` : "Price unavailable"}
+          </strong>
+        </article>
+      </section>
       <p className="gm-meta" style={{ marginTop: 8, marginBottom: 16 }} data-testid="intelligence-impl-type">
-        Deterministic market context (not an AI chatbot). Analysis only · AutoTrade OFF.
+        Deterministic market context (not an AI chatbot). Verified facts only — never estimated.
       </p>
+      <Link className="gm-btn-outline" to="/" data-testid="view-todays-plan-btn">
+        View today&apos;s plan
+      </Link>
       {!online && (
         <div className="banner stale" role="status" data-testid="offline-status">
           Offline — LIVE verification unavailable. Any cached answers may be stale.
@@ -193,10 +218,10 @@ export function IntelligencePage() {
           <div className="chip-row">
             {[
               "Why are we waiting?",
-              "Why was this rejected?",
-              "Why is risk geometry invalid?",
-              "What changed since the previous candle?",
-              "How has Strategy A historically performed?"
+              "What would make this a BUY?",
+              "What would invalidate the setup?",
+              "Where is the nearest resistance?",
+              "What changed since the last candle?"
             ].map((q) => (
               <button key={q} type="button" className="chip" onClick={() => setQuestion(q)}>
                 {q}
@@ -263,45 +288,41 @@ export function IntelligencePage() {
         </SectionCard>
       </div>
 
-      <SectionCard title="Weekly coach & personal stats">
-        {!coach ? (
-          <p className="gm-meta">Loading coach…</p>
-        ) : (
+      <SectionCard title="Weekly coach">
+        <p className="gm-meta">
+          Weekly coaching and personal statistics live in{" "}
+          <Link to="/insights/performance">Insights → Performance</Link>.
+        </p>
+        {coach ? (
           <>
             <p>{String(coach.summary ?? "")}</p>
             {Boolean(coach.insufficientData) && (
               <StatusBadge tone="warning">Insufficient verified data</StatusBadge>
             )}
           </>
-        )}
-        {personal && (
-          <div className="gm-metrics-grid" style={{ marginTop: 12 }}>
-            <div className="gm-metric">
-              <span className="gm-label">Ignored WAIT tags</span>
-              <span className="gm-metric-value">{String(personal.ignoredWait ?? 0)}</span>
-            </div>
-            <div className="gm-metric">
-              <span className="gm-label">Avg R</span>
-              <span className="gm-metric-value">{String(personal.averageR ?? "—")}</span>
-            </div>
-          </div>
-        )}
+        ) : null}
+        {personal ? (
+          <p className="gm-meta" style={{ marginTop: 8 }}>
+            Avg R {String(personal.averageR ?? "—")} · see Insights for full breakdown.
+          </p>
+        ) : null}
       </SectionCard>
 
       {SCREENSHOT_ENABLED ? (
-        <div data-testid="screenshot-section">
+        <details className="gm-disclosure" data-testid="screenshot-section">
+          <summary>Advanced · Screenshot comparison (research)</summary>
           <SectionCard title="Screenshot Comparison — Beta">
+            <p className="gm-meta" data-testid="screenshot-beta-copy">
+              Research tool only — not part of the everyday Markets view. This does{" "}
+              <strong>not</strong> automatically read exact prices from the image and does{" "}
+              <strong>not</strong> use screenshot values as verified market data. It cannot create
+              or modify a setup. Vision OCR remains future work.
+            </p>
             <DisclosurePanel summary="Open screenshot comparison (Beta)">
-              <p className="gm-meta" data-testid="screenshot-beta-copy">
-                This does <strong>not</strong> automatically read exact prices from the image. It does{" "}
-                <strong>not</strong> use screenshot values as verified market data. It compares
-                user-provided context against verified GoldMeta data. It cannot create or modify a
-                setup. Vision OCR remains future work.
-              </p>
               <ScreenshotCompare />
             </DisclosurePanel>
           </SectionCard>
-        </div>
+        </details>
       ) : (
         <section className="gm-section" data-testid="screenshot-disabled">
           <p className="gm-meta">Screenshot comparison disabled.</p>

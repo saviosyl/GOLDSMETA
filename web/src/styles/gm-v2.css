@@ -1631,6 +1631,29 @@ body.gm-drawer-open {
 .gm-risk-planner-grid {
   display: grid;
   gap: var(--space-3);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.gm-risk-planner-layout,
+.gm-risk-planner-layout .form-grid,
+.gm-risk-planner-layout .grid-2,
+.gm-risk-inputs,
+.gm-risk-results-navy {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 899px) {
+  .gm-risk-planner-grid {
+    grid-template-columns: 1fr;
+  }
+  .gm-risk-planner-layout .form-grid,
+  .gm-risk-planner-layout .grid-2,
+  .gm-risk-planner-layout .grid-2.compact-metrics {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (min-width: 900px) {

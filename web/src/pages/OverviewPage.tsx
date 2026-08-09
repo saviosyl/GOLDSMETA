@@ -209,7 +209,7 @@ function StickyActionSummary({
     >
       <strong>
         XAUUSD | {actionLabel}
-        {livePrice != null ? ` | ${livePrice.toFixed(2)}` : ""} | {triggerBit} | AutoTrade OFF
+        {livePrice != null ? ` | ${livePrice.toFixed(2)}` : ""} | {triggerBit}
       </strong>
     </div>
   );
@@ -586,6 +586,57 @@ export function OverviewPage() {
             priceChangePct={priceChangePct}
           />
 
+          <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
+            <DecisionDashboard
+              plan={intradayPlan}
+              marketFeedHealth={marketFeedHealth}
+              marketStructureMode={mode}
+              livePrice={livePrice}
+              onRefresh={refresh}
+              refreshing={refreshing}
+              density="hero"
+            />
+          </div>
+
+          <TradePlanSummary
+            plan={intradayPlan}
+            livePrice={livePrice}
+            marketStructureMode={mode}
+            state={decisionState}
+          />
+
+          <XauusdChartCard
+            currentPrice={livePrice}
+            vah={chartVah}
+            poc={chartPoc}
+            val={chartVal}
+            support={decisionState?.nearestSupport ?? null}
+            resistance={decisionState?.nearestResistance ?? null}
+            marketClosed={marketOpen === false}
+          />
+
+          <section
+            className="gm-prem-card gm-why-waiting"
+            id="why-waiting"
+            data-testid="why-waiting-card"
+            aria-label="Why GoldMeta is waiting"
+          >
+            <p className="gm-label">Why GoldMeta is waiting</p>
+            <SetupStatusCard
+              plan={intradayPlan}
+              marketStructureMode={mode}
+              livePrice={livePrice}
+              trendBias={intradayPlan.directionBias ?? briefing?.positionVsPoc ?? "Neutral"}
+              volatility={briefing?.atrLabel ?? briefing?.marketRegime ?? "Moderate"}
+              newsImpact="Low"
+            />
+            <a className="gm-linkish" href="/analysis" data-testid="view-full-analysis-link">
+              View full analysis
+            </a>
+          </section>
+
+          {systemHealth ? <SystemHealthStrip health={systemHealth} compact /> : null}
+
           <TodayPlanSummary
             marketStatus={
               marketOpen
@@ -606,49 +657,10 @@ export function OverviewPage() {
               qualification?.nextAction ||
               (marketOpen
                 ? "Waiting for valid market setup"
-                : "Qualification will continue when valid market setups resume")
+                : "Qualification resumes when valid market setups return")
             }
             qualification={qualification}
             daily={dailySafety}
-          />
-          {systemHealth ? <SystemHealthStrip health={systemHealth} /> : null}
-
-          <div data-testid="main-action-sentinel" id="gm-main-action-anchor">
-            <DecisionDashboard
-              plan={intradayPlan}
-              marketFeedHealth={marketFeedHealth}
-              marketStructureMode={mode}
-              livePrice={livePrice}
-              onRefresh={refresh}
-              refreshing={refreshing}
-              density="hero"
-            />
-          </div>
-
-          <XauusdChartCard
-            currentPrice={livePrice}
-            vah={chartVah}
-            poc={chartPoc}
-            val={chartVal}
-            support={decisionState?.nearestSupport ?? null}
-            resistance={decisionState?.nearestResistance ?? null}
-            marketClosed={marketOpen === false}
-          />
-
-          <TradePlanSummary
-            plan={intradayPlan}
-            livePrice={livePrice}
-            marketStructureMode={mode}
-            state={decisionState}
-          />
-
-          <SetupStatusCard
-            plan={intradayPlan}
-            marketStructureMode={mode}
-            livePrice={livePrice}
-            trendBias={intradayPlan.directionBias ?? briefing?.positionVsPoc ?? "Neutral"}
-            volatility={briefing?.atrLabel ?? briefing?.marketRegime ?? "Moderate"}
-            newsImpact="Low"
           />
 
           <div className="gm-plan-mini-actions" data-testid="premium-quick-actions">
@@ -1012,9 +1024,15 @@ export function OverviewPage() {
                   {intradayPlan.freshness.sourceLabel}
                 </p>
                 <div className="gm-trading-status-row" data-testid="dashboard-safety">
-                  <span className="gm-badge warning">Trading locked</span>
+                  <span className="gm-badge warning">Live trading locked</span>
                   <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-                    AutoTrade OFF
+                    {qualification?.state === "PREVIEW_QUALIFICATION" ||
+                    qualification?.state === "CONTROLLED_DEMO_QUALIFICATION" ||
+                    qualification?.state === "OBSERVATION_PERIOD"
+                      ? "Demo · Qualifying"
+                      : qualification?.demoAuto?.enabled
+                        ? "Demo Auto"
+                        : qualification?.overallLabel || "AutoTrade idle"}
                   </span>
                   <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
                     Emergency STOP ready
@@ -1151,9 +1169,9 @@ export function OverviewPage() {
             Raw codes: {(decision?.reasonCodes ?? []).join(", ") || "none"}
           </p>
           <div className="gm-trading-status-row" data-testid="dashboard-safety">
-            <span className="gm-badge warning">Trading locked</span>
+            <span className="gm-badge warning">Live trading locked</span>
             <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-              AutoTrade OFF
+              {qualification?.overallLabel || "AutoTrade idle"}
             </span>
             <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
               Emergency STOP ready

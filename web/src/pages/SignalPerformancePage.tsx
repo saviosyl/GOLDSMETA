@@ -8,7 +8,7 @@ function fmt(n: number | null | undefined, suffix = ""): string {
   return `${n}${suffix}`;
 }
 
-export function SignalPerformancePage() {
+export function SignalPerformancePage({ embedded = false }: { embedded?: boolean } = {}) {
   const { api } = useAuth();
   const [summary, setSummary] = useState<SignalPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,20 +25,26 @@ export function SignalPerformancePage() {
 
   return (
     <div className="signal-perf-page" data-testid="signal-performance-page">
-      <Link to="/history" className="muted">
-        ← Signal history
-      </Link>
-      <h1 className="brand" style={{ fontSize: "1.4rem", marginTop: "0.75rem" }}>
-        Hypothetical signal performance
-      </h1>
+      {!embedded ? (
+        <>
+          <Link to="/history" className="muted">
+            ← Signal history
+          </Link>
+          <h1 className="brand" style={{ fontSize: "1.4rem", marginTop: "0.75rem" }}>
+            Hypothetical signal performance
+          </h1>
+        </>
+      ) : null}
       <p className="muted" data-testid="perf-disclaimer">
         {summary?.disclaimer ??
           "Past hypothetical results do not guarantee future trading performance."}
       </p>
-      <p className="muted">
-        Confidence is a setup-confidence score, not the probability of profit. WAIT signals are
-        excluded from trade statistics. Ambiguous intrabar results are shown separately.
-      </p>
+      {!embedded ? (
+        <p className="muted">
+          Confidence is a setup-confidence score, not the probability of profit. WAIT signals are
+          excluded from trade statistics. Ambiguous intrabar results are shown separately.
+        </p>
+      ) : null}
       {error && (
         <div className="banner stale" role="alert">
           {error}

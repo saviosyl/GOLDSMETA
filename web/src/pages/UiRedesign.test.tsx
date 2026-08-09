@@ -43,7 +43,21 @@ const { mockApi } = vi.hoisted(() => {
         { time: 1_720_000_000, open: 2380, high: 2385, low: 2378, close: 2383 }
       ],
       source: "SHARED_CTRADER_TRENDBARS"
-    })
+    }),
+    getAutoTradeQualification: vi.fn().mockResolvedValue({
+      state: "PREVIEW_QUALIFICATION",
+      overallLabel: "Preview qualification",
+      nextAction: "Waiting for valid market setup",
+      demoAuto: { enabled: false, ready: false },
+      liveOrders: "LOCKED"
+    }),
+    autoTradeStatus: vi.fn().mockResolvedValue({
+      mode: "OFF",
+      displayStatus: "OFF",
+      locked: true
+    }),
+    getSystemHealth: vi.fn().mockResolvedValue(null),
+    getDailySafety: vi.fn().mockResolvedValue(null)
   };
   return { mockApi };
 });
@@ -113,9 +127,13 @@ describe("AppShell navigation", () => {
     expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
     expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AutoTrade").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Journal").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/More/i).length).toBeGreaterThan(0);
+    const mobileNav = screen.getByTestId("mobile-bottom-nav");
+    expect(mobileNav.textContent).toMatch(/AutoTrade/);
+    expect(mobileNav.textContent).not.toMatch(/Alerts/);
   });
 
   it("opens More sheet with secondary destinations", async () => {
@@ -131,7 +149,8 @@ describe("AppShell navigation", () => {
     expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /History/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Insights/i })).toBeInTheDocument();
   });
 });
 
@@ -162,7 +181,7 @@ describe("OverviewPage redesign", () => {
     await user.click(screen.getByRole("tab", { name: "Structure" }));
     expect(await screen.findByTestId("market-level-ladder")).toBeInTheDocument();
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
-    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toBeInTheDocument();
     expect(screen.getByTestId("advanced-diagnostics-section")).not.toHaveAttribute("open");
     expect(screen.queryByText("SHADOW")).not.toBeInTheDocument();
   });
@@ -184,7 +203,7 @@ describe("OverviewPage redesign", () => {
     const system = within(advanced).getByTestId("system-status-collapse");
     await user.click(system.querySelector("summary")!);
     expect(within(advanced).getByText(/dec_hidden_id_abc123/)).toBeInTheDocument();
-    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getAllByTestId("dashboard-autotrade-off")[0]).toBeInTheDocument();
     expect(within(advanced).getByTestId("dashboard-emergency-stop")).toBeInTheDocument();
     expect(within(advanced).getByTestId("goldmeta-score")).toBeInTheDocument();
   });

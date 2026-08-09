@@ -510,7 +510,9 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
     expect(screen.getByTestId("qual-start")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-connection-label")).toHaveTextContent("Connected");
-    expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(/Active|Live/i);
+    expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(
+      /Active|Live|Paused — market closed|Waiting for market/i
+    );
     expect(screen.getByTestId("autotrade-market-label")).toHaveTextContent(
       /XAUUSD · Market closed/i
     );
@@ -528,7 +530,9 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-step-10-status")).toHaveTextContent("Complete");
     expect(screen.getByTestId("autotrade-step-11-status")).toHaveTextContent("Locked");
     expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Demo · \*\*\*\*4810/);
-    expect(screen.getByTestId("autotrade-live-execution-stat")).toHaveTextContent(/Not selected/i);
+    expect(screen.getByTestId("autotrade-live-execution-stat")).toHaveTextContent(
+      /Not selected|LOCKED/i
+    );
     expect(screen.getByTestId("autotrade-market-data-stat")).toHaveTextContent(/Connected|Market closed/i);
     expect(screen.queryByTestId("autotrade-setup-required")).not.toBeInTheDocument();
     const activity = screen.getByTestId("autotrade-activity");

@@ -16,17 +16,20 @@ import { formatWaitGroupLabel, groupHistoryItems } from "../lib/historyGrouping"
 import { plainReason } from "../lib/reasonCodePlain";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
 
-const FILTERS: Array<{ id: HistoryFilter; label: string }> = [
+const PRIMARY_FILTERS: Array<{ id: HistoryFilter; label: string }> = [
   { id: "ALL", label: "All" },
   { id: "BUY", label: "BUY" },
   { id: "SELL", label: "SELL" },
-  { id: "WAIT", label: "WAIT" },
-  { id: "ACTIVE", label: "Active" },
+  { id: "WAIT", label: "Waits" },
   { id: "WON", label: "Won" },
-  { id: "LOST", label: "Lost" },
+  { id: "LOST", label: "Lost" }
+];
+
+const MORE_FILTERS: Array<{ id: HistoryFilter; label: string }> = [
+  { id: "ACTIVE", label: "Active" },
   { id: "EXPIRED", label: "Expired" },
-  { id: "LIVE", label: "LIVE" },
-  { id: "TEST", label: "TEST" }
+  { id: "LIVE", label: "Demo/Live" },
+  { id: "TEST", label: "Signals" }
 ];
 
 function formatPts(n: number | null | undefined): string {
@@ -115,7 +118,7 @@ function outcomeBlock(outcome: SignalOutcomeRecord | undefined, decision: Decisi
   );
 }
 
-export function HistoryPage() {
+export function HistoryPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { api } = useAuth();
   const navigate = useNavigate();
   const [items, setItems] = useState<Decision[]>([]);
@@ -124,6 +127,7 @@ export function HistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [filter, setFilter] = useState<HistoryFilter>("ALL");
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -185,18 +189,23 @@ export function HistoryPage() {
   );
 
   return (
-    <div className="history-page" data-testid="signal-history-page">
-      <div className="history-header-row">
-        <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-          Signal history
-        </h1>
-        <Link className="history-perf-link" to="/signal-performance" data-testid="signal-performance-link">
-          Hypothetical performance
-        </Link>
-      </div>
+    <div className="history-page gm-history-redesign" data-testid="signal-history-page">
+      {!embedded ? (
+        <div className="history-header-row">
+          <h1 className="brand" style={{ fontSize: "1.4rem" }}>
+            History
+          </h1>
+          <Link
+            className="history-perf-link"
+            to="/insights/signals"
+            data-testid="signal-performance-link"
+          >
+            Hypothetical performance
+          </Link>
+        </div>
+      ) : null}
       <p className="muted history-disclaimer" data-testid="hypothetical-disclaimer">
-        Past hypothetical results do not guarantee future trading performance. Setup quality is a
-        structure score, not the probability of profit.
+        Past hypothetical results do not guarantee future trading performance.
       </p>
       {(error || offline) && (
         <div className="banner stale" role="status">
@@ -205,7 +214,7 @@ export function HistoryPage() {
       )}
 
       <div className="history-filters" role="tablist" aria-label="Filter decisions">
-        {FILTERS.map((item) => (
+        {PRIMARY_FILTERS.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -217,7 +226,33 @@ export function HistoryPage() {
             {item.label}
           </button>
         ))}
+        <button
+          type="button"
+          className={`history-filter ${moreOpen ? "active" : ""}`}
+          aria-expanded={moreOpen}
+          data-testid="history-more-filters"
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          More
+        </button>
       </div>
+      {moreOpen ? (
+        <div className="history-filters history-filters-more" role="group" aria-label="More filters">
+          {MORE_FILTERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`history-filter ${filter === item.id ? "active" : ""}`}
+              onClick={() => {
+                setFilter(item.id);
+                setMoreOpen(false);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="card history-list-card">
         {visible.length === 0 ? (

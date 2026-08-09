@@ -14,6 +14,7 @@ import {
   History,
   Home,
   Layers3,
+  LineChart,
   MoreHorizontal,
   Radio,
   Settings,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import { useShellQuote } from "../../lib/quoteContext";
+import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 import { NotificationCentre } from "../decision/NotificationCentre";
 import { QuoteHeader } from "../gm/QuoteHeader";
 
@@ -35,39 +37,38 @@ type NavItem = {
 
 const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
   {
-    heading: "Main",
+    heading: "Trade",
     items: [
       { to: "/", label: "Plan", end: true, icon: Home },
-      { to: "/levels", label: "Levels", icon: Layers3 },
+      { to: "/autotrade", label: "AutoTrade", icon: Bot },
       { to: "/intelligence", label: "Markets", icon: Globe2 },
       { to: "/journal", label: "Journal", icon: BookOpen },
-      { to: "/alerts", label: "Alerts", icon: Bell }
+      { to: "/insights", label: "Insights", icon: LineChart }
     ]
   },
   {
-    heading: "Reports",
+    heading: "More / Tools",
     items: [
-      { to: "/v4", label: "Research", icon: BarChart3 },
-      { to: "/analytics", label: "Analytics", icon: Activity },
-      { to: "/autotrade/performance", label: "Performance", icon: Activity },
-      { to: "/history", label: "History", icon: History },
-      { to: "/replay", label: "Replay", icon: FileText }
-    ]
-  },
-  {
-    heading: "Tools",
-    items: [
+      { to: "/levels", label: "Levels", icon: Layers3 },
+      { to: "/history-replay", label: "History & Replay", icon: History },
       { to: "/planner", label: "Risk Planner", icon: Target },
-      { to: "/autotrade", label: "AutoTrade", icon: Bot },
-      { to: "/brokers", label: "Brokers", icon: Radio },
-      { to: "/tradingview", label: "TradingView", staffOnly: true, icon: Gauge }
+      { to: "/brokers", label: "Broker", icon: Radio }
     ]
   },
   {
     heading: "Account",
     items: [
       { to: "/settings", label: "Settings", icon: Settings },
-      { to: "/help", label: "Help & Guides", icon: HelpCircle }
+      { to: "/help", label: "Help", icon: HelpCircle },
+      { to: "/alerts", label: "Alerts", icon: Bell }
+    ]
+  },
+  {
+    heading: "Advanced",
+    items: [
+      { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
+      { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   },
   {
@@ -79,53 +80,51 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
         label: "TV Template",
         staffOnly: true,
         icon: Gauge
-      },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
+      }
     ]
   }
 ];
 
 const MOBILE_PRIMARY: NavItem[] = [
   { to: "/", label: "Plan", end: true, icon: Home },
+  { to: "/autotrade", label: "AutoTrade", icon: Bot },
   { to: "/intelligence", label: "Markets", icon: Globe2 },
-  { to: "/journal", label: "Journal", icon: BookOpen },
-  { to: "/alerts", label: "Alerts", icon: Bell }
+  { to: "/journal", label: "Journal", icon: BookOpen }
 ];
 
 type MoreGroup = { heading: string; items: NavItem[] };
 
 const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
-    heading: "Daily",
+    heading: "Trading tools",
     items: [
       { to: "/levels", label: "Levels", icon: Layers3 },
-      { to: "/history", label: "History", icon: History },
-      { to: "/replay", label: "Replay", icon: FileText }
-    ]
-  },
-  {
-    heading: "Reports",
-    items: [
-      { to: "/v4", label: "Research", icon: BarChart3 },
-      { to: "/analytics", label: "Analytics", icon: Activity },
-      { to: "/autotrade/performance", label: "Performance", icon: Activity },
-      { to: "/signal-performance", label: "Signals", icon: Gauge }
-    ]
-  },
-  {
-    heading: "Tools",
-    items: [
       { to: "/planner", label: "Risk Planner", icon: Target },
-      { to: "/autotrade", label: "AutoTrade", icon: Bot },
-      { to: "/brokers", label: "Brokers", icon: Radio },
-      { to: "/tradingview", label: "TradingView Setup", staffOnly: true, icon: Gauge }
+      { to: "/brokers", label: "Broker", icon: Radio }
+    ]
+  },
+  {
+    heading: "Review",
+    items: [
+      { to: "/history-replay", label: "History & Replay", icon: History },
+      { to: "/insights", label: "Insights", icon: LineChart },
+      { to: "/replay", label: "Replay", icon: FileText }
     ]
   },
   {
     heading: "Account",
     items: [
+      { to: "/alerts", label: "Alerts", icon: Bell },
       { to: "/settings", label: "Settings", icon: Settings },
-      { to: "/help", label: "Help & Guides", icon: HelpCircle }
+      { to: "/help", label: "Help", icon: HelpCircle }
+    ]
+  },
+  {
+    heading: "Advanced",
+    items: [
+      { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
+      { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
+      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   },
   {
@@ -137,8 +136,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
         label: "TV Template",
         staffOnly: true,
         icon: Gauge
-      },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
+      }
     ]
   }
 ];
@@ -155,6 +153,21 @@ function filterStaff<T extends { staffOnly?: boolean }>(items: T[], isStaff: boo
   return items.filter((l) => !l.staffOnly || isStaff);
 }
 
+function headerToneClass(tone: string): string {
+  switch (tone) {
+    case "success":
+      return "gm-autotrade-pill--success";
+    case "warning":
+      return "gm-autotrade-pill--warning";
+    case "danger":
+      return "gm-autotrade-pill--danger";
+    case "info":
+      return "gm-autotrade-pill--info";
+    default:
+      return "gm-autotrade-pill--neutral";
+  }
+}
+
 export function AppShell({
   children,
   linkPrefix = ""
@@ -164,6 +177,7 @@ export function AppShell({
 }) {
   const { user, account } = useAuth();
   const { quote } = useShellQuote();
+  const autoTradeHeader = useAutoTradeHeaderStatus();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -234,7 +248,7 @@ export function AppShell({
           <img src="/brand/mark-official.png" alt="" width={36} height={36} />
           <div>
             <strong>GOLDMETA</strong>
-            <span className="gm-meta">Daily trading assistant</span>
+            <span className="gm-meta">XAUUSD trading assistant</span>
           </div>
         </div>
         <nav className="gm-sidebar-nav">
@@ -242,7 +256,7 @@ export function AppShell({
             <div
               key={group.heading}
               className="gm-nav-group"
-              data-testid={`nav-group-${group.heading.toLowerCase()}`}
+              data-testid={`nav-group-${group.heading.toLowerCase().replace(/\s+|\/+/g, "-")}`}
             >
               <p className="gm-nav-heading">{group.heading}</p>
               {group.items.map((link) => {
@@ -264,7 +278,8 @@ export function AppShell({
         </nav>
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
-            <p>Analysis only. AutoTrade OFF · Demo OFF · Live OFF.</p>
+            <p data-testid="sidebar-autotrade-summary">{autoTradeHeader.label}</p>
+            <p className="gm-meta">Live execution locked</p>
           </div>
         </div>
       </aside>
@@ -272,37 +287,31 @@ export function AppShell({
       <div className="gm-main">
         <div className="gm-main-inner">
           <header className="gm-topbar" data-testid="topbar">
-            <div className="gm-topbar-brand">
-              <img
-                src="/brand/mark-official.png"
-                alt=""
-                width={28}
-                height={28}
-                className="gm-topbar-mark"
+            <div className="gm-topbar-market" data-testid="topbar-market">
+              <strong className="gm-topbar-symbol">XAUUSD</strong>
+              <QuoteHeader
+                className="gm-topbar-quote"
+                price={quote?.price ?? null}
+                updatedLabel={quote?.updatedLabel ?? "—"}
+                sessionLabel={quote?.sessionLabel}
+                fresh={quote?.fresh}
+                freshness={quote?.freshness}
+                unavailable={quote?.unavailable}
+                bid={quote?.bid}
+                ask={quote?.ask}
+                desktopOnly
               />
-              <div>
-                <strong>GOLDMETA</strong>
-                <span>Daily trading assistant</span>
-              </div>
             </div>
 
-            <QuoteHeader
-              className="gm-topbar-quote"
-              price={quote?.price ?? null}
-              updatedLabel={quote?.updatedLabel ?? "—"}
-              sessionLabel={quote?.sessionLabel}
-              fresh={quote?.fresh}
-              freshness={quote?.freshness}
-              unavailable={quote?.unavailable}
-              bid={quote?.bid}
-              ask={quote?.ask}
-              desktopOnly
-            />
-
             <div className="gm-topbar-actions">
-              <span className="gm-badge gm-autotrade-pill" data-testid="topbar-autotrade-off">
+              <span
+                className={`gm-badge gm-autotrade-pill ${headerToneClass(autoTradeHeader.tone)}`}
+                data-testid="topbar-autotrade-status"
+                data-state={autoTradeHeader.stateKey}
+                title={autoTradeHeader.nextAction ?? undefined}
+              >
                 <Bot size={14} aria-hidden />
-                AutoTrade OFF
+                {autoTradeHeader.label}
               </span>
               <NotificationCentre />
               <div className="gm-profile-menu" ref={profileRef}>
@@ -329,8 +338,8 @@ export function AppShell({
                   >
                     <p className="gm-meta">Signed in as</p>
                     <strong data-testid="profile-email">{email}</strong>
-                    <p className="gm-meta" style={{ marginTop: 8 }}>
-                      AutoTrade OFF · Analysis only
+                    <p className="gm-meta" style={{ marginTop: 8 }} data-testid="profile-autotrade">
+                      {autoTradeHeader.label}
                     </p>
                     <NavLink
                       to={withPrefix("/settings")}
@@ -435,4 +444,3 @@ export function AppShell({
     </div>
   );
 }
-

@@ -833,6 +833,7 @@ a {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .gm-auth-check input[type="checkbox"] {
@@ -841,6 +842,13 @@ a {
   min-width: 1.15rem;
   margin-top: 0.2rem;
   flex-shrink: 0;
+}
+
+.gm-auth-check > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .gm-auth-check span,
@@ -6928,4 +6936,153 @@ body.gm-drawer-open {
 .gm-perf-weekly dd {
   margin: 0.1rem 0 0;
   font-weight: 600;
+}
+
+/* —— Premium trading UX shell polish —— */
+.gm-topbar-market {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.gm-topbar-symbol {
+  color: var(--navy);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.gm-autotrade-pill--success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.gm-autotrade-pill--warning {
+  background: var(--warning-soft);
+  color: var(--gold-600);
+}
+.gm-autotrade-pill--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.gm-autotrade-pill--info {
+  background: var(--research-soft);
+  color: var(--info);
+}
+.gm-autotrade-pill--neutral {
+  background: var(--neutral-soft);
+  color: var(--neutral);
+}
+
+.gm-system-health--compact .gm-system-health__summary {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+.gm-markets-env-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+@media (min-width: 900px) {
+  .gm-markets-env-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .gm-settings-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+}
+
+.gm-settings-layout {
+  width: 100%;
+  min-width: 0;
+}
+
+.gm-at-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 12px 0 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.gm-at-next-action {
+  font-size: 1.05rem !important;
+  font-weight: 700;
+  margin-top: 8px !important;
+}
+
+.gm-chip-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gm-chip {
+  border: 1px solid var(--border);
+  background: var(--surface-card);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.gm-chip.is-selected {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+
+.gm-journal-manual-toggle {
+  margin: 12px 0;
+}
+
+.gm-empty-state.gm-perf-empty {
+  padding: 28px 20px;
+  text-align: center;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.gm-history-redesign .history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gm-banner.gm-banner-info {
+  background: var(--research-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.gm-help-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.gm-help-search input {
+  min-height: var(--touch-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
