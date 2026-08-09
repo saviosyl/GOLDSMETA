@@ -52,6 +52,9 @@ jobs:
         run: npm run typecheck
 
       - name: Test
+        env:
+          # Premium UI suite is large; default ~4GB heap OOMs intermittently on GHA.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm test
 
       - name: Production Firebase env gate
