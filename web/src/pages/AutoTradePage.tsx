@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Search,
   Shield,
-  Scale,
   Bot,
   AlertTriangle,
   BarChart3,
@@ -136,6 +134,10 @@ export function AutoTradePage() {
       /* ignore */
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (atTab === "risk") setShowSettings(true);
+  }, [atTab]);
 
   useEffect(() => {
     const loadedAt = Date.now();
@@ -745,7 +747,98 @@ export function AutoTradePage() {
         />
       ) : null}
 
-      {(atTab === "overview" || atTab === "qualification") && qualification ? (
+      {atTab === "overview" ? (
+        <OpenPositionCard
+          currency={currency}
+          position={
+            lifecyclePosition
+              ? {
+                  correlationId: String(lifecyclePosition.correlationId ?? ""),
+                  accountMasked:
+                    (lifecyclePosition.accountMasked as string | null) ??
+                    maskedAt,
+                  symbol: String(lifecyclePosition.symbol ?? "XAUUSD"),
+                  side: String(lifecyclePosition.side ?? ""),
+                  entry:
+                    typeof lifecyclePosition.entry === "number"
+                      ? lifecyclePosition.entry
+                      : null,
+                  current:
+                    typeof lifecyclePosition.current === "number"
+                      ? lifecyclePosition.current
+                      : null,
+                  lots:
+                    typeof lifecyclePosition.lots === "number"
+                      ? lifecyclePosition.lots
+                      : null,
+                  stopLoss:
+                    typeof lifecyclePosition.stopLoss === "number"
+                      ? lifecyclePosition.stopLoss
+                      : null,
+                  tp1:
+                    typeof lifecyclePosition.tp1 === "number"
+                      ? lifecyclePosition.tp1
+                      : null,
+                  tp2:
+                    typeof lifecyclePosition.tp2 === "number"
+                      ? lifecyclePosition.tp2
+                      : null,
+                  tp3:
+                    typeof lifecyclePosition.tp3 === "number"
+                      ? lifecyclePosition.tp3
+                      : null,
+                  tp1Status: String(lifecyclePosition.tp1Status ?? "PENDING"),
+                  tp2Status: String(lifecyclePosition.tp2Status ?? "PENDING"),
+                  tp3Status: String(lifecyclePosition.tp3Status ?? "PENDING"),
+                  pnl:
+                    typeof lifecyclePosition.pnl === "number"
+                      ? lifecyclePosition.pnl
+                      : null,
+                  initialRisk:
+                    typeof lifecyclePosition.initialRisk === "number"
+                      ? lifecyclePosition.initialRisk
+                      : null,
+                  currentRisk:
+                    typeof lifecyclePosition.currentRisk === "number"
+                      ? lifecyclePosition.currentRisk
+                      : null,
+                  openedAt:
+                    typeof lifecyclePosition.openedAt === "string"
+                      ? lifecyclePosition.openedAt
+                      : undefined,
+                  durationSeconds:
+                    typeof lifecyclePosition.durationSeconds === "number"
+                      ? lifecyclePosition.durationSeconds
+                      : null,
+                  managementState: String(
+                    lifecyclePosition.managementState ?? "HOLD"
+                  ),
+                  fundsLabel: String(lifecyclePosition.fundsLabel ?? "DEMO FUNDS"),
+                  lastRecommendation:
+                    typeof lifecyclePosition.lastRecommendation === "string"
+                      ? lifecyclePosition.lastRecommendation
+                      : null
+                }
+              : position
+                ? {
+                    side: position.direction,
+                    entry: position.entry,
+                    current: quote?.bid ?? null,
+                    lots: position.size,
+                    stopLoss: position.stop,
+                    tp1: position.takeProfit,
+                    pnl: position.unrealisedPnl,
+                    accountMasked: maskedAt,
+                    fundsLabel: "DEMO FUNDS",
+                    managementState: "HOLD",
+                    symbol: "XAUUSD"
+                  }
+                : null
+          }
+        />
+      ) : null}
+
+      {atTab === "qualification" && qualification ? (
         <QualificationDashboard
           view={qualification}
           busy={busy}
@@ -815,7 +908,7 @@ export function AutoTradePage() {
             })();
           }}
         />
-      ) : qualificationError ? (
+      ) : atTab === "qualification" && qualificationError ? (
         <section
           className="gm-qual-dash gm-qual-dash--error"
           data-testid="autotrade-qualification-error"
@@ -844,7 +937,7 @@ export function AutoTradePage() {
             </button>
           </div>
         </section>
-      ) : qualificationLoading ? (
+      ) : atTab === "qualification" && qualificationLoading ? (
         <section
           className="gm-qual-dash"
           data-testid="autotrade-qualification-loading"
@@ -857,7 +950,7 @@ export function AutoTradePage() {
             </div>
           </div>
         </section>
-      ) : !brokerConnected ? (
+      ) : atTab === "qualification" && !brokerConnected ? (
         <section
           className="gm-at-setup-required"
           data-testid="autotrade-setup-required"
@@ -879,6 +972,7 @@ export function AutoTradePage() {
               className="gm-btn"
               data-testid="autotrade-open-setup-wizard"
               onClick={() => {
+                setAtTab("overview");
                 setSetupWizardOpen(true);
                 setShowAccounts(true);
               }}
@@ -939,6 +1033,8 @@ export function AutoTradePage() {
         </div>
       ) : null}
 
+      {atTab === "overview" ? (
+        <>
       <p className="gm-prem-section-label">Readiness</p>
       <section className="gm-prem-card" aria-label="Readiness">
         <ul className="gm-prem-check-list" data-testid="autotrade-readiness-list">
@@ -1025,41 +1121,6 @@ export function AutoTradePage() {
         </ul>
       </section>
 
-      {atTab === "overview" ? (
-        <details className="gm-disclosure gm-at-how-details" data-testid="autotrade-how-it-works">
-          <summary>How AutoTrade works</summary>
-          <ol className="gm-prem-how-steps">
-            <li>
-              <span aria-hidden="true">
-                <Search size={16} />
-              </span>
-              <div>
-                <strong>Plan found</strong>
-                <p>GoldMeta identifies a setup</p>
-              </div>
-            </li>
-            <li>
-              <span aria-hidden="true">
-                <Shield size={16} />
-              </span>
-              <div>
-                <strong>Risk checked</strong>
-                <p>Risk and safeguards validated</p>
-              </div>
-            </li>
-            <li>
-              <span aria-hidden="true">
-                <Scale size={16} />
-              </span>
-              <div>
-                <strong>Execution decision</strong>
-                <p>Allowed, blocked, or research-only</p>
-              </div>
-            </li>
-          </ol>
-        </details>
-      ) : null}
-
       <p className="gm-prem-section-label">Controls</p>
       <div className="gm-prem-control-grid" aria-label="AutoTrade controls">
         <article className="gm-prem-control-card">
@@ -1108,6 +1169,68 @@ export function AutoTradePage() {
         </article>
       </div>
 
+      {previewNote ? (
+        <p className="gm-meta" data-testid="autotrade-preview-note">
+          {previewNote}
+        </p>
+      ) : null}
+
+      <p className="gm-prem-section-label">Execution actions</p>
+      <section
+        className="gm-prem-card"
+        aria-label="Execution control"
+        data-testid="autotrade-emergency-bar"
+      >
+        <div className="gm-prem-pill-actions">
+          <button
+            type="button"
+            className="gm-btn"
+            disabled={busy || !status?.mode || status.mode === "OFF"}
+            onClick={() => void run(() => api.autoTradeSetMode("OFF"))}
+            data-testid="autotrade-pause"
+          >
+            Pause AutoTrade
+          </button>
+          <button
+            type="button"
+            className="gm-btn gm-btn-danger"
+            data-testid="autotrade-emergency-stop"
+            disabled={busy}
+            onClick={() => void emergencyStop()}
+          >
+            Emergency stop
+          </button>
+          <button
+            type="button"
+            className="gm-btn"
+            data-testid="autotrade-view-diagnostics"
+            aria-expanded={showDiagnostics}
+            onClick={() => setShowDiagnostics((v) => !v)}
+          >
+            View audit log
+          </button>
+          <button
+            type="button"
+            className="gm-btn"
+            disabled={busy}
+            onClick={() => void runPreview()}
+            data-testid="autotrade-preview-trade"
+          >
+            Review shadow
+          </button>
+          <Link className="gm-btn" to="/brokers" data-testid="autotrade-connect-ctrader">
+            Open broker
+          </Link>
+        </div>
+        <p className="gm-meta" style={{ marginTop: 10 }}>
+          Live execution cannot be enabled until owner approval is granted.
+        </p>
+      </section>
+        </>
+      ) : null}
+
+      {atTab === "risk" ? (
+        <>
       <p className="gm-prem-section-label">Risk summary</p>
       <section className="gm-prem-card" aria-label="Risk and account controls">
         <div className="gm-prem-stat-grid gm-prem-stat-grid--2">
@@ -1188,280 +1311,6 @@ export function AutoTradePage() {
           </div>
         )}
       </section>
-
-      {previewNote ? (
-        <p className="gm-meta" data-testid="autotrade-preview-note">
-          {previewNote}
-        </p>
-      ) : null}
-
-      <p className="gm-prem-section-label">Execution actions</p>
-      <section
-        className="gm-prem-card"
-        aria-label="Execution control"
-        data-testid="autotrade-emergency-bar"
-      >
-        <div className="gm-prem-pill-actions">
-          <button
-            type="button"
-            className="gm-btn"
-            disabled={busy || !status?.mode || status.mode === "OFF"}
-            onClick={() => void run(() => api.autoTradeSetMode("OFF"))}
-            data-testid="autotrade-pause"
-          >
-            Pause AutoTrade
-          </button>
-          <button
-            type="button"
-            className="gm-btn gm-btn-danger"
-            data-testid="autotrade-emergency-stop"
-            disabled={busy}
-            onClick={() => void emergencyStop()}
-          >
-            Emergency stop
-          </button>
-          <button
-            type="button"
-            className="gm-btn"
-            data-testid="autotrade-view-diagnostics"
-            aria-expanded={showDiagnostics}
-            onClick={() => setShowDiagnostics((v) => !v)}
-          >
-            View audit log
-          </button>
-          <button
-            type="button"
-            className="gm-btn"
-            disabled={busy}
-            onClick={() => void runPreview()}
-            data-testid="autotrade-preview-trade"
-          >
-            Review shadow
-          </button>
-          <Link className="gm-btn" to="/brokers" data-testid="autotrade-connect-ctrader">
-            Open broker
-          </Link>
-        </div>
-        <p className="gm-meta" style={{ marginTop: 10 }}>
-          Live execution cannot be enabled until owner approval is granted.
-        </p>
-      </section>
-
-      <p className="gm-prem-section-label">Recent evaluations</p>
-      <section className="gm-prem-card" aria-label="Recent evaluations">
-        <ul className="gm-prem-activity" data-testid="autotrade-recent-evaluations">
-          {activityFeed.slice(0, 5).map((item) => (
-            <li key={item.id}>
-              <span>{item.message}</span>
-              <time dateTime={item.at}>
-                {new Date(item.at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit"
-                })}
-              </time>
-            </li>
-          ))}
-          {activityFeed.length === 0 ? (
-            <li>
-              <span>No recent evaluations yet</span>
-              <time>—</time>
-            </li>
-          ) : null}
-        </ul>
-      </section>
-
-      {error ? (
-        <p className="gm-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {showLiveConfirm ? (
-        <LiveActivationConfirm
-          brokerName={
-            accounts.find((a) => a.isLive)?.brokerNameTitle ??
-            diagnostics?.connection?.brokerName ??
-            "Pepperstone"
-          }
-          accountMasked={
-            accounts.find((a) => a.isLive)?.accountIdMasked ??
-            diagnostics?.connection?.accountMasked ??
-            "—"
-          }
-          currency={currency}
-          riskPerTrade={settings?.fixedRiskAmount ?? 20}
-          maxDailyLoss={settings?.maxDailyLoss ?? 50}
-          maxTradesPerDay={settings?.maxTradesPerDay ?? 3}
-          busy={busy}
-          onCancel={() => setShowLiveConfirm(false)}
-          onConfirm={confirmLiveAccount}
-        />
-      ) : null}
-
-      <details
-        className="gm-prem-advanced"
-        data-testid="autotrade-advanced-controls"
-        open={showAccounts || showSettings || showDiagnostics || setupWizardOpen}
-        onToggle={(e) => {
-          const open = (e.currentTarget as HTMLDetailsElement).open;
-          if (!open) {
-            setSetupWizardOpen(false);
-            setShowAccounts(false);
-            setShowSettings(false);
-            setShowDiagnostics(false);
-          }
-        }}
-      >
-        <summary>Advanced controls &amp; diagnostics</summary>
-        <div className="gm-prem-advanced-body">
-      <div className="gm-at-mode-tabs" role="tablist" aria-label="Account type">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "demo"}
-          className={`gm-btn${mode === "demo" ? " is-active" : ""}`}
-          data-testid="autotrade-tab-demo"
-          onClick={() => setMode("demo")}
-        >
-          Demo
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "live"}
-          className={`gm-btn${mode === "live" ? " is-active" : ""}`}
-          data-testid="autotrade-tab-live"
-          onClick={() => setMode("live")}
-        >
-          Live
-        </button>
-      </div>
-      {mode === "live" ? (
-        <p className="gm-at-live-warn" role="status" data-testid="autotrade-live-warn">
-          Live uses <strong>real money</strong>. Selecting a Live account requires typing{" "}
-          <strong>ENABLE LIVE</strong>. Order submission stays disabled in this preview.
-        </p>
-      ) : (
-        <p className="gm-meta" data-testid="autotrade-demo-hint">
-          Demo uses practice funds. Demo and Live settings are saved separately.
-        </p>
-      )}
-
-      <div className="gm-autotrade-readonly-banner" data-testid="autotrade-readonly-banner">
-        {mode === "live"
-          ? "Live execution stays locked. Select Demo to enable Pepperstone Demo AutoTrade."
-          : "Demo Auto is available after Authorise Demo Trading + a Pepperstone Demo account. Live orders stay locked."}
-      </div>
-
-      <details
-        className="gm-prem-nested"
-        data-testid="autotrade-full-setup-wizard"
-        open={setupWizardOpen}
-      >
-        <summary>Full setup wizard</summary>
-        <AutoTradeOnboarding steps={onboarding} />
-      </details>
-
-      <section className="gm-at-actions" aria-label="Primary controls">
-        <button
-          type="button"
-          className="gm-btn gm-btn-primary"
-          data-testid="autotrade-select-account"
-          onClick={() => setShowAccounts((v) => !v)}
-        >
-          {sync.accountSelected ? "Manage account" : "Select account"}
-        </button>
-        <button
-          type="button"
-          className="gm-btn"
-          data-testid="autotrade-edit-settings"
-          onClick={() => setShowSettings((v) => !v)}
-        >
-          Edit AutoTrade settings
-        </button>
-        <button
-          type="button"
-          className="gm-btn"
-          disabled={busy || mode === "live"}
-          title={
-            mode === "live"
-              ? "Switch to Demo — Live Auto stays locked"
-              : "Enable Pepperstone Demo AutoTrade"
-          }
-          data-testid="autotrade-enable-demo-auto"
-          onClick={() => {
-            void (async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                const result = await api.setCTraderAutomationMode("DEMO_AUTO");
-                setPreviewNote(
-                  result.note ??
-                    "Demo Auto enabled for Pepperstone Demo. Live stays locked."
-                );
-                setMode("demo");
-                await reload();
-                await loadSettings("demo");
-              } catch (err) {
-                setError(
-                  err instanceof Error ? err.message : "Could not enable Demo Auto"
-                );
-              } finally {
-                setBusy(false);
-              }
-            })();
-          }}
-        >
-          Enable Demo Auto
-        </button>
-        <button
-          type="button"
-          className="gm-btn"
-          disabled={mode !== "live"}
-          title="Requires Live confirmation — execution still OFF in preview"
-          data-testid="autotrade-open-live-confirm"
-          onClick={() => setShowLiveConfirm(true)}
-        >
-          Enable Live Auto
-        </button>
-      </section>
-
-      {showAccounts ? (
-        <section className="gm-at-account-list" data-testid="autotrade-account-list">
-          <h2 className="gm-section-title">Authorised broker accounts</h2>
-          <p className="gm-meta">
-            Showing {mode === "live" ? "Live (real money)" : "Demo (demo funds)"} accounts returned
-            by your cTrader connection.
-          </p>
-          {filteredAccounts.length === 0 ? (
-            <p className="gm-meta">No {mode === "live" ? "Live" : "Demo"} accounts found. Connect cTrader first.</p>
-          ) : (
-            <ul>
-              {filteredAccounts.map((acct) => (
-                <li key={acct.ctidTraderAccountId}>
-                  <button
-                    type="button"
-                    className={`gm-at-account-option${acct.selected ? " is-selected" : ""}`}
-                    disabled={busy}
-                    onClick={() => void selectAccount(acct)}
-                  >
-                    <strong>{acct.brokerNameTitle ?? "Broker"}</strong>
-                    <span>
-                      {acct.isLive ? "Live account" : "Demo account"} · {acct.accountIdMasked}
-                    </span>
-                    <span>
-                      {acct.depositCurrency ?? "—"}
-                      {acct.balance != null ? ` · ${money(acct.balance, acct.depositCurrency ?? "EUR")}` : ""}
-                    </span>
-                    <span>{acct.connectionStatus ?? "Connected"} · {acct.tradingPermission ?? "Read only"}</span>
-                    {acct.selected ? <em>Selected</em> : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ) : null}
 
       {showSettings && settings ? (
         <section className="gm-at-settings" data-testid="autotrade-settings-panel">
@@ -1850,68 +1699,7 @@ export function AutoTradePage() {
         </section>
       ) : null}
 
-      <p className="gm-meta gm-at-locked-note" data-testid="autotrade-demo-auto-note">
-        Demo Auto places Pepperstone Demo orders only. Live Auto and real-money execution stay locked.
-      </p>
-
-      <section className="gm-at-cards" aria-label="Daily overview">
-        <article className="gm-at-card" data-testid="autotrade-card-market">
-          <h3>Market</h3>
-          <dl>
-            <div>
-              <dt>Bid</dt>
-              <dd data-testid="autotrade-bid">{num(sync.bid ?? quote?.bid ?? connection?.bid, 3)}</dd>
-            </div>
-            <div>
-              <dt>Ask</dt>
-              <dd data-testid="autotrade-ask">{num(sync.ask ?? quote?.ask ?? connection?.ask, 3)}</dd>
-            </div>
-            <div>
-              <dt>Spread</dt>
-              <dd data-testid="autotrade-spread">
-                {num(sync.spread ?? quote?.spread ?? connection?.spread, 3)}
-              </dd>
-            </div>
-            <div>
-              <dt>Market status</dt>
-              <dd data-testid="autotrade-market-status">
-                {sync.marketStatusRaw
-                  ? marketOpen
-                    ? "Market open"
-                    : /CLOSE/i.test(sync.marketStatusRaw)
-                      ? "Market closed"
-                      : sync.marketStatusRaw.replace(/_/g, " ")
-                  : "Unknown"}
-              </dd>
-            </div>
-            <div>
-              <dt>Quote</dt>
-              <dd data-testid="autotrade-quote-label">{sync.quoteLabel}</dd>
-            </div>
-            <div>
-              <dt>Execution</dt>
-              <dd data-testid="autotrade-execution-label">{sync.executionLabel}</dd>
-            </div>
-          </dl>
-        </article>
-
-        <article className="gm-at-card" data-testid="autotrade-card-signal">
-          <h3>Current signal</h3>
-          <dl>
-            <div>
-              <dt>Decision</dt>
-              <dd>Waiting · preview only</dd>
-            </div>
-            <div>
-              <dt>Min confidence</dt>
-              <dd>{settings?.minConfidence ?? "—"}%</dd>
-            </div>
-          </dl>
-          <button type="button" className="gm-btn gm-btn-text" onClick={() => void runPreview()}>
-            Preview next trade
-          </button>
-        </article>
-
+      <section className="gm-at-cards" aria-label="Risk overview">
         <article className="gm-at-card" data-testid="autotrade-card-risk">
           <h3>Trade size &amp; risk</h3>
           <dl data-testid="autotrade-budget">
@@ -1955,126 +1743,6 @@ export function AutoTradePage() {
             </div>
           </dl>
         </article>
-
-        <article className="gm-at-card" data-testid="autotrade-card-account">
-          <h3>Today</h3>
-          <dl>
-            <div>
-              <dt>P/L</dt>
-              <dd>{money(budget?.dailyRealisedPnl ?? 0, currency)}</dd>
-            </div>
-            <div>
-              <dt>Trades taken</dt>
-              <dd>
-                {budget?.tradesUsed ?? 0} / {settings?.maxTradesPerDay ?? limits.maxTradesPerDay}
-              </dd>
-            </div>
-            <div>
-              <dt>Daily limit used</dt>
-              <dd>
-                {money(budget?.dailyRealisedPnl ?? 0, currency)} /{" "}
-                {money(settings?.maxDailyLoss ?? limits.maxDailyLoss, currency)}
-              </dd>
-            </div>
-            <div>
-              <dt>Open positions</dt>
-              <dd>{status?.positions?.length ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Balance</dt>
-              <dd>{money(demoAccount?.balance ?? connection?.balance, currency)}</dd>
-            </div>
-          </dl>
-        </article>
-
-        <OpenPositionCard
-          currency={currency}
-          position={
-            lifecyclePosition
-              ? {
-                  correlationId: String(lifecyclePosition.correlationId ?? ""),
-                  accountMasked:
-                    (lifecyclePosition.accountMasked as string | null) ??
-                    maskedAt,
-                  symbol: String(lifecyclePosition.symbol ?? "XAUUSD"),
-                  side: String(lifecyclePosition.side ?? ""),
-                  entry:
-                    typeof lifecyclePosition.entry === "number"
-                      ? lifecyclePosition.entry
-                      : null,
-                  current:
-                    typeof lifecyclePosition.current === "number"
-                      ? lifecyclePosition.current
-                      : null,
-                  lots:
-                    typeof lifecyclePosition.lots === "number"
-                      ? lifecyclePosition.lots
-                      : null,
-                  stopLoss:
-                    typeof lifecyclePosition.stopLoss === "number"
-                      ? lifecyclePosition.stopLoss
-                      : null,
-                  tp1:
-                    typeof lifecyclePosition.tp1 === "number"
-                      ? lifecyclePosition.tp1
-                      : null,
-                  tp2:
-                    typeof lifecyclePosition.tp2 === "number"
-                      ? lifecyclePosition.tp2
-                      : null,
-                  tp3:
-                    typeof lifecyclePosition.tp3 === "number"
-                      ? lifecyclePosition.tp3
-                      : null,
-                  tp1Status: String(lifecyclePosition.tp1Status ?? "PENDING"),
-                  tp2Status: String(lifecyclePosition.tp2Status ?? "PENDING"),
-                  tp3Status: String(lifecyclePosition.tp3Status ?? "PENDING"),
-                  pnl:
-                    typeof lifecyclePosition.pnl === "number"
-                      ? lifecyclePosition.pnl
-                      : null,
-                  initialRisk:
-                    typeof lifecyclePosition.initialRisk === "number"
-                      ? lifecyclePosition.initialRisk
-                      : null,
-                  currentRisk:
-                    typeof lifecyclePosition.currentRisk === "number"
-                      ? lifecyclePosition.currentRisk
-                      : null,
-                  openedAt:
-                    typeof lifecyclePosition.openedAt === "string"
-                      ? lifecyclePosition.openedAt
-                      : undefined,
-                  durationSeconds:
-                    typeof lifecyclePosition.durationSeconds === "number"
-                      ? lifecyclePosition.durationSeconds
-                      : null,
-                  managementState: String(
-                    lifecyclePosition.managementState ?? "HOLD"
-                  ),
-                  fundsLabel: String(lifecyclePosition.fundsLabel ?? "DEMO FUNDS"),
-                  lastRecommendation:
-                    typeof lifecyclePosition.lastRecommendation === "string"
-                      ? lifecyclePosition.lastRecommendation
-                      : null
-                }
-              : position
-                ? {
-                    side: position.direction,
-                    entry: position.entry,
-                    current: quote?.bid ?? null,
-                    lots: position.size,
-                    stopLoss: position.stop,
-                    tp1: position.takeProfit,
-                    pnl: position.unrealisedPnl,
-                    accountMasked: maskedAt,
-                    fundsLabel: "DEMO FUNDS",
-                    managementState: "HOLD",
-                    symbol: "XAUUSD"
-                  }
-                : null
-          }
-        />
       </section>
 
       <section className="gm-at-card gm-news-guard" data-testid="news-guard-card">
@@ -2145,9 +1813,339 @@ export function AutoTradePage() {
             ))}
           </ul>
         ) : null}
-        <p className="gm-meta">
-          <Link to="/autotrade/performance">Open Performance</Link>
+      </section>
+        </>
+      ) : null}
+
+      {atTab === "activity" ? (
+        <>
+      <p className="gm-prem-section-label">Recent evaluations</p>
+      <section className="gm-prem-card" aria-label="Recent evaluations">
+        <ul className="gm-prem-activity" data-testid="autotrade-recent-evaluations">
+          {activityFeed.slice(0, 5).map((item) => (
+            <li key={item.id}>
+              <span>{item.message}</span>
+              <time dateTime={item.at}>
+                {new Date(item.at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })}
+              </time>
+            </li>
+          ))}
+          {activityFeed.length === 0 ? (
+            <li>
+              <span>No recent evaluations yet</span>
+              <time>—</time>
+            </li>
+          ) : null}
+        </ul>
+      </section>
+
+      <section className="gm-autotrade-panel" aria-labelledby="activity-heading">
+        <h2 id="activity-heading" className="gm-section-title">
+          Activity
+        </h2>
+        <ul className="gm-autotrade-activity" data-testid="autotrade-activity">
+          {activityFeed.map((item) => (
+            <li key={item.id} data-level={item.level}>
+              <time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time>
+              <span>{item.message}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+        </>
+      ) : null}
+
+      {error ? (
+        <p className="gm-error" role="alert">
+          {error}
         </p>
+      ) : null}
+
+      {showLiveConfirm ? (
+        <LiveActivationConfirm
+          brokerName={
+            accounts.find((a) => a.isLive)?.brokerNameTitle ??
+            diagnostics?.connection?.brokerName ??
+            "Pepperstone"
+          }
+          accountMasked={
+            accounts.find((a) => a.isLive)?.accountIdMasked ??
+            diagnostics?.connection?.accountMasked ??
+            "—"
+          }
+          currency={currency}
+          riskPerTrade={settings?.fixedRiskAmount ?? 20}
+          maxDailyLoss={settings?.maxDailyLoss ?? 50}
+          maxTradesPerDay={settings?.maxTradesPerDay ?? 3}
+          busy={busy}
+          onCancel={() => setShowLiveConfirm(false)}
+          onConfirm={confirmLiveAccount}
+        />
+      ) : null}
+
+      {atTab === "overview" ? (
+      <details
+        className="gm-disclosure gm-prem-advanced"
+        data-testid="autotrade-advanced-controls"
+        open={showAccounts || showDiagnostics || setupWizardOpen}
+        onToggle={(e) => {
+          const open = (e.currentTarget as HTMLDetailsElement).open;
+          if (!open) {
+            setSetupWizardOpen(false);
+            setShowAccounts(false);
+            setShowDiagnostics(false);
+          }
+        }}
+      >
+        <summary>Advanced controls</summary>
+        <div className="gm-prem-advanced-body">
+      <div className="gm-at-mode-tabs" role="tablist" aria-label="Account type">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "demo"}
+          className={`gm-btn${mode === "demo" ? " is-active" : ""}`}
+          data-testid="autotrade-tab-demo"
+          onClick={() => setMode("demo")}
+        >
+          Demo
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "live"}
+          className={`gm-btn${mode === "live" ? " is-active" : ""}`}
+          data-testid="autotrade-tab-live"
+          onClick={() => setMode("live")}
+        >
+          Live
+        </button>
+      </div>
+      {mode === "live" ? (
+        <p className="gm-at-live-warn" role="status" data-testid="autotrade-live-warn">
+          Live uses <strong>real money</strong>. Selecting a Live account requires typing{" "}
+          <strong>ENABLE LIVE</strong>. Order submission stays disabled in this preview.
+        </p>
+      ) : (
+        <p className="gm-meta" data-testid="autotrade-demo-hint">
+          Demo uses practice funds. Demo and Live settings are saved separately.
+        </p>
+      )}
+
+      <div className="gm-autotrade-readonly-banner" data-testid="autotrade-readonly-banner">
+        {mode === "live"
+          ? "Live execution stays locked. Select Demo to enable Pepperstone Demo AutoTrade."
+          : "Demo Auto is available after Authorise Demo Trading + a Pepperstone Demo account. Live orders stay locked."}
+      </div>
+
+      <details
+        className="gm-prem-nested"
+        data-testid="autotrade-full-setup-wizard"
+        open={setupWizardOpen}
+      >
+        <summary>Full setup wizard</summary>
+        <AutoTradeOnboarding steps={onboarding} />
+      </details>
+
+      <section className="gm-at-actions" aria-label="Primary controls">
+        <button
+          type="button"
+          className="gm-btn gm-btn-primary"
+          data-testid="autotrade-select-account"
+          onClick={() => setShowAccounts((v) => !v)}
+        >
+          {sync.accountSelected ? "Manage account" : "Select account"}
+        </button>
+        <button
+          type="button"
+          className="gm-btn"
+          data-testid="autotrade-edit-settings"
+          onClick={() => {
+            setAtTab("risk");
+            setShowSettings(true);
+          }}
+        >
+          Edit AutoTrade settings
+        </button>
+        <button
+          type="button"
+          className="gm-btn"
+          disabled={busy || mode === "live"}
+          title={
+            mode === "live"
+              ? "Switch to Demo — Live Auto stays locked"
+              : "Enable Pepperstone Demo AutoTrade"
+          }
+          data-testid="autotrade-enable-demo-auto"
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const result = await api.setCTraderAutomationMode("DEMO_AUTO");
+                setPreviewNote(
+                  result.note ??
+                    "Demo Auto enabled for Pepperstone Demo. Live stays locked."
+                );
+                setMode("demo");
+                await reload();
+                await loadSettings("demo");
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Could not enable Demo Auto"
+                );
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        >
+          Enable Demo Auto
+        </button>
+        <button
+          type="button"
+          className="gm-btn"
+          disabled={mode !== "live"}
+          title="Requires Live confirmation — execution still OFF in preview"
+          data-testid="autotrade-open-live-confirm"
+          onClick={() => setShowLiveConfirm(true)}
+        >
+          Enable Live Auto
+        </button>
+      </section>
+
+      {showAccounts ? (
+        <section className="gm-at-account-list" data-testid="autotrade-account-list">
+          <h2 className="gm-section-title">Authorised broker accounts</h2>
+          <p className="gm-meta">
+            Showing {mode === "live" ? "Live (real money)" : "Demo (demo funds)"} accounts returned
+            by your cTrader connection.
+          </p>
+          {filteredAccounts.length === 0 ? (
+            <p className="gm-meta">No {mode === "live" ? "Live" : "Demo"} accounts found. Connect cTrader first.</p>
+          ) : (
+            <ul>
+              {filteredAccounts.map((acct) => (
+                <li key={acct.ctidTraderAccountId}>
+                  <button
+                    type="button"
+                    className={`gm-at-account-option${acct.selected ? " is-selected" : ""}`}
+                    disabled={busy}
+                    onClick={() => void selectAccount(acct)}
+                  >
+                    <strong>{acct.brokerNameTitle ?? "Broker"}</strong>
+                    <span>
+                      {acct.isLive ? "Live account" : "Demo account"} · {acct.accountIdMasked}
+                    </span>
+                    <span>
+                      {acct.depositCurrency ?? "—"}
+                      {acct.balance != null ? ` · ${money(acct.balance, acct.depositCurrency ?? "EUR")}` : ""}
+                    </span>
+                    <span>{acct.connectionStatus ?? "Connected"} · {acct.tradingPermission ?? "Read only"}</span>
+                    {acct.selected ? <em>Selected</em> : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      <p className="gm-meta gm-at-locked-note" data-testid="autotrade-demo-auto-note">
+        Demo Auto places Pepperstone Demo orders only. Live Auto and real-money execution stay locked.
+      </p>
+
+      <section className="gm-at-cards" aria-label="Daily overview">
+        <article className="gm-at-card" data-testid="autotrade-card-market">
+          <h3>Market</h3>
+          <dl>
+            <div>
+              <dt>Bid</dt>
+              <dd data-testid="autotrade-bid">{num(sync.bid ?? quote?.bid ?? connection?.bid, 3)}</dd>
+            </div>
+            <div>
+              <dt>Ask</dt>
+              <dd data-testid="autotrade-ask">{num(sync.ask ?? quote?.ask ?? connection?.ask, 3)}</dd>
+            </div>
+            <div>
+              <dt>Spread</dt>
+              <dd data-testid="autotrade-spread">
+                {num(sync.spread ?? quote?.spread ?? connection?.spread, 3)}
+              </dd>
+            </div>
+            <div>
+              <dt>Market status</dt>
+              <dd data-testid="autotrade-market-status">
+                {sync.marketStatusRaw
+                  ? marketOpen
+                    ? "Market open"
+                    : /CLOSE/i.test(sync.marketStatusRaw)
+                      ? "Market closed"
+                      : sync.marketStatusRaw.replace(/_/g, " ")
+                  : "Unknown"}
+              </dd>
+            </div>
+            <div>
+              <dt>Quote</dt>
+              <dd data-testid="autotrade-quote-label">{sync.quoteLabel}</dd>
+            </div>
+            <div>
+              <dt>Execution</dt>
+              <dd data-testid="autotrade-execution-label">{sync.executionLabel}</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article className="gm-at-card" data-testid="autotrade-card-signal">
+          <h3>Current signal</h3>
+          <dl>
+            <div>
+              <dt>Decision</dt>
+              <dd>Waiting · preview only</dd>
+            </div>
+            <div>
+              <dt>Min confidence</dt>
+              <dd>{settings?.minConfidence ?? "—"}%</dd>
+            </div>
+          </dl>
+          <button type="button" className="gm-btn gm-btn-text" onClick={() => void runPreview()}>
+            Preview next trade
+          </button>
+        </article>
+
+        <article className="gm-at-card" data-testid="autotrade-card-account">
+          <h3>Today</h3>
+          <dl>
+            <div>
+              <dt>P/L</dt>
+              <dd>{money(budget?.dailyRealisedPnl ?? 0, currency)}</dd>
+            </div>
+            <div>
+              <dt>Trades taken</dt>
+              <dd>
+                {budget?.tradesUsed ?? 0} / {settings?.maxTradesPerDay ?? limits.maxTradesPerDay}
+              </dd>
+            </div>
+            <div>
+              <dt>Daily limit used</dt>
+              <dd>
+                {money(budget?.dailyRealisedPnl ?? 0, currency)} /{" "}
+                {money(settings?.maxDailyLoss ?? limits.maxDailyLoss, currency)}
+              </dd>
+            </div>
+            <div>
+              <dt>Open positions</dt>
+              <dd>{status?.positions?.length ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Balance</dt>
+              <dd>{money(demoAccount?.balance ?? connection?.balance, currency)}</dd>
+            </div>
+          </dl>
+        </article>
       </section>
 
       <details
@@ -2333,22 +2331,9 @@ export function AutoTradePage() {
           </section>
         ) : null}
       </details>
-
-      <section className="gm-autotrade-panel" aria-labelledby="activity-heading">
-        <h2 id="activity-heading" className="gm-section-title">
-          Activity
-        </h2>
-        <ul className="gm-autotrade-activity" data-testid="autotrade-activity">
-          {activityFeed.map((item) => (
-            <li key={item.id} data-level={item.level}>
-              <time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time>
-              <span>{item.message}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
         </div>
       </details>
+      ) : null}
     </div>
   );
 }

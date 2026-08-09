@@ -255,7 +255,20 @@ describe("AutoTradePage", () => {
     api.autoTradeStatus.mockResolvedValue(baseStatus);
   });
 
+  async function openQualificationTab(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId("autotrade-section-qualification"));
+  }
+
+  async function openActivityTab(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId("autotrade-section-activity"));
+  }
+
+  async function openRiskTab(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId("autotrade-section-risk"));
+  }
+
   it("renders Pepperstone-first dashboard with emergency STOP", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <AutoTradePage />
@@ -273,11 +286,12 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("autotrade-setup-journey")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-card-account")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-card-market")).toBeInTheDocument();
-    expect(screen.getByTestId("autotrade-card-risk")).toBeInTheDocument();
     expect(screen.queryByText(/IG Demo/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Parked — temporarily unavailable/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("autotrade-view-diagnostics")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-enable-demo-auto")).toBeEnabled();
+    await openRiskTab(user);
+    expect(screen.getByTestId("autotrade-card-risk")).toBeInTheDocument();
   });
 
   it("keeps technical modes behind View diagnostics", async () => {
@@ -322,6 +336,7 @@ describe("AutoTradePage", () => {
   });
 
   it("shows Broker-selected Demo account on AutoTrade summary and advances wizard", async () => {
+    const user = userEvent.setup();
     api.autoTradeStatus.mockResolvedValue({
       ...baseStatus,
       activity: [
@@ -507,8 +522,6 @@ describe("AutoTradePage", () => {
         /Pepperstone Demo · \*\*\*\*4810/
       )
     );
-    expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
-    expect(screen.getByTestId("qual-start")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-connection-label")).toHaveTextContent("Connected");
     expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(
       /Active|Live|Paused — market closed|Waiting for market/i
@@ -534,7 +547,11 @@ describe("AutoTradePage", () => {
       /Not selected|LOCKED/i
     );
     expect(screen.getByTestId("autotrade-market-data-stat")).toHaveTextContent(/Connected|Market closed/i);
+    await openQualificationTab(user);
+    expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
+    expect(screen.getByTestId("qual-start")).toBeInTheDocument();
     expect(screen.queryByTestId("autotrade-setup-required")).not.toBeInTheDocument();
+    await openActivityTab(user);
     const activity = screen.getByTestId("autotrade-activity");
     expect(activity.textContent).toMatch(/Demo account \*\*\*\*4810 connected\. AutoTrade OFF/);
     const connectedIdx = activity.textContent?.toLowerCase().indexOf("connected. autotrade off") ?? -1;
@@ -546,6 +563,7 @@ describe("AutoTradePage", () => {
   });
 
   it("does not wait on hanging diagnostics to show Broker Demo + qualification", async () => {
+    const user = userEvent.setup();
     api.getBrokerControlCentre.mockResolvedValue({
       defaultBroker: "pepperstone_ctrader",
       autoTrade: "OFF",
@@ -658,6 +676,7 @@ describe("AutoTradePage", () => {
     );
     expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/Connected/i);
     expect(screen.getByTestId("autotrade-broker-quotes-stat")).toHaveTextContent(/Active|Live/i);
+    await openQualificationTab(user);
     expect(screen.getByTestId("autotrade-qualification")).toBeInTheDocument();
     expect(screen.getByTestId("qual-next-action")).toHaveTextContent(/Authorise Demo Trading/i);
     expect(screen.getByTestId("qual-authorise-trading")).toBeInTheDocument();
@@ -666,6 +685,7 @@ describe("AutoTradePage", () => {
   });
 
   it("shows qualification retry UI when qualification API fails", async () => {
+    const user = userEvent.setup();
     api.getBrokerControlCentre.mockResolvedValue({
       defaultBroker: "pepperstone_ctrader",
       autoTrade: "OFF",
@@ -707,6 +727,10 @@ describe("AutoTradePage", () => {
       </MemoryRouter>
     );
 
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/48…10/)
+    );
+    await openQualificationTab(user);
     await waitFor(() =>
       expect(screen.getByTestId("autotrade-qualification-error")).toBeInTheDocument()
     );
