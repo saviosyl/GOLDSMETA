@@ -85,21 +85,47 @@ const main = async () => {
     fail("Main bundle does not reference an InsightsPage chunk");
   }
 
-  const missing = await fetch(`${base}/${assetRoot}/definitely-missing-${Date.now()}.js`);
+  const missing = await fetch(`${base}/${assetRoot}/definitely-missing-${Date.now()}.js`, {
+    headers: { "Cache-Control": "no-cache" }
+  });
   const missingType = missing.headers.get("content-type") || "";
   const missingBody = await missing.text();
-  // Prefer 404; if SPA still catches, at least flag HTML-as-JS.
-  if (
-    missing.status === 200 &&
-    missingType.includes("javascript") === false &&
-    missingBody.toLowerCase().includes("<!doctype html>")
-  ) {
-    // Expected while `/* /index.html 200` remains for SPA routing; warn only.
-    console.warn(
-      `WARN: Missing /${assetRoot}/* SPA-falls-back to HTML with 200 (known Pages SPA rewrite)`
+  const missingLooksLikeSpaShell =
+    missingBody.toLowerCase().includes("<!doctype html>") &&
+    (missingBody.includes("root") || missingBody.includes("GoldMeta"));
+  // Nearest public/<assetRoot>/404.html must yield a real 404 — never index.html.
+  if (missing.status === 200 && missingLooksLikeSpaShell) {
+    fail(
+      `Missing /${assetRoot}/* returned SPA index.html with HTTP 200 ` +
+        `(status=${missing.status} type=${missingType}). ` +
+        "Hashed assets must 404 via nearest 404.html — not SPA fallback."
     );
+  } else if (missing.status !== 404) {
+    fail(
+      `Missing /${assetRoot}/* expected HTTP 404, got ${missing.status} type=${missingType}`
+    );
+  } else if (missingLooksLikeSpaShell) {
+    fail(`Missing /${assetRoot}/* 404 body looks like SPA shell (wrong 404.html)`);
   } else {
-    console.log(`missing asset status=${missing.status} type=${missingType}`);
+    console.log(`missing asset OK: status=${missing.status} type=${missingType}`);
+  }
+
+  // SPA deep links must still resolve to the app shell.
+  for (const route of ["/intelligence", "/autotrade", "/learn"]) {
+    const routeRes = await fetch(`${base}${route}?t=${Date.now()}`, {
+      headers: { "Cache-Control": "no-cache" }
+    });
+    const routeType = routeRes.headers.get("content-type") || "";
+    const routeBody = await routeRes.text();
+    if (
+      routeRes.status !== 200 ||
+      !routeType.includes("text/html") ||
+      !routeBody.toLowerCase().includes("<!doctype html>")
+    ) {
+      fail(`SPA route ${route} shell: ${routeRes.status} ${routeType}`);
+    } else {
+      console.log(`SPA route OK: ${route}`);
+    }
   }
 
   if (!process.exitCode) console.log("post-deploy checks passed");

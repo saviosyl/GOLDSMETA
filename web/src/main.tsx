@@ -24,7 +24,7 @@ function purgeObsoleteUiCaches() {
   void caches.keys().then((keys) => {
     for (const key of keys) {
       if (
-        /goldmeta-hold-lean|goldmeta-v[0-4]|workbox-precache.*hold-lean|goldmeta-autotrade-hardening/i.test(
+        /goldmeta-hold-lean|goldmeta-v[0-4]|goldmeta-premium-ui-v[0-7]\b|workbox-precache.*hold-lean|goldmeta-autotrade-hardening/i.test(
           key
         )
       ) {

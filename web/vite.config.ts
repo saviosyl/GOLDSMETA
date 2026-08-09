@@ -152,8 +152,17 @@ export default defineConfig({
         // Bump on layout-critical deploys so outdated precaches are cleaned.
         // Bump when hashed chunk layout changes so stale PWA shells recover.
         // v7: retain gmv7 assets + push-handler without regressing premium PWA.
-        cacheId: "goldmeta-premium-ui-v7",
+        // v8: gmv7 nearest-404 + navigateFallback denylist (stale-chunk safety).
+        cacheId: "goldmeta-premium-ui-v8",
         navigateFallback: "/index.html",
+        // Never treat hashed assets / static files as SPA navigations.
+        navigateFallbackDenylist: [
+          /^\/gmv7\//,
+          /^\/gm\//,
+          /^\/assets\//,
+          /^\/learn-audio\//,
+          /\/[^/?]+\.(?:js|css|map|mjs|json|webmanifest|png|jpe?g|gif|svg|webp|ico|woff2?|mp3|m4a|wav)(?:$|\?)/i
+        ],
         // Do not cache API responses — private user / auth / admin / LIVE data
         // must not enter a public or shared SW cache. Offline shell uses
         // precached static assets only; decision freshness uses localStorage

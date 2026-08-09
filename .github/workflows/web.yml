@@ -81,6 +81,9 @@ jobs:
       - name: UI-review host isolation Playwright
         run: npx playwright test e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium
 
+      - name: SPA deep-link safety Playwright
+        run: npx playwright test e2e/spaDeepLinkSafety.spec.ts --project=desktop-chromium
+
   # Market Structure + mobileFit matrix (must stay green with current premium UI selectors).
   web-mobile-e2e:
     name: web-mobile-e2e

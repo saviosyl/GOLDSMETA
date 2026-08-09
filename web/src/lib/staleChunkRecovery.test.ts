@@ -27,6 +27,14 @@ describe("staleChunkRecovery", () => {
       )
     ).toBe(true);
     expect(isChunkLoadError(new Error("ChunkLoadError: Loading chunk 7 failed"))).toBe(true);
+    expect(
+      isChunkLoadError(
+        new TypeError(
+          "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/html\"."
+        )
+      )
+    ).toBe(true);
+    expect(isChunkLoadError(new SyntaxError("Unexpected token '<'"))).toBe(true);
     expect(isChunkLoadError(new Error("Network timeout"))).toBe(false);
   });
 

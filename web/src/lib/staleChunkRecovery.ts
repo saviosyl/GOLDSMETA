@@ -21,7 +21,12 @@ export function isChunkLoadError(error: unknown): boolean {
     /error loading dynamically imported module/i.test(message) ||
     /ChunkLoadError/i.test(message) ||
     /Loading chunk [\d]+ failed/i.test(message) ||
-    /Loading CSS chunk [\d]+ failed/i.test(message)
+    /Loading CSS chunk [\d]+ failed/i.test(message) ||
+    // HTML-as-JS from SPA fallback / CDN poison (Unexpected token '<', MIME errors).
+    /Failed to load module script/i.test(message) ||
+    /MIME type ['"]?text\/html/i.test(message) ||
+    /Unexpected token\s*['"]?</i.test(message) ||
+    /expected a JavaScript module script/i.test(message)
   );
 }
 

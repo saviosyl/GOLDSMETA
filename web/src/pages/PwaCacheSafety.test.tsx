@@ -13,13 +13,16 @@ describe("PWA cache safety", () => {
   });
 
   it("uses a fresh premium UI Workbox cache namespace", () => {
-    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v7"/);
+    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v8"/);
     expect(viteConfig).not.toMatch(/goldmeta-hold-lean-v4/);
     expect(viteConfig).toMatch(/sw-cache-migrate\.js/);
+    expect(viteConfig).toMatch(/navigateFallbackDenylist/);
+    expect(viteConfig).toMatch(/\/\^\\\/gmv7\\\//);
   });
 
   it("SPA redirects keep client routes on the app shell", () => {
     expect(redirects).toMatch(/\/\*\s+\/index\.html\s+200/);
+    expect(redirects).toMatch(/gmv7/);
   });
 
   it("HTML / SW headers force revalidation", () => {
