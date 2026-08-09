@@ -30,8 +30,13 @@ describe("PWA cache safety", () => {
     expect(headers).toMatch(/\/sw\.js[\s\S]*Cache-Control: no-cache[\s\S]*CDN-Cache-Control: no-store/);
   });
 
-  it("hashed /gm and /gmv7 assets use immutable long-cache headers", () => {
-    expect(headers).toMatch(/\/gm\/\*[\s\S]*immutable/);
-    expect(headers).toMatch(/\/gmv7\/\*[\s\S]*immutable/);
+  it("hashed /gm and /gmv7 assets use browser-immutable cache without CDN immutable", () => {
+    expect(headers).toMatch(/\/gm\/\*[\s\S]*Cache-Control: public, max-age=31536000, immutable/);
+    expect(headers).toMatch(/\/gmv7\/\*[\s\S]*Cache-Control: public, max-age=31536000, immutable/);
+    // CDN-Cache-Control: immutable on /gmv7/* poisons missing-chunk 404s at the edge.
+    const gmv7Block = headers.split("/gmv7/*")[1]?.split("\n/")[0] ?? "";
+    expect(gmv7Block).not.toMatch(/CDN-Cache-Control:\s*public,\s*max-age=31536000,\s*immutable/);
+    const gmBlock = headers.split("/gm/*")[1]?.split("\n/")[0] ?? "";
+    expect(gmBlock).not.toMatch(/CDN-Cache-Control:\s*public,\s*max-age=31536000,\s*immutable/);
   });
 });
