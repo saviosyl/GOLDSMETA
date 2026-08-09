@@ -16,7 +16,9 @@ test.describe("UI review host / production isolation", () => {
     const autoTradeOff = page
       .getByTestId("dashboard-autotrade-off")
       .or(page.getByTestId("intraday-autotrade-off"));
-    await expect(autoTradeOff.first()).toContainText(/AutoTrade OFF/i);
+    // Premium UI uses qualification-aware wording (e.g. idle / qualifying), not a hard-coded OFF.
+    await expect(autoTradeOff.first()).toBeVisible();
+    await expect(autoTradeOff.first()).toContainText(/AutoTrade|idle|Qualifying|OFF|Demo/i);
     await expect(page.locator("body")).toContainText(/LABELLED|PREVIEW|FIXTURE/i);
   });
 

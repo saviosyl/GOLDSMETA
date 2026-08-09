@@ -15,6 +15,8 @@ import {
   trendLabel
 } from "../lib/decisionDisplay";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
+import { evidencePlain, isRawEngineEvidence } from "../lib/evidencePlain";
+import { plainReason } from "../lib/reasonCodePlain";
 
 function FactorCard({
   title,
@@ -120,7 +122,7 @@ export function AnalysisPage() {
 
       <div className="gm-analysis-factor-grid">
         <FactorCard title="Decision drivers" testId="analysis-drivers">
-          <p className="gm-label">Reason codes</p>
+          <p className="gm-label">Why this decision</p>
           <ul className="gm-analysis-chip-list">
             {decision.reasonCodes.map((code) => (
               <li key={code}>{explainReasonCode(code)}</li>
@@ -129,21 +131,41 @@ export function AnalysisPage() {
           <div className="gm-analysis-evidence-grid">
             <div>
               <p className="gm-label">Supporting</p>
-              <ul className="list">
+              <ul className="list" data-testid="analysis-supporting">
                 {(supporting.length ? supporting : ["None listed"]).map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item}>{evidencePlain(item)}</li>
                 ))}
               </ul>
             </div>
             <div>
               <p className="gm-label">Opposing</p>
-              <ul className="list">
+              <ul className="list" data-testid="analysis-opposing">
                 {(opposing.length ? opposing : ["None listed"]).map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item}>{evidencePlain(item)}</li>
                 ))}
               </ul>
             </div>
           </div>
+          <details className="gm-disclosure" data-testid="analysis-advanced-technical" style={{ marginTop: 12 }}>
+            <summary>Advanced technical details</summary>
+            <p className="gm-label">Raw reason codes</p>
+            <pre className="muted">{decision.reasonCodes.join(", ") || "—"}</pre>
+            <p className="gm-label">Raw engine evidence</p>
+            <ul className="list">
+              {[...supporting, ...opposing]
+                .filter((item) => isRawEngineEvidence(item))
+                .map((item) => (
+                  <li key={item}>
+                    <code>{item}</code>
+                    <span className="gm-meta"> — {plainReason(item)}</span>
+                  </li>
+                ))}
+              {[...supporting, ...opposing].filter((item) => isRawEngineEvidence(item)).length ===
+              0 ? (
+                <li className="gm-meta">None</li>
+              ) : null}
+            </ul>
+          </details>
         </FactorCard>
 
         <FactorCard title="Market context" testId="analysis-market">

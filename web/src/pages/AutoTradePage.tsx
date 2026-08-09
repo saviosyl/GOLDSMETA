@@ -1887,6 +1887,20 @@ export function AutoTradePage() {
       ) : null}
 
       {atTab === "overview" ? (
+        <details className="gm-disclosure" data-testid="autotrade-how-this-works">
+          <summary>How this works</summary>
+          <p className="gm-meta">
+            AutoTrade evaluates verified strategy plans against your risk rules. Qualification
+            runs previews and controlled Demo trades first. Demo Auto can place practice orders
+            only after you enable it. Live Auto stays locked until separate activation.
+          </p>
+          <p className="gm-meta">
+            More detail is in <Link to="/help">Help → How AutoTrade works</Link>.
+          </p>
+        </details>
+      ) : null}
+
+      {atTab === "overview" ? (
       <details
         className="gm-disclosure gm-prem-advanced"
         data-testid="autotrade-advanced-controls"
@@ -2243,7 +2257,7 @@ export function AutoTradePage() {
             onClick={() => selectBroker("PEPPERSTONE_CTRADER")}
           >
             <strong>Pepperstone cTrader</strong>
-            <span>Primary path · Demo or Live · AutoTrade OFF</span>
+            <span>Primary path · Demo or Live · Live Auto locked</span>
           </button>
           <button
             type="button"

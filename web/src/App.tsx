@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, lazy, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { QuoteProvider } from "./lib/quoteContext";
@@ -83,9 +83,12 @@ function RouteFallback({ label }: { label: string }) {
 }
 
 function LazyRoute({ label, children }: { label: string; children: ReactNode }) {
+  const [retryKey, setRetryKey] = useState(0);
   return (
-    <RouteErrorBoundary label={label}>
-      <Suspense fallback={<RouteFallback label={label} />}>{children}</Suspense>
+    <RouteErrorBoundary label={label} onRetry={() => setRetryKey((k) => k + 1)}>
+      <Suspense key={retryKey} fallback={<RouteFallback label={label} />}>
+        {children}
+      </Suspense>
     </RouteErrorBoundary>
   );
 }

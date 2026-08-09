@@ -7,7 +7,6 @@ import {
   BookOpen,
   Bot,
   ChevronRight,
-  FileText,
   Gauge,
   Globe2,
   HelpCircle,
@@ -107,8 +106,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
     heading: "Review",
     items: [
       { to: "/history-replay", label: "History & Replay", icon: History },
-      { to: "/insights", label: "Insights", icon: LineChart },
-      { to: "/replay", label: "Replay", icon: FileText }
+      { to: "/insights", label: "Insights", icon: LineChart }
     ]
   },
   {
@@ -220,6 +218,10 @@ export function AppShell({
   /** Plan page owns the single premium market strip — hide duplicate mobile quote. */
   const hideMobileQuote =
     location.pathname === withPrefix("/") || location.pathname === "/";
+
+  const isAdminSurface =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith(withPrefix("/admin"));
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -372,40 +374,57 @@ export function AppShell({
         </div>
       </div>
 
-      <nav
-        className="gm-mobile-nav"
-        aria-label="Mobile primary"
-        data-testid="mobile-bottom-nav"
-      >
-        {MOBILE_PRIMARY.map((link) => {
-          const Icon = link.icon;
-          return (
-            <NavLink
-              key={link.to}
-              to={withPrefix(link.to)}
-              end={link.end}
-              className={({ isActive }) => (isActive ? "active" : undefined)}
-              onClick={() => setMoreOpen(false)}
-            >
-              <Icon aria-hidden strokeWidth={2} />
-              <span>{link.label}</span>
-            </NavLink>
-          );
-        })}
-        <button
-          type="button"
-          className={moreOpen || moreActive ? "active" : undefined}
-          aria-expanded={moreOpen}
-          aria-controls="gm-more-sheet"
-          data-testid="mobile-more-btn"
-          onClick={() => setMoreOpen((v) => !v)}
+      {isAdminSurface ? (
+        <nav
+          className="gm-mobile-nav gm-mobile-nav--admin"
+          aria-label="Admin"
+          data-testid="admin-mobile-nav"
         >
-          <MoreHorizontal aria-hidden strokeWidth={2} />
-          <span>More</span>
-        </button>
-      </nav>
+          <NavLink to={withPrefix("/")} end>
+            <Home aria-hidden strokeWidth={2} />
+            <span>Back to app</span>
+          </NavLink>
+          <NavLink to={withPrefix("/admin/users")}>
+            <Shield aria-hidden strokeWidth={2} />
+            <span>Users</span>
+          </NavLink>
+        </nav>
+      ) : (
+        <nav
+          className="gm-mobile-nav"
+          aria-label="Mobile primary"
+          data-testid="mobile-bottom-nav"
+        >
+          {MOBILE_PRIMARY.map((link) => {
+            const Icon = link.icon;
+            return (
+              <NavLink
+                key={link.to}
+                to={withPrefix(link.to)}
+                end={link.end}
+                className={({ isActive }) => (isActive ? "active" : undefined)}
+                onClick={() => setMoreOpen(false)}
+              >
+                <Icon aria-hidden strokeWidth={2} />
+                <span>{link.label}</span>
+              </NavLink>
+            );
+          })}
+          <button
+            type="button"
+            className={moreOpen || moreActive ? "active" : undefined}
+            aria-expanded={moreOpen}
+            aria-controls="gm-more-sheet"
+            data-testid="mobile-more-btn"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            <MoreHorizontal aria-hidden strokeWidth={2} />
+            <span>More</span>
+          </button>
+        </nav>
+      )}
 
-      {moreOpen && (
+      {!isAdminSurface && moreOpen && (
         <div className="gm-more-sheet" id="gm-more-sheet" data-testid="mobile-more-sheet">
           <div className="gm-more-sheet-card">
             <div className="gm-section-head" style={{ display: "flex", justifyContent: "space-between" }}>

@@ -47,11 +47,8 @@ export function CockpitAlerts({
   if (marketStructureMode === "LIVE_RANGE_ONLY") {
     return (
       <div className="gm-cockpit-alert tone-ageing" data-testid="cockpit-live-range-only" role="status">
-        <strong>Live price available.</strong>
-        <span>
-          Complete TradingView structure is missing. Planning is limited until the next verified
-          strategy signal.
-        </span>
+        <strong>Price feed connected.</strong>
+        <span>Waiting for the next verified strategy plan.</span>
       </div>
     );
   }

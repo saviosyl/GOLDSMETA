@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
 import { formatUserTimestamp } from "../lib/plainLanguage";
+import { replayPlainEnglish } from "../lib/replayPlainEnglish";
 import {
   EmptyState,
   PageHeader,
@@ -165,19 +166,19 @@ export function ReplayPage({ embedded = false }: { embedded?: boolean } = {}) {
 
           <SectionCard title="Analysis">
             <p>
-              <strong>Summary</strong>
+              <strong>Bias</strong>
               <br />
-              {frame.analysisSummary ?? "—"}
+              {replayPlainEnglish(frame.analysisSummary)}
             </p>
             <p>
-              <strong>Candidate</strong>
+              <strong>Market behaviour</strong>
               <br />
-              {frame.candidateStatus ?? "—"}
+              {replayPlainEnglish(frame.candidateStatus)}
             </p>
             <p>
-              <strong>Shadow plan</strong>
+              <strong>Why no new plan</strong>
               <br />
-              {frame.planStatus ?? "—"}
+              {replayPlainEnglish(frame.planStatus)}
             </p>
           </SectionCard>
 
@@ -185,13 +186,27 @@ export function ReplayPage({ embedded = false }: { embedded?: boolean } = {}) {
             <p>
               <strong>Note</strong>
               <br />
-              {frame.lifecycleNote ?? "—"}
+              {replayPlainEnglish(frame.lifecycleNote)}
             </p>
             <p>
               <strong>Result</strong>
               <br />
-              {frame.result ?? "—"}
+              {replayPlainEnglish(frame.result)}
             </p>
+            <details className="gm-disclosure" data-testid="replay-advanced" style={{ marginTop: 12 }}>
+              <summary>Advanced</summary>
+              <pre className="muted" style={{ whiteSpace: "pre-wrap" }}>
+                {[
+                  frame.analysisSummary,
+                  frame.candidateStatus,
+                  frame.planStatus,
+                  frame.lifecycleNote,
+                  frame.result
+                ]
+                  .filter(Boolean)
+                  .join("\n") || "—"}
+              </pre>
+            </details>
           </SectionCard>
         </div>
       )}

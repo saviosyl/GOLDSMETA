@@ -79,7 +79,21 @@ export function valueLocationLabel(loc: string | undefined): string {
       return "Above value";
     case "INSIDE_VALUE":
       return "Inside value";
+    case "ABOVE_POC":
+      return "Above POC";
+    case "BELOW_POC":
+      return "Below POC";
+    case "NEAR_VAH":
+    case "AT_VAH":
+      return "Near resistance";
+    case "NEAR_VAL":
+    case "AT_VAL":
+      return "Near support";
+    case "UNKNOWN":
+    case undefined:
+    case "":
+      return "Context unavailable";
     default:
-      return "Value location unknown";
+      return "Context unavailable";
   }
 }

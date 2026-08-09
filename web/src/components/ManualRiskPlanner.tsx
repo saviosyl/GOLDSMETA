@@ -53,13 +53,13 @@ export function ManualRiskPlanner({ risk, setup = null, suppressed = false }: Pr
     >
       <h2 className="section-title">Manual € risk planner</h2>
       <p className="muted">
-        Calculator and journal aid only. Estimates until you confirm value-per-point and size in your
-        broker. GoldMeta never places orders.
+        This manual calculator never places orders. Confirm the calculated size and broker
+        specifications before placing a manual trade.
       </p>
 
       <div className="confirm-banner" role="note" data-testid="broker-confirm-banner">
-        GoldMeta does not place this trade. Confirm position size, spread and maximum loss in your
-        broker before submitting. AutoTrade OFF.
+        Confirm position size, spread and maximum loss in your broker before submitting. This
+        calculator never places orders.
       </div>
 
       <div className="gm-risk-planner-grid">
@@ -163,33 +163,46 @@ export function ManualRiskPlanner({ risk, setup = null, suppressed = false }: Pr
 
         <div className="gm-risk-results-navy" data-testid="risk-estimates">
           <h3 className="gm-section-title">Result</h3>
-          <div className="grid-2 compact-metrics">
-            <div className="metric">
-              <span className="label">Stop distance</span>
-              <span className="value">{num(estimate.stopDistance)}</span>
+          {estimate.estimatedPositionSize == null || estimate.stopDistance == null ? (
+            <div className="gm-risk-empty" data-testid="risk-empty-state">
+              <strong>ENTER YOUR TRADE DETAILS</strong>
+              <p className="muted">
+                Add entry price, stop loss and value-per-point to calculate the position size.
+              </p>
             </div>
-            <div className="metric">
-              <span className="label">Intended max loss</span>
-              <span className="value">
-                {currency} {estimate.intendedMaxLoss}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="label">Est. position size</span>
-              <span className="value">{num(estimate.estimatedPositionSize)} *</span>
-            </div>
-            <div className="metric">
-              <span className="label">Est. spread cost</span>
-              <span className="value">{num(estimate.estimatedSpreadCost, ` ${currency}`)}</span>
-            </div>
-            <div className="metric">
-              <span className="label">Est. total risk</span>
-              <span className={`value ${estimate.exceedsMaxRisk ? "danger-text" : ""}`}>
-                {num(estimate.estimatedTotalRisk, ` ${currency}`)} *
-              </span>
-            </div>
-          </div>
-          <p className="estimate-note">* Estimate only — confirm in your broker ticket.</p>
+          ) : (
+            <>
+              <div className="grid-2 compact-metrics">
+                <div className="metric">
+                  <span className="label">Risk</span>
+                  <span className="value">
+                    {currency} {estimate.intendedMaxLoss}
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="label">Position size</span>
+                  <span className="value">{num(estimate.estimatedPositionSize)} *</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Stop distance</span>
+                  <span className="value">{num(estimate.stopDistance)}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Estimated loss at SL</span>
+                  <span className={`value ${estimate.exceedsMaxRisk ? "danger-text" : ""}`}>
+                    {num(estimate.estimatedTotalRisk, ` ${currency}`)} *
+                  </span>
+                </div>
+                {estimate.estimatedSpreadCost != null ? (
+                  <div className="metric">
+                    <span className="label">Est. spread cost</span>
+                    <span className="value">{num(estimate.estimatedSpreadCost, ` ${currency}`)}</span>
+                  </div>
+                ) : null}
+              </div>
+              <p className="estimate-note">* Estimate only — confirm in your broker ticket.</p>
+            </>
+          )}
         </div>
       </div>
 

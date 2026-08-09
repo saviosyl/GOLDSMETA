@@ -17,7 +17,7 @@ export function ExecutionDisabledBanner({ page }: { page: "brokers" | "autotrade
         <h2 className="gm-section-title">Safety mode</h2>
       </div>
       <p>
-        Live execution locked · AutoTrade OFF · No live orders can be submitted
+        Live execution locked · Live Auto locked · No live orders can be submitted
       </p>
       <DisclosurePanel summary="Technical details">
         <p className="gm-meta" style={{ margin: 0 }} data-testid={`${page}-execution-diagnostics`}>

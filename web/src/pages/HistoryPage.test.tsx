@@ -56,9 +56,10 @@ describe("HistoryPage", () => {
     expect(await screen.findByTestId("history-item-gm-web-buy")).toBeInTheDocument();
     expect(screen.getByTestId("history-item-gm-web-sell")).toBeInTheDocument();
     expect(screen.getByTestId("history-item-gm-web-wait")).toBeInTheDocument();
-    expect(screen.getAllByText(/XAUUSD · 15m/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/View details/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("gm-web-buy")).not.toBeInTheDocument();
     expect(screen.getByText("Wait for fresh market data")).toBeInTheDocument();
+    expect(screen.queryByText(/CONFLICTED_DATA|MISSING_CONFIRMATION/i)).not.toBeInTheDocument();
   });
 
   it("filters by WAIT and opens detail on tap", async () => {
@@ -98,8 +99,10 @@ describe("HistoryPage", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("history-item-d-test");
-    expect(screen.getByTestId("env-badge-d-test")).toHaveTextContent("TEST");
-    expect(screen.getByTestId("env-badge-d-live")).toHaveTextContent("LIVE");
+    // Hypothetical signal rows must not look like Live broker trades.
+    expect(screen.getByTestId("env-badge-d-test")).toHaveTextContent(/SIGNAL|HYPOTHETICAL/i);
+    expect(screen.getByTestId("env-badge-d-live")).toHaveTextContent(/SIGNAL|HYPOTHETICAL/i);
+    expect(screen.getByTestId("env-badge-d-live")).not.toHaveTextContent(/^LIVE$/);
 
     await user.click(screen.getByTestId("history-more-filters"));
     await user.click(screen.getByRole("button", { name: "Signals" }));

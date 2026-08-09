@@ -51,6 +51,16 @@ const {
   };
 });
 
+vi.mock("../../hooks/useAutoTradeHeaderStatus", () => ({
+  useAutoTradeHeaderStatus: () => ({
+    label: "OFF",
+    environment: "OFF",
+    stateKey: "OFF",
+    tone: "neutral",
+    nextAction: null
+  })
+}));
+
 vi.mock("../../lib/auth", () => ({
   useAuth: () => mockAuth
 }));
@@ -267,7 +277,9 @@ describe("BrokerControlCentrePage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent("OFF");
+    expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent(
+      /AutoTrade idle|QUALIFYING|OFF|DEMO/i
+    );
     expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
       /Live orders locked|Order submission disabled/i
     );

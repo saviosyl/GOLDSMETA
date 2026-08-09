@@ -34,6 +34,7 @@ import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
 import { ExecutionDisabledBanner } from "../../components/ExecutionDisabledBanner";
 import { PremiumStatusChip } from "../../components/broker/PremiumStatusChip";
 import { StatusBadge } from "../../components/ui/primitives";
+import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 import { ApiError } from "../../types/models";
 
 const FALLBACK_WIZARD = [
@@ -131,6 +132,7 @@ type ActionUiState = {
  */
 export function BrokerControlCentrePage() {
   const { api } = useAuth();
+  const atHeader = useAutoTradeHeaderStatus();
   const [searchParams, setSearchParams] = useSearchParams();
   const [centre, setCentre] = useState<BrokerControlCentreResponse | null>(null);
   const [demo, setDemo] = useState<CTraderDemonstrationBundle | null>(null);
@@ -834,8 +836,22 @@ export function BrokerControlCentrePage() {
           <p>Connection, account health, and execution readiness</p>
         </div>
         <div className="gm-prem-chip-row">
-          <PremiumStatusChip tone="off" withDot testId="autotrade-off-badge">
-            AutoTrade OFF
+          <PremiumStatusChip
+            tone={
+              atHeader.stateKey === "QUALIFYING" || atHeader.stateKey === "DEMO_AUTO"
+                ? "amber"
+                : atHeader.stateKey === "OFF"
+                  ? "off"
+                  : "navy"
+            }
+            withDot
+            testId="autotrade-off-badge"
+          >
+            {atHeader.stateKey === "QUALIFYING"
+              ? "DEMO · QUALIFYING"
+              : atHeader.stateKey === "OFF"
+                ? "AutoTrade idle"
+                : atHeader.label}
           </PremiumStatusChip>
           <PremiumStatusChip
             tone="locked"

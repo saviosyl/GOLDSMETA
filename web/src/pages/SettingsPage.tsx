@@ -4,7 +4,6 @@ import {
   Bell,
   ChevronRight,
   HelpCircle,
-  LogOut,
   Monitor,
   Scale,
   Shield,
@@ -329,16 +328,14 @@ export function SettingsPage() {
     icon: typeof UserRound;
     tab?: string;
     href?: string;
-    action?: "signout";
   }> = [
     { id: "profile", label: "Profile", icon: UserRound, tab: "account" },
     { id: "notifications", label: "Notifications", icon: Bell, tab: "notifications" },
-    { id: "display", label: "Display", icon: Monitor, tab: "appearance" },
-    { id: "risk", label: "Risk", icon: Target, tab: "risk" },
+    { id: "display", label: "Appearance", icon: Monitor, tab: "appearance" },
     { id: "security", label: "Security", icon: Shield, tab: "advanced" },
+    { id: "risk", label: "Trading preferences", icon: Target, tab: "risk" },
     { id: "help", label: "Help", icon: HelpCircle, href: "/help" },
-    { id: "legal", label: "Legal", icon: Scale, href: "/legal/terms" },
-    { id: "signout", label: "Sign out", icon: LogOut, action: "signout" }
+    { id: "legal", label: "Legal", icon: Scale, href: "/legal/terms" }
   ];
 
   return (
@@ -375,20 +372,6 @@ export function SettingsPage() {
                     <span>{item.label}</span>
                     <ChevronRight className="gm-chevron" size={18} aria-hidden />
                   </Link>
-                );
-              }
-              if (item.action === "signout") {
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="gm-settings-nav-item"
-                    onClick={() => void signOut()}
-                  >
-                    <Icon size={18} aria-hidden />
-                    <span>{item.label}</span>
-                    <ChevronRight className="gm-chevron" size={18} aria-hidden />
-                  </button>
                 );
               }
               return (

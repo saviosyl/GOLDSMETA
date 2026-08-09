@@ -20,15 +20,20 @@ export function FeedStatusStrip({ health, detailsHref = "/alerts" }: Props) {
     );
   }
 
+  // Amber = normal wait; red = genuine feed/service fault.
   const title =
-    status === "amber" ? "Plan feed waiting" : "Plan feed waiting";
+    status === "red" ? "Plan feed unavailable" : "Waiting for next verified plan";
   const detail =
     health?.subtitle ||
-    "Latest verified 15M plan is not available.";
+    (status === "red"
+      ? "Strategy plan feed needs attention."
+      : "Price feed connected. Waiting for the next verified strategy plan.");
 
   return (
     <div
-      className="gm-feed-strip gm-feed-strip--compact"
+      className={`gm-feed-strip gm-feed-strip--compact${
+        status === "amber" ? " gm-feed-strip--wait" : ""
+      }`}
       data-testid="premium-feed-bar"
       data-status={status}
     >

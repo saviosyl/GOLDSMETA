@@ -7195,6 +7195,78 @@ body.gm-drawer-open {
   gap: 8px;
 }
 
+.gm-history-compact .history-item--compact {
+  display: block;
+  padding: 12px 8px;
+}
+
+.gm-history-compact .history-item-top {
+  gap: 6px 10px;
+  margin-bottom: 4px;
+}
+
+.gm-history-compact .history-item-reason {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gm-history-compact .history-item--wait .history-item-reason {
+  -webkit-line-clamp: 1;
+}
+
+.gm-history-compact .history-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.gm-history-compact .history-result--loss {
+  color: var(--sell, #c45c5c);
+}
+
+.gm-history-compact .history-result--win {
+  color: var(--buy, #2f8f6b);
+}
+
+.gm-history-compact .history-diagnostics {
+  margin-top: 8px;
+}
+
+.gm-history-compact .badge {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+@media (max-width: 430px) {
+  .gm-history-compact .history-item-top {
+    flex-wrap: wrap;
+  }
+
+  .gm-history-compact .history-item-reason {
+    font-size: 0.9rem;
+  }
+}
+
+.gm-risk-empty {
+  padding: 16px 4px;
+}
+
+.gm-risk-empty strong {
+  display: block;
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+.gm-mobile-nav--admin {
+  justify-content: space-around;
+}
+
 .gm-banner.gm-banner-info {
   background: var(--research-soft);
   border: 1px solid var(--border);

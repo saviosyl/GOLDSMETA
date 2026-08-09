@@ -515,15 +515,21 @@ body,
   font-size: 0.72rem;
 }
 
-.gm-feed-strip[data-status="amber"] {
+.gm-feed-strip[data-status="amber"],
+.gm-feed-strip--wait {
   background: var(--warning-soft);
   border-color: var(--gold-200);
+  color: var(--gold-600);
 }
 
-.gm-feed-strip[data-status="red"],
-.gm-feed-strip[data-status="unknown"] {
+.gm-feed-strip[data-status="red"] {
   background: var(--danger-soft);
   border-color: #f5c2c2;
+}
+
+.gm-feed-strip[data-status="unknown"] {
+  background: var(--neutral-soft);
+  border-color: var(--border-soft);
 }
 
 .gm-feed-strip strong {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, Filter, Percent, ScrollText } from "lucide-react";
+import { BookOpen, Percent, ScrollText, Wallet } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import type { Decision, JournalEntry, JournalTag } from "../types/models";
 import { formatWhen } from "../lib/format";
@@ -77,8 +77,13 @@ export function JournalPage() {
     }
   };
 
-  const wins = entries.filter((e) => /win|profit|followed/i.test(e.tags?.join(" ") ?? "")).length;
-  const winRate = entries.length ? Math.round((wins / entries.length) * 100) : 0;
+  const wins = entries.filter((e) =>
+    /win|profit|tp/i.test(`${e.outcome ?? ""} ${e.tags?.join(" ") ?? ""}`)
+  ).length;
+  const scored = entries.filter((e) => e.outcome && !/pending|open|wait/i.test(e.outcome));
+  const winRate = scored.length ? Math.round((wins / scored.length) * 100) : 0;
+  const netPl = entries.reduce((sum, e) => sum + (typeof e.pnl === "number" ? e.pnl : 0), 0);
+  const hasPnl = entries.some((e) => typeof e.pnl === "number");
 
   return (
     <div data-testid="journal-page" className="gm-journal-page gm-premium-v2">
@@ -86,18 +91,18 @@ export function JournalPage() {
       <div className="gm-insight-strip" style={{ marginBottom: 16 }} data-testid="journal-overview">
         <div>
           <ScrollText aria-hidden />
-          <span className="gm-label">Entries</span>
+          <span className="gm-label">Trades</span>
           <strong>{entries.length}</strong>
         </div>
         <div>
           <Percent aria-hidden />
           <span className="gm-label">Win rate</span>
-          <strong>{entries.length ? `${winRate}%` : "—"}</strong>
+          <strong>{scored.length ? `${winRate}%` : "—"}</strong>
         </div>
         <div>
-          <Filter aria-hidden />
-          <span className="gm-label">Filter</span>
-          <strong>{dirFilter}</strong>
+          <Wallet aria-hidden />
+          <span className="gm-label">Net P/L</span>
+          <strong>{hasPnl ? netPl.toFixed(2) : "—"}</strong>
         </div>
       </div>
       <p className="gm-meta">

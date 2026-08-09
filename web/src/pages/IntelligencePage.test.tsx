@@ -22,9 +22,26 @@ vi.mock("../lib/auth", () => ({
         decision: {
           lastKnownPrice: 4265.31,
           currentSession: "LONDON",
-          ohlcv: { open: 4250.1, close: 4265.31 }
+          ohlcv: { open: 4250.1, close: 4265.31 },
+          marketStructure: { poc: 4260, vah: 4280, val: 4240, trend: "UP" },
+          decision: "WAIT",
+          reasonSummary: ["WAIT because setup score 61 did not reach BUY/SELL thresholds"],
+          bullishEvidence: ["gm_direction_1h(up)"],
+          bearishEvidence: []
         }
       }))
+    }
+  })
+}));
+
+vi.mock("../lib/quoteContext", () => ({
+  useShellQuote: () => ({
+    quote: {
+      price: 4265.31,
+      fresh: true,
+      freshness: "LIVE",
+      sessionLabel: "London",
+      updatedLabel: "now"
     }
   })
 }));

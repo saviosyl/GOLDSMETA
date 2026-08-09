@@ -42,7 +42,6 @@ import { SetupStatusCard } from "../components/decision/SetupStatusCard";
 import { XauusdChartCard } from "../components/decision/XauusdChartCard";
 import { PremiumMarketStrip } from "../components/premium/PremiumMarketStrip";
 import { PremiumPlanCard } from "../components/premium/PremiumPlanCard";
-import { TodayPlanSummary } from "../components/premium/TodayPlanSummary";
 import { SystemHealthStrip } from "../components/premium/SystemHealthStrip";
 import { Bell, CircleHelp, RefreshCw } from "lucide-react";
 import { deriveDecisionDashboardState } from "../lib/decisionDashboardState";
@@ -60,7 +59,6 @@ import type {
   DailySafetyPublicView,
   SystemHealthView
 } from "../lib/broker/ctraderTypes";
-import { premiumDecisionChip } from "../lib/premiumDecisionCopy";
 
 type Briefing = {
   session?: string | null;
@@ -636,32 +634,6 @@ export function OverviewPage() {
           </section>
 
           {systemHealth ? <SystemHealthStrip health={systemHealth} compact /> : null}
-
-          <TodayPlanSummary
-            marketStatus={
-              marketOpen
-                ? "MARKET OPEN"
-                : quote?.marketStatus
-                  ? String(quote.marketStatus).toUpperCase().includes("CLOSE")
-                    ? "MARKET CLOSED"
-                    : String(quote.marketStatus)
-                  : "MARKET STATUS PENDING"
-            }
-            price={livePrice}
-            bid={quote?.bid ?? null}
-            ask={quote?.ask ?? null}
-            updatedLabel={displayUpdated}
-            decisionLabel={decisionState ? premiumDecisionChip(decisionState) : shortAction}
-            confidence={intradayPlan.confidence ?? decision?.confidence ?? null}
-            nextAction={
-              qualification?.nextAction ||
-              (marketOpen
-                ? "Waiting for valid market setup"
-                : "Qualification resumes when valid market setups return")
-            }
-            qualification={qualification}
-            daily={dailySafety}
-          />
 
           <div className="gm-plan-mini-actions" data-testid="premium-quick-actions">
             <button

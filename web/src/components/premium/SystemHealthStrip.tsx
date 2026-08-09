@@ -13,6 +13,15 @@ function Dot({ tone }: { tone: string }) {
   return <span className={`gm-health-dot ${cls}`} aria-hidden />;
 }
 
+const TRADING_KEYS = [
+  "Market feed",
+  "Strategy feed",
+  "Broker",
+  "AutoTrade engine",
+  "Risk engine",
+  "Qualification"
+] as const;
+
 export function SystemHealthStrip({ health, compact = true }: Props) {
   const items = [
     ["Market feed", health.marketFeed],
@@ -24,13 +33,20 @@ export function SystemHealthStrip({ health, compact = true }: Props) {
     ["Qualification", health.qualificationWorker]
   ] as const;
 
-  const attentionCount = useMemo(
-    () => items.filter(([, row]) => row.tone !== "green").length,
+  const tradingIssues = useMemo(
+    () =>
+      items.filter(
+        ([label, row]) =>
+          TRADING_KEYS.includes(label as (typeof TRADING_KEYS)[number]) && row.tone !== "green"
+      ),
     [items]
   );
-  const healthyCount = items.length - attentionCount;
-  const needsAttention = attentionCount > 0;
-  const [open, setOpen] = useState(needsAttention && !compact);
+  const notificationsOptional =
+    health.notifications.tone !== "green" &&
+    /block|disabled|permission|denied|off/i.test(health.notifications.label);
+
+  const tradingHealthy = tradingIssues.length === 0;
+  const [open, setOpen] = useState(!tradingHealthy && !compact);
 
   if (compact && !open) {
     return (
@@ -48,11 +64,19 @@ export function SystemHealthStrip({ health, compact = true }: Props) {
         >
           <span className="gm-label">Systems</span>
           <strong>
-            {needsAttention
-              ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need attention`
-              : `${healthyCount}/${items.length} healthy`}
+            {tradingHealthy
+              ? "Trading systems healthy"
+              : `${tradingIssues.length} trading item${
+                  tradingIssues.length === 1 ? "" : "s"
+                } need attention`}
           </strong>
-          <span className="gm-meta">{needsAttention ? "View details" : "All systems healthy"}</span>
+          {notificationsOptional ? (
+            <span className="gm-meta" data-testid="system-health-optional">
+              Optional: Phone notifications disabled
+            </span>
+          ) : (
+            <span className="gm-meta">{tradingHealthy ? "All trading systems healthy" : "View details"}</span>
+          )}
         </button>
       </section>
     );
@@ -63,7 +87,7 @@ export function SystemHealthStrip({ health, compact = true }: Props) {
       <div className="gm-qual-dash__head">
         <div>
           <p className="gm-label">System health</p>
-          <h2>{health.plainSummary}</h2>
+          <h2>{tradingHealthy ? "Trading systems healthy" : health.plainSummary}</h2>
         </div>
         {compact ? (
           <button
@@ -81,7 +105,10 @@ export function SystemHealthStrip({ health, compact = true }: Props) {
           <li key={label}>
             <Dot tone={row.tone} />
             <div>
-              <strong>{label}</strong>
+              <strong>
+                {label}
+                {label === "Notifications" ? " (optional)" : ""}
+              </strong>
               <span>{row.label}</span>
             </div>
           </li>

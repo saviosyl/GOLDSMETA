@@ -21,6 +21,7 @@ import {
 import { NextPlanUpdate } from "../intraday/NextPlanUpdate";
 import { FeedStatusStrip } from "../gm/FeedStatusStrip";
 import { PhoneAlertsControl } from "./PhoneAlertsControl";
+import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 
 type Props = {
   plan: IntradayPlan;
@@ -102,6 +103,13 @@ export function DecisionSecondaryPanel({
     state.mode === "HOLD" ||
     (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
+  const atHeader = useAutoTradeHeaderStatus();
+  const atLabel =
+    atHeader.stateKey === "QUALIFYING"
+      ? "Qualification: Running · Demo Auto: Not enabled yet · Live Auto: Locked"
+      : atHeader.stateKey === "OFF"
+        ? "AutoTrade idle"
+        : atHeader.label;
 
   return (
     <div className="gm-decision-secondary" data-testid="decision-secondary-panel">
@@ -161,10 +169,10 @@ export function DecisionSecondaryPanel({
       <PhoneAlertsControl compact />
       {showWhy && <WhyWaiting plan={plan} state={state} />}
       <p className="gm-decision-safety" data-testid="dashboard-safety">
-        Manual only · Review your risk · AutoTrade OFF
+        Manual only · Review your risk · {atLabel}
       </p>
       <span className="gm-sr-only" data-testid="dashboard-autotrade-off">
-        AutoTrade OFF
+        {atLabel}
       </span>
     </div>
   );

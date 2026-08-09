@@ -60,6 +60,12 @@ const TOPIC_GROUPS: Array<{
         id: "demo-live",
         term: "Demo vs Live",
         detail: "Demo uses practice funds. Live money execution remains hard-locked until you complete activation."
+      },
+      {
+        id: "how-autotrade",
+        term: "How AutoTrade works",
+        detail:
+          "GoldMeta evaluates verified strategy plans against your risk rules. Qualification previews setups, then controlled Demo trades, then observation. Demo Auto can place practice orders only after you enable it. Live Auto stays locked until separate activation."
       }
     ]
   },

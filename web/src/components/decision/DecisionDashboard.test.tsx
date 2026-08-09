@@ -11,7 +11,17 @@ import { DetailedReportSections } from "./DetailedReportSections";
 import { TradePlanSummary } from "./TradePlanSummary";
 
 vi.mock("../../lib/auth", () => ({
-  useAuth: () => ({ api: {} })
+  useAuth: () => ({ api: {}, user: null })
+}));
+
+vi.mock("../../hooks/useAutoTradeHeaderStatus", () => ({
+  useAutoTradeHeaderStatus: () => ({
+    label: "OFF",
+    environment: "OFF",
+    stateKey: "OFF",
+    tone: "neutral",
+    nextAction: null
+  })
 }));
 
 function wrap(ui: ReactNode) {
@@ -196,7 +206,7 @@ describe("DecisionDashboard", () => {
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
-    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade idle|OFF/i);
   });
 
   it("shows BUY with confidence from 65% instead of BLOCKED", () => {

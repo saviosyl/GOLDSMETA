@@ -8,11 +8,13 @@ import { VerifiedDataMeta } from "../components/v5/VerifiedDataMeta";
 import {
   DisclosurePanel,
   PageHeader,
-  SectionCard,
-  StatusBadge
+  SectionCard
 } from "../components/ui/primitives";
 import { fmtPrice } from "../lib/intradayFormat";
+import { marketsPriceLocationLabel } from "../lib/marketsPriceLocation";
+import { marketsStructurePlain } from "../lib/marketsStructurePlain";
 import { formatSession } from "../lib/plainLanguage";
+import { useShellQuote } from "../lib/quoteContext";
 import type { Decision } from "../types/models";
 
 type Answer = {
@@ -38,12 +40,11 @@ const SCREENSHOT_ENABLED =
 /** GoldMeta Market Intelligence — deterministic rules/templated retrieval (not an LLM). */
 export function IntelligencePage() {
   const { api } = useAuth();
+  const { quote } = useShellQuote();
   const [question, setQuestion] = useState("Why are we waiting?");
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [coach, setCoach] = useState<Record<string, unknown> | null>(null);
-  const [personal, setPersonal] = useState<Record<string, unknown> | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
 
@@ -66,16 +67,11 @@ export function IntelligencePage() {
     const ac = new AbortController();
     void (async () => {
       try {
-        const [c, p, pack] = await Promise.all([
-          api.v5WeeklyCoach("LIVE"),
-          api.v5Personal(),
+        const pack =
           typeof api.latestDecisionPack === "function"
-            ? api.latestDecisionPack().catch(() => null)
-            : Promise.resolve(null)
-        ]);
+            ? await api.latestDecisionPack().catch(() => null)
+            : null;
         if (ac.signal.aborted) return;
-        setCoach(c);
-        setPersonal(p);
         setDecision((pack as { decision?: Decision } | null)?.decision ?? null);
       } catch {
         /* non-fatal */
@@ -84,7 +80,15 @@ export function IntelligencePage() {
     return () => ac.abort();
   }, [api]);
 
-  const livePrice = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const livePrice =
+    quote?.price ?? decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  const marketClosed =
+    quote?.freshness === "MARKET_CLOSED" ||
+    /closed/i.test(quote?.sessionLabel ?? "") ||
+    /closed/i.test(String(decision?.currentSession ?? ""));
+  const dataConnected = online && (quote?.fresh === true || livePrice != null);
+  const marketsEnvLabel = marketClosed ? "MARKET CLOSED" : "MARKET OPEN";
+  const marketsFreshness = dataConnected ? "DATA CONNECTED" : online ? "DATA WAITING" : "OFFLINE";
   const openPrice = decision?.ohlcv?.open ?? null;
   const changePts =
     livePrice != null && openPrice != null && Number.isFinite(livePrice) && Number.isFinite(openPrice)
@@ -114,7 +118,11 @@ export function IntelligencePage() {
 
   return (
     <div className="v5-page gm-markets-page gm-premium-v2" data-testid="intelligence-page">
-      <PageHeader title="Markets" environment="LIVE" freshness={online ? "Online" : "Offline"} />
+      <PageHeader
+        title="Markets"
+        environment={marketsEnvLabel}
+        freshness={marketsFreshness}
+      />
 
       <header className="gm-page-hero-navy gm-markets-summary" data-testid="markets-xauusd-summary">
         <div>
@@ -175,18 +183,22 @@ export function IntelligencePage() {
         <article className="gm-prem-card">
           <span className="gm-label">Market structure</span>
           <strong data-testid="markets-plain-english">
-            {(Array.isArray(decision?.reasonSummary)
-              ? decision?.reasonSummary[0]
-              : null) ||
-              decision?.explanation ||
-              "Open Plan for the full decision context"}
+            {marketsStructurePlain(decision)}
           </strong>
         </article>
-        <article className="gm-prem-card">
+        <article className="gm-prem-card" data-testid="markets-price-location">
           <span className="gm-label">Price location</span>
           <strong>
-            {livePrice != null ? `XAUUSD ${fmtPrice(livePrice)}` : "Price unavailable"}
+            {marketsPriceLocationLabel({
+              price: livePrice,
+              structure: decision?.marketStructure ?? null
+            })}
           </strong>
+          {livePrice != null ? (
+            <span className="gm-meta" style={{ display: "block", marginTop: 4 }}>
+              XAUUSD {fmtPrice(livePrice)}
+            </span>
+          ) : null}
         </article>
       </section>
       <p className="gm-meta" style={{ marginTop: 8, marginBottom: 16 }} data-testid="intelligence-impl-type">
@@ -290,25 +302,9 @@ export function IntelligencePage() {
         </SectionCard>
       </div>
 
-      <SectionCard title="Weekly coach">
-        <p className="gm-meta">
-          Weekly coaching and personal statistics live in{" "}
-          <Link to="/insights/performance">Insights → Performance</Link>.
-        </p>
-        {coach ? (
-          <>
-            <p>{String(coach.summary ?? "")}</p>
-            {Boolean(coach.insufficientData) && (
-              <StatusBadge tone="warning">Insufficient verified data</StatusBadge>
-            )}
-          </>
-        ) : null}
-        {personal ? (
-          <p className="gm-meta" style={{ marginTop: 8 }}>
-            Avg R {String(personal.averageR ?? "—")} · see Insights for full breakdown.
-          </p>
-        ) : null}
-      </SectionCard>
+      <p className="gm-meta" style={{ margin: "12px 0 20px" }} data-testid="markets-insights-link">
+        <Link to="/insights/performance">View performance insights →</Link>
+      </p>
 
       {SCREENSHOT_ENABLED ? (
         <details className="gm-disclosure" data-testid="screenshot-section">
