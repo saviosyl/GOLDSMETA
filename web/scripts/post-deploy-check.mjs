@@ -7,6 +7,7 @@
  *   node scripts/post-deploy-check.mjs https://goldmeta.metamechsolutions.com
  */
 const base = (process.argv[2] || "https://goldmeta.metamechsolutions.com").replace(/\/$/, "");
+const expectedJsArg = (process.argv[3] || "").replace(/^\//, "");
 
 const fail = (msg) => {
   console.error(`FAIL: ${msg}`);
@@ -14,14 +15,25 @@ const fail = (msg) => {
 };
 
 const main = async () => {
-  const htmlRes = await fetch(`${base}/?t=${Date.now()}`, {
-    headers: { "Cache-Control": "no-cache" }
-  });
-  const html = await htmlRes.text();
-  const jsPath = html.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.js)/)?.[1];
-  const cssPath = html.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.css)/)?.[1];
+  let html = "";
+  let jsPath = null;
+  let cssPath = null;
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const htmlRes = await fetch(`${base}/?t=${Date.now()}-${attempt}`, {
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" }
+    });
+    html = await htmlRes.text();
+    jsPath = html.match(/\/?((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.js)/)?.[1] ?? null;
+    cssPath = html.match(/\/?((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.css)/)?.[1] ?? null;
+    if (jsPath && cssPath && (!expectedJsArg || jsPath === expectedJsArg)) break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
   if (!jsPath || !cssPath) {
     fail("index.html missing hashed asset references");
+    return;
+  }
+  if (expectedJsArg && jsPath !== expectedJsArg) {
+    fail(`index.html still references ${jsPath}, expected ${expectedJsArg}`);
     return;
   }
   console.log(`index assets: ${jsPath} ${cssPath}`);

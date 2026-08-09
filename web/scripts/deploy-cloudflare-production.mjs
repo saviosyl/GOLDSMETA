@@ -163,5 +163,5 @@ if (!switched) {
 }
 
 console.log("== post-deploy check ==");
-run("node", ["scripts/post-deploy-check.mjs", customOrigin]);
+run("node", ["scripts/post-deploy-check.mjs", customOrigin, expectedJs]);
 console.log("Production deploy finished.");
