@@ -27,7 +27,8 @@ describe("PWA cache safety", () => {
     expect(headers).toMatch(/\/sw\.js[\s\S]*Cache-Control: no-cache[\s\S]*CDN-Cache-Control: no-store/);
   });
 
-  it("hashed /gm assets use immutable long-cache headers", () => {
+  it("hashed /gm and /gmv7 assets use immutable long-cache headers", () => {
     expect(headers).toMatch(/\/gm\/\*[\s\S]*immutable/);
+    expect(headers).toMatch(/\/gmv7\/\*[\s\S]*immutable/);
   });
 });

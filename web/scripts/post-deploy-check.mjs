@@ -18,8 +18,8 @@ const main = async () => {
     headers: { "Cache-Control": "no-cache" }
   });
   const html = await htmlRes.text();
-  const jsPath = html.match(/\/((?:assets|gm)\/index-[A-Za-z0-9_-]+\.js)/)?.[1];
-  const cssPath = html.match(/\/((?:assets|gm)\/index-[A-Za-z0-9_-]+\.css)/)?.[1];
+  const jsPath = html.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.js)/)?.[1];
+  const cssPath = html.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.css)/)?.[1];
   if (!jsPath || !cssPath) {
     fail("index.html missing hashed asset references");
     return;
@@ -61,7 +61,30 @@ const main = async () => {
     console.log(`Firebase config OK in ${jsPath}`);
   }
 
-  const assetRoot = jsPath.startsWith("gm/") ? "gm" : "assets";
+  const assetRoot = jsPath.startsWith("gmv7/")
+    ? "gmv7"
+    : jsPath.startsWith("gm/")
+      ? "gm"
+      : "assets";
+  // Also verify Insights lazy chunk from the main bundle is reachable (release blocker).
+  const insightsChunk = jsBody.match(/(?:assets|gm|gmv7)\/InsightsPage-[A-Za-z0-9_-]+\.js/)?.[0];
+  if (insightsChunk) {
+    const insightsRes = await fetch(`${base}/${insightsChunk}?t=${Date.now()}`, {
+      headers: { "Cache-Control": "no-cache" }
+    });
+    const insightsType = insightsRes.headers.get("content-type") || "";
+    if (
+      insightsRes.status !== 200 ||
+      !(insightsType.includes("javascript") || insightsType.includes("ecmascript"))
+    ) {
+      fail(`Insights chunk MIME/status: ${insightsChunk} ${insightsRes.status} ${insightsType}`);
+    } else {
+      console.log(`Insights chunk OK: ${insightsChunk}`);
+    }
+  } else {
+    fail("Main bundle does not reference an InsightsPage chunk");
+  }
+
   const missing = await fetch(`${base}/${assetRoot}/definitely-missing-${Date.now()}.js`);
   const missingType = missing.headers.get("content-type") || "";
   const missingBody = await missing.text();

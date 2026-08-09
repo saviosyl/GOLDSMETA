@@ -81,13 +81,18 @@ const deployUrl = deployUrlMatch?.[0] ?? null;
 
 if (deployUrl) {
   console.log(`== warm deploy assets at ${deployUrl} ==`);
-  const gmDir = join("dist", "gm");
-  const files = existsSync(gmDir)
-    ? readdirSync(gmDir).filter((f) => /\.(js|css)$/i.test(f))
-    : [];
   const html = readFileSync("dist/index.html", "utf8");
-  const refs = Array.from(html.matchAll(/gm\/[A-Za-z0-9._-]+\.(?:js|css)/g)).map((m) => m[0]);
-  const targets = Array.from(new Set([...refs, ...files.map((f) => `gm/${f}`), "sw.js", "index.html"]));
+  const assetDirs = ["gmv7", "gm", "assets"].filter((d) => existsSync(join("dist", d)));
+  const files = assetDirs.flatMap((d) =>
+    readdirSync(join("dist", d))
+      .filter((f) => /\.(js|css)$/i.test(f))
+      .map((f) => `${d}/${f}`)
+  );
+  const refs = Array.from(
+    html.matchAll(/(?:gmv7|gm|assets)\/[A-Za-z0-9._-]+\.(?:js|css)/g)
+  ).map((m) => m[0]);
+  const targets = Array.from(new Set([...refs, ...files, "sw.js", "index.html"]));
+  let failures = 0;
   for (const path of targets) {
     try {
       const res = spawnSync(
@@ -95,15 +100,23 @@ if (deployUrl) {
         ["-sS", "-o", "/dev/null", "-w", "%{http_code} %{content_type}", `${deployUrl}/${path}`],
         { encoding: "utf8" }
       );
-      console.log(`warm ${path}: ${(res.stdout || "").trim()}`);
+      const line = (res.stdout || "").trim();
+      console.log(`warm ${path}: ${line}`);
+      if (!line.startsWith("200") && path !== "index.html") failures += 1;
     } catch {
-      /* ignore warm failures */
+      failures += 1;
     }
+  }
+  if (failures > 0) {
+    console.error(`FAIL: ${failures} deploy-alias asset(s) not warm/200 before custom-domain check`);
+    process.exit(1);
   }
 }
 
 console.log("== post-deploy check ==");
 // Give the custom-domain alias a moment to point at the new deployment.
-spawnSync("sleep", ["4"], { stdio: "inherit" });
+// Avoid probing missing hashed URLs on the custom domain before they exist —
+// Cloudflare can cache those 404s for hours.
+spawnSync("sleep", ["8"], { stdio: "inherit" });
 run("node", ["scripts/post-deploy-check.mjs", "https://goldmeta.metamechsolutions.com"]);
 console.log("Production deploy finished.");

@@ -54,9 +54,9 @@ export default defineConfig({
     "import.meta.env.VITE_GOLD_META_COMMIT_SHA": JSON.stringify(BUILD.short)
   },
   build: {
-    // Avoid /assets/* on the custom domain while zone cache may still hold
-    // poisoned SPA HTML responses for that path from an earlier deploy miss.
-    assetsDir: "gm"
+    // Custom-domain edge can cache 404s for missing hashed assets (max-age=14400).
+    // /assets and /gm were previously poisoned; bump the directory on recovery deploys.
+    assetsDir: "gmv7"
   },
   plugins: [
     react(),
