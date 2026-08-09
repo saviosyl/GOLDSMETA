@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { QuoteProvider } from "../../lib/quoteContext";
@@ -84,7 +84,9 @@ describe("AppShell premium V2", () => {
       )
     );
     const pill = await screen.findByTestId("topbar-autotrade-status");
-    expect(pill.getAttribute("data-state")).toBe("QUALIFYING");
+    await waitFor(() => {
+      expect(pill.getAttribute("data-state")).toBe("QUALIFYING");
+    });
     expect(pill.textContent).toMatch(/QUALIFYING/i);
     expect(pill.textContent).not.toMatch(/AutoTrade OFF/i);
   });
