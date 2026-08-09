@@ -64,9 +64,10 @@ const deployArgs = [
   "dist",
   "--project-name",
   "goldmeta-web",
-  // Production custom domain aliases the Pages `production` branch.
+  // Project production_branch is `cursor/production-connection` (custom domain alias).
+  // Deploying to `--branch production` only creates a Preview deployment.
   "--branch",
-  "production",
+  "cursor/production-connection",
   "--commit-dirty=true"
 ];
 if (commit) {
