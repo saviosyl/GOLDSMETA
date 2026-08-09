@@ -16,6 +16,7 @@ describe("buildMarketReportModel", () => {
     expect(report.planReadinessOverall).toMatch(/NOT READY|READY/);
     expect(report.tradePlan).toBeNull();
     expect(report.storyCards).toHaveLength(4);
+    expect(report.storyCards.every((c) => c.detail.length > 0)).toBe(true);
     expect(report.scenarios.length).toBeGreaterThanOrEqual(1);
     expect(report.structureLevels.some((l) => l.kind === "current")).toBe(true);
     expect(JSON.stringify(report)).not.toMatch(/gm_/i);

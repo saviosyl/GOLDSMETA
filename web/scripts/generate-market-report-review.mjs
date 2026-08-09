@@ -62,15 +62,22 @@ try {
     throw new Error("Missing WAIT/BUY/SELL report payloads");
   }
 
+  const v2Names = {
+    WAIT: "01-WAIT-Report-v2.png",
+    BUY: "02-BUY-Report-v2.png",
+    SELL: "03-SELL-Report-v2.png"
+  };
+
   for (const key of ["WAIT", "BUY", "SELL"]) {
     const r = reports[key];
+    const filename = v2Names[key] || r.filename;
     const buf = Buffer.from(r.pngBase64, "base64");
-    const dest = join(outDir, r.filename);
+    const dest = join(outDir, filename);
     writeFileSync(dest, buf);
-    copyFileSync(dest, join(artDir, r.filename));
+    copyFileSync(dest, join(artDir, filename));
     // Flat artifact names requested by owner review
-    copyFileSync(dest, join("/opt/cursor/artifacts", r.filename));
-    console.log("wrote", r.filename, buf.length, "bytes", `${r.width}x${r.height}`);
+    copyFileSync(dest, join("/opt/cursor/artifacts", filename));
+    console.log("wrote", filename, buf.length, "bytes", `${r.width}x${r.height}`);
   }
 } finally {
   await browser.close();

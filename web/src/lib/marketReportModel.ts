@@ -33,6 +33,7 @@ export type ReportStoryCard = {
   id: string;
   title: string;
   value: string;
+  detail: string;
   icon: "trend" | "value" | "structure" | "volatility" | "confirmation" | "session" | "risk" | "targets";
 };
 
@@ -63,6 +64,7 @@ export type ReportKeyLevel = {
   label: string;
   price: number;
   tone: "resistance" | "support" | "live" | "poc" | "vah" | "val";
+  caption?: string | null;
 };
 
 export type ReportChartOverlay = {
@@ -338,14 +340,59 @@ function buildStoryCards(
               ? "Range-bound"
               : "Mixed";
 
+  const value = valueCardText(ctx, livePrice);
+  const structure = structureCardText(decision, ctx);
+  const vol = volatilityCardText(ctx);
   const cards: ReportStoryCard[] = [
-    { id: "trend", title: "Trend", value: trend, icon: "trend" },
-    { id: "value", title: "Value", value: valueCardText(ctx, livePrice), icon: "value" },
-    { id: "structure", title: "Structure", value: structureCardText(decision, ctx), icon: "structure" },
+    {
+      id: "trend",
+      title: "Trend",
+      value: trend,
+      detail:
+        trend === "Supportive"
+          ? "Price holds above key trend levels"
+          : trend === "Pressuring"
+            ? "Sellers pressure key trend levels"
+            : trend === "Range-bound"
+              ? "No clear directional expansion"
+              : "Directional context is mixed",
+      icon: "trend"
+    },
+    {
+      id: "value",
+      title: "Value",
+      value,
+      detail: value.toLowerCase().includes("above")
+        ? "Trading above session value"
+        : value.toLowerCase().includes("below")
+          ? "Trading below session value"
+          : "Near session value area",
+      icon: "value"
+    },
+    {
+      id: "structure",
+      title: "Structure",
+      value: structure,
+      detail:
+        structure === "Incomplete"
+          ? "Confirmation still required"
+          : structure === "Structure verified"
+            ? "Verified structure in place"
+            : "Structure context forming",
+      icon: "structure"
+    },
     {
       id: "volatility",
       title: "Volatility",
-      value: volatilityCardText(ctx),
+      value: vol,
+      detail:
+        vol === "Below preferred"
+          ? "Expansion not yet preferred"
+          : vol === "Elevated"
+            ? "Range expansion elevated"
+            : vol === "Normal"
+              ? "Within preferred band"
+              : "Volatility context unavailable",
       icon: "volatility"
     }
   ];
@@ -450,23 +497,27 @@ function buildPlanReadiness(
   };
 
   const rows: ReportReadinessRow[] = [];
-  const wanted = ["Trend", "Structure", "Confirmation", "Entry"];
-  for (const label of wanted) {
-    const item = setup.find((s) => mapId(s.id) === label);
+  const wanted: Array<{ key: string; label: string }> = [
+    { key: "Trend", label: "Trend" },
+    { key: "Structure", label: "Structure" },
+    { key: "Confirmation", label: "Confirmation" },
+    { key: "Entry", label: "Entry Trigger" }
+  ];
+  for (const row of wanted) {
+    const item = setup.find((s) => mapId(s.id) === row.key);
     if (!item) {
-      rows.push({ label, status: "WAITING" });
+      rows.push({ label: row.label, status: "WAITING" });
       continue;
     }
     const mark = checklistMark(item);
     rows.push({
-      label,
+      label: row.label,
       status: mark === "pass" ? "READY" : mark === "fail" ? "FAIL" : "WAITING"
     });
   }
 
   const readyCount = rows.filter((r) => r.status === "READY").length;
-  const overall =
-    readyCount === rows.length ? "PLAN READY" : "PLAN NOT READY";
+  const overall = readyCount === rows.length ? "READY" : "NOT READY";
   return { rows, overall };
 }
 
@@ -582,19 +633,30 @@ function buildScenarios(
 
 function buildKeyLevels(
   structure: ReportStructureLevel[],
-  livePrice: number | null
+  livePrice: number | null,
+  ctx: MarketReportContext | null | undefined
 ): ReportKeyLevel[] {
   const out: ReportKeyLevel[] = [];
+  const poc = structure.find((l) => l.kind === "poc")?.price ?? ctx?.poc ?? null;
   for (const l of structure) {
-    if (l.kind === "resistance") out.push({ label: "Resistance", price: l.price, tone: "resistance" });
-    if (l.kind === "current" && livePrice != null)
-      out.push({ label: "Current", price: l.price, tone: "live" });
-    if (l.kind === "support") out.push({ label: "Support", price: l.price, tone: "support" });
-    if (l.kind === "poc") out.push({ label: "POC", price: l.price, tone: "poc" });
-    if (l.kind === "vah") out.push({ label: "VAH", price: l.price, tone: "vah" });
-    if (l.kind === "val") out.push({ label: "VAL", price: l.price, tone: "val" });
+    if (l.kind === "resistance")
+      out.push({ label: "Resistance", price: l.price, tone: "resistance", caption: "Nearest resistance" });
+    if (l.kind === "current" && livePrice != null) {
+      let caption = "Live price";
+      if (poc != null) {
+        caption = livePrice > poc ? "Above POC" : livePrice < poc ? "Below POC" : "At POC";
+      }
+      out.push({ label: "Current", price: l.price, tone: "live", caption });
+    }
+    if (l.kind === "support")
+      out.push({ label: "Support", price: l.price, tone: "support", caption: "Nearest support" });
+    if (l.kind === "poc")
+      out.push({ label: "POC", price: l.price, tone: "poc", caption: "Session point of control" });
+    if (l.kind === "vah")
+      out.push({ label: "VAH", price: l.price, tone: "vah", caption: "Value area high" });
+    if (l.kind === "val")
+      out.push({ label: "VAL", price: l.price, tone: "val", caption: "Value area low" });
   }
-  // Prefer compact set: Resistance, Current, Support, then POC/VAH/VAL
   const order = ["Resistance", "Current", "Support", "POC", "VAH", "VAL"];
   const uniq = new Map<string, ReportKeyLevel>();
   for (const k of out) {
@@ -658,7 +720,7 @@ export function buildMarketReportModel(
   const trade = buildTradePlan(decision, snapshot.plan, ctx);
   const timeframes = buildTimeframes(ctx);
   const scenarios = buildScenarios(decision, ctx, structureLevels);
-  const keyLevels = buildKeyLevels(structureLevels, snapshot.livePrice);
+  const keyLevels = buildKeyLevels(structureLevels, snapshot.livePrice, ctx);
   const overall = classifyOverallScore(snapshot.scoreTotal);
 
   const marketStatus =
