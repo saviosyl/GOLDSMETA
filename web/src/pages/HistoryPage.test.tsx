@@ -70,7 +70,7 @@ describe("HistoryPage", () => {
     );
 
     await screen.findByTestId("history-item-gm-web-buy");
-    await user.click(screen.getByRole("tab", { name: "WAIT" }));
+    await user.click(screen.getByRole("tab", { name: "Waits" }));
     expect(screen.queryByTestId("history-item-gm-web-buy")).not.toBeInTheDocument();
     expect(screen.getByTestId("history-item-gm-web-wait")).toBeInTheDocument();
 
@@ -101,12 +101,14 @@ describe("HistoryPage", () => {
     expect(screen.getByTestId("env-badge-d-test")).toHaveTextContent("TEST");
     expect(screen.getByTestId("env-badge-d-live")).toHaveTextContent("LIVE");
 
-    await user.click(screen.getByRole("tab", { name: "TEST" }));
+    await user.click(screen.getByTestId("history-more-filters"));
+    await user.click(screen.getByRole("button", { name: "Signals" }));
     expect(screen.getByTestId("history-item-d-test")).toBeInTheDocument();
     expect(screen.queryByTestId("history-item-d-live")).not.toBeInTheDocument();
     expect(screen.queryByTestId("history-item-w-live")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "LIVE" }));
+    await user.click(screen.getByTestId("history-more-filters"));
+    await user.click(screen.getByRole("button", { name: "Demo/Live" }));
     expect(screen.queryByTestId("history-item-d-test")).not.toBeInTheDocument();
     expect(screen.getByTestId("history-item-d-live")).toBeInTheDocument();
     expect(screen.getByTestId("history-item-w-live")).toBeInTheDocument();

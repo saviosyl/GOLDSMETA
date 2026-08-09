@@ -58,9 +58,7 @@ export function deriveAutoTradeHeaderStatus(args: {
   const liveLocked = qualification?.liveOrders === "LOCKED" || status?.locked === true;
   const demoAutoEnabled = Boolean(qualification?.demoAuto?.enabled);
   const demoAutoReady = Boolean(qualification?.demoAuto?.ready);
-  const emergency =
-    status?.displayStatus === "LOCKED" ||
-    (status?.mode === "OFF" && status?.locked === true && status?.displayStatus === "LOCKED");
+  const emergency = Boolean(status?.emergencyStopActive) || Boolean(status?.locked && qState === "BLOCKED");
 
   if (qState === "BLOCKED" || emergency) {
     return {

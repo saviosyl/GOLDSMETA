@@ -163,8 +163,8 @@ export function IntelligencePage() {
         <article className="gm-prem-card">
           <span className="gm-label">Trend</span>
           <strong>
-            {decision?.directionBias
-              ? String(decision.directionBias).replace(/_/g, " ")
+            {decision?.marketStructure?.trend
+              ? String(decision.marketStructure.trend).replace(/_/g, " ")
               : decision?.decision === "BUY"
                 ? "Bullish lean"
                 : decision?.decision === "SELL"
@@ -175,8 +175,10 @@ export function IntelligencePage() {
         <article className="gm-prem-card">
           <span className="gm-label">Market structure</span>
           <strong data-testid="markets-plain-english">
-            {decision?.oneLineReason ||
-              decision?.primaryReason ||
+            {(Array.isArray(decision?.reasonSummary)
+              ? decision?.reasonSummary[0]
+              : null) ||
+              decision?.explanation ||
               "Open Plan for the full decision context"}
           </strong>
         </article>

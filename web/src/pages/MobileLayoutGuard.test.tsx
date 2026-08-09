@@ -4,11 +4,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const gmV2 = readFileSync(resolve(__dirname, "../styles/gm-v2.css"), "utf8");
-const redesign = readFileSync(resolve(__dirname, "../styles/redesign.css"), "utf8");
-const tokens = readFileSync(resolve(__dirname, "../styles/tokens.css"), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const gmV2 = readFileSync(resolve(here, "../styles/gm-v2.css"), "utf8");
+const redesign = readFileSync(resolve(here, "../styles/redesign.css"), "utf8");
+const tokens = readFileSync(resolve(here, "../styles/tokens.css"), "utf8");
 
 describe("Mobile layout guards", () => {
   it("defines mobile nav height and safe-area tokens", () => {

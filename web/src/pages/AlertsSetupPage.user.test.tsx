@@ -44,16 +44,18 @@ vi.mock("../lib/push", () => ({
 }));
 
 describe("AlertsSetupPage ordinary user", () => {
-  it("hides webhook URL and derives healthy checklist without admin diagnostics", async () => {
+  it("shows notification preferences and hides TradingView feed setup", async () => {
     render(
       <MemoryRouter>
         <AlertsSetupPage />
       </MemoryRouter>
     );
-    expect(await screen.findByTestId("premium-setup-health")).toHaveTextContent(/Setup complete/i);
+    expect(await screen.findByTestId("notification-status")).toBeInTheDocument();
+    expect(screen.getByTestId("alerts-preferences")).toBeInTheDocument();
+    expect(screen.queryByTestId("premium-setup-health")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("alerts-advanced-setup")).not.toBeInTheDocument();
     expect(screen.queryByTestId("standard-webhook-url")).not.toBeInTheDocument();
     expect(screen.queryByText(/example\.test\/webhook/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Pine 3\.0 detected/i)).toBeInTheDocument();
-    expect(screen.getByText(/No recent legacy Bridge traffic/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Pine 3\.0 detected/i)).not.toBeInTheDocument();
   });
 });
