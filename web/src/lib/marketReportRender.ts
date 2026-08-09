@@ -23,8 +23,8 @@ const C = {
   gold: "#D4A84B",
   goldSoft: "#E0C07A",
   text: "#F2F5F8",
-  muted: "#A8B4C6",
-  faint: "#7E8BA0",
+  muted: "#C0CAD8",
+  faint: "#9AA8BC",
   buy: "#2FBF71",
   sell: "#E25555",
   wait: "#D4A84B",
@@ -268,11 +268,16 @@ function drawScoreGauge(
   ctx.font = `700 10px ${FONT}`;
   ctx.fillText("SETUP QUALITY", cx, cy + 34);
 
-  const labels = ["Weak", "Developing", "Good", "Strong"];
-  const ly = cy + radius + 18;
-  ctx.font = `600 9px ${FONT}`;
+  // Evenly spaced tick labels across the score card width — no overlap.
+  // Compact even ticks — "Developing" shortened so labels never collide.
+  const labels = ["Weak", "Devel.", "Good", "Strong"];
+  const bandW = Math.max(radius * 3.1, 300);
+  const bandLeft = cx - bandW / 2;
+  const ly = cy + radius + 22;
+  ctx.font = `600 10px ${FONT}`;
+  ctx.textBaseline = "alphabetic";
   for (let i = 0; i < labels.length; i++) {
-    const lx = cx - radius + (i * (radius * 2)) / (labels.length - 1);
+    const lx = bandLeft + (i * bandW) / (labels.length - 1);
     const active =
       score != null &&
       ((i === 0 && score < 40) ||
@@ -280,6 +285,8 @@ function drawScoreGauge(
         (i === 2 && score >= 60 && score < 80) ||
         (i === 3 && score >= 80));
     ctx.fillStyle = active ? accent : C.faint;
+    ctx.fillRect(lx - 0.75, ly - 12, 1.5, 5);
+    ctx.textAlign = i === 0 ? "left" : i === labels.length - 1 ? "right" : "center";
     ctx.fillText(labels[i]!, lx, ly);
   }
   ctx.restore();
@@ -414,6 +421,32 @@ function drawStructureLadder(
   }
 }
 
+function formatCandleAxisLabel(
+  time: number | null | undefined,
+  timeZone: string | null,
+  isLast: boolean
+): string | null {
+  if (isLast) return "Now";
+  if (time == null || !Number.isFinite(time)) return null;
+  const ms = time > 1e12 ? time : time * 1000;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: timeZone || undefined
+    }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).format(d);
+  }
+}
+
 function drawCandles(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -422,7 +455,8 @@ function drawCandles(
   h: number,
   candles: ReportCandle[],
   overlays: MarketReportModel["chartOverlays"],
-  timeframe: string | null
+  timeframe: string | null,
+  timeZone: string | null
 ) {
   fillCard(ctx, x, y, w, h, 14);
   const padL = 14;
@@ -522,15 +556,22 @@ function drawCandles(
     ctx.fillRect(cx - bodyW / 2, top, bodyW, bh);
   }
 
-  // Time labels
-  ctx.fillStyle = C.faint;
-  ctx.font = `600 10px ${FONT}`;
+  // Time axis — real candle timestamps when available; relative fallback otherwise
+  const axisIdx = [0, Math.floor((n - 1) / 3), Math.floor(((n - 1) * 2) / 3), n - 1];
+  const hasRealTimes = candles.some((c) => c.time != null && Number.isFinite(c.time));
+  const fallbackRel = ["-30", "-20", "-10", "Now"];
+  ctx.fillStyle = C.muted;
+  ctx.font = `600 11px ${FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  const labels = ["-30", "-20", "-10", "Now"];
-  for (let i = 0; i < labels.length; i++) {
-    const tx = innerX + (innerW * i) / (labels.length - 1);
-    ctx.fillText(labels[i]!, tx, y + h - 10);
+  for (let i = 0; i < axisIdx.length; i++) {
+    const idx = axisIdx[i]!;
+    const c = candles[idx]!;
+    const text = hasRealTimes
+      ? formatCandleAxisLabel(c.time, timeZone, i === axisIdx.length - 1) ?? fallbackRel[i]!
+      : fallbackRel[i]!;
+    const tx = innerX + (innerW * i) / (axisIdx.length - 1);
+    ctx.fillText(text, tx, y + h - 10);
   }
 
   // Compact level legend under title
@@ -605,7 +646,7 @@ function drawTradePlanVisual(
 
   ctx.fillStyle = C.gold;
   ctx.font = `700 11px ${FONT}`;
-  ctx.fillText("RISK / REWARD", x + 14, y + h - 28);
+  ctx.fillText("R:R TO TP1", x + 14, y + h - 28);
   ctx.fillStyle = C.text;
   ctx.font = `800 18px ${FONT}`;
   ctx.fillText(p.riskReward != null ? `1 : ${p.riskReward}` : "—", x + 14, y + h - 10);
@@ -926,7 +967,8 @@ export async function renderMarketReportPng(
       blockH,
       model.candles,
       model.chartOverlays,
-      model.chartTimeframe
+      model.chartTimeframe,
+      model.chartTimeZone
     );
     drawStructureLadder(
       ctx,
@@ -965,7 +1007,7 @@ export async function renderMarketReportPng(
     ctx.font = `800 15px ${FONT}`;
     ctx.fillText(card.value, cx + 52, storyY + 44);
     ctx.fillStyle = C.muted;
-    ctx.font = `500 11px ${FONT}`;
+    ctx.font = `500 12px ${FONT}`;
     const detailLines = wrapText(ctx, card.detail, cardW - 24, 2);
     let dy = storyY + 70;
     for (const line of detailLines) {
@@ -1285,16 +1327,16 @@ export async function renderMarketReportPng(
   ctx.fillText("MetaMech Solutions", PAD, footerTop + 38);
 
   ctx.textAlign = "right";
-  ctx.fillStyle = C.faint;
-  ctx.font = `400 10px ${FONT}`;
+  ctx.fillStyle = C.muted;
+  ctx.font = `400 11px ${FONT}`;
   const disc = wrapText(ctx, SNAPSHOT_DISCLAIMER, 620, 2);
   let dy = footerTop + 18;
   for (const line of disc) {
     ctx.fillText(line, W - PAD, dy);
-    dy += 13;
+    dy += 14;
   }
   ctx.fillStyle = C.muted;
-  ctx.font = `500 10px ${FONT}`;
+  ctx.font = `500 11px ${FONT}`;
   ctx.fillText(model.generatedLabel, W - PAD, footerTop + 52);
   ctx.textAlign = "left";
 

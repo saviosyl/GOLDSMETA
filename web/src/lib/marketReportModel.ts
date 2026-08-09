@@ -6,11 +6,7 @@
 import { biasLabel as formatBiasLabel } from "./intradayFormat";
 import { checklistMark } from "./planDisplay";
 import { formatSession, plainLanguageReason } from "./plainLanguage";
-import {
-  classifyOverallScore,
-  classifyScoreComponent,
-  sortScoreComponents
-} from "./scoreStatus";
+import { classifyScoreComponent, sortScoreComponents } from "./scoreStatus";
 import type { PromoSnapshotModel, SnapshotPlan } from "./promoSnapshot";
 
 export type ReportDecision = "BUY" | "SELL" | "WAIT";
@@ -20,6 +16,8 @@ export type ReportCandle = {
   high: number;
   low: number;
   close: number;
+  /** Unix seconds (or ms) when available — used for chart axis labels. */
+  time?: number | null;
 };
 
 export type ReportStructureLevel = {
@@ -136,6 +134,8 @@ export type MarketReportModel = {
   livePrice: number | null;
   candles: ReportCandle[] | null;
   chartTimeframe: string | null;
+  /** IANA zone for chart axis labels when candle timestamps exist. */
+  chartTimeZone: string | null;
   chartOverlays: ReportChartOverlay[];
   structureLevels: ReportStructureLevel[];
   storyCards: ReportStoryCard[];
@@ -191,22 +191,36 @@ function biasFromContext(
 
 function humanSetupLabel(item: { id: string; label: string }): string {
   const id = item.id.toLowerCase();
-  if (id.includes("structure")) return "Structure";
-  if (id.includes("confirm")) return "Confirmation";
-  if (id.includes("plan") || id.includes("entry")) return "Entry";
+  if (id.includes("structure")) return "Market Structure";
+  if (id.includes("confirm")) return "Trade Confirmation";
+  if (id.includes("plan") || id.includes("entry")) return "Entry Trigger";
   if (id.includes("bias") || id.includes("trend")) return "Trend";
   if (id.includes("fresh") || id.includes("quote")) return "Quote";
   if (id.includes("align")) return "Alignment";
   const cleaned = item.label
     .replace(/\(.*?\)/g, "")
-    .replace(/complete market structure.*/i, "Structure")
-    .replace(/entry confirmation.*/i, "Confirmation")
-    .replace(/entry \/ stop.*/i, "Entry")
+    .replace(/complete market structure.*/i, "Market Structure")
+    .replace(/entry confirmation.*/i, "Trade Confirmation")
+    .replace(/entry \/ stop.*/i, "Entry Trigger")
     .replace(/directional bias.*/i, "Trend")
     .replace(/fresh live.*/i, "Quote")
     .replace(/price sources.*/i, "Alignment")
     .trim();
-  return cleaned.length > 18 ? cleaned.slice(0, 16) + "…" : cleaned || "Condition";
+  return cleaned.length > 22 ? cleaned.slice(0, 20) + "…" : cleaned || "Condition";
+}
+
+/** Plain-language confirmation waiting copy from real confirmation fields only. */
+function confirmationWaitingText(ctx: MarketReportContext | null | undefined): string {
+  const label = (ctx?.confirmationLabel ?? "").trim();
+  const detail = (ctx?.setupItems ?? []).find((i) => i.id.includes("confirm"))?.detail ?? "";
+  const blob = `${label} ${detail}`.toUpperCase();
+  if (/5M|5-MINUTE|FIVE.?MINUTE/.test(blob)) {
+    return "Lower-timeframe (5M) confirmation is still missing";
+  }
+  if (label && !/none/i.test(label)) {
+    return `${label.replace(/\.$/, "")} — still waiting`;
+  }
+  return "Trade confirmation is still missing";
 }
 
 function valueCardText(ctx: MarketReportContext | null | undefined, live: number | null): string {
@@ -375,9 +389,9 @@ function buildStoryCards(
       value: structure,
       detail:
         structure === "Incomplete"
-          ? "Confirmation still required"
+          ? "Market structure still incomplete"
           : structure === "Structure verified"
-            ? "Verified structure in place"
+            ? "Market structure verified"
             : "Structure context forming",
       icon: "structure"
     },
@@ -426,16 +440,16 @@ function buildWhy(
           decision === "WAIT"
             ? label === "Trend"
               ? "Trend remains supportive"
-              : label === "Structure"
-                ? "Price structure remains supportive"
-                : `${label} supportive`
+              : label === "Market Structure"
+                ? "Market structure is ready"
+                : `${label} ready`
             : `${label} aligned`;
       } else if (mark === "fail") {
         text = `${label} failed`;
-      } else if (label === "Confirmation") {
-        text = "Structure confirmation missing";
-      } else if (label === "Entry") {
-        text = "Entry trigger not confirmed";
+      } else if (label === "Trade Confirmation") {
+        text = confirmationWaitingText(ctx);
+      } else if (label === "Entry Trigger") {
+        text = "Entry trigger is not confirmed";
       } else {
         text = `${label} waiting`;
       }
@@ -469,11 +483,34 @@ function buildWhy(
 
   let nextTrigger: string | null = null;
   if (decision === "WAIT") {
-    nextTrigger =
-      ctx?.whyNotReady?.replace(/^Price is /i, "Price ") ??
-      "Market structure + confirmation";
-    if (nextTrigger.length > 90) {
-      nextTrigger = "Market structure + confirmation";
+    const pendingConfirm = items.find(
+      (i) => i.state === "pending" && /confirmation/i.test(i.text)
+    );
+    const pendingEntry = items.find(
+      (i) => i.state === "pending" && /entry trigger/i.test(i.text)
+    );
+    const structureReady = items.some(
+      (i) => i.state === "pass" && /market structure/i.test(i.text)
+    );
+    if (pendingConfirm && pendingEntry) {
+      nextTrigger = "Trade confirmation + entry trigger";
+    } else if (pendingConfirm) {
+      nextTrigger = confirmationWaitingText(ctx);
+    } else if (pendingEntry) {
+      nextTrigger = "Entry trigger is not confirmed";
+    } else if (ctx?.whyNotReady) {
+      let raw = ctx.whyNotReady.replace(/^Price is /i, "Price ");
+      // Avoid contradictory "structure confirmation" when structure is already ready.
+      if (structureReady) {
+        raw = raw
+          .replace(/market structure confirmation and a?\s*/i, "")
+          .replace(/market structure confirmation/i, "trade confirmation");
+      }
+      nextTrigger = raw.length > 90 ? "Trade confirmation + entry trigger" : raw;
+    } else {
+      nextTrigger = structureReady
+        ? "Trade confirmation + entry trigger"
+        : "Market structure + confirmation";
     }
   } else if (ctx?.confirmationLabel) {
     nextTrigger = ctx.confirmationLabel;
@@ -499,8 +536,8 @@ function buildPlanReadiness(
   const rows: ReportReadinessRow[] = [];
   const wanted: Array<{ key: string; label: string }> = [
     { key: "Trend", label: "Trend" },
-    { key: "Structure", label: "Structure" },
-    { key: "Confirmation", label: "Confirmation" },
+    { key: "Structure", label: "Market Structure" },
+    { key: "Confirmation", label: "Trade Confirmation" },
     { key: "Entry", label: "Entry Trigger" }
   ];
   for (const row of wanted) {
@@ -684,19 +721,11 @@ function buildChartOverlays(
   return overlays.slice(0, 6);
 }
 
-function decisionSubtext(
-  decision: ReportDecision,
-  ctx: MarketReportContext | null | undefined,
-  overall: ReturnType<typeof classifyOverallScore>
-): string {
-  if (ctx?.oneSentence) {
-    const s = ctx.oneSentence.replace(/\s*\(LABELLED.*?\)\s*/gi, "").trim();
-    const sentence = s.split(/(?<=\.)\s+/)[0] ?? s;
-    return sentence.length > 72 ? sentence.slice(0, 69) + "…" : sentence;
-  }
-  if (decision === "WAIT") return "No confirmed entry yet";
-  if (decision === "BUY") return overall.label === "HIGH QUALITY" ? "Validated buy setup" : "Buy plan active";
-  return overall.label === "HIGH QUALITY" ? "Validated sell setup" : "Sell plan active";
+function decisionSubtext(decision: ReportDecision): string {
+  // Shared market-intelligence copy — avoid account/execution-specific phrasing.
+  if (decision === "WAIT") return "No confirmed entry yet.";
+  if (decision === "BUY") return "Validated BUY plan active.";
+  return "Validated SELL plan active.";
 }
 
 export function buildMarketReportModel(
@@ -721,7 +750,6 @@ export function buildMarketReportModel(
   const timeframes = buildTimeframes(ctx);
   const scenarios = buildScenarios(decision, ctx, structureLevels);
   const keyLevels = buildKeyLevels(structureLevels, snapshot.livePrice, ctx);
-  const overall = classifyOverallScore(snapshot.scoreTotal);
 
   const marketStatus =
     ctx?.marketStatus === "OPEN"
@@ -769,7 +797,7 @@ export function buildMarketReportModel(
       ? `Generated ${snapshot.utcSecondary}`
       : `Generated ${snapshot.compactTime}`,
     decision,
-    decisionSubtext: decisionSubtext(decision, ctx, overall),
+    decisionSubtext: decisionSubtext(decision),
     scoreTotal: snapshot.scoreTotal,
     scoreDescriptor: scoreDescriptor(snapshot.scoreTotal),
     biasLabel: bias.label,
@@ -777,6 +805,7 @@ export function buildMarketReportModel(
     livePrice: snapshot.livePrice,
     candles: candles && candles.length >= 8 ? candles : null,
     chartTimeframe: candles ? ctx?.chartTimeframe ?? "15M" : null,
+    chartTimeZone: snapshot.timeZone || null,
     chartOverlays: buildChartOverlays(snapshot.livePrice, structureLevels, trade.plan),
     structureLevels,
     storyCards: buildStoryCards(decision, ctx, snapshot.livePrice),

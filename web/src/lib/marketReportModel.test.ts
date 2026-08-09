@@ -17,6 +17,15 @@ describe("buildMarketReportModel", () => {
     expect(report.tradePlan).toBeNull();
     expect(report.storyCards).toHaveLength(4);
     expect(report.storyCards.every((c) => c.detail.length > 0)).toBe(true);
+    expect(report.decisionSubtext).toBe("No confirmed entry yet.");
+    expect(report.planReadiness?.some((r) => r.label === "Market Structure")).toBe(true);
+    expect(report.planReadiness?.some((r) => r.label === "Trade Confirmation")).toBe(true);
+    expect(report.whyItems.some((i) => /structure confirmation missing/i.test(i.text))).toBe(
+      false
+    );
+    expect(
+      report.whyItems.some((i) => /trade confirmation|5m|still missing|still waiting/i.test(i.text))
+    ).toBe(true);
     expect(report.scenarios.length).toBeGreaterThanOrEqual(1);
     expect(report.structureLevels.some((l) => l.kind === "current")).toBe(true);
     expect(JSON.stringify(report)).not.toMatch(/gm_/i);
@@ -27,10 +36,12 @@ describe("buildMarketReportModel", () => {
     const snap = buildPromoSnapshotModel(buy.input);
     const report = buildMarketReportModel(snap, snap.reportContext);
     expect(report.decision).toBe("BUY");
+    expect(report.decisionSubtext).toBe("Validated BUY plan active.");
     expect(report.tradePlan).not.toBeNull();
     expect(report.tradePlan?.entry).toBeTruthy();
     expect(report.planReadiness).toBeNull();
     expect(report.candles?.length).toBeGreaterThanOrEqual(8);
+    expect(report.candles?.every((c) => c.time != null)).toBe(true);
     expect(report.timeframes?.length).toBeGreaterThan(0);
   });
 
@@ -39,6 +50,7 @@ describe("buildMarketReportModel", () => {
     const snap = buildPromoSnapshotModel(sell.input);
     const report = buildMarketReportModel(snap, snap.reportContext);
     expect(report.decision).toBe("SELL");
+    expect(report.decisionSubtext).toBe("Validated SELL plan active.");
     expect(report.tradePlan?.direction.toUpperCase()).toContain("SELL");
     expect(report.biasPosition).toBeLessThan(0.5);
   });

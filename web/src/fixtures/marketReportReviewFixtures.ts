@@ -13,17 +13,25 @@ function synthCandles(
   mid: number,
   decision: "WAIT" | "BUY" | "SELL",
   count = 32
-): Array<{ open: number; high: number; low: number; close: number }> {
+): Array<{ open: number; high: number; low: number; close: number; time: number }> {
+  // Review-only synthetic series with timestamps so axis formatting can be checked.
+  const end = Math.floor(Date.UTC(2026, 7, 9, 21, 0, 0) / 1000);
   const bars = [];
   let price = mid - (decision === "BUY" ? 8 : decision === "SELL" ? -8 : 2);
   for (let i = 0; i < count; i++) {
     const drift =
       decision === "BUY" ? 0.35 : decision === "SELL" ? -0.35 : Math.sin(i / 3) * 0.4;
     const open = price;
-    const close = open + drift + (Math.sin(i * 1.7) * 0.55);
+    const close = open + drift + Math.sin(i * 1.7) * 0.55;
     const high = Math.max(open, close) + 0.55 + (i % 3) * 0.15;
     const low = Math.min(open, close) - 0.55 - (i % 2) * 0.12;
-    bars.push({ open, high, low, close });
+    bars.push({
+      open,
+      high,
+      low,
+      close,
+      time: end - (count - 1 - i) * 15 * 60
+    });
     price = close;
   }
   return bars;
@@ -118,7 +126,7 @@ const waitPlan: IntradayPlan = {
   ...structuredClone(chartExampleIntradayPlanFixture),
   oneSentence:
     "No confirmed entry yet. Price is above session POC with supportive trend, but structure confirmation is still incomplete.",
-  whyNotReady: "Waiting for market structure confirmation and a valid entry trigger.",
+  whyNotReady: "Waiting for trade confirmation and a valid entry trigger.",
   session: "NEW_YORK",
   directionBias: "SLIGHTLY_BULLISH",
   marketType: "RANGE",

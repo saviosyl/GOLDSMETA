@@ -63,9 +63,9 @@ try {
   }
 
   const v2Names = {
-    WAIT: "01-WAIT-Report-v2.png",
-    BUY: "02-BUY-Report-v2.png",
-    SELL: "03-SELL-Report-v2.png"
+    WAIT: "01-WAIT-Report-FINAL.png",
+    BUY: "02-BUY-Report-FINAL.png",
+    SELL: "03-SELL-Report-FINAL.png"
   };
 
   for (const key of ["WAIT", "BUY", "SELL"]) {

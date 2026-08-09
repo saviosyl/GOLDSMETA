@@ -122,7 +122,13 @@ function buildReportContext(args: {
   marketOpen: boolean | null;
   localTs: FormattedTimestamp;
   stampIso: string | null | undefined;
-  candles: Array<{ open: number; high: number; low: number; close: number }> | null;
+  candles: Array<{
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    time?: number | null;
+  }> | null;
 }): MarketReportContext {
   const { decision, briefing, plan } = args;
   const tf = plan ? deriveTimeframeAlignment(plan) : null;
@@ -210,7 +216,13 @@ function buildSnapshotFromPage(args: {
   intradayPlan: IntradayPlan | null;
   marketOpen: boolean | null;
   stampIso: string | null | undefined;
-  candles: Array<{ open: number; high: number; low: number; close: number }> | null;
+  candles: Array<{
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    time?: number | null;
+  }> | null;
 }): BuildSnapshotInput | null {
   const { decision, briefing } = args;
   if (!decision && !briefing && !args.intradayPlan) return null;
@@ -574,7 +586,8 @@ export function OverviewPage() {
           open: b.open,
           high: b.high,
           low: b.low,
-          close: b.close
+          close: b.close,
+          time: typeof b.time === "number" && Number.isFinite(b.time) ? b.time : null
         }))
       : null;
 
