@@ -1,9 +1,10 @@
-/* GoldMeta push click handler — opens the relevant plan without exposing tokens. */
+/* GoldMeta push click handler — opens the PWA / plan without exposing tokens. */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   const planId = data.planId || data.decisionId || "";
-  const targetUrl = planId ? `/?planId=${encodeURIComponent(String(planId))}` : "/";
+  const openPath = typeof data.openPath === "string" && data.openPath.startsWith("/") ? data.openPath : "/";
+  const targetUrl = planId ? `/?planId=${encodeURIComponent(String(planId))}` : openPath;
 
   event.waitUntil(
     (async () => {
@@ -39,7 +40,9 @@ self.addEventListener("push", (event) => {
     body: payload.body || "Open GoldMeta to review the current plan.",
     data: payload.data || {},
     icon: "/icons/pwa-192x192.png",
-    badge: "/icons/pwa-192x192.png"
+    badge: "/icons/pwa-192x192.png",
+    tag: payload.tag || payload.data?.event || "goldmeta-push",
+    renotify: true
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

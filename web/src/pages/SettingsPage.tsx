@@ -14,6 +14,7 @@ import { useAuth } from "../lib/auth";
 import { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA } from "../lib/buildIdentity";
 import type { BackendSettings, ManualRiskSettings, TradingViewConnection } from "../types/models";
 import {
+  ensureWebPushRegistered,
   getNotificationPermission,
   isProbablyInstalledPwa,
   isWebPushSupported,
@@ -60,7 +61,9 @@ const notificationUx = (
   pushStatus: NotificationPermission | "default" | "denied" | "granted" | string,
   installed: boolean,
   pushSupported: boolean,
-  online: boolean
+  online: boolean,
+  subscriptionRegistered: boolean,
+  serverConfigured: boolean | null
 ): NotificationUx => {
   if (!online) {
     return {
@@ -90,26 +93,46 @@ const notificationUx = (
       enableReason: "Install the PWA to the Home Screen first."
     };
   }
+  if (serverConfigured === false) {
+    return {
+      headline: "Server configuration missing",
+      detail: "GoldMeta Web Push (VAPID) is not configured on the server yet.",
+      canEnable: false,
+      canUnsubscribe: false,
+      enableReason: "Server VAPID configuration is missing."
+    };
+  }
   if (pushStatus === "denied") {
     return {
       headline: "Blocked by the browser",
       detail: "Notifications were denied. Enable them in system / Safari settings, then try again.",
       canEnable: false,
-      canUnsubscribe: true,
+      canUnsubscribe: subscriptionRegistered,
       enableReason: "Browser permission is denied."
+    };
+  }
+  if (subscriptionRegistered) {
+    return {
+      headline: "Phone alerts active",
+      detail:
+        "A Web Push subscription for this phone is registered with GoldMeta. Permission alone is not enough.",
+      canEnable: false,
+      canUnsubscribe: true,
+      enableReason: "Already registered."
     };
   }
   if (pushStatus === "granted") {
     return {
-      headline: "Enabled on this device",
-      detail: "This browser can receive GoldMeta decision alerts when the server flag is on.",
-      canEnable: false,
-      canUnsubscribe: true,
-      enableReason: "Already enabled."
+      headline: "Notifications permission required",
+      detail:
+        "Browser permission is allowed, but this phone is not registered for Web Push yet. Tap Enable Web Push.",
+      canEnable: true,
+      canUnsubscribe: false,
+      enableReason: "Push subscription is not registered with GoldMeta."
     };
   }
   return {
-    headline: "Ready to enable",
+    headline: "Notifications permission required",
     detail: "Permission is requested only after you tap Enable Web Push.",
     canEnable: true,
     canUnsubscribe: false
@@ -123,6 +146,8 @@ export function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState(getNotificationPermission());
+  const [subscriptionRegistered, setSubscriptionRegistered] = useState(false);
+  const [serverConfigured, setServerConfigured] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [createdWebhookUrl, setCreatedWebhookUrl] = useState<string | null>(null);
   const [tzPref, setTzPref] = useState<TimezonePreference>(() => loadTimezonePreference());
@@ -139,9 +164,38 @@ export function SettingsPage() {
   const pushSupported = isWebPushSupported();
   const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
   const notif = useMemo(
-    () => notificationUx(pushStatus, installed, pushSupported, online),
-    [pushStatus, installed, pushSupported, online]
+    () =>
+      notificationUx(
+        pushStatus,
+        installed,
+        pushSupported,
+        online,
+        subscriptionRegistered,
+        serverConfigured
+      ),
+    [pushStatus, installed, pushSupported, online, subscriptionRegistered, serverConfigured]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const key = await api.getVapidPublicKey();
+        if (cancelled) return;
+        setServerConfigured(Boolean(key));
+        const result = await ensureWebPushRegistered(api);
+        if (cancelled) return;
+        setPushStatus(getNotificationPermission());
+        setSubscriptionRegistered(result.status === "subscribed");
+      } catch {
+        if (!cancelled) setServerConfigured(null);
+      }
+    };
+    void probe();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const reload = async () => {
     const [nextSettings, nextConnections] = await Promise.all([
@@ -268,12 +322,18 @@ export function SettingsPage() {
     try {
       const result = await subscribeWebPush(api);
       setPushStatus(getNotificationPermission());
+      setSubscriptionRegistered(result.status === "subscribed");
+      setServerConfigured(result.status !== "missing_vapid");
       setMessage(result.message);
+      if (result.status !== "subscribed") {
+        setError(result.message);
+      }
       if (result.status === "subscribed" && settings && !settings.notificationsEnabled) {
         const updated = await api.updateSettings({ notificationsEnabled: true });
         setSettings(updated);
       }
     } catch (err) {
+      setSubscriptionRegistered(false);
       setError(formatClientError(err, "Push registration failed"));
     } finally {
       setBusy(false);
@@ -286,6 +346,7 @@ export function SettingsPage() {
     try {
       await unsubscribeWebPush(api);
       setPushStatus(getNotificationPermission());
+      setSubscriptionRegistered(false);
       setMessage("Unsubscribed from Web Push for this browser.");
     } catch (err) {
       setError(formatClientError(err, "Unsubscribe failed"));

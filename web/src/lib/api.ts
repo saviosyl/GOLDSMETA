@@ -380,11 +380,32 @@ export class ApiClient {
     });
   }
 
-  async sendTestNotification(): Promise<{ ok: boolean; message?: string }> {
+  async sendTestNotification(): Promise<{
+    ok: boolean;
+    message?: string;
+    webSent?: number;
+    fcmSent?: number;
+    vapidConfigured?: boolean;
+    subscriptionCount?: number;
+  }> {
     return this.request("/v1/notifications/test", {
       method: "POST",
       body: "{}"
     });
+  }
+
+  async listWebPushSubscriptions(): Promise<{
+    count: number;
+    subscriptions: Array<{
+      subscriptionId: string;
+      endpointHost: string;
+      userAgent: string | null;
+      registeredAt: string;
+      updatedAt: string;
+      expirationTime: number | null;
+    }>;
+  }> {
+    return this.request("/v1/push/web-subscriptions");
   }
 
   async listTradingViewConnections(): Promise<TradingViewConnection[]> {

@@ -126,7 +126,20 @@ export function NotificationCentre() {
     setError(null);
     try {
       const result = await api.sendTestNotification();
-      setMessage(result.message ?? "Test notification sent.");
+      const delivered = (result.webSent ?? 0) > 0 || (result.fcmSent ?? 0) > 0;
+      if (!result.ok || !delivered) {
+        setError(
+          result.message ||
+            "Test push was not delivered. Enable phone alerts so a Web Push subscription is registered."
+        );
+        return;
+      }
+      setMessage(
+        result.message ??
+          (result.webSent
+            ? "Test Web Push sent (GoldMeta Test Alert)."
+            : "Test notification sent.")
+      );
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Test notification failed.");

@@ -48,7 +48,12 @@ describe("NotificationCentre", () => {
       ...patch
     }));
     apiMock.markNotificationsRead.mockResolvedValue({ ok: true });
-    apiMock.sendTestNotification.mockResolvedValue({ ok: true, message: "Test notification sent." });
+    apiMock.sendTestNotification.mockResolvedValue({
+      ok: true,
+      webSent: 1,
+      fcmSent: 0,
+      message: "Test Web Push sent. You should see: GoldMeta Test Alert."
+    });
   });
 
   it("shows unread count and notification list inside a fitted drawer", async () => {
@@ -99,7 +104,7 @@ describe("NotificationCentre", () => {
     await user.click(await screen.findByRole("button", { name: /Notifications/i }));
     await user.click(screen.getByRole("button", { name: /Send test notification/i }));
     expect(apiMock.sendTestNotification).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/Test notification sent/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Test Web Push sent/i)).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("notification-drawer")).not.toBeInTheDocument();
   });
