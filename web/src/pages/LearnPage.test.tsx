@@ -1,10 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LearnPage } from "./LearnPage";
 import { LEARN_LESSONS } from "../lib/learn/lessons";
 import { lessonScript } from "../lib/learn/types";
+import { learnSpeech } from "../lib/learn/speechController";
+import { TEACHER_VOICE_STORAGE_KEY } from "../lib/learn/teacherVoices";
 
 function renderLearn(path = "/learn") {
   return render(
@@ -20,6 +22,13 @@ function renderLearn(path = "/learn") {
 describe("Learn GoldMeta", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    try {
+      localStorage.removeItem(TEACHER_VOICE_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    learnSpeech.stop();
+    learnSpeech.setTeacherVoice("female");
   });
 
   it("renders home with 21 lesson cards and education disclaimer", () => {
@@ -76,7 +85,7 @@ describe("Learn GoldMeta", () => {
     }
   });
 
-  it("exposes play pause restart controls when speech is available", async () => {
+  it("exposes only Female/Male British Teacher voices and play controls", async () => {
     const speak = vi.fn((u: SpeechSynthesisUtterance) => {
       window.setTimeout(() => u.onend?.(new Event("end") as SpeechSynthesisEvent), 0);
     });
@@ -89,7 +98,7 @@ describe("Learn GoldMeta", () => {
       rate = 1;
       pitch = 1;
       volume = 1;
-      lang = "en-US";
+      lang = "en-GB";
       voice: SpeechSynthesisVoice | null = null;
       onend: ((ev: SpeechSynthesisEvent) => void) | null = null;
       onerror: ((ev: SpeechSynthesisErrorEvent) => void) | null = null;
@@ -98,6 +107,12 @@ describe("Learn GoldMeta", () => {
       }
     }
     vi.stubGlobal("SpeechSynthesisUtterance", MockUtterance);
+
+    // Premium files are absent in tests — mock fetch HEAD as missing.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 404 }))
+    );
 
     Object.defineProperty(window, "speechSynthesis", {
       configurable: true,
@@ -110,9 +125,78 @@ describe("Learn GoldMeta", () => {
         paused: false,
         getVoices: () => [
           {
-            voiceURI: "test-en",
-            name: "Test English",
-            lang: "en-US",
+            voiceURI: "google-uk-female",
+            name: "Google UK English Female",
+            lang: "en-GB",
+            localService: false,
+            default: false
+          },
+          {
+            voiceURI: "google-uk-male",
+            name: "Google UK English Male",
+            lang: "en-GB",
+            localService: false,
+            default: false
+          },
+          {
+            voiceURI: "other-en",
+            name: "Microsoft Hazel - English (United Kingdom)",
+            lang: "en-GB",
+            localService: true,
+            default: false
+          }
+        ],
+        onvoiceschanged: null
+      }
+    });
+
+    const user = userEvent.setup();
+    renderLearn("/learn/what-is-trading");
+    const player = screen.getByTestId("learn-audio-player");
+    const select = within(player).getByTestId("learn-voice-select") as HTMLSelectElement;
+    const options = within(select).getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent("Female — British Teacher");
+    expect(options[1]).toHaveTextContent("Male — British Teacher");
+    expect(select.value).toBe("female");
+    expect(select).not.toHaveTextContent(/Google UK|Microsoft|Samantha/i);
+
+    expect(within(player).getByTestId("learn-audio-play-pause")).toBeInTheDocument();
+    expect(within(player).getByTestId("learn-audio-restart")).toBeInTheDocument();
+    await user.selectOptions(select, "male");
+    expect(select.value).toBe("male");
+    await user.click(within(player).getByTestId("learn-audio-play-pause"));
+    await waitFor(() => expect(speak).toHaveBeenCalled());
+    const uttered = speak.mock.calls[0]?.[0] as SpeechSynthesisUtterance;
+    expect(uttered.voice?.name).toBe("Google UK English Male");
+  });
+
+  it("shows UK unavailable message when approved Google UK voice is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 404 }))
+    );
+    class MockUtterance {
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    vi.stubGlobal("SpeechSynthesisUtterance", MockUtterance);
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: {
+        speak: vi.fn(),
+        cancel: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        speaking: false,
+        paused: false,
+        getVoices: () => [
+          {
+            voiceURI: "hazel",
+            name: "Microsoft Hazel - English (United Kingdom)",
+            lang: "en-GB",
             localService: true,
             default: true
           }
@@ -121,14 +205,14 @@ describe("Learn GoldMeta", () => {
       }
     });
 
-    // Re-import controller path uses window at call time — play through UI.
     const user = userEvent.setup();
     renderLearn("/learn/what-is-trading");
     const player = screen.getByTestId("learn-audio-player");
-    expect(within(player).getByTestId("learn-audio-play-pause")).toBeInTheDocument();
-    expect(within(player).getByTestId("learn-audio-restart")).toBeInTheDocument();
     await user.click(within(player).getByTestId("learn-audio-play-pause"));
-    expect(speak).toHaveBeenCalled();
+    expect(await within(player).findByTestId("learn-audio-error")).toHaveTextContent(
+      /UK English audio is not available on this device/i
+    );
+    expect(screen.getByTestId("learn-readalong")).toBeInTheDocument();
   });
 
   it("qualification lesson states Demo max trades and Live locked", () => {

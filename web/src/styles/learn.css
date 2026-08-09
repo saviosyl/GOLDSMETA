@@ -206,6 +206,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  margin: 0.55rem 0 0.85rem;
 }
 
 .gm-learn-voice select {
@@ -220,9 +221,14 @@
 }
 
 .gm-learn-audio-error {
-  margin: 0;
+  margin: 0.55rem 0 0;
   color: var(--danger);
   font-size: 0.9rem;
+}
+
+.gm-learn-audio-note {
+  margin: 0.65rem 0 0;
+  line-height: 1.45;
 }
 
 .gm-learn-diagram {

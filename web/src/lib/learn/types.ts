@@ -25,11 +25,6 @@ export type LearnLesson = {
   /** 3–5 key takeaways. */
   remember: string[];
   diagram: LessonDiagramId;
-  /**
-   * Optional future pre-generated audio path (MP3/M4A).
-   * Unused in v1 — browser speech synthesis is the player.
-   */
-  audioSrc?: string | null;
 };
 
 /** Concatenate the exact spoken / read-along script for a lesson. */

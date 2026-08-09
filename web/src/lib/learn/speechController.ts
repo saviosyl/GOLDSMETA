@@ -1,40 +1,50 @@
 /**
- * Singleton Web Speech controller for Learn GoldMeta.
- * - One utterance stream at a time across the app
- * - Natural English voice preference
- * - Rate ~0.92, normal pitch
+ * Learn GoldMeta audio controller.
+ *
+ * PRIMARY: pre-generated MP3/M4A from LEARN_AUDIO_MANIFEST
+ * FALLBACK: Google UK English Female / Male only (no other browser voices)
+ *
+ * User-facing choices: Female — British Teacher / Male — British Teacher
  */
 
-export type SpeechVoiceOption = {
-  voiceURI: string;
-  name: string;
-  lang: string;
-  localService: boolean;
-};
+import { getAudioCandidates } from "./audioManifest";
+import {
+  DEFAULT_TEACHER_VOICE,
+  TEACHER_VOICE_OPTIONS,
+  TEACHER_VOICE_STORAGE_KEY,
+  UK_AUDIO_UNAVAILABLE_MESSAGE,
+  findApprovedGoogleUkVoice,
+  isTeacherVoiceId,
+  type TeacherVoiceId,
+  type TeacherVoiceOption
+} from "./teacherVoices";
+
+export type SpeechVoiceOption = TeacherVoiceOption;
 
 export type SpeechStatus = {
+  /** True when HTMLAudioElement and/or speechSynthesis exist. */
   supported: boolean;
   speaking: boolean;
   paused: boolean;
   lessonId: string | null;
-  /** 0–1 progress through the current script */
+  /** 0–1 progress through the current script / file */
   progress: number;
-  /** Estimated duration in seconds for current script */
   durationSec: number | null;
-  /** Elapsed seconds estimate */
   elapsedSec: number;
+  /** Always the two teacher options (never browser voice lists). */
   voices: SpeechVoiceOption[];
+  /** @deprecated use teacherVoice — kept for status shape stability */
   selectedVoiceURI: string | null;
+  teacherVoice: TeacherVoiceId;
+  /** media = premium file, tts = Google UK fallback */
+  playbackMode: "idle" | "media" | "tts";
   error: string | null;
 };
 
 type Listener = (status: SpeechStatus) => void;
 
-const STORAGE_VOICE = "gm-learn-voice-uri";
 const DEFAULT_RATE = 0.92;
 const DEFAULT_PITCH = 1;
-
-/** Rough words-per-minute for duration estimates at rate 0.92. */
 const WPM = 145;
 
 function estimateDurationSec(text: string, rate: number): number {
@@ -42,19 +52,59 @@ function estimateDurationSec(text: string, rate: number): number {
   return Math.max(8, Math.round((words / WPM) * 60 / rate));
 }
 
-function scoreEnglishVoice(v: SpeechSynthesisVoice): number {
-  let score = 0;
-  const lang = (v.lang || "").toLowerCase();
-  const name = (v.name || "").toLowerCase();
-  if (lang.startsWith("en")) score += 50;
-  if (lang === "en-gb" || lang === "en-us" || lang === "en-au" || lang === "en-ie") score += 20;
-  if (v.localService) score += 10;
-  // Prefer natural / premium sounding names when present
-  if (/natural|neural|premium|enhanced|samantha|karen|daniel|moira|serena|google|microsoft/i.test(name)) {
-    score += 25;
+const mediaExistsCache = new Map<string, boolean>();
+
+async function probeMediaUrl(url: string): Promise<boolean> {
+  if (mediaExistsCache.has(url)) return mediaExistsCache.get(url)!;
+  if (typeof fetch !== "function") {
+    mediaExistsCache.set(url, false);
+    return false;
   }
-  if (/compact|eloquence|robot|novelty/i.test(name)) score -= 30;
-  return score;
+  try {
+    const head = await fetch(url, { method: "HEAD", cache: "force-cache" });
+    if (head.ok) {
+      const ct = (head.headers.get("content-type") || "").toLowerCase();
+      // SPA fallbacks often return HTML 200 — reject those.
+      if (ct.includes("text/html")) {
+        mediaExistsCache.set(url, false);
+        return false;
+      }
+      mediaExistsCache.set(url, true);
+      return true;
+    }
+  } catch {
+    /* try GET range / audio element below */
+  }
+  // Some hosts block HEAD — try a tiny ranged GET
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+      cache: "force-cache"
+    });
+    if (res.ok || res.status === 206) {
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (!ct.includes("text/html")) {
+        mediaExistsCache.set(url, true);
+        return true;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  mediaExistsCache.set(url, false);
+  return false;
+}
+
+async function resolvePremiumAudioUrl(
+  lessonId: string,
+  teacher: TeacherVoiceId
+): Promise<string | null> {
+  const candidates = getAudioCandidates(lessonId, teacher);
+  for (const url of candidates) {
+    if (await probeMediaUrl(url)) return url;
+  }
+  return null;
 }
 
 class LearnSpeechController {
@@ -70,27 +120,33 @@ class LearnSpeechController {
   private startedAtMs: number | null = null;
   private pausedAccumMs = 0;
   private pauseStartedMs: number | null = null;
-  private selectedVoiceURI: string | null = null;
-  private voices: SpeechVoiceOption[] = [];
+  private teacherVoice: TeacherVoiceId = DEFAULT_TEACHER_VOICE;
   private error: string | null = null;
   private tickTimer: number | null = null;
+  private playbackMode: "idle" | "media" | "tts" = "idle";
+  private audioEl: HTMLAudioElement | null = null;
+  private playGeneration = 0;
 
   constructor() {
     if (typeof window !== "undefined") {
       try {
-        this.selectedVoiceURI = localStorage.getItem(STORAGE_VOICE);
+        const saved = localStorage.getItem(TEACHER_VOICE_STORAGE_KEY);
+        if (isTeacherVoiceId(saved)) this.teacherVoice = saved;
       } catch {
-        this.selectedVoiceURI = null;
+        this.teacherVoice = DEFAULT_TEACHER_VOICE;
       }
-      this.refreshVoices();
       if (typeof window.speechSynthesis !== "undefined") {
-        window.speechSynthesis.onvoiceschanged = () => this.refreshVoices();
+        window.speechSynthesis.onvoiceschanged = () => this.emit();
       }
     }
   }
 
   isSupported(): boolean {
-    return typeof window !== "undefined" && typeof window.speechSynthesis !== "undefined";
+    if (typeof window === "undefined") return false;
+    return (
+      typeof window.speechSynthesis !== "undefined" ||
+      typeof window.Audio !== "undefined"
+    );
   }
 
   getStatus(): SpeechStatus {
@@ -102,8 +158,10 @@ class LearnSpeechController {
       progress: this.progress,
       durationSec: this.durationSec,
       elapsedSec: this.elapsedSec(),
-      voices: this.voices,
-      selectedVoiceURI: this.selectedVoiceURI,
+      voices: [...TEACHER_VOICE_OPTIONS],
+      selectedVoiceURI: this.teacherVoice,
+      teacherVoice: this.teacherVoice,
+      playbackMode: this.playbackMode,
       error: this.error
     };
   }
@@ -119,65 +177,147 @@ class LearnSpeechController {
     for (const l of this.listeners) l(status);
   }
 
+  /** No-op retained for callers; teacher voices are fixed (not browser lists). */
   refreshVoices(): SpeechVoiceOption[] {
-    if (!this.isSupported()) {
-      this.voices = [];
-      this.emit();
-      return this.voices;
-    }
-    const raw = window.speechSynthesis.getVoices();
-    const english = raw
-      .filter((v) => (v.lang || "").toLowerCase().startsWith("en"))
-      .sort((a, b) => scoreEnglishVoice(b) - scoreEnglishVoice(a));
-    this.voices = english.map((v) => ({
-      voiceURI: v.voiceURI,
-      name: v.name,
-      lang: v.lang,
-      localService: v.localService
-    }));
-    if (
-      this.selectedVoiceURI &&
-      !this.voices.some((v) => v.voiceURI === this.selectedVoiceURI)
-    ) {
-      this.selectedVoiceURI = this.voices[0]?.voiceURI ?? null;
-    }
-    if (!this.selectedVoiceURI && this.voices[0]) {
-      this.selectedVoiceURI = this.voices[0].voiceURI;
-    }
     this.emit();
-    return this.voices;
+    return [...TEACHER_VOICE_OPTIONS];
   }
 
-  setVoice(voiceURI: string) {
-    this.selectedVoiceURI = voiceURI;
+  getTeacherVoice(): TeacherVoiceId {
+    return this.teacherVoice;
+  }
+
+  setTeacherVoice(id: TeacherVoiceId) {
+    this.teacherVoice = id;
     try {
-      localStorage.setItem(STORAGE_VOICE, voiceURI);
+      localStorage.setItem(TEACHER_VOICE_STORAGE_KEY, id);
     } catch {
       /* ignore */
     }
     this.emit();
-    if (this.speaking && !this.paused && this.lessonId) {
-      // Restart current chunk with new voice for consistency
-      const id = this.lessonId;
+    if (this.speaking && !this.paused && this.lessonId && this.fullText) {
+      const lessonId = this.lessonId;
       const text = this.fullText;
       const prog = this.progress;
       this.stopInternal(false);
-      this.play(id, text, prog);
+      void this.play(lessonId, text, prog);
     }
   }
 
-  play(lessonId: string, text: string, resumeProgress = 0) {
-    if (!this.isSupported()) {
-      this.error = "Speech is not available on this device or browser.";
-      this.emit();
-      return;
-    }
+  /** @deprecated Use setTeacherVoice — maps female/male ids only. */
+  setVoice(voiceURI: string) {
+    if (isTeacherVoiceId(voiceURI)) this.setTeacherVoice(voiceURI);
+  }
+
+  async play(lessonId: string, text: string, resumeProgress = 0) {
     this.error = null;
-    // Stop any other lesson
     this.stopInternal(false);
 
     this.lessonId = lessonId;
     this.fullText = text;
+    this.progress = Math.min(0.99, Math.max(0, resumeProgress));
+    this.pausedAccumMs = 0;
+    this.pauseStartedMs = null;
+    this.startedAtMs = Date.now();
+    this.speaking = true;
+    this.paused = false;
+    const gen = ++this.playGeneration;
+
+    const premiumUrl = await resolvePremiumAudioUrl(lessonId, this.teacherVoice);
+    if (gen !== this.playGeneration) return;
+
+    if (premiumUrl) {
+      await this.playMedia(premiumUrl, resumeProgress, gen);
+      return;
+    }
+
+    this.playTtsFallback(text, resumeProgress);
+  }
+
+  private async playMedia(url: string, resumeProgress: number, gen: number) {
+    if (typeof window === "undefined" || typeof window.Audio === "undefined") {
+      this.playTtsFallback(this.fullText, resumeProgress);
+      return;
+    }
+    const audio = new Audio();
+    audio.preload = "auto";
+    this.audioEl = audio;
+    this.playbackMode = "media";
+
+    const onError = () => {
+      if (gen !== this.playGeneration) return;
+      // File probe passed but playback failed — try Google UK TTS.
+      this.teardownMedia();
+      this.playTtsFallback(this.fullText, resumeProgress);
+    };
+
+    audio.addEventListener("error", onError, { once: true });
+    audio.addEventListener("loadedmetadata", () => {
+      if (gen !== this.playGeneration) return;
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        this.durationSec = audio.duration;
+        if (resumeProgress > 0) {
+          audio.currentTime = resumeProgress * audio.duration;
+        }
+      }
+      this.emit();
+    });
+    audio.addEventListener("timeupdate", () => {
+      if (gen !== this.playGeneration || !this.audioEl) return;
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        this.durationSec = audio.duration;
+        this.progress = Math.min(0.99, audio.currentTime / audio.duration);
+      }
+      this.emit();
+    });
+    audio.addEventListener("ended", () => {
+      if (gen !== this.playGeneration) return;
+      this.progress = 1;
+      this.speaking = false;
+      this.paused = false;
+      this.playbackMode = "idle";
+      this.stopTick();
+      this.emit();
+    });
+
+    audio.src = url;
+    this.startTick();
+    this.emit();
+    try {
+      await audio.play();
+      if (gen !== this.playGeneration) return;
+      this.speaking = true;
+      this.paused = false;
+      this.emit();
+    } catch {
+      onError();
+    }
+  }
+
+  private playTtsFallback(text: string, resumeProgress: number) {
+    if (typeof window === "undefined" || typeof window.speechSynthesis === "undefined") {
+      this.error = UK_AUDIO_UNAVAILABLE_MESSAGE;
+      this.speaking = false;
+      this.paused = false;
+      this.playbackMode = "idle";
+      this.emit();
+      return;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    const voice = findApprovedGoogleUkVoice(this.teacherVoice, voices);
+    if (!voice) {
+      this.error = UK_AUDIO_UNAVAILABLE_MESSAGE;
+      this.speaking = false;
+      this.paused = false;
+      this.playbackMode = "idle";
+      // Keep lessonId so the open lesson can still show Read Along + the message.
+      this.emit();
+      return;
+    }
+
+    this.playbackMode = "tts";
+    this.error = null;
     this.chunks = splitIntoChunks(text);
     this.durationSec = estimateDurationSec(text, DEFAULT_RATE);
     this.progress = Math.min(0.99, Math.max(0, resumeProgress));
@@ -191,33 +331,58 @@ class LearnSpeechController {
     this.speaking = true;
     this.paused = false;
     this.startTick();
-    this.speakFromChunk();
+    this.speakFromChunk(voice);
     this.emit();
   }
 
   pause() {
-    if (!this.isSupported() || !this.speaking || this.paused) return;
-    window.speechSynthesis.pause();
-    this.paused = true;
-    this.pauseStartedMs = Date.now();
-    this.emit();
+    if (!this.speaking || this.paused) return;
+    if (this.playbackMode === "media" && this.audioEl) {
+      this.audioEl.pause();
+      this.paused = true;
+      this.pauseStartedMs = Date.now();
+      this.emit();
+      return;
+    }
+    if (this.playbackMode === "tts" && typeof window !== "undefined") {
+      window.speechSynthesis.pause();
+      this.paused = true;
+      this.pauseStartedMs = Date.now();
+      this.emit();
+    }
   }
 
   resume() {
-    if (!this.isSupported() || !this.speaking || !this.paused) return;
+    if (!this.speaking || !this.paused) return;
     if (this.pauseStartedMs != null) {
       this.pausedAccumMs += Date.now() - this.pauseStartedMs;
       this.pauseStartedMs = null;
     }
-    window.speechSynthesis.resume();
-    // Some browsers (iOS) drop resume — restart from current chunk if not speaking
-    window.setTimeout(() => {
-      if (this.speaking && this.paused === false && !window.speechSynthesis.speaking) {
-        this.speakFromChunk();
-      }
-    }, 120);
-    this.paused = false;
-    this.emit();
+    if (this.playbackMode === "media" && this.audioEl) {
+      void this.audioEl.play().catch(() => {
+        this.error = "Audio stopped unexpectedly. Tap Play to try again.";
+        this.speaking = false;
+        this.paused = false;
+        this.emit();
+      });
+      this.paused = false;
+      this.emit();
+      return;
+    }
+    if (this.playbackMode === "tts" && typeof window !== "undefined") {
+      window.speechSynthesis.resume();
+      window.setTimeout(() => {
+        if (this.speaking && !this.paused && !window.speechSynthesis.speaking) {
+          const voice = findApprovedGoogleUkVoice(
+            this.teacherVoice,
+            window.speechSynthesis.getVoices()
+          );
+          if (voice) this.speakFromChunk(voice);
+        }
+      }, 120);
+      this.paused = false;
+      this.emit();
+    }
   }
 
   restart() {
@@ -225,22 +390,36 @@ class LearnSpeechController {
     const id = this.lessonId;
     const text = this.fullText;
     this.stopInternal(false);
-    this.play(id, text, 0);
+    void this.play(id, text, 0);
   }
 
   stop() {
     this.stopInternal(true);
   }
 
-  /** Call when leaving a lesson page. */
   stopIfLesson(lessonId: string) {
     if (this.lessonId === lessonId) this.stop();
   }
 
+  private teardownMedia() {
+    if (this.audioEl) {
+      try {
+        this.audioEl.pause();
+        this.audioEl.removeAttribute("src");
+        this.audioEl.load();
+      } catch {
+        /* ignore */
+      }
+      this.audioEl = null;
+    }
+  }
+
   private stopInternal(emit: boolean) {
-    if (this.isSupported()) {
+    this.playGeneration += 1;
+    if (typeof window !== "undefined" && typeof window.speechSynthesis !== "undefined") {
       window.speechSynthesis.cancel();
     }
+    this.teardownMedia();
     this.speaking = false;
     this.paused = false;
     this.lessonId = null;
@@ -252,11 +431,16 @@ class LearnSpeechController {
     this.startedAtMs = null;
     this.pausedAccumMs = 0;
     this.pauseStartedMs = null;
+    this.playbackMode = "idle";
+    this.error = null;
     this.stopTick();
     if (emit) this.emit();
   }
 
   private elapsedSec(): number {
+    if (this.playbackMode === "media" && this.audioEl) {
+      return Math.max(0, this.audioEl.currentTime || 0);
+    }
     if (this.startedAtMs == null || this.durationSec == null) return 0;
     let pausedExtra = this.pausedAccumMs;
     if (this.paused && this.pauseStartedMs != null) {
@@ -269,12 +453,16 @@ class LearnSpeechController {
   private startTick() {
     this.stopTick();
     this.tickTimer = window.setInterval(() => {
-      if (!this.speaking || this.paused) {
-        this.emit();
-        return;
-      }
-      if (this.durationSec && this.durationSec > 0) {
-        this.progress = Math.min(0.99, this.elapsedSec() / this.durationSec);
+      if (this.playbackMode === "media" && this.audioEl && this.speaking && !this.paused) {
+        const d = this.audioEl.duration;
+        if (Number.isFinite(d) && d > 0) {
+          this.durationSec = d;
+          this.progress = Math.min(0.99, this.audioEl.currentTime / d);
+        }
+      } else if (this.playbackMode === "tts" && this.speaking && !this.paused) {
+        if (this.durationSec && this.durationSec > 0) {
+          this.progress = Math.min(0.99, this.elapsedSec() / this.durationSec);
+        }
       }
       this.emit();
     }, 250);
@@ -287,25 +475,15 @@ class LearnSpeechController {
     }
   }
 
-  private resolveVoice(): SpeechSynthesisVoice | null {
-    if (!this.isSupported()) return null;
-    const all = window.speechSynthesis.getVoices();
-    if (this.selectedVoiceURI) {
-      const match = all.find((v) => v.voiceURI === this.selectedVoiceURI);
-      if (match) return match;
+  private speakFromChunk(voice: SpeechSynthesisVoice) {
+    if (typeof window === "undefined" || !this.speaking || this.playbackMode !== "tts") {
+      return;
     }
-    const english = all
-      .filter((v) => (v.lang || "").toLowerCase().startsWith("en"))
-      .sort((a, b) => scoreEnglishVoice(b) - scoreEnglishVoice(a));
-    return english[0] ?? all[0] ?? null;
-  }
-
-  private speakFromChunk() {
-    if (!this.isSupported() || !this.speaking) return;
     if (this.chunkIndex >= this.chunks.length) {
       this.progress = 1;
       this.speaking = false;
       this.paused = false;
+      this.playbackMode = "idle";
       this.stopTick();
       this.emit();
       return;
@@ -316,27 +494,22 @@ class LearnSpeechController {
     u.rate = DEFAULT_RATE;
     u.pitch = DEFAULT_PITCH;
     u.volume = 1;
-    const voice = this.resolveVoice();
-    if (voice) {
-      u.voice = voice;
-      u.lang = voice.lang || "en-US";
-    } else {
-      u.lang = "en-US";
-    }
+    u.voice = voice;
+    u.lang = voice.lang || "en-GB";
 
     u.onend = () => {
-      if (!this.speaking || this.paused) return;
+      if (!this.speaking || this.paused || this.playbackMode !== "tts") return;
       this.chunkIndex += 1;
       this.progress = Math.min(1, this.chunkIndex / Math.max(1, this.chunks.length));
-      this.speakFromChunk();
+      this.speakFromChunk(voice);
       this.emit();
     };
     u.onerror = (ev) => {
-      // interrupted by cancel/restart is normal
       if (ev.error === "interrupted" || ev.error === "canceled") return;
       this.error = "Audio stopped unexpectedly. Tap Play to try again.";
       this.speaking = false;
       this.paused = false;
+      this.playbackMode = "idle";
       this.stopTick();
       this.emit();
     };
@@ -352,7 +525,6 @@ function splitIntoChunks(text: string): string[] {
     .filter(Boolean);
   const chunks: string[] = [];
   for (const part of parts) {
-    // Split long paragraphs on sentence boundaries for smoother iOS playback
     const sentences = part.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [part];
     for (const s of sentences) {
       const t = s.trim();
