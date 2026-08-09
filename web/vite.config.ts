@@ -176,6 +176,11 @@ export default defineConfig({
     globals: true,
     css: true,
     exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
+    // GitHub Actions runners (~7GB) OOM when multiple Vitest forks each approach
+    // the default ~4GB heap. Keep CI serial; local stays parallel.
+    pool: "forks",
+    maxWorkers: process.env.CI ? 1 : undefined,
+    fileParallelism: process.env.CI ? false : undefined,
     // React 19 only exports act() from the development build.
     env: {
       NODE_ENV: "test",

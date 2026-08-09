@@ -53,7 +53,8 @@ jobs:
 
       - name: Test
         env:
-          # Premium UI suite is large; default ~4GB heap OOMs intermittently on GHA.
+          CI: true
+          # Single Vitest worker (see vite.config.ts) + raised heap for premium suite.
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm test
 
