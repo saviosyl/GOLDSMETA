@@ -22,8 +22,16 @@ test.describe("Signal History outcomes", () => {
     await expect(page.getByTestId("lifecycle-badge-be-1")).toHaveText("BREAKEVEN");
     await expect(page.getByTestId("lifecycle-badge-amb-1")).toHaveText("AMBIGUOUS");
     await expect(page.getByTestId("lifecycle-badge-partial-1")).toHaveText("WIN");
+
+    // Compact History keeps Entry/SL/TP under Advanced — open for partial TP detail.
+    await page.getByTestId("history-advanced-toggle-partial-1").click();
     await expect(page.getByTestId("outcome-final-partial-1")).toContainText("TP1");
-    await expect(page.getByTestId("outcome-final-partial-1")).toContainText("HYPOTHETICAL SIGNAL PERFORMANCE");
+    await expect(page.getByTestId("outcome-final-partial-1")).toContainText(
+      "HYPOTHETICAL SIGNAL PERFORMANCE"
+    );
+
+    // Hypothetical signal rows must not look like Live broker trades.
+    await expect(page.getByTestId("env-badge-win-1")).toHaveText(/SIGNAL|HYPOTHETICAL/i);
 
     await page.goto("/ui-review/signal-performance?scenario=signal-outcomes");
     await expect(page.getByTestId("signal-performance-page")).toBeVisible();
