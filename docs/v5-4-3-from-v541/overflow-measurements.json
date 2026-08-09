@@ -1,32 +1,38 @@
 {
-  "dashboard-320x568": {
+  "plan-320x568": {
     "sw": 320,
     "cw": 320,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   },
-  "dashboard-360x800": {
+  "plan-360x800": {
     "sw": 360,
     "cw": 360,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   },
-  "dashboard-375x812": {
+  "plan-375x812": {
     "sw": 375,
     "cw": 375,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   },
-  "dashboard-390x844": {
+  "plan-390x844": {
     "sw": 390,
     "cw": 390,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   },
-  "dashboard-393x852": {
+  "plan-393x852": {
     "sw": 393,
     "cw": 393,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   },
-  "dashboard-430x932": {
+  "plan-430x932": {
     "sw": 430,
     "cw": 430,
-    "delta": 0
+    "delta": 0,
+    "ok": true
   }
 }

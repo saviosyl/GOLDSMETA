@@ -78,13 +78,12 @@ jobs:
       - name: UI-review host isolation Playwright
         run: npx playwright test e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium
 
-  # Separate job so release gates are not blocked by the large mobileFit matrix.
+  # Market Structure + mobileFit matrix (must stay green with current premium UI selectors).
   web-mobile-e2e:
     name: web-mobile-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 40
     needs: web
-    continue-on-error: true
     env:
       VITE_API_BASE_URL: http://127.0.0.1:8080
       VITE_FIREBASE_API_KEY: test-api-key
