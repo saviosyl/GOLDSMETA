@@ -1,0 +1,300 @@
+{
+  "productionUrl": "https://goldmeta.metamechsolutions.com",
+  "productionBuild": "2a1fc27029beccf3e1a9621a5ac4b9e5aaebe2bd",
+  "capturedAt": "2026-08-09T09:34:31.744Z",
+  "desktopViewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "mobileViewport": {
+    "width": 430,
+    "height": 932
+  },
+  "results": [
+    {
+      "n": "01",
+      "slug": "plan",
+      "route": "/",
+      "name": "Plan",
+      "desktop": "01-plan-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "01-plan-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "02",
+      "slug": "autotrade",
+      "route": "/autotrade",
+      "name": "AutoTrade",
+      "desktop": "02-autotrade-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "02-autotrade-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "03",
+      "slug": "markets",
+      "route": "/intelligence",
+      "name": "Markets",
+      "desktop": "03-markets-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "03-markets-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "04",
+      "slug": "journal",
+      "route": "/journal",
+      "name": "Journal",
+      "desktop": "04-journal-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "04-journal-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "05",
+      "slug": "insights-performance",
+      "route": "/insights/performance",
+      "name": "Insights / Performance",
+      "desktop": "05-insights-performance-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "05-insights-performance-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "06",
+      "slug": "insights-signals",
+      "route": "/insights/signals",
+      "name": "Insights / Signals",
+      "desktop": "06-insights-signals-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "06-insights-signals-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "07",
+      "slug": "insights-strategy",
+      "route": "/insights/strategy",
+      "name": "Insights / Strategy",
+      "desktop": "07-insights-strategy-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "07-insights-strategy-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "08",
+      "slug": "history-replay",
+      "route": "/history-replay/history",
+      "name": "History & Replay",
+      "desktop": "08-history-replay-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "08-history-replay-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "09",
+      "slug": "replay",
+      "route": "/history-replay/replay",
+      "name": "Replay",
+      "desktop": "09-replay-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "09-replay-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "10",
+      "slug": "levels",
+      "route": "/levels",
+      "name": "Levels",
+      "desktop": "10-levels-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "10-levels-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "11",
+      "slug": "risk-planner",
+      "route": "/planner",
+      "name": "Risk Planner",
+      "desktop": "11-risk-planner-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "11-risk-planner-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "12",
+      "slug": "broker",
+      "route": "/brokers",
+      "name": "Broker",
+      "desktop": "12-broker-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "12-broker-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "13",
+      "slug": "alerts",
+      "route": "/alerts",
+      "name": "Alerts",
+      "desktop": "13-alerts-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "13-alerts-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "14",
+      "slug": "settings",
+      "route": "/settings",
+      "name": "Settings",
+      "desktop": "14-settings-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "14-settings-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "15",
+      "slug": "help",
+      "route": "/help",
+      "name": "Help",
+      "desktop": "15-help-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "15-help-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "16",
+      "slug": "analysis",
+      "route": "/analysis",
+      "name": "Analysis",
+      "desktop": "16-analysis-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "16-analysis-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "17",
+      "slug": "tradingview-setup",
+      "route": "/tradingview",
+      "name": "TradingView Setup",
+      "desktop": "17-tradingview-setup-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "17-tradingview-setup-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "18",
+      "slug": "research",
+      "route": "/v4",
+      "name": "Research Lab",
+      "desktop": "18-research-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "",
+      "mobile": "18-research-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "19",
+      "slug": "history-detail",
+      "route": "/history/:decisionId",
+      "name": "History Detail",
+      "desktop": null,
+      "desktopStatus": "NO REAL PRODUCTION RECORD AVAILABLE",
+      "notes": ""
+    },
+    {
+      "n": "20",
+      "slug": "setup-detail",
+      "route": "/setups/:setupId",
+      "name": "Setup Detail",
+      "desktop": null,
+      "desktopStatus": "NO REAL PRODUCTION RECORD AVAILABLE",
+      "notes": ""
+    },
+    {
+      "n": "A01",
+      "slug": "admin-users",
+      "route": "/admin/users",
+      "name": "Admin Users",
+      "desktop": "A01-admin-users-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "ADMIN",
+      "admin": true,
+      "mobile": "A01-admin-users-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "A02",
+      "slug": "admin-tradingview-template",
+      "route": "/admin/tradingview-template",
+      "name": "TradingView Template",
+      "desktop": "A02-admin-tradingview-template-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "ADMIN",
+      "admin": true,
+      "mobile": "A02-admin-tradingview-template-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "A03",
+      "slug": "admin-diagnostics",
+      "route": "/diagnostics",
+      "name": "Diagnostics",
+      "desktop": "A03-admin-diagnostics-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "ADMIN",
+      "admin": true,
+      "mobile": "A03-admin-diagnostics-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "00",
+      "slug": "mobile-more-nav",
+      "route": "/ (MORE open)",
+      "name": "Mobile MORE navigation",
+      "mobile": "00-mobile-more-nav-open.png",
+      "mobileStatus": "Captured",
+      "notes": "MORE sheet open"
+    },
+    {
+      "n": "P01",
+      "slug": "sign-in",
+      "route": "/",
+      "name": "Sign In",
+      "public": true,
+      "desktop": "P01-sign-in-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "Public auth (signed-out context; owner account unchanged)",
+      "mobile": "P01-sign-in-mobile.png",
+      "mobileStatus": "Captured"
+    },
+    {
+      "n": "P02",
+      "slug": "register",
+      "route": "/register",
+      "name": "Register",
+      "public": true,
+      "desktop": "P02-register-desktop.png",
+      "desktopStatus": "Captured",
+      "notes": "Public auth (signed-out context; owner account unchanged)",
+      "mobile": "P02-register-mobile.png",
+      "mobileStatus": "Captured"
+    }
+  ]
+}
