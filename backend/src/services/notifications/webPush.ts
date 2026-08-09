@@ -4,6 +4,12 @@ import type { GoldMetaStore } from "../storage/types";
 
 let configured = false;
 
+export const isWebPushConfigured = (): boolean => {
+  const publicKey = process.env.VAPID_PUBLIC_KEY?.trim();
+  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
+  return Boolean(publicKey && privateKey);
+};
+
 const ensureVapid = (): boolean => {
   const publicKey = process.env.VAPID_PUBLIC_KEY?.trim();
   const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -52,9 +58,13 @@ export const sendWebPushToUser = async (
         typeof error === "object" && error !== null && "statusCode" in error
           ? Number((error as { statusCode?: number }).statusCode)
           : undefined;
-      if (statusCode === 404 || statusCode === 410) {
+      if (statusCode === 404 || statusCode === 410 || statusCode === 401 || statusCode === 403) {
         await store.deleteWebPushSubscription(userId, subscription.endpoint);
-        logger.info("Removed expired Web Push subscription", { userId, endpoint: subscription.endpoint });
+        logger.info("Removed expired or invalid Web Push subscription", {
+          userId,
+          endpoint: subscription.endpoint,
+          statusCode
+        });
       } else {
         logger.warn("Web Push send failed", {
           userId,

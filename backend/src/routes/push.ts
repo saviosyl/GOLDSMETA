@@ -13,7 +13,29 @@ export const buildPushRouter = (store: GoldMetaStore): Router => {
 
   router.get("/v1/push/vapid-public-key", requireAuth, (_req, res) => {
     const publicKey = process.env.VAPID_PUBLIC_KEY?.trim() || null;
-    res.json({ publicKey });
+    res.json({ publicKey, configured: Boolean(publicKey) });
+  });
+
+  router.get("/v1/push/web-subscriptions", requireAuth, async (req, res) => {
+    const userId = getAuthenticatedUserId(req);
+    const subscriptions = await store.listWebPushSubscriptions(userId);
+    res.json({
+      count: subscriptions.length,
+      subscriptions: subscriptions.map((item) => ({
+        subscriptionId: item.subscriptionId,
+        endpointHost: (() => {
+          try {
+            return new URL(item.endpoint).host;
+          } catch {
+            return "unknown";
+          }
+        })(),
+        userAgent: item.userAgent ?? null,
+        registeredAt: item.registeredAt,
+        updatedAt: item.updatedAt,
+        expirationTime: item.expirationTime ?? null
+      }))
+    });
   });
 
   router.post("/v1/push/web-subscriptions", requireAuth, async (req, res) => {

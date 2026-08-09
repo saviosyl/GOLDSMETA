@@ -8,7 +8,7 @@ import {
   notificationPreferenceSchema
 } from "../models/types";
 import { sendFirebaseMessages } from "../services/firebaseAdmin";
-import { sendWebPushToUser } from "../services/notifications/webPush";
+import { isWebPushConfigured, sendWebPushToUser } from "../services/notifications/webPush";
 import type { GoldMetaStore } from "../services/storage/types";
 
 const preferencePatchSchema = notificationPreferenceSchema.partial().strict();
@@ -99,9 +99,44 @@ export const buildNotificationsRouter = (store: GoldMetaStore): Router => {
 
   router.post("/v1/notifications/test", requireAuth, ...approvedAccountGate, async (req, res) => {
     const userId = getAuthenticatedUserId(req);
-    const title = "GoldMeta — Test notification";
-    const message = "Notifications are connected for this device.";
-    const data = { event: "TEST_NOTIFICATION" };
+    const title = "GoldMeta Test Alert";
+    const message = "iPhone notifications are working.";
+    const data = { event: "TEST_NOTIFICATION", openPath: "/" };
+    const vapidConfigured = isWebPushConfigured();
+    const subscriptions = await store.listWebPushSubscriptions(userId);
+    const devices = await store.listDevices(userId);
+
+    if (!vapidConfigured && devices.length === 0) {
+      res.status(503).json({
+        ok: false,
+        webSent: 0,
+        fcmSent: 0,
+        vapidConfigured: false,
+        subscriptionCount: subscriptions.length,
+        error: {
+          code: "SERVER_CONFIGURATION_MISSING",
+          message: "Server configuration missing — Web Push (VAPID) is not configured."
+        }
+      });
+      return;
+    }
+
+    if (subscriptions.length === 0 && devices.length === 0) {
+      res.status(409).json({
+        ok: false,
+        webSent: 0,
+        fcmSent: 0,
+        vapidConfigured,
+        subscriptionCount: 0,
+        error: {
+          code: "NO_PUSH_TARGETS",
+          message:
+            "No active Web Push subscription or FCM device is registered for this account. Enable phone alerts first."
+        }
+      });
+      return;
+    }
+
     const notification = store.createInAppNotification
       ? await store.createInAppNotification(userId, {
           event: "TEST_NOTIFICATION",
@@ -112,15 +147,45 @@ export const buildNotificationsRouter = (store: GoldMetaStore): Router => {
           data
         })
       : null;
-    const devices = await store.listDevices(userId);
     const fcmMessages: Message[] = devices.map((device) => ({
       token: device.fcmToken,
       notification: { title, body: message },
       data
     }));
     const fcmSent = await sendFirebaseMessages(fcmMessages);
-    const webSent = await sendWebPushToUser(store, userId, { title, body: message, data });
-    res.json({ ok: true, notification, fcmSent, webSent });
+    const webSent = vapidConfigured
+      ? await sendWebPushToUser(store, userId, { title, body: message, data })
+      : 0;
+
+    if (webSent === 0 && fcmSent === 0) {
+      res.status(502).json({
+        ok: false,
+        notification,
+        fcmSent,
+        webSent,
+        vapidConfigured,
+        subscriptionCount: subscriptions.length,
+        error: {
+          code: "PUSH_DELIVERY_FAILED",
+          message:
+            "Push delivery failed. Expired subscriptions were removed — enable phone alerts again on this device."
+        }
+      });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      notification,
+      fcmSent,
+      webSent,
+      vapidConfigured,
+      subscriptionCount: subscriptions.length,
+      message:
+        webSent > 0
+          ? "Test Web Push sent. You should see: GoldMeta Test Alert."
+          : "Test notification sent via FCM device token."
+    });
   });
 
   return router;
