@@ -3,6 +3,7 @@ import { AutoTradePerformancePage } from "./AutoTradePerformancePage";
 import { SignalPerformancePage } from "./SignalPerformancePage";
 import { V4ResearchPage } from "./V4ResearchPage";
 
+/** Insights hub — Performance / Signals / Strategy (chunk-recovery friendly). */
 const TABS = [
   { id: "performance", label: "Performance", path: "/insights/performance" },
   { id: "signals", label: "Signals", path: "/insights/signals" },
