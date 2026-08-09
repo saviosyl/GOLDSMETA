@@ -180,6 +180,7 @@ export function SettingsPage() {
     let cancelled = false;
     const probe = async () => {
       try {
+        // Mount-only: avoid re-running when auth mocks recreate `api` each render.
         const key = await api.getVapidPublicKey();
         if (cancelled) return;
         setServerConfigured(Boolean(key));
@@ -195,7 +196,8 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only probe
+  }, []);
 
   const reload = async () => {
     const [nextSettings, nextConnections] = await Promise.all([

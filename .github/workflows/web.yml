@@ -53,10 +53,9 @@ jobs:
 
       - name: Test
         env:
-          CI: true
-          # Single Vitest worker (see vite.config.ts) + raised heap for premium suite.
+          # Single worker + raised heap — premium suite OOMs on multi-fork GHA runners.
           NODE_OPTIONS: --max-old-space-size=6144
-        run: npm test
+        run: npm run test:ci
 
       - name: Production Firebase env gate
         run: npm run gate:production-config:env

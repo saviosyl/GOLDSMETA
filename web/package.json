@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
     "typecheck": "tsc -b --pretty false",
     "test": "NODE_ENV=test VITE_ENABLE_UI_REVIEW=true vitest run",
+    "test:ci": "NODE_ENV=test VITE_ENABLE_UI_REVIEW=true vitest run --maxWorkers=1 --no-file-parallelism",
     "test:watch": "NODE_ENV=test VITE_ENABLE_UI_REVIEW=true vitest",
     "test:e2e": "playwright test",
     "test:production-bundle": "node scripts/assert-production-bundle-clean.mjs",

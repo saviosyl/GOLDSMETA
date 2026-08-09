@@ -136,6 +136,8 @@ export function PhoneAlertsControl({ compact = true }: { compact?: boolean }) {
       setProbe("probing");
       setError(null);
       try {
+        // Use the mount-time api client. Do not depend on `api` identity — test
+        // mocks often return a fresh `{}` each render, which would re-probe forever.
         const next = await ensureWebPushRegistered(api);
         if (cancelled) return;
         setResult(next);
@@ -158,7 +160,8 @@ export function PhoneAlertsControl({ compact = true }: { compact?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only probe
+  }, []);
 
   const enable = async () => {
     if (busy) return;

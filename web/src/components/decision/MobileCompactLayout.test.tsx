@@ -41,7 +41,11 @@ vi.mock("../../lib/push", () => ({
   getNotificationPermission: () => "default",
   isProbablyInstalledPwa: () => true,
   isWebPushSupported: () => true,
-  subscribeWebPush: vi.fn()
+  subscribeWebPush: vi.fn(),
+  ensureWebPushRegistered: vi.fn(async () => ({
+    status: "permission_required",
+    message: "Notifications permission required."
+  }))
 }));
 
 function waitPlan(): IntradayPlan {

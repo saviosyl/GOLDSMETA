@@ -14,6 +14,17 @@ vi.mock("../../lib/auth", () => ({
   useAuth: () => ({ api: {}, user: null })
 }));
 
+vi.mock("../../lib/push", () => ({
+  getNotificationPermission: () => "default",
+  isProbablyInstalledPwa: () => true,
+  isWebPushSupported: () => true,
+  subscribeWebPush: vi.fn(),
+  ensureWebPushRegistered: vi.fn(async () => ({
+    status: "permission_required",
+    message: "Notifications permission required."
+  }))
+}));
+
 vi.mock("../../hooks/useAutoTradeHeaderStatus", () => ({
   useAutoTradeHeaderStatus: () => ({
     label: "OFF",
