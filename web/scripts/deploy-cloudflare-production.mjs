@@ -113,10 +113,55 @@ if (deployUrl) {
   }
 }
 
+console.log("== wait for custom domain to serve this deployment ==");
+// CRITICAL: do not probe new hashed /gmv7/* URLs on the custom domain until its
+// index.html references them. Probing early SPA-falls-back to index.html with
+// immutable Cache-Control and poisons the CDN for up to a year.
+const expectedJs = (() => {
+  const html = readFileSync("dist/index.html", "utf8");
+  return html.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.js)/)?.[1] ?? null;
+})();
+if (!expectedJs) {
+  console.error("FAIL: dist/index.html missing hashed JS reference");
+  process.exit(1);
+}
+const customOrigin = "https://goldmeta.metamechsolutions.com";
+let switched = false;
+for (let attempt = 1; attempt <= 36; attempt += 1) {
+  try {
+    const res = spawnSync(
+      "curl",
+      [
+        "-sS",
+        "-H",
+        "Cache-Control: no-cache",
+        "-H",
+        "Pragma: no-cache",
+        `${customOrigin}/?t=${Date.now()}-${attempt}`
+      ],
+      { encoding: "utf8" }
+    );
+    const body = res.stdout || "";
+    if (body.includes(expectedJs)) {
+      console.log(`custom domain serving ${expectedJs} (attempt ${attempt})`);
+      switched = true;
+      break;
+    }
+    const seen = body.match(/\/((?:assets|gm|gmv7)\/index-[A-Za-z0-9_-]+\.js)/)?.[1] ?? "unknown";
+    console.log(`waiting for custom domain… attempt ${attempt}/36 (saw ${seen})`);
+  } catch {
+    console.log(`waiting for custom domain… attempt ${attempt}/36 (fetch error)`);
+  }
+  spawnSync("sleep", ["5"], { stdio: "inherit" });
+}
+if (!switched) {
+  console.error(
+    `FAIL: custom domain did not serve ${expectedJs} within timeout. ` +
+      "Not running asset probes (would risk CDN HTML poison)."
+  );
+  process.exit(1);
+}
+
 console.log("== post-deploy check ==");
-// Give the custom-domain alias a moment to point at the new deployment.
-// Avoid probing missing hashed URLs on the custom domain before they exist —
-// Cloudflare can cache those 404s for hours.
-spawnSync("sleep", ["8"], { stdio: "inherit" });
-run("node", ["scripts/post-deploy-check.mjs", "https://goldmeta.metamechsolutions.com"]);
+run("node", ["scripts/post-deploy-check.mjs", customOrigin]);
 console.log("Production deploy finished.");
