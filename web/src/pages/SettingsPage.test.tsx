@@ -57,7 +57,11 @@ vi.mock("../lib/push", () => ({
   isProbablyInstalledPwa: () => false,
   isWebPushSupported: () => false,
   subscribeWebPush: vi.fn(),
-  unsubscribeWebPush: vi.fn()
+  unsubscribeWebPush: vi.fn(),
+  ensureWebPushRegistered: vi.fn(async () => ({
+    status: "unsupported",
+    message: "This browser does not support Web Push."
+  }))
 }));
 
 const longWebhook =
