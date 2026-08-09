@@ -1,8 +1,37 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../lib/auth";
 import type { Decision } from "../types/models";
-import { explainReasonCode, formatWhen, primaryReason } from "../lib/decisionDisplay";
+import {
+  explainReasonCode,
+  formatPercent,
+  formatPrice,
+  formatWhen,
+  primaryReason,
+  recommendedActionLabel,
+  tradePlanEntryLabel,
+  tradePlanRrLabel,
+  tradePlanStopLabel,
+  tradePlanTpLabel,
+  trendLabel
+} from "../lib/decisionDisplay";
 import { cacheKeys, loadCache, saveCache } from "../lib/offlineCache";
+
+function FactorCard({
+  title,
+  testId,
+  children
+}: {
+  title: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="gm-prem-card gm-analysis-factor" data-testid={testId}>
+      <h2 className="gm-analysis-factor__title">{title}</h2>
+      {children}
+    </section>
+  );
+}
 
 export function AnalysisPage() {
   const { api } = useAuth();
@@ -28,45 +57,194 @@ export function AnalysisPage() {
 
   if (!decision) {
     return (
-      <div className="card">
-        <h2>Full analysis</h2>
-        <p className="muted">{error ?? "No decision available."}</p>
+      <div className="analysis-page gm-prem-page">
+        <h1 className="gm-prem-page-head">Full analysis</h1>
+        <div className="gm-prem-card">
+          <p className="muted">{error ?? "No decision available."}</p>
+        </div>
       </div>
     );
   }
 
+  const supporting =
+    decision.decision === "SELL" ? decision.bearishEvidence : decision.bullishEvidence;
+  const opposing =
+    decision.decision === "SELL" ? decision.bullishEvidence : decision.bearishEvidence;
+  const structure = decision.marketStructure;
+
   return (
-    <div className="analysis-page">
-      <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-        Full analysis
-      </h1>
+    <div className="analysis-page gm-prem-page">
+      <header className="gm-prem-page-head">
+        <div>
+          <h1>Full analysis</h1>
+          <p>Decision factors, trade plan, and risk context for the latest signal</p>
+        </div>
+      </header>
+
       {error && (
         <div className="banner stale" role="status">
           {error} — showing cached analysis if available.
         </div>
       )}
-      <div className="card">
-        <h2>
-          {decision.decision} · {decision.setupGrade ?? "—"}
-        </h2>
-        <p className="muted">{formatWhen(decision.generatedAt)}</p>
-        <p>{decision.explanation ?? primaryReason(decision)}</p>
-        <h3>Why this decision</h3>
-        <ul className="list">
-          {decision.reasonCodes.map((code) => (
-            <li key={code}>{explainReasonCode(code)}</li>
-          ))}
-        </ul>
-        <h3>Warnings</h3>
-        <ul className="list">
-          {(decision.warnings.length ? decision.warnings : ["None"]).map((w) => (
-            <li key={w}>{w}</li>
-          ))}
-        </ul>
-        <h3>Invalidation</h3>
-        <p className="muted">{decision.invalidation}</p>
-        <h3>Disclaimer</h3>
-        <p className="muted">{decision.disclaimer}</p>
+
+      <section
+        className="gm-prem-card gm-prem-card--hero gm-analysis-hero"
+        data-testid="analysis-summary"
+        aria-label="Decision summary"
+      >
+        <div className="gm-analysis-hero__top">
+          <div>
+            <p className="gm-label">{decision.symbol}</p>
+            <h2 className={`gm-analysis-decision gm-analysis-decision--${decision.decision.toLowerCase()}`}>
+              {decision.decision}
+            </h2>
+            <p className="gm-meta">{formatWhen(decision.generatedAt)}</p>
+          </div>
+          <div className="gm-prem-stat-grid gm-prem-stat-grid--3 gm-analysis-hero__stats">
+            <div className="gm-prem-stat">
+              <span>Grade</span>
+              <strong>{decision.setupGrade ?? "—"}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Confidence</span>
+              <strong>{formatPercent(decision.confidence)}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Action</span>
+              <strong>{recommendedActionLabel(decision)}</strong>
+            </div>
+          </div>
+        </div>
+        <p className="gm-analysis-summary">{decision.explanation ?? primaryReason(decision)}</p>
+      </section>
+
+      <div className="gm-analysis-factor-grid">
+        <FactorCard title="Decision drivers" testId="analysis-drivers">
+          <p className="gm-label">Reason codes</p>
+          <ul className="gm-analysis-chip-list">
+            {decision.reasonCodes.map((code) => (
+              <li key={code}>{explainReasonCode(code)}</li>
+            ))}
+          </ul>
+          <div className="gm-analysis-evidence-grid">
+            <div>
+              <p className="gm-label">Supporting</p>
+              <ul className="list">
+                {(supporting.length ? supporting : ["None listed"]).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="gm-label">Opposing</p>
+              <ul className="list">
+                {(opposing.length ? opposing : ["None listed"]).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </FactorCard>
+
+        <FactorCard title="Market context" testId="analysis-market">
+          <div className="gm-prem-stat-grid gm-prem-stat-grid--2">
+            <div className="gm-prem-stat">
+              <span>Regime</span>
+              <strong>{decision.marketRegime.replace(/_/g, " ")}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Trend</span>
+              <strong>{trendLabel(decision)}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Session</span>
+              <strong>{decision.currentSession ?? "—"}</strong>
+            </div>
+            <div className="gm-prem-stat">
+              <span>Data quality</span>
+              <strong>{decision.dataQuality}</strong>
+            </div>
+          </div>
+          {structure ? (
+            <div className="gm-prem-stat-grid gm-prem-stat-grid--3" style={{ marginTop: 12 }}>
+              <div className="gm-prem-stat">
+                <span>POC</span>
+                <strong>{formatPrice(structure.poc)}</strong>
+              </div>
+              <div className="gm-prem-stat">
+                <span>VAH</span>
+                <strong>{formatPrice(structure.vah)}</strong>
+              </div>
+              <div className="gm-prem-stat">
+                <span>VAL</span>
+                <strong>{formatPrice(structure.val)}</strong>
+              </div>
+            </div>
+          ) : null}
+        </FactorCard>
+
+        <FactorCard title="Trade plan" testId="analysis-trade-plan">
+          <dl className="gm-analysis-dl">
+            <div>
+              <dt>Entry</dt>
+              <dd>{tradePlanEntryLabel(decision)}</dd>
+            </div>
+            <div>
+              <dt>Stop loss</dt>
+              <dd>{tradePlanStopLabel(decision)}</dd>
+            </div>
+            <div>
+              <dt>TP1</dt>
+              <dd>{tradePlanTpLabel(decision, "TP1")}</dd>
+            </div>
+            <div>
+              <dt>TP2</dt>
+              <dd>{tradePlanTpLabel(decision, "TP2")}</dd>
+            </div>
+            <div>
+              <dt>TP3</dt>
+              <dd>{tradePlanTpLabel(decision, "TP3")}</dd>
+            </div>
+            <div>
+              <dt>Risk / reward</dt>
+              <dd>{tradePlanRrLabel(decision)}</dd>
+            </div>
+          </dl>
+        </FactorCard>
+
+        <FactorCard title="Warnings & invalidation" testId="analysis-warnings">
+          <p className="gm-label">Warnings</p>
+          <ul className="list">
+            {(decision.warnings.length ? decision.warnings : ["None"]).map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+          <p className="gm-label" style={{ marginTop: 12 }}>
+            Invalidation
+          </p>
+          <p className="gm-meta">{decision.invalidation}</p>
+          {(decision.missingInputs?.length ?? 0) > 0 ? (
+            <>
+              <p className="gm-label" style={{ marginTop: 12 }}>
+                Missing inputs
+              </p>
+              <ul className="list">
+                {decision.missingInputs.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </FactorCard>
+
+        <FactorCard title="Disclaimer" testId="analysis-disclaimer">
+          <p className="gm-meta">{decision.disclaimer}</p>
+          {decision.analysisOnly !== false ? (
+            <p className="gm-meta" style={{ marginTop: 8 }}>
+              Analysis only — not an executed broker order.
+            </p>
+          ) : null}
+        </FactorCard>
       </div>
     </div>
   );

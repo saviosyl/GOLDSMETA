@@ -1,5 +1,6 @@
 import type { DailySafetyPublicView } from "../../lib/broker/ctraderTypes";
 import type { QualificationPublicView } from "../../lib/broker/qualificationTypes";
+import { deriveAutoTradeHeaderStatus } from "../../lib/autoTradeHeaderStatus";
 
 type Props = {
   marketStatus: string;
@@ -26,13 +27,11 @@ export function TodayPlanSummary({
   qualification,
   daily
 }: Props) {
-  const autoLabel = qualification
-    ? qualification.demoAuto.enabled
-      ? "Demo Auto"
-      : qualification.startedAt
-        ? "Qualification"
-        : "Off"
-    : "—";
+  const headerStatus = deriveAutoTradeHeaderStatus({ qualification, status: null });
+  const autoNote =
+    qualification?.liveOrders === "LOCKED"
+      ? "Live locked"
+      : headerStatus.nextAction ?? qualification?.overallLabel ?? null;
 
   return (
     <section className="gm-prem-card gm-today-summary" data-testid="today-plan-summary" aria-label="Today summary">
@@ -60,8 +59,8 @@ export function TodayPlanSummary({
         </div>
         <div className="gm-prem-stat">
           <span>AutoTrade</span>
-          <strong>{autoLabel}</strong>
-          <em className="gm-prem-stat-note">Live Locked</em>
+          <strong data-testid="today-autotrade-label">{headerStatus.label}</strong>
+          {autoNote ? <em className="gm-prem-stat-note">{autoNote}</em> : null}
         </div>
         <div className="gm-prem-stat">
           <span>Trades today</span>

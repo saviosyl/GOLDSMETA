@@ -799,6 +799,23 @@ export function BrokerControlCentrePage() {
     diagnostics?.connection?.currency ??
     "EUR";
   const quoteHealthy = Boolean(diagnostics?.liveQuoteReceived && !diagnostics?.quote?.stale);
+  const quoteHasData = Boolean(diagnostics?.liveQuoteReceived || quoteTimestamp);
+  const brokerQuoteDetail =
+    quoteHealthy && marketOpen
+      ? "Active"
+      : !marketOpen && quoteHasData
+        ? "Paused — market closed"
+        : quoteHealthy
+          ? "Active"
+          : "Waiting";
+  const brokerQuoteHeroLabel =
+    quoteHealthy && marketOpen
+      ? "LIVE"
+      : !marketOpen && quoteHasData
+        ? "Paused — market closed"
+        : quoteHealthy
+          ? "LIVE"
+          : "Waiting";
   const oauthOk = Boolean(diagnostics?.oauthConnected || connected);
   const tokenOk =
     diagnostics?.connection?.tokenRefreshHealthy === undefined
@@ -901,8 +918,11 @@ export function BrokerControlCentrePage() {
             </div>
             <div className="gm-prem-stat">
               <span>Broker quotes</span>
-              <strong className={quoteHealthy ? "is-ok" : "is-warn"}>
-                {quoteHealthy ? "LIVE" : "Waiting"}
+              <strong
+                className={quoteHealthy && marketOpen ? "is-ok" : "is-warn"}
+                data-testid="broker-quote-status"
+              >
+                {brokerQuoteHeroLabel}
               </strong>
             </div>
           </div>
@@ -983,10 +1003,10 @@ export function BrokerControlCentrePage() {
                   detail: oauthOk ? "Connected" : "Reconnect required"
                 },
                 {
-                  ok: quoteHealthy,
-                  warn: !quoteHealthy,
+                  ok: quoteHealthy && marketOpen,
+                  warn: !quoteHealthy || !marketOpen,
                   label: "Broker quotes",
-                  detail: quoteHealthy ? "Active" : "Waiting"
+                  detail: brokerQuoteDetail
                 },
                 {
                   ok: tokenOk,
@@ -1083,13 +1103,6 @@ export function BrokerControlCentrePage() {
             </button>
           </div>
 
-          <div className="gm-prem-safety" role="status">
-            <span aria-hidden="true">🛡</span>
-            <div>
-              <strong>Live order submission remains disabled until approval</strong>
-              <p>You will be notified when trading is enabled.</p>
-            </div>
-          </div>
         </>
 
       ) : null}

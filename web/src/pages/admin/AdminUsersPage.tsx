@@ -63,7 +63,7 @@ export function AdminUsersPage() {
   }
 
   return (
-    <div className="gm-section" data-testid="admin-users-page">
+    <div className="gm-section gm-admin-users-page" data-testid="admin-users-page">
       <h2 className="gm-section-title">User approval centre</h2>
       <p className="gm-meta">
         Approve or pause registered users. Owner promotion and pinned-owner changes are not available
@@ -147,9 +147,13 @@ export function AdminUsersPage() {
               {u.firstName} {u.lastName}
             </strong>
             <span className="gm-meta">{u.email}</span>
+            <span className="gm-meta">{u.userIdMasked}</span>
             <span>
               {u.suspended ? "Suspended" : approvalStatusLabel(u.approvalStatus)} ·{" "}
               {roleLabel(u.role)}
+            </span>
+            <span className="gm-meta">
+              Registered {u.registeredAt ? new Date(u.registeredAt).toLocaleDateString() : "—"}
             </span>
             <div className="gm-admin-actions">
               <button
@@ -162,9 +166,23 @@ export function AdminUsersPage() {
               <button
                 type="button"
                 disabled={busyId !== null}
+                onClick={() => void act(u.userId, "reject")}
+              >
+                Reject
+              </button>
+              <button
+                type="button"
+                disabled={busyId !== null}
                 onClick={() => void act(u.userId, "suspend")}
               >
                 Suspend
+              </button>
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={() => void act(u.userId, "restore")}
+              >
+                Restore
               </button>
             </div>
           </li>
