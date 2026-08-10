@@ -6,7 +6,33 @@
  * re-runs normal safety gates before any execution attempt.
  */
 
+import { setupLifecycleConfig } from "../../../config/setupLifecycleConfig";
 import { resolveAuthoritativeConfirmation } from "../../decision/tradePlanGeometry";
+
+/** Same entry window as WAITING_FOR_ENTRY setups (setupExpiryBars × 15m). */
+export function maxArmedCandidateAgeMs(): number {
+  return setupLifecycleConfig.limits.setupExpiryBars * 15 * 60 * 1000;
+}
+
+/**
+ * Stale / cross-session guard — backend restarts may reload an armed doc from
+ * Firestore; age + optional plan validUntil reuse existing setup expiry rules.
+ */
+export function isArmedCandidateStale(args: {
+  armedAt: string;
+  nowIso: string;
+  sessionPlanValidUntil?: string | null;
+}): boolean {
+  const armedMs = Date.parse(args.armedAt);
+  const nowMs = Date.parse(args.nowIso);
+  if (!Number.isFinite(armedMs) || !Number.isFinite(nowMs)) return true;
+  if (nowMs - armedMs > maxArmedCandidateAgeMs()) return true;
+  if (args.sessionPlanValidUntil) {
+    const until = Date.parse(args.sessionPlanValidUntil);
+    if (Number.isFinite(until) && until < nowMs) return true;
+  }
+  return false;
+}
 
 export type ArmedCandidateStatus = "ARMED" | "EXECUTED" | "INVALIDATED";
 
@@ -198,6 +224,8 @@ export type ArmedLifecycleInput = {
   confirmationRequired: boolean;
   confirmationState: string | null | undefined;
   candleClassification?: string | null;
+  /** Optional session-plan validUntil — expired plans invalidate armed candidates. */
+  sessionPlanValidUntil?: string | null;
   /** Session / structure hard invalidation of the armed thesis. */
   structurallyInvalid?: boolean;
   structuralReason?: string | null;
@@ -212,6 +240,37 @@ export function evaluateArmedCandidateLifecycle(
 ): ArmedLifecycleResult {
   const existing =
     input.existing && input.existing.status === "ARMED" ? input.existing : null;
+
+  if (
+    existing &&
+    isArmedCandidateStale({
+      armedAt: existing.armedAt,
+      nowIso: input.nowIso,
+      sessionPlanValidUntil: input.sessionPlanValidUntil
+    })
+  ) {
+    const cancelled: ArmedCandidate = {
+      ...existing,
+      status: "INVALIDATED",
+      invalidationReason: "STALE_OR_EXPIRED_ARMED_CANDIDATE",
+      updatedAt: input.nowIso,
+      lastReasonCode: "CANDIDATE_INVALIDATED_STALE"
+    };
+    if (!input.qualifiedSetup) {
+      return {
+        action: "INVALIDATE",
+        candidate: cancelled,
+        reasonCode: cancelled.lastReasonCode!,
+        cancelled: null
+      };
+    }
+    // A fresh qualified setup on this cycle may replace the stale candidate.
+    return armOrReadyFromQualified({
+      ...input,
+      existing: null,
+      priorCancelled: cancelled
+    });
+  }
 
   if (!input.autoTradePermitted) {
     if (existing) {

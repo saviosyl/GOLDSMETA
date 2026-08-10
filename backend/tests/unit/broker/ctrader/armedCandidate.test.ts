@@ -6,8 +6,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createArmedCandidate,
   evaluateArmedCandidateLifecycle,
+  isArmedCandidateStale,
   isEntryConfirmationReady,
   markExecutionAttempted,
+  maxArmedCandidateAgeMs,
   type ArmedCandidate
 } from "../../../../src/services/broker/ctrader/armedCandidate";
 import {
@@ -212,6 +214,44 @@ describe("armed candidate lifecycle", () => {
     expect(result.action).toBe("INVALIDATE");
     expect(result.reasonCode).toBe("CANDIDATE_INVALIDATED_AUTOTRADE_OFF");
     expect(result.candidate?.status).toBe("INVALIDATED");
+  });
+
+  it("stale / new-session: armed candidate beyond setup entry window is invalidated", () => {
+    const armed = armedFrom();
+    const maxAge = maxArmedCandidateAgeMs();
+    expect(maxAge).toBeGreaterThan(0);
+    const later = new Date(Date.parse(armed.armedAt) + maxAge + 60_000).toISOString();
+    expect(
+      isArmedCandidateStale({ armedAt: armed.armedAt, nowIso: later })
+    ).toBe(true);
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: later,
+      autoTradePermitted: true,
+      existing: armed,
+      qualifiedSetup: null,
+      confirmationRequired: true,
+      confirmationState: "REJECTION_CONFIRMED"
+    });
+    expect(result.action).toBe("INVALIDATE");
+    expect(result.reasonCode).toBe("CANDIDATE_INVALIDATED_STALE");
+    expect(result.candidate?.status).toBe("INVALIDATED");
+  });
+
+  it("stale / new-session: expired session-plan validUntil invalidates armed candidate", () => {
+    const armed = armedFrom();
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:10:00.000Z",
+      autoTradePermitted: true,
+      existing: armed,
+      qualifiedSetup: null,
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      sessionPlanValidUntil: "2026-08-10T15:05:00.000Z"
+    });
+    expect(result.action).toBe("INVALIDATE");
+    expect(result.reasonCode).toBe("CANDIDATE_INVALIDATED_STALE");
   });
 
   it("TEST H — low-quality WAIT setups are never armed", () => {

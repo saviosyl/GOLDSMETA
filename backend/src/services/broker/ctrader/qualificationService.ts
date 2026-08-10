@@ -633,6 +633,7 @@ export async function processDecisionForQualification(args: {
       confirmationRequired: settings.confirmationCandleRequired,
       confirmationState,
       candleClassification,
+      sessionPlanValidUntil: sessionPlan?.validUntil ?? null,
       structurallyInvalid,
       structuralReason: structurallyInvalid
         ? `SESSION_PLAN_${sessionPlan?.lifecycleState ?? "INVALID"}`

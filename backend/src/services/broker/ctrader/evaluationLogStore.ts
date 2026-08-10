@@ -76,6 +76,7 @@ export function reasonLabelFor(code: string): string {
     CANDIDATE_INVALIDATED: "Armed setup invalidated",
     CANDIDATE_INVALIDATED_OPPOSITE: "Armed setup cancelled by opposite signal",
     CANDIDATE_INVALIDATED_AUTOTRADE_OFF: "Armed setup cancelled — AutoTrade off",
+    CANDIDATE_INVALIDATED_STALE: "Armed setup cancelled — stale / expired",
     ENTRY_CONFIRMATION_RECEIVED: "Entry confirmation received",
     EXECUTION_ALREADY_ATTEMPTED: "Duplicate execution suppressed",
     FINAL_SAFETY_FAILED: "Final safety check rejected execution"
