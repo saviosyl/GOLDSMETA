@@ -1,6 +1,9 @@
 /**
  * Guards the production failure mode where Firebase Functions ran stale dist/
  * while src/ contained Demo Auto reconcile / authority fixes.
+ *
+ * CI runs unit tests before `npm run build`, and dist/ is gitignored — so this
+ * suite asserts deploy contracts + source presence, not a prebuilt dist tree.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "fs";
@@ -27,17 +30,17 @@ describe("Demo Auto dist deploy guard", () => {
     expect(hooks.some((h) => h.includes("run build"))).toBe(true);
   });
 
-  it("built dist includes open-position reconcile (fail if deploy skipped build)", () => {
-    const reconcileJs = resolve(
+  it("source includes open-position reconcile required by the Functions runtime", () => {
+    const reconcileTs = resolve(
       backendRoot,
-      "dist/services/broker/ctrader/openPositionReconcile.js"
+      "src/services/broker/ctrader/openPositionReconcile.ts"
     );
-    const indexJs = resolve(backendRoot, "dist/index.js");
-    expect(existsSync(reconcileJs)).toBe(true);
-    expect(existsSync(indexJs)).toBe(true);
-    const index = readFileSync(indexJs, "utf8");
+    const indexTs = resolve(backendRoot, "src/index.ts");
+    expect(existsSync(reconcileTs)).toBe(true);
+    expect(existsSync(indexTs)).toBe(true);
+    const index = readFileSync(indexTs, "utf8");
     expect(index).toContain("manage_demo_positions_pass");
-    const reconcile = readFileSync(reconcileJs, "utf8");
+    const reconcile = readFileSync(reconcileTs, "utf8");
     expect(reconcile).toContain("reconcileDemoOpenPositionCounters");
     expect(reconcile).toContain("backfillLifecycleFromBroker");
   });
