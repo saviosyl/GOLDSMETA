@@ -92,6 +92,7 @@ import {
   getOpenPositionsPublicView,
   manageAllOpenDemoPositionsForUser
 } from "../services/broker/ctrader/demoPositionLifecycle";
+import { reconcileDemoOpenPositionCounters } from "../services/broker/ctrader/openPositionReconcile";
 import { LIVE_HARD_CAPS } from "../services/broker/ctrader/liveRiskCaps";
 
 function codeOf(err: unknown): string {
@@ -1416,9 +1417,11 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       if (!uid) return;
       try {
         assertCTraderLiveMutationsDisabled();
+        const openPositionReconcile = await reconcileDemoOpenPositionCounters(uid);
         const result = await manageAllOpenDemoPositionsForUser(uid);
         res.json({
           ...result,
+          openPositionReconcile,
           positions: await getOpenPositionsPublicView(uid),
           liveOrders: "LOCKED"
         });
