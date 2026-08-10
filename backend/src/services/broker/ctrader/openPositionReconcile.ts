@@ -16,6 +16,7 @@ import {
   saveQualificationDoc
 } from "./qualificationStore";
 import { reconcileDemoBrokerPositions } from "./demoPositionMutations";
+import { getConnection } from "./connectionStore";
 
 export type OpenPositionReconcileResult = {
   before: number;
@@ -92,6 +93,12 @@ export async function reconcileDemoOpenPositionCounters(
       daily.openPositions = brokerOpen;
       await saveDailySafetyDoc(daily);
     }
+    // Backfill missing lifecycle so UI/management can see the real Demo position.
+    try {
+      await backfillLifecycleFromBroker(uid);
+    } catch {
+      /* best-effort */
+    }
     return {
       before,
       after: daily.openPositions,
@@ -138,4 +145,63 @@ async function markGhostDemoAutoTradesReconciled(uid: string): Promise<void> {
   });
   if (!changed) return;
   await saveQualificationDoc({ ...doc, demoAutoTrades });
+}
+
+/** Create lifecycle docs for broker opens that lack Firestore tracking. */
+async function backfillLifecycleFromBroker(uid: string): Promise<number> {
+  // Dynamic import avoids circular dependency with demoPositionLifecycle.
+  const { createDemoPositionLifecycle } = await import(
+    "./demoPositionLifecycle.js"
+  );
+  const existing = await listOpenPositionLifecycles(uid);
+  const have = new Set(
+    existing.map((p) => p.brokerPositionId).filter(Boolean) as string[]
+  );
+  const positions = await reconcileDemoBrokerPositions(uid);
+  const conn = await getConnection(uid);
+  const accountId = conn?.selectedAccountId ?? null;
+  const accountMasked = conn?.selectedAccountMasked ?? null;
+  const accountQualId = await getActiveQualificationAccountId(uid);
+  const qual = accountQualId
+    ? await getQualificationDoc(uid, accountQualId)
+    : null;
+  const openTrade = (qual?.demoAutoTrades ?? []).find((t) => t.status === "OPEN");
+  let created = 0;
+  for (const p of positions) {
+    if (!p.positionId || have.has(p.positionId)) continue;
+    const correlationId =
+      openTrade && !openTrade.brokerPositionId
+        ? openTrade.correlationId
+        : `broker_${p.positionId}`;
+    await createDemoPositionLifecycle({
+      uid,
+      correlationId,
+      brokerOrderId: openTrade?.brokerOrderId ?? null,
+      brokerPositionId: p.positionId,
+      accountId,
+      accountMasked,
+      side: p.side,
+      entry: p.entryPrice,
+      stopLoss: p.stopLoss,
+      takeProfit: p.takeProfit,
+      tp1: p.takeProfit,
+      tp2: null,
+      tp3: null,
+      lots: p.volumeLots,
+      qualificationStage: qual ? String(qual.state) : null,
+      decisionId: openTrade?.signalId ?? null,
+      source: "demo_auto",
+      openedAt: p.openTimestamp ?? openTrade?.at ?? new Date().toISOString()
+    });
+    if (openTrade && qual && openTrade.correlationId === correlationId) {
+      const demoAutoTrades = qual.demoAutoTrades.map((t) =>
+        t.correlationId === correlationId
+          ? { ...t, brokerPositionId: p.positionId }
+          : t
+      );
+      await saveQualificationDoc({ ...qual, demoAutoTrades });
+    }
+    created += 1;
+  }
+  return created;
 }

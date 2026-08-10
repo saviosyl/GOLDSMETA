@@ -212,14 +212,30 @@ export const manageDemoAutoTradePositions = onSchedule(
     ]
   },
   async () => {
-    if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
+    if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) {
+      console.log(
+        JSON.stringify({
+          event: "manage_demo_positions_skip",
+          reason: "CTRADER_CLIENT_ID_MISSING",
+          ts: new Date().toISOString()
+        })
+      );
+      return;
+    }
     process.env.CTRADER_CONNECTOR_ENABLED = "true";
     process.env.CTRADER_DEMO_READ_ENABLED = "true";
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
     process.env.CTRADER_LIVE_ENABLED = "false";
     process.env.BROKER_EXECUTION_ENABLED = "false";
     process.env.CTRADER_ENVIRONMENT = "DEMO";
-    await runDemoPositionManagementPass();
+    const result = await runDemoPositionManagementPass();
+    console.log(
+      JSON.stringify({
+        event: "manage_demo_positions_pass",
+        ...result,
+        ts: new Date().toISOString()
+      })
+    );
   }
 );
 
