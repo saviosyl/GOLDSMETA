@@ -64,6 +64,17 @@ import { createDemoPositionLifecycle } from "./demoPositionLifecycle";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
 import { newsProtectionBlocksLiveActivation } from "./liveNewsGate";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
+import { logger } from "../../logging/logger";
+import {
+  evaluateArmedCandidateLifecycle,
+  markExecutionAttempted,
+  type ArmedCandidate
+} from "./armedCandidate";
+import {
+  clearArmedCandidate,
+  getArmedCandidate,
+  saveArmedCandidate
+} from "./armedCandidateStore";
 
 function buildSha(): string | null {
   return (process.env.GOLD_META_COMMIT_SHA || process.env.VITE_GOLD_META_COMMIT_SHA || "").trim() || null;
@@ -462,12 +473,16 @@ export async function processDecisionForQualification(args: {
   const { uid, decisionId, store } = args;
   const setup = await loadSetupSnapshot(uid);
   if (!setup.accountId || setup.accountIsLive || setup.emergencyStopActive) {
+    if (setup.emergencyStopActive || setup.accountIsLive) {
+      await clearArmedCandidate(uid).catch(() => undefined);
+    }
     return { handled: false, message: "setup_or_live_or_stop" };
   }
 
   let doc = await getQualificationDoc(uid, setup.accountId);
   if (!doc?.startedAt) return { handled: false, message: "not_started" };
   if (doc.state === "PAUSED" || doc.state === "BLOCKED") {
+    await clearArmedCandidate(uid).catch(() => undefined);
     return { handled: false, message: "paused_or_blocked" };
   }
 
@@ -480,8 +495,293 @@ export async function processDecisionForQualification(args: {
   const d = await store.getDecision(uid, decisionId);
   if (!d) return { handled: false, message: "no_decision" };
 
-  const direction = String(d.decision ?? "WAIT").toUpperCase();
-  if (direction !== "BUY" && direction !== "SELL") {
+  const settings = await getUserAutoTradeSettings(uid, "demo");
+  if (settings.autoTradePaused || settings.emergencyStopActive) {
+    const existingArmed = await getArmedCandidate(uid).catch(() => null);
+    if (existingArmed) {
+      await clearArmedCandidate(uid).catch(() => undefined);
+      logger.info("AutoTrade armed candidate invalidated", {
+        uid,
+        candidateId: existingArmed.candidateId,
+        reason: settings.emergencyStopActive ? "emergency_stop" : "paused"
+      });
+    }
+    return { handled: false, message: settings.emergencyStopActive ? "emergency_stop" : "paused" };
+  }
+
+  const diagnostics = await buildDiagnostics(uid);
+  const quote = diagnostics.quote;
+  const quoteAgeSeconds =
+    quote?.timestamp != null
+      ? Math.max(0, (Date.now() - Date.parse(quote.timestamp)) / 1000)
+      : null;
+
+  const decisionDirection = String(d.decision ?? "WAIT").toUpperCase();
+  const geom = decisionGeometry(d);
+  const sessionPlan = (await store.getActiveSessionPlan?.(uid)) ?? null;
+  const confirmationState =
+    sessionPlan?.confirmationState ??
+    d.marketStructure?.confirmationClassification ??
+    null;
+  const candleClassification = d.marketStructure?.confirmationClassification ?? null;
+  const planSourceKey = sessionPlan?.planSourceKey ?? null;
+  const orderStates =
+    state === "CONTROLLED_DEMO_QUALIFICATION" ||
+    state === "DEMO_AUTO_ENABLED" ||
+    state === "LIVE_QUALIFICATION";
+
+  // --- Internal armed-candidate lifecycle (order states only; no UI) ---
+  let armedTrade: ArmedCandidate | null = null;
+  if (orderStates) {
+    const existingArmed = await getArmedCandidate(uid).catch(() => null);
+    const alreadyCountedArmed = existingArmed
+      ? doc.controlledTrades.some((t) => t.signalId === existingArmed.signalId) ||
+        doc.demoAutoTrades.some((t) => t.signalId === existingArmed.signalId)
+      : false;
+
+    let qualifiedSetup: {
+      direction: "BUY" | "SELL";
+      signalId: string;
+      planSourceKey: string | null;
+      entry: number;
+      stopLoss: number;
+      takeProfit: number;
+      confidence: number | null;
+      setupScore: number | null;
+    } | null = null;
+
+    if (
+      (decisionDirection === "BUY" || decisionDirection === "SELL") &&
+      geom.entry != null &&
+      geom.stopLoss != null &&
+      geom.takeProfit != null
+    ) {
+      const preCandidate = evaluateQualificationCandidate({
+        direction: decisionDirection,
+        signalId: d.decisionId,
+        entry: geom.entry,
+        stopLoss: geom.stopLoss,
+        takeProfit: geom.takeProfit,
+        confidence: d.confidence ?? null,
+        minConfidence: settings.minConfidence,
+        minRiskReward: settings.minRiskReward,
+        quoteBid: quote?.bid ?? null,
+        quoteAsk: quote?.ask ?? null,
+        quoteSpread: quote?.spread ?? null,
+        quoteStale: Boolean(quote?.stale),
+        marketStatus: quote?.marketStatus ?? null,
+        maxSpread: settings.maxSpread,
+        maxQuoteAgeSeconds: settings.maxQuoteAgeSeconds,
+        quoteAgeSeconds,
+        alreadyCountedSignal: false,
+        requireMarketOpen: true
+      });
+      // Soft quote/session failures must not prevent arming a valid setup thesis;
+      // final safety still runs before any order. Hard geometry/confidence still required.
+      const hardFail = preCandidate.failed.some((f) =>
+        [
+          "NOT_ACTIONABLE",
+          "INCOMPLETE_GEOMETRY",
+          "GEOMETRY_DIRECTION_INVALID",
+          "CONFIDENCE_TOO_LOW",
+          "RR_TOO_LOW"
+        ].includes(f)
+      );
+      if (!hardFail) {
+        qualifiedSetup = {
+          direction: decisionDirection,
+          signalId: d.decisionId,
+          planSourceKey,
+          entry: geom.entry,
+          stopLoss: geom.stopLoss,
+          takeProfit: geom.takeProfit,
+          confidence: d.confidence ?? null,
+          setupScore: d.setupScore ?? null
+        };
+        logger.info("AutoTrade setup qualified", {
+          uid,
+          signalId: d.decisionId,
+          direction: decisionDirection,
+          setupScore: d.setupScore ?? null
+        });
+      }
+    }
+
+    const structurallyInvalid =
+      Boolean(existingArmed) &&
+      (sessionPlan?.lifecycleState === "NO_VALID_PLAN" ||
+        sessionPlan?.lifecycleState === "INVALIDATED" ||
+        sessionPlan?.lifecycleState === "EXPIRED" ||
+        sessionPlan?.lifecycleState === "NO_TRADE" ||
+        (sessionPlan?.direction != null &&
+          existingArmed != null &&
+          sessionPlan.direction !== existingArmed.direction &&
+          sessionPlan.direction !== "WAIT"));
+
+    const life = evaluateArmedCandidateLifecycle({
+      uid,
+      nowIso: new Date().toISOString(),
+      autoTradePermitted: !settings.autoTradePaused && !settings.emergencyStopActive,
+      autoTradeOffReason: settings.emergencyStopActive ? "EMERGENCY_STOP" : "AUTOTRADE_PAUSED",
+      existing:
+        existingArmed == null
+          ? null
+          : alreadyCountedArmed
+            ? { ...existingArmed, executionAttempted: true }
+            : existingArmed,
+      qualifiedSetup,
+      confirmationRequired: settings.confirmationCandleRequired,
+      confirmationState,
+      candleClassification,
+      structurallyInvalid,
+      structuralReason: structurallyInvalid
+        ? `SESSION_PLAN_${sessionPlan?.lifecycleState ?? "INVALID"}`
+        : null
+    });
+
+    if (life.action === "INVALIDATE" && life.candidate) {
+      await clearArmedCandidate(uid).catch(() => undefined);
+      logger.info("AutoTrade armed candidate invalidated", {
+        uid,
+        candidateId: life.candidate.candidateId,
+        reason: life.reasonCode,
+        detail: life.candidate.invalidationReason
+      });
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: life.candidate.direction,
+          signalId: life.candidate.signalId,
+          confidence: life.candidate.confidence,
+          entry: life.candidate.entry,
+          stopLoss: life.candidate.stopLoss,
+          takeProfit: life.candidate.takeProfit,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "IGNORED",
+          reasonCode: life.reasonCode,
+          reasonLabel: reasonLabelFor(life.reasonCode),
+          passed: [],
+          failed: [life.candidate.invalidationReason ?? life.reasonCode]
+        });
+      } catch {
+        /* ignore */
+      }
+      return { handled: true, message: "armed_invalidated" };
+    }
+
+    const readyToExecute =
+      life.action === "READY_TO_EXECUTE" ||
+      (life.action === "REPLACE_WITH_OPPOSITE" &&
+        (life.reasonCode === "OPPOSITE_SETUP_READY" ||
+          life.reasonCode === "ENTRY_CONFIRMATION_RECEIVED"));
+
+    if (
+      !readyToExecute &&
+      (life.action === "ARM" ||
+        life.action === "KEEP_WAITING" ||
+        life.action === "REPLACE_WITH_OPPOSITE") &&
+      life.candidate
+    ) {
+      if (
+        life.reasonCode === "EXECUTION_ALREADY_ATTEMPTED" ||
+        life.candidate.executionAttempted
+      ) {
+        await clearArmedCandidate(uid).catch(() => undefined);
+        return { handled: true, message: "armed_duplicate_suppressed" };
+      }
+      await saveArmedCandidate({ ...life.candidate, uid }).catch(() => undefined);
+      logger.info("AutoTrade armed candidate waiting for confirmation", {
+        uid,
+        candidateId: life.candidate.candidateId,
+        direction: life.candidate.direction,
+        reason: life.reasonCode,
+        confirmationState
+      });
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: life.candidate.direction,
+          signalId: life.candidate.signalId,
+          confidence: life.candidate.confidence,
+          entry: life.candidate.entry,
+          stopLoss: life.candidate.stopLoss,
+          takeProfit: life.candidate.takeProfit,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "IGNORED",
+          reasonCode: life.reasonCode,
+          reasonLabel: reasonLabelFor(life.reasonCode),
+          passed: ["SETUP_QUALIFIED"],
+          failed: ["CANDLE_CONFIRMATION_REQUIRED"]
+        });
+      } catch {
+        /* ignore */
+      }
+      return { handled: true, message: `armed_${life.reasonCode.toLowerCase()}` };
+    }
+
+    if (readyToExecute && life.candidate) {
+      if (life.candidate.executionAttempted || alreadyCountedArmed) {
+        await clearArmedCandidate(uid).catch(() => undefined);
+        logger.info("AutoTrade duplicate execution suppressed", {
+          uid,
+          candidateId: life.candidate.candidateId
+        });
+        return { handled: true, message: "armed_duplicate_suppressed" };
+      }
+      armedTrade = { ...life.candidate, uid };
+      logger.info("AutoTrade entry confirmation received", {
+        uid,
+        candidateId: armedTrade.candidateId,
+        direction: armedTrade.direction,
+        signalId: armedTrade.signalId
+      });
+      await saveArmedCandidate(armedTrade).catch(() => undefined);
+    }
+
+    if (
+      !armedTrade &&
+      (decisionDirection !== "BUY" && decisionDirection !== "SELL")
+    ) {
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: decisionDirection,
+          signalId: decisionId,
+          confidence: d.confidence ?? null,
+          entry: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "IGNORED",
+          reasonCode: "WAIT_HOLD",
+          reasonLabel: reasonLabelFor("WAIT_HOLD"),
+          passed: [],
+          failed: ["NOT_ACTIONABLE"]
+        });
+      } catch {
+        /* ignore */
+      }
+      return { handled: false, message: "wait_hold_ignored" };
+    }
+  } else if (decisionDirection !== "BUY" && decisionDirection !== "SELL") {
     try {
       await appendEvaluation({
         uid,
@@ -489,7 +789,7 @@ export async function processDecisionForQualification(args: {
         at: new Date().toISOString(),
         tradingDay: tradingDayKey(),
         stage: state,
-        direction,
+        direction: decisionDirection,
         signalId: decisionId,
         confidence: d.confidence ?? null,
         entry: null,
@@ -510,19 +810,16 @@ export async function processDecisionForQualification(args: {
     return { handled: false, message: "wait_hold_ignored" };
   }
 
-  const { entry, stopLoss, takeProfit, tp1, tp2, tp3 } = decisionGeometry(d);
-  const signalId = d.decisionId;
-  const settings = await getUserAutoTradeSettings(uid, "demo");
-  if (settings.autoTradePaused || settings.emergencyStopActive) {
-    return { handled: false, message: settings.emergencyStopActive ? "emergency_stop" : "paused" };
-  }
-
-  const diagnostics = await buildDiagnostics(uid);
-  const quote = diagnostics.quote;
-  const quoteAgeSeconds =
-    quote?.timestamp != null
-      ? Math.max(0, (Date.now() - Date.parse(quote.timestamp)) / 1000)
-      : null;
+  // Prefer armed candidate geometry when confirmation finally arrives on a later cycle.
+  const direction = armedTrade?.direction ?? decisionDirection;
+  const entry = armedTrade?.entry ?? geom.entry;
+  const stopLoss = armedTrade?.stopLoss ?? geom.stopLoss;
+  const takeProfit = armedTrade?.takeProfit ?? geom.takeProfit;
+  const tp1 = armedTrade?.takeProfit ?? geom.tp1;
+  const tp2 = geom.tp2;
+  const tp3 = geom.tp3;
+  const signalId = armedTrade?.signalId ?? d.decisionId;
+  const tradeConfidence = armedTrade?.confidence ?? d.confidence ?? null;
 
   const alreadyCounted =
     doc.previewSignalIds.includes(signalId) ||
@@ -541,7 +838,7 @@ export async function processDecisionForQualification(args: {
     entry,
     stopLoss,
     takeProfit,
-    confidence: d.confidence ?? null,
+    confidence: tradeConfidence,
     minConfidence: settings.minConfidence,
     minRiskReward: settings.minRiskReward,
     quoteBid: quote?.bid ?? null,
@@ -578,7 +875,7 @@ export async function processDecisionForQualification(args: {
         stage: state,
         direction,
         signalId,
-        confidence: d.confidence ?? null,
+        confidence: tradeConfidence,
         entry,
         stopLoss,
         takeProfit,
@@ -692,19 +989,30 @@ export async function processDecisionForQualification(args: {
     if (!candidate.ok) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
+      logger.info("AutoTrade final safety check failed", {
+        uid,
+        signalId,
+        failed: candidate.failed,
+        armed: Boolean(armedTrade)
+      });
       await logEval(
         "REJECTED",
-        candidate.failed[0] ?? "REJECTED",
+        candidate.failed[0] ?? "FINAL_SAFETY_FAILED",
         candidate.failed,
         candidate.passed
       );
+      // Keep armed candidate — risk rejection must not bypass gates, and must not
+      // forget a still-valid thesis unless duplicate/execution already attempted.
       return { handled: true, message: `controlled_blocked:${candidate.failed[0]}` };
     }
     if (doc.controlledOpenCount > 0 && state === "CONTROLLED_DEMO_QUALIFICATION") {
       await logEval("REJECTED", "ONE_POSITION_RULE", ["ONE_POSITION_RULE"], candidate.passed);
       return { handled: true, message: "one_position_rule" };
     }
-    if (alreadyCounted) return { handled: true, message: "duplicate_signal" };
+    if (alreadyCounted) {
+      await clearArmedCandidate(uid).catch(() => undefined);
+      return { handled: true, message: "duplicate_signal" };
+    }
 
     const symbol = diagnostics.symbol;
     if (!symbol?.metadataComplete) {
@@ -754,8 +1062,24 @@ export async function processDecisionForQualification(args: {
       if (!result.accepted) {
         doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
         await saveQualificationDoc(doc);
+        logger.info("AutoTrade order rejected", { uid, signalId, direction });
         return { handled: true, message: "order_rejected" };
       }
+
+      if (armedTrade) {
+        await saveArmedCandidate(
+          markExecutionAttempted(armedTrade, new Date().toISOString())
+        ).catch(() => undefined);
+        await clearArmedCandidate(uid).catch(() => undefined);
+      } else {
+        await clearArmedCandidate(uid).catch(() => undefined);
+      }
+      logger.info("AutoTrade order submitted", {
+        uid,
+        signalId,
+        direction,
+        armedCandidateId: armedTrade?.candidateId ?? null
+      });
 
       const trade: ControlledDemoTradeRecord = {
         id: newId("tr"),

@@ -70,7 +70,15 @@ export function reasonLabelFor(code: string): string {
     PREVIEW_COUNTED: "Qualified preview",
     CONTROLLED_OPENED: "Controlled Demo trade opened",
     ONE_POSITION_RULE: "One Gold position at a time",
-    WAIT_HOLD: "WAIT/HOLD signal"
+    WAIT_HOLD: "WAIT/HOLD signal",
+    CANDIDATE_ARMED: "Setup armed — waiting for entry confirmation",
+    CANDIDATE_WAITING_CONFIRMATION: "Armed setup still waiting for confirmation",
+    CANDIDATE_INVALIDATED: "Armed setup invalidated",
+    CANDIDATE_INVALIDATED_OPPOSITE: "Armed setup cancelled by opposite signal",
+    CANDIDATE_INVALIDATED_AUTOTRADE_OFF: "Armed setup cancelled — AutoTrade off",
+    ENTRY_CONFIRMATION_RECEIVED: "Entry confirmation received",
+    EXECUTION_ALREADY_ATTEMPTED: "Duplicate execution suppressed",
+    FINAL_SAFETY_FAILED: "Final safety check rejected execution"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
