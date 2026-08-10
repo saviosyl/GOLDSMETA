@@ -20,16 +20,27 @@ export async function getPositionLifecycle(
   return snap.data() as DemoPositionLifecycle;
 }
 
+function stripUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUndefined);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefined(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export async function savePositionLifecycle(
   doc: DemoPositionLifecycle
 ): Promise<void> {
-  await col(doc.uid).doc(doc.correlationId).set(
-    {
-      ...doc,
-      updatedAt: new Date().toISOString()
-    },
-    { merge: true }
-  );
+  const payload = stripUndefined({
+    ...doc,
+    updatedAt: new Date().toISOString()
+  }) as DemoPositionLifecycle;
+  await col(doc.uid).doc(doc.correlationId).set(payload, { merge: true });
 }
 
 export async function listOpenPositionLifecycles(

@@ -1413,6 +1413,8 @@ export async function markQualificationTradeClosed(args: {
   closePrice?: number | null;
   closeReason?: string | null;
   brokerDealId?: string | null;
+  brokerPositionId?: string | null;
+  brokerOrderId?: string | null;
   closedAt?: string | null;
 }): Promise<QualificationPublicView> {
   const setup = await loadSetupSnapshot(args.uid);
@@ -1446,6 +1448,14 @@ export async function markQualificationTradeClosed(args: {
       closedAt: t.closedAt ?? now,
       pnl: confirmedPnl,
       counted: true,
+      brokerPositionId:
+        args.brokerPositionId ??
+        (t as { brokerPositionId?: string | null }).brokerPositionId ??
+        null,
+      brokerOrderId:
+        args.brokerOrderId ??
+        (t as { brokerOrderId?: string | null }).brokerOrderId ??
+        null,
       grossPnl: args.grossPnl ?? (t as { grossPnl?: number | null }).grossPnl ?? null,
       commission:
         args.commission ?? (t as { commission?: number | null }).commission ?? null,

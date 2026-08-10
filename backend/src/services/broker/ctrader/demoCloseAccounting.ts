@@ -235,6 +235,8 @@ export async function applyConfirmedDemoBrokerClose(args: {
     closePrice: args.deal.closePrice,
     closeReason: reason,
     brokerDealId: args.deal.dealId,
+    brokerPositionId: args.brokerPositionId,
+    brokerOrderId: args.deal.orderId,
     closedAt
   });
 
