@@ -8,6 +8,9 @@
  * ProtoOASpotEvent into the authoritative Firestore quote store, and exposes a
  * tiny health HTTP endpoint for Cloud Run / local process supervision.
  *
+ * Health is based on LAST SUCCESSFUL VALID QUOTE / PERSIST — not lock heartbeat
+ * alone. A live heartbeat with a stalled quote stream triggers reconnect.
+ *
  * Run via: `npx tsx scripts/runPersistentQuoteWorker.ts`
  * Deploy target: always-on runtime (Cloud Run min instances ≥ 1, or equivalent).
  * Live order submission remains hard-locked elsewhere.
@@ -32,6 +35,12 @@ import {
   requireLiveAllowlist
 } from "./accountAllowlist";
 import { acquireWorkerLock, type WorkerLockHandle } from "./workerLock";
+import {
+  DEFAULT_QUOTE_STALL_MS,
+  DEFAULT_QUOTE_STALL_MS_MARKET_CLOSED,
+  evaluateQuoteStreamHealth,
+  isQuoteWorkerHealthy
+} from "./quoteStreamHealth";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const LIVE_HOST = "live.ctraderapi.com";
@@ -55,6 +64,11 @@ export type PersistentWorkerStatus = {
   reconnectAttempts: number;
   lockHeld: boolean;
   lastHeartbeatAt: string | null;
+  /** Epoch ms of last accepted valid bid+ask spot. */
+  lastValidQuoteAtMs: number | null;
+  /** Epoch ms of last successful Firestore quote persist. */
+  lastPersistedQuoteAtMs: number | null;
+  marketStatus: AuthoritativeQuote["marketStatus"] | null;
   /** True only while the Spotware WS is open and subscribed. */
   websocketPersistent: true;
 };
@@ -81,6 +95,25 @@ function clientCreds(source = process.env) {
   };
 }
 
+function logWorker(event: string, fields: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ event, ...fields, ts: new Date().toISOString() }));
+}
+
+function stallAfterMsFor(
+  marketStatus: AuthoritativeQuote["marketStatus"] | null
+): number {
+  const openEnv = Number(process.env.CTRADER_QUOTE_INACTIVITY_MS ?? "");
+  const closedEnv = Number(process.env.CTRADER_QUOTE_INACTIVITY_MS_CLOSED ?? "");
+  if (marketStatus === "CLOSED") {
+    return Number.isFinite(closedEnv) && closedEnv >= 5_000
+      ? closedEnv
+      : DEFAULT_QUOTE_STALL_MS_MARKET_CLOSED;
+  }
+  return Number.isFinite(openEnv) && openEnv >= 5_000
+    ? openEnv
+    : DEFAULT_QUOTE_STALL_MS;
+}
+
 export class PersistentXauUsdQuoteWorker {
   private connection: InstanceType<typeof CTraderConnection> | null = null;
   private stopping = false;
@@ -101,6 +134,9 @@ export class PersistentXauUsdQuoteWorker {
     reconnectAttempts: 0,
     lockHeld: false,
     lastHeartbeatAt: null,
+    lastValidQuoteAtMs: null,
+    lastPersistedQuoteAtMs: null,
+    marketStatus: null,
     websocketPersistent: true
   };
 
@@ -119,10 +155,21 @@ export class PersistentXauUsdQuoteWorker {
       this.persistMinMs = persistEnv;
     }
 
+    logWorker("quote_worker_started", {
+      ownerUidHash: ownerUid.slice(0, 6) + "…"
+    });
+
     // Startup reconciliation — surface last stored quote immediately in health.
     try {
       const stored = await getStoredAuthoritativeQuote(ownerUid);
-      if (stored) this.status.lastQuote = stored;
+      if (stored) {
+        this.status.lastQuote = stored;
+        const received = Date.parse(stored.receivedAt);
+        if (Number.isFinite(received)) {
+          this.status.lastValidQuoteAtMs = received;
+          this.status.lastPersistedQuoteAtMs = received;
+        }
+      }
     } catch {
       /* best-effort */
     }
@@ -134,13 +181,22 @@ export class PersistentXauUsdQuoteWorker {
     this.status.lockHeld = true;
     this.status.lastHeartbeatAt = new Date().toISOString();
     this.lockRenewTimer = setInterval(() => {
-      void this.lock?.renew().then((ok) => {
-        if (ok) this.status.lastHeartbeatAt = new Date().toISOString();
-        else {
-          this.status.lockHeld = false;
-          this.status.lastError = "CTRADER_QUOTE_WORKER_LOCK_LOST";
-        }
-      });
+      void this.lock
+        ?.renew({
+          lastSuccessfulQuoteAt: this.status.lastPersistedQuoteAtMs
+            ? new Date(this.status.lastPersistedQuoteAtMs).toISOString()
+            : null
+        })
+        .then((ok) => {
+          if (ok) this.status.lastHeartbeatAt = new Date().toISOString();
+          else {
+            this.status.lockHeld = false;
+            this.status.lastError = "CTRADER_QUOTE_WORKER_LOCK_LOST";
+            logWorker("quote_worker_lock_lost", {
+              ownerUidHash: ownerUid.slice(0, 6) + "…"
+            });
+          }
+        });
     }, LOCK_RENEW_MS);
 
     await this.loop(ownerUid);
@@ -177,13 +233,19 @@ export class PersistentXauUsdQuoteWorker {
     while (!this.stopping) {
       try {
         await this.connectAndSubscribe(ownerUid);
-        // connectAndSubscribe resolves when the socket ends unexpectedly.
+        // connectAndSubscribe resolves when the socket ends or stream stalls.
         this.status.connected = false;
-        this.status.lastError = "CTRADER_WS_DISCONNECTED";
+        if (!this.status.lastError) {
+          this.status.lastError = "CTRADER_WS_DISCONNECTED";
+        }
       } catch (e) {
         this.status.connected = false;
         this.status.lastError =
           e instanceof Error ? e.message : "CTRADER_WORKER_ERROR";
+        logWorker("quote_worker_connect_failed", {
+          error: this.status.lastError,
+          reconnectAttempts: this.status.reconnectAttempts
+        });
       }
       if (this.stopping) break;
       const delay = Math.min(
@@ -191,6 +253,11 @@ export class PersistentXauUsdQuoteWorker {
         RECONNECT_MAX_MS
       );
       this.status.reconnectAttempts += 1;
+      logWorker("quote_worker_reconnect_scheduled", {
+        delayMs: delay,
+        reconnectAttempts: this.status.reconnectAttempts,
+        lastError: this.status.lastError
+      });
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -228,6 +295,10 @@ export class PersistentXauUsdQuoteWorker {
       accessToken,
       ctidTraderAccountId: Number(fresh.selectedAccountId)
     });
+    logWorker("quote_worker_ctrader_connected", {
+      environment: this.status.environment,
+      symbolId: this.status.symbolId
+    });
 
     let marketStatus: AuthoritativeQuote["marketStatus"] = "UNKNOWN";
     try {
@@ -254,20 +325,29 @@ export class PersistentXauUsdQuoteWorker {
     } catch {
       marketStatus = "UNKNOWN";
     }
+    this.status.marketStatus = marketStatus;
 
     await connection.sendCommand("ProtoOASubscribeSpotsReq", {
       ctidTraderAccountId: Number(fresh.selectedAccountId),
       symbolId: [Number(fresh.symbolId)],
       subscribeToSpotTimestamp: true
     });
+    logWorker("quote_worker_xauusd_subscribed", {
+      symbolId: this.status.symbolId,
+      symbolName: this.status.symbolName,
+      marketStatus
+    });
 
     this.status.connected = true;
     this.status.reconnectAttempts = 0;
     this.status.lastError = null;
-    let lastSpotAt = Date.now();
+    // New session must prove stream health with fresh spots/persists.
+    // Keep lastQuote for partial bid/ask carry-forward only.
+    this.status.lastValidQuoteAtMs = null;
+    this.status.lastPersistedQuoteAtMs = null;
+    const sessionStartedAtMs = Date.now();
 
     connection.on("ProtoOASpotEvent", (event: { descriptor?: Record<string, unknown> }) => {
-      lastSpotAt = Date.now();
       void this.onSpot(event?.descriptor ?? {}, {
         ownerUid,
         symbolId: fresh.symbolId!,
@@ -282,9 +362,9 @@ export class PersistentXauUsdQuoteWorker {
       });
     });
 
-    // Spotware requires heartbeats. Library #onClose is silent — use inactivity.
+    // Spotware requires protocol heartbeats. Stream health uses valid quotes only.
     const HEARTBEAT_MS = 10_000;
-    const INACTIVITY_MS = Number(process.env.CTRADER_QUOTE_INACTIVITY_MS ?? 45_000);
+    const stallAfterMs = stallAfterMsFor(marketStatus);
     await new Promise<void>((resolve) => {
       const heartbeat = setInterval(() => {
         try {
@@ -300,8 +380,29 @@ export class PersistentXauUsdQuoteWorker {
           resolve();
           return;
         }
-        if (Date.now() - lastSpotAt > INACTIVITY_MS) {
-          this.status.lastError = "CTRADER_SPOT_INACTIVITY";
+        const nowMs = Date.now();
+        // Grace window after subscribe for the first valid tick.
+        if (nowMs - sessionStartedAtMs < stallAfterMs) return;
+        const health = evaluateQuoteStreamHealth({
+          nowMs,
+          lastValidQuoteAtMs: this.status.lastValidQuoteAtMs,
+          lastPersistedQuoteAtMs: this.status.lastPersistedQuoteAtMs,
+          marketStatus,
+          stallAfterMs
+        });
+        if (health.stalled) {
+          this.status.lastError = `CTRADER_QUOTE_STREAM_STALLED:${health.reason}`;
+          logWorker("quote_stream_stalled", {
+            reason: health.reason,
+            ageMs: health.ageMs,
+            stallAfterMs: health.stallAfterMs,
+            marketStatus,
+            lastValidQuoteAtMs: this.status.lastValidQuoteAtMs,
+            lastPersistedQuoteAtMs: this.status.lastPersistedQuoteAtMs
+          });
+          logWorker("quote_worker_reconnect_attempt", {
+            cause: health.reason
+          });
           clearInterval(heartbeat);
           clearInterval(watch);
           resolve();
@@ -331,11 +432,19 @@ export class PersistentXauUsdQuoteWorker {
     ) {
       return;
     }
-    const bid = spotPriceFromRelative(spot.bid);
-    const ask = spotPriceFromRelative(spot.ask);
-    if (bid == null || ask == null || !(ask >= bid)) return;
+    // Spotware may omit an unchanged side — carry forward last valid prices.
+    let bid = spotPriceFromRelative(spot.bid);
+    let ask = spotPriceFromRelative(spot.ask);
+    if (bid == null && this.status.lastQuote) bid = this.status.lastQuote.bid;
+    if (ask == null && this.status.lastQuote) ask = this.status.lastQuote.ask;
+    if (bid == null || ask == null || !(ask >= bid)) {
+      // Do NOT treat incomplete/empty spot events as stream activity.
+      return;
+    }
 
     const now = Date.now();
+    this.status.lastValidQuoteAtMs = now;
+
     if (now - this.lastPersistAt < this.persistMinMs && this.status.lastQuote) {
       // Still update in-memory last quote for health, throttle Firestore writes.
       const tsMs = asNumber(spot.timestamp);
@@ -382,6 +491,7 @@ export class PersistentXauUsdQuoteWorker {
     });
     await saveAuthoritativeQuote(meta.ownerUid, quote);
     this.lastPersistAt = now;
+    this.status.lastPersistedQuoteAtMs = now;
     this.status.lastQuote = quote;
   }
 }
@@ -399,7 +509,21 @@ export function startWorkerHealthServer(
       path === "/v1/ctrader/worker-health"
     ) {
       const status = worker.getStatus();
-      const ok = status.running && status.connected;
+      const stream = evaluateQuoteStreamHealth({
+        nowMs: Date.now(),
+        lastValidQuoteAtMs: status.lastValidQuoteAtMs,
+        lastPersistedQuoteAtMs: status.lastPersistedQuoteAtMs,
+        marketStatus: status.marketStatus
+      });
+      const ok = isQuoteWorkerHealthy({
+        running: status.running,
+        lockHeld: status.lockHeld,
+        stream
+      });
+      const lastQuoteAgeMs =
+        status.lastPersistedQuoteAtMs != null
+          ? Date.now() - status.lastPersistedQuoteAtMs
+          : null;
       res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -410,11 +534,21 @@ export function startWorkerHealthServer(
           environment: status.environment,
           symbolId: status.symbolId,
           symbolName: status.symbolName,
+          marketStatus: status.marketStatus,
           reconnectAttempts: status.reconnectAttempts,
           startedAt: status.startedAt,
           lastHeartbeatAt: status.lastHeartbeatAt,
           lastError: status.lastError,
           websocketPersistent: status.websocketPersistent,
+          quoteStream: {
+            stalled: stream.stalled,
+            reason: stream.reason,
+            ageMs: stream.ageMs,
+            stallAfterMs: stream.stallAfterMs,
+            lastValidQuoteAtMs: status.lastValidQuoteAtMs,
+            lastPersistedQuoteAtMs: status.lastPersistedQuoteAtMs,
+            lastSuccessfulQuoteAgeMs: lastQuoteAgeMs
+          },
           lastQuote: status.lastQuote
             ? {
                 bid: status.lastQuote.bid,

@@ -80,12 +80,12 @@ export async function listOwnersNeedingQuoteRefresh(
   limit = 50
 ): Promise<string[]> {
   try {
-    // Prefer connections that still have a selected account. Filter disconnects in memory
-    // because Firestore `== null` does not match missing fields.
+    // Ungated collection-group scan + in-memory filter.
+    // Avoids requiring a COLLECTION_GROUP inequality index on selectedAccountId
+    // (missing index previously caused keepalive to silently refresh 0 owners).
     const snap = await getFirestore()
       .collectionGroup("ctraderConnection")
-      .where("selectedAccountId", "!=", null)
-      .limit(limit)
+      .limit(Math.max(limit * 4, 50))
       .get();
 
     const owners: string[] = [];
@@ -102,10 +102,11 @@ export async function listOwnersNeedingQuoteRefresh(
         data.ownerUid ??
         (doc.ref.path.match(/^users\/([^/]+)\/ctraderConnection\//)?.[1] ?? null);
       if (uid) owners.push(uid);
+      if (owners.length >= limit) break;
     }
-    return [...new Set(owners)];
+    return [...new Set(owners)].slice(0, limit);
   } catch {
-    // Collection-group index may be missing — keepalive is best-effort.
+    // Keepalive is best-effort.
     return [];
   }
 }

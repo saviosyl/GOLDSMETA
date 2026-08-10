@@ -255,19 +255,41 @@ export async function readAuthoritativeBrokerQuote(
   return toBrokerQuote(q);
 }
 
+/** Skip broker WS when the store already has a sufficiently fresh tick. */
+const KEEPALIVE_SKIP_IF_FRESHER_THAN_MS = 10_000;
+
 /**
  * Background keepalive — refresh quotes for connected owners while UI is closed.
  * Safe to call from a 1-minute scheduler; frontend short-poll keeps display live.
+ *
+ * Acts as a fallback when the persistent worker stalls: always refreshes when
+ * the stored quote is older than {@link KEEPALIVE_SKIP_IF_FRESHER_THAN_MS}.
  */
 export async function runQuoteKeepalivePass(opts?: {
   limit?: number;
   api?: CTraderOpenApiClient;
-}): Promise<{ refreshed: number; failed: number; owners: string[] }> {
+  nowMs?: number;
+}): Promise<{
+  refreshed: number;
+  failed: number;
+  skippedFresh: number;
+  owners: string[];
+}> {
   const owners = await listOwnersNeedingQuoteRefresh(opts?.limit ?? 50);
+  const nowMs = opts?.nowMs ?? Date.now();
   let refreshed = 0;
   let failed = 0;
+  let skippedFresh = 0;
   for (const ownerUid of owners) {
     try {
+      const stored = await getStoredAuthoritativeQuote(ownerUid);
+      if (stored) {
+        const age = nowMs - Date.parse(stored.receivedAt);
+        if (Number.isFinite(age) && age >= 0 && age < KEEPALIVE_SKIP_IF_FRESHER_THAN_MS) {
+          skippedFresh += 1;
+          continue;
+        }
+      }
       await refreshAuthoritativeQuoteFromBroker(
         ownerUid,
         opts?.api ?? createOpenApiClient()
@@ -277,5 +299,15 @@ export async function runQuoteKeepalivePass(opts?: {
       failed += 1;
     }
   }
-  return { refreshed, failed, owners };
+  console.log(
+    JSON.stringify({
+      event: "quote_keepalive_pass",
+      refreshed,
+      failed,
+      skippedFresh,
+      ownerCount: owners.length,
+      ts: new Date().toISOString()
+    })
+  );
+  return { refreshed, failed, skippedFresh, owners };
 }
