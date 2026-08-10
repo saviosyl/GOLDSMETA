@@ -56,10 +56,27 @@ export type ControlledDemoTradeRecord = {
   lots: number | null;
   brokerOrderId: string | null;
   brokerPositionId: string | null;
+  ctidTraderAccountId?: string | null;
+  traderLogin?: string | null;
+  symbol?: string | null;
+  requestedVolumeLots?: number | null;
+  filledVolumeLots?: number | null;
+  requestedEntry?: number | null;
+  fillPrice?: number | null;
+  brokerStopLoss?: number | null;
+  brokerTakeProfit?: number | null;
+  openTimestamp?: string | null;
   status: "SUBMITTED" | "OPEN" | "CLOSED" | "REJECTED";
   pnl: number | null;
   counted: boolean;
   rejectionReason?: string | null;
+  grossPnl?: number | null;
+  commission?: number | null;
+  swap?: number | null;
+  netPnl?: number | null;
+  closePrice?: number | null;
+  closeReason?: string | null;
+  brokerDealId?: string | null;
 };
 
 export type DemoAutoTradeRecord = {
@@ -72,13 +89,33 @@ export type DemoAutoTradeRecord = {
   status: "SUBMITTED" | "OPEN" | "CLOSED" | "REJECTED";
   pnl: number | null;
   counted: boolean;
-  /** Optional broker linkage for reconcile / open-position tracking. */
+  /** Authoritative broker linkage — required after successful Demo fill. */
   brokerOrderId?: string | null;
   brokerPositionId?: string | null;
+  /** Open API ctidTraderAccountId used for Auth/orders. */
+  ctidTraderAccountId?: string | null;
+  /** Pepperstone/Spotware trader login (UI / push notification account). */
+  traderLogin?: string | null;
+  symbol?: string | null;
+  requestedVolumeLots?: number | null;
+  filledVolumeLots?: number | null;
+  requestedEntry?: number | null;
+  fillPrice?: number | null;
+  brokerStopLoss?: number | null;
+  brokerTakeProfit?: number | null;
+  openTimestamp?: string | null;
   entry?: number | null;
   stopLoss?: number | null;
   takeProfit?: number | null;
   lots?: number | null;
+  /** Broker close accounting (idempotent). */
+  grossPnl?: number | null;
+  commission?: number | null;
+  swap?: number | null;
+  netPnl?: number | null;
+  closePrice?: number | null;
+  closeReason?: string | null;
+  brokerDealId?: string | null;
 };
 
 export type SafetyCheckId =

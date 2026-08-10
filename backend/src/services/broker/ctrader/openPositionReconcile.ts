@@ -3,6 +3,9 @@
  *
  * Prevents a ghost OPEN counter (order ack recorded, lifecycle missing, broker flat)
  * from permanently blocking Demo Auto via MAX_OPEN_POSITIONS.
+ *
+ * Ghost clear is recovery only — close accounting must come from broker deals
+ * (see demoCloseAccounting), never by inventing CLOSED + null PnL.
  */
 
 import {
@@ -25,6 +28,7 @@ export type OpenPositionReconcileResult = {
   brokerOpen: number | null;
   clearedGhost: boolean;
   brokerChecked: boolean;
+  repairAttempted: boolean;
   error: string | null;
 };
 
@@ -53,12 +57,23 @@ export async function reconcileDemoOpenPositionCounters(
       brokerOpen: null,
       clearedGhost: false,
       brokerChecked: false,
+      repairAttempted: false,
       error: null
     };
   }
 
-  // No lifecycle opens. If counter already 0, nothing to do.
+  // No lifecycle opens. If counter already 0, still try repair for unaccounted closes.
   if (daily.openPositions <= 0) {
+    let repairAttempted = false;
+    try {
+      const { reconcileClosedTradesWithoutErasingPnl } = await import(
+        "./demoCloseAccounting.js"
+      );
+      await reconcileClosedTradesWithoutErasingPnl(uid);
+      repairAttempted = true;
+    } catch {
+      /* best-effort */
+    }
     return {
       before,
       after: 0,
@@ -66,6 +81,7 @@ export async function reconcileDemoOpenPositionCounters(
       brokerOpen: null,
       clearedGhost: false,
       brokerChecked: false,
+      repairAttempted,
       error: null
     };
   }
@@ -83,6 +99,7 @@ export async function reconcileDemoOpenPositionCounters(
       brokerOpen: null,
       clearedGhost: false,
       brokerChecked: false,
+      repairAttempted: false,
       error: e instanceof Error ? e.message : "BROKER_RECONCILE_FAILED"
     };
   }
@@ -106,14 +123,26 @@ export async function reconcileDemoOpenPositionCounters(
       brokerOpen,
       clearedGhost: false,
       brokerChecked: true,
+      repairAttempted: false,
       error: null
     };
   }
 
-  // Broker flat + no lifecycle → ghost counter. Clear and close untracked OPEN records.
+  // Broker flat + no lifecycle → ghost counter. Clear openPositions, then repair
+  // close accounting from broker deals (do NOT invent CLOSED + null pnl).
   daily.openPositions = 0;
   await saveDailySafetyDoc(daily);
-  await markGhostDemoAutoTradesReconciled(uid);
+
+  let repairAttempted = false;
+  try {
+    const { reconcileClosedTradesWithoutErasingPnl } = await import(
+      "./demoCloseAccounting.js"
+    );
+    await reconcileClosedTradesWithoutErasingPnl(uid);
+    repairAttempted = true;
+  } catch {
+    /* best-effort — trades may remain OPEN until deal is available */
+  }
 
   return {
     before,
@@ -122,29 +151,9 @@ export async function reconcileDemoOpenPositionCounters(
     brokerOpen: 0,
     clearedGhost: before > 0,
     brokerChecked: true,
+    repairAttempted,
     error: null
   };
-}
-
-async function markGhostDemoAutoTradesReconciled(uid: string): Promise<void> {
-  const accountId = await getActiveQualificationAccountId(uid);
-  if (!accountId) return;
-  const doc = await getQualificationDoc(uid, accountId);
-  if (!doc) return;
-  let changed = false;
-  const demoAutoTrades = doc.demoAutoTrades.map((t) => {
-    if (t.status !== "OPEN") return t;
-    changed = true;
-    return {
-      ...t,
-      status: "CLOSED" as const,
-      closedAt: new Date().toISOString(),
-      counted: false,
-      pnl: t.pnl
-    };
-  });
-  if (!changed) return;
-  await saveQualificationDoc({ ...doc, demoAutoTrades });
 }
 
 /** Create lifecycle docs for broker opens that lack Firestore tracking. */
@@ -196,7 +205,16 @@ async function backfillLifecycleFromBroker(uid: string): Promise<number> {
     if (openTrade && qual && openTrade.correlationId === correlationId) {
       const demoAutoTrades = qual.demoAutoTrades.map((t) =>
         t.correlationId === correlationId
-          ? { ...t, brokerPositionId: p.positionId }
+          ? {
+              ...t,
+              brokerPositionId: p.positionId,
+              ctidTraderAccountId: accountId,
+              traderLogin: conn?.selectedTraderLogin ?? t.traderLogin ?? null,
+              fillPrice: p.entryPrice ?? t.fillPrice ?? null,
+              brokerStopLoss: p.stopLoss ?? t.brokerStopLoss ?? null,
+              brokerTakeProfit: p.takeProfit ?? t.brokerTakeProfit ?? null,
+              filledVolumeLots: p.volumeLots ?? t.filledVolumeLots ?? null
+            }
           : t
       );
       await saveQualificationDoc({ ...qual, demoAutoTrades });

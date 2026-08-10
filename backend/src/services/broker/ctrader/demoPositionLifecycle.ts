@@ -63,7 +63,34 @@ export async function createDemoPositionLifecycle(args: {
   openedAt: string;
 }): Promise<DemoPositionLifecycle> {
   const existing = await getPositionLifecycle(args.uid, args.correlationId);
-  if (existing) return existing;
+  if (existing) {
+    // Backfill authoritative broker linkage when a prior create raced / lacked IDs.
+    const needsMerge =
+      (args.brokerPositionId && !existing.brokerPositionId) ||
+      (args.brokerOrderId && !existing.brokerOrderId) ||
+      (args.accountId && !existing.accountId) ||
+      (args.entry != null && existing.entry == null) ||
+      (args.stopLoss != null && existing.initialSl == null) ||
+      (args.lots != null && existing.lots == null);
+    if (!needsMerge) return existing;
+    const merged: DemoPositionLifecycle = {
+      ...existing,
+      brokerOrderId: existing.brokerOrderId ?? args.brokerOrderId,
+      brokerPositionId: existing.brokerPositionId ?? args.brokerPositionId,
+      accountId: existing.accountId ?? args.accountId,
+      accountMasked: existing.accountMasked ?? args.accountMasked,
+      entry: existing.entry ?? args.entry,
+      currentPrice: existing.currentPrice ?? args.entry,
+      lots: existing.lots ?? args.lots,
+      remainingLots: existing.remainingLots ?? args.lots,
+      initialSl: existing.initialSl ?? args.stopLoss,
+      currentSl: existing.currentSl ?? args.stopLoss,
+      decisionId: existing.decisionId ?? args.decisionId,
+      updatedAt: new Date().toISOString()
+    };
+    await savePositionLifecycle(merged);
+    return merged;
+  }
 
   // Only strategy-supplied targets — never invent R-multiple ladders.
   const tps = strategyProvidedTakeProfits([
@@ -375,7 +402,14 @@ async function closeLifecycleConfirmed(args: {
     await markQualificationTradeClosed({
       uid: doc.uid,
       correlationId: doc.correlationId,
-      pnl: netPnl
+      pnl: netPnl,
+      grossPnl: args.grossPnl,
+      commission: args.commission,
+      swap: args.swap,
+      closePrice: args.closePrice,
+      closeReason: reason,
+      brokerDealId: args.brokerDealId,
+      closedAt
     });
   } catch {
     /* qualification close best-effort */

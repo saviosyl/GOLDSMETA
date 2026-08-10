@@ -7,6 +7,7 @@ const getActiveQualificationAccountId = vi.fn();
 const getQualificationDoc = vi.fn();
 const saveQualificationDoc = vi.fn();
 const reconcileDemoBrokerPositions = vi.fn();
+const reconcileClosedTradesWithoutErasingPnl = vi.fn();
 
 vi.mock("../../../../src/services/broker/ctrader/dailySafetyStore", () => ({
   getDailySafetyDoc: (...a: unknown[]) => getDailySafetyDoc(...a),
@@ -24,6 +25,14 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
 vi.mock("../../../../src/services/broker/ctrader/demoPositionMutations", () => ({
   reconcileDemoBrokerPositions: (...a: unknown[]) => reconcileDemoBrokerPositions(...a)
 }));
+vi.mock("../../../../src/services/broker/ctrader/demoCloseAccounting.js", () => ({
+  reconcileClosedTradesWithoutErasingPnl: (...a: unknown[]) =>
+    reconcileClosedTradesWithoutErasingPnl(...a)
+}));
+vi.mock("../../../../src/services/broker/ctrader/demoCloseAccounting", () => ({
+  reconcileClosedTradesWithoutErasingPnl: (...a: unknown[]) =>
+    reconcileClosedTradesWithoutErasingPnl(...a)
+}));
 
 import { reconcileDemoOpenPositionCounters } from "../../../../src/services/broker/ctrader/openPositionReconcile";
 
@@ -31,6 +40,12 @@ describe("reconcileDemoOpenPositionCounters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getActiveQualificationAccountId.mockResolvedValue("48014710");
+    reconcileClosedTradesWithoutErasingPnl.mockResolvedValue({
+      examined: 0,
+      repaired: 0,
+      skipped: 0,
+      errors: []
+    });
   });
 
   it("A: healthy — lifecycle open matches counter → no broker call", async () => {
@@ -42,7 +57,7 @@ describe("reconcileDemoOpenPositionCounters", () => {
     expect(reconcileDemoBrokerPositions).not.toHaveBeenCalled();
   });
 
-  it("C: heartbeat-style ghost — counter>0, no lifecycle, broker flat → clear", async () => {
+  it("C: heartbeat-style ghost — counter>0, no lifecycle, broker flat → clear + repair", async () => {
     getDailySafetyDoc.mockResolvedValue({
       openPositions: 1,
       tradesUsed: 1,
@@ -50,32 +65,16 @@ describe("reconcileDemoOpenPositionCounters", () => {
     });
     listOpenPositionLifecycles.mockResolvedValue([]);
     reconcileDemoBrokerPositions.mockResolvedValue([]);
-    getQualificationDoc.mockResolvedValue({
-      accountId: "48014710",
-      demoAutoTrades: [
-        {
-          id: "t1",
-          correlationId: "corr_x",
-          signalId: "s1",
-          at: "2026-08-10T18:32:00Z",
-          closedAt: null,
-          direction: "BUY",
-          status: "OPEN",
-          pnl: null,
-          counted: false
-        }
-      ]
-    });
-    saveQualificationDoc.mockResolvedValue(undefined);
     saveDailySafetyDoc.mockResolvedValue(undefined);
 
     const r = await reconcileDemoOpenPositionCounters("uid");
     expect(r.clearedGhost).toBe(true);
     expect(r.after).toBe(0);
+    expect(r.repairAttempted).toBe(true);
     expect(saveDailySafetyDoc).toHaveBeenCalled();
-    expect(saveQualificationDoc).toHaveBeenCalled();
-    const saved = saveQualificationDoc.mock.calls[0][0];
-    expect(saved.demoAutoTrades[0].status).toBe("CLOSED");
+    // Must NOT invent CLOSED + null pnl — repair path owns close accounting.
+    expect(saveQualificationDoc).not.toHaveBeenCalled();
+    expect(reconcileClosedTradesWithoutErasingPnl).toHaveBeenCalledWith("uid");
   });
 
   it("fail closed when broker reconcile fails — do not clear counter", async () => {
