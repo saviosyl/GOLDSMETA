@@ -40,7 +40,8 @@ export const createApp = (dependencies: Partial<AppDependencies> = {}) =>
 export const app = createApp();
 /**
  * Apply cTrader Demo connector env on production `api` when CTRADER_* secrets
- * are bound. Order submission / Live execution remain hard-locked via flags.ts.
+ * are bound. Demo paper submission may be enabled for Demo Auto; Live execution
+ * stays hard-locked via flags.ts.
  * OAuth redirect URI continues to come from CTRADER_REDIRECT_URI (Secret Manager).
  */
 function applyProductionCTraderRuntimeEnv(): void {
@@ -51,7 +52,8 @@ function applyProductionCTraderRuntimeEnv(): void {
     process.env.CTRADER_DEMO_READ_ENABLED || "true";
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED =
     process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED || "true";
-  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
+  // Demo Auto / controlled Demo paper orders — Live remains impossible.
+  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
   process.env.CTRADER_LIVE_ENABLED = "false";
   process.env.BROKER_EXECUTION_ENABLED = "false";
   if (!process.env.GOLDMETA_WEB_ORIGIN) {
@@ -59,6 +61,19 @@ function applyProductionCTraderRuntimeEnv(): void {
       process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
   }
   // Force DEMO Open API environment for this phase.
+  process.env.CTRADER_ENVIRONMENT = "DEMO";
+}
+
+/** Shared Demo Auto runtime env for decision-triggered execution (never Live). */
+function applyDemoAutoTradeRuntimeEnv(): void {
+  if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
+  process.env.CTRADER_CONNECTOR_ENABLED =
+    process.env.CTRADER_CONNECTOR_ENABLED || "true";
+  process.env.CTRADER_DEMO_READ_ENABLED =
+    process.env.CTRADER_DEMO_READ_ENABLED || "true";
+  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
+  process.env.CTRADER_LIVE_ENABLED = "false";
+  process.env.BROKER_EXECUTION_ENABLED = "false";
   process.env.CTRADER_ENVIRONMENT = "DEMO";
 }
 
@@ -240,6 +255,8 @@ export const onGoldMetaDecisionCreated = onDocumentCreated(
   async (event) => {
     const userId = event.params.userId;
     const decisionId = event.params.decisionId;
+    // Demo paper AutoTrade path — submission on; Live stays hard-off.
+    applyDemoAutoTradeRuntimeEnv();
     await processDecisionForAutoTrade({
       userId,
       decisionId,

@@ -10,7 +10,7 @@ import {
   saveUserAutoTradeSettings
 } from "./userAutoTradeSettings";
 import { submitDemoMarketOrder } from "./demoOrderExecution";
-import { isCTraderLiveEnabled } from "./flags";
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 import { calculateCTraderVolume } from "./sizing";
 import { evaluateQualificationCandidate } from "./qualificationEvaluator";
 import type { GoldMetaStore } from "../../storage/types";
@@ -398,21 +398,64 @@ export async function enableDemoAutoFromQualification(
       code: "QUALIFICATION_NOT_READY"
     });
   }
+  if (isCTraderLiveEnabled()) {
+    throw Object.assign(new Error("LIVE_EXECUTION_FORBIDDEN"), {
+      code: "LIVE_EXECUTION_FORBIDDEN"
+    });
+  }
   let doc = await getQualificationDoc(uid, setup.accountId);
   if (!doc) throw Object.assign(new Error("QUALIFICATION_NOT_STARTED"), { code: "QUALIFICATION_NOT_STARTED" });
   const state = deriveAdvancedState(doc);
-  if (state !== "DEMO_AUTO_READY" && doc.state !== "DEMO_AUTO_READY") {
+  // Owner Demo start: when Demo paper submission is enabled and the Pepperstone
+  // Demo account is ready, Demo Auto may be enabled. Historical preview/controlled
+  // gates remain as progress reporting (see evaluateDemoAutoQualification).
+  // Live stays impossible.
+  const demoStartReady =
+    isCTraderDemoOrderSubmissionEnabled() &&
+    setup.oauthConnected &&
+    setup.demoAccountSelected &&
+    !setup.accountIsLive &&
+    setup.tradingScope &&
+    !setup.emergencyStopActive &&
+    Boolean(doc.startedAt) &&
+    state !== "PAUSED" &&
+    state !== "BLOCKED";
+  if (
+    state !== "DEMO_AUTO_READY" &&
+    doc.state !== "DEMO_AUTO_READY" &&
+    !demoStartReady
+  ) {
     throw Object.assign(new Error("DEMO_AUTO_NOT_READY"), { code: "DEMO_AUTO_NOT_READY" });
+  }
+  if (
+    state === "DEMO_AUTO_ENABLED" ||
+    state === "LIVE_QUALIFICATION" ||
+    doc.demoAutoEnabledAt
+  ) {
+    await saveUserAutoTradeSettings(uid, "demo", {
+      autoTradeEnabledIntent: true,
+      emergencyStopActive: false,
+      autoTradePaused: false
+    });
+    return getQualificationView(uid);
   }
   await saveUserAutoTradeSettings(uid, "demo", {
     autoTradeEnabledIntent: true,
-    emergencyStopActive: false
+    emergencyStopActive: false,
+    autoTradePaused: false
   });
   doc = {
     ...doc,
     demoAutoEnabledAt: new Date().toISOString()
   };
-  doc = await appendTransition(doc, "DEMO_AUTO_ENABLED", "user_enable_demo_auto", buildSha());
+  doc = await appendTransition(
+    doc,
+    "DEMO_AUTO_ENABLED",
+    demoStartReady && state !== "DEMO_AUTO_READY"
+      ? "owner_demo_start_enable_demo_auto"
+      : "user_enable_demo_auto",
+    buildSha()
+  );
   doc = await appendTransition(doc, "LIVE_QUALIFICATION", "auto_start_live_qualification", buildSha());
   await saveQualificationDoc(doc);
   return getQualificationView(uid);
@@ -561,7 +604,8 @@ export async function processDecisionForQualification(args: {
         signalId: d.decisionId,
         entry: geom.entry,
         stopLoss: geom.stopLoss,
-        takeProfit: geom.takeProfit,
+        // RR / geometry quality against TP2 when present (see order-path note below).
+        takeProfit: geom.tp2 ?? geom.tp3 ?? geom.takeProfit,
         confidence: d.confidence ?? null,
         minConfidence: settings.minConfidence,
         minRiskReward: settings.minRiskReward,
@@ -827,18 +871,33 @@ export async function processDecisionForQualification(args: {
     doc.controlledTrades.some((t) => t.signalId === signalId) ||
     doc.demoAutoTrades.some((t) => t.signalId === signalId);
 
+  // Qualification RR gate uses the best strategy TP that exists (TP2/TP3 when
+  // present). GoldMeta plans are typically TP1=1R / TP2=2R / TP3=3R — checking
+  // only TP1 against minRiskReward (default 1.5) incorrectly rejected every setup.
+  // Order submission still uses strategy TP1 as the primary broker take-profit.
+  const rrTakeProfit = tp2 ?? tp3 ?? takeProfit;
   const risk =
     entry != null && stopLoss != null ? Math.abs(entry - stopLoss) : null;
   const reward =
-    entry != null && takeProfit != null ? Math.abs(takeProfit - entry) : null;
-  const riskReward = risk && risk > 0 && reward != null ? reward / risk : null;
+    entry != null && rrTakeProfit != null ? Math.abs(rrTakeProfit - entry) : null;
+  const riskRewardFromDecision =
+    typeof d.riskReward?.tp2 === "number"
+      ? d.riskReward.tp2
+      : typeof d.riskReward?.tp3 === "number"
+        ? d.riskReward.tp3
+        : typeof d.riskReward?.tp1 === "number"
+          ? d.riskReward.tp1
+          : null;
+  const riskReward =
+    riskRewardFromDecision ??
+    (risk && risk > 0 && reward != null ? reward / risk : null);
 
   const candidate = evaluateQualificationCandidate({
     direction,
     signalId,
     entry,
     stopLoss,
-    takeProfit,
+    takeProfit: rrTakeProfit,
     confidence: tradeConfidence,
     minConfidence: settings.minConfidence,
     minRiskReward: settings.minRiskReward,
