@@ -54,11 +54,16 @@ function applyProductionCTraderRuntimeEnv(): void {
   process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "false";
   process.env.CTRADER_LIVE_ENABLED = "false";
   process.env.BROKER_EXECUTION_ENABLED = "false";
+  // LIVE SHADOW may be enabled via env; Live order submission stays hard-locked.
+  if (!("CTRADER_LIVE_SHADOW_ENABLED" in process.env)) {
+    process.env.CTRADER_LIVE_SHADOW_ENABLED = "false";
+  }
   if (!process.env.GOLDMETA_WEB_ORIGIN) {
     process.env.GOLDMETA_WEB_ORIGIN =
       process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
   }
-  // Force DEMO Open API environment for this phase.
+  // Force DEMO Open API environment for OAuth app config; Live account
+  // selection still uses the Live host via per-call isLive flags.
   process.env.CTRADER_ENVIRONMENT = "DEMO";
 }
 
@@ -235,9 +240,23 @@ export const generateWeeklyGoldMetaReports = onSchedule(
 export const onGoldMetaDecisionCreated = onDocumentCreated(
   {
     document: "users/{userId}/decisions/{decisionId}",
-    region: env.FIREBASE_REGION
+    region: env.FIREBASE_REGION,
+    timeoutSeconds: 120,
+    secrets: [
+      "GOLDMETA_PINNED_OWNER_UID",
+      "CTRADER_CLIENT_ID",
+      "CTRADER_CLIENT_SECRET",
+      "CTRADER_REDIRECT_URI",
+      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
+      "CTRADER_ENVIRONMENT"
+    ]
   },
   async (event) => {
+    applyProductionCTraderRuntimeEnv();
+    // LIVE SHADOW on for production decision triggers; Live submit stays hard-locked.
+    process.env.CTRADER_LIVE_SHADOW_ENABLED = "true";
+    process.env.CTRADER_QUOTE_REQUIRE_LIVE =
+      process.env.CTRADER_QUOTE_REQUIRE_LIVE || "true";
     const userId = event.params.userId;
     const decisionId = event.params.decisionId;
     await processDecisionForAutoTrade({
