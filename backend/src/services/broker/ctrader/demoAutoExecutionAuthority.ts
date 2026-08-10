@@ -9,7 +9,7 @@ import { allowsDemoOrderSubmission } from "./qualificationMachine";
 import type { QualificationState } from "./qualificationTypes";
 
 export type DemoAutoExecutionAuthorityInput = {
-  qualificationState: QualificationState | string | null | undefined;
+  qualificationState: QualificationState | null | undefined;
   autoTradeEnabledIntent: boolean;
   autoTradePaused: boolean;
   emergencyStopActive: boolean;
