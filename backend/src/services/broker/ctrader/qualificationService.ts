@@ -1180,7 +1180,14 @@ export async function processDecisionForQualification(args: {
               direction: trade.direction,
               status: "OPEN",
               pnl: null,
-              counted: false
+              counted: false,
+              // Retain broker ids so reconcile can track the real Demo order.
+              brokerOrderId: trade.brokerOrderId,
+              brokerPositionId: trade.brokerPositionId,
+              entry: trade.entry,
+              stopLoss: trade.stopLoss,
+              takeProfit: trade.takeProfit,
+              lots: trade.lots
             }
           ],
           firstDemoAutoTradeAt: doc.firstDemoAutoTradeAt ?? trade.at
@@ -1259,8 +1266,12 @@ export async function processDecisionForQualification(args: {
               : "demo_auto",
           openedAt: trade.at
         });
-      } catch {
-        /* lifecycle must not block order ack */
+      } catch (lifeErr) {
+        logger.error("AutoTrade demo position lifecycle create failed", {
+          uid,
+          correlationId: trade.correlationId,
+          error: lifeErr instanceof Error ? lifeErr.message : "unknown"
+        });
       }
       return { handled: true, message: "order_submitted" };
     } catch (e) {

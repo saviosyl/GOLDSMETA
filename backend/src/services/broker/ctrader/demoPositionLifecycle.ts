@@ -28,6 +28,8 @@ import {
 import { updateAutoTradeJournalOnClose } from "./autoTradeJournal";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 import { getExecutableQuoteForAutoTrade } from "./quoteService";
+import { listOwnersNeedingQuoteRefresh } from "./quoteStore";
+import { reconcileDemoOpenPositionCounters } from "./openPositionReconcile";
 import { evaluateNewsGuard } from "./newsGuard";
 import { setEmergencyStop } from "./userAutoTradeSettings";
 import { lotsToValidatedBrokerVolume } from "./volumeUnits";
@@ -732,10 +734,24 @@ export async function manageAllOpenDemoPositionsForUser(
 export async function runDemoPositionManagementPass(opts?: {
   limit?: number;
 }): Promise<{ owners: number; managed: number; closed: number }> {
-  const owners = await listOpenPositionOwners(opts?.limit ?? 40);
+  const owners = new Set(await listOpenPositionOwners(opts?.limit ?? 40));
+  // Also visit connected Demo owners so ghost open-position counters can clear
+  // even when lifecycle docs were never created.
+  try {
+    for (const uid of await listOwnersNeedingQuoteRefresh(opts?.limit ?? 40)) {
+      owners.add(uid);
+    }
+  } catch {
+    /* best-effort */
+  }
   let managed = 0;
   let closed = 0;
   for (const uid of owners) {
+    try {
+      await reconcileDemoOpenPositionCounters(uid);
+    } catch {
+      /* continue */
+    }
     try {
       const r = await manageAllOpenDemoPositionsForUser(uid);
       managed += r.managed;
@@ -744,7 +760,7 @@ export async function runDemoPositionManagementPass(opts?: {
       /* continue other owners */
     }
   }
-  return { owners: owners.length, managed, closed };
+  return { owners: owners.size, managed, closed };
 }
 
 export async function getOpenPositionsPublicView(uid: string): Promise<{

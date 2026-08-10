@@ -15,6 +15,7 @@ import {
 import type { DailySafetyDocument, DailySafetyPublicView } from "./dailySafetyTypes";
 import { getQualificationDoc, getActiveQualificationAccountId } from "./qualificationStore";
 import { deriveAdvancedState } from "./qualificationMachine";
+import { reconcileDemoOpenPositionCounters } from "./openPositionReconcile";
 
 export type EntryGateResult = {
   allowed: boolean;
@@ -149,6 +150,14 @@ export async function assertEntryAllowed(
   uid: string,
   environment: AutoTradeEnvironment
 ): Promise<EntryGateResult> {
+  // Demo: reconcile ghost open-position counters before gating (lifecycle/broker).
+  if (environment === "demo") {
+    try {
+      await reconcileDemoOpenPositionCounters(uid);
+    } catch {
+      /* fail closed — evaluate gates on current counters */
+    }
+  }
   const [settings, daily] = await Promise.all([
     getUserAutoTradeSettings(uid, environment),
     getDailySafetyDoc(uid, environment)

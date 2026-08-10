@@ -1,6 +1,11 @@
 /**
  * Trusted AutoTrade trigger — loads immutable GoldMeta decisions server-side.
  * Never trusts browser-supplied execution fields.
+ *
+ * Legacy autoTradeRiskState.mode OFF is expected when Pepperstone Demo Auto is
+ * the active executor (qualification path). That path runs separately in
+ * processDecisionForQualification — this function only drives the legacy
+ * IG/T212 AutoTradeService and must not block Pepperstone Demo Auto.
  */
 
 import { logger } from "../logging/logger";
@@ -17,7 +22,16 @@ export async function processDecisionForAutoTrade(args: {
   try {
     const status = await autoTrade.getStatus(userId);
     if (status.mode === "OFF") {
-      logger.info("AutoTrade skip — mode OFF", { userId, decisionId });
+      // Pepperstone Demo Auto uses qualification — legacy mode OFF is not a Demo Auto blocker.
+      const pepperstoneDemo =
+        status.selectedBroker === "PEPPERSTONE_CTRADER" ||
+        String(status.displayStatus ?? "").toUpperCase() === "DEMO";
+      logger.info(
+        pepperstoneDemo
+          ? "Legacy AutoTrade skip — mode OFF (Pepperstone Demo Auto uses qualification path)"
+          : "AutoTrade skip — mode OFF",
+        { userId, decisionId, selectedBroker: status.selectedBroker ?? null }
+      );
       return;
     }
     if (status.locked) {

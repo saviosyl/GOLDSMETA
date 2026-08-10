@@ -72,6 +72,13 @@ export type DemoAutoTradeRecord = {
   status: "SUBMITTED" | "OPEN" | "CLOSED" | "REJECTED";
   pnl: number | null;
   counted: boolean;
+  /** Optional broker linkage for reconcile / open-position tracking. */
+  brokerOrderId?: string | null;
+  brokerPositionId?: string | null;
+  entry?: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  lots?: number | null;
 };
 
 export type SafetyCheckId =
