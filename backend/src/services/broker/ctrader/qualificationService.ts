@@ -595,6 +595,40 @@ export async function processDecisionForQualification(args: {
 
     if (
       (decisionDirection === "BUY" || decisionDirection === "SELL") &&
+      (geom.entry == null || geom.stopLoss == null || geom.takeProfit == null)
+    ) {
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: decisionDirection,
+          signalId: d.decisionId,
+          confidence: d.confidence ?? null,
+          entry: geom.entry,
+          stopLoss: geom.stopLoss,
+          takeProfit: geom.takeProfit,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "REJECTED",
+          reasonCode: "INCOMPLETE_GEOMETRY",
+          reasonLabel: reasonLabelFor("INCOMPLETE_GEOMETRY"),
+          passed: [],
+          failed: ["INCOMPLETE_GEOMETRY"]
+        });
+      } catch {
+        /* ignore */
+      }
+      if (!existingArmed) {
+        return { handled: true, message: "arm_hard_reject:INCOMPLETE_GEOMETRY" };
+      }
+    }
+
+    if (
+      (decisionDirection === "BUY" || decisionDirection === "SELL") &&
       geom.entry != null &&
       geom.stopLoss != null &&
       geom.takeProfit != null
@@ -648,6 +682,46 @@ export async function processDecisionForQualification(args: {
           direction: decisionDirection,
           setupScore: d.setupScore ?? null
         });
+      } else {
+        // Persist arm-stage hard rejects so missed BUY/SELL never disappear silently.
+        try {
+          await appendEvaluation({
+            uid,
+            accountMasked: setup.accountMasked,
+            at: new Date().toISOString(),
+            tradingDay: tradingDayKey(),
+            stage: state,
+            direction: decisionDirection,
+            signalId: d.decisionId,
+            confidence: d.confidence ?? null,
+            entry: geom.entry,
+            stopLoss: geom.stopLoss,
+            takeProfit: geom.takeProfit,
+            riskReward: null,
+            spread: quote?.spread ?? null,
+            maxSpread: settings.maxSpread,
+            outcome: "REJECTED",
+            reasonCode: preCandidate.failed[0] ?? "REJECTED",
+            reasonLabel: reasonLabelFor(preCandidate.failed[0] ?? "REJECTED"),
+            passed: preCandidate.passed,
+            failed: preCandidate.failed
+          });
+        } catch {
+          /* never block on log failure */
+        }
+        logger.info("AutoTrade setup hard-rejected before arm", {
+          uid,
+          signalId: d.decisionId,
+          direction: decisionDirection,
+          failed: preCandidate.failed
+        });
+        // No existing armed thesis to monitor — stop here (avoid silent fallthrough).
+        if (!existingArmed) {
+          return {
+            handled: true,
+            message: `arm_hard_reject:${preCandidate.failed[0] ?? "REJECTED"}`
+          };
+        }
       }
     }
 
