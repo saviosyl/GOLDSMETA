@@ -534,10 +534,15 @@ describe("mutation guard + service", () => {
   });
 
   it("readiness and control centre stay disconnected with AutoTrade OFF", () => {
+    // Isolate from deploy-shell env (CTRADER_DEMO_ORDER_SUBMISSION_ENABLED may be true).
+    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     const readiness = buildCTraderReadiness();
     expect(readiness.connected).toBe(false);
     expect(readiness.autoTrade).toBe("OFF");
     expect(readiness.orderSubmissionEnabled).toBe(false);
+    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
     expect(readiness.wizardSteps).toHaveLength(8);
     expect(readiness.wizardSteps[0]?.title).toMatch(/Create Pepperstone/i);
     expect(readiness.wizardSteps[7]?.title).toMatch(/Enable Demo Auto/i);
