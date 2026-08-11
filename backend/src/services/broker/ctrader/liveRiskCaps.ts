@@ -23,7 +23,12 @@ export const DEMO_HARD_CAPS = {
   maxDailyLossMax: 100_000,
   maxTradesPerDayMax: 10,
   maxOpenPositionsMax: 3,
-  maxPositionExposureLotsMax: 100,
+  /**
+   * Demo-only XAUUSD oz/lots ceiling after proven 1 lot = 1 oz mapping.
+   * Sized for ~€50 cash risk on a €50k Demo account (covers normal + tight
+   * recent stops up to ~213 oz while remaining margin-gated). Live cap unchanged.
+   */
+  maxPositionExposureLotsMax: 250,
   maxSlippageMax: 20,
   maxSpreadMax: 20
 } as const;

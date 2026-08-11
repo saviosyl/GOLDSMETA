@@ -109,7 +109,7 @@ describe("Pepperstone Demo XAUUSD economic sizing", () => {
     expect(legacy.ok).toBe(true);
     expect(legacy.volume).toBe(11); // risk/(100*0.26) ≈ 11.5 → 11
 
-    // Economic model requires ~1331 lots for €300; Demo hard exposure cap (100) fail-closes.
+    // Economic model requires ~1331 lots for €300; Demo hard exposure cap fail-closes.
     const economic = baseSizing({
       riskAmountDeposit: 300,
       remainingDailyLossCapacity: 10_000,
@@ -156,20 +156,20 @@ describe("Pepperstone Demo XAUUSD economic sizing", () => {
   it("F: €50 risk calculation produces approximately correct lot size with rounding", () => {
     const riskPerLot = PROVEN_STOP * PROVEN_QUOTE_TO_DEPOSIT;
     expect(50 / riskPerLot).toBeCloseTo(222, 0);
-    // ~222 lots exceeds Demo hard exposure cap (100) → fail closed (never silent resize).
+    // ~222 lots fits Demo hard exposure cap (250) and is margin-safe here.
     const r = baseSizing({
       riskAmountDeposit: 50,
       remainingDailyLossCapacity: 50,
       maxPositionExposureLots: null,
       freeMargin: 200_000
     });
-    expect(r.ok).toBe(false);
-    expect(r.rejectionReason).toBe("RISK_SIZE_EXCEEDS_EXPOSURE_CAP");
-    const rawNote = r.notes.find((n) => n.startsWith("rawLots=")) ?? "";
-    const rounded = Number(/roundedDown=(\d+)/.exec(rawNote)?.[1] ?? NaN);
-    expect(rounded).toBeGreaterThanOrEqual(221);
-    expect(rounded).toBeLessThanOrEqual(222);
-    expect(protocolVolumeFromLots(rounded)).toBe(rounded * 100);
+    expect(r.ok).toBe(true);
+    expect(r.volumeLots).toBeGreaterThanOrEqual(221);
+    expect(r.volumeLots).toBeLessThanOrEqual(222);
+    expect(r.protocolVolume).toBe(protocolVolumeFromLots(r.volumeLots!));
+    expect(r.volumeLots!).toBeLessThanOrEqual(
+      DEMO_HARD_CAPS.maxPositionExposureLotsMax
+    );
   });
 
   it("G: €100 risk calculation", () => {
@@ -211,7 +211,7 @@ describe("Pepperstone Demo XAUUSD economic sizing", () => {
   });
 
   it("I: trade blocked when required margin exceeds available margin", () => {
-    // €20 → 88 lots fits exposure hard cap (100) but needs ~€11k margin at 30x.
+    // €20 → ~88 lots fits Demo exposure hard cap but needs ~€11k margin at 30x.
     const r = baseSizing({
       riskAmountDeposit: 20,
       remainingDailyLossCapacity: 50,
@@ -240,14 +240,23 @@ describe("Pepperstone Demo XAUUSD economic sizing", () => {
     expect(resolveExposureCapLots(null)).toBe(
       DEMO_HARD_CAPS.maxPositionExposureLotsMax
     );
+    expect(DEMO_HARD_CAPS.maxPositionExposureLotsMax).toBe(250);
     const r = baseSizing({
       riskAmountDeposit: 300,
       remainingDailyLossCapacity: 10_000,
-      maxPositionExposureLots: null, // Demo hard cap 100
+      maxPositionExposureLots: null, // Demo hard cap 250 — €300 still far above
       freeMargin: 1_000_000
     });
     expect(r.ok).toBe(false);
     expect(r.rejectionReason).toBe("RISK_SIZE_EXCEEDS_EXPOSURE_CAP");
+  });
+
+  it("Demo hard exposure cap raised for oz-model; Live exposure cap unchanged", async () => {
+    const { LIVE_HARD_CAPS } = await import(
+      "../../../../src/services/broker/ctrader/liveRiskCaps"
+    );
+    expect(LIVE_HARD_CAPS.maxPositionExposureLotsMax).toBe(2);
+    expect(DEMO_HARD_CAPS.maxPositionExposureLotsMax).toBe(250);
   });
 
   it("L: missing/stale FX conversion fails closed", () => {
