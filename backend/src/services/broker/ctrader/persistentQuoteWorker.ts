@@ -28,7 +28,8 @@ import {
 import { nextQuoteSequence, saveAuthoritativeQuote, getStoredAuthoritativeQuote } from "./quoteStore";
 import {
   marketStatusFromSchedule,
-  parseScheduleIntervals
+  parseScheduleIntervals,
+  type ScheduleInterval
 } from "./marketSchedule";
 import {
   assertAccountAllowlisted,
@@ -114,6 +115,63 @@ function stallAfterMsFor(
     : DEFAULT_QUOTE_STALL_MS;
 }
 
+/**
+ * Recompute market status from the schedule cached at worker connect.
+ * Uses marketStatusFromSchedule — no second hours implementation, no Spotware
+ * metadata round-trip. Call on every spot/persist so CLOSED↔OPEN flips while
+ * the WebSocket stays up (no reconnect required for status transitions).
+ */
+export function resolveCachedScheduleMarketStatus(args: {
+  schedule: ScheduleInterval[];
+  timeZone?: string | null;
+  now?: Date;
+}): AuthoritativeQuote["marketStatus"] {
+  if (!args.schedule.length) return "UNKNOWN";
+  return marketStatusFromSchedule({
+    schedule: args.schedule,
+    timeZone: args.timeZone,
+    now: args.now
+  });
+}
+
+/** Build an authoritative quote using current schedule evaluation (test + worker path). */
+export function buildAuthoritativeQuoteFromCachedSchedule(args: {
+  symbolId: string;
+  symbolName: string;
+  digits?: number | null;
+  pipPosition?: number | null;
+  bid: number;
+  ask: number;
+  brokerTimestamp: string;
+  quoteSequence: number;
+  environment: "DEMO" | "LIVE";
+  schedule: ScheduleInterval[];
+  scheduleTimeZone?: string | null;
+  nowMs: number;
+  source?: "LIVE" | "CACHED";
+}): AuthoritativeQuote {
+  const marketStatus = resolveCachedScheduleMarketStatus({
+    schedule: args.schedule,
+    timeZone: args.scheduleTimeZone,
+    now: new Date(args.nowMs)
+  });
+  return buildAuthoritativeQuote({
+    symbolId: args.symbolId,
+    symbolName: args.symbolName,
+    digits: args.digits,
+    pipPosition: args.pipPosition,
+    bid: args.bid,
+    ask: args.ask,
+    brokerTimestamp: args.brokerTimestamp,
+    quoteSequence: args.quoteSequence,
+    marketStatus,
+    environment: args.environment,
+    source: args.source ?? "LIVE",
+    nowMs: args.nowMs,
+    thresholds: loadLiveQuoteThresholds()
+  });
+}
+
 export class PersistentXauUsdQuoteWorker {
   private connection: InstanceType<typeof CTraderConnection> | null = null;
   private stopping = false;
@@ -121,6 +179,9 @@ export class PersistentXauUsdQuoteWorker {
   private lastPersistAt = 0;
   private lock: WorkerLockHandle | null = null;
   private lockRenewTimer: ReturnType<typeof setInterval> | null = null;
+  /** Broker symbol schedule fetched once per WS session — recomputed over time. */
+  private cachedSchedule: ScheduleInterval[] = [];
+  private cachedScheduleTimeZone = "UTC";
   private status: PersistentWorkerStatus = {
     running: false,
     ownerUid: null,
@@ -300,6 +361,8 @@ export class PersistentXauUsdQuoteWorker {
       symbolId: this.status.symbolId
     });
 
+    this.cachedSchedule = [];
+    this.cachedScheduleTimeZone = "UTC";
     let marketStatus: AuthoritativeQuote["marketStatus"] = "UNKNOWN";
     try {
       const detailRes = (await connection.sendCommand("ProtoOASymbolByIdReq", {
@@ -312,17 +375,21 @@ export class PersistentXauUsdQuoteWorker {
           ? [detailRes.symbol]
           : [];
       const detail = detailList[0] ?? {};
-      marketStatus = marketStatusFromSchedule({
-        schedule: parseScheduleIntervals(detail.schedule),
-        timeZone:
-          typeof detail.scheduleTimeZone === "string"
-            ? detail.scheduleTimeZone
-            : "UTC"
+      this.cachedSchedule = parseScheduleIntervals(detail.schedule);
+      this.cachedScheduleTimeZone =
+        typeof detail.scheduleTimeZone === "string" && detail.scheduleTimeZone.trim()
+          ? detail.scheduleTimeZone.trim()
+          : "UTC";
+      marketStatus = resolveCachedScheduleMarketStatus({
+        schedule: this.cachedSchedule,
+        timeZone: this.cachedScheduleTimeZone
       });
       if (typeof detail.symbolName === "string" && detail.symbolName.trim()) {
         this.status.symbolName = detail.symbolName.trim();
       }
     } catch {
+      this.cachedSchedule = [];
+      this.cachedScheduleTimeZone = "UTC";
       marketStatus = "UNKNOWN";
     }
     this.status.marketStatus = marketStatus;
@@ -335,7 +402,9 @@ export class PersistentXauUsdQuoteWorker {
     logWorker("quote_worker_xauusd_subscribed", {
       symbolId: this.status.symbolId,
       symbolName: this.status.symbolName,
-      marketStatus
+      marketStatus,
+      scheduleIntervalCount: this.cachedSchedule.length,
+      scheduleTimeZone: this.cachedScheduleTimeZone
     });
 
     this.status.connected = true;
@@ -354,7 +423,6 @@ export class PersistentXauUsdQuoteWorker {
         symbolName: this.status.symbolName ?? "XAUUSD",
         digits: fresh.symbolDigits ?? null,
         pipPosition: fresh.symbolPipPosition ?? null,
-        marketStatus,
         environment: isLive ? "LIVE" : "DEMO"
       }).catch((err) => {
         this.status.lastError =
@@ -363,8 +431,8 @@ export class PersistentXauUsdQuoteWorker {
     });
 
     // Spotware requires protocol heartbeats. Stream health uses valid quotes only.
+    // Market-status flips do NOT force reconnect — only a stalled quote stream does.
     const HEARTBEAT_MS = 10_000;
-    const stallAfterMs = stallAfterMsFor(marketStatus);
     await new Promise<void>((resolve) => {
       const heartbeat = setInterval(() => {
         try {
@@ -381,13 +449,24 @@ export class PersistentXauUsdQuoteWorker {
           return;
         }
         const nowMs = Date.now();
+        // Keep worker health aligned with the current schedule window.
+        const liveStatus = this.resolveSessionMarketStatus(nowMs);
+        if (liveStatus !== this.status.marketStatus) {
+          logWorker("quote_worker_market_status_transition", {
+            from: this.status.marketStatus,
+            to: liveStatus,
+            reconnectRequired: false
+          });
+          this.status.marketStatus = liveStatus;
+        }
+        const stallAfterMs = stallAfterMsFor(liveStatus);
         // Grace window after subscribe for the first valid tick.
         if (nowMs - sessionStartedAtMs < stallAfterMs) return;
         const health = evaluateQuoteStreamHealth({
           nowMs,
           lastValidQuoteAtMs: this.status.lastValidQuoteAtMs,
           lastPersistedQuoteAtMs: this.status.lastPersistedQuoteAtMs,
-          marketStatus,
+          marketStatus: liveStatus,
           stallAfterMs
         });
         if (health.stalled) {
@@ -396,7 +475,7 @@ export class PersistentXauUsdQuoteWorker {
             reason: health.reason,
             ageMs: health.ageMs,
             stallAfterMs: health.stallAfterMs,
-            marketStatus,
+            marketStatus: liveStatus,
             lastValidQuoteAtMs: this.status.lastValidQuoteAtMs,
             lastPersistedQuoteAtMs: this.status.lastPersistedQuoteAtMs
           });
@@ -414,6 +493,15 @@ export class PersistentXauUsdQuoteWorker {
     this.status.connected = false;
   }
 
+  /** Current market status from the schedule cached for this WS session. */
+  private resolveSessionMarketStatus(nowMs: number = Date.now()): AuthoritativeQuote["marketStatus"] {
+    return resolveCachedScheduleMarketStatus({
+      schedule: this.cachedSchedule,
+      timeZone: this.cachedScheduleTimeZone,
+      now: new Date(nowMs)
+    });
+  }
+
   private async onSpot(
     spot: Record<string, unknown>,
     meta: {
@@ -422,7 +510,6 @@ export class PersistentXauUsdQuoteWorker {
       symbolName: string;
       digits: number | null;
       pipPosition: number | null;
-      marketStatus: AuthoritativeQuote["marketStatus"];
       environment: "DEMO" | "LIVE";
     }
   ): Promise<void> {
@@ -444,6 +531,17 @@ export class PersistentXauUsdQuoteWorker {
 
     const now = Date.now();
     this.status.lastValidQuoteAtMs = now;
+    // Recompute from cached broker schedule on every accepted spot so a worker
+    // that connected during rollover flips to OPEN without reconnecting.
+    const marketStatus = this.resolveSessionMarketStatus(now);
+    if (marketStatus !== this.status.marketStatus) {
+      logWorker("quote_worker_market_status_transition", {
+        from: this.status.marketStatus,
+        to: marketStatus,
+        reconnectRequired: false
+      });
+    }
+    this.status.marketStatus = marketStatus;
 
     if (now - this.lastPersistAt < this.persistMinMs && this.status.lastQuote) {
       // Still update in-memory last quote for health, throttle Firestore writes.
@@ -460,7 +558,7 @@ export class PersistentXauUsdQuoteWorker {
         ask,
         brokerTimestamp,
         quoteSequence: this.status.lastQuote.quoteSequence,
-        marketStatus: meta.marketStatus,
+        marketStatus,
         environment: meta.environment,
         source: "LIVE",
         nowMs: now,
@@ -483,7 +581,7 @@ export class PersistentXauUsdQuoteWorker {
       ask,
       brokerTimestamp,
       quoteSequence: sequence,
-      marketStatus: meta.marketStatus,
+      marketStatus,
       environment: meta.environment,
       source: "LIVE",
       nowMs: now,
