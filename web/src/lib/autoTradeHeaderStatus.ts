@@ -103,9 +103,12 @@ export function deriveAutoTradeHeaderStatus(args: {
   }
 
   // Qualification never started — do not show misleading QUALIFYING.
-  if (!startedAt && (qState === "READY_TO_QUALIFY" || qState === "SETUP_REQUIRED" || !qState)) {
-    const setupReady = qState === "READY_TO_QUALIFY" || Boolean(qualification?.canStart);
-    if (setupReady || qState === "READY_TO_QUALIFY") {
+  if (!startedAt) {
+    const awaitingStart =
+      qState == null ||
+      qState === "READY_TO_QUALIFY" ||
+      qState === "SETUP_REQUIRED";
+    if (awaitingStart) {
       return {
         label: "DEMO AUTO NOT ACTIVE",
         environment: "DEMO",

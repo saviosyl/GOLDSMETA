@@ -132,7 +132,6 @@ export interface CTraderDiagnosticsReport {
     lotSize?: number | null;
   } | null;
   technical?: Record<string, unknown>;
-  orderSubmissionEnabled?: false;
   label?: string;
 }
 

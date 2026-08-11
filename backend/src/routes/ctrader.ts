@@ -947,11 +947,22 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         patch.liveActivationConfirmedAt = null;
       }
       const settings = await saveUserAutoTradeSettings(uid, environment, patch);
+      // Recalculate Demo Auto authority AFTER mutation — never return stale hardcoded OFF.
+      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
       res.json({
         settings,
         recommended: recommendedAutoTradeSettings(),
-        orderSubmissionEnabled: false,
-        autoTrade: "OFF"
+        orderSubmissionEnabled:
+          environment === "live" ? false : surface.orderSubmissionEnabled,
+        autoTrade: environment === "live" ? "LOCKED" : surface.autoTrade,
+        demoAutoAuthority,
+        executionNote:
+          environment === "live"
+            ? "Live execution remains hard-locked."
+            : surface.autoTrade === "ON"
+              ? "Demo Auto authority ON after settings save."
+              : "Demo Auto authority OFF — see demoAutoAuthority.reasons."
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -989,15 +1000,24 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       } catch {
         /* qualification optional */
       }
+      // Re-resolve authority after e-stop mutation — active ⇒ blocked; cleared ⇒ real state.
+      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+      const liveEnv = environment === "live";
       res.json({
         settings,
         emergencyStopActive: settings.emergencyStopActive,
         environment,
-        orderSubmissionEnabled: false,
-        autoTrade: "OFF",
+        orderSubmissionEnabled: liveEnv ? false : surface.orderSubmissionEnabled,
+        autoTrade: liveEnv
+          ? "LOCKED"
+          : active
+            ? "OFF"
+            : surface.autoTrade,
+        demoAutoAuthority,
         message: active
-          ? `Emergency STOP active for your ${environment === "live" ? "Live" : "Demo"} automation only.`
-          : `Emergency STOP cleared for your ${environment === "live" ? "Live" : "Demo"} automation.`
+          ? `Emergency STOP active for your ${liveEnv ? "Live" : "Demo"} automation only.`
+          : `Emergency STOP cleared for your ${liveEnv ? "Live" : "Demo"} automation.`
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));

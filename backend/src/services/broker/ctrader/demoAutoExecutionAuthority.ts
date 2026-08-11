@@ -5,7 +5,16 @@
  * qualification + autotradeSettings/demo for whether Demo orders may submit.
  *
  * This module is THE authoritative source for Demo Auto ON/OFF labels across
- * API + UI. Live execution remains hard-locked elsewhere.
+ * API + UI AND the broker submission boundary. Live execution remains hard-locked.
+ *
+ * Three concepts (keep separate):
+ * A) Demo Auto ENABLED — owner intent + qual state allow autonomous Demo trading
+ * B) Submission AUTHORIZED — enabled + Demo selected + trading OAuth + runtime flag
+ * C) Execution ELIGIBLE NOW — authorized AND market/quote healthy right now
+ *
+ * CONTROLLED_DEMO_QUALIFICATION is a separate permission path for the
+ * qualification ladder BEFORE Demo Auto intent is required. It must not bypass
+ * the owner's Demo Auto OFF switch once state is DEMO_AUTO_ENABLED / LIVE_QUALIFICATION.
  */
 
 import { getConnection } from "./connectionStore";
@@ -42,6 +51,7 @@ export type DemoAutoExecutionAuthority = {
  * Live execution is never enabled by this object.
  */
 export type DemoAutoAuthorityApi = {
+  /** A) Owner Demo Auto ENABLED (intent + qual + not paused/e-stop + flag). */
   enabled: boolean;
   label: "ON" | "OFF" | "PAUSED" | "LOCKED_LIVE";
   reasons: string[];
@@ -53,7 +63,12 @@ export type DemoAutoAuthorityApi = {
   selectedDemoAccount: string | null;
   tradingScope: "accounts" | "trading" | null;
   quoteHealthy: boolean;
+  /** B) Submission AUTHORIZED — enabled + Demo selected + trading OAuth. */
+  submissionAuthorized: boolean;
+  /** C) Execution ELIGIBLE NOW — authorized AND quote/market healthy. */
   executionEligible: boolean;
+  /** Human label for C, e.g. READY / WAITING — MARKET CLOSED / BLOCKED. */
+  executionNowLabel: string;
   /** Distinct from legacy risk.mode — never overridden by IG/T212 OFF. */
   authorityLabel: DemoAutoExecutionAuthority["authorityLabel"];
   startedAt: string | null;
@@ -62,6 +77,59 @@ export type DemoAutoAuthorityApi = {
   quoteExecutable: boolean | null;
   marketStatus: string | null;
 };
+
+/** Autonomous Demo Auto states that require owner intent=true. */
+export const AUTONOMOUS_DEMO_ORDER_STATES: QualificationState[] = [
+  "DEMO_AUTO_ENABLED",
+  "LIVE_QUALIFICATION"
+];
+
+/**
+ * Controlled qualification may place Demo orders to prove the ladder
+ * BEFORE the owner enables Demo Auto intent. Explicit and separate from
+ * autonomous Demo Auto authority.
+ */
+export function allowsControlledDemoQualificationOrders(
+  state: QualificationState | null | undefined
+): boolean {
+  return state === "CONTROLLED_DEMO_QUALIFICATION";
+}
+
+export type ControlledDemoOrderAuthorityInput = {
+  qualificationState: QualificationState | null | undefined;
+  autoTradePaused: boolean;
+  emergencyStopActive: boolean;
+  selectedAccountIsLive: boolean;
+  demoAccountSelected: boolean;
+  tradingScope: "accounts" | "trading" | null;
+  demoOrderSubmissionEnabled: boolean;
+};
+
+export type ControlledDemoOrderAuthority = {
+  allowed: boolean;
+  reasons: string[];
+};
+
+/**
+ * Permission for CONTROLLED_DEMO_QUALIFICATION ladder orders only.
+ * Does NOT require autoTradeEnabledIntent — by design.
+ * Must never be used for DEMO_AUTO_ENABLED / LIVE_QUALIFICATION.
+ */
+export function evaluateControlledDemoOrderAuthority(
+  input: ControlledDemoOrderAuthorityInput
+): ControlledDemoOrderAuthority {
+  const reasons: string[] = [];
+  if (input.selectedAccountIsLive) reasons.push("SELECTED_ACCOUNT_IS_LIVE");
+  if (!input.demoAccountSelected) reasons.push("DEMO_ACCOUNT_NOT_SELECTED");
+  if (input.tradingScope !== "trading") reasons.push("TRADING_OAUTH_REQUIRED");
+  if (input.emergencyStopActive) reasons.push("EMERGENCY_STOP");
+  if (input.autoTradePaused) reasons.push("AUTOTRADE_PAUSED");
+  if (!input.demoOrderSubmissionEnabled) reasons.push("DEMO_SUBMISSION_FLAG_OFF");
+  if (!allowsControlledDemoQualificationOrders(input.qualificationState)) {
+    reasons.push("NOT_CONTROLLED_DEMO_STATE");
+  }
+  return { allowed: reasons.length === 0, reasons };
+}
 
 export function evaluateDemoAutoExecutionAuthority(
   input: DemoAutoExecutionAuthorityInput
@@ -88,8 +156,21 @@ export function evaluateDemoAutoExecutionAuthority(
   if (!input.demoOrderSubmissionEnabled) {
     reasons.push("DEMO_SUBMISSION_FLAG_OFF");
   }
-  if (!state || !allowsDemoOrderSubmission(state)) {
-    reasons.push("QUALIFICATION_STATE_BLOCKS_ORDERS");
+  // Autonomous Demo Auto requires DEMO_AUTO_ENABLED / LIVE_QUALIFICATION.
+  // CONTROLLED_DEMO is handled by evaluateControlledDemoOrderAuthority instead.
+  const autonomousOk =
+    state != null && AUTONOMOUS_DEMO_ORDER_STATES.includes(state);
+  if (!autonomousOk) {
+    // Keep prior allowsDemoOrderSubmission semantics for label surfaces that
+    // still treat CONTROLLED as "can eventually submit", but do not enable
+    // autonomous authority from CONTROLLED alone.
+    if (!state || !allowsDemoOrderSubmission(state)) {
+      reasons.push("QUALIFICATION_STATE_BLOCKS_ORDERS");
+    } else if (state === "CONTROLLED_DEMO_QUALIFICATION") {
+      reasons.push("CONTROLLED_PHASE_REQUIRES_SEPARATE_PERMISSION");
+    } else {
+      reasons.push("QUALIFICATION_STATE_BLOCKS_ORDERS");
+    }
   }
 
   const demoExecutionEnabled =
@@ -98,21 +179,41 @@ export function evaluateDemoAutoExecutionAuthority(
     !input.autoTradePaused &&
     input.autoTradeEnabledIntent &&
     input.demoOrderSubmissionEnabled &&
-    Boolean(state && allowsDemoOrderSubmission(state));
+    autonomousOk;
 
   let authorityLabel: DemoAutoExecutionAuthority["authorityLabel"] = "OFF";
   if (input.selectedAccountIsLive) authorityLabel = "DEMO_AUTO_LOCKED_LIVE";
   else if (demoExecutionEnabled) authorityLabel = "DEMO_AUTO";
   else if (
     input.autoTradeEnabledIntent &&
-    state &&
-    allowsDemoOrderSubmission(state) &&
+    autonomousOk &&
     input.autoTradePaused
   ) {
     authorityLabel = "DEMO_AUTO_PAUSED";
   }
 
   return { demoExecutionEnabled, authorityLabel, reasons };
+}
+
+export function executionNowLabelFor(args: {
+  submissionAuthorized: boolean;
+  executionEligible: boolean;
+  marketStatus: string | null;
+  quoteHealthy: boolean;
+  reasons: string[];
+}): string {
+  if (args.executionEligible) return "READY";
+  if (!args.submissionAuthorized) {
+    const first = args.reasons[0];
+    if (first === "EMERGENCY_STOP") return "BLOCKED — EMERGENCY STOP";
+    if (first === "AUTOTRADE_PAUSED") return "BLOCKED — PAUSED";
+    if (first === "INTENT_OFF") return "BLOCKED — INTENT OFF";
+    if (first === "SELECTED_ACCOUNT_IS_LIVE") return "LOCKED — LIVE";
+    return "BLOCKED";
+  }
+  if (args.marketStatus === "CLOSED") return "WAITING — MARKET CLOSED";
+  if (!args.quoteHealthy) return "WAITING — QUOTE";
+  return "WAITING";
 }
 
 export function toDemoAutoAuthorityApi(args: {
@@ -137,11 +238,13 @@ export function toDemoAutoAuthorityApi(args: {
   else if (authority.authorityLabel === "DEMO_AUTO_PAUSED") label = "PAUSED";
   else if (authority.demoExecutionEnabled) label = "ON";
 
-  const executionEligible =
+  const submissionAuthorized =
     authority.demoExecutionEnabled &&
-    args.quoteHealthy &&
     args.tradingScope === "trading" &&
     Boolean(args.selectedDemoAccount);
+
+  const executionEligible = submissionAuthorized && args.quoteHealthy;
+  const marketStatus = args.marketStatus ?? null;
 
   return {
     enabled: authority.demoExecutionEnabled,
@@ -155,14 +258,68 @@ export function toDemoAutoAuthorityApi(args: {
     selectedDemoAccount: args.selectedDemoAccount,
     tradingScope: args.tradingScope,
     quoteHealthy: args.quoteHealthy,
+    submissionAuthorized,
     executionEligible,
+    executionNowLabel: executionNowLabelFor({
+      submissionAuthorized,
+      executionEligible,
+      marketStatus,
+      quoteHealthy: args.quoteHealthy,
+      reasons: authority.reasons
+    }),
     authorityLabel: authority.authorityLabel,
     startedAt: args.startedAt ?? null,
     demoAutoEnabledAt: args.demoAutoEnabledAt ?? null,
     quoteAgeSeconds: args.quoteAgeSeconds ?? null,
     quoteExecutable: args.quoteExecutable ?? null,
-    marketStatus: args.marketStatus ?? null
+    marketStatus
   };
+}
+
+/**
+ * Final broker-submission gate for autonomous Demo Auto
+ * (DEMO_AUTO_ENABLED / LIVE_QUALIFICATION).
+ * Fail closed unless Demo + trading OAuth + intent + not paused + not e-stop + flag.
+ */
+export function assertAutonomousDemoSubmissionAllowed(
+  authority: DemoAutoAuthorityApi
+): { ok: true } | { ok: false; reasonCode: string; reasons: string[] } {
+  if (authority.qualificationState === "CONTROLLED_DEMO_QUALIFICATION") {
+    return {
+      ok: false,
+      reasonCode: "EXECUTION_AUTHORITY_OFF",
+      reasons: ["USE_CONTROLLED_PERMISSION_PATH"]
+    };
+  }
+  if (!authority.enabled) {
+    return {
+      ok: false,
+      reasonCode: "EXECUTION_AUTHORITY_OFF",
+      reasons: authority.reasons.length ? authority.reasons : ["AUTHORITY_OFF"]
+    };
+  }
+  if (authority.tradingScope !== "trading") {
+    return {
+      ok: false,
+      reasonCode: "EXECUTION_AUTHORITY_OFF",
+      reasons: ["TRADING_OAUTH_REQUIRED", ...authority.reasons]
+    };
+  }
+  if (!authority.selectedDemoAccount) {
+    return {
+      ok: false,
+      reasonCode: "EXECUTION_AUTHORITY_OFF",
+      reasons: ["DEMO_ACCOUNT_NOT_SELECTED", ...authority.reasons]
+    };
+  }
+  if (!authority.demoSubmissionFlag) {
+    return {
+      ok: false,
+      reasonCode: "EXECUTION_AUTHORITY_OFF",
+      reasons: ["DEMO_SUBMISSION_FLAG_OFF", ...authority.reasons]
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -281,28 +438,36 @@ function maskAccountId(id: string | null | undefined): string | null {
 /**
  * Surface labels for legacy autoTrade / orderSubmissionEnabled fields.
  * Live order submission is ALWAYS false. Demo submission follows authority.
+ * orderSubmissionEnabled reflects submissionAuthorized (B), not market-open (C).
  */
 export function demoAutoSurfaceLabels(authority: DemoAutoAuthorityApi | DemoAutoExecutionAuthority): {
   autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
   orderSubmissionEnabled: boolean;
 } {
-  const enabled =
-    "enabled" in authority ? authority.enabled : authority.demoExecutionEnabled;
-  const label =
-    "label" in authority
-      ? authority.label
-      : authority.authorityLabel === "DEMO_AUTO"
-        ? "ON"
-        : authority.authorityLabel === "DEMO_AUTO_PAUSED"
-          ? "PAUSED"
-          : authority.authorityLabel === "DEMO_AUTO_LOCKED_LIVE"
-            ? "LOCKED_LIVE"
-            : "OFF";
+  if ("submissionAuthorized" in authority) {
+    if (authority.label === "LOCKED_LIVE") {
+      return { autoTrade: "LOCKED", orderSubmissionEnabled: false };
+    }
+    if (authority.label === "PAUSED" || authority.emergencyStop) {
+      return {
+        autoTrade: authority.emergencyStop ? "OFF" : "PAUSED",
+        orderSubmissionEnabled: false
+      };
+    }
+    if (authority.enabled) {
+      return {
+        autoTrade: "ON",
+        orderSubmissionEnabled: authority.submissionAuthorized
+      };
+    }
+    return { autoTrade: "OFF", orderSubmissionEnabled: false };
+  }
 
-  if (label === "LOCKED_LIVE") {
+  const enabled = authority.demoExecutionEnabled;
+  if (authority.authorityLabel === "DEMO_AUTO_LOCKED_LIVE") {
     return { autoTrade: "LOCKED", orderSubmissionEnabled: false };
   }
-  if (label === "PAUSED") {
+  if (authority.authorityLabel === "DEMO_AUTO_PAUSED") {
     return { autoTrade: "PAUSED", orderSubmissionEnabled: false };
   }
   if (enabled) {

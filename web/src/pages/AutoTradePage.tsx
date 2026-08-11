@@ -1089,8 +1089,6 @@ export function AutoTradePage() {
         <DemoAutoTradeHealthCard
           authority={demoAutoAuthority}
           qualification={qualification}
-          signalEngineActive
-          decisionTriggerActive
         />
       ) : null}
 

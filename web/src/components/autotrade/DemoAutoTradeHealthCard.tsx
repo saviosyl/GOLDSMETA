@@ -1,5 +1,6 @@
 /**
  * Compact DEMO AUTOTRADE HEALTH card — owner can see in ~5s whether Demo Auto will trade.
+ * Never invents healthy telemetry: unknown engines show WAITING FOR DATA.
  */
 
 import type { DemoAutoAuthorityApi } from "../../lib/broker/demoAutoAuthority";
@@ -12,11 +13,19 @@ function ageLabel(seconds: number | null | undefined): string {
   return `${Math.round(seconds / 60)}m`;
 }
 
+function maskOrderId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const s = String(id);
+  if (s.length < 4) return "…";
+  return `${s.slice(0, 2)}…${s.slice(-2)}`;
+}
+
 export function DemoAutoTradeHealthCard(props: {
   authority: DemoAutoAuthorityApi | null | undefined;
   qualification: QualificationPublicView | null | undefined;
-  signalEngineActive?: boolean;
-  decisionTriggerActive?: boolean;
+  /** Only pass when backed by real heartbeat/status — otherwise omit (shows WAITING FOR DATA). */
+  signalEngineActive?: boolean | null;
+  decisionTriggerActive?: boolean | null;
 }) {
   const a = props.authority;
   const q = props.qualification;
@@ -24,32 +33,63 @@ export function DemoAutoTradeHealthCard(props: {
   const lastBlocker =
     lastEval && lastEval.outcome !== "QUALIFIED"
       ? lastEval.reasonLabel || (lastEval.failed?.[0] ?? "—")
-      : a?.reasons?.[0]
-        ? a.reasons[0].replace(/_/g, " ")
-        : "none";
+      : a?.marketStatus === "CLOSED" && a.enabled
+        ? "MARKET CLOSED"
+        : a?.reasons?.[0]
+          ? a.reasons[0].replace(/_/g, " ")
+          : "—";
+
   const account =
     a?.selectedDemoAccount || q?.accountMasked
       ? `Demo ${a?.selectedDemoAccount || q?.accountMasked}`
       : "—";
   const oauthOk = a?.tradingScope === "trading";
   const demoOn = Boolean(a?.enabled);
+  const submissionReady = Boolean(
+    a?.submissionAuthorized ?? (a?.enabled && a?.tradingScope === "trading")
+  );
+
   const quote =
     a?.marketStatus === "CLOSED"
-      ? "CLOSED"
+      ? `CLOSED / ${ageLabel(a.quoteAgeSeconds)}`
       : a?.quoteHealthy
         ? `LIVE / ${ageLabel(a.quoteAgeSeconds)}`
         : a?.quoteAgeSeconds != null
           ? `age ${ageLabel(a.quoteAgeSeconds)}`
           : "—";
-  const execution = a?.executionEligible
-    ? "READY"
-    : demoOn
-      ? "BLOCKED"
-      : "BLOCKED";
+
+  const executionNow =
+    a?.executionNowLabel ??
+    (a?.executionEligible
+      ? "READY"
+      : a?.marketStatus === "CLOSED" && submissionReady
+        ? "WAITING — MARKET CLOSED"
+        : submissionReady
+          ? "WAITING"
+          : "BLOCKED");
+
   const qualLabel =
     !a?.startedAt && (a?.qualificationState === "READY_TO_QUALIFY" || !a?.qualificationState)
       ? "NOT STARTED"
       : (q?.overallLabel || a?.qualificationState || "—").toString();
+
+  const lastBrokerOrder =
+    maskOrderId(
+      q?.recentControlledTrades?.find((t) => t.status !== "REJECTED")?.correlationId
+    ) ?? "—";
+
+  const signalLabel =
+    props.signalEngineActive === true
+      ? "Active ✓"
+      : props.signalEngineActive === false
+        ? "Inactive"
+        : "WAITING FOR DATA";
+  const triggerLabel =
+    props.decisionTriggerActive === true
+      ? "Active ✓"
+      : props.decisionTriggerActive === false
+        ? "Inactive"
+        : "WAITING FOR DATA";
 
   return (
     <article
@@ -67,15 +107,15 @@ export function DemoAutoTradeHealthCard(props: {
         </div>
         <div>
           <dt>Trading OAuth</dt>
-          <dd data-testid="health-oauth">{oauthOk ? "Granted ✓" : "Missing"}</dd>
+          <dd data-testid="health-oauth">{oauthOk ? "Granted ✓" : a ? "Missing" : "—"}</dd>
         </div>
         <div>
           <dt>Signal engine</dt>
-          <dd>{props.signalEngineActive !== false ? "Active ✓" : "Unknown"}</dd>
+          <dd data-testid="health-signal-engine">{signalLabel}</dd>
         </div>
         <div>
           <dt>Decision trigger</dt>
-          <dd>{props.decisionTriggerActive !== false ? "Active ✓" : "Unknown"}</dd>
+          <dd data-testid="health-decision-trigger">{triggerLabel}</dd>
         </div>
         <div>
           <dt>Qualification</dt>
@@ -83,15 +123,23 @@ export function DemoAutoTradeHealthCard(props: {
         </div>
         <div>
           <dt>Demo Auto</dt>
-          <dd data-testid="health-demo-auto">{demoOn ? "ON" : a?.label === "PAUSED" ? "PAUSED" : "OFF"}</dd>
+          <dd data-testid="health-demo-auto">
+            {demoOn ? "ON" : a?.label === "PAUSED" ? "PAUSED" : a ? "OFF" : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt>Submission</dt>
+          <dd data-testid="health-submission">
+            {submissionReady ? "READY" : a ? "NOT AUTHORIZED" : "—"}
+          </dd>
         </div>
         <div>
           <dt>Quote</dt>
           <dd data-testid="health-quote">{quote}</dd>
         </div>
         <div>
-          <dt>Execution</dt>
-          <dd data-testid="health-execution">{execution}</dd>
+          <dt>Execution now</dt>
+          <dd data-testid="health-execution">{executionNow}</dd>
         </div>
         <div>
           <dt>Last evaluation</dt>
@@ -105,7 +153,7 @@ export function DemoAutoTradeHealthCard(props: {
         </div>
         <div>
           <dt>Last broker order</dt>
-          <dd data-testid="health-last-order">none</dd>
+          <dd data-testid="health-last-order">{lastBrokerOrder}</dd>
         </div>
       </dl>
     </article>

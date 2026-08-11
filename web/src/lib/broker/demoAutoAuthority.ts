@@ -3,6 +3,7 @@
 import type { QualificationState } from "./qualificationTypes";
 
 export type DemoAutoAuthorityApi = {
+  /** A) Owner Demo Auto ENABLED */
   enabled: boolean;
   label: "ON" | "OFF" | "PAUSED" | "LOCKED_LIVE";
   reasons: string[];
@@ -14,7 +15,12 @@ export type DemoAutoAuthorityApi = {
   selectedDemoAccount: string | null;
   tradingScope: "accounts" | "trading" | null;
   quoteHealthy: boolean;
+  /** B) Submission AUTHORIZED (enabled + Demo + trading OAuth) */
+  submissionAuthorized?: boolean;
+  /** C) Execution ELIGIBLE NOW (authorized + quote/market) */
   executionEligible: boolean;
+  /** Human label for C */
+  executionNowLabel?: string;
   authorityLabel: "DEMO_AUTO" | "DEMO_AUTO_PAUSED" | "DEMO_AUTO_LOCKED_LIVE" | "OFF";
   startedAt: string | null;
   demoAutoEnabledAt: string | null;

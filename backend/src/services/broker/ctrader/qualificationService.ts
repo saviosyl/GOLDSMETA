@@ -14,6 +14,11 @@ import {
 } from "./userAutoTradeSettings";
 import { submitDemoMarketOrder } from "./demoOrderExecution";
 import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
+import {
+  assertAutonomousDemoSubmissionAllowed,
+  evaluateControlledDemoOrderAuthority,
+  resolveDemoAutoAuthorityForUser
+} from "./demoAutoExecutionAuthority";
 import { calculateCTraderVolume } from "./sizing";
 import { resolvePepperstoneXauUsdDemoMapping } from "./brokerUnitMappings";
 import { calculatePepperstoneXauUsdDemoVolume } from "./demoXauUsdSizing";
@@ -1401,6 +1406,54 @@ export async function processDecisionForQualification(args: {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
       return { handled: true, message: sizingRejectMessage };
+    }
+
+    // Final broker-submission authority gate (same SSOT as API/UI).
+    // CONTROLLED_DEMO_QUALIFICATION: explicit ladder permission (intent not required).
+    // DEMO_AUTO_ENABLED / LIVE_QUALIFICATION: full autonomous Demo Auto authority
+    // including owner intent — CONTROLLED must not bypass intent OFF.
+    if (state === "CONTROLLED_DEMO_QUALIFICATION") {
+      const connection = await getConnection(uid);
+      const controlledAuth = evaluateControlledDemoOrderAuthority({
+        qualificationState: state,
+        autoTradePaused: settings.autoTradePaused,
+        emergencyStopActive: settings.emergencyStopActive,
+        selectedAccountIsLive: Boolean(connection?.selectedAccountIsLive),
+        demoAccountSelected: Boolean(
+          connection?.selectedAccountId && !connection.selectedAccountIsLive
+        ),
+        tradingScope: connection?.oauthScope ?? null,
+        demoOrderSubmissionEnabled: isCTraderDemoOrderSubmissionEnabled()
+      });
+      if (!controlledAuth.allowed) {
+        await logEval(
+          "REJECTED",
+          "EXECUTION_AUTHORITY_OFF",
+          controlledAuth.reasons,
+          candidate.passed,
+          {
+            brokerSubmissionAttempted: false,
+            executionAuthority: "CONTROLLED_OFF"
+          }
+        );
+        return { handled: true, message: "execution_authority_off" };
+      }
+    } else {
+      const demoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const gate = assertAutonomousDemoSubmissionAllowed(demoAuthority);
+      if (!gate.ok) {
+        await logEval(
+          "REJECTED",
+          gate.reasonCode,
+          gate.reasons,
+          candidate.passed,
+          {
+            brokerSubmissionAttempted: false,
+            executionAuthority: "OFF"
+          }
+        );
+        return { handled: true, message: "execution_authority_off" };
+      }
     }
 
     const correlationId = newId("corr");

@@ -144,9 +144,9 @@ describe("Demo Auto SSOT authority API", () => {
     ).toBe("BUY 91/100 skipped — Demo Auto qualification was not started.");
   });
 
-  it("BUY and SELL authority identical when gates pass", () => {
+  it("BUY and SELL autonomous authority identical when gates pass", () => {
     const buy = evaluateDemoAutoExecutionAuthority({
-      qualificationState: "CONTROLLED_DEMO_QUALIFICATION",
+      qualificationState: "LIVE_QUALIFICATION",
       autoTradeEnabledIntent: true,
       autoTradePaused: false,
       emergencyStopActive: false,
@@ -154,7 +154,7 @@ describe("Demo Auto SSOT authority API", () => {
       demoOrderSubmissionEnabled: true
     });
     const sell = evaluateDemoAutoExecutionAuthority({
-      qualificationState: "CONTROLLED_DEMO_QUALIFICATION",
+      qualificationState: "LIVE_QUALIFICATION",
       autoTradeEnabledIntent: true,
       autoTradePaused: false,
       emergencyStopActive: false,
@@ -164,5 +164,31 @@ describe("Demo Auto SSOT authority API", () => {
     expect(buy.demoExecutionEnabled).toBe(true);
     expect(sell.demoExecutionEnabled).toBe(true);
     expect(buy.authorityLabel).toBe(sell.authorityLabel);
+  });
+
+  it("CONTROLLED_DEMO is not autonomous Demo Auto (intent alone does not enable)", () => {
+    const authority = evaluateDemoAutoExecutionAuthority({
+      qualificationState: "CONTROLLED_DEMO_QUALIFICATION",
+      autoTradeEnabledIntent: true,
+      autoTradePaused: false,
+      emergencyStopActive: false,
+      selectedAccountIsLive: false,
+      demoOrderSubmissionEnabled: true
+    });
+    expect(authority.demoExecutionEnabled).toBe(false);
+    expect(authority.reasons).toContain("CONTROLLED_PHASE_REQUIRES_SEPARATE_PERMISSION");
+  });
+
+  it("LIVE_QUALIFICATION + intent OFF → autonomous authority OFF", () => {
+    const authority = evaluateDemoAutoExecutionAuthority({
+      qualificationState: "LIVE_QUALIFICATION",
+      autoTradeEnabledIntent: false,
+      autoTradePaused: false,
+      emergencyStopActive: false,
+      selectedAccountIsLive: false,
+      demoOrderSubmissionEnabled: true
+    });
+    expect(authority.demoExecutionEnabled).toBe(false);
+    expect(authority.reasons).toContain("INTENT_OFF");
   });
 });
