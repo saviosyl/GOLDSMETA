@@ -2767,6 +2767,37 @@ a {
   overflow-wrap: anywhere;
 }
 
+.gm-at-health {
+  margin: 0 0 1rem;
+}
+
+.gm-at-health-grid {
+  margin: 0.75rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem 1rem;
+}
+
+.gm-at-health-grid div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.gm-at-health-grid dt {
+  color: var(--muted);
+  font: 600 0.68rem/1.2 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gm-at-health-grid dd {
+  margin: 0;
+  font: 650 0.88rem/1.3 var(--font-sans);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .gm-at-advanced,
 .gm-at-other-brokers {
   margin: 0 0 1.25rem;

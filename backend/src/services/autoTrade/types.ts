@@ -230,8 +230,10 @@ export interface AutoTradeStatusPayload {
   lockReason: string | null;
   emergencyStopActive: boolean;
   liveExecutionFeatureEnabled: boolean;
-  /** Hard false for this verification stage. */
+  /** Runtime Demo submission flag (CTRADER_DEMO_ORDER_SUBMISSION_ENABLED). */
   demoOrderSubmissionEnabled: boolean;
+  /** Pepperstone Demo Auto SSOT — UI must derive ON/OFF from this, not legacy mode. */
+  demoAutoAuthority?: import("../broker/ctrader/demoAutoExecutionAuthority").DemoAutoAuthorityApi | null;
   /** Master broker execution kill switch — always false in this release. */
   brokerExecutionEnabled: false;
   t212PaperOrderSubmissionEnabled: false;

@@ -252,6 +252,8 @@ export interface AutoTradeStatus {
   emergencyStopActive: boolean;
   liveExecutionFeatureEnabled: boolean;
   demoOrderSubmissionEnabled?: boolean;
+  /** Pepperstone Demo Auto SSOT — prefer over legacy mode for ON/OFF. */
+  demoAutoAuthority?: import("./broker/demoAutoAuthority").DemoAutoAuthorityApi | null;
   brokerExecutionEnabled?: false;
   t212PaperOrderSubmissionEnabled?: false;
   t212LiveExecutionFeatureEnabled?: false;

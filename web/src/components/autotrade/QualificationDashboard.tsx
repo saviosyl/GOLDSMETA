@@ -183,7 +183,7 @@ export function QualificationDashboard({
             data-testid="qual-start"
             onClick={onStart}
           >
-            Start qualification
+            Start Demo Auto qualification
           </button>
         ) : null}
         {view.canEnableDemoAuto ? (

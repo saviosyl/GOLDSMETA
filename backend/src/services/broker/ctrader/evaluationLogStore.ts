@@ -18,6 +18,8 @@ export type EvaluationRecord = {
   stage: string;
   direction: string;
   signalIdHash: string;
+  /** Original decision id when available (not hashed). */
+  decisionId?: string | null;
   confidence: number | null;
   entry: number | null;
   stopLoss: number | null;
@@ -30,6 +32,21 @@ export type EvaluationRecord = {
   reasonLabel: string;
   passed: string[];
   failed: string[];
+  /** Pipeline stage results for missed-opportunity audit (optional). */
+  pipeline?: {
+    confirmation?: string | null;
+    session?: string | null;
+    news?: string | null;
+    quoteAge?: string | null;
+    dailyLimits?: string | null;
+    openPositions?: string | null;
+    armedCandidate?: string | null;
+    executionAuthority?: string | null;
+    brokerSubmissionAttempted?: boolean;
+    brokerOrderIdMasked?: string | null;
+  };
+  /** One human-readable final reason when not submitted. */
+  finalReason?: string | null;
 };
 
 function col(uid: string) {
@@ -79,15 +96,45 @@ export function reasonLabelFor(code: string): string {
     CANDIDATE_INVALIDATED_STALE: "Armed setup cancelled — stale / expired",
     ENTRY_CONFIRMATION_RECEIVED: "Entry confirmation received",
     EXECUTION_ALREADY_ATTEMPTED: "Duplicate execution suppressed",
-    FINAL_SAFETY_FAILED: "Final safety check rejected execution"
+    FINAL_SAFETY_FAILED: "Final safety check rejected execution",
+    QUALIFICATION_NOT_STARTED: "Demo Auto qualification was not started",
+    EXECUTION_AUTHORITY_OFF: "Demo Auto authority OFF",
+    BROKER_SUBMITTED: "Broker Demo order submitted",
+    BROKER_BOUNDARY_REACHED: "Reached Demo order submission boundary"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
+}
+
+/** Human-readable Activity line, e.g. "BUY 91/100 skipped — Demo Auto qualification was not started." */
+export function formatEvaluationActivityMessage(row: {
+  direction: string;
+  confidence: number | null;
+  outcome: EvaluationOutcome;
+  reasonCode: string;
+  reasonLabel?: string | null;
+  finalReason?: string | null;
+}): string {
+  const dir = String(row.direction || "WAIT").toUpperCase();
+  const score =
+    row.confidence != null && Number.isFinite(row.confidence)
+      ? `${Math.round(row.confidence)}/100`
+      : null;
+  const head = score ? `${dir} ${score}` : dir;
+  if (row.outcome === "QUALIFIED" && row.reasonCode === "BROKER_SUBMITTED") {
+    return `${head} submitted — Demo order placed.`;
+  }
+  const why =
+    row.finalReason ||
+    row.reasonLabel ||
+    reasonLabelFor(row.reasonCode);
+  return `${head} skipped — ${why}.`;
 }
 
 export async function appendEvaluation(
   partial: Omit<EvaluationRecord, "id" | "signalIdHash"> & { signalId: string }
 ): Promise<EvaluationRecord> {
   const id = `ev_${Date.now().toString(36)}_${randomBytes(3).toString("hex")}`;
+  const reasonLabel = partial.reasonLabel || reasonLabelFor(partial.reasonCode);
   const row: EvaluationRecord = {
     id,
     uid: partial.uid,
@@ -97,6 +144,7 @@ export async function appendEvaluation(
     stage: partial.stage,
     direction: partial.direction,
     signalIdHash: hashSignal(partial.signalId),
+    decisionId: partial.decisionId ?? null,
     confidence: partial.confidence,
     entry: partial.entry,
     stopLoss: partial.stopLoss,
@@ -106,9 +154,13 @@ export async function appendEvaluation(
     maxSpread: partial.maxSpread,
     outcome: partial.outcome,
     reasonCode: partial.reasonCode,
-    reasonLabel: partial.reasonLabel || reasonLabelFor(partial.reasonCode),
+    reasonLabel,
     passed: partial.passed.slice(0, 24),
-    failed: partial.failed.slice(0, 24)
+    failed: partial.failed.slice(0, 24),
+    pipeline: partial.pipeline,
+    finalReason:
+      partial.finalReason ??
+      (partial.outcome === "QUALIFIED" ? null : reasonLabel)
   };
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).

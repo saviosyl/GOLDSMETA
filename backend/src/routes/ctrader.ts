@@ -26,6 +26,10 @@ import {
   isCTraderDemoOrderSubmissionEnabled,
   snapshotCTraderFlags
 } from "../services/broker/ctrader/flags";
+import {
+  demoAutoSurfaceLabels,
+  resolveDemoAutoAuthorityForUser
+} from "../services/broker/ctrader/demoAutoExecutionAuthority";
 import { CTraderMutationDisabledError } from "../services/broker/ctrader/mutationGuard";
 import { submitDemoMarketOrder } from "../services/broker/ctrader/demoOrderExecution";
 import { approveTradePreview, buildTradePreview } from "../services/broker/ctrader/preview";
@@ -272,10 +276,26 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const auth = await resolveAuthHealth(store);
     const uid = getAuthenticatedUserId(req);
     const connection = await connectionArgsForUser(uid);
+    let autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED" = "OFF";
+    let orderSubmissionEnabled = false;
+    let demoAutoAuthority = null as Awaited<
+      ReturnType<typeof resolveDemoAutoAuthorityForUser>
+    > | null;
+    try {
+      demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+      autoTrade = surface.autoTrade;
+      orderSubmissionEnabled =
+        surface.orderSubmissionEnabled && !demoAutoAuthority.emergencyStop;
+    } catch {
+      /* keep OFF when authority cannot be resolved (e.g. test/no Firestore) */
+    }
     res.json({
       ...getBrokerControlCentreSnapshot(auth, connection),
-      autoTrade: "OFF",
-      orderSubmissionEnabled: false
+      autoTrade,
+      // Live execution stays impossible; Demo submission follows authority.
+      orderSubmissionEnabled,
+      demoAutoAuthority
     });
   });
 
@@ -564,12 +584,25 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           confirmPepperstone: true,
           confirmLiveSelection: false
         });
+        // Persist into Demo Auto settings exactly as the explicit select path does.
+        await saveUserAutoTradeSettings(uid, "demo", {
+          selectedAccountId: only.ctidTraderAccountId
+        });
         autoSelected = {
           accountIdMasked: selected.account.accountIdMasked,
           brokerNameTitle: selected.account.brokerName,
           accountType: "Demo"
         };
       } else if (existing?.selectedAccountId) {
+        // Keep Demo settings selectedAccountId in sync when connection already selected Demo.
+        if (!existing.selectedAccountIsLive) {
+          const demoSettings = await getUserAutoTradeSettings(uid, "demo");
+          if (demoSettings.selectedAccountId !== existing.selectedAccountId) {
+            await saveUserAutoTradeSettings(uid, "demo", {
+              selectedAccountId: existing.selectedAccountId
+            });
+          }
+        }
         autoSelected = {
           accountIdMasked: existing.selectedAccountMasked ?? "—",
           brokerNameTitle: existing.brokerName,
@@ -577,6 +610,8 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         };
       }
       const selectedId = (await getConnection(uid))?.selectedAccountId ?? null;
+      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
       res.json({
         accounts: accounts.map((a) => ({
           ...publicAccount(a),
@@ -585,8 +620,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
           tradingPermission: "Read only"
         })),
         autoSelected,
-        orderSubmissionEnabled: false,
-        autoTrade: "OFF"
+        orderSubmissionEnabled: surface.orderSubmissionEnabled,
+        autoTrade: surface.autoTrade,
+        demoAutoAuthority
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -626,17 +662,22 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       await saveUserAutoTradeSettings(uid, isLive ? "live" : "demo", {
         selectedAccountId: body.ctidTraderAccountId
       });
+      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
       res.json({
         account: selected.account,
         symbol: selected.symbol,
         environment: isLive ? "LIVE" : "DEMO",
         accountType: isLive ? "Live" : "Demo",
         fundsLabel: isLive ? "Real money" : "Demo funds",
-        orderSubmissionEnabled: false,
-        autoTrade: "OFF",
+        orderSubmissionEnabled: isLive ? false : surface.orderSubmissionEnabled,
+        autoTrade: isLive ? "LOCKED" : surface.autoTrade,
+        demoAutoAuthority,
         label: isLive
           ? "Live account selected — confirmation required before Live AutoTrade"
-          : "Demo account selected — read-only"
+          : surface.autoTrade === "ON"
+            ? "Demo account selected — Demo Auto authority ON"
+            : "Demo account selected"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -665,8 +706,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       const report = await buildDiagnostics(uid);
       res.json({
         ...report,
-        orderSubmissionEnabled: false,
-        label: "cTrader connection diagnostics — read-only"
+        label: report.demoAutoAuthority?.enabled
+          ? "cTrader diagnostics — Demo Auto authority ON"
+          : "cTrader connection diagnostics"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -850,13 +892,20 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       return;
     }
     const settings = await getUserAutoTradeSettings(uid, environment);
+    const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+    const surface = demoAutoSurfaceLabels(demoAutoAuthority);
     res.json({
       settings,
       recommended: recommendedAutoTradeSettings(),
-      orderSubmissionEnabled: false,
-      autoTrade: "OFF",
+      orderSubmissionEnabled: environment === "live" ? false : surface.orderSubmissionEnabled,
+      autoTrade: environment === "live" ? "LOCKED" : surface.autoTrade,
+      demoAutoAuthority,
       executionNote:
-        "Settings are saved per user and environment. Order submission remains disabled in this preview."
+        environment === "live"
+          ? "Live execution remains hard-locked."
+          : surface.autoTrade === "ON"
+            ? "Demo Auto authority ON — Pepperstone Demo submission may proceed when gates pass."
+            : "Demo Auto authority OFF — see demoAutoAuthority.reasons."
     });
   });
 
@@ -1181,7 +1230,9 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const uid = requireUid(req, res);
     if (!uid) return;
     try {
-      res.json(await getQualificationView(uid));
+      const view = await getQualificationView(uid);
+      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      res.json({ ...view, demoAutoAuthority });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
     }

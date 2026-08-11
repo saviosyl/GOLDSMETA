@@ -50,6 +50,8 @@ import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 import type { DailySafetyPublicView } from "../lib/broker/ctraderTypes";
 import { deriveAutoTradeHeaderStatus } from "../lib/autoTradeHeaderStatus";
 import { deriveDemoAutoPermissionReadiness } from "../lib/demoAutoReadiness";
+import { demoAutoLabelFromAuthority } from "../lib/broker/demoAutoAuthority";
+import { DemoAutoTradeHealthCard } from "../components/autotrade/DemoAutoTradeHealthCard";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -313,13 +315,19 @@ export function AutoTradePage() {
   );
 
   const connectionLabel = sync.connectionLabel;
+  const demoAutoAuthority =
+    status?.demoAutoAuthority ??
+    qualification?.demoAutoAuthority ??
+    diagnostics?.demoAutoAuthority ??
+    null;
+
   const headerStatus = deriveAutoTradeHeaderStatus({
     qualification,
     status,
     loading: qualificationLoading && !qualification
   });
-  /** Execution mode pill (OFF / SHADOW / DEMO) — distinct from qualification hero label. */
-  const autoTradeLabel = "OFF";
+  /** Execution mode pill — derived from Demo Auto SSOT, never legacy hardcoded OFF. */
+  const autoTradeLabel = demoAutoLabelFromAuthority(demoAutoAuthority);
   const marketOpen = sync.marketOpen;
   const marketLabel = sync.marketLabel;
   const accountLabel = sync.accountLabel;
@@ -327,7 +335,8 @@ export function AutoTradePage() {
   const fundsLabel = sync.fundsLabel;
 
   const tradingAuthorised = Boolean(
-    diagnostics?.connection?.oauthScope === "trading" ||
+    demoAutoAuthority?.tradingScope === "trading" ||
+      diagnostics?.connection?.oauthScope === "trading" ||
       qualification?.blockers?.some((b) => b.id === "trading_scope" && b.ok)
   );
 
@@ -343,7 +352,7 @@ export function AutoTradePage() {
         checksOk: sync.checksOk,
         previewOk,
         tradingAuthorised,
-        autoTradeOn: false
+        autoTradeOn: Boolean(demoAutoAuthority?.enabled)
       }),
     [
       account?.emailVerified,
@@ -354,21 +363,40 @@ export function AutoTradePage() {
       mode,
       settingsSaved,
       previewOk,
-      tradingAuthorised
+      tradingAuthorised,
+      demoAutoAuthority?.enabled
     ]
   );
 
-  const activityFeed = useMemo(
-    () =>
-      buildAutoTradeActivityFeed({
-        activity: status?.activity ?? [],
-        summary: sync
-      }).map((item) => ({
-        ...item,
-        message: friendlyActivityMessage(item.message)
-      })),
-    [status?.activity, sync]
-  );
+  const activityFeed = useMemo(() => {
+    const evalLines = (qualification?.recentEvaluations ?? []).slice(0, 12).map((ev, i) => {
+      const dir = String(ev.direction || "").toUpperCase();
+      const score =
+        ev.confidence != null && Number.isFinite(ev.confidence)
+          ? `${Math.round(ev.confidence)}/100`
+          : null;
+      const head = score ? `${dir} ${score}` : dir || "SETUP";
+      const skipped = ev.outcome !== "QUALIFIED";
+      const msg = skipped
+        ? `${head} skipped — ${ev.reasonLabel || "blocked"}.`
+        : `${head} — ${ev.reasonLabel || "qualified"}.`;
+      return {
+        id: `eval-${ev.at}-${i}`,
+        at: ev.at,
+        message: friendlyActivityMessage(msg),
+        level: skipped ? ("warn" as const) : ("info" as const)
+      };
+    });
+    if (evalLines.length > 0) return evalLines;
+    return buildAutoTradeActivityFeed({
+      activity: status?.activity ?? [],
+      summary: sync,
+      autoTradeLabel
+    }).map((item) => ({
+      ...item,
+      message: friendlyActivityMessage(item.message)
+    }));
+  }, [qualification?.recentEvaluations, status?.activity, sync, autoTradeLabel]);
 
   const selectBroker = (broker: SelectedBrokerId) => {
     if (broker === selectedBroker) return;
@@ -576,19 +604,39 @@ export function AutoTradePage() {
     (shellQuote?.marketStatus === "CLOSED" ||
       /CLOSE/i.test(sync.marketStatusRaw || "") ||
       shellQuote?.freshness === "MARKET_CLOSED");
-  /** Authoritative Demo Auto permission — settings intent + qualification demoAuto/state. */
-  const demoAutoPermission = deriveDemoAutoPermissionReadiness({
-    isLiveSelected: Boolean(sync.isLive),
-    demoAccountConnected: Boolean(sync.connected && maskedAt && !sync.isLive),
-    autoTradeEnabledIntent: settings?.autoTradeEnabledIntent,
-    autoTradePaused: settings?.autoTradePaused,
-    emergencyStopActive:
-      Boolean(settings?.emergencyStopActive) || Boolean(status?.emergencyStopActive),
-    qualificationState: qualification?.state,
-    demoAutoEnabled: qualification?.demoAuto?.enabled,
-    qualificationNextAction: qualification?.nextAction
-  });
-  const heroState = display === "SHADOW" || isLiveEnv ? "SHADOW" : "OFF";
+  /** Authoritative Demo Auto permission — prefer API demoAutoAuthority SSOT. */
+  const demoAutoPermission = demoAutoAuthority
+    ? {
+        ok: demoAutoAuthority.enabled,
+        pending: !demoAutoAuthority.enabled,
+        label: "Demo trading permission / execution requirement",
+        detail: demoAutoAuthority.enabled
+          ? "Demo Auto enabled"
+          : demoAutoAuthority.emergencyStop
+            ? "Emergency stop active"
+            : demoAutoAuthority.paused
+              ? "Demo Auto paused"
+              : !demoAutoAuthority.startedAt
+                ? "Start Demo Auto qualification"
+                : demoAutoAuthority.reasons[0]?.replace(/_/g, " ") || "Demo Auto not enabled"
+      }
+    : deriveDemoAutoPermissionReadiness({
+        isLiveSelected: Boolean(sync.isLive),
+        demoAccountConnected: Boolean(sync.connected && maskedAt && !sync.isLive),
+        autoTradeEnabledIntent: settings?.autoTradeEnabledIntent,
+        autoTradePaused: settings?.autoTradePaused,
+        emergencyStopActive:
+          Boolean(settings?.emergencyStopActive) || Boolean(status?.emergencyStopActive),
+        qualificationState: qualification?.state,
+        demoAutoEnabled: qualification?.demoAuto?.enabled,
+        qualificationNextAction: qualification?.nextAction
+      });
+  const heroState =
+    display === "SHADOW" || isLiveEnv
+      ? "SHADOW"
+      : autoTradeLabel === "ON"
+        ? "DEMO"
+        : "OFF";
 
   return (
     <div
@@ -635,9 +683,11 @@ export function AutoTradePage() {
               {isLiveEnv ? "LIVE AUTOTRADE" : "DEMO AUTOTRADE"}
             </p>
             <h2 className="gm-prem-card__headline" data-testid="autotrade-hero-state">
-              {headerStatus.stateKey === "QUALIFYING"
-                ? "QUALIFYING"
-                : headerStatus.label}
+              {headerStatus.label === "DEMO AUTO NOT ACTIVE"
+                ? "DEMO AUTO NOT ACTIVE"
+                : headerStatus.stateKey === "QUALIFYING"
+                  ? "QUALIFYING"
+                  : headerStatus.label}
             </h2>
             <p className="gm-prem-card__sub">
               {maskedAt || qualification?.accountMasked
@@ -1020,7 +1070,12 @@ export function AutoTradePage() {
         </div>
         <div>
           <span className="gm-label">AutoTrade</span>
-          <span className={`gm-at-pill ${statusTone(display)}`} data-testid="autotrade-mode-pill">
+          <span
+            className={`gm-at-pill ${statusTone(
+              autoTradeLabel === "ON" ? "DEMO" : autoTradeLabel === "LOCKED" ? "LOCKED" : display
+            )}`}
+            data-testid="autotrade-mode-pill"
+          >
             {autoTradeLabel}
           </span>
         </div>
@@ -1029,6 +1084,15 @@ export function AutoTradePage() {
           <strong>{fundsLabel}</strong>
         </div>
       </section>
+
+      {atTab === "overview" ? (
+        <DemoAutoTradeHealthCard
+          authority={demoAutoAuthority}
+          qualification={qualification}
+          signalEngineActive
+          decisionTriggerActive
+        />
+      ) : null}
 
       {stalePrompt ? (
         <div className="banner stale" role="status" data-testid="autotrade-stale-prompt">
@@ -1741,7 +1805,10 @@ export function AutoTradePage() {
                 settings?.sizingMode === "automatic_risk" &&
                 (settings.fixedRiskAmount ?? 0) > 0
                   ? "Checked when you preview"
-                  : diagnostics?.goldSymbolFound
+                  : diagnostics?.goldSymbolFound ||
+                      Boolean(settings?.selectedAccountId) ||
+                      Boolean(demoAutoAuthority?.selectedDemoAccount) ||
+                      Boolean(sync.accountSelected && maskedAt)
                     ? "Symbol ready"
                     : "Connect & select account"}
               </dd>

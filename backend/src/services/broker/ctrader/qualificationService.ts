@@ -532,7 +532,58 @@ export async function processDecisionForQualification(args: {
   }
 
   let doc = await getQualificationDoc(uid, setup.accountId);
-  if (!doc?.startedAt) return { handled: false, message: "not_started" };
+  if (!doc?.startedAt) {
+    // Never silently drop an actionable decision — record QUALIFICATION_NOT_STARTED.
+    // Do NOT execute an order. Do NOT count as a qualifying preview.
+    try {
+      const pending = await store.getDecision(uid, decisionId);
+      const dir = String(pending?.decision ?? "WAIT").toUpperCase();
+      if (pending && (dir === "BUY" || dir === "SELL")) {
+        const geom = decisionGeometry(pending);
+        const score =
+          typeof pending.setupScore === "number"
+            ? pending.setupScore
+            : typeof pending.confidence === "number"
+              ? pending.confidence
+              : null;
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: "qualification",
+          direction: dir,
+          signalId: decisionId,
+          decisionId,
+          confidence: score,
+          entry: geom.entry,
+          stopLoss: geom.stopLoss,
+          takeProfit: geom.takeProfit,
+          riskReward: null,
+          spread: null,
+          maxSpread: null,
+          outcome: "REJECTED",
+          reasonCode: "QUALIFICATION_NOT_STARTED",
+          reasonLabel: reasonLabelFor("QUALIFICATION_NOT_STARTED"),
+          passed: [],
+          failed: ["QUALIFICATION_NOT_STARTED"],
+          pipeline: {
+            executionAuthority: "OFF",
+            brokerSubmissionAttempted: false,
+            brokerOrderIdMasked: null
+          },
+          finalReason: "Demo Auto qualification was not started"
+        });
+      }
+    } catch (err) {
+      logger.warn("Failed to audit QUALIFICATION_NOT_STARTED", {
+        uid,
+        decisionId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+    return { handled: false, message: "not_started" };
+  }
   if (doc.state === "PAUSED" || doc.state === "BLOCKED") {
     await clearArmedCandidate(uid).catch(() => undefined);
     return { handled: false, message: "paused_or_blocked" };
@@ -1007,7 +1058,12 @@ export async function processDecisionForQualification(args: {
     outcome: "QUALIFIED" | "REJECTED",
     reasonCode: string,
     failed: string[],
-    passed: string[]
+    passed: string[],
+    extras?: {
+      brokerSubmissionAttempted?: boolean;
+      brokerOrderIdMasked?: string | null;
+      executionAuthority?: string | null;
+    }
   ) => {
     try {
       await appendEvaluation({
@@ -1018,6 +1074,7 @@ export async function processDecisionForQualification(args: {
         stage: state,
         direction,
         signalId,
+        decisionId,
         confidence: tradeConfidence,
         entry,
         stopLoss,
@@ -1029,7 +1086,21 @@ export async function processDecisionForQualification(args: {
         reasonCode,
         reasonLabel: reasonLabelFor(reasonCode),
         passed,
-        failed
+        failed,
+        pipeline: {
+          confirmation: confirmationState,
+          session: session.ok ? "PASS" : "SESSION_BLOCKED",
+          news: news.active ? "NEWS_GUARD" : "PASS",
+          quoteAge:
+            quoteAgeSeconds != null ? `${quoteAgeSeconds.toFixed(1)}s` : null,
+          dailyLimits: null,
+          openPositions: null,
+          armedCandidate: armedTrade ? "ARMED" : null,
+          executionAuthority: extras?.executionAuthority ?? null,
+          brokerSubmissionAttempted: extras?.brokerSubmissionAttempted ?? false,
+          brokerOrderIdMasked: extras?.brokerOrderIdMasked ?? null
+        },
+        finalReason: outcome === "QUALIFIED" ? null : reasonLabelFor(reasonCode)
       });
     } catch {
       /* never block qualification on log failure */

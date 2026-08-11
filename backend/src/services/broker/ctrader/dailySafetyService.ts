@@ -13,9 +13,8 @@ import {
   tradingDayKey
 } from "./dailySafetyStore";
 import type { DailySafetyDocument, DailySafetyPublicView } from "./dailySafetyTypes";
-import { getQualificationDoc, getActiveQualificationAccountId } from "./qualificationStore";
-import { deriveAdvancedState } from "./qualificationMachine";
 import { reconcileDemoOpenPositionCounters } from "./openPositionReconcile";
+import { resolveDemoAutoAuthorityForUser } from "./demoAutoExecutionAuthority";
 
 export type EntryGateResult = {
   allowed: boolean;
@@ -88,19 +87,14 @@ export async function getDailySafetyView(
   let autoTradeLabel = opts?.autoTradeLabel ?? "OFF";
   if (!opts?.autoTradeLabel && environment === "demo") {
     try {
-      const accountId = await getActiveQualificationAccountId(uid);
-      if (accountId) {
-        const q = await getQualificationDoc(uid, accountId);
-        if (q) {
-          const st = deriveAdvancedState(q);
-          if (st === "DEMO_AUTO_ENABLED" || st === "LIVE_QUALIFICATION") autoTradeLabel = "DEMO AUTO";
-          else if (st === "DEMO_AUTO_READY") autoTradeLabel = "DEMO AUTO READY";
-          else if (q.startedAt) autoTradeLabel = "QUALIFYING";
-          else autoTradeLabel = "OFF";
-          if (st === "PAUSED" || daily.pausedReason) autoTradeLabel = "PAUSED";
-          if (settings.emergencyStopActive || st === "BLOCKED") autoTradeLabel = "EMERGENCY STOP";
-        }
-      }
+      const authority = await resolveDemoAutoAuthorityForUser(uid);
+      if (authority.emergencyStop) autoTradeLabel = "EMERGENCY STOP";
+      else if (authority.paused || daily.pausedReason) autoTradeLabel = "PAUSED";
+      else if (authority.enabled) autoTradeLabel = "DEMO AUTO";
+      else if (authority.qualificationState === "DEMO_AUTO_READY")
+        autoTradeLabel = "DEMO AUTO READY";
+      else if (authority.startedAt) autoTradeLabel = "QUALIFYING";
+      else autoTradeLabel = "DEMO AUTO NOT ACTIVE";
     } catch {
       /* keep default */
     }

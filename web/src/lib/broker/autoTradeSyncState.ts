@@ -195,13 +195,18 @@ export type ActivityItem = {
 export function buildAutoTradeActivityFeed(args: {
   activity: ActivityItem[];
   summary: AutoTradeSyncSummary;
+  /** Demo Auto SSOT label — never hardcode OFF when authority is ON. */
+  autoTradeLabel?: "ON" | "OFF" | "PAUSED" | "LOCKED" | string;
 }): ActivityItem[] {
   const items = [...(args.activity ?? [])];
   if (args.summary.connected && args.summary.accountSelected && args.summary.accountMasked) {
-    const message = `Pepperstone ${args.summary.isLive ? "Live" : "Demo"} account ${args.summary.accountMasked} connected. AutoTrade OFF. No order placed.`;
+    const atLabel = args.autoTradeLabel ?? "OFF";
+    const message = `Pepperstone ${args.summary.isLive ? "Live" : "Demo"} account ${args.summary.accountMasked} connected. AutoTrade ${atLabel}. ${
+      atLabel === "ON" ? "Waiting for valid setup." : "No order placed."
+    }`;
     const alreadyCurrent =
       items[0]?.message?.includes(args.summary.accountMasked) &&
-      /connected\. AutoTrade OFF/i.test(items[0]?.message ?? "");
+      new RegExp(`connected\\. AutoTrade ${atLabel}`, "i").test(items[0]?.message ?? "");
     if (!alreadyCurrent) {
       items.unshift({
         id: `canonical-connected-${args.summary.accountMasked}`,
