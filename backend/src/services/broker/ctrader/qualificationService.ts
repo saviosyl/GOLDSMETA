@@ -4,7 +4,10 @@
 
 import { randomBytes } from "crypto";
 import { getConnection } from "./connectionStore";
-import { buildDiagnostics } from "./connectionService";
+import {
+  buildDiagnostics,
+  ensureFreshAccessToken
+} from "./connectionService";
 import {
   getUserAutoTradeSettings,
   saveUserAutoTradeSettings
@@ -12,6 +15,11 @@ import {
 import { submitDemoMarketOrder } from "./demoOrderExecution";
 import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 import { calculateCTraderVolume } from "./sizing";
+import { resolvePepperstoneXauUsdDemoMapping } from "./brokerUnitMappings";
+import { calculatePepperstoneXauUsdDemoVolume } from "./demoXauUsdSizing";
+import { resolveQuoteToDepositFx } from "./quoteToDepositFx";
+import { createOpenApiClient } from "./openApiClient";
+import { getDailySafetyDoc } from "./dailySafetyStore";
 import { evaluateQualificationCandidate } from "./qualificationEvaluator";
 import type { GoldMetaStore } from "../../storage/types";
 import type { DecisionRecord } from "../../../models/types";
@@ -1158,27 +1166,170 @@ export async function processDecisionForQualification(args: {
 
     const entryPx =
       direction === "BUY" ? (quote?.ask ?? entry) : (quote?.bid ?? entry);
-    const sizing = calculateCTraderVolume({
-      equity: diagnostics.account?.equity ?? diagnostics.account?.balance ?? null,
-      freeMargin: diagnostics.account?.freeMargin ?? null,
-      accountCurrency: diagnostics.account?.currency ?? "EUR",
-      riskAmountEur: settings.fixedRiskAmount,
-      entryPrice: entryPx,
-      stopLoss,
-      lotSize: symbol.lotSize,
-      tickSize: symbol.tickSize,
-      minVolume: symbol.minVolume,
-      volumeStep: symbol.volumeStep,
-      maxVolume: symbol.maxVolume,
-      marginPerLot: null,
-      eurToAccountRate: 1,
-      sizingMode: settings.sizingMode,
-      manualLotSize: settings.manualLotSize
+
+    // Pepperstone Demo XAUUSD: proven economic sizing (1 lot = 1 oz) + FX + fail-closed gates.
+    // Other broker/symbol paths keep legacy calculateCTraderVolume until separately proven.
+    const unitMapping = resolvePepperstoneXauUsdDemoMapping({
+      pepperstoneConfirmed: Boolean(diagnostics.pepperstoneConfirmed),
+      selectedAccountIsLive: Boolean(diagnostics.selectedAccountIsLive),
+      symbolName: symbol.symbolName ?? diagnostics.connection?.symbolName
     });
-    if (!sizing.ok || sizing.volume == null || sizing.volume <= 0) {
+
+    let sizedLots: number | null = null;
+    let sizingRejectMessage = "lots_invalid";
+
+    if (unitMapping) {
+      const connection = await getConnection(uid);
+      if (!connection?.selectedAccountId) {
+        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+        await saveQualificationDoc(doc);
+        return { handled: true, message: "lots_invalid:NO_ACCOUNT" };
+      }
+
+      const daily = await getDailySafetyDoc(uid, "demo");
+      const lossUsed = Math.abs(Math.min(0, daily.realisedPnl));
+      const remainingDailyLossCapacity = Math.max(
+        0,
+        settings.maxDailyLoss - lossUsed
+      );
+
+      const depositCurrency =
+        diagnostics.account?.currency ?? connection.currency ?? null;
+      const quoteCurrency = "USD";
+
+      let quoteToDepositRate: number | null = null;
+      try {
+        const { accessToken, connection: freshConn } =
+          await ensureFreshAccessToken(connection);
+        const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+        const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+        if (!clientId || !clientSecret) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          await logEval(
+            "REJECTED",
+            "CURRENCY_CONVERSION_UNAVAILABLE",
+            ["CURRENCY_CONVERSION_UNAVAILABLE"],
+            candidate.passed
+          );
+          return {
+            handled: true,
+            message: "lots_invalid:CURRENCY_CONVERSION_UNAVAILABLE"
+          };
+        }
+        const fx = await resolveQuoteToDepositFx({
+          openApiClient: createOpenApiClient(),
+          accessToken,
+          clientId,
+          clientSecret,
+          ctidTraderAccountId: freshConn.selectedAccountId!,
+          quoteCurrency,
+          depositCurrency: depositCurrency ?? "",
+          isLive: Boolean(freshConn.selectedAccountIsLive)
+        });
+        if (!fx.ok) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          await logEval(
+            "REJECTED",
+            fx.reason,
+            [fx.reason],
+            candidate.passed
+          );
+          return { handled: true, message: `lots_invalid:${fx.reason}` };
+        }
+        quoteToDepositRate = fx.rate;
+      } catch (fxErr) {
+        doc = {
+          ...doc,
+          controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+        };
+        await saveQualificationDoc(doc);
+        logger.info("AutoTrade FX conversion failed closed", {
+          uid,
+          signalId,
+          error: fxErr instanceof Error ? fxErr.message : String(fxErr)
+        });
+        await logEval(
+          "REJECTED",
+          "CURRENCY_CONVERSION_UNAVAILABLE",
+          ["CURRENCY_CONVERSION_UNAVAILABLE"],
+          candidate.passed
+        );
+        return {
+          handled: true,
+          message: "lots_invalid:CURRENCY_CONVERSION_UNAVAILABLE"
+        };
+      }
+
+      const xauSizing = calculatePepperstoneXauUsdDemoVolume({
+        riskAmountDeposit: settings.fixedRiskAmount,
+        entryPrice: entryPx,
+        stopLoss,
+        quoteToDepositRate,
+        ozPerLot: unitMapping.ozPerLot,
+        minLots: symbol.minVolume,
+        stepLots: symbol.volumeStep,
+        maxLots: symbol.maxVolume,
+        freeMargin: diagnostics.account?.freeMargin ?? null,
+        leverage:
+          diagnostics.account?.leverage ?? connection.leverage ?? null,
+        remainingDailyLossCapacity,
+        maxPositionExposureLots: settings.maxPositionExposureLots,
+        sizingMode: settings.sizingMode,
+        manualLotSize: settings.manualLotSize
+      });
+
+      if (!xauSizing.ok || xauSizing.volumeLots == null || xauSizing.volumeLots <= 0) {
+        const reason = xauSizing.rejectionReason ?? "LOTS_INVALID";
+        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+        await saveQualificationDoc(doc);
+        logger.info("AutoTrade XAUUSD Demo sizing rejected", {
+          uid,
+          signalId,
+          reason,
+          notes: xauSizing.notes
+        });
+        await logEval("REJECTED", reason, [reason], candidate.passed);
+        return { handled: true, message: `lots_invalid:${reason}` };
+      }
+      sizedLots = xauSizing.volumeLots;
+    } else {
+      const sizing = calculateCTraderVolume({
+        equity: diagnostics.account?.equity ?? diagnostics.account?.balance ?? null,
+        freeMargin: diagnostics.account?.freeMargin ?? null,
+        accountCurrency: diagnostics.account?.currency ?? "EUR",
+        riskAmountEur: settings.fixedRiskAmount,
+        entryPrice: entryPx,
+        stopLoss,
+        lotSize: symbol.lotSize,
+        tickSize: symbol.tickSize,
+        minVolume: symbol.minVolume,
+        volumeStep: symbol.volumeStep,
+        maxVolume: symbol.maxVolume,
+        marginPerLot: null,
+        eurToAccountRate: 1,
+        sizingMode: settings.sizingMode,
+        manualLotSize: settings.manualLotSize
+      });
+      if (!sizing.ok || sizing.volume == null || sizing.volume <= 0) {
+        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+        await saveQualificationDoc(doc);
+        return { handled: true, message: sizingRejectMessage };
+      }
+      sizedLots = sizing.volume;
+    }
+
+    if (sizedLots == null || !(sizedLots > 0)) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
-      return { handled: true, message: "lots_invalid" };
+      return { handled: true, message: sizingRejectMessage };
     }
 
     const correlationId = newId("corr");
@@ -1186,7 +1337,7 @@ export async function processDecisionForQualification(args: {
       const result = await submitDemoMarketOrder({
         ownerUid: uid,
         side: direction as "BUY" | "SELL",
-        lots: sizing.volume,
+        lots: sizedLots,
         stopLoss,
         takeProfit,
         entryHint: entryPx,
@@ -1227,7 +1378,7 @@ export async function processDecisionForQualification(args: {
       const fillPrice = result.fillPrice ?? null;
       const brokerStopLoss = result.stopLoss ?? null;
       const brokerTakeProfit = result.takeProfit ?? null;
-      const filledVolumeLots = result.filledVolumeLots ?? sizing.volume;
+      const filledVolumeLots = result.filledVolumeLots ?? sizedLots;
       // Prefer broker fill/SL/TP for lifecycle authority; keep decision geometry as fallback.
       const lifecycleEntry = fillPrice ?? entryPx;
       const lifecycleSl = brokerStopLoss ?? stopLoss;
@@ -1249,7 +1400,7 @@ export async function processDecisionForQualification(args: {
         ctidTraderAccountId,
         traderLogin,
         symbol: "XAUUSD",
-        requestedVolumeLots: sizing.volume,
+        requestedVolumeLots: sizedLots,
         filledVolumeLots,
         requestedEntry: entryPx,
         fillPrice,
