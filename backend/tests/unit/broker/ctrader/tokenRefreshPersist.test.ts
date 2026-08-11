@@ -85,6 +85,7 @@ function seedConnection(ciphertext: string, tokenVersion = 1): CTraderConnection
       tokenVersion
     },
     selectedAccountId: "48123410",
+    selectedTraderLogin: "4261013",
     selectedAccountMasked: "48…10",
     selectedAccountKeyHash: "hash",
     selectedAccountIsLive: false,
@@ -95,6 +96,8 @@ function seedConnection(ciphertext: string, tokenVersion = 1): CTraderConnection
     balance: 50000,
     symbolId: "41",
     symbolName: "XAUUSD",
+    symbolDigits: 2,
+    symbolPipPosition: 1,
     lastSyncAt: "2026-08-01T00:00:00.000Z",
     lastQuoteAt: null,
     lastErrorCode: null,

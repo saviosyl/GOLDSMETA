@@ -35,6 +35,7 @@ import {
 } from "./qualificationStore";
 import type {
   ControlledDemoTradeRecord,
+  DemoAutoTradeRecord,
   QualificationDocument,
   QualificationPreviewRecord,
   QualificationPublicView,
@@ -1215,19 +1216,46 @@ export async function processDecisionForQualification(args: {
         armedCandidateId: armedTrade?.candidateId ?? null
       });
 
+      const openedAt = new Date().toISOString();
+      const connSnap = await getConnection(uid).catch(() => null);
+      const ctidTraderAccountId =
+        result.ctidTraderAccountId ??
+        connSnap?.selectedAccountId ??
+        setup.accountId ??
+        null;
+      const traderLogin = connSnap?.selectedTraderLogin ?? null;
+      const fillPrice = result.fillPrice ?? null;
+      const brokerStopLoss = result.stopLoss ?? null;
+      const brokerTakeProfit = result.takeProfit ?? null;
+      const filledVolumeLots = result.filledVolumeLots ?? sizing.volume;
+      // Prefer broker fill/SL/TP for lifecycle authority; keep decision geometry as fallback.
+      const lifecycleEntry = fillPrice ?? entryPx;
+      const lifecycleSl = brokerStopLoss ?? stopLoss;
+      const lifecycleTp = brokerTakeProfit ?? takeProfit;
+
       const trade: ControlledDemoTradeRecord = {
         id: newId("tr"),
         correlationId,
         signalId,
-        at: new Date().toISOString(),
+        at: openedAt,
         closedAt: null,
         direction: direction as "BUY" | "SELL",
-        entry: entryPx,
-        stopLoss,
-        takeProfit,
-        lots: sizing.volume,
+        entry: lifecycleEntry,
+        stopLoss: lifecycleSl,
+        takeProfit: lifecycleTp,
+        lots: filledVolumeLots,
         brokerOrderId: result.orderId ?? null,
         brokerPositionId: result.positionId ?? null,
+        ctidTraderAccountId,
+        traderLogin,
+        symbol: "XAUUSD",
+        requestedVolumeLots: sizing.volume,
+        filledVolumeLots,
+        requestedEntry: entryPx,
+        fillPrice,
+        brokerStopLoss,
+        brokerTakeProfit,
+        openTimestamp: openedAt,
         status: "OPEN",
         pnl: null,
         counted: false
@@ -1255,9 +1283,18 @@ export async function processDecisionForQualification(args: {
               status: "OPEN",
               pnl: null,
               counted: false,
-              // Retain broker ids so reconcile can track the real Demo order.
               brokerOrderId: trade.brokerOrderId,
               brokerPositionId: trade.brokerPositionId,
+              ctidTraderAccountId: trade.ctidTraderAccountId,
+              traderLogin: trade.traderLogin,
+              symbol: trade.symbol,
+              requestedVolumeLots: trade.requestedVolumeLots,
+              filledVolumeLots: trade.filledVolumeLots,
+              requestedEntry: trade.requestedEntry,
+              fillPrice: trade.fillPrice,
+              brokerStopLoss: trade.brokerStopLoss,
+              brokerTakeProfit: trade.brokerTakeProfit,
+              openTimestamp: trade.openTimestamp,
               entry: trade.entry,
               stopLoss: trade.stopLoss,
               takeProfit: trade.takeProfit,
@@ -1322,16 +1359,16 @@ export async function processDecisionForQualification(args: {
           correlationId: trade.correlationId,
           brokerOrderId: trade.brokerOrderId,
           brokerPositionId: trade.brokerPositionId,
-          accountId: setup.accountId,
+          accountId: ctidTraderAccountId,
           accountMasked: setup.accountMasked,
           side: trade.direction,
-          entry: trade.entry,
-          stopLoss: trade.stopLoss,
-          takeProfit: trade.takeProfit,
-          tp1,
+          entry: lifecycleEntry,
+          stopLoss: lifecycleSl,
+          takeProfit: lifecycleTp,
+          tp1: brokerTakeProfit ?? tp1,
           tp2,
           tp3,
-          lots: trade.lots,
+          lots: filledVolumeLots,
           qualificationStage: state,
           decisionId: signalId,
           source:
@@ -1370,42 +1407,86 @@ export async function markQualificationTradeClosed(args: {
   uid: string;
   correlationId: string;
   pnl?: number | null;
+  grossPnl?: number | null;
+  commission?: number | null;
+  swap?: number | null;
+  closePrice?: number | null;
+  closeReason?: string | null;
+  brokerDealId?: string | null;
+  brokerPositionId?: string | null;
+  brokerOrderId?: string | null;
+  closedAt?: string | null;
 }): Promise<QualificationPublicView> {
   const setup = await loadSetupSnapshot(args.uid);
   if (!setup.accountId) throw Object.assign(new Error("NO_ACCOUNT"), { code: "NO_ACCOUNT" });
   let doc = await getQualificationDoc(args.uid, setup.accountId);
   if (!doc) throw Object.assign(new Error("QUALIFICATION_NOT_STARTED"), { code: "QUALIFICATION_NOT_STARTED" });
 
-  const now = new Date().toISOString();
+  const now = args.closedAt ?? new Date().toISOString();
   const confirmedPnl = typeof args.pnl === "number" ? args.pnl : null;
   // Do not complete qualification closure without a real P/L (never invent 0).
   if (confirmedPnl == null) {
     return getQualificationView(args.uid);
   }
+
+  const needsCloseAccounting = (t: {
+    correlationId: string;
+    status: string;
+    counted: boolean;
+    pnl: number | null;
+  }) =>
+    t.correlationId === args.correlationId &&
+    (t.status !== "CLOSED" || !t.counted || t.pnl == null);
+
+  const patchClose = <T extends ControlledDemoTradeRecord | DemoAutoTradeRecord>(
+    t: T
+  ): T => {
+    if (!needsCloseAccounting(t)) return t;
+    return {
+      ...t,
+      status: "CLOSED" as const,
+      closedAt: t.closedAt ?? now,
+      pnl: confirmedPnl,
+      counted: true,
+      brokerPositionId:
+        args.brokerPositionId ??
+        (t as { brokerPositionId?: string | null }).brokerPositionId ??
+        null,
+      brokerOrderId:
+        args.brokerOrderId ??
+        (t as { brokerOrderId?: string | null }).brokerOrderId ??
+        null,
+      grossPnl: args.grossPnl ?? (t as { grossPnl?: number | null }).grossPnl ?? null,
+      commission:
+        args.commission ?? (t as { commission?: number | null }).commission ?? null,
+      swap: args.swap ?? (t as { swap?: number | null }).swap ?? null,
+      netPnl: confirmedPnl,
+      closePrice:
+        args.closePrice ?? (t as { closePrice?: number | null }).closePrice ?? null,
+      closeReason:
+        args.closeReason ??
+        (t as { closeReason?: string | null }).closeReason ??
+        "BROKER_CLOSE",
+      brokerDealId:
+        args.brokerDealId ??
+        (t as { brokerDealId?: string | null }).brokerDealId ??
+        null
+    };
+  };
+
+  const prior =
+    doc.controlledTrades.find((t) => t.correlationId === args.correlationId) ||
+    doc.demoAutoTrades.find((t) => t.correlationId === args.correlationId);
+  const alreadyFullyCounted =
+    prior != null &&
+    prior.status === "CLOSED" &&
+    prior.counted &&
+    prior.pnl != null;
+
   doc = {
     ...doc,
-    controlledTrades: doc.controlledTrades.map((t) =>
-      t.correlationId === args.correlationId && t.status !== "CLOSED"
-        ? {
-            ...t,
-            status: "CLOSED",
-            closedAt: now,
-            pnl: confirmedPnl,
-            counted: true
-          }
-        : t
-    ),
-    demoAutoTrades: doc.demoAutoTrades.map((t) =>
-      t.correlationId === args.correlationId && t.status !== "CLOSED"
-        ? {
-            ...t,
-            status: "CLOSED",
-            closedAt: now,
-            pnl: confirmedPnl,
-            counted: true
-          }
-        : t
-    )
+    controlledTrades: doc.controlledTrades.map((t) => patchClose(t)),
+    demoAutoTrades: doc.demoAutoTrades.map((t) => patchClose(t))
   };
   doc = recountControlled(doc);
   doc = recountDemoAuto(doc);
@@ -1418,15 +1499,18 @@ export async function markQualificationTradeClosed(args: {
     doc.controlledTrades.find((t) => t.correlationId === args.correlationId) ||
     doc.demoAutoTrades.find((t) => t.correlationId === args.correlationId);
   if (closed && closed.status === "CLOSED") {
-    try {
-      await markTradeClosed({
-        uid: args.uid,
-        environment: "demo",
-        tradeId: args.correlationId,
-        pnl: confirmedPnl
-      });
-    } catch {
-      /* ignore */
+    // markTradeClosed is idempotent via countedTradeIds — safe on repair.
+    if (!alreadyFullyCounted || prior?.pnl == null) {
+      try {
+        await markTradeClosed({
+          uid: args.uid,
+          environment: "demo",
+          tradeId: args.correlationId,
+          pnl: confirmedPnl
+        });
+      } catch {
+        /* ignore */
+      }
     }
     try {
       const updated = await updateAutoTradeJournalOnClose({
@@ -1434,12 +1518,16 @@ export async function markQualificationTradeClosed(args: {
         correlationId: args.correlationId,
         pnl: confirmedPnl,
         closedAt: closed.closedAt ?? now,
-        reasonForExit: "Position closed",
-        exitPrice: null,
+        reasonForExit: args.closeReason ?? "Position closed",
+        exitPrice: args.closePrice ?? null,
         managementActions: [],
         durationSeconds: null,
         slTpOutcome: null,
-        brokerPnlConfirmed: true
+        brokerPnlConfirmed: true,
+        brokerDealId: args.brokerDealId ?? null,
+        grossPnl: args.grossPnl ?? null,
+        commission: args.commission ?? null,
+        swap: args.swap ?? null
       });
       if (!updated.updated) {
         await createAutoTradeJournalEntry({
@@ -1456,17 +1544,17 @@ export async function markQualificationTradeClosed(args: {
           riskReward: null,
           session: null,
           spread: null,
-            pnl: confirmedPnl,
-            reasonForTrade: "Controlled Demo / Demo Auto trade",
-            reasonForExit: "Position closed",
-            qualificationStage: advanced,
-            accountMasked: setup.accountMasked,
-            broker: "Pepperstone cTrader",
-            correlationId: args.correlationId,
-            openedAt: closed.at,
-            closedAt: closed.closedAt,
-            brokerPnlConfirmed: true
-          });
+          pnl: confirmedPnl,
+          reasonForTrade: "Controlled Demo / Demo Auto trade",
+          reasonForExit: args.closeReason ?? "Position closed",
+          qualificationStage: advanced,
+          accountMasked: setup.accountMasked,
+          broker: "Pepperstone cTrader",
+          correlationId: args.correlationId,
+          openedAt: closed.at,
+          closedAt: closed.closedAt,
+          brokerPnlConfirmed: true
+        });
       }
     } catch {
       /* ignore */

@@ -48,7 +48,13 @@ function spotPriceFromRelative(value: unknown): number | null {
 }
 
 export type DiscoveredAccount = {
+  /** Open API account id (ctidTraderAccountId) — used for Auth/orders. */
   ctidTraderAccountId: string;
+  /**
+   * Broker/UI login number when provided by Spotware (often what push
+   * notifications show). Distinct from ctidTraderAccountId.
+   */
+  traderLogin: string | null;
   isLive: boolean;
   brokerNameTitle: string | null;
   depositCurrency: string | null;
@@ -89,6 +95,16 @@ export type DemoMarketOrderResult = {
   positionId: string | null;
   errorCode: string | null;
   clientOrderId: string | null;
+  /** Actual fill price when present on the execution/deal event. */
+  fillPrice: number | null;
+  /** Broker absolute stop when present on the position snapshot. */
+  stopLoss: number | null;
+  /** Broker absolute take-profit when present on the position snapshot. */
+  takeProfit: number | null;
+  /** Filled size in lots (1.00 = 1 lot). */
+  filledVolumeLots: number | null;
+  /** Account id the order was placed against. */
+  ctidTraderAccountId: string | null;
   raw?: Record<string, unknown>;
 };
 
@@ -269,6 +285,15 @@ export interface CTraderOpenApiClient {
     fromTimestampMs: number;
     toTimestampMs: number;
   }): Promise<BrokerClosedDeal[]>;
+  /** Demo host only — deal list in a time window (max 7 days). */
+  fetchDemoDealList?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    fromTimestampMs: number;
+    toTimestampMs: number;
+  }): Promise<BrokerClosedDeal[]>;
 }
 
 function moneyFromDigits(value: unknown, moneyDigits: number): number | null {
@@ -399,26 +424,53 @@ function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
   return out;
 }
 
+/**
+ * Collect ProtoOAExecutionEvent(s) until a position id is present or timeout.
+ * First event alone often accepts the order before the position snapshot arrives.
+ */
 async function waitForDemoExecution(
   connection: InstanceType<typeof CTraderConnection>,
   timeoutMs = 15_000
 ): Promise<Record<string, unknown>> {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("CTRADER_ORDER_TIMEOUT")),
-      timeoutMs
-    );
+    let latest: Record<string, unknown> = {};
+    let settled = false;
+    const finish = (value: Record<string, unknown>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      if (Object.keys(latest).length > 0) finish(latest);
+      else reject(new Error("CTRADER_ORDER_TIMEOUT"));
+    }, timeoutMs);
     connection.on(
       "ProtoOAExecutionEvent",
       (event: { descriptor?: Record<string, unknown> }) => {
-        clearTimeout(timer);
-        resolve(event?.descriptor ?? {});
+        const descriptor = event?.descriptor ?? {};
+        latest = { ...latest, ...descriptor };
+        const order = (descriptor.order ?? latest.order ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const position = (descriptor.position ?? latest.position ?? {}) as Record<
+          string,
+          unknown
+        >;
+        if (order.orderId != null && latest.order == null) latest.order = order;
+        if (position.positionId != null) {
+          latest.position = position;
+          finish(latest);
+        }
       }
     );
     connection.on(
       "ProtoOAErrorRes",
       (event: { descriptor?: Record<string, unknown> }) => {
         const descriptor = event?.descriptor ?? {};
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(
           new Error(
@@ -434,10 +486,54 @@ async function waitForDemoExecution(
   });
 }
 
+function extractFillFromExecution(
+  execution: Record<string, unknown>
+): {
+  fillPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  filledVolumeLots: number | null;
+} {
+  const position = (execution.position ?? {}) as Record<string, unknown>;
+  const trade = (position.tradeData ?? position.trade ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const deal = (execution.deal ?? {}) as Record<string, unknown>;
+  const fillPrice =
+    asNumber(deal.executionPrice) ??
+    asNumber(position.price) ??
+    asNumber(trade.price) ??
+    asNumber(execution.price);
+  const stopLoss =
+    asNumber(position.stopLoss) ??
+    asNumber(trade.stopLoss) ??
+    asNumber(execution.stopLoss);
+  const takeProfit =
+    asNumber(position.takeProfit) ??
+    asNumber(trade.takeProfit) ??
+    asNumber(execution.takeProfit);
+  const volUnits =
+    asNumber(deal.filledVolume) ??
+    asNumber(trade.volume) ??
+    asNumber(position.volume);
+  return {
+    fillPrice,
+    stopLoss,
+    takeProfit,
+    filledVolumeLots:
+      volUnits != null ? Number((volUnits / 100).toFixed(8)) : null
+  };
+}
+
 function mapDiscovered(raw: Record<string, unknown>): DiscoveredAccount {
-  const id = String(
-    raw.ctidTraderAccountId ?? raw.accountId ?? raw.traderLogin ?? ""
-  );
+  // Prefer Open API ctidTraderAccountId — never silently substitute traderLogin
+  // as the order-auth id (login is a separate UI/notification identifier).
+  const id = String(raw.ctidTraderAccountId ?? raw.accountId ?? "");
+  const traderLogin =
+    raw.traderLogin != null && String(raw.traderLogin).trim() !== ""
+      ? String(raw.traderLogin)
+      : null;
   const isLive = Boolean(raw.isLive ?? raw.live ?? false);
   const brokerNameTitle =
     typeof raw.brokerTitle === "string"
@@ -449,6 +545,7 @@ function mapDiscovered(raw: Record<string, unknown>): DiscoveredAccount {
           : null;
   return {
     ctidTraderAccountId: id,
+    traderLogin,
     isLive,
     brokerNameTitle,
     depositCurrency:
@@ -932,15 +1029,55 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           comment: args.comment ?? "GoldMeta Demo"
         });
 
-        const execution = await executionPromise;
-        const order = (execution.order ?? {}) as Record<string, unknown>;
-        const position = (execution.position ?? {}) as Record<string, unknown>;
+        let execution = await executionPromise;
+        let order = (execution.order ?? {}) as Record<string, unknown>;
+        let position = (execution.position ?? {}) as Record<string, unknown>;
+        let positionId =
+          position.positionId != null ? String(position.positionId) : null;
+
+        // If the first execution wave lacked a position snapshot, reconcile once.
+        if (!positionId && !execution.errorCode) {
+          try {
+            const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+              ctidTraderAccountId: Number(args.ctidTraderAccountId)
+            })) as Record<string, unknown>;
+            const opens = parseBrokerOpenPositions(
+              recon.position ?? recon.positions
+            );
+            const match =
+              opens.find((p) => p.side === args.side) ??
+              opens[opens.length - 1] ??
+              null;
+            if (match?.positionId) {
+              positionId = match.positionId;
+              position = {
+                positionId: match.positionId,
+                price: match.entryPrice,
+                stopLoss: match.stopLoss,
+                takeProfit: match.takeProfit,
+                tradeData: {
+                  volume:
+                    match.volumeUnits != null
+                      ? match.volumeUnits
+                      : match.volumeLots != null
+                        ? match.volumeLots * 100
+                        : null
+                }
+              };
+              execution = { ...execution, position, reconcileMatched: true };
+            }
+          } catch {
+            /* keep execution as-is */
+          }
+        }
+
         const errorCode =
           typeof execution.errorCode === "string" ? execution.errorCode : null;
         const executionType =
           execution.executionType != null
             ? String(execution.executionType)
             : null;
+        const fill = extractFillFromExecution(execution);
         return {
           accepted: !errorCode,
           executionType,
@@ -950,10 +1087,14 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
               : execution.orderId != null
                 ? String(execution.orderId)
                 : null,
-          positionId:
-            position.positionId != null ? String(position.positionId) : null,
+          positionId,
           errorCode,
           clientOrderId,
+          fillPrice: fill.fillPrice,
+          stopLoss: fill.stopLoss,
+          takeProfit: fill.takeProfit,
+          filledVolumeLots: fill.filledVolumeLots,
+          ctidTraderAccountId: String(args.ctidTraderAccountId),
           raw: execution
         } satisfies DemoMarketOrderResult;
       });
@@ -1082,6 +1223,31 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         )) as Record<string, unknown>;
         return parseBrokerClosedDeals(res.deal ?? res.deals);
       });
+    },
+
+    async fetchDemoDealList(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const span = Math.min(
+          Math.max(args.toTimestampMs - args.fromTimestampMs, 1),
+          7 * 86_400_000
+        );
+        const toTimestamp = args.toTimestampMs;
+        const fromTimestamp = toTimestamp - span;
+        const res = (await connection.sendCommand("ProtoOADealListReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          fromTimestamp,
+          toTimestamp
+        })) as Record<string, unknown>;
+        return parseBrokerClosedDeals(res.deal ?? res.deals);
+      });
     }
   };
 }
@@ -1098,6 +1264,7 @@ export function createMockOpenApiClient(opts?: {
     ([
       {
         ctidTraderAccountId: "123456",
+        traderLogin: "4261013",
         isLive: false,
         brokerNameTitle: "Pepperstone",
         depositCurrency: "EUR",
@@ -1191,6 +1358,11 @@ export function createMockOpenApiClient(opts?: {
         positionId: "mock-pos-1",
         errorCode: null,
         clientOrderId: args.clientOrderId ?? "mock-client-order",
+        fillPrice: 4365.8,
+        stopLoss: null,
+        takeProfit: null,
+        filledVolumeLots: Number((args.volume / 100).toFixed(8)),
+        ctidTraderAccountId: args.ctidTraderAccountId,
         raw: { mock: true, side: args.side, volume: args.volume }
       };
     },
@@ -1243,6 +1415,12 @@ export function createMockOpenApiClient(opts?: {
           closedVolumeLots: 0.01
         }
       ];
+    },
+    async fetchDemoDealList(args) {
+      return this.fetchDemoDealsByPositionId!({
+        ...args,
+        positionId: "mock-pos-1"
+      });
     }
   };
 }

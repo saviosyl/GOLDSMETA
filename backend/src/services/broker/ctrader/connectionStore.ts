@@ -33,6 +33,11 @@ export type CTraderConnectionRecord = {
   updatedAt: string;
   tokens: EncryptedTokenBlob;
   selectedAccountId: string | null;
+  /**
+   * Spotware/Pepperstone trader login (UI / push-notification account number).
+   * Distinct from selectedAccountId (ctidTraderAccountId used for Open API auth).
+   */
+  selectedTraderLogin: string | null;
   selectedAccountMasked: string | null;
   selectedAccountKeyHash: string | null;
   selectedAccountIsLive: boolean;
@@ -115,7 +120,10 @@ export async function getConnection(
   if (!snap.exists) return null;
   const data = snap.data() as CTraderConnectionRecord;
   if (data.disconnectedAt) return null;
-  return data;
+  return {
+    ...data,
+    selectedTraderLogin: data.selectedTraderLogin ?? null
+  };
 }
 
 export type PersistRotatedTokensResult =
@@ -205,6 +213,7 @@ export async function disconnectConnection(ownerUid: string): Promise<void> {
       updatedAt: new Date().toISOString(),
       tokens: null,
       selectedAccountId: null,
+      selectedTraderLogin: null,
       lastErrorCode: null
     },
     { merge: true }

@@ -265,6 +265,10 @@ export async function completeOAuthCallback(args: {
       requestedScope === "trading" && prior?.selectedAccountIsLive
         ? null
         : prior?.selectedAccountId ?? null,
+    selectedTraderLogin:
+      requestedScope === "trading" && prior?.selectedAccountIsLive
+        ? null
+        : prior?.selectedTraderLogin ?? null,
     selectedAccountMasked:
       requestedScope === "trading" && prior?.selectedAccountIsLive
         ? null
@@ -550,6 +554,7 @@ export async function selectBrokerAccountForUser(args: {
     updatedAt: now,
     lastSyncAt: now,
     selectedAccountId: match.ctidTraderAccountId,
+    selectedTraderLogin: match.traderLogin ?? null,
     selectedAccountMasked: match.accountIdMasked,
     selectedAccountKeyHash: match.accountKeyHash,
     selectedAccountIsLive: match.isLive,
@@ -686,6 +691,21 @@ export async function buildDiagnostics(
             ctidTraderAccountId: match.ctidTraderAccountId,
             isLive: match.isLive
           });
+          // Backfill traderLogin mapping when Spotware provides it (push/UI id).
+          if (
+            match.traderLogin &&
+            connection.selectedTraderLogin !== match.traderLogin
+          ) {
+            try {
+              await saveConnection({
+                ...connection,
+                selectedTraderLogin: match.traderLogin,
+                updatedAt: new Date().toISOString()
+              });
+            } catch {
+              /* best-effort mapping persist */
+            }
+          }
           account = toSafeBrokerAccount(match, snap);
           marginMeta = snap.freeMargin != null || snap.usedMargin != null;
           if (connection.symbolId) {

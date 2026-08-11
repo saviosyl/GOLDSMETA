@@ -40,7 +40,7 @@ export type PositionLifecycleEvent = {
   reason: string;
   oldSl?: number | null;
   newSl?: number | null;
-  brokerAck?: boolean;
+  brokerAck?: boolean | null;
   dedupeKey: string;
 };
 
@@ -148,9 +148,10 @@ export function appendLifecycleEvent(
     at: event.at,
     kind: event.kind,
     reason: event.reason,
-    oldSl: event.oldSl,
-    newSl: event.newSl,
-    brokerAck: event.brokerAck,
+    // Firestore rejects `undefined` — persist null for omitted optional fields.
+    oldSl: event.oldSl ?? null,
+    newSl: event.newSl ?? null,
+    brokerAck: event.brokerAck ?? null,
     dedupeKey: event.dedupeKey
   };
   return {
