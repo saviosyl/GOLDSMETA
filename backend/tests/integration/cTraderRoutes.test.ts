@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../../src/index";
 import { AiExplainer } from "../../src/services/ai/explainer";
@@ -8,6 +8,20 @@ describe("cTrader HTTP routes — mutation safety", () => {
   const app = createApp({
     store: createStore(),
     aiExplainer: new AiExplainer()
+  });
+
+  let prevDemoSubmit: string | undefined;
+  beforeEach(() => {
+    // Isolate from deploy-shell env used for Firebase Functions.
+    prevDemoSubmit = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+  });
+  afterEach(() => {
+    if (prevDemoSubmit === undefined) {
+      delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
+    } else {
+      process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prevDemoSubmit;
+    }
   });
 
   it("serves broker control centre with AutoTrade OFF", async () => {
