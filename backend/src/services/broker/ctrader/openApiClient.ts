@@ -230,6 +230,18 @@ export interface CTraderOpenApiClient {
     /** When true, use Pepperstone Live Open API host for quotes. */
     isLive?: boolean;
   }): Promise<BrokerQuote>;
+  /**
+   * Resolve a catalogue symbol id by exact/normalized name (e.g. EURUSD).
+   * Used for quote→deposit FX; not used by Decision Engine.
+   */
+  findSymbolIdByName?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    symbolName: string;
+    isLive?: boolean;
+  }): Promise<string | null>;
   /** Display-only historical OHLC — never used by decision/autotrade engines. */
   fetchTrendbars(args: {
     accessToken: string;
@@ -762,6 +774,44 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
       });
     },
 
+    async findSymbolIdByName(args) {
+      const isLive = Boolean(args.isLive);
+      const wanted = String(args.symbolName ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[/\s._-]/g, "");
+      if (!wanted) return null;
+      return withOpenApiConnection({ isLive }, async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const symbolsRes = (await connection.sendCommand(
+          "ProtoOASymbolsListReq",
+          {
+            ctidTraderAccountId: Number(args.ctidTraderAccountId)
+          }
+        )) as { symbol?: unknown[]; symbols?: unknown[] };
+        const rawList = (symbolsRes.symbol ??
+          symbolsRes.symbols ??
+          []) as Array<Record<string, unknown>>;
+        for (const s of rawList) {
+          const name = String(s.symbolName ?? s.name ?? "")
+            .trim()
+            .toUpperCase()
+            .replace(/[/\s._-]/g, "");
+          if (name === wanted && s.symbolId != null) {
+            return String(s.symbolId);
+          }
+        }
+        return null;
+      });
+    },
+
     async fetchQuote(args) {
       const isLive = Boolean(args.isLive);
       return withOpenApiConnection({ isLive }, async (connection) => {
@@ -1092,6 +1142,8 @@ export function createMockOpenApiClient(opts?: {
   symbol?: BrokerSymbol | null;
   quote?: BrokerQuote;
   snapshot?: AccountSnapshot;
+  /** Optional EURUSD quote for quote→deposit FX tests. */
+  eurusdQuote?: BrokerQuote;
 }): CTraderOpenApiClient {
   const accounts =
     opts?.accounts ??
@@ -1106,6 +1158,7 @@ export function createMockOpenApiClient(opts?: {
         accountKeyHash: hashAccountKey("123456")
       }
     ] satisfies DiscoveredAccount[]);
+  const eurusdSymbolId = "1";
   return {
     async listAccountsByAccessToken() {
       return accounts;
@@ -1144,7 +1197,32 @@ export function createMockOpenApiClient(opts?: {
         ])
       );
     },
-    async fetchQuote() {
+    async findSymbolIdByName(args) {
+      const wanted = String(args.symbolName ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[/\s._-]/g, "");
+      if (wanted === "EURUSD") return eurusdSymbolId;
+      if (wanted === "XAUUSD") return "41";
+      return null;
+    },
+    async fetchQuote(args) {
+      if (String(args.symbolId) === eurusdSymbolId) {
+        return (
+          opts?.eurusdQuote ?? {
+            symbolId: eurusdSymbolId,
+            symbolName: "EURUSD",
+            // mid 1.15441 → 1/mid ≈ 0.86624336 (proven Demo conversion)
+            bid: 1.1543,
+            ask: 1.15452,
+            spread: 0.00022,
+            timestamp: new Date().toISOString(),
+            marketStatus: "OPEN",
+            stale: false,
+            source: "LIVE"
+          }
+        );
+      }
       return (
         opts?.quote ?? {
           symbolId: "41",
