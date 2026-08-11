@@ -49,6 +49,7 @@ import { OpenPositionCard } from "../components/autotrade/OpenPositionCard";
 import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 import type { DailySafetyPublicView } from "../lib/broker/ctraderTypes";
 import { deriveAutoTradeHeaderStatus } from "../lib/autoTradeHeaderStatus";
+import { deriveDemoAutoPermissionReadiness } from "../lib/demoAutoReadiness";
 
 const MODE_STORAGE_KEY = "gm-autotrade-mode-tab";
 
@@ -575,6 +576,18 @@ export function AutoTradePage() {
     (shellQuote?.marketStatus === "CLOSED" ||
       /CLOSE/i.test(sync.marketStatusRaw || "") ||
       shellQuote?.freshness === "MARKET_CLOSED");
+  /** Authoritative Demo Auto permission — settings intent + qualification demoAuto/state. */
+  const demoAutoPermission = deriveDemoAutoPermissionReadiness({
+    isLiveSelected: Boolean(sync.isLive),
+    demoAccountConnected: Boolean(sync.connected && maskedAt && !sync.isLive),
+    autoTradeEnabledIntent: settings?.autoTradeEnabledIntent,
+    autoTradePaused: settings?.autoTradePaused,
+    emergencyStopActive:
+      Boolean(settings?.emergencyStopActive) || Boolean(status?.emergencyStopActive),
+    qualificationState: qualification?.state,
+    demoAutoEnabled: qualification?.demoAuto?.enabled,
+    qualificationNextAction: qualification?.nextAction
+  });
   const heroState = display === "SHADOW" || isLiveEnv ? "SHADOW" : "OFF";
 
   return (
@@ -1071,18 +1084,10 @@ export function AutoTradePage() {
               detail: status?.emergencyStopActive ? "Active" : "Ready"
             },
             {
-              ok: false,
-              pending: true,
-              label: sync.isLive
-                ? "Owner/live approval pending"
-                : sync.connected && maskedAt
-                  ? "Demo trading permission / execution requirement"
-                  : "AutoTrade setup incomplete",
-              detail: sync.isLive
-                ? "Required for live"
-                : sync.connected && maskedAt
-                  ? "Demo Auto not enabled"
-                  : "Connect and select account"
+              ok: demoAutoPermission.ok,
+              pending: demoAutoPermission.pending,
+              label: demoAutoPermission.label,
+              detail: demoAutoPermission.detail
             },
             {
               ok: false,

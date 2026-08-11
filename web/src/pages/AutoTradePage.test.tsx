@@ -737,4 +737,193 @@ describe("AutoTradePage", () => {
     expect(screen.getByTestId("qual-retry")).toBeInTheDocument();
     expect(screen.getByTestId("autotrade-broker-account-stat")).toHaveTextContent(/48…10/);
   });
+
+  it("readiness shows Demo Auto enabled when intent + LIVE_QUALIFICATION are on", async () => {
+    api.getBrokerControlCentre.mockResolvedValue({
+      defaultBroker: "pepperstone_ctrader",
+      autoTrade: "DEMO",
+      brokers: [
+        {
+          id: "pepperstone_ctrader",
+          name: "Pepperstone cTrader Demo",
+          status: "Connected",
+          detail: "Demo",
+          badge: "DEMO"
+        }
+      ],
+      automationModes: [],
+      readiness: {
+        setupRequired: false,
+        authSetupRequired: false,
+        oauthConfigured: true,
+        connected: true,
+        demonstrationAvailable: true,
+        automationMode: "DEMO_AUTO",
+        autoTrade: "DEMO",
+        orderSubmissionEnabled: true,
+        liveEnabled: false,
+        wizardSteps: [],
+        label: "Ready",
+        auth: { status: "OK", brokerSetupEnabled: true, notes: [] },
+        qualification: {
+          unlocked: true,
+          canActivate: true,
+          failed: [],
+          progress: {
+            completedPreviews: 20,
+            requiredPreviews: 20,
+            approvedControlledDemoTrades: 0,
+            requiredTrades: 5,
+            daysSinceFirstTrade: null,
+            requiredDays: 7
+          }
+        },
+        connectionSummary: {
+          connected: true,
+          accountMasked: "****4810",
+          pepperstoneConfirmed: true,
+          symbolName: "XAUUSD",
+          lastSyncAt: new Date().toISOString(),
+          lastQuoteAt: new Date().toISOString()
+        }
+      }
+    });
+    api.listCTraderAccounts.mockResolvedValue({
+      accounts: [
+        {
+          ctidTraderAccountId: "demo-4810",
+          accountIdMasked: "****4810",
+          isLive: false,
+          selected: true,
+          brokerNameTitle: "Pepperstone",
+          depositCurrency: "EUR"
+        }
+      ]
+    });
+    api.getCTraderDiagnostics.mockResolvedValue({
+      oauthConnected: true,
+      accountSelected: true,
+      demoAccountSelected: true,
+      selectedAccountIsLive: false,
+      credentialsConfigured: true,
+      pepperstoneConfirmed: true,
+      goldSymbolFound: true,
+      liveQuoteReceived: true,
+      spreadAvailable: true,
+      volumeRulesAvailable: true,
+      marginMetadataAvailable: true,
+      marketStatusAvailable: true,
+      tradingSafelyLocked: true,
+      autoTrade: "DEMO",
+      environment: "DEMO",
+      connection: {
+        accountMasked: "****4810",
+        brokerName: "Pepperstone",
+        currency: "EUR",
+        symbolName: "XAUUSD",
+        oauthScope: "trading",
+        tokenRefreshHealthy: true
+      },
+      quote: {
+        bid: 4362.1,
+        ask: 4362.2,
+        spread: 0.1,
+        marketStatus: "OPEN",
+        stale: false,
+        timestamp: new Date().toISOString()
+      }
+    });
+    api.getAutoTradeSettings.mockResolvedValue({
+      settings: {
+        uid: "u",
+        environment: "demo",
+        updatedAt: new Date().toISOString(),
+        selectedAccountId: "demo-4810",
+        sizingMode: "automatic_risk",
+        fixedRiskAmount: 50,
+        percentageRisk: 0.5,
+        manualLotSize: 0.01,
+        maxDailyLoss: 250,
+        maxTradesPerDay: 6,
+        maxOpenPositions: 1,
+        minConfidence: 80,
+        minRiskReward: 1.5,
+        maxSpread: 2,
+        maxQuoteAgeSeconds: 15,
+        stopLossDistance: null,
+        takeProfitMethod: "fixed_rr",
+        tradeCooldownMinutes: 30,
+        pauseAfterConsecutiveLosses: 3,
+        allowedSessions: ["London", "NewYork"],
+        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        newsFilterEnabled: true,
+        confirmationCandleRequired: true,
+        trendConfirmationRequired: false,
+        volumeConfirmationRequired: false,
+        breakEvenEnabled: false,
+        trailingStopEnabled: false,
+        partialTakeProfitEnabled: false,
+        liveActivationConfirmedAt: null,
+        liveActivationPhraseConfirmed: false,
+        autoTradeEnabledIntent: true,
+        autoTradePaused: false,
+        emergencyStopActive: false
+      },
+      recommended: {}
+    });
+    api.getAutoTradeQualification.mockResolvedValue({
+      state: "LIVE_QUALIFICATION",
+      overallLabel: "Live qualification",
+      accountMasked: "****4810",
+      accountIdPresent: true,
+      environment: "DEMO",
+      nextAction: "Continue Demo Auto qualification",
+      nextRequirement: "Valid market setup",
+      blockers: [
+        { id: "oauth", label: "Pepperstone Demo connected", ok: true },
+        { id: "trading_scope", label: "Demo trading permission", ok: true }
+      ],
+      canStart: false,
+      canPause: true,
+      canResume: false,
+      canEnableDemoAuto: false,
+      canBeginLiveActivation: false,
+      preview: { completed: 20, required: 20 },
+      controlledDemo: { completed: 0, required: 5, open: 0, blockedAttempts: 0 },
+      observation: { day: null, requiredDays: 7, firstTradeAt: null, remainingMs: null },
+      safety: { completed: 6, required: 6, checks: [] },
+      liveEligibility: {
+        demoAutoTrades: 1,
+        requiredTrades: 20,
+        observationDay: null,
+        requiredDays: 7,
+        criticalSafetyFailures: 0,
+        status: "QUALIFYING"
+      },
+      demoAuto: { enabled: true, ready: true },
+      liveOrders: "LOCKED",
+      recentPreviews: [],
+      recentControlledTrades: [],
+      todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
+      recentEvaluations: [],
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    render(
+      <MemoryRouter>
+        <AutoTradePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("autotrade-readiness-list")).toHaveTextContent(
+        "Demo Auto enabled"
+      )
+    );
+    const readiness = screen.getByTestId("autotrade-readiness-list");
+    expect(readiness).not.toHaveTextContent("Demo Auto not enabled");
+    expect(readiness).toHaveTextContent("Live execution disabled");
+    expect(readiness).toHaveTextContent("Hard locked");
+  });
 });
