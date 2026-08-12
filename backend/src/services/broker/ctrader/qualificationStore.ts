@@ -45,47 +45,90 @@ export type ForeignQualificationHit = {
   accountMasked: string | null;
 };
 
+export type ForeignLookupResult =
+  | { ok: true; hits: ForeignQualificationHit[] }
+  | {
+      ok: false;
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE";
+      message: string;
+    };
+
+function hitFromDoc(
+  pathUid: string,
+  docId: string,
+  data: Record<string, unknown>
+): ForeignQualificationHit | null {
+  const docAccount =
+    normalizeAccountId((data.accountId as string | number | undefined) ?? docId) ??
+    docId;
+  const startedAt =
+    typeof data.startedAt === "string" && data.startedAt.trim()
+      ? data.startedAt
+      : null;
+  if (!startedAt) return null;
+  return {
+    uid: pathUid,
+    accountId: docAccount,
+    state: (data.state as string) || "UNKNOWN",
+    startedAt,
+    accountMasked:
+      typeof data.accountMasked === "string" ? data.accountMasked : null
+  };
+}
+
 /**
  * Find started qualification docs for the same Demo account under a different UID.
- * Used to surface QUALIFICATION ACCOUNT MISMATCH instead of a silent 0/20 restart.
+ * Exact accountId query — never an arbitrary first-N scan.
+ * Failures are returned as ok:false (callers must not treat as "no conflict").
  */
 export async function findForeignStartedQualifications(
   uid: string,
   accountId: string | number | null | undefined
-): Promise<ForeignQualificationHit[]> {
+): Promise<ForeignLookupResult> {
   const normalized = normalizeAccountId(accountId);
-  if (!normalized) return [];
+  if (!normalized) return { ok: true, hits: [] };
+
   try {
-    const snap = await getFirestore()
-      .collectionGroup("autotradeQualification")
-      .limit(80)
-      .get();
-    const hits: ForeignQualificationHit[] = [];
-    for (const doc of snap.docs) {
-      const pathUid = doc.ref.path.split("/")[1];
-      if (!pathUid || pathUid === uid) continue;
-      const data = doc.data() as Record<string, unknown>;
-      const docAccount =
-        normalizeAccountId((data.accountId as string | number | undefined) ?? doc.id) ??
-        doc.id;
-      if (docAccount !== normalized) continue;
-      const startedAt =
-        typeof data.startedAt === "string" && data.startedAt.trim()
-          ? data.startedAt
-          : null;
-      if (!startedAt) continue;
-      hits.push({
-        uid: pathUid,
-        accountId: docAccount,
-        state: (data.state as string) || "UNKNOWN",
-        startedAt,
-        accountMasked:
-          typeof data.accountMasked === "string" ? data.accountMasked : null
-      });
+    const db = getFirestore();
+    // Query string form (canonical). Also query numeric form for historical docs.
+    const queries = [
+      db
+        .collectionGroup("autotradeQualification")
+        .where("accountId", "==", normalized)
+        .limit(10)
+    ];
+    if (/^\d+$/.test(normalized)) {
+      const asNum = Number(normalized);
+      if (Number.isSafeInteger(asNum)) {
+        queries.push(
+          db
+            .collectionGroup("autotradeQualification")
+            .where("accountId", "==", asNum)
+            .limit(10)
+        );
+      }
     }
-    return hits;
-  } catch {
-    return [];
+
+    const snaps = await Promise.all(queries.map((q) => q.get()));
+    const byUid = new Map<string, ForeignQualificationHit>();
+    for (const snap of snaps) {
+      for (const doc of snap.docs) {
+        const pathUid = doc.ref.path.split("/")[1];
+        if (!pathUid || pathUid === uid) continue;
+        const hit = hitFromDoc(pathUid, doc.id, (doc.data() ?? {}) as Record<string, unknown>);
+        if (hit) byUid.set(pathUid, hit);
+      }
+    }
+    return { ok: true, hits: [...byUid.values()] };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE",
+      message:
+        err instanceof Error
+          ? err.message
+          : "Qualification ownership lookup failed"
+    };
   }
 }
 
@@ -150,9 +193,10 @@ export function createEmptyQualificationDoc(args: {
   buildSha?: string | null;
 }): QualificationDocument {
   const now = new Date().toISOString();
+  const accountId = normalizeAccountId(args.accountId) ?? String(args.accountId);
   return {
     uid: args.uid,
-    accountId: args.accountId,
+    accountId,
     accountMasked: args.accountMasked,
     environment: "DEMO",
     state: "READY_TO_QUALIFY",

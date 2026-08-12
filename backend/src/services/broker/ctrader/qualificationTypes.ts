@@ -260,9 +260,13 @@ export type QualificationPublicView = {
     | "NEVER_STARTED"
     | "MISSING_RECORD"
     | "ACCOUNT_MISMATCH"
-    | "ACCOUNT_CONFLICT";
+    | "ACCOUNT_CONFLICT"
+    | "OWNERSHIP_CHECK_UNAVAILABLE";
   accountConflict?: {
-    kind: "FOREIGN_STARTED_QUALIFICATION" | "SELECTED_ACCOUNT_MISMATCH";
+    kind:
+      | "FOREIGN_STARTED_QUALIFICATION"
+      | "SELECTED_ACCOUNT_MISMATCH"
+      | "OWNERSHIP_CHECK_UNAVAILABLE";
     message: string;
     foreignAccountMasked: string | null;
   } | null;

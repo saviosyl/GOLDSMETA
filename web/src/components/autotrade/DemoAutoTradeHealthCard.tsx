@@ -69,14 +69,17 @@ export function DemoAutoTradeHealthCard(props: {
           : "BLOCKED");
 
   const qualLabel =
-    q?.accountConflict ||
-    q?.recordStatus === "ACCOUNT_CONFLICT" ||
-    q?.recordStatus === "ACCOUNT_MISMATCH"
-      ? "QUALIFICATION ACCOUNT MISMATCH"
-      : !a?.startedAt &&
-          (a?.qualificationState === "READY_TO_QUALIFY" || !a?.qualificationState)
-        ? "NOT STARTED"
-        : (q?.overallLabel || a?.qualificationState || "—").toString();
+    q?.recordStatus === "OWNERSHIP_CHECK_UNAVAILABLE" ||
+    q?.accountConflict?.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+      ? "OWNERSHIP CHECK UNAVAILABLE"
+      : q?.accountConflict ||
+          q?.recordStatus === "ACCOUNT_CONFLICT" ||
+          q?.recordStatus === "ACCOUNT_MISMATCH"
+        ? "QUALIFICATION ACCOUNT MISMATCH"
+        : !a?.startedAt &&
+            (a?.qualificationState === "READY_TO_QUALIFY" || !a?.qualificationState)
+          ? "NOT STARTED"
+          : (q?.overallLabel || a?.qualificationState || "—").toString();
   const demoAutoDetail =
     !demoOn && a
       ? !a.startedAt

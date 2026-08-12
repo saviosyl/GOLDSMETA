@@ -23,7 +23,7 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
   saveQualificationDoc: (...a: unknown[]) => saveQualificationDoc(...a),
   normalizeAccountId: (id: unknown) =>
     id == null ? null : String(id).trim() || null,
-  findForeignStartedQualifications: vi.fn(async () => [])
+  findForeignStartedQualifications: vi.fn(async () => ({ ok: true, hits: [] }))
 }));
 vi.mock("../../../../src/services/broker/ctrader/demoPositionMutations", () => ({
   reconcileDemoBrokerPositions: (...a: unknown[]) => reconcileDemoBrokerPositions(...a)

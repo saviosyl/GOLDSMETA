@@ -33,7 +33,7 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
   recountDemoAuto: (d: unknown) => d,
   normalizeAccountId: (id: unknown) =>
     id == null ? null : String(id).trim() || null,
-  findForeignStartedQualifications: vi.fn(async () => [])
+  findForeignStartedQualifications: vi.fn(async () => ({ ok: true, hits: [] }))
 }));
 vi.mock("../../../../src/services/broker/ctrader/positionLifecycleStore", () => ({
   getPositionLifecycle: (...a: unknown[]) => getPositionLifecycle(...a),

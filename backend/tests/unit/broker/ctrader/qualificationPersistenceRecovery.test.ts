@@ -13,7 +13,9 @@ const {
   getConnection,
   getUserAutoTradeSettings,
   countEvaluationsForDay,
-  listRecentEvaluations
+  listRecentEvaluations,
+  claimDemoQualificationOwnership,
+  backfillOwnershipFromStartedQualification
 } = vi.hoisted(() => ({
   getQualificationDoc: vi.fn(),
   getActiveQualificationAccountId: vi.fn(),
@@ -24,7 +26,9 @@ const {
   getConnection: vi.fn(),
   getUserAutoTradeSettings: vi.fn(),
   countEvaluationsForDay: vi.fn(),
-  listRecentEvaluations: vi.fn()
+  listRecentEvaluations: vi.fn(),
+  claimDemoQualificationOwnership: vi.fn(),
+  backfillOwnershipFromStartedQualification: vi.fn()
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/qualificationStore", async () => {
@@ -41,6 +45,13 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", async () =
     appendTransition
   };
 });
+
+vi.mock("../../../../src/services/broker/ctrader/qualificationOwnership", () => ({
+  claimDemoQualificationOwnership,
+  backfillOwnershipFromStartedQualification,
+  getQualificationOwnershipClaim: vi.fn(),
+  qualificationOwnerDocId: (id: string) => `hash-${id}`
+}));
 
 vi.mock("../../../../src/services/broker/ctrader/connectionStore", () => ({
   getConnection
@@ -162,7 +173,17 @@ describe("qualification persistence + conflict recovery", () => {
     getConnection.mockResolvedValue(demoConnection());
     getUserAutoTradeSettings.mockResolvedValue(demoSettings(true));
     getActiveQualificationAccountId.mockResolvedValue(ACCOUNT);
-    findForeignStartedQualifications.mockResolvedValue([]);
+    findForeignStartedQualifications.mockResolvedValue({ ok: true, hits: [] });
+    claimDemoQualificationOwnership.mockResolvedValue({
+      ok: true,
+      claimed: true,
+      ownerUid: OWNER
+    });
+    backfillOwnershipFromStartedQualification.mockResolvedValue({
+      ok: true,
+      claimed: false,
+      ownerUid: OWNER
+    });
     countEvaluationsForDay.mockResolvedValue({
       evaluated: 0,
       qualified: 0,
@@ -170,6 +191,10 @@ describe("qualification persistence + conflict recovery", () => {
     });
     listRecentEvaluations.mockResolvedValue([]);
     saveQualificationDoc.mockResolvedValue(undefined);
+    appendTransition.mockImplementation(async (doc: { state?: string }, to: string) => ({
+      ...doc,
+      state: to
+    }));
   });
 
   it("A/E: LIVE_QUALIFICATION persists and is returned (not READY_TO_QUALIFY)", async () => {
@@ -180,6 +205,12 @@ describe("qualification persistence + conflict recovery", () => {
     expect(view.recordStatus).toBe("ACTIVE");
     expect(view.overallLabel).not.toMatch(/not active/i);
     expect(saveQualificationDoc).not.toHaveBeenCalled();
+  });
+
+  it("owner active GET performs ZERO foreign collection-group lookups", async () => {
+    getQualificationDoc.mockResolvedValue(liveQualDoc());
+    await getQualificationView(OWNER);
+    expect(findForeignStartedQualifications).not.toHaveBeenCalled();
   });
 
   it("B/K: Demo Auto intent remains authoritative when settings say true", () => {
@@ -229,25 +260,43 @@ describe("qualification persistence + conflict recovery", () => {
     expect(view.canStart).toBe(false);
     expect(view.preview.completed).toBe(1);
     expect(saveQualificationDoc).not.toHaveBeenCalled();
+    expect(findForeignStartedQualifications).not.toHaveBeenCalled();
   });
 
   it("G: foreign UID started qualification surfaces ACCOUNT CONFLICT (not silent 0/20)", async () => {
     getQualificationDoc.mockResolvedValue(null);
-    findForeignStartedQualifications.mockResolvedValue([
-      {
-        uid: "other-uid",
-        accountId: ACCOUNT,
-        state: "LIVE_QUALIFICATION",
-        startedAt: "2026-08-08T21:02:29.619Z",
-        accountMasked: "48…10"
-      }
-    ]);
+    findForeignStartedQualifications.mockResolvedValue({
+      ok: true,
+      hits: [
+        {
+          uid: "other-uid",
+          accountId: ACCOUNT,
+          state: "LIVE_QUALIFICATION",
+          startedAt: "2026-08-08T21:02:29.619Z",
+          accountMasked: "48…10"
+        }
+      ]
+    });
     const view = await getQualificationView(OWNER);
     expect(view.recordStatus).toBe("ACCOUNT_CONFLICT");
     expect(view.overallLabel).toMatch(/ACCOUNT MISMATCH/i);
     expect(view.canStart).toBe(false);
     expect(view.preview.completed).toBe(0);
     expect(view.demoAuto.enabled).toBe(false);
+  });
+
+  it("GET lookup failure → OWNERSHIP_CHECK_UNAVAILABLE (not invented conflict, canStart false)", async () => {
+    getQualificationDoc.mockResolvedValue(null);
+    findForeignStartedQualifications.mockResolvedValue({
+      ok: false,
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE",
+      message: "index missing"
+    });
+    const view = await getQualificationView(OWNER);
+    expect(view.recordStatus).toBe("OWNERSHIP_CHECK_UNAVAILABLE");
+    expect(view.canStart).toBe(false);
+    expect(view.overallLabel).toMatch(/unavailable/i);
+    expect(saveQualificationDoc).not.toHaveBeenCalled();
   });
 
   it("H: string/number account id normalization collapses duplicate keys", () => {
@@ -348,18 +397,63 @@ describe("qualification persistence + conflict recovery", () => {
   });
 
   it("startQualification refuses foreign started qualification (no silent 0/20)", async () => {
-    findForeignStartedQualifications.mockResolvedValue([
-      {
-        uid: "other",
-        accountId: ACCOUNT,
-        state: "LIVE_QUALIFICATION",
-        startedAt: "2026-08-08T00:00:00Z",
-        accountMasked: "48…10"
-      }
-    ]);
+    findForeignStartedQualifications.mockResolvedValue({
+      ok: true,
+      hits: [
+        {
+          uid: "other",
+          accountId: ACCOUNT,
+          state: "LIVE_QUALIFICATION",
+          startedAt: "2026-08-08T00:00:00Z",
+          accountMasked: "48…10"
+        }
+      ]
+    });
     await expect(startQualification(OWNER)).rejects.toMatchObject({
       code: "QUALIFICATION_ACCOUNT_MISMATCH"
     });
     expect(saveQualificationDoc).not.toHaveBeenCalled();
+    expect(claimDemoQualificationOwnership).not.toHaveBeenCalled();
+  });
+
+  it("startQualification lookup failure fails CLOSED — zero qual create", async () => {
+    findForeignStartedQualifications.mockResolvedValue({
+      ok: false,
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE",
+      message: "firestore unavailable"
+    });
+    await expect(startQualification(OWNER)).rejects.toMatchObject({
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE"
+    });
+    expect(saveQualificationDoc).not.toHaveBeenCalled();
+    expect(createEmptyQualificationDoc).not.toHaveBeenCalled();
+    expect(claimDemoQualificationOwnership).not.toHaveBeenCalled();
+  });
+
+  it("startQualification claim mismatch fails CLOSED — zero qual create", async () => {
+    claimDemoQualificationOwnership.mockResolvedValue({
+      ok: false,
+      code: "QUALIFICATION_ACCOUNT_MISMATCH",
+      message: "claimed by other"
+    });
+    await expect(startQualification(OWNER)).rejects.toMatchObject({
+      code: "QUALIFICATION_ACCOUNT_MISMATCH"
+    });
+    expect(saveQualificationDoc).not.toHaveBeenCalled();
+  });
+
+  it("Live account cannot start Demo qualification", async () => {
+    getConnection.mockResolvedValue({
+      ...demoConnection(),
+      selectedAccountIsLive: true,
+      environment: "LIVE"
+    });
+    await expect(startQualification(OWNER)).rejects.toMatchObject({
+      // Live selection fails setup readiness / Demo-account gate before any write.
+      code: expect.stringMatching(/QUALIFICATION_NOT_READY|CTRADER_DEMO_ACCOUNT_REQUIRED/)
+    });
+    expect(findForeignStartedQualifications).not.toHaveBeenCalled();
+    expect(saveQualificationDoc).not.toHaveBeenCalled();
+    expect(claimDemoQualificationOwnership).not.toHaveBeenCalled();
   });
 });

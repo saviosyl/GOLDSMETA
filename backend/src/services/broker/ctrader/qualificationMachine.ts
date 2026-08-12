@@ -160,8 +160,12 @@ export function overallLabel(
   opts?: {
     startedAt?: string | null;
     accountConflict?: boolean;
+    ownershipCheckUnavailable?: boolean;
   }
 ): string {
+  if (opts?.ownershipCheckUnavailable) {
+    return "Qualification ownership check unavailable";
+  }
   if (opts?.accountConflict) {
     return "QUALIFICATION ACCOUNT MISMATCH";
   }
@@ -327,11 +331,16 @@ export function toPublicView(args: {
   const conflictBlockers: QualificationBlocker[] = conflict
     ? [
         {
-          id: "account_conflict",
+          id:
+            conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+              ? "ownership_check_unavailable"
+              : "account_conflict",
           label: conflict.message,
           ok: false,
           action:
-            "Use the Firebase account that owns this Demo qualification, or disconnect the conflicting login"
+            conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+              ? "Retry shortly — qualification cannot start until ownership check succeeds"
+              : "Use the Firebase account that owns this Demo qualification, or disconnect the conflicting login"
         }
       ]
     : [];
@@ -339,9 +348,11 @@ export function toPublicView(args: {
   const recordStatus: QualificationPublicView["recordStatus"] =
     args.recordStatus ??
     (conflict
-      ? conflict.kind === "SELECTED_ACCOUNT_MISMATCH"
-        ? "ACCOUNT_MISMATCH"
-        : "ACCOUNT_CONFLICT"
+      ? conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+        ? "OWNERSHIP_CHECK_UNAVAILABLE"
+        : conflict.kind === "SELECTED_ACCOUNT_MISMATCH"
+          ? "ACCOUNT_MISMATCH"
+          : "ACCOUNT_CONFLICT"
       : doc?.startedAt
         ? "ACTIVE"
         : "NEVER_STARTED");
@@ -350,7 +361,9 @@ export function toPublicView(args: {
     state,
     overallLabel: overallLabel(state, {
       startedAt: doc?.startedAt ?? null,
-      accountConflict: Boolean(conflict)
+      accountConflict:
+        Boolean(conflict) && conflict?.kind !== "OWNERSHIP_CHECK_UNAVAILABLE",
+      ownershipCheckUnavailable: conflict?.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
     }),
     accountMasked: args.setup.accountMasked ?? doc?.accountMasked ?? null,
     accountIdPresent: Boolean(args.setup.accountId),
