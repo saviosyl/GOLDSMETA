@@ -50,6 +50,17 @@ type Status = {
   labelVersion: string;
   lastCandleCloseTs: string | null;
   disclaimer: string;
+  marketFeedConnected?: boolean;
+  marketFeedStatus?: string;
+  connectionState?: string;
+  interfaceReady?: boolean;
+  overallMicroDecision?: string;
+  dataUnavailable?: boolean;
+  degradedReason?: string | null;
+  collector?: {
+    healthy?: boolean;
+    reasons?: string[];
+  };
 };
 
 function pct(x: number | undefined): string {
@@ -131,6 +142,13 @@ export function MicroEdgePage() {
 
       <section className="gm-card gm-micro-status" data-testid="micro-edge-status">
         <h2>Status</h2>
+        <div
+          className={`gm-banner ${status?.marketFeedConnected ? "gm-banner-info" : "gm-banner-danger"}`}
+          data-testid="micro-market-feed-status"
+        >
+          {status?.marketFeedStatus ?? "Market feed not connected"}
+          {status?.connectionState ? ` · ${status.connectionState}` : ""}
+        </div>
         <div className="gm-micro-grid">
           <div>
             <div className="gm-label">Symbol</div>
@@ -139,24 +157,31 @@ export function MicroEdgePage() {
           <div>
             <div className="gm-label">Bid / Ask</div>
             <div>
-              {latest ? `${num(latest.bid, 2)} / ${num(latest.ask, 2)}` : "—"}
+              {status?.marketFeedConnected && latest
+                ? `${num(latest.bid, 2)} / ${num(latest.ask, 2)}`
+                : "—"}
             </div>
           </div>
           <div>
             <div className="gm-label">Spread</div>
-            <div>{latest ? num(latest.spread, 2) : "—"}</div>
+            <div>
+              {status?.marketFeedConnected && latest ? num(latest.spread, 2) : "—"}
+            </div>
           </div>
           <div>
             <div className="gm-label">Freshness</div>
             <div>
-              {latest?.dataFreshness ?? "—"}
-              {latest ? ` · ${Math.round(latest.quoteAgeMs)}ms` : ""}
+              {status?.marketFeedConnected && latest
+                ? `${latest.dataFreshness} · ${Math.round(latest.quoteAgeMs)}ms`
+                : "DATA UNAVAILABLE"}
             </div>
           </div>
           <div>
             <div className="gm-label">Session / Regime</div>
             <div>
-              {latest?.session ?? "—"} / {latest?.regime ?? "—"}
+              {status?.marketFeedConnected && latest
+                ? `${latest.session} / ${latest.regime}`
+                : "— / —"}
             </div>
           </div>
           <div>
@@ -172,12 +197,22 @@ export function MicroEdgePage() {
             <div>{latest?.candleCloseTs ?? status?.lastCandleCloseTs ?? "—"}</div>
           </div>
           <div>
+            <div className="gm-label">Collector health</div>
+            <div data-testid="micro-collector-health">
+              {status?.collector?.healthy ? "Healthy" : "Unhealthy"}
+              {status?.collector?.reasons?.length
+                ? ` · ${status.collector.reasons.join(", ")}`
+                : ""}
+            </div>
+          </div>
+          <div>
             <div className="gm-label">Execution</div>
             <div>Disabled (shadow)</div>
           </div>
         </div>
         <p className="gm-muted gm-micro-disclaimer">
-          Shadow signal only — no broker order is submitted.
+          Shadow signal only — no broker order is submitted. cTrader OpenAPI ingestion is
+          not connected in V1 (interface scaffold only).
         </p>
       </section>
 
@@ -223,8 +258,10 @@ export function MicroEdgePage() {
 
       <section className="gm-card" data-testid="micro-edge-decision">
         <h2>Micro decision</h2>
-        <p className="gm-micro-decision-value">
-          {latest?.overallMicroDecision ?? "WAIT"}
+        <p className="gm-micro-decision-value" data-testid="micro-overall-decision">
+          {status?.dataUnavailable || !status?.marketFeedConnected
+            ? "WAIT / DATA UNAVAILABLE"
+            : latest?.overallMicroDecision ?? "WAIT"}
         </p>
         <ul>
           {(latest?.topFactors ?? ["Awaiting first completed M1 evaluation"]).map((f) => (

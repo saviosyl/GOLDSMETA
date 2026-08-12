@@ -23,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so Micro Core-protection gate can diff against PR base SHA.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -37,14 +40,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests (includes owner safeguards, password-reset, webhook gate)
-        run: npm test
-        env:
-          NODE_ENV: test
-          APP_ENV: test
-          STORAGE_BACKEND: memory
-          GOLDMETA_PINNED_OWNER_UID: testPinnedOwnerUid000000000001
-          GOLDMETA_OWNER_EMAIL: saviosyl@gmail.com
+      # Micro Edge safety gates MUST run before the general suite so they are
+      # visible even when unrelated pre-existing Core tests fail later.
+      - name: Build (typecheck)
+        run: npm run build
 
       - name: Micro Edge — import boundary + broker mutation ban
         run: npm run gate:micro-edge-imports && npm run gate:micro-edge-mutations
@@ -62,6 +61,15 @@ jobs:
           APP_ENV: test
           STORAGE_BACKEND: memory
           MICRO_BROKER_EXECUTION_ENABLED: "false"
+
+      - name: Unit tests (includes owner safeguards, password-reset, webhook gate)
+        run: npm test
+        env:
+          NODE_ENV: test
+          APP_ENV: test
+          STORAGE_BACKEND: memory
+          GOLDMETA_PINNED_OWNER_UID: testPinnedOwnerUid000000000001
+          GOLDMETA_OWNER_EMAIL: saviosyl@gmail.com
 
       - name: Static gate — workflows must not invoke owner restore
         run: npx vitest run tests/unit/auth/deployMustNotRestoreOwner.test.ts
@@ -82,9 +90,6 @@ jobs:
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8081
           GCLOUD_PROJECT: goldmeta-signal-outcome-test
           GOOGLE_CLOUD_PROJECT: goldmeta-signal-outcome-test
-
-      - name: Build
-        run: npm run build
 
   # B. Optional credential-dependent live gate — never fails required CI when secrets absent.
   # Do not use production secrets for pull requests from forks.

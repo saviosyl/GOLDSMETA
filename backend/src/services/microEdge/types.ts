@@ -71,6 +71,19 @@ export type MicroHorizonForecast = {
   eligibilityReasons: string[];
 };
 
+/** Frozen at prediction time — outcome scoring must reuse these, not current globals. */
+export type MicroCostAssumptions = {
+  entryHalfSpread: number;
+  estimatedExitHalfSpread: number;
+  entrySlippageProxy: number;
+  exitSlippageProxy: number;
+  executionBuffer: number;
+  assumedLatencyMs: number;
+  slippageMethod: "PROXY";
+  costModelVersion: string;
+  estimatedFriction: number;
+};
+
 export type MicroPrediction = {
   predictionId: string;
   symbol: string;
@@ -97,6 +110,10 @@ export type MicroPrediction = {
   regimeReasons: string[];
   shadowOnly: true;
   brokerExecutionEnabled: false;
+  /** Exact prediction-time cost assumptions for reproducible outcomes. */
+  costAssumptions: MicroCostAssumptions;
+  /** Frozen label thresholds by horizon (USD/oz). */
+  labelThetaByHorizon: Record<MicroHorizon, number>;
   dataQuality: {
     ok: boolean;
     flags: string[];
@@ -148,9 +165,15 @@ export type MicroOutcome = {
   classCorrect: boolean | null;
   brierComponents: number | null;
   logLossComponent: number | null;
+  /** Copied from the immutable prediction — never current globals. */
   modelVersion: string;
   costModelVersion: string;
   labelVersion: string;
+  featureVersion: string;
+  calibrationVersion: string;
+  regimeVersion: string;
+  /** Frozen cost assumptions used for this outcome NET. */
+  costAssumptions: MicroCostAssumptions | null;
   mfeLong: number | null;
   maeLong: number | null;
   mfeShort: number | null;

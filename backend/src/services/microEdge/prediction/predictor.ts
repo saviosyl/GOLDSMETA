@@ -1,6 +1,5 @@
 import {
   MICRO_BROKER_EXECUTION_ENABLED,
-  MICRO_COST_MODEL_VERSION,
   MICRO_FEATURE_VERSION,
   MICRO_HORIZONS,
   MICRO_LABEL_VERSION,
@@ -9,6 +8,7 @@ import {
   MICRO_REGIME_VERSION,
   MICRO_SESSION_VERSION,
   MICRO_SHADOW_ONLY,
+  MICRO_THETA,
   type MicroHorizon
 } from "../config";
 import { classifyMicroSession, nowIso } from "../clock";
@@ -20,6 +20,7 @@ import { estimateFriction, netEdgeFromSignedMove } from "./costModel";
 import { decideHorizon, overallDecision } from "./decision";
 import type {
   MicroBar,
+  MicroCostAssumptions,
   MicroFeatureSnapshot,
   MicroHorizonForecast,
   MicroPrediction,
@@ -63,6 +64,18 @@ export function createPrediction(args: {
     currentSpread: args.quote.spread,
     historicalSpreads: args.spreadHistory
   });
+  const costAssumptions: MicroCostAssumptions = {
+    entryHalfSpread: friction.entryHalfSpread,
+    estimatedExitHalfSpread: friction.estimatedExitHalfSpread,
+    entrySlippageProxy: friction.entrySlippageProxy,
+    exitSlippageProxy: friction.exitSlippageProxy,
+    executionBuffer: friction.executionBuffer,
+    assumedLatencyMs: friction.assumedLatencyMs,
+    slippageMethod: friction.slippageMethod,
+    costModelVersion: friction.costModelVersion,
+    estimatedFriction: friction.estimatedFriction
+  };
+  const labelThetaByHorizon = { ...MICRO_THETA };
   const dataOk =
     !features.missingFlags.m1_insufficient &&
     !features.missingFlags.quote_stale &&
@@ -74,7 +87,7 @@ export function createPrediction(args: {
     const scale = h === "1m" ? 0.5 : h === "5m" ? 1 : 1.4;
     const expectedSignedMove = raw.expectedSignedMove * scale;
     const expectedAbsoluteMove = raw.expectedAbsoluteMove * scale;
-    const e = netEdgeFromSignedMove(expectedSignedMove, friction.estimatedFriction);
+    const e = netEdgeFromSignedMove(expectedSignedMove, costAssumptions.estimatedFriction);
     const dec = decideHorizon({
       netEdgeUp: e.netEdgeUp,
       netEdgeDown: e.netEdgeDown,
@@ -91,7 +104,7 @@ export function createPrediction(args: {
       pNoEdge: cal.pNoEdge,
       expectedSignedMove,
       expectedAbsoluteMove,
-      estimatedFriction: friction.estimatedFriction,
+      estimatedFriction: costAssumptions.estimatedFriction,
       netEdgeUp: e.netEdgeUp,
       netEdgeDown: e.netEdgeDown,
       confidence: Math.max(cal.pUp, cal.pDown, cal.pNoEdge),
@@ -139,7 +152,7 @@ export function createPrediction(args: {
     featureVersion: MICRO_FEATURE_VERSION,
     modelVersion: MICRO_MODEL_VERSION,
     calibrationVersion: cal.calibrationVersion,
-    costModelVersion: MICRO_COST_MODEL_VERSION,
+    costModelVersion: costAssumptions.costModelVersion,
     labelVersion: MICRO_LABEL_VERSION,
     regimeVersion: MICRO_REGIME_VERSION,
     sessionVersion: MICRO_SESSION_VERSION,
@@ -148,6 +161,8 @@ export function createPrediction(args: {
     regimeReasons: regime.reasons,
     shadowOnly: MICRO_SHADOW_ONLY,
     brokerExecutionEnabled: MICRO_BROKER_EXECUTION_ENABLED,
+    costAssumptions,
+    labelThetaByHorizon,
     dataQuality: {
       ok: dataOk,
       flags: Object.entries(features.missingFlags)
