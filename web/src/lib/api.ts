@@ -1441,4 +1441,28 @@ export class ApiClient {
       body: "{}"
     });
   }
+
+  /** Micro Edge — shadow research API (read-only; no broker orders). */
+  microEdgeStatus(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/status");
+  }
+
+  microEdgeLatest(): Promise<{ prediction: Record<string, unknown> | null }> {
+    return this.request("/v1/micro-edge/latest");
+  }
+
+  microEdgeHistory(limit = 30): Promise<{
+    items: Array<Record<string, unknown>>;
+    outcomes: Array<Record<string, unknown>>;
+  }> {
+    return this.request(`/v1/micro-edge/history?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  microEdgePerformance(): Promise<{ summary: Record<string, unknown> }> {
+    return this.request("/v1/micro-edge/performance");
+  }
+
+  microEdgeModels(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/models");
+  }
 }

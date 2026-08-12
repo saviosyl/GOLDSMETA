@@ -1,0 +1,36 @@
+{
+  "description": "Protected Core AutoTrade / cTrader paths. Micro Edge PRs must not modify these relative to MICRO_BASE_SHA.",
+  "microBaseShaEnv": "MICRO_BASE_SHA",
+  "protectedGlobs": [
+    "backend/src/services/autoTrade/**",
+    "backend/src/services/decision/**",
+    "backend/src/services/decisionEngine/**",
+    "backend/src/services/activeTrade/**",
+    "backend/src/services/broker/ctrader/**",
+    "backend/src/routes/autoTrade.ts"
+  ],
+  "forbiddenMicroImports": [
+    "services/autoTrade",
+    "services/decision",
+    "services/decisionEngine",
+    "services/activeTrade",
+    "services/broker/ctrader",
+    "/autoTrade/",
+    "/decisionEngine/",
+    "/activeTrade/",
+    "broker/ctrader/"
+  ],
+  "forbiddenBrokerMutationTokens": [
+    "ProtoOANewOrderReq",
+    "ProtoOAAmendOrderReq",
+    "ProtoOACancelOrderReq",
+    "ProtoOAClosePositionReq",
+    "submitDemoOrder",
+    "submitLiveOrder",
+    "createMarketOrder",
+    "closePosition",
+    "amendPosition",
+    "demoPositionMutations",
+    "placeOrder"
+  ]
+}

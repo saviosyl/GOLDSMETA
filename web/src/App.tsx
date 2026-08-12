@@ -60,6 +60,9 @@ const HistoryReplayPage = lazy(() =>
 const AutoTradePage = lazy(() =>
   import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
 );
+const MicroEdgePage = lazy(() =>
+  import("./pages/MicroEdgePage").then((m) => ({ default: m.MicroEdgePage }))
+);
 const BrokerControlCentrePage = lazy(() =>
   import("./pages/broker/BrokerControlCentrePage").then((m) => ({
     default: m.BrokerControlCentrePage
@@ -275,6 +278,14 @@ function ProtectedApp() {
             element={
               <LazyRoute label="AutoTrade">
                 <AutoTradePage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/micro-edge"
+            element={
+              <LazyRoute label="Micro Edge">
+                <MicroEdgePage />
               </LazyRoute>
             }
           />

@@ -19,7 +19,8 @@ import {
   Radio,
   Settings,
   Shield,
-  Target
+  Target,
+  Zap
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import { useShellQuote } from "../../lib/quoteContext";
@@ -41,6 +42,7 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     items: [
       { to: "/", label: "Plan", end: true, icon: Home },
       { to: "/autotrade", label: "AutoTrade", icon: Bot },
+      { to: "/micro-edge", label: "Micro Edge", icon: Zap },
       { to: "/intelligence", label: "Markets", icon: Globe2 },
       { to: "/journal", label: "Journal", icon: BookOpen },
       { to: "/insights", label: "Insights", icon: LineChart }
@@ -99,6 +101,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
     heading: "Trading tools",
     items: [
+      { to: "/micro-edge", label: "Micro Edge", icon: Zap },
       { to: "/levels", label: "Levels", icon: Layers3 },
       { to: "/planner", label: "Risk Planner", icon: Target },
       { to: "/brokers", label: "Broker", icon: Radio }
