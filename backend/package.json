@@ -17,6 +17,7 @@
     "gate:micro-edge-mutations": "node scripts/microEdge/assertMicroBrokerMutationBan.mjs",
     "gate:micro-edge": "npm run gate:micro-edge-imports && npm run gate:micro-edge-mutations && npm run gate:micro-edge-core",
     "test:micro-edge": "vitest run tests/unit/microEdge",
+    "micro-edge:backfill": "tsx scripts/microEdge/backfillCli.ts",
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts",

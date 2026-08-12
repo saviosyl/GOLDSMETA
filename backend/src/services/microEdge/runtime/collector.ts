@@ -1,11 +1,5 @@
 /**
- * Micro market-data collector abstraction.
- *
- * Prefer a separate persistent worker (not Core persistentQuoteWorker).
- * V1 default: polled completed M1/M5/M15 + Bid/Ask spot (when connected).
- * Continuous DOM/tick streaming is feature-gated until dedicated deployment exists.
- *
- * Health is fail-closed — never hard-code healthy=true.
+ * Micro market-data collector health — fail-closed.
  */
 import {
   MICRO_M1_MAX_AGE_MS,
@@ -16,7 +10,7 @@ import type { MicroMarketDataConnectionState } from "../marketData/types";
 import type { MicroBar, MicroQuote } from "../types";
 
 export type MicroCollectorStatus = {
-  mode: "POLLED_BARS" | "STREAMING_FEATURE_GATED";
+  mode: string;
   connectionState: MicroMarketDataConnectionState;
   marketFeedConnected: boolean;
   marketFeedStatus: string;
@@ -26,9 +20,12 @@ export type MicroCollectorStatus = {
   tickStreamAvailable: boolean;
   healthy: boolean;
   reasons: string[];
-  /** Forced Micro decision when unhealthy. */
   degradedDecision: "WAIT" | null;
   dataUnavailable: boolean;
+  lastConnectedAt?: string | null;
+  lastDisconnectedAt?: string | null;
+  reconnectAttempts?: number;
+  lastErrorCode?: string | null;
 };
 
 function parseTs(iso: string | null | undefined): number | null {
@@ -44,21 +41,28 @@ export function evaluateCollectorHealth(args: {
   quoteMaxAgeMs?: number;
   m1MaxAgeMs?: number;
   marketFeedConnected: boolean;
+  transportConnected?: boolean;
+  symbolResolved?: boolean;
+  credentialsConfigured?: boolean;
+  heartbeatAt?: string | null;
+  heartbeatMaxAgeMs?: number;
+  extraReasons?: string[];
 }): { healthy: boolean; reasons: string[] } {
   const nowMs = args.nowMs ?? Date.now();
   const quoteMax = args.quoteMaxAgeMs ?? MICRO_QUOTE_MAX_AGE_MS;
   const m1Max = args.m1MaxAgeMs ?? MICRO_M1_MAX_AGE_MS;
-  const reasons: string[] = [];
+  const reasons: string[] = [...(args.extraReasons ?? [])];
 
-  if (!args.marketFeedConnected) {
-    reasons.push("market_feed_not_connected");
-  }
+  if (args.credentialsConfigured === false) reasons.push("oauth_missing");
+  if (!args.marketFeedConnected) reasons.push("market_feed_not_connected");
+  if (args.transportConnected === false) reasons.push("transport_disconnected");
+  if (args.symbolResolved === false) reasons.push("xauusd_not_found");
 
   if (!args.quote) {
-    reasons.push("missing_bid_ask_quote");
+    reasons.push("quote_missing");
   } else {
     if (!(args.quote.bid > 0) || !(args.quote.ask > 0) || !(args.quote.ask >= args.quote.bid)) {
-      reasons.push("invalid_bid_ask");
+      reasons.push("quote_invalid");
     }
     const qTs = parseTs(args.quote.brokerTimestamp);
     if (qTs == null) {
@@ -76,7 +80,7 @@ export function evaluateCollectorHealth(args: {
   }
 
   if (!args.lastM1) {
-    reasons.push("missing_completed_m1");
+    reasons.push("m1_missing");
   } else {
     if (!Number.isFinite(args.lastM1.closeTimeMs) || args.lastM1.closeTimeMs <= 0) {
       reasons.push("m1_timestamp_invalid");
@@ -85,7 +89,15 @@ export function evaluateCollectorHealth(args: {
     }
   }
 
-  return { healthy: reasons.length === 0, reasons };
+  if (args.heartbeatAt != null) {
+    const hb = parseTs(args.heartbeatAt);
+    const maxHb = args.heartbeatMaxAgeMs ?? 60_000;
+    if (hb == null || nowMs - hb > maxHb) reasons.push("collector_heartbeat_stale");
+  }
+
+  // Deduplicate
+  const unique = [...new Set(reasons)];
+  return { healthy: unique.length === 0, reasons: unique };
 }
 
 export function getCollectorStatus(
@@ -96,6 +108,15 @@ export function getCollectorStatus(
     quote?: MicroQuote | null;
     lastM1?: MicroBar | null;
     nowMs?: number;
+    transportConnected?: boolean;
+    symbolResolved?: boolean;
+    credentialsConfigured?: boolean;
+    heartbeatAt?: string | null;
+    lastConnectedAt?: string | null;
+    lastDisconnectedAt?: string | null;
+    reconnectAttempts?: number;
+    lastErrorCode?: string | null;
+    extraReasons?: string[];
   }
 ): MicroCollectorStatus {
   const marketFeedConnected = client.isLiveMarketFeedConnected();
@@ -103,7 +124,12 @@ export function getCollectorStatus(
     quote: meta.quote ?? null,
     lastM1: meta.lastM1 ?? null,
     nowMs: meta.nowMs,
-    marketFeedConnected
+    marketFeedConnected,
+    transportConnected: meta.transportConnected,
+    symbolResolved: meta.symbolResolved,
+    credentialsConfigured: meta.credentialsConfigured,
+    heartbeatAt: meta.heartbeatAt,
+    extraReasons: meta.extraReasons
   });
 
   return {
@@ -113,11 +139,15 @@ export function getCollectorStatus(
     marketFeedStatus: client.marketFeedStatusMessage(),
     lastQuoteTs: meta.lastQuoteTs,
     lastM1CloseTs: meta.lastM1CloseTs,
-    domAvailable: false, // never claim live DOM until wired
+    domAvailable: false,
     tickStreamAvailable: false,
     healthy: health.healthy,
     reasons: health.reasons,
     degradedDecision: health.healthy ? null : "WAIT",
-    dataUnavailable: !health.healthy
+    dataUnavailable: !health.healthy,
+    lastConnectedAt: meta.lastConnectedAt,
+    lastDisconnectedAt: meta.lastDisconnectedAt,
+    reconnectAttempts: meta.reconnectAttempts,
+    lastErrorCode: meta.lastErrorCode
   };
 }

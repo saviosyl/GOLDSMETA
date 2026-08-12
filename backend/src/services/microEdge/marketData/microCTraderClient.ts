@@ -1,28 +1,29 @@
 /**
- * Micro Edge read-only cTrader adapter scaffold.
+ * Micro Edge read-only cTrader high-level client.
  *
  * SHADOW ONLY — no order / amend / close / preview methods exist.
  * Does NOT import the Core mixed cTrader client module.
  *
- * V1 truth:
- * - Interface/scaffold = INTERFACE_READY
- * - In-memory seed helpers = MOCK_SEEDED (tests / offline only)
- * - Genuine live OpenAPI ingestion = LIVE_NOT_CONNECTED (not wired)
- * - DOM/tick streaming = FEATURE_GATED until a dedicated Micro collector exists
- *
- * Do NOT claim this class is a live cTrader integration until real reads exist.
+ * Modes:
+ * - MOCK_SEEDED: deterministic in-memory seed (tests)
+ * - LIVE_CONNECTED / LIVE_NOT_CONNECTED: via MicroLiveMarketSession + OpenAPI transport
+ * - FEATURE_GATED: historical ticks / DOM / live trendbar subs
  */
 
 import type { MicroBar, MicroDepthSnapshot, MicroQuote } from "../types";
+import type { MicroLiveMarketSession } from "./liveSession";
 import type {
   MicroCollectorMode,
   MicroMarketDataConnectionState,
-  MicroReadOnlyCapability
+  MicroReadOnlyCapability,
+  MicroTimeframe
 } from "./types";
 
 export type MicroCTraderClientConfig = {
   /** When true, continuous DOM/tick streaming APIs are enabled (still read-only). */
   streamingEnabled?: boolean;
+  /** Optional live session — never silently falls back to mock when live is requested. */
+  liveSession?: MicroLiveMarketSession | null;
 };
 
 export class MicroCTraderReadOnlyClient {
@@ -36,28 +37,38 @@ export class MicroCTraderReadOnlyClient {
     available: false
   };
   private seeded = false;
+  private liveSession: MicroLiveMarketSession | null;
 
   constructor(private readonly cfg: MicroCTraderClientConfig = {}) {
-    this.mode = cfg.streamingEnabled ? "STREAMING_FEATURE_GATED" : "POLLED_BARS";
+    this.liveSession = cfg.liveSession ?? null;
+    this.mode = this.liveSession
+      ? "LIVE_OPENAPI"
+      : cfg.streamingEnabled
+        ? "STREAMING_FEATURE_GATED"
+        : "POLLED_BARS";
   }
 
-  /** Scaffold methods exist; not the same as a live feed. */
+  attachLiveSession(session: MicroLiveMarketSession | null): void {
+    this.liveSession = session;
+  }
+
+  /** Scaffold / live methods exist; not the same as a live feed. */
   isInterfaceReady(): boolean {
     return true;
   }
 
-  /**
-   * Honest connection state. Live OpenAPI is never reported as connected in V1.
-   * MOCK_SEEDED = in-memory test/offline injection only.
-   */
   connectionState(): MicroMarketDataConnectionState {
+    if (this.liveSession) {
+      return this.liveSession.isLiveConnected()
+        ? "LIVE_CONNECTED"
+        : "LIVE_NOT_CONNECTED";
+    }
     if (this.seeded || this.bars.size > 0 || this.quote) return "MOCK_SEEDED";
     return "LIVE_NOT_CONNECTED";
   }
 
-  /** True only when a genuine live feed is wired (never in V1). */
   isLiveMarketFeedConnected(): boolean {
-    return false;
+    return this.liveSession?.isLiveConnected() === true;
   }
 
   marketFeedStatusMessage(): string {
@@ -66,7 +77,6 @@ export class MicroCTraderReadOnlyClient {
   }
 
   capabilities(): MicroReadOnlyCapability[] {
-    // Declared interface surface only — not proof of live connectivity.
     return [
       "M1_TRENDBARS",
       "M5_TRENDBARS",
@@ -79,55 +89,80 @@ export class MicroCTraderReadOnlyClient {
   }
 
   capabilityStates(): Record<MicroReadOnlyCapability, MicroMarketDataConnectionState> {
-    const seeded = this.connectionState() === "MOCK_SEEDED";
+    const live = this.connectionState();
+    const barState =
+      live === "LIVE_CONNECTED"
+        ? "LIVE_CONNECTED"
+        : live === "MOCK_SEEDED"
+          ? "MOCK_SEEDED"
+          : "LIVE_NOT_CONNECTED";
     return {
-      M1_TRENDBARS: seeded ? "MOCK_SEEDED" : "LIVE_NOT_CONNECTED",
-      M5_TRENDBARS: seeded ? "MOCK_SEEDED" : "LIVE_NOT_CONNECTED",
-      M15_TRENDBARS: seeded ? "MOCK_SEEDED" : "LIVE_NOT_CONNECTED",
-      BID_ASK_SPOT: seeded ? "MOCK_SEEDED" : "LIVE_NOT_CONNECTED",
-      // Streaming microstructure remains feature-gated until a Micro collector ships.
-      HISTORICAL_TICKS: this.cfg.streamingEnabled ? "FEATURE_GATED" : "FEATURE_GATED",
+      M1_TRENDBARS: barState,
+      M5_TRENDBARS: barState,
+      M15_TRENDBARS: barState,
+      BID_ASK_SPOT: barState,
+      HISTORICAL_TICKS: "FEATURE_GATED",
       DEPTH_OF_MARKET: "FEATURE_GATED",
       LIVE_TRENDBAR_SUB: "FEATURE_GATED"
     };
   }
 
-  /** Inject historical/polled bars for tests and offline collection — NOT live feed. */
-  seedBars(tf: "M1" | "M5" | "M15", bars: MicroBar[]): void {
+  /** Inject historical/polled bars for tests — NOT live feed. */
+  seedBars(tf: MicroTimeframe, bars: MicroBar[]): void {
+    if (this.liveSession) {
+      throw new Error("MICRO_MOCK_SEED_FORBIDDEN_WHILE_LIVE");
+    }
     this.seeded = true;
     this.bars.set(tf, [...bars].sort((a, b) => a.closeTimeMs - b.closeTimeMs));
   }
 
   seedQuote(quote: MicroQuote): void {
+    if (this.liveSession) {
+      throw new Error("MICRO_MOCK_SEED_FORBIDDEN_WHILE_LIVE");
+    }
     this.seeded = true;
     this.quote = quote;
   }
 
   seedDepth(depth: MicroDepthSnapshot): void {
+    if (this.liveSession) {
+      throw new Error("MICRO_MOCK_SEED_FORBIDDEN_WHILE_LIVE");
+    }
     this.seeded = true;
     this.depth = depth;
   }
 
-  async getTrendbars(tf: "M1" | "M5" | "M15", limit = 500): Promise<MicroBar[]> {
+  async getTrendbars(tf: MicroTimeframe, limit = 500): Promise<MicroBar[]> {
+    if (this.liveSession) {
+      // Live path reads from session store via poll; client cache filled by collector.
+      const all = this.bars.get(tf) ?? [];
+      return all.slice(Math.max(0, all.length - limit));
+    }
     const all = this.bars.get(tf) ?? [];
     return all.slice(Math.max(0, all.length - limit));
   }
 
+  /** Allow live collector to publish completed bars into the client cache. */
+  publishLiveBars(tf: MicroTimeframe, bars: MicroBar[]): void {
+    this.bars.set(tf, [...bars].sort((a, b) => a.closeTimeMs - b.closeTimeMs));
+  }
+
+  publishLiveQuote(quote: MicroQuote): void {
+    this.quote = quote;
+  }
+
   async getSpotQuote(): Promise<MicroQuote | null> {
+    if (this.liveSession) {
+      const state = await this.liveSession.getState();
+      return state.lastQuote;
+    }
     return this.quote;
   }
 
   async getDepthSnapshot(): Promise<MicroDepthSnapshot> {
-    if (!this.cfg.streamingEnabled) {
-      return { ...this.depth, available: false };
-    }
-    return this.depth;
+    return { ...this.depth, available: false };
   }
 
-  /**
-   * Intentionally absent mutation surface — compile-time / API absence is the control.
-   * There is no createOrder / amend / close / preview method on this class.
-   */
   get mutationSurface(): "NONE" {
     return "NONE";
   }

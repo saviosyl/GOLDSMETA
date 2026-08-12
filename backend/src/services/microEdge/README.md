@@ -1,35 +1,56 @@
-# Micro Edge V1 (SHADOW ONLY)
+# Micro Edge — shadow research + market data
 
-Isolated prediction/research bot. **No broker order path.**
+**MICRO EDGE MARKET DATA V1 IS READ-ONLY. NO BROKER ORDER PATH EXISTS.**
 
-- Namespace: `microEdge/shadow-v1`
-- Base production SHA: see `backend/scripts/microEdge/MICRO_BASE_SHA.txt`
-- Does **not** import Core AutoTrade or the Core mixed cTrader client
-- `MICRO_BROKER_EXECUTION_ENABLED` must remain `false` (fail-closed)
+## Namespace
 
-## Market data
+`microEdge/shadow-v1` (predictions/outcomes)  
+`microEdge/shadow-v1/marketData/**` (raw bars/quotes/checkpoints)
 
-Read-only adapter scaffold (`marketData/microCTraderClient.ts`):
+## Market data (V1.1)
 
 | State | Meaning |
 |-------|---------|
 | `INTERFACE_READY` | Methods/types exist |
-| `MOCK_SEEDED` | In-memory test/offline injection only |
-| `LIVE_NOT_CONNECTED` | **V1 default** — no genuine cTrader OpenAPI session |
-| `FEATURE_GATED` | DOM / ticks / live trendbar subs pending Micro collector |
+| `MOCK_SEEDED` | In-memory test injection only |
+| `LIVE_CONNECTED` | Authenticated OpenAPI + XAUUSD + fresh Bid/Ask |
+| `LIVE_NOT_CONNECTED` | Default until genuine session is up |
+| `FEATURE_GATED` | Historical ticks / DOM / live trendbar subs |
 
-Until live OpenAPI reads are wired, status/UI must report **Market feed not connected**.
+### Credentials (Micro-specific)
+
+```
+MICRO_CTRADER_CLIENT_ID
+MICRO_CTRADER_CLIENT_SECRET
+MICRO_CTRADER_ACCESS_TOKEN
+MICRO_CTRADER_REFRESH_TOKEN
+MICRO_CTRADER_ACCOUNT_ID
+MICRO_CTRADER_ENVIRONMENT=DEMO|LIVE
+MICRO_CTRADER_REDIRECT_URI   # optional — for later OAuth helper
+MICRO_QUOTE_SAMPLE_INTERVAL_MS=5000
+```
+
+Prefer **scope=accounts** view-only tokens. Trading scope is not required.
+
 Do **not** import Core `services/broker/ctrader`.
-Dedicated `scope=accounts` OAuth is **not** introduced in V1.
 
-## Retention
+### CLI
 
-- Immutable predictions + feature snapshots + outcomes are retained for forward research
-- Streaming ticks/DOM (when enabled) should use bounded buckets, not one Firestore write per tick
+```bash
+npm run micro-edge:backfill
+```
 
-## Versions (V1)
+### Bar conflict policy
+
+Deterministic id `SYMBOL_TF_closeTimeMs`. Identical re-upsert → skip. Changed OHLC → **conflict** (keep original, audit conflict). No silent overwrite.
+
+### Retention
+
+Quotes: recommend 30 days (helper only; no destructive prod cleanup in this PR).  
+Bars: long-lived research retention.
+
+## Versions
 
 - Feature: `features-v1.0.0`
-- Model: `logistic-champion-v1.0.0`
-- Label: `label-theta-v1.0.0`
-- Cost: `cost-proxy-v1.0.0`
+- Model: `logistic-champion-v1.0.0` — **NOT TRAINED ON LIVE DATA**
+- Label / cost: see config.ts
