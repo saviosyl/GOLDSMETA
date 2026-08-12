@@ -20,7 +20,10 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
   getActiveQualificationAccountId: (...a: unknown[]) =>
     getActiveQualificationAccountId(...a),
   getQualificationDoc: (...a: unknown[]) => getQualificationDoc(...a),
-  saveQualificationDoc: (...a: unknown[]) => saveQualificationDoc(...a)
+  saveQualificationDoc: (...a: unknown[]) => saveQualificationDoc(...a),
+  normalizeAccountId: (id: unknown) =>
+    id == null ? null : String(id).trim() || null,
+  findForeignStartedQualifications: vi.fn(async () => ({ ok: true, hits: [] }))
 }));
 vi.mock("../../../../src/services/broker/ctrader/demoPositionMutations", () => ({
   reconcileDemoBrokerPositions: (...a: unknown[]) => reconcileDemoBrokerPositions(...a)

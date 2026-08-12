@@ -16,12 +16,120 @@ import type {
 } from "./qualificationTypes";
 import { QUALIFICATION_GATES } from "./qualificationTypes";
 
+/** Normalize cTrader account ids so number/string forms share one document key. */
+export function normalizeAccountId(
+  accountId: string | number | null | undefined
+): string | null {
+  if (accountId == null) return null;
+  const s = String(accountId).trim();
+  return s.length ? s : null;
+}
+
 function docRef(uid: string, accountId: string) {
-  return getFirestore().doc(`users/${uid}/autotradeQualification/${accountId}`);
+  const id = normalizeAccountId(accountId);
+  if (!id) {
+    throw new Error("QUALIFICATION_ACCOUNT_ID_REQUIRED");
+  }
+  return getFirestore().doc(`users/${uid}/autotradeQualification/${id}`);
 }
 
 function metaRef(uid: string) {
   return getFirestore().doc(`users/${uid}/autotradeQualificationMeta/current`);
+}
+
+export type ForeignQualificationHit = {
+  uid: string;
+  accountId: string;
+  state: string;
+  startedAt: string;
+  accountMasked: string | null;
+};
+
+export type ForeignLookupResult =
+  | { ok: true; hits: ForeignQualificationHit[] }
+  | {
+      ok: false;
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE";
+      message: string;
+    };
+
+function hitFromDoc(
+  pathUid: string,
+  docId: string,
+  data: Record<string, unknown>
+): ForeignQualificationHit | null {
+  const docAccount =
+    normalizeAccountId((data.accountId as string | number | undefined) ?? docId) ??
+    docId;
+  const startedAt =
+    typeof data.startedAt === "string" && data.startedAt.trim()
+      ? data.startedAt
+      : null;
+  if (!startedAt) return null;
+  return {
+    uid: pathUid,
+    accountId: docAccount,
+    state: (data.state as string) || "UNKNOWN",
+    startedAt,
+    accountMasked:
+      typeof data.accountMasked === "string" ? data.accountMasked : null
+  };
+}
+
+/**
+ * Find started qualification docs for the same Demo account under a different UID.
+ * Exact accountId query — never an arbitrary first-N scan.
+ * Failures are returned as ok:false (callers must not treat as "no conflict").
+ */
+export async function findForeignStartedQualifications(
+  uid: string,
+  accountId: string | number | null | undefined
+): Promise<ForeignLookupResult> {
+  const normalized = normalizeAccountId(accountId);
+  if (!normalized) return { ok: true, hits: [] };
+
+  try {
+    const db = getFirestore();
+    // Query string form (canonical). Also query numeric form for historical docs.
+    const queries = [
+      db
+        .collectionGroup("autotradeQualification")
+        .where("accountId", "==", normalized)
+        .limit(10)
+    ];
+    if (/^\d+$/.test(normalized)) {
+      const asNum = Number(normalized);
+      if (Number.isSafeInteger(asNum)) {
+        queries.push(
+          db
+            .collectionGroup("autotradeQualification")
+            .where("accountId", "==", asNum)
+            .limit(10)
+        );
+      }
+    }
+
+    const snaps = await Promise.all(queries.map((q) => q.get()));
+    const byUid = new Map<string, ForeignQualificationHit>();
+    for (const snap of snaps) {
+      for (const doc of snap.docs) {
+        const pathUid = doc.ref.path.split("/")[1];
+        if (!pathUid || pathUid === uid) continue;
+        const hit = hitFromDoc(pathUid, doc.id, (doc.data() ?? {}) as Record<string, unknown>);
+        if (hit) byUid.set(pathUid, hit);
+      }
+    }
+    return { ok: true, hits: [...byUid.values()] };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE",
+      message:
+        err instanceof Error
+          ? err.message
+          : "Qualification ownership lookup failed"
+    };
+  }
 }
 
 export function emptySafetyChecks(_nowIso: string): SafetyCheckRecord[] {
@@ -85,9 +193,10 @@ export function createEmptyQualificationDoc(args: {
   buildSha?: string | null;
 }): QualificationDocument {
   const now = new Date().toISOString();
+  const accountId = normalizeAccountId(args.accountId) ?? String(args.accountId);
   return {
     uid: args.uid,
-    accountId: args.accountId,
+    accountId,
     accountMasked: args.accountMasked,
     environment: "DEMO",
     state: "READY_TO_QUALIFY",
@@ -153,16 +262,17 @@ export async function getQualificationDoc(
   uid: string,
   accountId: string
 ): Promise<QualificationDocument | null> {
-  const snap = await docRef(uid, accountId).get();
+  const id = normalizeAccountId(accountId);
+  if (!id) return null;
+  const snap = await docRef(uid, id).get();
   if (!snap.exists) return null;
-  return normalize(snap.data() ?? {}, uid, accountId);
+  return normalize(snap.data() ?? {}, uid, id);
 }
 
 export async function getActiveQualificationAccountId(uid: string): Promise<string | null> {
   const snap = await metaRef(uid).get();
   if (!snap.exists) return null;
-  const accountId = String(snap.data()?.accountId ?? "").trim();
-  return accountId || null;
+  return normalizeAccountId(snap.data()?.accountId as string | number | undefined);
 }
 
 export async function setActiveQualificationAccount(
@@ -170,9 +280,11 @@ export async function setActiveQualificationAccount(
   accountId: string,
   accountMasked: string | null
 ): Promise<void> {
+  const id = normalizeAccountId(accountId);
+  if (!id) return;
   await metaRef(uid).set(
     {
-      accountId,
+      accountId: id,
       accountMasked,
       updatedAt: new Date().toISOString()
     },
@@ -181,12 +293,17 @@ export async function setActiveQualificationAccount(
 }
 
 export async function saveQualificationDoc(doc: QualificationDocument): Promise<void> {
+  const accountId = normalizeAccountId(doc.accountId);
+  if (!accountId) {
+    throw new Error("QUALIFICATION_ACCOUNT_ID_REQUIRED");
+  }
   const payload = {
     ...doc,
+    accountId,
     updatedAt: new Date().toISOString()
   };
-  await docRef(doc.uid, doc.accountId).set(payload, { merge: true });
-  await setActiveQualificationAccount(doc.uid, doc.accountId, doc.accountMasked);
+  await docRef(doc.uid, accountId).set(payload, { merge: true });
+  await setActiveQualificationAccount(doc.uid, accountId, doc.accountMasked);
 }
 
 export async function appendTransition(

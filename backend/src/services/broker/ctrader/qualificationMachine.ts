@@ -157,8 +157,18 @@ export function deriveAdvancedState(
 
 export function overallLabel(
   state: QualificationState,
-  opts?: { startedAt?: string | null }
+  opts?: {
+    startedAt?: string | null;
+    accountConflict?: boolean;
+    ownershipCheckUnavailable?: boolean;
+  }
 ): string {
+  if (opts?.ownershipCheckUnavailable) {
+    return "Qualification ownership check unavailable";
+  }
+  if (opts?.accountConflict) {
+    return "QUALIFICATION ACCOUNT MISMATCH";
+  }
   // When qualification has never been started, do not show misleading "Qualifying".
   if (
     !opts?.startedAt &&
@@ -285,10 +295,13 @@ export function toPublicView(args: {
   doc: QualificationDocument | null;
   setup: SetupSnapshot;
   stateOverride?: QualificationState;
+  accountConflict?: QualificationPublicView["accountConflict"];
+  recordStatus?: QualificationPublicView["recordStatus"];
 }): QualificationPublicView {
   const blockers = buildSetupBlockers(args.setup);
   const ready = setupReady(blockers);
   const doc = args.doc;
+  const conflict = args.accountConflict ?? null;
   let state: QualificationState =
     args.stateOverride ??
     (doc ? deriveAdvancedState(doc) : ready ? "READY_TO_QUALIFY" : "SETUP_REQUIRED");
@@ -297,6 +310,10 @@ export function toPublicView(args: {
     // Connected users mid-qualification keep their state even if a transient check fails,
     // but brand-new users stay in setup.
     if (!doc?.startedAt) state = "SETUP_REQUIRED";
+  }
+
+  if (conflict) {
+    state = "SETUP_REQUIRED";
   }
 
   const obs = observationProgress(doc?.firstControlledDemoTradeAt ?? null);
@@ -311,27 +328,70 @@ export function toPublicView(args: {
   else if (state === "LIVE_QUALIFICATION" || state === "DEMO_AUTO_ENABLED")
     liveStatus = "QUALIFYING";
 
+  const conflictBlockers: QualificationBlocker[] = conflict
+    ? [
+        {
+          id:
+            conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+              ? "ownership_check_unavailable"
+              : "account_conflict",
+          label: conflict.message,
+          ok: false,
+          action:
+            conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+              ? "Retry shortly — qualification cannot start until ownership check succeeds"
+              : "Use the Firebase account that owns this Demo qualification, or disconnect the conflicting login"
+        }
+      ]
+    : [];
+
+  const recordStatus: QualificationPublicView["recordStatus"] =
+    args.recordStatus ??
+    (conflict
+      ? conflict.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+        ? "OWNERSHIP_CHECK_UNAVAILABLE"
+        : conflict.kind === "SELECTED_ACCOUNT_MISMATCH"
+          ? "ACCOUNT_MISMATCH"
+          : "ACCOUNT_CONFLICT"
+      : doc?.startedAt
+        ? "ACTIVE"
+        : "NEVER_STARTED");
+
   return {
     state,
-    overallLabel: overallLabel(state, { startedAt: doc?.startedAt ?? null }),
+    overallLabel: overallLabel(state, {
+      startedAt: doc?.startedAt ?? null,
+      accountConflict:
+        Boolean(conflict) && conflict?.kind !== "OWNERSHIP_CHECK_UNAVAILABLE",
+      ownershipCheckUnavailable: conflict?.kind === "OWNERSHIP_CHECK_UNAVAILABLE"
+    }),
     accountMasked: args.setup.accountMasked ?? doc?.accountMasked ?? null,
     accountIdPresent: Boolean(args.setup.accountId),
     environment: "DEMO",
-    nextAction: nextActionFor(state, blockers),
-    nextRequirement: doc
-      ? nextRequirementFor(doc, state)
-      : firstBlockerLabel(blockers) || "Complete setup",
-    blockers,
-    canStart: ready && (state === "READY_TO_QUALIFY" || state === "SETUP_REQUIRED"),
+    nextAction: conflict
+      ? "Resolve Demo account ownership conflict"
+      : nextActionFor(state, blockers),
+    nextRequirement: conflict
+      ? conflict.message
+      : doc
+        ? nextRequirementFor(doc, state)
+        : firstBlockerLabel(blockers) || "Complete setup",
+    blockers: [...conflictBlockers, ...blockers],
+    canStart:
+      !conflict &&
+      ready &&
+      (state === "READY_TO_QUALIFY" || state === "SETUP_REQUIRED"),
     canPause:
-      state === "PREVIEW_QUALIFICATION" ||
-      state === "CONTROLLED_DEMO_QUALIFICATION" ||
-      state === "OBSERVATION_PERIOD" ||
-      state === "LIVE_QUALIFICATION",
-    canResume: state === "PAUSED",
-    canEnableDemoAuto: state === "DEMO_AUTO_READY",
+      !conflict &&
+      (state === "PREVIEW_QUALIFICATION" ||
+        state === "CONTROLLED_DEMO_QUALIFICATION" ||
+        state === "OBSERVATION_PERIOD" ||
+        state === "LIVE_QUALIFICATION"),
+    canResume: !conflict && state === "PAUSED",
+    canEnableDemoAuto: !conflict && state === "DEMO_AUTO_READY",
     canBeginLiveActivation:
-      state === "LIVE_AUTO_ELIGIBLE" || state === "LIVE_ACTIVATION_REQUIRED",
+      !conflict &&
+      (state === "LIVE_AUTO_ELIGIBLE" || state === "LIVE_ACTIVATION_REQUIRED"),
     preview: {
       completed: doc?.previewCount ?? 0,
       required: QUALIFICATION_GATES.requiredPreviews
@@ -362,8 +422,21 @@ export function toPublicView(args: {
       status: liveStatus
     },
     demoAuto: {
-      enabled: state === "DEMO_AUTO_ENABLED" || state === "LIVE_QUALIFICATION" || state === "LIVE_AUTO_ELIGIBLE" || state === "LIVE_ACTIVATION_REQUIRED" || state === "LIVE_AUTO_ENABLED",
-      ready: state === "DEMO_AUTO_READY" || state === "DEMO_AUTO_ENABLED" || state === "LIVE_QUALIFICATION" || state === "LIVE_AUTO_ELIGIBLE" || state === "LIVE_ACTIVATION_REQUIRED" || state === "LIVE_AUTO_ENABLED"
+      enabled:
+        !conflict &&
+        (state === "DEMO_AUTO_ENABLED" ||
+          state === "LIVE_QUALIFICATION" ||
+          state === "LIVE_AUTO_ELIGIBLE" ||
+          state === "LIVE_ACTIVATION_REQUIRED" ||
+          state === "LIVE_AUTO_ENABLED"),
+      ready:
+        !conflict &&
+        (state === "DEMO_AUTO_READY" ||
+          state === "DEMO_AUTO_ENABLED" ||
+          state === "LIVE_QUALIFICATION" ||
+          state === "LIVE_AUTO_ELIGIBLE" ||
+          state === "LIVE_ACTIVATION_REQUIRED" ||
+          state === "LIVE_AUTO_ENABLED")
     },
     liveOrders: "LOCKED",
     recentPreviews: (doc?.previews ?? []).slice(-8).reverse(),
@@ -371,7 +444,9 @@ export function toPublicView(args: {
     todayActivity: { evaluated: 0, qualified: 0, rejected: 0 },
     recentEvaluations: [],
     startedAt: doc?.startedAt ?? null,
-    updatedAt: doc?.updatedAt ?? null
+    updatedAt: doc?.updatedAt ?? null,
+    recordStatus,
+    accountConflict: conflict
   };
 }
 
