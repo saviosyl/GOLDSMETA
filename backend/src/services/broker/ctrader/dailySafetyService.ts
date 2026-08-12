@@ -142,7 +142,8 @@ export async function getDailySafetyView(
 
 export async function assertEntryAllowed(
   uid: string,
-  environment: AutoTradeEnvironment
+  environment: AutoTradeEnvironment,
+  opts?: { settingsOverride?: UserAutoTradeSettings }
 ): Promise<EntryGateResult> {
   // Demo: reconcile ghost open-position counters before gating (lifecycle/broker).
   if (environment === "demo") {
@@ -152,10 +153,13 @@ export async function assertEntryAllowed(
       /* fail closed — evaluate gates on current counters */
     }
   }
-  const [settings, daily] = await Promise.all([
-    getUserAutoTradeSettings(uid, environment),
+  const [loadedSettings, daily] = await Promise.all([
+    opts?.settingsOverride
+      ? Promise.resolve(opts.settingsOverride)
+      : getUserAutoTradeSettings(uid, environment),
     getDailySafetyDoc(uid, environment)
   ]);
+  const settings = opts?.settingsOverride ?? loadedSettings;
   // Persist day rollover if needed
   if (daily.tradingDay !== tradingDayKey()) {
     await saveDailySafetyDoc(daily);

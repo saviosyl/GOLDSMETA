@@ -17,6 +17,12 @@ export type AutoTradeJournalInput = {
   takeProfit: number | null;
   lots: number | null;
   cashRisk: number | null;
+  /** Saved risk before session mult / overnight overlay (optional audit). */
+  requestedRiskAmountDeposit?: number | null;
+  /** Risk actually used for sizing after caps/mult (optional audit). */
+  effectiveRiskAmountDeposit?: number | null;
+  riskCapReason?: string | null;
+  overnightRunId?: string | null;
   confidence: number | null;
   riskReward: number | null;
   session: string | null;
@@ -73,6 +79,11 @@ export async function createAutoTradeJournalEntry(
     takeProfit: input.takeProfit,
     lots: input.lots,
     cashRisk: input.cashRisk,
+    requestedRiskAmountDeposit: input.requestedRiskAmountDeposit ?? null,
+    effectiveRiskAmountDeposit:
+      input.effectiveRiskAmountDeposit ?? input.cashRisk ?? null,
+    riskCapReason: input.riskCapReason ?? null,
+    overnightRunId: input.overnightRunId ?? null,
     confidence: input.confidence,
     riskReward: rr,
     session: input.session,

@@ -47,6 +47,8 @@ export type EvaluationRecord = {
   };
   /** One human-readable final reason when not submitted. */
   finalReason?: string | null;
+  /** Optional overnight Demo run correlation id. */
+  overnightRunId?: string | null;
 };
 
 function col(uid: string) {
@@ -114,7 +116,8 @@ export function reasonLabelFor(code: string): string {
     AUTOTRADE_INTENT_OFF: "Demo Auto intent OFF — armed thesis cancelled",
     TRADING_OAUTH_REQUIRED: "Trading OAuth scope required",
     DEMO_ACCOUNT_NOT_SELECTED: "Demo account not selected",
-    DEMO_SUBMISSION_FLAG_OFF: "Demo submission flag off"
+    DEMO_SUBMISSION_FLAG_OFF: "Demo submission flag off",
+    OVERNIGHT_WINDOW_ENDED: "Demo overnight entry window ended"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
@@ -191,7 +194,8 @@ export async function appendEvaluation(
     pipeline: partial.pipeline,
     finalReason:
       partial.finalReason ??
-      (partial.outcome === "QUALIFIED" ? null : reasonLabel)
+      (partial.outcome === "QUALIFIED" ? null : reasonLabel),
+    overnightRunId: partial.overnightRunId ?? null
   };
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).

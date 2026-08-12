@@ -2,6 +2,14 @@
  * Pepperstone cTrader Demo XAUUSD cash-risk sizing (proven 1 lot = 1 oz).
  * Fail-closed on missing FX, margin, daily-loss capacity, or exposure caps.
  * Never silently increases volume.
+ *
+ * Sizing contract (ACTIVE_DEMO):
+ * 1) requestedRiskAmountDeposit = saved fixedRiskAmount (pre-session mult / overnight cap)
+ * 2) effectiveRiskAmountDeposit = after session mult (and overnight cap when enabled)
+ * 3) ONE final volumeLots after round-down / min-max / exposure
+ * 4) protocolVolume = lotsToOrderVolumeUnits(volumeLots)
+ * 5) authoritative margin gate AND submitDemoMarketOrder MUST use that same FINAL volume
+ * 6) never resize upward after margin approval
  */
 
 import { roundDownLotsToStep, lotsToOrderVolumeUnits } from "./volumeUnits";
