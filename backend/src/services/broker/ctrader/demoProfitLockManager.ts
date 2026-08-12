@@ -583,7 +583,7 @@ async function reconcilePendingClose(
   deps: ProfitLockDeps,
   mutations: ProfitLockMutationCounters,
   stamp: () => string,
-  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED" | null
+  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED"
 ): Promise<{
   doc: DemoPositionLifecycle;
   mutations: ProfitLockMutationCounters;
@@ -820,7 +820,7 @@ async function reconcilePendingAmend(
   deps: ProfitLockDeps,
   mutations: ProfitLockMutationCounters,
   stamp: () => string,
-  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED" | null,
+  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED",
   m5Time?: number | null
 ): Promise<{
   doc: DemoPositionLifecycle;
