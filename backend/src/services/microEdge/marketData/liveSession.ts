@@ -1,6 +1,6 @@
 /**
  * In-process Micro live market-data session (read-only).
- * Not a deployed worker — callable locally / from CLI / future collector.
+ * Persistent spot subscription — 5s is STORAGE sample interval only.
  */
 import {
   loadMicroCTraderCredentials,
@@ -9,16 +9,23 @@ import {
 import {
   FakeMicroCTraderTransport,
   RealMicroCTraderTransport,
-  type MicroOpenApiTransport
+  type MicroOpenApiTransport,
+  type MicroTransportEventHandler
 } from "./microCTraderTransport";
 import { resolveMicroXauUsd } from "./microCTraderSymbolResolver";
-import { fetchOneShotQuote } from "./microCTraderQuotes";
+import {
+  applySpotEvent,
+  createEmptySpotBook,
+  publishQuoteFromBook,
+  type MicroSpotBook
+} from "./microCTraderQuotes";
 import {
   fetchTrendbarsWindow,
   filterCompletedBars
 } from "./microCTraderTrendbars";
 import { detectCompletedM1 } from "./completedBars";
 import { MICRO_TIMEFRAME_MS } from "./microCTraderProtocol";
+import { MICRO_QUOTE_MAX_AGE_MS } from "../config";
 import type { MicroMarketDataStore } from "./marketDataStore";
 import { makeRawBar } from "./marketDataStore";
 import { microLog } from "./microLog";
@@ -33,7 +40,14 @@ export type MicroLiveSessionState = {
   connectionState: MicroMarketDataConnectionState;
   liveConnected: boolean;
   credentialsConfigured: boolean;
+  applicationAuthenticated: boolean;
+  accountAuthenticated: boolean;
+  configuredAccountAuthorized: boolean | null;
+  authorizedAccountCount: number | null;
   symbol: MicroSymbolMetadata | null;
+  spotSubscribed: boolean;
+  spotSubscribedAt: string | null;
+  lastSpotEventAt: string | null;
   lastQuote: MicroQuote | null;
   lastQuoteTs: string | null;
   quoteAgeMs: number | null;
@@ -47,11 +61,11 @@ export type MicroLiveSessionState = {
   healthReasons: string[];
   collectorHeartbeatAt: string | null;
   m1CompletedEvents: number;
+  subscribeSpotsCallCount: number;
 };
 
 export type LiveSessionOptions = {
   store: MicroMarketDataStore;
-  /** Inject transport for tests. */
   transport?: MicroOpenApiTransport;
   credentials?: MicroCTraderCredentials;
   quoteSampleIntervalMs?: number;
@@ -63,6 +77,11 @@ export class MicroLiveMarketSession {
   private credentials: MicroCTraderCredentials | null = null;
   private symbol: MicroSymbolMetadata | null = null;
   private lastQuote: MicroQuote | null = null;
+  private spotBook: MicroSpotBook | null = null;
+  private spotHandler: MicroTransportEventHandler | null = null;
+  private spotSubscribed = false;
+  private spotSubscribedAt: string | null = null;
+  private lastSpotEventAt: string | null = null;
   private seenM1 = new Set<number>();
   private lastConnectedAt: string | null = null;
   private lastDisconnectedAt: string | null = null;
@@ -79,14 +98,22 @@ export class MicroLiveMarketSession {
       opts.quoteSampleIntervalMs ??
       Number(process.env.MICRO_QUOTE_SAMPLE_INTERVAL_MS ?? 5000);
     this.nowMs = opts.nowMs ?? (() => Date.now());
+    if (opts.credentials) this.credentials = opts.credentials;
   }
 
   get mutationSurface(): "NONE" {
     return "NONE";
   }
 
+  private credentialsAreConfigured(): boolean {
+    if (this.credentials) return true;
+    if (this.opts.credentials) return true;
+    return loadMicroCTraderCredentials().ok;
+  }
+
   async connect(): Promise<void> {
     microLog("MICRO_CTRADER_CONNECTING", {});
+    this.clearSpotState();
     const loaded =
       this.opts.credentials != null
         ? { ok: true as const, credentials: this.opts.credentials }
@@ -117,7 +144,9 @@ export class MicroLiveMarketSession {
     this.reconnectAttempts = 0;
     this.lastErrorCode = null;
     microLog("MICRO_CTRADER_CONNECTED", {
-      environment: this.credentials.environment
+      environment: this.credentials.environment,
+      authorizedAccountCount:
+        this.transport.getAccountAuthMeta()?.authorizedAccountCount ?? null
     });
 
     const symbols = await this.transport.listSymbols();
@@ -143,64 +172,150 @@ export class MicroLiveMarketSession {
       symbolId: this.symbol.symbolId,
       symbolName: this.symbol.symbolName
     });
+
+    await this.subscribeSpotsOnce();
+  }
+
+  private clearSpotState(): void {
+    if (this.transport && this.spotHandler) {
+      this.transport.off("ProtoOASpotEvent", this.spotHandler);
+    }
+    this.spotHandler = null;
+    this.spotSubscribed = false;
+    this.spotSubscribedAt = null;
+    this.lastSpotEventAt = null;
+    this.spotBook = null;
+    this.lastQuote = null;
+  }
+
+  private async subscribeSpotsOnce(): Promise<void> {
+    if (!this.transport || !this.symbol) return;
+    if (this.spotSubscribed) return;
+    this.spotBook = createEmptySpotBook(this.symbol.symbolId);
+    this.spotHandler = (_name, payload) => {
+      this.onSpotEvent(payload);
+    };
+    this.transport.on("ProtoOASpotEvent", this.spotHandler);
+    await this.transport.subscribeSpots(this.symbol.symbolId);
+    this.spotSubscribed = true;
+    this.spotSubscribedAt = new Date(this.nowMs()).toISOString();
+  }
+
+  private onSpotEvent(payload: Record<string, unknown>): void {
+    if (!this.symbol || !this.spotBook) return;
+    this.spotBook = applySpotEvent(this.spotBook, payload, this.symbol.symbolId);
+    this.lastSpotEventAt = new Date(this.nowMs()).toISOString();
+    const pub = publishQuoteFromBook({
+      book: this.spotBook,
+      nowMs: this.nowMs(),
+      maxSideAgeMs: MICRO_QUOTE_MAX_AGE_MS
+    });
+    if (pub.ok) {
+      this.lastQuote = pub.quote;
+      void this.maybePersistQuoteSample(pub.quote);
+    }
+    this.heartbeatAt = new Date(this.nowMs()).toISOString();
+    void this.opts.store.saveCollectorHeartbeat(this.heartbeatAt, {
+      symbolId: this.symbol.symbolId,
+      lastSpotEventAt: this.lastSpotEventAt
+    });
+  }
+
+  private async maybePersistQuoteSample(quote: MicroQuote): Promise<void> {
+    if (!this.symbol || !this.credentials) return;
+    const now = this.nowMs();
+    if (now - this.lastQuotePersistMs < this.quoteSampleIntervalMs) return;
+    const bucket =
+      Math.floor(now / this.quoteSampleIntervalMs) * this.quoteSampleIntervalMs;
+    await this.opts.store.saveQuoteSample({
+      id: `${this.symbol.symbolId}_${bucket}`,
+      symbol: "XAUUSD",
+      symbolId: this.symbol.symbolId,
+      bid: quote.bid,
+      ask: quote.ask,
+      mid: quote.mid,
+      spread: quote.spread,
+      brokerTimestamp: quote.brokerTimestamp,
+      receivedAt: quote.receivedAt,
+      ageMs: quote.ageMs,
+      freshness: quote.freshness,
+      source: "CTRADER_OPEN_API",
+      environment: this.credentials.environment
+    });
+    this.lastQuotePersistMs = now;
   }
 
   async disconnect(): Promise<void> {
+    this.clearSpotState();
     if (this.transport) {
       await this.transport.disconnect();
     }
     this.transport = null;
+    this.symbol = null;
     this.lastDisconnectedAt = new Date().toISOString();
     microLog("MICRO_CTRADER_DISCONNECTED", { code: this.lastErrorCode });
   }
 
+  /**
+   * Strict LIVE_CONNECTED: app+account auth, account in list, symbol, spot sub,
+   * valid fresh quote, recent completed M1, collector heartbeat fresh.
+   * Synchronous path omits async store M1 lookup — prefer getState().liveConnected
+   * when a definitive status is required. This method still refuses socket+symbol+old-quote.
+   */
   isLiveConnected(): boolean {
-    return Boolean(
-      this.transport?.isConnected() &&
-        this.symbol &&
-        this.lastQuote &&
-        this.lastErrorCode == null
-    );
+    const now = this.nowMs();
+    if (!this.transport?.isConnected()) return false;
+    if (!this.transport.isApplicationAuthenticated()) return false;
+    if (!this.transport.isAccountAuthenticated()) return false;
+    if (!this.transport.getAccountAuthMeta()?.configuredAccountAuthorized) return false;
+    if (!this.symbol) return false;
+    if (!this.spotSubscribed) return false;
+    if (!this.lastQuote || !this.spotBook) return false;
+    const pub = publishQuoteFromBook({
+      book: this.spotBook,
+      nowMs: now,
+      maxSideAgeMs: MICRO_QUOTE_MAX_AGE_MS
+    });
+    if (!pub.ok) return false;
+    if (!this.heartbeatAt) return false;
+    const hbAge = now - Date.parse(this.heartbeatAt);
+    if (!Number.isFinite(hbAge) || hbAge > 60_000) return false;
+    if (this.lastErrorCode != null) return false;
+    return true;
   }
 
+  /** Refresh from in-memory spot book — does NOT re-subscribe. */
   async refreshQuote(): Promise<MicroQuote> {
-    if (!this.transport || !this.symbol || !this.credentials) {
+    if (!this.transport || !this.symbol || !this.spotBook) {
       throw Object.assign(new Error("MICRO_NOT_CONNECTED"), {
         code: "transport_disconnected"
       });
     }
-    const quote = await fetchOneShotQuote({
-      transport: this.transport,
-      symbolId: this.symbol.symbolId,
-      nowMs: this.nowMs()
-    });
-    this.lastQuote = quote;
-    const now = this.nowMs();
-    if (now - this.lastQuotePersistMs >= this.quoteSampleIntervalMs) {
-      const bucket = Math.floor(now / this.quoteSampleIntervalMs) * this.quoteSampleIntervalMs;
-      await this.opts.store.saveQuoteSample({
-        id: `${this.symbol.symbolId}_${bucket}`,
-        symbol: "XAUUSD",
-        symbolId: this.symbol.symbolId,
-        bid: quote.bid,
-        ask: quote.ask,
-        mid: quote.mid,
-        spread: quote.spread,
-        brokerTimestamp: quote.brokerTimestamp,
-        receivedAt: quote.receivedAt,
-        ageMs: quote.ageMs,
-        freshness: quote.freshness,
-        source: "CTRADER_OPEN_API",
-        environment: this.credentials.environment
-      });
-      this.lastQuotePersistMs = now;
+    if (!this.spotSubscribed) {
+      await this.subscribeSpotsOnce();
     }
-    this.heartbeatAt = new Date(now).toISOString();
-    await this.opts.store.saveCollectorHeartbeat(this.heartbeatAt, {
-      symbolId: this.symbol.symbolId,
-      quoteTs: quote.brokerTimestamp
+    const pub = publishQuoteFromBook({
+      book: this.spotBook,
+      nowMs: this.nowMs(),
+      maxSideAgeMs: MICRO_QUOTE_MAX_AGE_MS
     });
-    return quote;
+    if (!pub.ok) {
+      if (pub.error === "quote_stale") {
+        microLog("MICRO_QUOTE_STALE", { ageMs: pub.ageMs });
+      }
+      throw Object.assign(new Error("MICRO_QUOTE_UNAVAILABLE"), {
+        code: pub.error
+      });
+    }
+    this.lastQuote = pub.quote;
+    this.heartbeatAt = new Date(this.nowMs()).toISOString();
+    await this.maybePersistQuoteSample(pub.quote);
+    return pub.quote;
+  }
+
+  /** Inject spot event (tests) without extra subscribe. */
+  ingestSpotEventForTests(payload: Record<string, unknown>): void {
+    this.onSpotEvent(payload);
   }
 
   async pollCompletedBars(tf: MicroTimeframe, lookbackBars = 5): Promise<number> {
@@ -279,36 +394,73 @@ export class MicroLiveMarketSession {
     const m5 = await store.latestBar("M5");
     const m15 = await store.latestBar("M15");
     const now = this.nowMs();
-    const liveConnected = this.isLiveConnected() && this.lastQuote != null;
     const reasons: string[] = [];
-    if (!this.credentials && !loadMicroCTraderCredentials().ok) {
-      reasons.push("oauth_missing");
-    }
+    const credsConfigured = this.credentialsAreConfigured();
+    if (!credsConfigured) reasons.push("oauth_missing");
     if (!this.transport?.isConnected()) reasons.push("transport_disconnected");
+    if (this.transport && !this.transport.isApplicationAuthenticated()) {
+      reasons.push("transport_disconnected");
+    }
+    if (this.transport && !this.transport.isAccountAuthenticated()) {
+      reasons.push("account_not_authorized");
+    }
+    const authMeta = this.transport?.getAccountAuthMeta() ?? null;
+    if (this.transport && authMeta && !authMeta.configuredAccountAuthorized) {
+      reasons.push("account_not_authorized");
+    }
     if (!this.symbol) reasons.push("xauusd_not_found");
-    if (!this.lastQuote) reasons.push("quote_missing");
-    else if (now - Date.parse(this.lastQuote.brokerTimestamp) > 30_000) {
-      reasons.push("quote_stale");
-      microLog("MICRO_QUOTE_STALE", { ageMs: now - Date.parse(this.lastQuote.brokerTimestamp) });
+    if (!this.spotSubscribed) reasons.push("transport_disconnected");
+    if (!this.spotBook || this.lastQuote == null) reasons.push("quote_missing");
+    else {
+      const pub = publishQuoteFromBook({
+        book: this.spotBook,
+        nowMs: now,
+        maxSideAgeMs: MICRO_QUOTE_MAX_AGE_MS
+      });
+      if (!pub.ok) {
+        reasons.push(pub.error);
+        if (pub.error === "quote_stale") {
+          microLog("MICRO_QUOTE_STALE", { ageMs: pub.ageMs });
+        }
+      }
     }
     if (!m1) reasons.push("m1_missing");
     else if (now - m1.closeTimeMs > 5 * 60_000) reasons.push("m1_stale");
+    if (this.heartbeatAt) {
+      const hbAge = now - Date.parse(this.heartbeatAt);
+      if (!Number.isFinite(hbAge) || hbAge > 60_000) {
+        reasons.push("collector_heartbeat_stale");
+      }
+    } else if (this.transport?.isConnected()) {
+      reasons.push("collector_heartbeat_stale");
+    }
     if (this.lastErrorCode) reasons.push(this.lastErrorCode);
 
-    let connectionState: MicroMarketDataConnectionState = "LIVE_NOT_CONNECTED";
-    if (liveConnected && reasons.length === 0) connectionState = "LIVE_CONNECTED";
-    else if (this.transport?.isConnected()) connectionState = "LIVE_NOT_CONNECTED";
+    const unique = [...new Set(reasons)];
+    const liveConnected = unique.length === 0;
+    const connectionState: MicroMarketDataConnectionState = liveConnected
+      ? "LIVE_CONNECTED"
+      : "LIVE_NOT_CONNECTED";
+
+    const quoteAgeMs = this.lastQuote
+      ? now - Date.parse(this.lastQuote.brokerTimestamp)
+      : null;
 
     return {
       connectionState,
-      liveConnected: connectionState === "LIVE_CONNECTED",
-      credentialsConfigured: loadMicroCTraderCredentials().ok,
+      liveConnected,
+      credentialsConfigured: credsConfigured,
+      applicationAuthenticated: this.transport?.isApplicationAuthenticated() ?? false,
+      accountAuthenticated: this.transport?.isAccountAuthenticated() ?? false,
+      configuredAccountAuthorized: authMeta?.configuredAccountAuthorized ?? null,
+      authorizedAccountCount: authMeta?.authorizedAccountCount ?? null,
       symbol: this.symbol,
+      spotSubscribed: this.spotSubscribed,
+      spotSubscribedAt: this.spotSubscribedAt,
+      lastSpotEventAt: this.lastSpotEventAt,
       lastQuote: this.lastQuote,
       lastQuoteTs: this.lastQuote?.brokerTimestamp ?? null,
-      quoteAgeMs: this.lastQuote
-        ? now - Date.parse(this.lastQuote.brokerTimestamp)
-        : null,
+      quoteAgeMs,
       lastCompletedM1Ts: m1 ? new Date(m1.closeTimeMs).toISOString() : null,
       lastCompletedM5Ts: m5 ? new Date(m5.closeTimeMs).toISOString() : null,
       lastCompletedM15Ts: m15 ? new Date(m15.closeTimeMs).toISOString() : null,
@@ -316,9 +468,10 @@ export class MicroLiveMarketSession {
       lastDisconnectedAt: this.lastDisconnectedAt,
       reconnectAttempts: this.reconnectAttempts,
       lastErrorCode: this.lastErrorCode,
-      healthReasons: [...new Set(reasons)],
+      healthReasons: unique,
       collectorHeartbeatAt: this.heartbeatAt,
-      m1CompletedEvents: this.m1CompletedEvents
+      m1CompletedEvents: this.m1CompletedEvents,
+      subscribeSpotsCallCount: this.transport?.getSubscribeSpotsCallCount() ?? 0
     };
   }
 }
@@ -329,17 +482,19 @@ export function createFakeLiveSession(
   fake: FakeMicroCTraderTransport = new FakeMicroCTraderTransport(),
   nowMs?: () => number
 ): { session: MicroLiveMarketSession; fake: FakeMicroCTraderTransport } {
-  const credentials = {
+  const credentials: MicroCTraderCredentials = {
     clientId: "test",
     clientSecret: "test",
     accessToken: "test-access",
     refreshToken: "test-refresh",
     accountId: "123",
-    environment: "DEMO" as const,
+    environment: "DEMO",
     tokenUrl: "https://example.test/token",
     authUrl: "https://example.test/auth",
     redirectUri: null
   };
+  fake.configuredAccountId = "123";
+  fake.authorizedAccountIds = ["123"];
   const session = new MicroLiveMarketSession({
     store,
     transport: fake,

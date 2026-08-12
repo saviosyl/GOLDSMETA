@@ -24,6 +24,7 @@ export const MICRO_TIMEFRAME_MS: Record<MicroTimeframe, number> = {
 /** Read-only Open API commands Micro transport may send. */
 export const MICRO_ALLOWED_READ_COMMANDS = new Set([
   "ProtoOAApplicationAuthReq",
+  "ProtoOAGetAccountListByAccessTokenReq",
   "ProtoOAAccountAuthReq",
   "ProtoOASymbolsListReq",
   "ProtoOASymbolByIdReq",
