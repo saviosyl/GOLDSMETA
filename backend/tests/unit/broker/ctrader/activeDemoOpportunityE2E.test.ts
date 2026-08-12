@@ -4,21 +4,41 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { submitDemoMarketOrder, appendEvaluation, clearArmedCandidate, saveArmedCandidate, getArmedCandidate } =
-  vi.hoisted(() => ({
-    submitDemoMarketOrder: vi.fn(async () => ({
-      accepted: true,
-      orderId: "ord_1",
-      positionId: "pos_1",
-      executionType: "ORDER_FILLED",
-      errorCode: null,
-      clientOrderId: "c1"
-    })),
-    appendEvaluation: vi.fn(async (row: Record<string, unknown>) => ({ id: "ev", ...row })),
-    clearArmedCandidate: vi.fn(async () => undefined),
-    saveArmedCandidate: vi.fn(async (c: unknown) => c),
-    getArmedCandidate: vi.fn(async () => null as unknown)
-  }));
+const {
+  submitDemoMarketOrder,
+  appendEvaluation,
+  clearArmedCandidate,
+  saveArmedCandidate,
+  getArmedCandidate,
+  calculatePepperstoneXauUsdDemoVolume,
+  resolvePepperstoneXauUsdDemoMapping,
+  createAutoTradeJournalEntry
+} = vi.hoisted(() => ({
+  submitDemoMarketOrder: vi.fn(async () => ({
+    accepted: true,
+    orderId: "ord_1",
+    positionId: "pos_1",
+    executionType: "ORDER_FILLED",
+    errorCode: null,
+    clientOrderId: "c1"
+  })),
+  appendEvaluation: vi.fn(async (row: Record<string, unknown>) => ({ id: "ev", ...row })),
+  clearArmedCandidate: vi.fn(async () => undefined),
+  saveArmedCandidate: vi.fn(async (c: unknown) => c),
+  getArmedCandidate: vi.fn(async () => null as unknown),
+  calculatePepperstoneXauUsdDemoVolume: vi.fn(() => ({
+    ok: true,
+    volumeLots: 0.05,
+    rejectionReason: null,
+    notes: ["test-mock"]
+  })),
+  resolvePepperstoneXauUsdDemoMapping: vi.fn(() => ({
+    ozPerLot: 1,
+    broker: "Pepperstone",
+    symbol: "XAUUSD"
+  })),
+  createAutoTradeJournalEntry: vi.fn(async () => undefined)
+}));
 
 vi.mock("../../../../src/services/broker/ctrader/demoOrderExecution", () => ({
   submitDemoMarketOrder
@@ -207,20 +227,11 @@ vi.mock("../../../../src/services/broker/ctrader/quoteToDepositFx", () => ({
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/demoXauUsdSizing", () => ({
-  calculatePepperstoneXauUsdDemoVolume: () => ({
-    ok: true,
-    volumeLots: 0.05,
-    rejectionReason: null,
-    notes: ["test-mock"]
-  })
+  calculatePepperstoneXauUsdDemoVolume
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/brokerUnitMappings", () => ({
-  resolvePepperstoneXauUsdDemoMapping: () => ({
-    ozPerLot: 1,
-    broker: "Pepperstone",
-    symbol: "XAUUSD"
-  })
+  resolvePepperstoneXauUsdDemoMapping
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/sizing", () => ({
@@ -231,7 +242,7 @@ vi.mock("../../../../src/services/broker/ctrader/sizing", () => ({
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/autoTradeJournal", () => ({
-  createAutoTradeJournalEntry: vi.fn(),
+  createAutoTradeJournalEntry,
   updateAutoTradeJournalOnClose: vi.fn()
 }));
 
@@ -273,15 +284,32 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     appendEvaluation.mockClear();
     clearArmedCandidate.mockClear();
     saveArmedCandidate.mockClear();
+    calculatePepperstoneXauUsdDemoVolume.mockClear();
+    resolvePepperstoneXauUsdDemoMapping.mockClear();
+    createAutoTradeJournalEntry.mockClear();
     getArmedCandidate.mockReset();
     getArmedCandidate.mockResolvedValue(null);
+    resolvePepperstoneXauUsdDemoMapping.mockReturnValue({
+      ozPerLot: 1,
+      broker: "Pepperstone",
+      symbol: "XAUUSD"
+    });
+    calculatePepperstoneXauUsdDemoVolume.mockReturnValue({
+      ok: true,
+      volumeLots: 0.05,
+      rejectionReason: null,
+      notes: ["test-mock"]
+    });
     settingsState.autoTradeEnabledIntent = true;
     settingsState.autoTradePaused = false;
     settingsState.emergencyStopActive = false;
+    settingsState.confirmationCandleRequired = true;
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
     process.env.DEMO_OPPORTUNITY_MODE = "ACTIVE_DEMO";
     process.env.CTRADER_CLIENT_ID = "test-client";
     process.env.CTRADER_CLIENT_SECRET = "test-secret";
+    delete process.env.DEMO_A_PLUS_MIN_SCORE;
+    delete process.env.DEMO_A_MIN_SCORE;
   });
 
   it("A+ valid setup + intent ON + gates pass → exactly ONE submit", async () => {
@@ -750,6 +778,155 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     await processDecisionForQualification({
       uid: "u1",
       decisionId: "dec_later",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+  });
+
+  it("custom A+=95 / A=85 + score 90 → tier A, risk 0.75, persists through submit/journal", async () => {
+    process.env.DEMO_A_PLUS_MIN_SCORE = "95";
+    process.env.DEMO_A_MIN_SCORE = "85";
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_custom_a",
+          setupScore: 90,
+          confidence: 99,
+          reasons: ["MTF_BULLISH", "MARKET_STRUCTURE"],
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_custom_a",
+      store: store as never
+    });
+    // Score 90 with A+=95 is A-tier → must wait for normal confirm, but
+    // BREAKOUT_CONFIRMED satisfies mandatory A confirmation → one submit.
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    const sizingArg = calculatePepperstoneXauUsdDemoVolume.mock.calls.at(-1)?.[0] as {
+      riskAmountDeposit?: number;
+    };
+    expect(sizingArg?.riskAmountDeposit).toBe(37.5); // 50 * 0.75
+    const journalArg = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
+      reasonForTrade?: string;
+      cashRisk?: number;
+    };
+    expect(journalArg?.cashRisk).toBe(37.5);
+    expect(journalArg?.reasonForTrade).toMatch(/Tier A\b/);
+    expect(journalArg?.reasonForTrade).not.toMatch(/Tier A_PLUS|Tier A\+/);
+  });
+
+  it("A + confirmationCandleRequired=false still waits without 5M confirm", async () => {
+    settingsState.confirmationCandleRequired = false;
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_a_wait",
+          setupScore: 86,
+          confidence: 86,
+          reasons: ["MTF_BULLISH"],
+          marketStructure: { confirmationClassification: "OUTSIDE_ZONE" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "OUTSIDE_ZONE",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_a_wait",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(saveArmedCandidate).toHaveBeenCalled();
+    const armed = saveArmedCandidate.mock.calls.at(-1)?.[0] as {
+      status?: string;
+      tier?: string;
+      setupScore?: number;
+    };
+    expect(armed?.status).toBe("ARMED");
+    expect(armed?.tier).toBe("A");
+
+    getArmedCandidate.mockResolvedValue(armed);
+    const confirmStore = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_a_confirm",
+          decision: "WAIT",
+          setupScore: 40,
+          takeProfits: [],
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_a_confirm",
+      store: confirmStore as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("missing Pepperstone XAU unit mapping → ZERO submit (ACTIVE_DEMO fail closed)", async () => {
+    resolvePepperstoneXauUsdDemoMapping.mockReturnValue(null);
+    const store = {
+      getDecision: vi.fn(async () => decision()),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_a_plus_buy",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    const mapped = appendEvaluation.mock.calls.some(
+      (c) =>
+        (c[0] as { reasonCode?: string }).reasonCode ===
+        "BROKER_UNIT_MAPPING_REQUIRED"
+    );
+    expect(mapped).toBe(true);
+  });
+
+  it("opposite classification + same-side reasons → no A+ fast execution", async () => {
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_conflict",
+          setupScore: 94,
+          confidence: 94,
+          reasons: ["MTF_BULLISH", "TREND_AGREEMENT"],
+          marketStructure: {
+            confirmationClassification: "BEARISH_REJECTION"
+          }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BEARISH_REJECTION",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_conflict",
       store: store as never
     });
     expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);

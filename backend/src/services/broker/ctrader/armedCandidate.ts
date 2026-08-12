@@ -13,6 +13,7 @@ import { resolveAuthoritativeConfirmation } from "../../decision/tradePlanGeomet
 import {
   armedWindowMs,
   classifyDemoSetupTier,
+  confirmationRequiredForTier,
   DEFAULT_DEMO_OPPORTUNITY_CONFIG,
   hasFastDirectionalConfirmation,
   loadDemoOpportunityConfig,
@@ -504,8 +505,15 @@ export function evaluateArmedCandidateLifecycle(
     };
   }
 
+  const cfg = input.opportunityConfig ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
+  const existingTier =
+    existing.tier ?? classifyDemoSetupTier(existing.setupScore, cfg);
   const ready = isEntryConfirmationReady({
-    confirmationRequired: input.confirmationRequired,
+    confirmationRequired: confirmationRequiredForTier({
+      mode: cfg.mode,
+      tier: existingTier,
+      settingConfirmationRequired: input.confirmationRequired
+    }),
     direction: existing.direction,
     confirmationState: input.confirmationState,
     candleClassification: input.candleClassification
@@ -514,6 +522,7 @@ export function evaluateArmedCandidateLifecycle(
   if (ready) {
     const readyCandidate: ArmedCandidate = {
       ...existing,
+      tier: existingTier,
       updatedAt: input.nowIso,
       lastReasonCode: "ENTRY_CONFIRMATION_RECEIVED"
     };
@@ -527,6 +536,7 @@ export function evaluateArmedCandidateLifecycle(
 
   const waiting: ArmedCandidate = {
     ...existing,
+    tier: existingTier,
     updatedAt: input.nowIso,
     lastReasonCode: "CANDIDATE_WAITING_CONFIRMATION"
   };
@@ -569,6 +579,7 @@ function armOrReadyFromQualified(
 
   // A+ fast path: requires directional decision evidence — NOT the ordinary
   // confirmationCandleRequired / isEntryConfirmationReady path alone.
+  // Explicit opposite confirmation always vetoes fast-ready.
   const fastReady =
     Boolean(input.allowFastConfirmation) &&
     tier === "A_PLUS" &&
@@ -578,10 +589,16 @@ function armOrReadyFromQualified(
       confirmationClassification:
         input.candleClassification ?? input.confirmationState
     });
+  // ACTIVE_DEMO A-tier always requires directional confirmation.
+  const confirmationRequired = confirmationRequiredForTier({
+    mode: cfg.mode,
+    tier,
+    settingConfirmationRequired: input.confirmationRequired
+  });
   const ready =
     fastReady ||
     isEntryConfirmationReady({
-      confirmationRequired: input.confirmationRequired,
+      confirmationRequired,
       direction: setup.direction,
       confirmationState: input.confirmationState,
       candleClassification: input.candleClassification

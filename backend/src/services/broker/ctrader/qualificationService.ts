@@ -34,6 +34,7 @@ import {
   isValidDemoRiskMultiplier,
   loadDemoOpportunityConfig,
   markPriceForInvalidation,
+  resolveExecutionSetupTier,
   resolveTradingSessionBucket
 } from "./demoOpportunityEngine";
 import { calculateCTraderVolume } from "./sizing";
@@ -981,7 +982,11 @@ export async function processDecisionForQualification(args: {
 
     if (life.action === "INVALIDATE" && life.candidate) {
       await clearArmedCandidate(uid).catch(() => undefined);
-      const invTier = classifyDemoSetupTier(life.candidate.setupScore);
+      const invTier = resolveExecutionSetupTier({
+        armedTier: life.candidate.tier,
+        setupScore: life.candidate.setupScore,
+        config: oppConfig
+      });
       const expired =
         life.candidate.invalidationReason === "ARMED_WINDOW_EXPIRED" ||
         life.reasonCode === "CANDIDATE_INVALIDATED_STALE";
@@ -1052,7 +1057,11 @@ export async function processDecisionForQualification(args: {
         return { handled: true, message: "armed_duplicate_suppressed" };
       }
       await saveArmedCandidate({ ...life.candidate, uid }).catch(() => undefined);
-      const tier = classifyDemoSetupTier(life.candidate.setupScore);
+      const tier = resolveExecutionSetupTier({
+        armedTier: life.candidate.tier,
+        setupScore: life.candidate.setupScore,
+        config: oppConfig
+      });
       const barsLeft = barsRemainingInArmedWindow({
         armedAt: life.candidate.armedAt,
         nowIso: new Date().toISOString(),
@@ -1398,14 +1407,31 @@ export async function processDecisionForQualification(args: {
       return { handled: true, message: `controlled_blocked:${entryGate.code}` };
     }
     const oppCfg = loadDemoOpportunityConfig();
-    const setupTier = classifyDemoSetupTier(
-      armedTrade?.setupScore ?? d.setupScore ?? tradeConfidence
-    );
+    // Prefer persisted armed tier so configured thresholds cannot drift.
+    // ACTIVE_DEMO never substitutes confidence for a missing setupScore.
+    const setupTier = resolveExecutionSetupTier({
+      armedTier: armedTrade?.tier,
+      setupScore: armedTrade?.setupScore ?? d.setupScore ?? null,
+      confidence: tradeConfidence,
+      config: oppCfg
+    });
+    if (oppCfg.mode === "ACTIVE_DEMO" && setupTier === "BELOW") {
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        "TIER_BELOW_A",
+        ["TIER_BELOW_A"],
+        candidate.passed
+      );
+      return { handled: true, message: "controlled_blocked:TIER_BELOW_A" };
+    }
     const sessionBucket = resolveTradingSessionBucket();
     const activeDemoSession = demoSessionPolicyAllows({
       mode: oppCfg.mode,
       allowedSessions: settings.allowedSessions,
-      tier: setupTier
+      tier: setupTier,
+      config: oppCfg
     });
     // ACTIVE_DEMO Asia: experimental A+/A only. Major sessions keep classic allowedSessions.
     const sessionOk =
@@ -1639,7 +1665,23 @@ export async function processDecisionForQualification(args: {
         return { handled: true, message: `lots_invalid:${reason}` };
       }
       sizedLots = xauSizing.volumeLots;
+    } else if (oppCfg.mode === "ACTIVE_DEMO") {
+      // ACTIVE_DEMO is Pepperstone Demo XAUUSD — never fall back to full-risk
+      // generic sizing when the proven unit mapping is missing/unproven.
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        "BROKER_UNIT_MAPPING_REQUIRED",
+        ["BROKER_UNIT_MAPPING_REQUIRED"],
+        candidate.passed
+      );
+      return {
+        handled: true,
+        message: "lots_invalid:BROKER_UNIT_MAPPING_REQUIRED"
+      };
     } else {
+      // STRICT / non-target broker path — legacy generic sizing.
       const sizing = calculateCTraderVolume({
         equity: diagnostics.account?.equity ?? diagnostics.account?.balance ?? null,
         freeMargin: diagnostics.account?.freeMargin ?? null,

@@ -379,6 +379,59 @@ describe("armed candidate lifecycle", () => {
     expect(aWait.reasonCode).toBe("CANDIDATE_ARMED");
   });
 
+  it("ACTIVE_DEMO A tier requires confirmation even when setting is false", () => {
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-a-mandatory",
+        planSourceKey: "plan_a",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        confidence: 86,
+        setupScore: 86,
+        originalReasons: ["MTF_BULLISH"]
+      },
+      confirmationRequired: false,
+      confirmationState: "OUTSIDE_ZONE",
+      candleClassification: "OUTSIDE_ZONE",
+      allowFastConfirmation: false
+    });
+    expect(result.action).toBe("ARM");
+    expect(result.candidate?.status).toBe("ARMED");
+  });
+
+  it("contradictory opposite class + same-side reasons → no A+ fast-ready", () => {
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-conflict",
+        planSourceKey: "plan_c",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        confidence: 94,
+        setupScore: 94,
+        originalReasons: ["MTF_BULLISH"]
+      },
+      confirmationRequired: true,
+      confirmationState: "BEARISH_REJECTION",
+      candleClassification: "BEARISH_REJECTION",
+      allowFastConfirmation: true,
+      decisionReasons: ["MTF_BULLISH"]
+    });
+    expect(result.action).not.toBe("READY_TO_EXECUTE");
+    expect(result.reasonCode).not.toBe("FAST_CONFIRMATION_RECEIVED");
+  });
+
   it("BELOW opposite setup cannot replace an existing A/A+ armed candidate", () => {
     const armed = createArmedCandidate({
       uid: "u1",

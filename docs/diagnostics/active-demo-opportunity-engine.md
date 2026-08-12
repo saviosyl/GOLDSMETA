@@ -23,10 +23,13 @@ SL/TP, RR, score) had already passed.
 | Tier | Score | Confirmation |
 |------|------:|--------------|
 | A+ | ≥ configured A+ (default 90) + structural + **directional** decision evidence | Fast confirm when completed decision already has direction-aware support; else wait ≤15m |
-| A | ≥ configured A (default 80) and &lt; A+ | Wait for directional 5M confirmation within 15m |
+| A | ≥ configured A (default 80) and &lt; A+ | **Always** wait for directional 5M confirmation (setting cannot disable) |
 | BELOW | &lt; A | **Hard reject** `TIER_BELOW_A` — no arm / replace / submit |
 
-Confidence alone must not promote a BELOW setupScore into the order pipeline.
+Confidence alone must not promote a BELOW / missing setupScore into the order pipeline.
+Execution prefers persisted `armedTrade.tier` so configured thresholds cannot drift.
+Explicit opposite confirmation always vetoes A+ fast-confirm (no reason-token override).
+ACTIVE_DEMO never falls back to full-risk generic sizing without proven Pepperstone XAU mapping.
 
 ## Session-plan semantics
 

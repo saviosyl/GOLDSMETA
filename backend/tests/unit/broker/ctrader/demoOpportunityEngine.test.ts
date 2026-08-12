@@ -3,6 +3,7 @@ import {
   applyRiskMultiplier,
   armedWindowMs,
   classifyDemoSetupTier,
+  confirmationRequiredForTier,
   demoRiskMultiplier,
   demoSessionPolicyAllows,
   formatOpportunityActivity,
@@ -12,7 +13,8 @@ import {
   isPlanRefreshUnavailableState,
   isValidDemoRiskMultiplier,
   loadDemoOpportunityConfig,
-  markPriceForInvalidation
+  markPriceForInvalidation,
+  resolveExecutionSetupTier
 } from "../../../../src/services/broker/ctrader/demoOpportunityEngine";
 import {
   isCTraderLiveEnabled,
@@ -79,6 +81,75 @@ describe("demo opportunity engine", () => {
         confirmationClassification: "REJECTION_CONFIRMED"
       })
     ).toBe(false);
+  });
+
+  it("explicit opposite confirmation vetoes fast-confirm despite same-side reasons", () => {
+    expect(
+      hasFastDirectionalConfirmation({
+        direction: "BUY",
+        reasons: ["MTF_BULLISH", "TREND_AGREEMENT"],
+        confirmationClassification: "BEARISH_REJECTION"
+      })
+    ).toBe(false);
+    expect(
+      hasFastDirectionalConfirmation({
+        direction: "BUY",
+        reasons: ["MTF_BULLISH"],
+        confirmationClassification: "BEARISH_CONFIRMED"
+      })
+    ).toBe(false);
+    expect(
+      hasFastDirectionalConfirmation({
+        direction: "SELL",
+        reasons: ["MTF_BEARISH"],
+        confirmationClassification: "BULLISH_BREAKOUT"
+      })
+    ).toBe(false);
+    expect(
+      hasFastDirectionalConfirmation({
+        direction: "SELL",
+        reasons: ["MTF_BEARISH"],
+        confirmationClassification: "BULLISH_CONFIRMED"
+      })
+    ).toBe(false);
+    // Bare CONFIRMED alone is insufficient without side proof.
+    expect(
+      hasFastDirectionalConfirmation({
+        direction: "BUY",
+        reasons: ["TREND_AGREEMENT"],
+        confirmationClassification: "CONFIRMED"
+      })
+    ).toBe(false);
+  });
+
+  it("runtime tier config stays consistent; confidence is not a substitute", () => {
+    const cfg = loadDemoOpportunityConfig({
+      DEMO_A_PLUS_MIN_SCORE: "95",
+      DEMO_A_MIN_SCORE: "85"
+    } as NodeJS.ProcessEnv);
+    expect(classifyDemoSetupTier(90, cfg)).toBe("A");
+    expect(
+      resolveExecutionSetupTier({
+        armedTier: "A",
+        setupScore: 90,
+        confidence: 99,
+        config: cfg
+      })
+    ).toBe("A");
+    expect(
+      resolveExecutionSetupTier({
+        setupScore: null,
+        confidence: 99,
+        config: cfg
+      })
+    ).toBe("BELOW");
+    expect(
+      confirmationRequiredForTier({
+        mode: "ACTIVE_DEMO",
+        tier: "A",
+        settingConfirmationRequired: false
+      })
+    ).toBe(true);
   });
 
   it("risk multipliers: A+ major 1.0, A major 0.75, Asia 0.50; BELOW=0", () => {

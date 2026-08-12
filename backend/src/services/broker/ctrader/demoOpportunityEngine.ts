@@ -141,6 +141,50 @@ export function classifyDemoSetupTier(
 }
 
 /**
+ * Resolve tier for execution / activity / journal.
+ * Prefer persisted armed candidate tier so configured thresholds cannot drift
+ * between arm and submit. ACTIVE_DEMO never substitutes confidence for a
+ * missing setupScore — missing score is BELOW unless a persisted tier exists.
+ */
+export function resolveExecutionSetupTier(args: {
+  armedTier?: DemoSetupTier | null;
+  setupScore?: number | null;
+  /** Ignored in ACTIVE_DEMO — confidence is not a setup-score substitute. */
+  confidence?: number | null;
+  config: DemoOpportunityConfig;
+}): DemoSetupTier {
+  if (
+    args.armedTier === "A_PLUS" ||
+    args.armedTier === "A" ||
+    args.armedTier === "BELOW"
+  ) {
+    return args.armedTier;
+  }
+  if (args.config.mode === "ACTIVE_DEMO") {
+    return classifyDemoSetupTier(args.setupScore ?? null, args.config);
+  }
+  // STRICT: legacy may fall back to confidence only when setupScore absent.
+  return classifyDemoSetupTier(
+    args.setupScore ?? args.confidence ?? null,
+    args.config
+  );
+}
+
+/**
+ * ACTIVE_DEMO A-tier must always require directional 5M confirmation,
+ * regardless of the editable confirmationCandleRequired setting.
+ * A+ may use the fast-directional path separately.
+ */
+export function confirmationRequiredForTier(args: {
+  mode: DemoOpportunityMode;
+  tier: DemoSetupTier;
+  settingConfirmationRequired: boolean;
+}): boolean {
+  if (args.mode === "ACTIVE_DEMO" && args.tier === "A") return true;
+  return args.settingConfirmationRequired;
+}
+
+/**
  * Meaningful structural support from existing decision reason strings.
  * Does not invent indicators — only recognises known GoldMeta reason tokens.
  * Structural support alone is NOT sufficient for A+ fast confirmation.
@@ -174,10 +218,40 @@ export function hasMeaningfulStructuralSupport(
   return tokens.some((t) => joined.includes(t));
 }
 
+/** Explicit opposite confirmation classifications — hard veto for A+ fast path. */
+export function isExplicitOppositeConfirmation(args: {
+  direction: "BUY" | "SELL";
+  confirmationClassification?: string | null;
+}): boolean {
+  const cls = String(args.confirmationClassification ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+  if (!cls || cls === "NONE") return false;
+  if (args.direction === "BUY") {
+    return (
+      cls.includes("BEARISH") ||
+      cls === "REJECTION_CONFIRMED" ||
+      (cls.includes("REJECTION") && !cls.includes("BULLISH"))
+    );
+  }
+  return (
+    cls.includes("BULLISH") ||
+    cls === "BREAKOUT_CONFIRMED" ||
+    cls === "BREAKOUT_HELD" ||
+    (cls.includes("BREAKOUT") &&
+      !cls.includes("BEARISH") &&
+      (cls.includes("CONFIRMED") || cls.includes("HELD")))
+  );
+}
+
 /**
  * Direction-aware A+ fast-confirmation evidence from a COMPLETED decision.
  * Requires existing GoldMeta diagnostics that actually support the trade side.
  * Generic structural tokens (e.g. TREND alone) are insufficient.
+ *
+ * Priority: EXPLICIT OPPOSITE CONFIRMATION → always false (no reason override).
+ * Bare ambiguous "CONFIRMED" alone is never sufficient without side proof.
  */
 export function hasFastDirectionalConfirmation(args: {
   direction: "BUY" | "SELL";
@@ -193,36 +267,32 @@ export function hasFastDirectionalConfirmation(args: {
     .map((r) => String(r).toUpperCase())
     .join(" ");
 
-  const buyClassExact = (ACCEPTED_BUY_CONFIRMATIONS as readonly string[]).includes(
-    cls
-  );
-  const sellClassExact = (
-    ACCEPTED_SELL_CONFIRMATIONS as readonly string[]
-  ).includes(cls);
+  // Hard veto — same-side reason tokens must NEVER override opposite class.
+  if (
+    isExplicitOppositeConfirmation({
+      direction: dir,
+      confirmationClassification: cls
+    })
+  ) {
+    return false;
+  }
+
+  // Bare "CONFIRMED" is ambiguous — require another side-proving diagnostic.
+  const bareConfirmed = cls === "CONFIRMED";
 
   if (dir === "BUY") {
-    // Explicit opposite / bearish rejection must not fast-confirm BUY.
-    if (
-      sellClassExact ||
-      cls.includes("BEARISH") ||
-      (cls.includes("REJECTION") && !cls.includes("BULLISH"))
-    ) {
-      return /\b(BULLISH|BUY_CONFIRM|MTF_BULLISH|BULLISH_CONTINUATION|BULLISH_REJECTION|BREAKOUT_HELD|DIRECTIONAL_BULLISH)\b/.test(
-        joined
-      );
-    }
     const buyClass =
-      buyClassExact ||
+      (!bareConfirmed &&
+        (ACCEPTED_BUY_CONFIRMATIONS as readonly string[]).includes(cls)) ||
       (cls.includes("BULLISH") &&
         (cls.includes("BREAKOUT") ||
           cls.includes("REJECTION") ||
           cls.includes("CONTINUATION") ||
           cls.includes("CONFIRMED") ||
           cls.includes("HELD"))) ||
-      ((cls === "BREAKOUT_CONFIRMED" ||
-        cls === "BREAKOUT_HELD" ||
-        cls === "BREAKOUT_RETEST") &&
-        !cls.includes("BEARISH"));
+      cls === "BREAKOUT_CONFIRMED" ||
+      cls === "BREAKOUT_HELD" ||
+      cls === "BREAKOUT_RETEST";
     const buyReasons =
       /\b(BULLISH|BUY_CONFIRM|MTF_BULLISH|BULLISH_CONTINUATION|BULLISH_REJECTION|BREAKOUT_HELD|DIRECTIONAL_BULLISH)\b/.test(
         joined
@@ -230,22 +300,13 @@ export function hasFastDirectionalConfirmation(args: {
       (joined.includes("BREAKOUT") &&
         joined.includes("RETEST") &&
         !joined.includes("BEARISH"));
+    if (bareConfirmed) return Boolean(buyReasons);
     return Boolean(buyClass || buyReasons);
   }
 
-  // SELL
-  if (
-    buyClassExact ||
-    cls.includes("BULLISH") ||
-    cls === "BREAKOUT_CONFIRMED" ||
-    cls === "BREAKOUT_HELD"
-  ) {
-    return /\b(BEARISH|SELL_CONFIRM|MTF_BEARISH|BEARISH_CONTINUATION|BEARISH_REJECTION|DIRECTIONAL_BEARISH)\b/.test(
-      joined
-    );
-  }
   const sellClass =
-    sellClassExact ||
+    (!bareConfirmed &&
+      (ACCEPTED_SELL_CONFIRMATIONS as readonly string[]).includes(cls)) ||
     (cls.includes("BEARISH") &&
       (cls.includes("BREAKOUT") ||
         cls.includes("REJECTION") ||
@@ -257,6 +318,7 @@ export function hasFastDirectionalConfirmation(args: {
     /\b(BEARISH|SELL_CONFIRM|MTF_BEARISH|BEARISH_CONTINUATION|BEARISH_REJECTION|DIRECTIONAL_BEARISH)\b/.test(
       joined
     );
+  if (bareConfirmed) return Boolean(sellReasons);
   return Boolean(sellClass || sellReasons);
 }
 
@@ -414,6 +476,7 @@ export function markPriceForInvalidation(args: {
  * Accepted confirmation classifications for FAST (A+) and standard (A) paths.
  * Documented for audits — mirrors resolveAuthoritativeConfirmation semantics.
  */
+/** Side-proving BUY classifications for A+ fast path (no bare CONFIRMED). */
 export const ACCEPTED_BUY_CONFIRMATIONS = [
   "BULLISH_BREAKOUT",
   "BREAKOUT_CONFIRMED",
@@ -421,18 +484,17 @@ export const ACCEPTED_BUY_CONFIRMATIONS = [
   "BULLISH_REJECTION",
   "BULLISH_CONTINUATION",
   "BULLISH_CONFIRMED",
-  "HELD_BULLISH",
-  "CONFIRMED"
+  "HELD_BULLISH"
 ] as const;
 
+/** Side-proving SELL classifications for A+ fast path (no bare CONFIRMED). */
 export const ACCEPTED_SELL_CONFIRMATIONS = [
   "BEARISH_REJECTION",
   "REJECTION_CONFIRMED",
   "BEARISH_BREAKOUT",
   "BEARISH_CONTINUATION",
   "BEARISH_CONFIRMED",
-  "HELD_BEARISH",
-  "CONFIRMED"
+  "HELD_BEARISH"
 ] as const;
 
 export function barsRemainingInArmedWindow(args: {

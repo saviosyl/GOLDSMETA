@@ -108,6 +108,8 @@ export function reasonLabelFor(code: string): string {
     ARMED_WINDOW_EXPIRED: "Armed confirmation window expired",
     INVALIDATION_PRICE_BREACHED: "Invalidation / stop price breached",
     TIER_BELOW_A: "Setup score below A threshold (ACTIVE_DEMO)",
+    BROKER_UNIT_MAPPING_REQUIRED:
+      "Pepperstone XAUUSD unit mapping required — fail closed",
     RISK_MULTIPLIER_INVALID: "Demo risk multiplier invalid — fail closed",
     AUTOTRADE_INTENT_OFF: "Demo Auto intent OFF — armed thesis cancelled",
     TRADING_OAUTH_REQUIRED: "Trading OAuth scope required",
