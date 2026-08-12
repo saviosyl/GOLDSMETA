@@ -806,7 +806,7 @@ export async function buildDiagnostics(
       connected: oauthConnected,
       selected: Boolean(connection?.selectedAccountId),
       marginNote:
-        "freeMargin/usedMargin absent from ProtoOATraderRes and ProtoOAReconcileRes under scope=accounts; not invented. Margin eligibility UNKNOWN until Open API returns freeMargin."
+        "ProtoOATrader has no freeMargin/equity/usedMargin fields (schema gap, not scope). Demo AutoTrade derives freeMargin via authoritative margin snapshot (Trader.balance + Reconcile positions + UnrealizedPnL) and ProtoOAExpectedMarginReq at execution."
     }
   };
 }

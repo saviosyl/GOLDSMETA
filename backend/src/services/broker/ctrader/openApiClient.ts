@@ -17,6 +17,19 @@ import {
   parseScheduleIntervals
 } from "./marketSchedule";
 import { parseCTraderVolumeRules } from "./volumeUnits";
+import {
+  computeAuthoritativeMarginSnapshot,
+  parseExpectedMarginEntries,
+  selectSideExpectedMargin,
+  type AuthoritativeMarginSnapshot
+} from "./authoritativeMargin";
+import {
+  describeRuntimeType,
+  moneyFromDigitsSafe,
+  safeIdString,
+  safeInteger,
+  safeWireAccountId
+} from "./openApiNumeric";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;
@@ -121,8 +134,28 @@ export type BrokerOpenPosition = {
   stopLoss: number | null;
   takeProfit: number | null;
   unrealisedPnl: number | null;
+  /**
+   * Deposit-currency used margin from ProtoOAPosition.usedMargin
+   * (moneyDigits-converted). Null when broker omitted the field.
+   */
+  usedMargin: number | null;
   openTimestamp: string | null;
 };
+
+export type AuthoritativeMarginSnapshotResult =
+  | { ok: true; snapshot: AuthoritativeMarginSnapshot }
+  | { ok: false; notes: string[] };
+
+export type ExpectedMarginResult =
+  | {
+      ok: true;
+      expectedMargin: number;
+      buyMargin: number;
+      sellMargin: number;
+      volume: number;
+      moneyDigits: number;
+    }
+  | { ok: false; notes: string[] };
 
 export type DemoAmendSlTpRequest = {
   accessToken: string;
@@ -306,6 +339,26 @@ export interface CTraderOpenApiClient {
     fromTimestampMs: number;
     toTimestampMs: number;
   }): Promise<BrokerClosedDeal[]>;
+  /**
+   * Demo host — derive freeMargin/equity from Trader + Reconcile + UnrealizedPnL.
+   * Never invents freeMargin when open-position state is unknown.
+   */
+  fetchAuthoritativeDemoMarginSnapshot?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+  }): Promise<AuthoritativeMarginSnapshotResult>;
+  /** Demo host — ProtoOAExpectedMarginReq for a single final protocol volume. */
+  fetchDemoExpectedMargin?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    symbolId: string;
+    volume: number;
+    side: "BUY" | "SELL";
+  }): Promise<ExpectedMarginResult>;
 }
 
 function moneyFromDigits(value: unknown, moneyDigits: number): number | null {
@@ -405,22 +458,27 @@ function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
     const side: "BUY" | "SELL" = sideNum === 2 ? "SELL" : "BUY";
     const volumeUnits = asNumber(trade.volume ?? row.volume);
     const positionId =
-      row.positionId != null
-        ? String(row.positionId)
-        : trade.positionId != null
-          ? String(trade.positionId)
-          : "";
+      safeIdString(row.positionId) ?? safeIdString(trade.positionId);
     if (!positionId) continue;
     const openTs = asNumber(trade.openTimestamp ?? row.openTimestamp);
+    const posMoneyDigits =
+      safeInteger(row.moneyDigits) ?? safeInteger(trade.moneyDigits) ?? 2;
     // ProtoOAPosition price/SL/TP are absolute money prices (not relative spot units).
+    // usedMargin is deposit currency × 10^moneyDigits when present.
+    const usedMargin = moneyFromDigitsSafe(
+      row.usedMargin ?? trade.usedMargin,
+      posMoneyDigits
+    );
     out.push({
       positionId,
       symbolId:
-        trade.symbolId != null
+        safeIdString(trade.symbolId) ??
+        safeIdString(row.symbolId) ??
+        (trade.symbolId != null
           ? String(trade.symbolId)
           : row.symbolId != null
             ? String(row.symbolId)
-            : null,
+            : null),
       side,
       volumeUnits,
       volumeLots:
@@ -429,11 +487,480 @@ function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
       stopLoss: asNumber(row.stopLoss ?? trade.stopLoss),
       takeProfit: asNumber(row.takeProfit ?? trade.takeProfit),
       unrealisedPnl: moneyFromCenti(row.unrealizedPnl ?? row.unrealisedPnl, 2),
+      usedMargin,
       openTimestamp:
         openTs != null ? new Date(openTs).toISOString() : null
     });
   }
   return out;
+}
+
+async function fetchAuthoritativeDemoMarginSnapshotImpl(
+  connection: InstanceType<typeof CTraderConnection>,
+  args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+  }
+): Promise<AuthoritativeMarginSnapshotResult> {
+  const accountId = safeWireAccountId(args.ctidTraderAccountId);
+  if (accountId == null) {
+    return {
+      ok: false,
+      notes: ["ctidTraderAccountId unsafe/invalid for wire send"]
+    };
+  }
+
+  await connection.sendCommand("ProtoOAApplicationAuthReq", {
+    clientId: args.clientId,
+    clientSecret: args.clientSecret
+  });
+  await connection.sendCommand("ProtoOAAccountAuthReq", {
+    accessToken: args.accessToken,
+    ctidTraderAccountId: accountId
+  });
+
+  const traderRes = (await connection.sendCommand("ProtoOATraderReq", {
+    ctidTraderAccountId: accountId
+  })) as Record<string, unknown>;
+  const t = (traderRes.trader ?? traderRes) as Record<string, unknown>;
+  const moneyDigits = safeInteger(t.moneyDigits);
+  if (moneyDigits == null) {
+    return {
+      ok: false,
+      notes: ["ProtoOATrader.moneyDigits missing/invalid — fail closed"]
+    };
+  }
+  const balance = moneyFromDigitsSafe(t.balance, moneyDigits);
+  const leverageInCents = safeInteger(t.leverageInCents);
+  const leverage =
+    leverageInCents != null ? leverageInCents / 100 : asNumber(t.leverage);
+
+  let reconcileOk = false;
+  let positions: BrokerOpenPosition[] = [];
+  try {
+    const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+      ctidTraderAccountId: accountId
+    })) as Record<string, unknown>;
+    positions = parseBrokerOpenPositions(recon.position ?? recon.positions);
+    reconcileOk = true;
+  } catch {
+    return {
+      ok: false,
+      notes: ["ProtoOAReconcileReq failed — open-position state unknown"]
+    };
+  }
+
+  let unrealisedRows:
+    | { positionId: string; netUnrealisedPnl: number | null }[]
+    | null = null;
+
+  if (positions.length > 0) {
+    try {
+      const pnlRes = (await connection.sendCommand(
+        "ProtoOAGetPositionUnrealizedPnLReq",
+        { ctidTraderAccountId: accountId }
+      )) as Record<string, unknown>;
+      const pnlDigits = safeInteger(pnlRes.moneyDigits) ?? moneyDigits;
+      const rows = Array.isArray(pnlRes.positionUnrealizedPnL)
+        ? pnlRes.positionUnrealizedPnL
+        : [];
+      unrealisedRows = rows.map((item) => {
+        const row = (item ?? {}) as Record<string, unknown>;
+        return {
+          positionId: safeIdString(row.positionId) ?? "",
+          netUnrealisedPnl: moneyFromDigitsSafe(
+            row.netUnrealizedPnL ?? row.netUnrealisedPnL,
+            pnlDigits
+          )
+        };
+      });
+    } catch {
+      return {
+        ok: false,
+        notes: [
+          "ProtoOAGetPositionUnrealizedPnLReq failed with open positions — fail closed"
+        ]
+      };
+    }
+  }
+
+  const computed = computeAuthoritativeMarginSnapshot({
+    balance,
+    moneyDigits,
+    leverage,
+    openPositionCount: positions.length,
+    reconcileOk,
+    positionsUsedMargin: positions.map((p) => ({
+      positionId: p.positionId,
+      usedMargin: p.usedMargin
+    })),
+    unrealisedRows
+  });
+
+  if (!computed.ok) {
+    return { ok: false, notes: computed.notes };
+  }
+  return { ok: true, snapshot: computed.snapshot };
+}
+
+async function fetchDemoExpectedMarginImpl(
+  connection: InstanceType<typeof CTraderConnection>,
+  args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    symbolId: string;
+    volume: number;
+    side: "BUY" | "SELL";
+  }
+): Promise<ExpectedMarginResult> {
+  const accountId = safeWireAccountId(args.ctidTraderAccountId);
+  const symbolId = safeWireAccountId(args.symbolId);
+  const volume = safeInteger(args.volume);
+  if (accountId == null || symbolId == null || volume == null || !(volume > 0)) {
+    return {
+      ok: false,
+      notes: ["accountId/symbolId/volume unsafe or invalid for ExpectedMargin"]
+    };
+  }
+
+  await connection.sendCommand("ProtoOAApplicationAuthReq", {
+    clientId: args.clientId,
+    clientSecret: args.clientSecret
+  });
+  await connection.sendCommand("ProtoOAAccountAuthReq", {
+    accessToken: args.accessToken,
+    ctidTraderAccountId: accountId
+  });
+
+  let res: Record<string, unknown>;
+  try {
+    res = (await connection.sendCommand("ProtoOAExpectedMarginReq", {
+      ctidTraderAccountId: accountId,
+      symbolId,
+      volume: [volume]
+    })) as Record<string, unknown>;
+  } catch (err) {
+    return {
+      ok: false,
+      notes: [
+        err instanceof Error
+          ? `ProtoOAExpectedMarginReq failed: ${err.message}`
+          : "ProtoOAExpectedMarginReq failed"
+      ]
+    };
+  }
+
+  const moneyDigits = safeInteger(res.moneyDigits);
+  if (moneyDigits == null) {
+    return {
+      ok: false,
+      notes: ["ProtoOAExpectedMarginRes.moneyDigits missing/invalid"]
+    };
+  }
+  const quotes = parseExpectedMarginEntries({
+    margins: res.margin ?? res.margins,
+    moneyDigits
+  });
+  const expected = selectSideExpectedMargin({
+    side: args.side,
+    protocolVolume: volume,
+    quotes
+  });
+  if (expected == null) {
+    return {
+      ok: false,
+      notes: [
+        `No ${args.side} margin for protocol volume ${volume} in ProtoOAExpectedMarginRes`
+      ]
+    };
+  }
+  const match = quotes.find((q) => q.volume === volume);
+  if (!match) {
+    return {
+      ok: false,
+      notes: [`No margin entry with volume=${volume}`]
+    };
+  }
+  return {
+    ok: true,
+    expectedMargin: expected,
+    buyMargin: match.buyMargin,
+    sellMargin: match.sellMargin,
+    volume,
+    moneyDigits
+  };
+}
+
+/** Read-only Demo margin probe result (never mutates broker state). */
+export type DemoMarginReadOnlyProbe = {
+  ok: boolean;
+  notes: string[];
+  accountMasked: string | null;
+  moneyDigits: number | null;
+  balance: number | null;
+  openPositionCount: number | null;
+  usedMarginTotal: number | null;
+  unrealisedNetPnl: number | null;
+  equity: number | null;
+  freeMargin: number | null;
+  marginSource: AuthoritativeMarginSnapshot["source"] | null;
+  symbolId: string | null;
+  requestedProtocolVolume: number | null;
+  buyMargin: number | null;
+  sellMargin: number | null;
+  selectedExpectedMarginBuy: number | null;
+  selectedExpectedMarginSell: number | null;
+  pnlPayloadAccepted: boolean;
+  pnlResponsePayloadType: string | null;
+  runtimeTypes: Record<string, ReturnType<typeof describeRuntimeType>>;
+  ordersSubmitted: 0;
+};
+
+/**
+ * READ-ONLY Demo margin probe over a live Spotware connection.
+ * Never places/amends/closes orders.
+ */
+export async function probeDemoMarginReadOnly(args: {
+  accessToken: string;
+  clientId: string;
+  clientSecret: string;
+  ctidTraderAccountId: string;
+  symbolId: string;
+  protocolVolume: number;
+  accountMasked?: string | null;
+}): Promise<DemoMarginReadOnlyProbe> {
+  const emptyTypes: DemoMarginReadOnlyProbe["runtimeTypes"] = {};
+  const baseFail = (notes: string[]): DemoMarginReadOnlyProbe => ({
+    ok: false,
+    notes,
+    accountMasked: args.accountMasked ?? null,
+    moneyDigits: null,
+    balance: null,
+    openPositionCount: null,
+    usedMarginTotal: null,
+    unrealisedNetPnl: null,
+    equity: null,
+    freeMargin: null,
+    marginSource: null,
+    symbolId: args.symbolId,
+    requestedProtocolVolume: args.protocolVolume,
+    buyMargin: null,
+    sellMargin: null,
+    selectedExpectedMarginBuy: null,
+    selectedExpectedMarginSell: null,
+    pnlPayloadAccepted: false,
+    pnlResponsePayloadType: null,
+    runtimeTypes: emptyTypes,
+    ordersSubmitted: 0
+  });
+
+  const accountId = safeWireAccountId(args.ctidTraderAccountId);
+  const symbolId = safeWireAccountId(args.symbolId);
+  const volume = safeInteger(args.protocolVolume);
+  if (accountId == null || symbolId == null || volume == null) {
+    return baseFail(["unsafe accountId/symbolId/volume"]);
+  }
+
+  return withDemoConnection(async (connection) => {
+    const runtimeTypes: DemoMarginReadOnlyProbe["runtimeTypes"] = {};
+    const notes: string[] = [];
+
+    await connection.sendCommand("ProtoOAApplicationAuthReq", {
+      clientId: args.clientId,
+      clientSecret: args.clientSecret
+    });
+    await connection.sendCommand("ProtoOAAccountAuthReq", {
+      accessToken: args.accessToken,
+      ctidTraderAccountId: accountId
+    });
+
+    const traderRes = (await connection.sendCommand("ProtoOATraderReq", {
+      ctidTraderAccountId: accountId
+    })) as Record<string, unknown>;
+    const t = (traderRes.trader ?? traderRes) as Record<string, unknown>;
+    runtimeTypes.trader_balance = describeRuntimeType(t.balance);
+    runtimeTypes.trader_moneyDigits = describeRuntimeType(t.moneyDigits);
+    runtimeTypes.trader_leverageInCents = describeRuntimeType(t.leverageInCents);
+
+    const moneyDigits = safeInteger(t.moneyDigits);
+    const balance =
+      moneyDigits != null ? moneyFromDigitsSafe(t.balance, moneyDigits) : null;
+    if (moneyDigits == null || balance == null) {
+      notes.push("Trader balance/moneyDigits decode failed");
+    }
+
+    const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
+      ctidTraderAccountId: accountId
+    })) as Record<string, unknown>;
+    const positions = parseBrokerOpenPositions(
+      recon.position ?? recon.positions
+    );
+    if (positions[0]) {
+      runtimeTypes.position0_positionId = describeRuntimeType(
+        ((recon.position ?? recon.positions) as unknown[])?.[0] &&
+          (((recon.position ?? recon.positions) as unknown[])[0] as Record<
+            string,
+            unknown
+          >).positionId
+      );
+      const raw0 = ((recon.position ?? recon.positions) as unknown[])[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (raw0) {
+        runtimeTypes.position0_usedMargin = describeRuntimeType(raw0.usedMargin);
+        runtimeTypes.position0_moneyDigits = describeRuntimeType(
+          raw0.moneyDigits
+        );
+      }
+    }
+
+    let pnlPayloadAccepted = false;
+    let pnlResponsePayloadType: string | null = null;
+    let unrealisedRows:
+      | { positionId: string; netUnrealisedPnl: number | null }[]
+      | null = null;
+    try {
+      const pnlRes = (await connection.sendCommand(
+        "ProtoOAGetPositionUnrealizedPnLReq",
+        { ctidTraderAccountId: accountId }
+      )) as Record<string, unknown>;
+      pnlPayloadAccepted = true;
+      pnlResponsePayloadType =
+        pnlRes.payloadType != null
+          ? String(pnlRes.payloadType)
+          : "ProtoOAGetPositionUnrealizedPnLRes";
+      const pnlDigits = safeInteger(pnlRes.moneyDigits) ?? moneyDigits ?? 2;
+      runtimeTypes.pnl_moneyDigits = describeRuntimeType(pnlRes.moneyDigits);
+      const rows = Array.isArray(pnlRes.positionUnrealizedPnL)
+        ? pnlRes.positionUnrealizedPnL
+        : [];
+      if (rows[0]) {
+        const r0 = rows[0] as Record<string, unknown>;
+        runtimeTypes.pnl0_positionId = describeRuntimeType(r0.positionId);
+        runtimeTypes.pnl0_grossUnrealizedPnL = describeRuntimeType(
+          r0.grossUnrealizedPnL
+        );
+        runtimeTypes.pnl0_netUnrealizedPnL = describeRuntimeType(
+          r0.netUnrealizedPnL
+        );
+      }
+      unrealisedRows = rows.map((item) => {
+        const row = (item ?? {}) as Record<string, unknown>;
+        return {
+          positionId: safeIdString(row.positionId) ?? "",
+          netUnrealisedPnl: moneyFromDigitsSafe(
+            row.netUnrealizedPnL ?? row.netUnrealisedPnL,
+            pnlDigits
+          )
+        };
+      });
+      notes.push("ProtoOAGetPositionUnrealizedPnLReq accepted");
+    } catch (err) {
+      notes.push(
+        err instanceof Error
+          ? `ProtoOAGetPositionUnrealizedPnLReq failed: ${err.message}`
+          : "ProtoOAGetPositionUnrealizedPnLReq failed"
+      );
+    }
+
+    const computed =
+      moneyDigits != null
+        ? computeAuthoritativeMarginSnapshot({
+            balance,
+            moneyDigits,
+            leverage: null,
+            openPositionCount: positions.length,
+            reconcileOk: true,
+            positionsUsedMargin: positions.map((p) => ({
+              positionId: p.positionId,
+              usedMargin: p.usedMargin
+            })),
+            unrealisedRows
+          })
+        : ({
+            ok: false as const,
+            reason: "MARGIN_UNAVAILABLE" as const,
+            notes: ["moneyDigits"]
+          });
+
+    let buyMargin: number | null = null;
+    let sellMargin: number | null = null;
+    let expDigits: number | null = null;
+    try {
+      const exp = (await connection.sendCommand("ProtoOAExpectedMarginReq", {
+        ctidTraderAccountId: accountId,
+        symbolId,
+        volume: [volume]
+      })) as Record<string, unknown>;
+      expDigits = safeInteger(exp.moneyDigits);
+      runtimeTypes.expected_moneyDigits = describeRuntimeType(exp.moneyDigits);
+      const margins = (exp.margin ?? exp.margins) as unknown[];
+      if (Array.isArray(margins) && margins[0]) {
+        const m0 = margins[0] as Record<string, unknown>;
+        runtimeTypes.expected0_volume = describeRuntimeType(m0.volume);
+        runtimeTypes.expected0_buyMargin = describeRuntimeType(m0.buyMargin);
+        runtimeTypes.expected0_sellMargin = describeRuntimeType(m0.sellMargin);
+      }
+      if (expDigits != null) {
+        const quotes = parseExpectedMarginEntries({
+          margins: exp.margin ?? exp.margins,
+          moneyDigits: expDigits
+        });
+        const match = quotes.find((q) => q.volume === volume);
+        if (match) {
+          buyMargin = match.buyMargin;
+          sellMargin = match.sellMargin;
+        } else {
+          notes.push(`ExpectedMargin missing volume=${volume} entry`);
+        }
+      } else {
+        notes.push("ExpectedMargin moneyDigits invalid");
+      }
+    } catch (err) {
+      notes.push(
+        err instanceof Error
+          ? `ProtoOAExpectedMarginReq failed: ${err.message}`
+          : "ProtoOAExpectedMarginReq failed"
+      );
+    }
+
+    const snapOk = computed.ok === true;
+    const snapshot = snapOk ? computed.snapshot : null;
+
+    return {
+      ok:
+        pnlPayloadAccepted &&
+        snapOk &&
+        buyMargin != null &&
+        sellMargin != null &&
+        buyMargin > 0 &&
+        sellMargin > 0,
+      notes,
+      accountMasked: args.accountMasked ?? null,
+      moneyDigits: snapshot?.moneyDigits ?? moneyDigits,
+      balance: snapshot?.balance ?? balance,
+      openPositionCount: positions.length,
+      usedMarginTotal: snapshot?.usedMargin ?? null,
+      unrealisedNetPnl: snapshot?.unrealisedNetPnl ?? null,
+      equity: snapshot?.equity ?? null,
+      freeMargin: snapshot?.freeMargin ?? null,
+      marginSource: snapshot?.source ?? null,
+      symbolId: String(symbolId),
+      requestedProtocolVolume: volume,
+      buyMargin,
+      sellMargin,
+      selectedExpectedMarginBuy: buyMargin,
+      selectedExpectedMarginSell: sellMargin,
+      pnlPayloadAccepted,
+      pnlResponsePayloadType,
+      runtimeTypes,
+      ordersSubmitted: 0
+    };
+  });
 }
 
 /**
@@ -1298,6 +1825,18 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         })) as Record<string, unknown>;
         return parseBrokerClosedDeals(res.deal ?? res.deals);
       });
+    },
+
+    async fetchAuthoritativeDemoMarginSnapshot(args) {
+      return withDemoConnection((connection) =>
+        fetchAuthoritativeDemoMarginSnapshotImpl(connection, args)
+      );
+    },
+
+    async fetchDemoExpectedMargin(args) {
+      return withDemoConnection((connection) =>
+        fetchDemoExpectedMarginImpl(connection, args)
+      );
     }
   };
 }
@@ -1310,6 +1849,13 @@ export function createMockOpenApiClient(opts?: {
   snapshot?: AccountSnapshot;
   /** Optional EURUSD quote for quote→deposit FX tests. */
   eurusdQuote?: BrokerQuote;
+  /** Optional authoritative margin snapshot for Demo gate tests. */
+  authoritativeMargin?: AuthoritativeMarginSnapshotResult;
+  /** Optional expected margin (deposit) for a volume — used for both sides unless overridden. */
+  expectedMarginDeposit?: number;
+  expectedBuyMargin?: number;
+  expectedSellMargin?: number;
+  expectedMarginFail?: boolean;
 }): CTraderOpenApiClient {
   const accounts =
     opts?.accounts ??
@@ -1449,13 +1995,14 @@ export function createMockOpenApiClient(opts?: {
         {
           positionId: "mock-pos-1",
           symbolId: "41",
-          side: "BUY",
+          side: "BUY" as const,
           volumeLots: 0.01,
           volumeUnits: 1,
           entryPrice: 2350.1,
           stopLoss: 2340,
           takeProfit: 2370,
           unrealisedPnl: 1.2,
+          usedMargin: 500,
           openTimestamp: new Date().toISOString()
         }
       ];
@@ -1499,6 +2046,49 @@ export function createMockOpenApiClient(opts?: {
         ...args,
         positionId: "mock-pos-1"
       });
+    },
+
+    async fetchAuthoritativeDemoMarginSnapshot() {
+      if (opts?.authoritativeMargin) return opts.authoritativeMargin;
+      const snap = opts?.snapshot;
+      const balance = snap?.balance ?? 10_000;
+      const used = snap?.usedMargin ?? 0;
+      const free = snap?.freeMargin ?? balance - used;
+      const equity = snap?.equity ?? balance;
+      return {
+        ok: true,
+        snapshot: {
+          balance,
+          unrealisedNetPnl: Number((equity - balance).toFixed(8)),
+          equity,
+          usedMargin: used,
+          freeMargin: free,
+          moneyDigits: 2,
+          leverage: snap?.leverage ?? 100,
+          openPositionCount: used > 0 ? 1 : 0,
+          source: used > 0 ? "BROKER_POSITIONS" : "BROKER_FLAT",
+          capturedAt: new Date().toISOString()
+        }
+      };
+    },
+
+    async fetchDemoExpectedMargin(args) {
+      if (opts?.expectedMarginFail) {
+        return { ok: false, notes: ["mock expected margin timeout"] };
+      }
+      const buy =
+        opts?.expectedBuyMargin ?? opts?.expectedMarginDeposit ?? 100;
+      const sell =
+        opts?.expectedSellMargin ?? opts?.expectedMarginDeposit ?? 100;
+      const expected = args.side === "BUY" ? buy : sell;
+      return {
+        ok: true,
+        expectedMargin: expected,
+        buyMargin: buy,
+        sellMargin: sell,
+        volume: args.volume,
+        moneyDigits: 2
+      };
     }
   };
 }

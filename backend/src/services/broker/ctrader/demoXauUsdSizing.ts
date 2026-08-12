@@ -29,6 +29,11 @@ export type DemoXauUsdSizingInput = {
   maxPositionExposureLots: number | null;
   sizingMode?: "automatic_risk" | "manual_lots";
   manualLotSize?: number | null;
+  /**
+   * When true, skip freeMargin/leverage/local estimateMarginDeposit gates.
+   * ACTIVE_DEMO uses ProtoOAExpectedMarginReq after final volume rounding instead.
+   */
+  deferBrokerMarginGate?: boolean;
 };
 
 export type DemoXauUsdSizingResult = {
@@ -270,56 +275,64 @@ export function calculatePepperstoneXauUsdDemoVolume(
     );
   }
 
-  // Margin: require freeMargin + leverage; fail closed if unknown.
-  if (input.leverage == null || !(input.leverage > 0)) {
-    return reject(
-      "LEVERAGE_UNAVAILABLE",
-      [...notes, "Account leverage required for margin check — fail closed"],
-      {
-        ozPerLot,
-        stopDistance,
-        riskPerLotDeposit,
-        estimatedMaxLossDeposit
-      }
-    );
-  }
-  if (input.freeMargin == null || !Number.isFinite(input.freeMargin)) {
-    return reject(
-      "MARGIN_UNAVAILABLE",
-      [...notes, "freeMargin required for margin check — fail closed"],
-      {
-        ozPerLot,
-        stopDistance,
-        riskPerLotDeposit,
-        estimatedMaxLossDeposit
-      }
-    );
-  }
+  // Margin gate: legacy local estimate OR deferred to ProtoOAExpectedMarginReq.
+  let estimatedMarginDeposit: number | null = null;
+  if (!input.deferBrokerMarginGate) {
+    // Margin: require freeMargin + leverage; fail closed if unknown.
+    if (input.leverage == null || !(input.leverage > 0)) {
+      return reject(
+        "LEVERAGE_UNAVAILABLE",
+        [...notes, "Account leverage required for margin check — fail closed"],
+        {
+          ozPerLot,
+          stopDistance,
+          riskPerLotDeposit,
+          estimatedMaxLossDeposit
+        }
+      );
+    }
+    if (input.freeMargin == null || !Number.isFinite(input.freeMargin)) {
+      return reject(
+        "MARGIN_UNAVAILABLE",
+        [...notes, "freeMargin required for margin check — fail closed"],
+        {
+          ozPerLot,
+          stopDistance,
+          riskPerLotDeposit,
+          estimatedMaxLossDeposit
+        }
+      );
+    }
 
-  const estimatedMarginDeposit = Number(
-    estimateMarginDeposit({
-      lots: volumeLots,
-      ozPerLot,
-      entryPrice: input.entryPrice,
-      quoteToDepositRate: input.quoteToDepositRate,
-      leverage: input.leverage
-    }).toFixed(2)
-  );
-
-  if (estimatedMarginDeposit > input.freeMargin + 1e-6) {
-    return reject(
-      "RISK_SIZE_EXCEEDS_MARGIN",
-      [
-        ...notes,
-        `Estimated margin ${estimatedMarginDeposit} > freeMargin ${input.freeMargin}`
-      ],
-      {
+    estimatedMarginDeposit = Number(
+      estimateMarginDeposit({
+        lots: volumeLots,
         ozPerLot,
-        stopDistance,
-        riskPerLotDeposit,
-        estimatedMaxLossDeposit,
-        estimatedMarginDeposit
-      }
+        entryPrice: input.entryPrice,
+        quoteToDepositRate: input.quoteToDepositRate,
+        leverage: input.leverage
+      }).toFixed(2)
+    );
+
+    if (estimatedMarginDeposit > input.freeMargin + 1e-6) {
+      return reject(
+        "RISK_SIZE_EXCEEDS_MARGIN",
+        [
+          ...notes,
+          `Estimated margin ${estimatedMarginDeposit} > freeMargin ${input.freeMargin}`
+        ],
+        {
+          ozPerLot,
+          stopDistance,
+          riskPerLotDeposit,
+          estimatedMaxLossDeposit,
+          estimatedMarginDeposit
+        }
+      );
+    }
+  } else {
+    notes.push(
+      "broker margin gate deferred — ProtoOAExpectedMarginReq after final volume"
     );
   }
 

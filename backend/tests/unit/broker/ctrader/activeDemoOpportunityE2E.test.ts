@@ -230,6 +230,30 @@ vi.mock("../../../../src/services/broker/ctrader/demoXauUsdSizing", () => ({
   calculatePepperstoneXauUsdDemoVolume
 }));
 
+vi.mock("../../../../src/services/broker/ctrader/demoMarginService", () => ({
+  assertDemoAuthoritativeMarginGate: vi.fn(async () => ({
+    ok: true,
+    freeMargin: 50_000,
+    expectedMargin: 2500,
+    marginSnapshot: {
+      balance: 50_000,
+      unrealisedNetPnl: 0,
+      equity: 50_000,
+      usedMargin: 0,
+      freeMargin: 50_000,
+      moneyDigits: 2,
+      leverage: 30,
+      openPositionCount: 0,
+      source: "BROKER_FLAT",
+      capturedAt: new Date().toISOString()
+    },
+    marginAgeMs: 10,
+    marginCapturedAt: new Date().toISOString(),
+    marginSource: "BROKER_FLAT",
+    expectedMarginSource: "PROTO_OA_EXPECTED_MARGIN"
+  }))
+}));
+
 vi.mock("../../../../src/services/broker/ctrader/brokerUnitMappings", () => ({
   resolvePepperstoneXauUsdDemoMapping
 }));
