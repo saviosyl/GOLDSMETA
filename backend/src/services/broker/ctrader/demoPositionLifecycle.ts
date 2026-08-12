@@ -16,6 +16,7 @@ import {
 import type { DemoPositionLifecycle } from "./positionLifecycleTypes";
 import {
   appendLifecycleEvent,
+  emptyProfitLockState,
   emptyTpStatuses
 } from "./positionLifecycleTypes";
 import {
@@ -34,6 +35,17 @@ import { evaluateNewsGuard } from "./newsGuard";
 import { setEmergencyStop } from "./userAutoTradeSettings";
 import { lotsToValidatedBrokerVolume } from "./volumeUnits";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
+import {
+  brokerHardTakeProfitForAmend,
+  brokerTp3Preserved
+} from "./demoProfitLockStops";
+import {
+  runDemoProfitLockPass,
+  type ProfitLockDeps
+} from "./demoProfitLockManager";
+import { loadCompletedM5BarsForProfitLock } from "./demoProfitLockCandles";
+import { getConnection } from "./connectionStore";
+import { resolveManagementPolicy } from "./demoProfitLockTypes";
 
 function riskDistance(entry: number | null, sl: number | null): number | null {
   if (entry == null || sl == null) return null;
@@ -51,11 +63,20 @@ export async function createDemoPositionLifecycle(args: {
   side: "BUY" | "SELL";
   entry: number | null;
   stopLoss: number | null;
-  /** @deprecated Prefer tp1/tp2/tp3 from strategy — kept as TP1 fallback only. */
+  /**
+   * Legacy broker/primary TP fallback for LEGACY_V1 only.
+   * Never used as strategy TP1 when managementPolicy is PROFIT_LOCK_V1
+   * (broker hard TP is stored separately as brokerHardTakeProfit).
+   */
   takeProfit?: number | null;
+  /** Strategy TP1 — never derived from broker hard TP. */
   tp1?: number | null;
   tp2?: number | null;
   tp3?: number | null;
+  /** Immutable snapshot at open. Defaults LEGACY_V1. */
+  managementPolicy?: "LEGACY_V1" | "PROFIT_LOCK_V1";
+  /** Broker hard TP (TP3 under PROFIT_LOCK_V1). Separate from strategy targets. */
+  brokerHardTakeProfit?: number | null;
   lots: number | null;
   qualificationStage: string | null;
   decisionId: string | null;
@@ -92,14 +113,28 @@ export async function createDemoPositionLifecycle(args: {
     return merged;
   }
 
-  // Only strategy-supplied targets — never invent R-multiple ladders.
+  const policy = args.managementPolicy === "PROFIT_LOCK_V1" ? "PROFIT_LOCK_V1" : "LEGACY_V1";
+  // Strategy targets only. Under PROFIT_LOCK_V1 never fall back to broker hard TP
+  // (takeProfit) for TP1 — that would turn strategy TP1 into TP3.
+  const strategyTp1 =
+    args.tp1 != null && Number.isFinite(args.tp1)
+      ? args.tp1
+      : policy === "LEGACY_V1" &&
+          args.takeProfit != null &&
+          Number.isFinite(args.takeProfit)
+        ? args.takeProfit
+        : null;
   const tps = strategyProvidedTakeProfits([
-    args.tp1 != null || args.takeProfit != null
-      ? { label: "TP1", price: args.tp1 ?? args.takeProfit ?? null }
-      : null,
+    strategyTp1 != null ? { label: "TP1", price: strategyTp1 } : null,
     args.tp2 != null ? { label: "TP2", price: args.tp2 } : null,
     args.tp3 != null ? { label: "TP3", price: args.tp3 } : null
   ].filter(Boolean) as Array<{ label: string; price: number | null }>);
+  const hardTp =
+    args.brokerHardTakeProfit != null && Number.isFinite(args.brokerHardTakeProfit)
+      ? args.brokerHardTakeProfit
+      : policy === "PROFIT_LOCK_V1" && tps.tp3 != null
+        ? tps.tp3
+        : null;
   const initialRisk = riskDistance(args.entry, args.stopLoss);
   const doc: DemoPositionLifecycle = {
     id: args.correlationId,
@@ -146,12 +181,19 @@ export async function createDemoPositionLifecycle(args: {
     events: [],
     appliedDedupeKeys: [],
     updatedAt: new Date().toISOString(),
-    status: "OPEN"
+    status: "OPEN",
+    ...emptyProfitLockState(),
+    managementPolicy: policy,
+    profitLockStage: policy === "PROFIT_LOCK_V1" ? "OPEN" : null,
+    brokerHardTakeProfit: hardTp
   };
   const opened = appendLifecycleEvent(doc, {
     at: args.openedAt,
     kind: "OPENED",
-    reason: "Demo position opened",
+    reason:
+      policy === "PROFIT_LOCK_V1"
+        ? "Demo position opened (PROFIT_LOCK_V1; strategy TP1/TP2/TP3 separate from broker hard TP)"
+        : "Demo position opened",
     dedupeKey: `open:${args.correlationId}`
   });
   await savePositionLifecycle(opened.doc);
@@ -190,8 +232,10 @@ function buildManagementInput(
   };
 }
 
-async function verifyAndRepairProtection(
-  doc: DemoPositionLifecycle
+/** Exported for PROFIT_LOCK_V1 initial SL+TP3 verification unit tests. */
+export async function verifyAndRepairProtection(
+  doc: DemoPositionLifecycle,
+  opts?: { profitLockActive?: boolean }
 ): Promise<DemoPositionLifecycle> {
   if (!doc.brokerPositionId || doc.initialSl == null) {
     const failed = appendLifecycleEvent(doc, {
@@ -244,19 +288,37 @@ async function verifyAndRepairProtection(
     unrealisedPnl: match.unrealisedPnl
   };
 
-  if (match.stopLoss != null && Number.isFinite(match.stopLoss)) {
+  const slOk = match.stopLoss != null && Number.isFinite(match.stopLoss);
+  const expectedHardTp = opts?.profitLockActive
+    ? brokerHardTakeProfitForAmend({
+        tp3: doc.tp3,
+        brokerHardTakeProfit: doc.brokerHardTakeProfit
+      }) ?? null
+    : null;
+  const tp3Ok =
+    !opts?.profitLockActive ||
+    brokerTp3Preserved({
+      brokerTp: match.takeProfit,
+      expectedTp3: expectedHardTp
+    });
+
+  // LEGACY: SL alone is enough. PROFIT_LOCK_V1: require SL + broker hard TP3.
+  if (slOk && tp3Ok) {
     const verified = appendLifecycleEvent(next, {
       at: new Date().toISOString(),
       kind: "SL_VERIFIED",
-      reason: "Broker Stop Loss confirmed",
+      reason: opts?.profitLockActive
+        ? `Broker SL + hard TP3 confirmed (TP=${match.takeProfit})`
+        : "Broker Stop Loss confirmed",
       newSl: match.stopLoss,
       brokerAck: true,
-      dedupeKey: `sl_verified:${doc.correlationId}:${match.stopLoss}`
+      dedupeKey: `sl_verified:${doc.correlationId}:${match.stopLoss}:${match.takeProfit ?? "na"}`
     });
     next = {
       ...verified.doc,
       protectionVerified: true,
       protectionFailure: false,
+      profitLockLastBlocker: null,
       managementState:
         verified.doc.managementState === "HOLD" ||
         verified.doc.managementState === "SL_PROTECTED"
@@ -267,39 +329,98 @@ async function verifyAndRepairProtection(
     return next;
   }
 
-  // Attempt to apply required SL once
-  const amendKey = `sl_repair:${doc.correlationId}:${doc.initialSl}`;
+  // Repair: never weaken SL. For PROFIT_LOCK_V1 also attach exact hard TP3.
+  const repairSl = doc.initialSl;
+  const repairTp = opts?.profitLockActive
+    ? expectedHardTp
+    : doc.tp1;
+  const amendKey = opts?.profitLockActive
+    ? `sl_tp3_repair:${doc.correlationId}:${repairSl}:${repairTp ?? "na"}`
+    : `sl_repair:${doc.correlationId}:${repairSl}`;
   if (doc.appliedDedupeKeys.includes(amendKey)) {
+    // Prior repair accepted but broker still not confirmed — remain unverified.
+    next = {
+      ...next,
+      protectionVerified: false,
+      profitLockLastBlocker: opts?.profitLockActive
+        ? "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+        : next.profitLockLastBlocker
+    };
+    await savePositionLifecycle(next);
     return next;
   }
   try {
     const result = await amendDemoStopLoss({
       ownerUid: doc.uid,
       positionId: doc.brokerPositionId,
-      stopLoss: doc.initialSl,
-      takeProfit: doc.tp1
+      stopLoss: repairSl,
+      takeProfit: repairTp
     });
     if (result.accepted) {
       const amended = appendLifecycleEvent(next, {
         at: new Date().toISOString(),
         kind: "SL_AMENDED",
-        reason: "Applied required Stop Loss after broker ack",
-        oldSl: null,
-        newSl: doc.initialSl,
+        reason: opts?.profitLockActive
+          ? "Repair Demo SL + broker hard TP3 requested — awaiting broker reconcile proof"
+          : "Applied required Stop Loss after broker ack",
+        oldSl: match.stopLoss,
+        newSl: repairSl,
         brokerAck: true,
         dedupeKey: amendKey
       });
+      // Do NOT mark protectionVerified from accepted alone — re-reconcile.
+      let proof;
+      try {
+        proof = await reconcileDemoBrokerPositions(doc.uid);
+      } catch {
+        proof = null;
+      }
+      const proven = proof?.find((p) => p.positionId === doc.brokerPositionId);
+      const provenSlOk =
+        proven?.stopLoss != null && Number.isFinite(proven.stopLoss);
+      const provenTp3Ok =
+        !opts?.profitLockActive ||
+        brokerTp3Preserved({
+          brokerTp: proven?.takeProfit,
+          expectedTp3: expectedHardTp
+        });
+      if (proven && provenSlOk && provenTp3Ok) {
+        next = {
+          ...amended.doc,
+          currentSl: proven.stopLoss,
+          protectionVerified: true,
+          protectionFailure: false,
+          profitLockLastBlocker: null,
+          managementState: "SL_PROTECTED"
+        };
+        await savePositionLifecycle(next);
+        return next;
+      }
       next = {
         ...amended.doc,
-        currentSl: doc.initialSl,
-        protectionVerified: true,
-        managementState: "SL_PROTECTED"
+        currentSl: proven?.stopLoss ?? repairSl,
+        protectionVerified: false,
+        profitLockLastBlocker: opts?.profitLockActive
+          ? "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+          : "SL_REPAIR_PENDING_BROKER_PROOF"
       };
       await savePositionLifecycle(next);
       return next;
     }
   } catch {
-    /* fall through to failure */
+    /* fall through */
+  }
+
+  // PROFIT_LOCK_V1 with SL present but TP3 unconfirmed: keep SL, do not emergency-stop.
+  if (opts?.profitLockActive && slOk) {
+    next = {
+      ...next,
+      protectionVerified: false,
+      protectionFailure: false,
+      profitLockLastBlocker: "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+    };
+    await savePositionLifecycle(next);
+    return next;
   }
 
   const failed = appendLifecycleEvent(next, {
@@ -478,6 +599,24 @@ async function resolveMissingBrokerPosition(
   return markCloseReconciliationPending(doc);
 }
 
+function buildProfitLockDeps(): ProfitLockDeps {
+  return {
+    reconcilePositions: reconcileDemoBrokerPositions,
+    amendStopLoss: amendDemoStopLoss,
+    closePosition: closeDemoBrokerPosition,
+    loadSymbol: loadDemoXauUsdSymbol,
+    getQuote: async (ownerUid) =>
+      getExecutableQuoteForAutoTrade({ ownerUid }).catch(() => null),
+    getCompletedM5Bars: (ownerUid) =>
+      loadCompletedM5BarsForProfitLock({ ownerUid }),
+    isSelectedAccountLive: async (ownerUid) => {
+      const conn = await getConnection(ownerUid);
+      return Boolean(conn?.selectedAccountIsLive || conn?.environment === "LIVE");
+    },
+    save: savePositionLifecycle
+  };
+}
+
 export async function manageOpenDemoPosition(
   uid: string,
   correlationId: string
@@ -490,10 +629,25 @@ export async function manageOpenDemoPosition(
     return resolveMissingBrokerPosition(doc);
   }
 
+  const settings = await getUserAutoTradeSettings(uid, "demo");
+  // Immutable per-position policy (snapshotted at open). Current user setting
+  // must NOT flip management mid-trade.
+  const policy = resolveManagementPolicy(doc.managementPolicy);
+  const profitLockActive = policy === "PROFIT_LOCK_V1";
+
   // First: protection verification
   if (!doc.protectionVerified && !doc.protectionFailure) {
-    doc = await verifyAndRepairProtection(doc);
+    doc = await verifyAndRepairProtection(doc, { profitLockActive });
     if (doc.protectionFailure || doc.status !== "OPEN") return doc;
+  }
+
+  // Deterministic T1/T2/T3 profit-lock ladder (Demo only; per-position policy).
+  if (profitLockActive) {
+    const result = await runDemoProfitLockPass(doc, buildProfitLockDeps());
+    if (result.doc.status === "CLOSE_RECONCILIATION_PENDING") {
+      return resolveMissingBrokerPosition(result.doc);
+    }
+    return result.doc;
   }
 
   let brokerPositions: Awaited<ReturnType<typeof reconcileDemoBrokerPositions>> =
@@ -569,7 +723,6 @@ export async function manageOpenDemoPosition(
     }
   }
 
-  const settings = await getUserAutoTradeSettings(uid, "demo");
   const news = evaluateNewsGuard({
     mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
     minutesBefore: settings.newsMinutesBefore,

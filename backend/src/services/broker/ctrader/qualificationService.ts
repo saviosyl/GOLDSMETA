@@ -98,6 +98,8 @@ import { createDemoPositionLifecycle } from "./demoPositionLifecycle";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
 import { newsProtectionBlocksLiveActivation } from "./liveNewsGate";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
+import { isDemoProfitLockLadderEnabled } from "./demoProfitLockFlag";
+import { validateProfitLockTargets } from "./demoProfitLockTargets";
 import { logger } from "../../logging/logger";
 import {
   evaluateArmedCandidateLifecycle,
@@ -1225,7 +1227,10 @@ export async function processDecisionForQualification(args: {
   // Qualification RR gate uses the best strategy TP that exists (TP2/TP3 when
   // present). GoldMeta plans are typically TP1=1R / TP2=2R / TP3=3R — checking
   // only TP1 against minRiskReward (default 1.5) incorrectly rejected every setup.
-  // Order submission still uses strategy TP1 as the primary broker take-profit.
+  // Default order submission still uses strategy TP1 as the broker take-profit.
+  // When demoProfitLockLadderEnabled is explicitly true and TP3 exists, the
+  // broker hard TP is TP3 (position-management ladder). Missing TP3 keeps
+  // existing fail-closed / TP1 behaviour — never invent targets.
   // When confirming a retained armed candidate, RR comes from ORIGINAL geometry.
   const rrTakeProfit = tp2 ?? tp3 ?? takeProfit;
   const risk =
@@ -1830,12 +1835,43 @@ export async function processDecisionForQualification(args: {
 
     const correlationId = newId("corr");
     try {
+      const profitLockActive = isDemoProfitLockLadderEnabled(settings);
+      const managementPolicy = profitLockActive
+        ? ("PROFIT_LOCK_V1" as const)
+        : ("LEGACY_V1" as const);
+      let brokerOrderTakeProfit = takeProfit;
+      if (profitLockActive) {
+        const targets = validateProfitLockTargets({
+          side: direction as "BUY" | "SELL",
+          entry: entryPx,
+          tp1,
+          tp2,
+          tp3
+        });
+        if (!targets.ok) {
+          await logEval(
+            "REJECTED",
+            targets.code,
+            [targets.code, targets.message],
+            candidate.passed,
+            { brokerSubmissionAttempted: false }
+          );
+          logger.info("PROFIT_LOCK_V1 blocked — invalid/incomplete strategy targets", {
+            uid,
+            signalId,
+            decisionId,
+            code: targets.code
+          });
+          return { handled: true, message: targets.code.toLowerCase() };
+        }
+        brokerOrderTakeProfit = targets.tp3;
+      }
       const result = await submitDemoMarketOrder({
         ownerUid: uid,
         side: direction as "BUY" | "SELL",
         lots: sizedLots,
         stopLoss,
-        takeProfit,
+        takeProfit: brokerOrderTakeProfit,
         entryHint: entryPx,
         comment: `GMQ ${correlationId}`,
         label: correlationId.slice(0, 30)
@@ -2083,10 +2119,17 @@ export async function processDecisionForQualification(args: {
           side: trade.direction,
           entry: lifecycleEntry,
           stopLoss: lifecycleSl,
-          takeProfit: lifecycleTp,
-          tp1: brokerTakeProfit ?? tp1,
+          // Legacy only: broker/primary TP. Never used as strategy TP1 under PROFIT_LOCK_V1.
+          takeProfit: managementPolicy === "LEGACY_V1" ? lifecycleTp : null,
+          // Strategy targets — never overwritten by broker-returned hard TP3.
+          tp1,
           tp2,
           tp3,
+          managementPolicy,
+          brokerHardTakeProfit:
+            managementPolicy === "PROFIT_LOCK_V1"
+              ? brokerTakeProfit ?? tp3
+              : null,
           lots: filledVolumeLots,
           qualificationStage: state,
           decisionId: signalId,

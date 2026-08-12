@@ -3,6 +3,22 @@
  * Survives Cloud Function cold starts and PWA reloads.
  */
 
+import type {
+  DemoProfitLockState,
+  PositionManagementPolicy,
+  ProfitLockProtectionLevel,
+  ProfitLockStage
+} from "./demoProfitLockTypes";
+import { emptyProfitLockState } from "./demoProfitLockTypes";
+
+export type {
+  ProfitLockStage,
+  ProfitLockProtectionLevel,
+  DemoProfitLockState,
+  PositionManagementPolicy
+};
+export { emptyProfitLockState };
+
 export type PositionManagementState =
   | "HOLD"
   | "SL_PROTECTED"
@@ -93,7 +109,7 @@ export type DemoPositionLifecycle = {
   appliedDedupeKeys: string[];
   updatedAt: string;
   status: "OPEN" | "CLOSED" | "FAILED_PROTECTION" | "CLOSE_RECONCILIATION_PENDING";
-};
+} & DemoProfitLockState;
 
 /**
  * Map strategy/decision take-profit plans → TP1/TP2/TP3.

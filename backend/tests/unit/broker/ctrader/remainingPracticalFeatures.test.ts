@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DemoPositionLifecycle } from "../../../../src/services/broker/ctrader/positionLifecycleTypes";
 import {
   appendLifecycleEvent,
+  emptyProfitLockState,
   emptyTpStatuses
 } from "../../../../src/services/broker/ctrader/positionLifecycleTypes";
 import {
@@ -61,7 +62,8 @@ function sampleLifecycle(): DemoPositionLifecycle {
     events: [],
     appliedDedupeKeys: [],
     updatedAt: new Date().toISOString(),
-    status: "OPEN"
+    status: "OPEN",
+    ...emptyProfitLockState()
   };
 }
 

@@ -24,6 +24,10 @@ export interface RawCTraderSymbol {
   swapLong?: number;
   swapShort?: number;
   minStopDistance?: number;
+  rawSlDistance?: number;
+  distanceSetIn?: string | number;
+  rawTpDistance?: number;
+  normalizedMinStopPriceDistance?: number;
   guaranteedStopAvailable?: boolean;
   scheduleId?: string | number;
 }
@@ -132,7 +136,14 @@ export function resolveXauUsdFromCatalogue(
     minCommission: raw.minCommission ?? null,
     swapLong: raw.swapLong ?? null,
     swapShort: raw.swapShort ?? null,
-    minStopDistance: raw.minStopDistance ?? null,
+    minStopDistance:
+      raw.normalizedMinStopPriceDistance ?? raw.minStopDistance ?? null,
+    rawSlDistance: raw.rawSlDistance ?? null,
+    distanceSetIn:
+      raw.distanceSetIn != null ? String(raw.distanceSetIn) : null,
+    rawTpDistance: raw.rawTpDistance ?? null,
+    normalizedMinStopPriceDistance:
+      raw.normalizedMinStopPriceDistance ?? null,
     guaranteedStopAvailable: raw.guaranteedStopAvailable ?? null,
     tradingScheduleId:
       raw.scheduleId != null ? String(raw.scheduleId) : null,

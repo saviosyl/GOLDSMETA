@@ -58,6 +58,12 @@ export type UserAutoTradeSettings = {
   breakEvenEnabled: boolean;
   trailingStopEnabled: boolean;
   partialTakeProfitEnabled: boolean;
+  /**
+   * Demo-only deterministic T1/T2/T3 profit-lock ladder.
+   * Default FALSE — must be explicitly enabled after review.
+   * Ignored / forced false on Live settings.
+   */
+  demoProfitLockLadderEnabled: boolean;
   /** Soft pause (distinct from Emergency Stop). */
   autoTradePaused: boolean;
   autoTradePausedReason: string | null;
@@ -113,6 +119,7 @@ const RECOMMENDED: Omit<
   breakEvenEnabled: false,
   trailingStopEnabled: false,
   partialTakeProfitEnabled: false,
+  demoProfitLockLadderEnabled: false,
   autoTradePaused: false,
   autoTradePausedReason: null
 };
@@ -158,7 +165,10 @@ export async function getUserAutoTradeSettings(
     liveActivationConfirmedAt:
       environment === "live" ? (data.liveActivationConfirmedAt ?? null) : null,
     liveActivationPhraseConfirmed:
-      environment === "live" ? Boolean(data.liveActivationPhraseConfirmed) : false
+      environment === "live" ? Boolean(data.liveActivationPhraseConfirmed) : false,
+    // Profit-lock ladder cannot be active on Live settings docs.
+    demoProfitLockLadderEnabled:
+      environment === "demo" ? Boolean(data.demoProfitLockLadderEnabled) : false
   };
 }
 
@@ -177,6 +187,11 @@ export function validateSettingsPatch(
   if (environment === "demo") {
     clean.liveActivationConfirmedAt = null;
     clean.liveActivationPhraseConfirmed = false;
+  }
+
+  // Profit-lock ladder is Demo-only — never enable on Live settings.
+  if (environment === "live") {
+    clean.demoProfitLockLadderEnabled = false;
   }
 
   const num = (v: unknown, min: number, max: number, label: string) => {

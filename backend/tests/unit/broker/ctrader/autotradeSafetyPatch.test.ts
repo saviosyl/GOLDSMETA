@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   strategyProvidedTakeProfits,
   appendLifecycleEvent,
+  emptyProfitLockState,
   emptyTpStatuses,
   type DemoPositionLifecycle
 } from "../../../../src/services/broker/ctrader/positionLifecycleTypes";
@@ -73,6 +74,7 @@ function baseLifecycle(
     appliedDedupeKeys: [],
     updatedAt: new Date().toISOString(),
     status: "OPEN",
+    ...emptyProfitLockState(),
     ...overrides
   };
 }
