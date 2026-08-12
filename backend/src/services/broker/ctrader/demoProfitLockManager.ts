@@ -1,6 +1,6 @@
 /**
  * Demo-only T1/T2/T3 profit-lock manager.
- * Executes evaluateProfitLock plans with broker reconcile + exactly-once safety.
+ * Broker-confirmed volume/SL is authority — never advance on accepted=true alone.
  * Live accounts produce ZERO mutations.
  */
 
@@ -10,14 +10,22 @@ import {
   canAdvanceProfitLockStage,
   emptyProfitLockState,
   maxProtectionLevel,
+  type PendingAmendIntent,
+  type PendingCloseIntent,
   type ProfitLockStage
 } from "./demoProfitLockTypes";
 import {
   evaluateProfitLock,
+  isFreshPostSecureM5Bar,
   m5CloseConfirmsContinuation,
   type ProfitLockAction
 } from "./demoProfitLockEvaluate";
 import { brokerClosedLots } from "./demoProfitLockVolume";
+import {
+  brokerSlConfirmsRequested,
+  brokerTp3Preserved
+} from "./demoProfitLockStops";
+import { executableTargetTouchPrice } from "./demoProfitLockTargets";
 import {
   isCTraderLiveEnabled,
   isBrokerExecutionEnabled
@@ -32,7 +40,6 @@ export type ProfitLockMutationCounters = {
   positionCloses: number;
 };
 
-/** Minimal quote shape used for mid/spread in the ladder. */
 export type ProfitLockQuote = {
   bid: number | null;
   ask: number | null;
@@ -54,12 +61,7 @@ export type ProfitLockDeps = {
   }) => Promise<{ accepted: boolean }>;
   loadSymbol: (uid: string) => Promise<BrokerSymbol | null>;
   getQuote: (uid: string) => Promise<ProfitLockQuote | null>;
-  /**
-   * Completed (not forming) M5 bars, newest last.
-   * Injected in tests; production loads via trendbars.
-   */
   getCompletedM5Bars: (uid: string) => Promise<TrendbarCandle[]>;
-  /** Connection facts for Live hard-lock. */
   isSelectedAccountLive: (uid: string) => Promise<boolean>;
   save: (doc: DemoPositionLifecycle) => Promise<void>;
   nowIso?: () => string;
@@ -95,19 +97,29 @@ function mapStageToManagementState(
 ): DemoPositionLifecycle["managementState"] {
   switch (stage) {
     case "T1_SECURED_BE":
+    case "BE_AMEND_PENDING_RECONCILE":
       return "BREAKEVEN_SET";
     case "T1_TRIGGERED":
+    case "T1_CLOSE_SUBMITTING":
+    case "T1_CLOSE_PENDING_RECONCILE":
     case "T1_PARTIAL_DONE_SL_PENDING":
     case "T1_CONTINUATION_CONFIRMED":
+    case "T1_PROTECT_AMEND_PENDING_RECONCILE":
     case "T1_PROTECTED":
       return "TP1_HIT";
     case "T2_TRIGGERED":
+    case "T2_CLOSE_SUBMITTING":
+    case "T2_CLOSE_PENDING_RECONCILE":
     case "T2_PARTIAL_DONE":
+    case "T2_ENSURE_AMEND_PENDING_RECONCILE":
     case "T2_SECURED":
     case "T2_CONTINUATION_CONFIRMED":
+    case "T2_PROTECT_AMEND_PENDING_RECONCILE":
     case "T2_PROTECTED":
       return "TP2_HIT";
     case "T3_TRIGGERED":
+    case "T3_CLOSE_SUBMITTING":
+    case "T3_CLOSE_PENDING_RECONCILE":
       return "TP3_HIT";
     case "CLOSE_RECONCILIATION_PENDING":
       return "CLOSE_RECONCILIATION_PENDING";
@@ -118,25 +130,63 @@ function mapStageToManagementState(
   }
 }
 
+function lockedProfitDistance(
+  side: "BUY" | "SELL",
+  entry: number | null,
+  sl: number | null
+): number | null {
+  if (entry == null || sl == null) return null;
+  if (side === "BUY") {
+    return sl > entry + 1e-12 ? Number((sl - entry).toFixed(8)) : null;
+  }
+  return sl < entry - 1e-12 ? Number((entry - sl).toFixed(8)) : null;
+}
+
 export function ensureProfitLockInitialized(
   doc: DemoPositionLifecycle
 ): DemoPositionLifecycle {
-  if (doc.profitLockStage != null) return doc;
+  if (doc.profitLockStage != null && doc.managementPolicy === "PROFIT_LOCK_V1") {
+    return doc;
+  }
   const base = emptyProfitLockState();
   return {
     ...doc,
     ...base,
-    profitLockStage: "OPEN",
+    managementPolicy: "PROFIT_LOCK_V1",
+    profitLockStage: doc.profitLockStage ?? "OPEN",
     brokerHardTakeProfit:
-      doc.tp3 != null && Number.isFinite(doc.tp3) ? doc.tp3 : null,
-    cumulativeClosedLots: 0,
+      doc.brokerHardTakeProfit ??
+      (doc.tp3 != null && Number.isFinite(doc.tp3) ? doc.tp3 : null),
+    cumulativeClosedLots: doc.cumulativeClosedLots ?? 0,
     updatedAt: nowIsoDefault()
   };
 }
 
+function cumulativeSatisfied(
+  originalLots: number,
+  brokerRemaining: number,
+  desiredCumulative: number
+): boolean {
+  const closed = brokerClosedLots(originalLots, brokerRemaining);
+  return closed + 1e-8 >= desiredCumulative || brokerRemaining <= 1e-8;
+}
+
+async function reconcileMatch(
+  deps: ProfitLockDeps,
+  uid: string,
+  positionId: string | null
+): Promise<BrokerOpenPosition | null | "RECONCILE_FAILED"> {
+  if (!positionId) return null;
+  try {
+    const positions = await deps.reconcilePositions(uid);
+    return positions.find((p) => p.positionId === positionId) ?? null;
+  } catch {
+    return "RECONCILE_FAILED";
+  }
+}
+
 /**
  * Run one profit-lock management pass for an open Demo lifecycle doc.
- * Returns updated doc + mutation counters (for Live zero-mutation tests).
  */
 export async function runDemoProfitLockPass(
   docIn: DemoPositionLifecycle,
@@ -155,7 +205,6 @@ export async function runDemoProfitLockPass(
   };
   const stamp = deps.nowIso ?? nowIsoDefault;
 
-  // Hard Live locks — ZERO mutations.
   if (isCTraderLiveEnabled() || isBrokerExecutionEnabled()) {
     return {
       doc: docIn,
@@ -182,40 +231,92 @@ export async function runDemoProfitLockPass(
     return { doc, mutations, action: null, blockedReason: "NOT_OPEN" };
   }
 
-  let brokerPositions: BrokerOpenPosition[] = [];
-  try {
-    brokerPositions = await deps.reconcilePositions(doc.uid);
-  } catch {
-    return {
-      doc: { ...doc, profitLockLastBlocker: "RECONCILE_FAILED", updatedAt: stamp() },
-      mutations,
-      action: null,
-      blockedReason: "RECONCILE_FAILED"
+  const matchOrFail = await reconcileMatch(
+    deps,
+    doc.uid,
+    doc.brokerPositionId
+  );
+  if (matchOrFail === "RECONCILE_FAILED") {
+    doc = {
+      ...doc,
+      profitLockLastBlocker: "RECONCILE_FAILED",
+      updatedAt: stamp()
     };
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: "RECONCILE_FAILED" };
   }
-
-  const match = doc.brokerPositionId
-    ? brokerPositions.find((p) => p.positionId === doc.brokerPositionId)
-    : undefined;
 
   const quote = await deps.getQuote(doc.uid).catch(() => null);
   const mid =
     quote?.bid != null && quote?.ask != null
       ? (quote.bid + quote.ask) / 2
-      : match?.entryPrice ?? doc.currentPrice;
+      : matchOrFail?.entryPrice ?? doc.currentPrice;
+  const touch = executableTargetTouchPrice({
+    side: doc.side,
+    bid: quote?.bid,
+    ask: quote?.ask
+  });
 
   const originalLots = doc.lots ?? 0;
-  const brokerRemaining = match?.volumeLots ?? 0;
+  const brokerRemaining = matchOrFail?.volumeLots ?? 0;
   doc = {
     ...doc,
     currentPrice: mid ?? doc.currentPrice,
-    currentSl: match?.stopLoss ?? doc.currentSl,
-    remainingLots: match ? brokerRemaining : doc.remainingLots,
-    cumulativeClosedLots: match
+    currentSl: matchOrFail?.stopLoss ?? doc.currentSl,
+    remainingLots: matchOrFail ? brokerRemaining : doc.remainingLots,
+    cumulativeClosedLots: matchOrFail
       ? brokerClosedLots(originalLots, brokerRemaining)
       : doc.cumulativeClosedLots,
-    unrealisedPnl: match?.unrealisedPnl ?? doc.unrealisedPnl
+    unrealisedPnl: matchOrFail?.unrealisedPnl ?? doc.unrealisedPnl,
+    lockedProfitDistance: lockedProfitDistance(
+      doc.side,
+      doc.entry,
+      matchOrFail?.stopLoss ?? doc.currentSl
+    )
   };
+
+  // --- Pending close reconcile (broker volume is authority) ---
+  if (
+    doc.profitLockStage === "T1_CLOSE_SUBMITTING" ||
+    doc.profitLockStage === "T1_CLOSE_PENDING_RECONCILE" ||
+    doc.profitLockStage === "T2_CLOSE_SUBMITTING" ||
+    doc.profitLockStage === "T2_CLOSE_PENDING_RECONCILE" ||
+    doc.profitLockStage === "T3_CLOSE_SUBMITTING" ||
+    doc.profitLockStage === "T3_CLOSE_PENDING_RECONCILE"
+  ) {
+    return reconcilePendingClose(doc, deps, mutations, stamp, matchOrFail);
+  }
+
+  // --- Pending SL amend reconcile ---
+  if (
+    doc.profitLockStage === "BE_AMEND_PENDING_RECONCILE" ||
+    doc.profitLockStage === "T1_PROTECT_AMEND_PENDING_RECONCILE" ||
+    doc.profitLockStage === "T2_ENSURE_AMEND_PENDING_RECONCILE" ||
+    doc.profitLockStage === "T2_PROTECT_AMEND_PENDING_RECONCILE"
+  ) {
+    return reconcilePendingAmend(doc, deps, mutations, stamp, matchOrFail);
+  }
+
+  if (!matchOrFail) {
+    const ev = appendLifecycleEvent(doc, {
+      at: stamp(),
+      kind: "CLOSE_PENDING",
+      reason: "PROFIT_LOCK: broker flat — reconcile close, no second close",
+      dedupeKey: `profit_lock:flat:${doc.correlationId}:${doc.profitLockStage}`
+    });
+    doc = withStage(ev.applied ? ev.doc : doc, "CLOSE_RECONCILIATION_PENDING", {
+      status: "CLOSE_RECONCILIATION_PENDING",
+      pendingClose: null,
+      pendingAmend: null
+    });
+    await deps.save(doc);
+    return {
+      doc,
+      mutations,
+      action: { type: "RECONCILE_CLOSED", nextStage: "CLOSE_RECONCILIATION_PENDING", reason: "BROKER_POSITION_FLAT" },
+      blockedReason: null
+    };
+  }
 
   const symbol = await deps.loadSymbol(doc.uid).catch(() => null);
   if (
@@ -224,7 +325,11 @@ export async function runDemoProfitLockPass(
     symbol.maxVolume == null ||
     symbol.volumeStep == null
   ) {
-    doc = { ...doc, profitLockLastBlocker: "VOLUME_METADATA_UNAVAILABLE", updatedAt: stamp() };
+    doc = {
+      ...doc,
+      profitLockLastBlocker: "VOLUME_METADATA_UNAVAILABLE",
+      updatedAt: stamp()
+    };
     await deps.save(doc);
     return {
       doc,
@@ -239,6 +344,29 @@ export async function runDemoProfitLockPass(
   const m5Close = lastCompleted?.close ?? null;
   const m5Time = lastCompleted?.time ?? null;
 
+  const freshT1 =
+    isFreshPostSecureM5Bar({
+      barTime: m5Time,
+      securedAfterM5BarTime: doc.t1SecuredAfterM5BarTime,
+      alreadyConfirmedBarTime: doc.t1ContinuationBarTime
+    }) &&
+    m5CloseConfirmsContinuation({
+      side: doc.side,
+      completedClose: m5Close,
+      level: doc.tp1
+    });
+  const freshT2 =
+    isFreshPostSecureM5Bar({
+      barTime: m5Time,
+      securedAfterM5BarTime: doc.t2SecuredAfterM5BarTime,
+      alreadyConfirmedBarTime: doc.t2ContinuationBarTime
+    }) &&
+    m5CloseConfirmsContinuation({
+      side: doc.side,
+      completedClose: m5Close,
+      level: doc.tp2
+    });
+
   const action = evaluateProfitLock({
     side: doc.side,
     stage: doc.profitLockStage ?? "OPEN",
@@ -250,32 +378,25 @@ export async function runDemoProfitLockPass(
     tp3: doc.tp3,
     brokerHardTakeProfit: doc.brokerHardTakeProfit,
     originalLots,
-    brokerRemainingLots: match ? brokerRemaining : 0,
-    currentPrice: mid ?? null,
-    brokerPositionOpen: Boolean(match),
-    m5ContinuationBeyondTp1: m5CloseConfirmsContinuation({
-      side: doc.side,
-      completedClose: m5Close,
-      level: doc.tp1
-    }),
-    m5ContinuationBeyondTp2: m5CloseConfirmsContinuation({
-      side: doc.side,
-      completedClose: m5Close,
-      level: doc.tp2
-    }),
+    brokerRemainingLots: brokerRemaining,
+    targetTouchPrice: touch,
+    brokerPositionOpen: true,
+    m5ContinuationBeyondTp1: freshT1,
+    m5ContinuationBeyondTp2: freshT2,
     completedM5BarTime: m5Time,
-    t1ContinuationBarTime: doc.t1ContinuationBarTime,
-    t2ContinuationBarTime: doc.t2ContinuationBarTime,
     volumeRules: {
       minLots: symbol.minVolume,
       maxLots: symbol.maxVolume,
       stepLots: symbol.volumeStep
     },
     stopBuffer: {
-      minStopDistance: symbol.minStopDistance,
+      normalizedMinStopPriceDistance: symbol.normalizedMinStopPriceDistance,
+      rawSlDistance: symbol.rawSlDistance,
+      distanceSetIn: symbol.distanceSetIn,
+      digits: symbol.digits,
+      referencePrice: doc.tp1 ?? doc.entry,
       spread: quote?.spread ?? null,
-      tickSize: symbol.tickSize,
-      digits: symbol.digits
+      tickSize: symbol.tickSize
     }
   });
 
@@ -291,13 +412,7 @@ export async function runDemoProfitLockPass(
   }
 
   if (action.type === "ADVANCE_STAGE") {
-    const ev = appendLifecycleEvent(doc, {
-      at: stamp(),
-      kind: "RECOMMENDATION",
-      reason: `PROFIT_LOCK advance → ${action.nextStage}: ${action.reason}`,
-      dedupeKey: `profit_lock:advance:${action.nextStage}:${action.reason}`
-    });
-    doc = withStage(ev.applied ? ev.doc : doc, action.nextStage, {
+    const extras: Partial<DemoPositionLifecycle> = {
       profitLockProtectionLevel: action.nextProtection
         ? maxProtectionLevel(
             doc.profitLockProtectionLevel ?? "NONE",
@@ -310,7 +425,23 @@ export async function runDemoProfitLockPass(
         action.t2ContinuationBarTime ?? doc.t2ContinuationBarTime,
       profitLockLastBlocker: null,
       lastRecommendation: `PROFIT_LOCK:${action.reason}`
+    };
+    if (action.nextStage === "T1_SECURED_BE") {
+      extras.t1SecuredAt = stamp();
+      extras.t1SecuredAfterM5BarTime = m5Time;
+      extras.currentRisk = 0;
+    }
+    if (action.nextStage === "T2_SECURED") {
+      extras.t2SecuredAt = stamp();
+      extras.t2SecuredAfterM5BarTime = m5Time;
+    }
+    const ev = appendLifecycleEvent(doc, {
+      at: stamp(),
+      kind: "RECOMMENDATION",
+      reason: `PROFIT_LOCK advance → ${action.nextStage}: ${action.reason}`,
+      dedupeKey: `profit_lock:advance:${action.nextStage}:${action.reason}:${action.t1ContinuationBarTime ?? action.t2ContinuationBarTime ?? "na"}`
     });
+    doc = withStage(ev.applied ? ev.doc : doc, action.nextStage, extras);
     await deps.save(doc);
     return { doc, mutations, action, blockedReason: null };
   }
@@ -324,233 +455,502 @@ export async function runDemoProfitLockPass(
     });
     doc = withStage(ev.applied ? ev.doc : doc, action.nextStage, {
       status: "CLOSE_RECONCILIATION_PENDING",
-      profitLockLastBlocker: null,
-      lastRecommendation: `PROFIT_LOCK:${action.reason}`
+      pendingClose: null,
+      pendingAmend: null,
+      profitLockLastBlocker: null
     });
     await deps.save(doc);
     return { doc, mutations, action, blockedReason: null };
   }
 
   if (action.type === "PARTIAL_CLOSE") {
-    if (!doc.brokerPositionId) {
-      return {
-        doc: { ...doc, profitLockLastBlocker: "NO_BROKER_POSITION_ID", updatedAt: stamp() },
-        mutations,
-        action,
-        blockedReason: "NO_BROKER_POSITION_ID"
+    return executePartialClose(doc, deps, mutations, stamp, action, m5Time);
+  }
+
+  if (action.type === "AMEND_SL") {
+    return executeAmendSl(doc, deps, mutations, stamp, action, m5Time);
+  }
+
+  return { doc, mutations, action: null, blockedReason: "UNHANDLED_ACTION" };
+}
+
+async function executePartialClose(
+  docIn: DemoPositionLifecycle,
+  deps: ProfitLockDeps,
+  mutations: ProfitLockMutationCounters,
+  stamp: () => string,
+  action: Extract<ProfitLockAction, { type: "PARTIAL_CLOSE" }>,
+  _m5Time: number | null
+): Promise<{
+  doc: DemoPositionLifecycle;
+  mutations: ProfitLockMutationCounters;
+  action: ProfitLockAction | null;
+  blockedReason: string | null;
+}> {
+  let doc = docIn;
+  const positionId = doc.brokerPositionId;
+  if (!positionId) {
+    doc = { ...doc, profitLockLastBlocker: "NO_BROKER_POSITION_ID", updatedAt: stamp() };
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "NO_BROKER_POSITION_ID" };
+  }
+
+  // Persist intent BEFORE broker mutation.
+  const intent: PendingCloseIntent = {
+    tag: action.tag,
+    desiredCumulativeLots: action.desiredCumulativeLots,
+    requestedLots: action.lots,
+    volumeUnits: action.volumeUnits,
+    submittedAt: stamp(),
+    brokerAccepted: null
+  };
+  doc = withStage(doc, action.submittingStage, {
+    pendingClose: intent,
+    intendedT1CloseLots:
+      action.tag === "T1" ? action.lots : doc.intendedT1CloseLots,
+    intendedT2CloseLots:
+      action.tag === "T2" ? action.lots : doc.intendedT2CloseLots,
+    profitLockLastBlocker: null
+  });
+  await deps.save(doc);
+
+  // Re-check broker before sending.
+  const pre = await reconcileMatch(deps, doc.uid, positionId);
+  if (pre === "RECONCILE_FAILED") {
+    doc = withStage(doc, action.pendingStage, {
+      pendingClose: { ...intent, brokerAccepted: null },
+      profitLockLastBlocker: "RECONCILE_FAILED_BEFORE_CLOSE"
+    });
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "RECONCILE_FAILED" };
+  }
+  if (!pre) {
+    doc = withStage(doc, "CLOSE_RECONCILIATION_PENDING", {
+      status: "CLOSE_RECONCILIATION_PENDING",
+      pendingClose: null
+    });
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "BROKER_ALREADY_FLAT" };
+  }
+  const originalLots = doc.lots ?? 0;
+  if (
+    action.tag !== "T3_REMAINDER" &&
+    cumulativeSatisfied(originalLots, pre.volumeLots ?? 0, action.desiredCumulativeLots)
+  ) {
+    doc = withStage(doc, action.doneStage, {
+      pendingClose: null,
+      remainingLots: pre.volumeLots,
+      cumulativeClosedLots: brokerClosedLots(originalLots, pre.volumeLots ?? 0),
+      tp1Status: action.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
+      tp2Status: action.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status
+    });
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: null };
+  }
+
+  try {
+    const result = await deps.closePosition({
+      ownerUid: doc.uid,
+      positionId,
+      volumeUnits: action.volumeUnits
+    });
+    mutations.partialCloses += 1;
+    if (action.tag === "T3_REMAINDER") mutations.positionCloses += 1;
+    doc = withStage(doc, action.pendingStage, {
+      pendingClose: { ...intent, brokerAccepted: result.accepted },
+      profitLockLastBlocker: result.accepted
+        ? "CLOSE_PENDING_BROKER_PROOF"
+        : "CLOSE_NOT_ACCEPTED_PENDING_PROOF"
+    });
+    await deps.save(doc);
+  } catch (err) {
+    doc = withStage(doc, action.pendingStage, {
+      pendingClose: { ...intent, brokerAccepted: false },
+      profitLockLastBlocker: `PARTIAL_CLOSE_ERROR:${
+        err instanceof Error ? err.message : "unknown"
+      }`
+    });
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "PARTIAL_CLOSE_ERROR" };
+  }
+
+  // Immediate reconcile attempt — advance only on broker proof.
+  return reconcilePendingClose(doc, deps, mutations, stamp, null);
+}
+
+async function reconcilePendingClose(
+  docIn: DemoPositionLifecycle,
+  deps: ProfitLockDeps,
+  mutations: ProfitLockMutationCounters,
+  stamp: () => string,
+  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED" | null
+): Promise<{
+  doc: DemoPositionLifecycle;
+  mutations: ProfitLockMutationCounters;
+  action: ProfitLockAction | null;
+  blockedReason: string | null;
+}> {
+  let doc = docIn;
+  const intent = doc.pendingClose;
+  const stage = doc.profitLockStage;
+  const originalLots = doc.lots ?? 0;
+
+  const doneStage: ProfitLockStage =
+    stage === "T1_CLOSE_SUBMITTING" || stage === "T1_CLOSE_PENDING_RECONCILE"
+      ? "T1_PARTIAL_DONE_SL_PENDING"
+      : stage === "T2_CLOSE_SUBMITTING" || stage === "T2_CLOSE_PENDING_RECONCILE"
+        ? "T2_PARTIAL_DONE"
+        : "CLOSE_RECONCILIATION_PENDING";
+
+  const pendingStage: ProfitLockStage =
+    stage === "T1_CLOSE_SUBMITTING"
+      ? "T1_CLOSE_PENDING_RECONCILE"
+      : stage === "T2_CLOSE_SUBMITTING"
+        ? "T2_CLOSE_PENDING_RECONCILE"
+        : stage === "T3_CLOSE_SUBMITTING"
+          ? "T3_CLOSE_PENDING_RECONCILE"
+          : (stage as ProfitLockStage);
+
+  // SUBMITTING without completed call: if volume unchanged, allow one send.
+  if (
+    (stage === "T1_CLOSE_SUBMITTING" ||
+      stage === "T2_CLOSE_SUBMITTING" ||
+      stage === "T3_CLOSE_SUBMITTING") &&
+    intent &&
+    intent.brokerAccepted == null
+  ) {
+    const pre = knownMatch === "RECONCILE_FAILED"
+      ? "RECONCILE_FAILED"
+      : knownMatch !== null && knownMatch !== undefined
+        ? knownMatch
+        : await reconcileMatch(deps, doc.uid, doc.brokerPositionId);
+    if (pre === "RECONCILE_FAILED") {
+      doc = {
+        ...doc,
+        profitLockLastBlocker: "RECONCILE_FAILED",
+        updatedAt: stamp()
       };
-    }
-    // Re-check broker volume immediately before close (crash/restart safety).
-    const fresh = await deps.reconcilePositions(doc.uid).catch(() => brokerPositions);
-    const freshMatch = fresh.find((p) => p.positionId === doc.brokerPositionId);
-    if (!freshMatch) {
-      const ev = appendLifecycleEvent(doc, {
-        at: stamp(),
-        kind: "CLOSE_PENDING",
-        reason: "PROFIT_LOCK: broker flat before partial — no second close",
-        dedupeKey: `profit_lock:flat_before_${action.tag}:${doc.correlationId}`
-      });
-      doc = withStage(ev.applied ? ev.doc : doc, "CLOSE_RECONCILIATION_PENDING", {
-        status: "CLOSE_RECONCILIATION_PENDING"
-      });
       await deps.save(doc);
-      return { doc, mutations, action, blockedReason: "BROKER_ALREADY_FLAT" };
+      return { doc, mutations, action: null, blockedReason: "RECONCILE_FAILED" };
     }
-    const freshRemaining = freshMatch.volumeLots ?? 0;
-    const already = brokerClosedLots(originalLots, freshRemaining);
     if (
-      action.tag !== "T3_REMAINDER" &&
-      already + 1e-8 >= action.desiredCumulativeLots
+      pre &&
+      intent.tag !== "T3_REMAINDER" &&
+      cumulativeSatisfied(
+        originalLots,
+        pre.volumeLots ?? 0,
+        intent.desiredCumulativeLots
+      )
     ) {
-      const ev = appendLifecycleEvent(doc, {
-        at: stamp(),
-        kind: "IDEMPOTENT_SKIP",
-        reason: `PROFIT_LOCK: ${action.tag} already satisfied by broker volume`,
-        brokerAck: true,
-        dedupeKey: `${action.dedupeKey}:idempotent`
-      });
-      doc = withStage(ev.applied ? ev.doc : doc, action.nextStage, {
-        remainingLots: freshRemaining,
-        cumulativeClosedLots: already,
-        tp1Status:
-          action.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
-        tp2Status:
-          action.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status,
-        intendedT1CloseLots:
-          action.tag === "T1" ? action.lots : doc.intendedT1CloseLots,
-        intendedT2CloseLots:
-          action.tag === "T2" ? action.lots : doc.intendedT2CloseLots,
-        profitLockLastBlocker: null
+      doc = withStage(doc, doneStage, {
+        pendingClose: null,
+        remainingLots: pre.volumeLots,
+        cumulativeClosedLots: brokerClosedLots(originalLots, pre.volumeLots ?? 0),
+        tp1Status: intent.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
+        tp2Status: intent.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status
       });
       await deps.save(doc);
-      return { doc, mutations, action, blockedReason: null };
+      return { doc, mutations, action: null, blockedReason: null };
     }
-
-    if (doc.appliedDedupeKeys.includes(action.dedupeKey)) {
-      // Dedupe key present but stage not advanced — trust broker reconcile path above next tick.
-      doc = withStage(doc, action.nextStage, {
-        remainingLots: freshRemaining,
-        cumulativeClosedLots: already,
-        profitLockLastBlocker: "DEDUPE_KEY_PRESENT_ADVANCE"
-      });
-      await deps.save(doc);
-      return { doc, mutations, action, blockedReason: null };
+    if (!doc.brokerPositionId) {
+      return { doc, mutations, action: null, blockedReason: "NO_BROKER_POSITION_ID" };
     }
-
     try {
       const result = await deps.closePosition({
         ownerUid: doc.uid,
         positionId: doc.brokerPositionId,
-        volumeUnits: action.volumeUnits
+        volumeUnits: intent.volumeUnits
       });
       mutations.partialCloses += 1;
-      if (action.tag === "T3_REMAINDER") mutations.positionCloses += 1;
-      if (!result.accepted) {
-        doc = {
-          ...doc,
-          profitLockLastBlocker: `${action.tag}_CLOSE_NOT_ACCEPTED`,
-          updatedAt: stamp()
-        };
-        await deps.save(doc);
-        return {
-          doc,
-          mutations,
-          action,
-          blockedReason: `${action.tag}_CLOSE_NOT_ACCEPTED`
-        };
-      }
-      const after = await deps.reconcilePositions(doc.uid).catch(() => fresh);
-      const afterMatch = after.find((p) => p.positionId === doc.brokerPositionId);
-      const rem = afterMatch?.volumeLots ?? Math.max(0, freshRemaining - action.lots);
-      const closed = brokerClosedLots(originalLots, rem);
-      const ev = appendLifecycleEvent(doc, {
-        at: stamp(),
-        kind: "PARTIAL_CLOSE",
-        reason: `PROFIT_LOCK ${action.tag} close ${action.lots} lots (cumulative target ${action.desiredCumulativeLots})`,
-        brokerAck: true,
-        dedupeKey: action.dedupeKey
-      });
-      doc = withStage(ev.doc, action.nextStage, {
-        remainingLots: rem,
-        cumulativeClosedLots: closed,
-        tp1Status: action.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
-        tp2Status: action.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status,
-        tp3Status: action.tag === "T3_REMAINDER" ? "HIT" : doc.tp3Status,
-        intendedT1CloseLots:
-          action.tag === "T1" ? action.lots : doc.intendedT1CloseLots,
-        intendedT2CloseLots:
-          action.tag === "T2" ? action.lots : doc.intendedT2CloseLots,
-        status:
-          action.nextStage === "CLOSE_RECONCILIATION_PENDING"
-            ? "CLOSE_RECONCILIATION_PENDING"
-            : doc.status,
-        profitLockLastBlocker: null,
-        lastRecommendation: `PROFIT_LOCK:${action.tag}_CLOSED`
+      doc = withStage(doc, pendingStage, {
+        pendingClose: { ...intent, brokerAccepted: result.accepted }
       });
       await deps.save(doc);
-      return { doc, mutations, action, blockedReason: null };
-    } catch (err) {
-      doc = {
-        ...doc,
-        profitLockLastBlocker: `PARTIAL_CLOSE_ERROR:${
-          err instanceof Error ? err.message : "unknown"
-        }`,
-        updatedAt: stamp()
-      };
+    } catch {
+      doc = withStage(doc, pendingStage, {
+        pendingClose: { ...intent, brokerAccepted: false },
+        profitLockLastBlocker: "CLOSE_SEND_FAILED_PENDING_PROOF"
+      });
       await deps.save(doc);
-      return {
-        doc,
-        mutations,
-        action,
-        blockedReason: "PARTIAL_CLOSE_ERROR"
-      };
+      return { doc, mutations, action: null, blockedReason: "CLOSE_SEND_FAILED" };
     }
   }
 
-  if (action.type === "AMEND_SL") {
-    if (!doc.brokerPositionId) {
-      return {
-        doc: { ...doc, profitLockLastBlocker: "NO_BROKER_POSITION_ID", updatedAt: stamp() },
-        mutations,
-        action,
-        blockedReason: "NO_BROKER_POSITION_ID"
-      };
-    }
-    if (doc.appliedDedupeKeys.includes(action.dedupeKey)) {
-      doc = withStage(doc, action.nextStage, {
-        profitLockProtectionLevel: maxProtectionLevel(
-          doc.profitLockProtectionLevel ?? "NONE",
-          action.nextProtection
-        ),
-        profitLockLastBlocker: null
-      });
-      await deps.save(doc);
-      return { doc, mutations, action, blockedReason: null };
-    }
-    try {
-      const oldSl = doc.currentSl;
-      const result = await deps.amendStopLoss({
-        ownerUid: doc.uid,
-        positionId: doc.brokerPositionId,
-        stopLoss: action.stopLoss,
-        // Preserve TP3 — never rewrite to TP1.
-        takeProfit: action.takeProfit ?? null
-      });
-      mutations.slAmends += 1;
-      if (action.takeProfit != null) mutations.tpAmends += 1;
-      if (!result.accepted) {
-        doc = {
-          ...doc,
-          profitLockLastBlocker: "SL_AMEND_NOT_ACCEPTED",
-          updatedAt: stamp()
-        };
-        await deps.save(doc);
-        return {
-          doc,
-          mutations,
-          action,
-          blockedReason: "SL_AMEND_NOT_ACCEPTED"
-        };
-      }
-      const ev = appendLifecycleEvent(doc, {
-        at: stamp(),
-        kind: action.nextProtection === "BE" ? "BREAKEVEN" : "SL_AMENDED",
-        reason: `PROFIT_LOCK: ${action.reason} (preserve TP3=${action.takeProfit ?? "omit"})`,
-        oldSl,
-        newSl: action.stopLoss,
-        brokerAck: true,
-        dedupeKey: action.dedupeKey
-      });
-      doc = withStage(ev.doc, action.nextStage, {
-        currentSl: action.stopLoss,
-        profitLockProtectionLevel: maxProtectionLevel(
-          doc.profitLockProtectionLevel ?? "NONE",
-          action.nextProtection
-        ),
-        currentRisk:
-          action.nextProtection === "BE" ||
-          action.nextProtection === "TP1" ||
-          action.nextProtection === "TP2"
-            ? 0
-            : doc.currentRisk,
-        profitLockLastBlocker: null,
-        lastRecommendation: `PROFIT_LOCK:${action.reason}`
-      });
-      await deps.save(doc);
-      return { doc, mutations, action, blockedReason: null };
-    } catch (err) {
-      // Partial succeeded earlier; only retry SL next pass.
-      doc = {
-        ...doc,
-        profitLockLastBlocker: `SL_AMEND_ERROR:${
-          err instanceof Error ? err.message : "unknown"
-        }`,
-        updatedAt: stamp()
-      };
-      await deps.save(doc);
-      return { doc, mutations, action, blockedReason: "SL_AMEND_ERROR" };
-    }
+  const match = await reconcileMatch(deps, doc.uid, doc.brokerPositionId);
+  if (match === "RECONCILE_FAILED") {
+    doc = withStage(doc, pendingStage, {
+      profitLockLastBlocker: "RECONCILE_FAILED"
+    });
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: "RECONCILE_FAILED" };
   }
 
-  return { doc, mutations, action: null, blockedReason: "UNHANDLED_ACTION" };
+  if (!match) {
+    // Flat — for T3 this is success; for T1/T2 unexpected full close → reconcile path.
+    const ev = appendLifecycleEvent(doc, {
+      at: stamp(),
+      kind: "CLOSE_PENDING",
+      reason: "PROFIT_LOCK: broker flat during pending close reconcile",
+      dedupeKey: `profit_lock:pending_flat:${doc.correlationId}:${stage}`
+    });
+    doc = withStage(ev.applied ? ev.doc : doc, "CLOSE_RECONCILIATION_PENDING", {
+      status: "CLOSE_RECONCILIATION_PENDING",
+      pendingClose: null
+    });
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: null };
+  }
+
+  const rem = match.volumeLots ?? 0;
+  const desired = intent?.desiredCumulativeLots;
+  if (
+    desired != null &&
+    (intent?.tag === "T3_REMAINDER"
+      ? rem <= 1e-8
+      : cumulativeSatisfied(originalLots, rem, desired))
+  ) {
+    const ev = appendLifecycleEvent(doc, {
+      at: stamp(),
+      kind: "PARTIAL_CLOSE",
+      reason: `PROFIT_LOCK ${intent?.tag ?? "CLOSE"} broker-confirmed (remaining=${rem})`,
+      brokerAck: true,
+      dedupeKey: `profit_lock:confirmed:${intent?.tag}:${desired}:${rem}`
+    });
+    doc = withStage(ev.doc, doneStage, {
+      pendingClose: null,
+      remainingLots: rem,
+      cumulativeClosedLots: brokerClosedLots(originalLots, rem),
+      tp1Status: intent?.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
+      tp2Status: intent?.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status,
+      tp3Status: intent?.tag === "T3_REMAINDER" ? "HIT" : doc.tp3Status,
+      status:
+        doneStage === "CLOSE_RECONCILIATION_PENDING"
+          ? "CLOSE_RECONCILIATION_PENDING"
+          : doc.status,
+      profitLockLastBlocker: null
+    });
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: null };
+  }
+
+  // Volume unchanged — remain pending; do NOT resend.
+  doc = withStage(doc, pendingStage, {
+    remainingLots: rem,
+    cumulativeClosedLots: brokerClosedLots(originalLots, rem),
+    currentSl: match.stopLoss ?? doc.currentSl,
+    profitLockLastBlocker: "CLOSE_PENDING_VOLUME_UNCHANGED"
+  });
+  await deps.save(doc);
+  return {
+    doc,
+    mutations,
+    action: null,
+    blockedReason: "CLOSE_PENDING_VOLUME_UNCHANGED"
+  };
+}
+
+async function executeAmendSl(
+  docIn: DemoPositionLifecycle,
+  deps: ProfitLockDeps,
+  mutations: ProfitLockMutationCounters,
+  stamp: () => string,
+  action: Extract<ProfitLockAction, { type: "AMEND_SL" }>,
+  m5Time: number | null
+): Promise<{
+  doc: DemoPositionLifecycle;
+  mutations: ProfitLockMutationCounters;
+  action: ProfitLockAction | null;
+  blockedReason: string | null;
+}> {
+  let doc = docIn;
+  const positionId = doc.brokerPositionId;
+  if (!positionId) {
+    doc = { ...doc, profitLockLastBlocker: "NO_BROKER_POSITION_ID", updatedAt: stamp() };
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "NO_BROKER_POSITION_ID" };
+  }
+
+  const intent: PendingAmendIntent = {
+    kind: action.amendKind,
+    stopLoss: action.stopLoss,
+    takeProfit: action.takeProfit ?? null,
+    nextStage: action.nextStage,
+    nextProtection: action.nextProtection,
+    submittedAt: stamp(),
+    brokerAccepted: null
+  };
+  doc = withStage(doc, action.pendingStage, {
+    pendingAmend: intent,
+    profitLockLastBlocker: null
+  });
+  await deps.save(doc);
+
+  try {
+    const result = await deps.amendStopLoss({
+      ownerUid: doc.uid,
+      positionId,
+      stopLoss: action.stopLoss,
+      takeProfit: action.takeProfit ?? null
+    });
+    mutations.slAmends += 1;
+    if (action.takeProfit != null) mutations.tpAmends += 1;
+    doc = withStage(doc, action.pendingStage, {
+      pendingAmend: { ...intent, brokerAccepted: result.accepted },
+      profitLockLastBlocker: result.accepted
+        ? "SL_AMEND_PENDING_BROKER_PROOF"
+        : "SL_AMEND_NOT_ACCEPTED_PENDING_PROOF"
+    });
+    await deps.save(doc);
+  } catch (err) {
+    doc = withStage(doc, action.pendingStage, {
+      pendingAmend: { ...intent, brokerAccepted: false },
+      profitLockLastBlocker: `SL_AMEND_ERROR:${
+        err instanceof Error ? err.message : "unknown"
+      }`
+    });
+    await deps.save(doc);
+    return { doc, mutations, action, blockedReason: "SL_AMEND_ERROR" };
+  }
+
+  return reconcilePendingAmend(doc, deps, mutations, stamp, null, m5Time);
+}
+
+async function reconcilePendingAmend(
+  docIn: DemoPositionLifecycle,
+  deps: ProfitLockDeps,
+  mutations: ProfitLockMutationCounters,
+  stamp: () => string,
+  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED" | null,
+  m5Time?: number | null
+): Promise<{
+  doc: DemoPositionLifecycle;
+  mutations: ProfitLockMutationCounters;
+  action: ProfitLockAction | null;
+  blockedReason: string | null;
+}> {
+  let doc = docIn;
+  const intent = doc.pendingAmend;
+  if (!intent) {
+    doc = { ...doc, profitLockLastBlocker: "PENDING_AMEND_MISSING", updatedAt: stamp() };
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: "PENDING_AMEND_MISSING" };
+  }
+
+  const match =
+    knownMatch === "RECONCILE_FAILED"
+      ? "RECONCILE_FAILED"
+      : knownMatch != null
+        ? knownMatch
+        : await reconcileMatch(deps, doc.uid, doc.brokerPositionId);
+
+  if (match === "RECONCILE_FAILED") {
+    doc = {
+      ...doc,
+      profitLockLastBlocker: "RECONCILE_FAILED",
+      updatedAt: stamp()
+    };
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: "RECONCILE_FAILED" };
+  }
+  if (!match) {
+    doc = withStage(doc, "CLOSE_RECONCILIATION_PENDING", {
+      status: "CLOSE_RECONCILIATION_PENDING",
+      pendingAmend: null
+    });
+    await deps.save(doc);
+    return { doc, mutations, action: null, blockedReason: "BROKER_FLAT_DURING_AMEND" };
+  }
+
+  const expectedTp3 = doc.brokerHardTakeProfit ?? doc.tp3;
+  if (!brokerTp3Preserved({ brokerTp: match.takeProfit, expectedTp3 })) {
+    const ev = appendLifecycleEvent(doc, {
+      at: stamp(),
+      kind: "PROTECTION_FAILURE",
+      reason: `PROFIT_LOCK: broker TP3 lost/changed (expected ${expectedTp3}, got ${match.takeProfit})`,
+      dedupeKey: `profit_lock:tp3_lost:${doc.correlationId}:${intent.kind}`
+    });
+    doc = {
+      ...ev.doc,
+      pendingAmend: intent,
+      protectionFailure: true,
+      profitLockLastBlocker: "BROKER_TP3_NOT_PRESERVED",
+      updatedAt: stamp()
+    };
+    await deps.save(doc);
+    return {
+      doc,
+      mutations,
+      action: null,
+      blockedReason: "BROKER_TP3_NOT_PRESERVED"
+    };
+  }
+
+  if (
+    !brokerSlConfirmsRequested({
+      side: doc.side,
+      brokerSl: match.stopLoss,
+      requestedSl: intent.stopLoss
+    })
+  ) {
+    doc = {
+      ...doc,
+      currentSl: match.stopLoss ?? doc.currentSl,
+      profitLockLastBlocker: "SL_AMEND_PENDING_OLD_SL",
+      updatedAt: stamp()
+    };
+    await deps.save(doc);
+    return {
+      doc,
+      mutations,
+      action: null,
+      blockedReason: "SL_AMEND_PENDING_OLD_SL"
+    };
+  }
+
+  // Broker-confirmed SL + TP3.
+  const bars = m5Time != null ? null : await deps.getCompletedM5Bars(doc.uid).catch(() => []);
+  const latestM5 =
+    m5Time ??
+    (bars && bars.length > 0 ? bars[bars.length - 1]!.time : null);
+
+  const ev = appendLifecycleEvent(doc, {
+    at: stamp(),
+    kind: intent.nextProtection === "BE" ? "BREAKEVEN" : "SL_AMENDED",
+    reason: `PROFIT_LOCK broker-confirmed ${intent.kind} SL=${match.stopLoss} TP3=${match.takeProfit}`,
+    oldSl: doc.currentSl,
+    newSl: match.stopLoss,
+    brokerAck: true,
+    dedupeKey: `profit_lock:sl_confirmed:${intent.kind}:${intent.stopLoss}`
+  });
+
+  const extras: Partial<DemoPositionLifecycle> = {
+    pendingAmend: null,
+    currentSl: match.stopLoss,
+    profitLockProtectionLevel: maxProtectionLevel(
+      doc.profitLockProtectionLevel ?? "NONE",
+      intent.nextProtection
+    ),
+    lockedProfitDistance: lockedProfitDistance(
+      doc.side,
+      doc.entry,
+      match.stopLoss
+    ),
+    currentRisk:
+      intent.nextProtection === "BE" ? 0 : doc.currentRisk,
+    profitLockLastBlocker: null,
+    lastRecommendation: `PROFIT_LOCK:${intent.kind}_CONFIRMED`
+  };
+  if (intent.nextStage === "T1_SECURED_BE") {
+    extras.t1SecuredAt = stamp();
+    extras.t1SecuredAfterM5BarTime = latestM5;
+    extras.currentRisk = 0;
+  }
+  if (intent.nextStage === "T2_SECURED") {
+    extras.t2SecuredAt = stamp();
+    extras.t2SecuredAfterM5BarTime = latestM5;
+  }
+
+  doc = withStage(ev.doc, intent.nextStage, extras);
+  await deps.save(doc);
+  return { doc, mutations, action: null, blockedReason: null };
 }

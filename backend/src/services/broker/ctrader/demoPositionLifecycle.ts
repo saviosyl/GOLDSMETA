@@ -42,7 +42,7 @@ import {
 } from "./demoProfitLockManager";
 import { loadCompletedM5BarsForProfitLock } from "./demoProfitLockCandles";
 import { getConnection } from "./connectionStore";
-import { isDemoProfitLockLadderEnabled } from "./demoProfitLockFlag";
+import { resolveManagementPolicy } from "./demoProfitLockTypes";
 
 function riskDistance(entry: number | null, sl: number | null): number | null {
   if (entry == null || sl == null) return null;
@@ -60,11 +60,20 @@ export async function createDemoPositionLifecycle(args: {
   side: "BUY" | "SELL";
   entry: number | null;
   stopLoss: number | null;
-  /** @deprecated Prefer tp1/tp2/tp3 from strategy — kept as TP1 fallback only. */
+  /**
+   * Legacy broker/primary TP fallback for LEGACY_V1 only.
+   * Never used as strategy TP1 when managementPolicy is PROFIT_LOCK_V1
+   * (broker hard TP is stored separately as brokerHardTakeProfit).
+   */
   takeProfit?: number | null;
+  /** Strategy TP1 — never derived from broker hard TP. */
   tp1?: number | null;
   tp2?: number | null;
   tp3?: number | null;
+  /** Immutable snapshot at open. Defaults LEGACY_V1. */
+  managementPolicy?: "LEGACY_V1" | "PROFIT_LOCK_V1";
+  /** Broker hard TP (TP3 under PROFIT_LOCK_V1). Separate from strategy targets. */
+  brokerHardTakeProfit?: number | null;
   lots: number | null;
   qualificationStage: string | null;
   decisionId: string | null;
@@ -101,14 +110,28 @@ export async function createDemoPositionLifecycle(args: {
     return merged;
   }
 
-  // Only strategy-supplied targets — never invent R-multiple ladders.
+  const policy = args.managementPolicy === "PROFIT_LOCK_V1" ? "PROFIT_LOCK_V1" : "LEGACY_V1";
+  // Strategy targets only. Under PROFIT_LOCK_V1 never fall back to broker hard TP
+  // (takeProfit) for TP1 — that would turn strategy TP1 into TP3.
+  const strategyTp1 =
+    args.tp1 != null && Number.isFinite(args.tp1)
+      ? args.tp1
+      : policy === "LEGACY_V1" &&
+          args.takeProfit != null &&
+          Number.isFinite(args.takeProfit)
+        ? args.takeProfit
+        : null;
   const tps = strategyProvidedTakeProfits([
-    args.tp1 != null || args.takeProfit != null
-      ? { label: "TP1", price: args.tp1 ?? args.takeProfit ?? null }
-      : null,
+    strategyTp1 != null ? { label: "TP1", price: strategyTp1 } : null,
     args.tp2 != null ? { label: "TP2", price: args.tp2 } : null,
     args.tp3 != null ? { label: "TP3", price: args.tp3 } : null
   ].filter(Boolean) as Array<{ label: string; price: number | null }>);
+  const hardTp =
+    args.brokerHardTakeProfit != null && Number.isFinite(args.brokerHardTakeProfit)
+      ? args.brokerHardTakeProfit
+      : policy === "PROFIT_LOCK_V1" && tps.tp3 != null
+        ? tps.tp3
+        : null;
   const initialRisk = riskDistance(args.entry, args.stopLoss);
   const doc: DemoPositionLifecycle = {
     id: args.correlationId,
@@ -157,13 +180,17 @@ export async function createDemoPositionLifecycle(args: {
     updatedAt: new Date().toISOString(),
     status: "OPEN",
     ...emptyProfitLockState(),
-    brokerHardTakeProfit:
-      tps.tp3 != null && Number.isFinite(tps.tp3) ? tps.tp3 : null
+    managementPolicy: policy,
+    profitLockStage: policy === "PROFIT_LOCK_V1" ? "OPEN" : null,
+    brokerHardTakeProfit: hardTp
   };
   const opened = appendLifecycleEvent(doc, {
     at: args.openedAt,
     kind: "OPENED",
-    reason: "Demo position opened",
+    reason:
+      policy === "PROFIT_LOCK_V1"
+        ? "Demo position opened (PROFIT_LOCK_V1; strategy TP1/TP2/TP3 separate from broker hard TP)"
+        : "Demo position opened",
     dedupeKey: `open:${args.correlationId}`
   });
   await savePositionLifecycle(opened.doc);
@@ -530,7 +557,10 @@ export async function manageOpenDemoPosition(
   }
 
   const settings = await getUserAutoTradeSettings(uid, "demo");
-  const profitLockActive = isDemoProfitLockLadderEnabled(settings);
+  // Immutable per-position policy (snapshotted at open). Current user setting
+  // must NOT flip management mid-trade.
+  const policy = resolveManagementPolicy(doc.managementPolicy);
+  const profitLockActive = policy === "PROFIT_LOCK_V1";
 
   // First: protection verification
   if (!doc.protectionVerified && !doc.protectionFailure) {
@@ -538,7 +568,7 @@ export async function manageOpenDemoPosition(
     if (doc.protectionFailure || doc.status !== "OPEN") return doc;
   }
 
-  // Deterministic T1/T2/T3 profit-lock ladder (Demo only, flag default false).
+  // Deterministic T1/T2/T3 profit-lock ladder (Demo only; per-position policy).
   if (profitLockActive) {
     const result = await runDemoProfitLockPass(doc, buildProfitLockDeps());
     if (result.doc.status === "CLOSE_RECONCILIATION_PENDING") {

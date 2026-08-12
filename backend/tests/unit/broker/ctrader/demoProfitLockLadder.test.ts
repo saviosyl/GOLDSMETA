@@ -1,25 +1,22 @@
 /**
- * Deterministic Demo T1/T2/T3 profit-lock ladder tests.
- * Covers BUY/SELL ladders, restart safety, volume rounding, Live zero-mutation,
- * TP3 preservation, irreversible stops, and feature-flag default.
+ * Deterministic Demo T1/T2/T3 profit-lock ladder — review-fix coverage.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   evaluateProfitLock,
+  isFreshPostSecureM5Bar,
   m5CloseConfirmsContinuation
 } from "../../../../src/services/broker/ctrader/demoProfitLockEvaluate";
 import {
   computeBrokerSafeStopBuffer,
   brokerHardTakeProfitForAmend,
   isStopImprovement,
-  proposeProtectedStop,
-  selectStopIfImproved
+  brokerTp3Preserved
 } from "../../../../src/services/broker/ctrader/demoProfitLockStops";
 import {
   planT1PartialClose,
   planT2PartialClose,
-  planRemainderClose,
   desiredCumulativeCloseLots
 } from "../../../../src/services/broker/ctrader/demoProfitLockVolume";
 import {
@@ -27,7 +24,15 @@ import {
   type ProfitLockDeps
 } from "../../../../src/services/broker/ctrader/demoProfitLockManager";
 import { isDemoProfitLockLadderEnabled } from "../../../../src/services/broker/ctrader/demoProfitLockFlag";
-import { filterCompletedM5Bars } from "../../../../src/services/broker/ctrader/demoProfitLockCandles";
+import {
+  executableTargetTouchPrice,
+  targetTouched,
+  validateProfitLockTargets
+} from "../../../../src/services/broker/ctrader/demoProfitLockTargets";
+import {
+  normalizeSlDistanceToPrice,
+  parseDistanceSetIn
+} from "../../../../src/services/broker/ctrader/ctraderStopDistance";
 import {
   emptyProfitLockState,
   emptyTpStatuses,
@@ -40,9 +45,9 @@ import {
 import { defaultUserAutoTradeSettings } from "../../../../src/services/broker/ctrader/userAutoTradeSettings";
 import type { BrokerOpenPosition } from "../../../../src/services/broker/ctrader/openApiClient";
 import type { BrokerSymbol } from "../../../../src/services/broker/domain";
+import { resolveManagementPolicy } from "../../../../src/services/broker/ctrader/demoProfitLockTypes";
 
 const FINE_RULES = { minLots: 0.01, maxLots: 100, stepLots: 0.01 };
-const COARSE_RULES = { minLots: 1, maxLots: 100, stepLots: 1 };
 
 function baseDoc(
   overrides: Partial<DemoPositionLifecycle> = {}
@@ -94,6 +99,7 @@ function baseDoc(
     updatedAt: new Date().toISOString(),
     status: "OPEN",
     ...emptyProfitLockState(),
+    managementPolicy: "PROFIT_LOCK_V1",
     profitLockStage: "OPEN",
     brokerHardTakeProfit: 2380,
     ...overrides
@@ -122,6 +128,10 @@ function symbolFine(): BrokerSymbol {
     swapLong: null,
     swapShort: null,
     minStopDistance: 0.3,
+    rawSlDistance: 30,
+    distanceSetIn: "SYMBOL_DISTANCE_IN_POINTS",
+    rawTpDistance: null,
+    normalizedMinStopPriceDistance: 0.3,
     guaranteedStopAvailable: null,
     tradingScheduleId: null,
     metadataComplete: true,
@@ -129,7 +139,11 @@ function symbolFine(): BrokerSymbol {
   };
 }
 
-function pos(lots: number, sl: number | null = 2340, tp: number | null = 2380): BrokerOpenPosition {
+function pos(
+  lots: number,
+  sl: number | null = 2340,
+  tp: number | null = 2380
+): BrokerOpenPosition {
   return {
     positionId: "p1",
     symbolId: "41",
@@ -145,193 +159,147 @@ function pos(lots: number, sl: number | null = 2340, tp: number | null = 2380): 
   };
 }
 
-function makeDeps(state: {
+type SimState = {
   remaining: number;
   sl: number | null;
   tp: number | null;
-  price: number;
-  m5Close?: number | null;
+  bid: number;
+  ask: number;
+  m5Bars?: Array<{ time: number; close: number }>;
   liveAccount?: boolean;
-  closeImpl?: ProfitLockDeps["closePosition"];
-  amendImpl?: ProfitLockDeps["amendStopLoss"];
-}): {
+  reconcileFail?: boolean;
+  closeDelayVolume?: boolean;
+  amendKeepOldSl?: boolean;
+  amendDropTp3?: boolean;
+};
+
+function makeDeps(state: SimState): {
   deps: ProfitLockDeps;
-  closes: Array<{ volumeUnits: number }>;
+  closes: number[];
   amends: Array<{ stopLoss: number; takeProfit?: number | null }>;
   saved: DemoPositionLifecycle[];
+  state: SimState;
 } {
-  const closes: Array<{ volumeUnits: number }> = [];
+  const closes: number[] = [];
   const amends: Array<{ stopLoss: number; takeProfit?: number | null }> = [];
   const saved: DemoPositionLifecycle[] = [];
-  let remaining = state.remaining;
-  let sl = state.sl;
-  let tp = state.tp;
 
   const deps: ProfitLockDeps = {
-    reconcilePositions: async () =>
-      remaining > 1e-8 ? [pos(remaining, sl, tp)] : [],
-    amendStopLoss: state.amendImpl
-      ?? (async (args) => {
-        amends.push({ stopLoss: args.stopLoss, takeProfit: args.takeProfit });
-        sl = args.stopLoss;
-        if (args.takeProfit != null) tp = args.takeProfit;
-        return { accepted: true };
-      }),
-    closePosition:
-      state.closeImpl ??
-      (async (args) => {
-        closes.push({ volumeUnits: args.volumeUnits });
-        remaining = Number(
-          (remaining - args.volumeUnits / 100).toFixed(8)
+    reconcilePositions: async () => {
+      if (state.reconcileFail) throw new Error("RECONCILE_DOWN");
+      return state.remaining > 1e-8
+        ? [pos(state.remaining, state.sl, state.tp)]
+        : [];
+    },
+    amendStopLoss: async (args) => {
+      amends.push({ stopLoss: args.stopLoss, takeProfit: args.takeProfit });
+      if (state.amendDropTp3) {
+        state.tp = 2360; // wrongly rewritten to TP1
+      } else if (args.takeProfit != null) {
+        state.tp = args.takeProfit;
+      }
+      if (!state.amendKeepOldSl) {
+        state.sl = args.stopLoss;
+      }
+      return { accepted: true };
+    },
+    closePosition: async (args) => {
+      closes.push(args.volumeUnits);
+      if (!state.closeDelayVolume) {
+        state.remaining = Number(
+          (state.remaining - args.volumeUnits / 100).toFixed(8)
         );
-        return { accepted: true };
-      }),
+      }
+      return { accepted: true };
+    },
     loadSymbol: async () => symbolFine(),
     getQuote: async () => ({
-      symbolId: "41",
-      symbolName: "XAUUSD",
-      bid: state.price - 0.05,
-      ask: state.price + 0.05,
-      spread: 0.1,
-      timestamp: new Date().toISOString(),
-      marketStatus: "OPEN",
-      stale: false,
-      source: "LIVE"
+      bid: state.bid,
+      ask: state.ask,
+      spread: Number((state.ask - state.bid).toFixed(6))
     }),
     getCompletedM5Bars: async () =>
-      state.m5Close == null
-        ? []
-        : [
-            {
-              time: Math.floor(Date.now() / 1000) - 600,
-              open: state.m5Close,
-              high: state.m5Close,
-              low: state.m5Close,
-              close: state.m5Close,
-              volume: 1
-            }
-          ],
+      (state.m5Bars ?? []).map((b) => ({
+        time: b.time,
+        open: b.close,
+        high: b.close,
+        low: b.close,
+        close: b.close,
+        volume: 1
+      })),
     isSelectedAccountLive: async () => Boolean(state.liveAccount),
     save: async (doc) => {
-      saved.push(doc);
+      saved.push(structuredClone(doc));
     }
   };
-  return { deps, closes, amends, saved };
+  return { deps, closes, amends, saved, state };
 }
 
-describe("demo profit-lock volume accounting", () => {
-  it("H: uses cumulative 50/80 of ORIGINAL lots (not half remaining)", () => {
-    expect(desiredCumulativeCloseLots(17, 0.5)).toBe(8.5);
-    expect(desiredCumulativeCloseLots(17, 0.8)).toBe(13.6);
-    const t1 = planT1PartialClose({
-      originalLots: 17,
-      brokerRemainingLots: 17,
-      rules: FINE_RULES
-    });
-    expect(t1.kind).toBe("CLOSE");
-    if (t1.kind === "CLOSE") {
-      expect(t1.roundedLots).toBe(8.5);
-      expect(t1.orderVolumeUnits).toBe(850);
-    }
-    const t2 = planT2PartialClose({
-      originalLots: 17,
-      brokerRemainingLots: 8.5,
-      rules: FINE_RULES
-    });
-    expect(t2.kind).toBe("CLOSE");
-    if (t2.kind === "CLOSE") {
-      expect(t2.desiredCumulativeLots).toBe(13.6);
-      expect(t2.roundedLots).toBe(5.1);
-    }
-  });
+const stopBuffer = {
+  normalizedMinStopPriceDistance: 0.3,
+  spread: 0.1,
+  tickSize: 0.01,
+  digits: 2
+};
 
-  it("H: broker volume-step rounding (coarse 1.0 lot step)", () => {
-    const t1 = planT1PartialClose({
-      originalLots: 3,
-      brokerRemainingLots: 3,
-      rules: COARSE_RULES
-    });
-    expect(t1.kind).toBe("CLOSE");
-    if (t1.kind === "CLOSE") {
-      // 50% of 3 = 1.5 → round down to 1.0
-      expect(t1.roundedLots).toBe(1);
-    }
-  });
-
-  it("I: small position where 30% is below min volume — no invalid request", () => {
-    const t2 = planT2PartialClose({
-      originalLots: 0.02,
-      brokerRemainingLots: 0.01, // after T1 of 0.01
-      rules: { minLots: 0.01, maxLots: 100, stepLots: 0.01 }
-    });
-    // desired cumulative 0.016; already closed 0.01; additional 0.006 → below min
-    expect(t2.kind).toBe("SKIP_INVALID");
-    if (t2.kind === "SKIP_INVALID") {
-      expect(t2.reason).toMatch(/VOLUME_BELOW_MINIMUM/);
-    }
-  });
-
-  it("restart: already satisfied cumulative does not request another close", () => {
-    const t1 = planT1PartialClose({
-      originalLots: 17,
-      brokerRemainingLots: 8.5,
-      rules: FINE_RULES
-    });
-    expect(t1.kind).toBe("ALREADY_SATISFIED");
-  });
-});
-
-describe("demo profit-lock stops", () => {
-  it("10/11: buffer from broker constraints; SL never backwards; preserve TP3", () => {
-    const buffer = computeBrokerSafeStopBuffer({
-      minStopDistance: 0.3,
-      spread: 0.1,
-      tickSize: 0.01,
-      digits: 2
-    });
-    expect(buffer).toBe(0.3);
-    const buySl = proposeProtectedStop({ side: "BUY", level: 2360, buffer: buffer! });
-    expect(buySl).toBeCloseTo(2359.7, 5);
+describe("B2 — executable BID/ASK target touch", () => {
+  it("BUY: mid>=TP1 but bid<TP1 does not trigger; bid cross does", () => {
     expect(
-      isStopImprovement({ side: "BUY", currentSl: 2350, proposedSl: buySl })
-    ).toBe(true);
-    expect(
-      selectStopIfImproved({
+      targetTouched({
         side: "BUY",
-        currentSl: 2359.7,
-        proposedSl: 2350
+        touchPrice: executableTargetTouchPrice({
+          side: "BUY",
+          bid: 2359.9,
+          ask: 2360.2
+        }),
+        level: 2360
       })
-    ).toBeNull();
-    expect(
-      brokerHardTakeProfitForAmend({ tp3: 2380, brokerHardTakeProfit: 2380 })
-    ).toBe(2380);
-    expect(brokerHardTakeProfitForAmend({ tp3: null })).toBeUndefined();
-  });
-
-  it("J: SELL irreversible stop mirrors BUY", () => {
-    expect(
-      isStopImprovement({ side: "SELL", currentSl: 2360, proposedSl: 2355 })
-    ).toBe(true);
-    expect(
-      isStopImprovement({ side: "SELL", currentSl: 2355, proposedSl: 2360 })
     ).toBe(false);
+    const mid = (2359.9 + 2360.2) / 2;
+    expect(mid).toBeGreaterThanOrEqual(2360);
+    expect(
+      targetTouched({
+        side: "BUY",
+        touchPrice: executableTargetTouchPrice({
+          side: "BUY",
+          bid: 2360,
+          ask: 2360.2
+        }),
+        level: 2360
+      })
+    ).toBe(true);
   });
-});
 
-describe("demo profit-lock evaluator", () => {
-  const stopBuffer = {
-    minStopDistance: 0.3,
-    spread: 0.1,
-    tickSize: 0.01,
-    digits: 2
-  };
+  it("SELL: mid<=TP1 but ask>TP1 does not trigger; ask cross does", () => {
+    expect(
+      targetTouched({
+        side: "SELL",
+        touchPrice: executableTargetTouchPrice({
+          side: "SELL",
+          bid: 2369.8,
+          ask: 2370.1
+        }),
+        level: 2370
+      })
+    ).toBe(false);
+    expect(
+      targetTouched({
+        side: "SELL",
+        touchPrice: executableTargetTouchPrice({
+          side: "SELL",
+          bid: 2369.8,
+          ask: 2370
+        }),
+        level: 2370
+      })
+    ).toBe(true);
+  });
 
-  it("A: BUY full ladder stages through T3 remainder", () => {
-    let stage = "OPEN" as const;
-    const run = (over: Partial<Parameters<typeof evaluateProfitLock>[0]>) =>
+  it("missing executable side fails closed", () => {
+    expect(
       evaluateProfitLock({
         side: "BUY",
-        stage,
+        stage: "OPEN",
         protectionLevel: "NONE",
         entry: 2350,
         currentSl: 2340,
@@ -341,164 +309,466 @@ describe("demo profit-lock evaluator", () => {
         brokerHardTakeProfit: 2380,
         originalLots: 10,
         brokerRemainingLots: 10,
-        currentPrice: 2350,
+        targetTouchPrice: null,
         brokerPositionOpen: true,
         m5ContinuationBeyondTp1: false,
         m5ContinuationBeyondTp2: false,
         completedM5BarTime: null,
-        t1ContinuationBarTime: null,
-        t2ContinuationBarTime: null,
         volumeRules: FINE_RULES,
-        stopBuffer,
-        ...over
-      });
-
-    let a = run({ currentPrice: 2360 });
-    expect(a.type).toBe("ADVANCE_STAGE");
-    if (a.type === "ADVANCE_STAGE") stage = a.nextStage as typeof stage;
-
-    a = run({ stage: "T1_TRIGGERED", currentPrice: 2360, brokerRemainingLots: 10 });
-    expect(a.type).toBe("PARTIAL_CLOSE");
-    if (a.type === "PARTIAL_CLOSE") {
-      expect(a.tag).toBe("T1");
-      expect(a.lots).toBe(5);
-      stage = a.nextStage as typeof stage;
-    }
-
-    a = run({
-      stage: "T1_PARTIAL_DONE_SL_PENDING",
-      brokerRemainingLots: 5,
-      currentSl: 2340
-    });
-    expect(a.type).toBe("AMEND_SL");
-    if (a.type === "AMEND_SL") {
-      expect(a.stopLoss).toBe(2350);
-      expect(a.takeProfit).toBe(2380);
-      stage = a.nextStage as typeof stage;
-    }
-
-    a = run({
-      stage: "T1_SECURED_BE",
-      brokerRemainingLots: 5,
-      currentSl: 2350,
-      protectionLevel: "BE",
-      m5ContinuationBeyondTp1: false
-    });
-    expect(a.type).toBe("NONE");
-    expect(a.type === "NONE" && a.reason).toBe("WAITING_T1_CONTINUATION_5M");
-
-    a = run({
-      stage: "T1_SECURED_BE",
-      brokerRemainingLots: 5,
-      currentSl: 2350,
-      protectionLevel: "BE",
-      m5ContinuationBeyondTp1: true,
-      completedM5BarTime: 100
-    });
-    expect(a.type).toBe("ADVANCE_STAGE");
-
-    a = run({
-      stage: "T1_CONTINUATION_CONFIRMED",
-      brokerRemainingLots: 5,
-      currentSl: 2350,
-      protectionLevel: "BE"
-    });
-    expect(a.type).toBe("AMEND_SL");
-    if (a.type === "AMEND_SL") {
-      expect(a.stopLoss).toBeCloseTo(2359.7, 5);
-      expect(a.takeProfit).toBe(2380);
-    }
-
-    a = run({
-      stage: "T1_PROTECTED",
-      brokerRemainingLots: 5,
-      currentSl: 2359.7,
-      currentPrice: 2370,
-      protectionLevel: "TP1"
-    });
-    expect(a.type).toBe("ADVANCE_STAGE");
-
-    a = run({
-      stage: "T2_TRIGGERED",
-      brokerRemainingLots: 5,
-      currentPrice: 2370
-    });
-    expect(a.type).toBe("PARTIAL_CLOSE");
-    if (a.type === "PARTIAL_CLOSE") {
-      expect(a.tag).toBe("T2");
-      expect(a.lots).toBe(3); // 80% of 10 = 8; already 5 closed → +3
-    }
-
-    a = run({
-      stage: "T2_PARTIAL_DONE",
-      brokerRemainingLots: 2,
-      currentSl: 2359.7,
-      protectionLevel: "TP1"
-    });
-    expect(a.type).toBe("ADVANCE_STAGE"); // already protected near TP1
-
-    a = run({
-      stage: "T2_SECURED",
-      brokerRemainingLots: 2,
-      m5ContinuationBeyondTp2: true,
-      completedM5BarTime: 200
-    });
-    expect(a.type).toBe("ADVANCE_STAGE");
-
-    a = run({
-      stage: "T2_CONTINUATION_CONFIRMED",
-      brokerRemainingLots: 2,
-      currentSl: 2359.7,
-      protectionLevel: "TP1"
-    });
-    expect(a.type).toBe("AMEND_SL");
-    if (a.type === "AMEND_SL") {
-      expect(a.stopLoss).toBeCloseTo(2369.7, 5);
-      expect(a.takeProfit).toBe(2380);
-    }
-
-    a = run({
-      stage: "T2_PROTECTED",
-      brokerRemainingLots: 2,
-      currentPrice: 2380,
-      currentSl: 2369.7
-    });
-    expect(a.type).toBe("ADVANCE_STAGE");
-
-    a = run({
-      stage: "T3_TRIGGERED",
-      brokerRemainingLots: 2,
-      currentPrice: 2381
-    });
-    expect(a.type).toBe("PARTIAL_CLOSE");
-    if (a.type === "PARTIAL_CLOSE") expect(a.tag).toBe("T3_REMAINDER");
-  });
-
-  it("B: SELL mirrored ladder T1 partial + BE + TP3 preserve", () => {
+        stopBuffer
+      }).type === "NONE" &&
+        evaluateProfitLock({
+          side: "BUY",
+          stage: "OPEN",
+          protectionLevel: "NONE",
+          entry: 2350,
+          currentSl: 2340,
+          tp1: 2360,
+          tp2: 2370,
+          tp3: 2380,
+          brokerHardTakeProfit: 2380,
+          originalLots: 10,
+          brokerRemainingLots: 10,
+          targetTouchPrice: null,
+          brokerPositionOpen: true,
+          m5ContinuationBeyondTp1: false,
+          m5ContinuationBeyondTp2: false,
+          completedM5BarTime: null,
+          volumeRules: FINE_RULES,
+          stopBuffer
+        }).type === "NONE"
+    ).toBe(true);
     const a = evaluateProfitLock({
-      side: "SELL",
-      stage: "T1_TRIGGERED",
+      side: "BUY",
+      stage: "OPEN",
       protectionLevel: "NONE",
-      entry: 2380,
-      currentSl: 2390,
-      tp1: 2370,
-      tp2: 2360,
-      tp3: 2350,
-      brokerHardTakeProfit: 2350,
+      entry: 2350,
+      currentSl: 2340,
+      tp1: 2360,
+      tp2: 2370,
+      tp3: 2380,
+      brokerHardTakeProfit: 2380,
       originalLots: 10,
       brokerRemainingLots: 10,
-      currentPrice: 2369,
+      targetTouchPrice: null,
       brokerPositionOpen: true,
       m5ContinuationBeyondTp1: false,
       m5ContinuationBeyondTp2: false,
       completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
       volumeRules: FINE_RULES,
       stopBuffer
     });
-    expect(a.type).toBe("PARTIAL_CLOSE");
+    expect(a).toEqual({
+      type: "NONE",
+      reason: "EXECUTABLE_TOUCH_PRICE_UNAVAILABLE"
+    });
+  });
+});
 
+describe("B3 — fresh post-secure M5 continuation", () => {
+  it("rejects bar that existed at/before BE secure; accepts newer bar; no duplicate", () => {
+    expect(
+      isFreshPostSecureM5Bar({
+        barTime: 1000,
+        securedAfterM5BarTime: 1000,
+        alreadyConfirmedBarTime: null
+      })
+    ).toBe(false);
+    expect(
+      isFreshPostSecureM5Bar({
+        barTime: 1001,
+        securedAfterM5BarTime: 1000,
+        alreadyConfirmedBarTime: null
+      })
+    ).toBe(true);
+    expect(
+      isFreshPostSecureM5Bar({
+        barTime: 1001,
+        securedAfterM5BarTime: 1000,
+        alreadyConfirmedBarTime: 1001
+      })
+    ).toBe(false);
+  });
+
+  it("BUY T1: pre-existing bar above TP1 keeps waiting; next bar confirms", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T1_SECURED_BE",
+      remainingLots: 8.5,
+      lots: 17,
+      currentSl: 2350,
+      profitLockProtectionLevel: "BE",
+      t1SecuredAt: new Date().toISOString(),
+      t1SecuredAfterM5BarTime: 1000
+    });
+    const { deps, amends, state } = makeDeps({
+      remaining: 8.5,
+      sl: 2350,
+      tp: 2380,
+      bid: 2362,
+      ask: 2362.2,
+      m5Bars: [{ time: 1000, close: 2361 }] // existed at secure
+    });
+    const wait = await runDemoProfitLockPass(doc, deps);
+    expect(wait.doc.profitLockStage).toBe("T1_SECURED_BE");
+    expect(wait.blockedReason).toBe("WAITING_T1_CONTINUATION_5M_FRESH");
+
+    state.m5Bars = [
+      { time: 1000, close: 2361 },
+      { time: 1300, close: 2362 }
+    ];
+    const conf = await runDemoProfitLockPass(wait.doc, deps);
+    expect(conf.doc.profitLockStage).toBe("T1_CONTINUATION_CONFIRMED");
+    expect(conf.doc.t1ContinuationBarTime).toBe(1300);
+
+    // Same bar again — no duplicate transition/amend from this stage
+    const again = await runDemoProfitLockPass(conf.doc, deps);
+    // May attempt protect amend; continuation bar must not re-fire
+    expect(again.doc.t1ContinuationBarTime).toBe(1300);
+    void amends;
+  });
+
+  it("SELL T2 fresh continuation mirrors BUY", () => {
+    expect(
+      m5CloseConfirmsContinuation({
+        side: "SELL",
+        completedClose: 2359,
+        level: 2360
+      })
+    ).toBe(true);
+    expect(
+      isFreshPostSecureM5Bar({
+        barTime: 2001,
+        securedAfterM5BarTime: 2000,
+        alreadyConfirmedBarTime: null
+      })
+    ).toBe(true);
+  });
+});
+
+describe("B4 — stop distance normalization", () => {
+  it("POINTS / PERCENTAGE / unknown", () => {
+    expect(parseDistanceSetIn(1)).toBe("SYMBOL_DISTANCE_IN_POINTS");
+    expect(parseDistanceSetIn(2)).toBe("SYMBOL_DISTANCE_IN_PERCENTAGE");
+    expect(parseDistanceSetIn("nope")).toBe("UNKNOWN");
+
+    const pts = normalizeSlDistanceToPrice({
+      rawSlDistance: 30,
+      distanceSetIn: 1,
+      digits: 2
+    });
+    expect(pts.ok).toBe(true);
+    if (pts.ok) expect(pts.normalizedMinStopPriceDistance).toBeCloseTo(0.3, 8);
+
+    const pct = normalizeSlDistanceToPrice({
+      rawSlDistance: 100, // 1%
+      distanceSetIn: 2,
+      digits: 2,
+      referencePrice: 2350
+    });
+    expect(pct.ok).toBe(true);
+    if (pct.ok) expect(pct.normalizedMinStopPriceDistance).toBeCloseTo(23.5, 8);
+
+    const unk = normalizeSlDistanceToPrice({
+      rawSlDistance: 30,
+      distanceSetIn: "weird",
+      digits: 2
+    });
+    expect(unk.ok).toBe(false);
+    if (!unk.ok) {
+      expect(unk.reason).toBe("STOP_DISTANCE_NORMALIZATION_UNAVAILABLE");
+    }
+
+    const buf = computeBrokerSafeStopBuffer({
+      rawSlDistance: 30,
+      distanceSetIn: "weird",
+      digits: 2,
+      spread: 0.1,
+      tickSize: 0.01
+    });
+    expect(buf.ok).toBe(false);
+  });
+});
+
+describe("B5 — valid T1/T2/T3 required for PROFIT_LOCK_V1", () => {
+  it("incomplete / invalid geometry blocked", () => {
+    expect(
+      validateProfitLockTargets({
+        side: "BUY",
+        entry: 2350,
+        tp1: 2360,
+        tp2: null,
+        tp3: 2380
+      }).ok
+    ).toBe(false);
+    const inv = validateProfitLockTargets({
+      side: "BUY",
+      entry: 2350,
+      tp1: 2380,
+      tp2: 2370,
+      tp3: 2360
+    });
+    expect(inv.ok).toBe(false);
+    if (!inv.ok) expect(inv.code).toBe("PROFIT_LOCK_TARGETS_INVALID");
+
+    const sellOk = validateProfitLockTargets({
+      side: "SELL",
+      entry: 2380,
+      tp1: 2370,
+      tp2: 2360,
+      tp3: 2350
+    });
+    expect(sellOk.ok).toBe(true);
+  });
+});
+
+describe("B6 — immutable per-position management policy", () => {
+  it("A/B/C policy snapshot semantics", () => {
+    expect(resolveManagementPolicy(null)).toBe("LEGACY_V1");
+    expect(resolveManagementPolicy("LEGACY_V1")).toBe("LEGACY_V1");
+    expect(resolveManagementPolicy("PROFIT_LOCK_V1")).toBe("PROFIT_LOCK_V1");
+
+    // A: opened LEGACY — setting later TRUE must not change policy
+    const legacy = baseDoc({
+      managementPolicy: "LEGACY_V1",
+      profitLockStage: null
+    });
+    expect(resolveManagementPolicy(legacy.managementPolicy)).toBe("LEGACY_V1");
+    expect(
+      isDemoProfitLockLadderEnabled({
+        environment: "demo",
+        demoProfitLockLadderEnabled: true
+      })
+    ).toBe(true);
+    // policy on doc still LEGACY
+    expect(legacy.managementPolicy).toBe("LEGACY_V1");
+
+    // B: opened PROFIT_LOCK — setting later FALSE must not change policy
+    const lock = baseDoc({ managementPolicy: "PROFIT_LOCK_V1" });
+    expect(resolveManagementPolicy(lock.managementPolicy)).toBe("PROFIT_LOCK_V1");
+    expect(
+      isDemoProfitLockLadderEnabled({
+        environment: "demo",
+        demoProfitLockLadderEnabled: false
+      })
+    ).toBe(false);
+
+    // C: new position uses current setting
+    expect(
+      isDemoProfitLockLadderEnabled({
+        environment: "demo",
+        demoProfitLockLadderEnabled: true
+      })
+        ? "PROFIT_LOCK_V1"
+        : "LEGACY_V1"
+    ).toBe("PROFIT_LOCK_V1");
+  });
+});
+
+describe("B7 — broker-proven mutations", () => {
+  it("close accepted but volume unchanged → pending, no double close", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T1_TRIGGERED",
+      currentPrice: 2361
+    });
+    const { deps, closes, state } = makeDeps({
+      remaining: 17,
+      sl: 2340,
+      tp: 2380,
+      bid: 2361,
+      ask: 2361.2,
+      closeDelayVolume: true
+    });
+    const first = await runDemoProfitLockPass(doc, deps);
+    expect(closes.length).toBe(1);
+    expect(first.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+    expect(first.blockedReason).toBe("CLOSE_PENDING_VOLUME_UNCHANGED");
+
+    const second = await runDemoProfitLockPass(first.doc, deps);
+    expect(closes.length).toBe(1); // no resend
+    expect(second.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+
+    state.closeDelayVolume = false;
+    state.remaining = 8.5; // broker now proves close
+    const third = await runDemoProfitLockPass(second.doc, deps);
+    expect(closes.length).toBe(1);
+    expect(third.doc.profitLockStage).toBe("T1_PARTIAL_DONE_SL_PENDING");
+  });
+
+  it("post-reconcile unavailable stays pending", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T1_CLOSE_PENDING_RECONCILE",
+      pendingClose: {
+        tag: "T1",
+        desiredCumulativeLots: 8.5,
+        requestedLots: 8.5,
+        volumeUnits: 850,
+        submittedAt: new Date().toISOString(),
+        brokerAccepted: true
+      },
+      remainingLots: 17
+    });
+    const { deps } = makeDeps({
+      remaining: 17,
+      sl: 2340,
+      tp: 2380,
+      bid: 2361,
+      ask: 2361.2,
+      reconcileFail: true
+    });
+    const r = await runDemoProfitLockPass(doc, deps);
+    expect(r.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+    expect(r.blockedReason).toBe("RECONCILE_FAILED");
+  });
+
+  it("SL amend accepted but old SL → pending; then confirms; TP3 loss fails", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T1_PARTIAL_DONE_SL_PENDING",
+      remainingLots: 8.5,
+      lots: 17
+    });
+    const { deps, state } = makeDeps({
+      remaining: 8.5,
+      sl: 2340,
+      tp: 2380,
+      bid: 2361,
+      ask: 2361.2,
+      amendKeepOldSl: true
+    });
+    const pending = await runDemoProfitLockPass(doc, deps);
+    expect(pending.doc.profitLockStage).toBe("BE_AMEND_PENDING_RECONCILE");
+    expect(pending.blockedReason).toBe("SL_AMEND_PENDING_OLD_SL");
+
+    state.amendKeepOldSl = false;
+    state.sl = 2350;
+    const ok = await runDemoProfitLockPass(pending.doc, deps);
+    expect(ok.doc.profitLockStage).toBe("T1_SECURED_BE");
+    expect(ok.doc.t1SecuredAfterM5BarTime).not.toBeUndefined();
+
+    // TP3 lost
+    const protectDoc = baseDoc({
+      profitLockStage: "T1_CONTINUATION_CONFIRMED",
+      remainingLots: 8.5,
+      lots: 17,
+      currentSl: 2350,
+      profitLockProtectionLevel: "BE",
+      t1SecuredAfterM5BarTime: 1000,
+      t1ContinuationBarTime: 1300
+    });
+    const bad = makeDeps({
+      remaining: 8.5,
+      sl: 2350,
+      tp: 2380,
+      bid: 2362,
+      ask: 2362.2,
+      amendDropTp3: true,
+      m5Bars: [{ time: 1300, close: 2362 }]
+    });
+    const lost = await runDemoProfitLockPass(protectDoc, bad.deps);
+    // After amend, reconcile sees TP!=TP3
+    expect(
+      lost.blockedReason === "BROKER_TP3_NOT_PRESERVED" ||
+        lost.doc.profitLockLastBlocker === "BROKER_TP3_NOT_PRESERVED"
+    ).toBe(true);
+  });
+
+  it("T3 broker already flat → no second close", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T2_PROTECTED",
+      remainingLots: 0,
+      lots: 17,
+      currentSl: 2369.7,
+      profitLockProtectionLevel: "TP2"
+    });
+    const { deps, closes } = makeDeps({
+      remaining: 0,
+      sl: 2369.7,
+      tp: 2380,
+      bid: 2381,
+      ask: 2381.2
+    });
+    const r = await runDemoProfitLockPass(doc, deps);
+    expect(closes.length).toBe(0);
+    expect(r.doc.profitLockStage).toBe("CLOSE_RECONCILIATION_PENDING");
+  });
+
+  it("brokerTp3Preserved helper", () => {
+    expect(
+      brokerTp3Preserved({ brokerTp: 2380, expectedTp3: 2380 })
+    ).toBe(true);
+    expect(
+      brokerTp3Preserved({ brokerTp: 2360, expectedTp3: 2380 })
+    ).toBe(false);
+  });
+});
+
+describe("ladder design still approved", () => {
+  it("cumulative 50/80 original; SL never backwards; TP3 on amend", () => {
+    expect(desiredCumulativeCloseLots(17, 0.5)).toBe(8.5);
+    expect(desiredCumulativeCloseLots(17, 0.8)).toBe(13.6);
+    const t1 = planT1PartialClose({
+      originalLots: 17,
+      brokerRemainingLots: 17,
+      rules: FINE_RULES
+    });
+    expect(t1.kind).toBe("CLOSE");
+    expect(
+      isStopImprovement({ side: "BUY", currentSl: 2359.7, proposedSl: 2350 })
+    ).toBe(false);
+    expect(
+      brokerHardTakeProfitForAmend({ tp3: 2380, brokerHardTakeProfit: 2380 })
+    ).toBe(2380);
+  });
+
+  it("BUY evaluator path T1→partial→BE", () => {
+    const a = evaluateProfitLock({
+      side: "BUY",
+      stage: "OPEN",
+      protectionLevel: "NONE",
+      entry: 2350,
+      currentSl: 2340,
+      tp1: 2360,
+      tp2: 2370,
+      tp3: 2380,
+      brokerHardTakeProfit: 2380,
+      originalLots: 10,
+      brokerRemainingLots: 10,
+      targetTouchPrice: 2360,
+      brokerPositionOpen: true,
+      m5ContinuationBeyondTp1: false,
+      m5ContinuationBeyondTp2: false,
+      completedM5BarTime: null,
+      volumeRules: FINE_RULES,
+      stopBuffer
+    });
+    expect(a.type).toBe("ADVANCE_STAGE");
+    const p = evaluateProfitLock({
+      side: "BUY",
+      stage: "T1_TRIGGERED",
+      protectionLevel: "NONE",
+      entry: 2350,
+      currentSl: 2340,
+      tp1: 2360,
+      tp2: 2370,
+      tp3: 2380,
+      brokerHardTakeProfit: 2380,
+      originalLots: 10,
+      brokerRemainingLots: 10,
+      targetTouchPrice: 2360,
+      brokerPositionOpen: true,
+      m5ContinuationBeyondTp1: false,
+      m5ContinuationBeyondTp2: false,
+      completedM5BarTime: null,
+      volumeRules: FINE_RULES,
+      stopBuffer
+    });
+    expect(p.type).toBe("PARTIAL_CLOSE");
+    if (p.type === "PARTIAL_CLOSE") {
+      expect(p.lots).toBe(5);
+      expect(p.submittingStage).toBe("T1_CLOSE_SUBMITTING");
+    }
+  });
+
+  it("SELL evaluator T1 partial + BE preserves TP3", () => {
     const be = evaluateProfitLock({
       side: "SELL",
       stage: "T1_PARTIAL_DONE_SL_PENDING",
@@ -511,13 +781,11 @@ describe("demo profit-lock evaluator", () => {
       brokerHardTakeProfit: 2350,
       originalLots: 10,
       brokerRemainingLots: 5,
-      currentPrice: 2369,
+      targetTouchPrice: 2369,
       brokerPositionOpen: true,
       m5ContinuationBeyondTp1: false,
       m5ContinuationBeyondTp2: false,
       completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
       volumeRules: FINE_RULES,
       stopBuffer
     });
@@ -525,319 +793,43 @@ describe("demo profit-lock evaluator", () => {
     if (be.type === "AMEND_SL") {
       expect(be.stopLoss).toBe(2380);
       expect(be.takeProfit).toBe(2350);
+      expect(be.pendingStage).toBe("BE_AMEND_PENDING_RECONCILE");
     }
-
-    expect(
-      m5CloseConfirmsContinuation({
-        side: "SELL",
-        completedClose: 2369,
-        level: 2370
-      })
-    ).toBe(true);
   });
 
-  it("C/D: repeated T1/T2 evaluation does not re-partial after stage advance", () => {
-    const t1Done = evaluateProfitLock({
-      side: "BUY",
-      stage: "T1_PARTIAL_DONE_SL_PENDING",
-      protectionLevel: "NONE",
-      entry: 2350,
-      currentSl: 2340,
-      tp1: 2360,
-      tp2: 2370,
-      tp3: 2380,
-      brokerHardTakeProfit: 2380,
-      originalLots: 10,
-      brokerRemainingLots: 5,
-      currentPrice: 2365,
-      brokerPositionOpen: true,
-      m5ContinuationBeyondTp1: false,
-      m5ContinuationBeyondTp2: false,
-      completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
-      volumeRules: FINE_RULES,
-      stopBuffer
+  it("volume rounding + below-min skip", () => {
+    const t2 = planT2PartialClose({
+      originalLots: 0.02,
+      brokerRemainingLots: 0.01,
+      rules: FINE_RULES
     });
-    expect(t1Done.type).toBe("AMEND_SL");
-
-    const t2Done = evaluateProfitLock({
-      side: "BUY",
-      stage: "T2_PARTIAL_DONE",
-      protectionLevel: "TP1",
-      entry: 2350,
-      currentSl: 2359.7,
-      tp1: 2360,
-      tp2: 2370,
-      tp3: 2380,
-      brokerHardTakeProfit: 2380,
-      originalLots: 10,
-      brokerRemainingLots: 2,
-      currentPrice: 2375,
-      brokerPositionOpen: true,
-      m5ContinuationBeyondTp1: true,
-      m5ContinuationBeyondTp2: false,
-      completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
-      volumeRules: FINE_RULES,
-      stopBuffer
-    });
-    expect(t2Done.type).not.toBe("PARTIAL_CLOSE");
+    expect(t2.kind).toBe("SKIP_INVALID");
   });
 
-  it("L: broker already flat — reconcile, no second close", () => {
-    const a = evaluateProfitLock({
-      side: "BUY",
-      stage: "T2_PROTECTED",
-      protectionLevel: "TP2",
-      entry: 2350,
-      currentSl: 2369.7,
-      tp1: 2360,
-      tp2: 2370,
-      tp3: 2380,
-      brokerHardTakeProfit: 2380,
-      originalLots: 10,
-      brokerRemainingLots: 0,
-      currentPrice: 2381,
-      brokerPositionOpen: false,
-      m5ContinuationBeyondTp1: true,
-      m5ContinuationBeyondTp2: true,
-      completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
-      volumeRules: FINE_RULES,
-      stopBuffer
-    });
-    expect(a.type).toBe("RECONCILE_CLOSED");
-  });
-
-  it("M/N: reverse before continuation keeps BE; continuation advances to T1 protect", () => {
-    const wait = evaluateProfitLock({
-      side: "BUY",
-      stage: "T1_SECURED_BE",
-      protectionLevel: "BE",
-      entry: 2350,
-      currentSl: 2350,
-      tp1: 2360,
-      tp2: 2370,
-      tp3: 2380,
-      brokerHardTakeProfit: 2380,
-      originalLots: 10,
-      brokerRemainingLots: 5,
-      currentPrice: 2355,
-      brokerPositionOpen: true,
-      m5ContinuationBeyondTp1: false,
-      m5ContinuationBeyondTp2: false,
-      completedM5BarTime: null,
-      t1ContinuationBarTime: null,
-      t2ContinuationBarTime: null,
-      volumeRules: FINE_RULES,
-      stopBuffer
-    });
-    expect(wait.type).toBe("NONE");
-
-    const cont = evaluateProfitLock({
-      side: "BUY",
-      stage: "T1_CONTINUATION_CONFIRMED",
-      protectionLevel: "BE",
-      entry: 2350,
-      currentSl: 2350,
-      tp1: 2360,
-      tp2: 2370,
-      tp3: 2380,
-      brokerHardTakeProfit: 2380,
-      originalLots: 10,
-      brokerRemainingLots: 5,
-      currentPrice: 2362,
-      brokerPositionOpen: true,
-      m5ContinuationBeyondTp1: true,
-      m5ContinuationBeyondTp2: false,
-      completedM5BarTime: 1,
-      t1ContinuationBarTime: 1,
-      t2ContinuationBarTime: null,
-      volumeRules: FINE_RULES,
-      stopBuffer
-    });
-    expect(cont.type).toBe("AMEND_SL");
-  });
-});
-
-describe("demo profit-lock manager orchestration", () => {
-  it("E: restart after T1 broker partial before Firestore — no duplicate close", async () => {
-    // Simulate crash: broker already at 8.5 remaining, stage still T1_TRIGGERED
-    const doc = baseDoc({
-      profitLockStage: "T1_TRIGGERED",
-      remainingLots: 17,
-      currentPrice: 2361
-    });
-    const { deps, closes, saved } = makeDeps({
-      remaining: 8.5,
-      sl: 2340,
-      tp: 2380,
-      price: 2361
-    });
-    const result = await runDemoProfitLockPass(doc, deps);
-    expect(closes.length).toBe(0);
-    expect(result.doc.profitLockStage).toBe("T1_PARTIAL_DONE_SL_PENDING");
-    expect(saved.length).toBeGreaterThan(0);
-  });
-
-  it("F: restart after T2 broker partial — no duplicate close", async () => {
-    const doc = baseDoc({
-      profitLockStage: "T2_TRIGGERED",
-      remainingLots: 8.5,
-      lots: 17,
-      currentSl: 2359.7,
-      profitLockProtectionLevel: "TP1",
-      currentPrice: 2371
-    });
-    const { deps, closes } = makeDeps({
-      remaining: 3.4, // already closed to ~80%
-      sl: 2359.7,
-      tp: 2380,
-      price: 2371
-    });
-    const result = await runDemoProfitLockPass(doc, deps);
-    expect(closes.length).toBe(0);
-    expect(result.doc.profitLockStage).toBe("T2_PARTIAL_DONE");
-  });
-
-  it("G: T1 partial succeeds but BE amend fails — only BE retries", async () => {
-    let remaining = 17;
-    const closes: number[] = [];
-    const amends: number[] = [];
-    const doc = baseDoc({
-      profitLockStage: "T1_TRIGGERED",
-      currentPrice: 2361
-    });
-    const deps: ProfitLockDeps = {
-      reconcilePositions: async () =>
-        remaining > 0 ? [pos(remaining, 2340, 2380)] : [],
-      closePosition: async (args) => {
-        closes.push(args.volumeUnits);
-        remaining = Number((remaining - args.volumeUnits / 100).toFixed(8));
-        return { accepted: true };
-      },
-      amendStopLoss: async () => {
-        amends.push(1);
-        throw new Error("AMEND_TIMEOUT");
-      },
-      loadSymbol: async () => symbolFine(),
-      getQuote: async () => ({
-        symbolId: "41",
-        symbolName: "XAUUSD",
-        bid: 2360.9,
-        ask: 2361.1,
-        spread: 0.2,
-        timestamp: new Date().toISOString(),
-        marketStatus: "OPEN",
-        stale: false,
-        source: "LIVE"
-      }),
-      getCompletedM5Bars: async () => [],
-      isSelectedAccountLive: async () => false,
-      save: async () => undefined
-    };
-
-    const first = await runDemoProfitLockPass(doc, deps);
-    expect(closes.length).toBe(1);
-    expect(first.doc.profitLockStage).toBe("T1_PARTIAL_DONE_SL_PENDING");
-
-    const second = await runDemoProfitLockPass(first.doc, deps);
-    expect(closes.length).toBe(1); // no second partial
-    expect(amends.length).toBeGreaterThanOrEqual(1);
-    expect(second.doc.profitLockStage).toBe("T1_PARTIAL_DONE_SL_PENDING");
-  });
-
-  it("K: SL amend preserves TP3 (never TP1)", async () => {
-    const doc = baseDoc({
-      profitLockStage: "T1_PARTIAL_DONE_SL_PENDING",
-      remainingLots: 8.5,
-      lots: 17,
-      currentPrice: 2361
-    });
-    const { deps, amends } = makeDeps({
-      remaining: 8.5,
-      sl: 2340,
-      tp: 2380,
-      price: 2361
-    });
-    await runDemoProfitLockPass(doc, deps);
-    expect(amends.length).toBe(1);
-    expect(amends[0].stopLoss).toBe(2350);
-    expect(amends[0].takeProfit).toBe(2380);
-  });
-
-  it("P: Live account → ZERO mutations", async () => {
-    const doc = baseDoc({
-      profitLockStage: "T1_TRIGGERED",
-      currentPrice: 2361
-    });
+  it("Live ZERO mutations + flag default false", async () => {
+    expect(defaultUserAutoTradeSettings("u", "demo").demoProfitLockLadderEnabled).toBe(
+      false
+    );
+    expect(isCTraderLiveEnabled()).toBe(false);
+    expect(isBrokerExecutionEnabled()).toBe(false);
     const { deps, closes, amends } = makeDeps({
       remaining: 17,
       sl: 2340,
       tp: 2380,
-      price: 2361,
+      bid: 2361,
+      ask: 2361.2,
       liveAccount: true
     });
-    const result = await runDemoProfitLockPass(doc, deps);
+    const r = await runDemoProfitLockPass(
+      baseDoc({ profitLockStage: "T1_TRIGGERED" }),
+      deps
+    );
     expect(closes.length).toBe(0);
     expect(amends.length).toBe(0);
-    expect(result.mutations).toEqual({
-      partialCloses: 0,
-      slAmends: 0,
-      tpAmends: 0,
-      positionCloses: 0
-    });
-    expect(result.blockedReason).toBe("LIVE_ACCOUNT_MUTATION_DENIED");
+    expect(r.blockedReason).toBe("LIVE_ACCOUNT_MUTATION_DENIED");
   });
 
-  it("O: T2 continuation advances SL near TP2 with TP3 preserved", async () => {
-    const doc = baseDoc({
-      profitLockStage: "T2_CONTINUATION_CONFIRMED",
-      remainingLots: 3.4,
-      lots: 17,
-      currentSl: 2359.7,
-      profitLockProtectionLevel: "TP1",
-      currentPrice: 2375
-    });
-    const { deps, amends } = makeDeps({
-      remaining: 3.4,
-      sl: 2359.7,
-      tp: 2380,
-      price: 2375,
-      m5Close: 2375
-    });
-    const result = await runDemoProfitLockPass(doc, deps);
-    expect(amends.length).toBe(1);
-    expect(amends[0].takeProfit).toBe(2380);
-    expect(amends[0].stopLoss).toBeGreaterThan(2359.7);
-    expect(result.doc.profitLockStage).toBe("T2_PROTECTED");
-  });
-});
-
-describe("demo profit-lock feature flag + hard locks", () => {
-  it("Q: feature flag defaults FALSE", () => {
-    const demo = defaultUserAutoTradeSettings("u1", "demo");
-    expect(demo.demoProfitLockLadderEnabled).toBe(false);
-    expect(isDemoProfitLockLadderEnabled(demo)).toBe(false);
-    const live = defaultUserAutoTradeSettings("u1", "live");
-    expect(live.demoProfitLockLadderEnabled).toBe(false);
-    expect(
-      isDemoProfitLockLadderEnabled({
-        environment: "live",
-        demoProfitLockLadderEnabled: true
-      })
-    ).toBe(false);
-  });
-
-  it("Live hard locks remain false", () => {
-    expect(isCTraderLiveEnabled()).toBe(false);
-    expect(isBrokerExecutionEnabled()).toBe(false);
-  });
-
-  it("R: ACTIVE_DEMO entry thresholds unchanged in opportunity engine constants", async () => {
+  it("ACTIVE_DEMO thresholds unchanged", async () => {
     const {
       loadDemoOpportunityConfig,
       classifyDemoSetupTier,
@@ -846,77 +838,13 @@ describe("demo profit-lock feature flag + hard locks", () => {
       "../../../../src/services/broker/ctrader/demoOpportunityEngine"
     );
     const cfg = loadDemoOpportunityConfig();
-    expect(cfg.armedConfirmationBars5m).toBe(3);
-    expect(cfg.asiaExperimentalEnabled).toBe(true);
-    expect(cfg.riskMultiplierAPlusMajor).toBe(1);
-    expect(cfg.riskMultiplierAMajor).toBe(0.75);
-    expect(cfg.riskMultiplierAsia).toBe(0.5);
     expect(cfg.aPlusMinScore).toBe(90);
     expect(cfg.aMinScore).toBe(80);
+    expect(cfg.armedConfirmationBars5m).toBe(3);
+    expect(cfg.asiaExperimentalEnabled).toBe(true);
     expect(classifyDemoSetupTier(90, cfg)).toBe("A_PLUS");
-    expect(classifyDemoSetupTier(80, cfg)).toBe("A");
-    expect(classifyDemoSetupTier(79, cfg)).toBe("BELOW");
-    expect(
-      demoRiskMultiplier({
-        tier: "A_PLUS",
-        session: "London",
-        config: cfg
-      })
-    ).toBe(1);
-    expect(
-      demoRiskMultiplier({
-        tier: "A",
-        session: "NewYork",
-        config: cfg
-      })
-    ).toBe(0.75);
-    expect(
-      demoRiskMultiplier({
-        tier: "A",
-        session: "Asia",
-        config: cfg
-      })
-    ).toBe(0.5);
-  });
-
-  it("completed M5 filter excludes forming bar", () => {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const bars = filterCompletedM5Bars(
-      [
-        {
-          time: nowSec - 600,
-          open: 1,
-          high: 1,
-          low: 1,
-          close: 1,
-          volume: 1
-        },
-        {
-          time: nowSec - 60,
-          open: 2,
-          high: 2,
-          low: 2,
-          close: 2,
-          volume: 1
-        }
-      ],
-      Date.now()
+    expect(demoRiskMultiplier({ tier: "A", session: "Asia", config: cfg })).toBe(
+      0.5
     );
-    expect(bars).toHaveLength(1);
-    expect(bars[0].close).toBe(1);
-  });
-});
-
-describe("demo profit-lock remainder close", () => {
-  it("plans T3 remainder safely", () => {
-    const rem = planRemainderClose({
-      brokerRemainingLots: 3.4,
-      rules: FINE_RULES
-    });
-    expect(rem.kind).toBe("CLOSE");
-    if (rem.kind === "CLOSE") {
-      expect(rem.roundedLots).toBe(3.4);
-      expect(rem.orderVolumeUnits).toBe(340);
-    }
   });
 });

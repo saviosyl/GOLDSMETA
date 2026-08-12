@@ -5,12 +5,18 @@
 
 import type {
   DemoProfitLockState,
+  PositionManagementPolicy,
   ProfitLockProtectionLevel,
   ProfitLockStage
 } from "./demoProfitLockTypes";
 import { emptyProfitLockState } from "./demoProfitLockTypes";
 
-export type { ProfitLockStage, ProfitLockProtectionLevel, DemoProfitLockState };
+export type {
+  ProfitLockStage,
+  ProfitLockProtectionLevel,
+  DemoProfitLockState,
+  PositionManagementPolicy
+};
 export { emptyProfitLockState };
 
 export type PositionManagementState =

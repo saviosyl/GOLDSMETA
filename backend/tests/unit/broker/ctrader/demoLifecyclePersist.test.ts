@@ -57,6 +57,38 @@ describe("createDemoPositionLifecycle persist", () => {
     savePositionLifecycle.mockResolvedValue(undefined);
   });
 
+  it("B1: PROFIT_LOCK_V1 keeps strategy TP1 when broker hard TP is TP3", async () => {
+    getPositionLifecycle.mockResolvedValue(null);
+    const doc = await createDemoPositionLifecycle({
+      uid: "uid",
+      correlationId: "corr_b1_tp_split",
+      brokerOrderId: "ord-tp3",
+      brokerPositionId: "pos-1",
+      accountId: "48014710",
+      accountMasked: "48…10",
+      side: "BUY",
+      entry: 2350,
+      stopLoss: 2340,
+      takeProfit: 2380, // broker-returned hard TP3 — must never become strategy TP1
+      tp1: 2360,
+      tp2: 2370,
+      tp3: 2380,
+      managementPolicy: "PROFIT_LOCK_V1",
+      brokerHardTakeProfit: 2380,
+      lots: 17,
+      qualificationStage: "LIVE_QUALIFICATION",
+      decisionId: "d1",
+      source: "demo_auto",
+      openedAt: "2026-08-12T11:00:00.000Z"
+    });
+    expect(doc.tp1).toBe(2360);
+    expect(doc.tp2).toBe(2370);
+    expect(doc.tp3).toBe(2380);
+    expect(doc.brokerHardTakeProfit).toBe(2380);
+    expect(doc.managementPolicy).toBe("PROFIT_LOCK_V1");
+    expect(doc.profitLockStage).toBe("OPEN");
+  });
+
   it("A/C: creates OPEN lifecycle with brokerPositionId exactly once", async () => {
     getPositionLifecycle.mockResolvedValue(null);
     const doc = await createDemoPositionLifecycle({

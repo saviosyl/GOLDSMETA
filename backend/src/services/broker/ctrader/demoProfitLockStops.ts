@@ -1,35 +1,63 @@
 /**
  * Irreversible stop rules + broker-safe buffer for Demo profit-lock ladder.
  * SL amendments must preserve broker hard TP = TP3 whenever TP3 exists.
+ * Buffer consumes only normalized PRICE stop distance — never raw slDistance.
  */
 
 import type { ProfitLockProtectionLevel } from "./demoProfitLockTypes";
 import { PROFIT_LOCK_PROTECTION_RANK } from "./demoProfitLockTypes";
+import { normalizeSlDistanceToPrice } from "./ctraderStopDistance";
 
 export type StopBufferInputs = {
-  /** Broker symbol min stop distance (price units). */
-  minStopDistance: number | null | undefined;
+  /** Already-normalized price distance (preferred). */
+  normalizedMinStopPriceDistance?: number | null;
+  /** Raw ProtoOASymbol.slDistance + distanceSetIn when normalized not precomputed. */
+  rawSlDistance?: number | null;
+  distanceSetIn?: string | number | null;
+  digits?: number | null | undefined;
+  /** Reference price for PERCENTAGE distance mode. */
+  referencePrice?: number | null;
   /** Current executable spread (price units). */
   spread: number | null | undefined;
   /** Symbol tick size. */
   tickSize: number | null | undefined;
-  /** Symbol digits — used to derive tick when tickSize missing. */
-  digits: number | null | undefined;
 };
+
+export type StopBufferResult =
+  | { ok: true; buffer: number }
+  | { ok: false; reason: "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE" };
 
 /**
  * Broker-derived safety buffer for placing SL near a TP level.
  * Never an arbitrary fixed XAUUSD dollar amount.
  */
-export function computeBrokerSafeStopBuffer(input: StopBufferInputs): number | null {
-  const candidates: number[] = [];
+export function computeBrokerSafeStopBuffer(
+  input: StopBufferInputs
+): StopBufferResult {
+  let normalizedStop: number | null = null;
   if (
-    typeof input.minStopDistance === "number" &&
-    Number.isFinite(input.minStopDistance) &&
-    input.minStopDistance > 0
+    typeof input.normalizedMinStopPriceDistance === "number" &&
+    Number.isFinite(input.normalizedMinStopPriceDistance) &&
+    input.normalizedMinStopPriceDistance > 0
   ) {
-    candidates.push(input.minStopDistance);
+    normalizedStop = input.normalizedMinStopPriceDistance;
+  } else if (input.rawSlDistance != null) {
+    const norm = normalizeSlDistanceToPrice({
+      rawSlDistance: input.rawSlDistance,
+      distanceSetIn: input.distanceSetIn,
+      digits: input.digits,
+      referencePrice: input.referencePrice
+    });
+    if (!norm.ok) {
+      return { ok: false, reason: "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE" };
+    }
+    normalizedStop = norm.normalizedMinStopPriceDistance;
+  } else {
+    // Without proven stop-distance metadata, fail closed (keep BE).
+    return { ok: false, reason: "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE" };
   }
+
+  const candidates: number[] = [normalizedStop];
   if (
     typeof input.spread === "number" &&
     Number.isFinite(input.spread) &&
@@ -51,9 +79,7 @@ export function computeBrokerSafeStopBuffer(input: StopBufferInputs): number | n
   ) {
     candidates.push(Math.pow(10, -input.digits));
   }
-  if (candidates.length === 0) return null;
-  // One full buffer unit past the level — enough for spread/min-stop rejection.
-  return Math.max(...candidates);
+  return { ok: true, buffer: Math.max(...candidates) };
 }
 
 export function proposeProtectedStop(args: {
@@ -70,7 +96,6 @@ export function proposeProtectedStop(args: {
  * Irreversible SL rule (strict improvement for amendments):
  * BUY: newSL > currentSL
  * SELL: newSL < currentSL
- * Equal stops are treated as already protected (no amend / no worsen).
  */
 export function isStopImprovement(args: {
   side: "BUY" | "SELL";
@@ -105,11 +130,13 @@ export function selectStopIfImproved(args: {
   proposedSl: number | null;
 }): number | null {
   if (args.proposedSl == null || !Number.isFinite(args.proposedSl)) return null;
-  if (!isStopImprovement(args as {
-    side: "BUY" | "SELL";
-    currentSl: number | null | undefined;
-    proposedSl: number;
-  })) {
+  if (
+    !isStopImprovement({
+      side: args.side,
+      currentSl: args.currentSl,
+      proposedSl: args.proposedSl
+    })
+  ) {
     return null;
   }
   return args.proposedSl;
@@ -118,14 +145,14 @@ export function selectStopIfImproved(args: {
 /**
  * Take-profit value to send on SL amendments when the ladder is active.
  * Always preserve TP3 when present — never accidentally rewrite to TP1.
- * Returns `undefined` to omit the field (leave broker TP unchanged) when TP3 missing.
  */
 export function brokerHardTakeProfitForAmend(args: {
   tp3: number | null | undefined;
   brokerHardTakeProfit?: number | null | undefined;
 }): number | undefined {
   const hard =
-    args.brokerHardTakeProfit != null && Number.isFinite(args.brokerHardTakeProfit)
+    args.brokerHardTakeProfit != null &&
+    Number.isFinite(args.brokerHardTakeProfit)
       ? args.brokerHardTakeProfit
       : args.tp3 != null && Number.isFinite(args.tp3)
         ? args.tp3
@@ -133,15 +160,35 @@ export function brokerHardTakeProfitForAmend(args: {
   return hard != null ? hard : undefined;
 }
 
-export function protectionLevelForStopTarget(
-  target: "BE" | "TP1" | "TP2"
-): ProfitLockProtectionLevel {
-  return target;
-}
-
 export function mayRaiseProtection(
   current: ProfitLockProtectionLevel,
   next: ProfitLockProtectionLevel
 ): boolean {
   return PROFIT_LOCK_PROTECTION_RANK[next] >= PROFIT_LOCK_PROTECTION_RANK[current];
+}
+
+/** Broker SL is at least as protective as requested. */
+export function brokerSlConfirmsRequested(args: {
+  side: "BUY" | "SELL";
+  brokerSl: number | null | undefined;
+  requestedSl: number;
+}): boolean {
+  if (args.brokerSl == null || !Number.isFinite(args.brokerSl)) return false;
+  return isStopNotWorse({
+    side: args.side,
+    currentSl: args.requestedSl,
+    proposedSl: args.brokerSl
+  }) || Math.abs(args.brokerSl - args.requestedSl) < 1e-6;
+}
+
+/** Broker hard TP still equals expected TP3. */
+export function brokerTp3Preserved(args: {
+  brokerTp: number | null | undefined;
+  expectedTp3: number | null | undefined;
+}): boolean {
+  if (args.expectedTp3 == null || !Number.isFinite(args.expectedTp3)) {
+    return true;
+  }
+  if (args.brokerTp == null || !Number.isFinite(args.brokerTp)) return false;
+  return Math.abs(args.brokerTp - args.expectedTp3) < 1e-6;
 }

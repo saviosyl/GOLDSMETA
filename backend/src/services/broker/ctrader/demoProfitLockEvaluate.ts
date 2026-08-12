@@ -1,6 +1,6 @@
 /**
  * Pure Demo profit-lock ladder evaluator.
- * Deterministic transitions from stage + broker facts + price/candles.
+ * Deterministic transitions from stage + broker facts + executable prices/candles.
  * No I/O — safe for exhaustive unit tests.
  */
 
@@ -23,6 +23,7 @@ import {
   planT2PartialClose,
   type VolumeRulesLots
 } from "./demoProfitLockVolume";
+import { targetTouched } from "./demoProfitLockTargets";
 
 export type ProfitLockEvalInput = {
   side: "BUY" | "SELL";
@@ -36,16 +37,21 @@ export type ProfitLockEvalInput = {
   brokerHardTakeProfit: number | null;
   originalLots: number;
   brokerRemainingLots: number;
-  /** Mid / executable price for target touch detection. */
-  currentPrice: number | null;
+  /**
+   * Executable close-side price for target touch:
+   * BUY → BID, SELL → ASK. Never mid.
+   * null → fail closed (do not declare target reached).
+   */
+  targetTouchPrice: number | null;
   /** True when broker position is absent (already closed). */
   brokerPositionOpen: boolean;
-  /** Completed M5 close beyond TP1 in trade direction. */
+  /**
+   * Fresh completed M5 close beyond TP1/TP2 AFTER secured baseline.
+   * Caller must ensure bar time > t1SecuredAfterM5BarTime / t2SecuredAfterM5BarTime.
+   */
   m5ContinuationBeyondTp1: boolean;
   m5ContinuationBeyondTp2: boolean;
   completedM5BarTime: number | null;
-  t1ContinuationBarTime: number | null;
-  t2ContinuationBarTime: number | null;
   volumeRules: VolumeRulesLots;
   stopBuffer: StopBufferInputs;
 };
@@ -58,16 +64,20 @@ export type ProfitLockAction =
       lots: number;
       volumeUnits: number;
       desiredCumulativeLots: number;
-      nextStage: ProfitLockStage;
+      submittingStage: ProfitLockStage;
+      pendingStage: ProfitLockStage;
+      doneStage: ProfitLockStage;
       dedupeKey: string;
     }
   | {
       type: "AMEND_SL";
       stopLoss: number;
       takeProfit: number | undefined;
+      pendingStage: ProfitLockStage;
       nextStage: ProfitLockStage;
       nextProtection: ProfitLockProtectionLevel;
       reason: string;
+      amendKind: "BE" | "TP1_PROTECT" | "TP2_ENSURE" | "TP2_PROTECT";
       dedupeKey: string;
     }
   | {
@@ -84,15 +94,6 @@ export type ProfitLockAction =
       reason: string;
     };
 
-function priceHit(
-  side: "BUY" | "SELL",
-  price: number | null,
-  level: number | null
-): boolean {
-  if (price == null || level == null) return false;
-  return side === "BUY" ? price >= level : price <= level;
-}
-
 function advance(
   current: ProfitLockStage,
   next: ProfitLockStage
@@ -100,27 +101,28 @@ function advance(
   return canAdvanceProfitLockStage(current, next) ? next : current;
 }
 
+function maxProt(
+  a: ProfitLockProtectionLevel,
+  b: ProfitLockProtectionLevel
+): ProfitLockProtectionLevel {
+  const rank = { NONE: 0, BE: 1, TP1: 2, TP2: 3 } as const;
+  return rank[a] >= rank[b] ? a : b;
+}
+
 /**
- * Evaluate one management tick. Caller persists + executes returned action.
+ * Evaluate one management tick for non-pending stages.
+ * Pending SUBMITTING/RECONCILE stages are handled by the manager via broker proof.
  */
 export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction {
   const stage = input.stage;
-  const cumClosed = brokerClosedLots(
-    input.originalLots,
-    input.brokerRemainingLots
-  );
 
-  // Position already flat at broker — never send another close.
   if (!input.brokerPositionOpen || input.brokerRemainingLots <= 1e-8) {
     if (stage === "CLOSED") {
       return { type: "NONE", reason: "ALREADY_CLOSED" };
     }
     return {
       type: "RECONCILE_CLOSED",
-      nextStage:
-        stage === "CLOSE_RECONCILIATION_PENDING"
-          ? "CLOSE_RECONCILIATION_PENDING"
-          : "CLOSE_RECONCILIATION_PENDING",
+      nextStage: "CLOSE_RECONCILIATION_PENDING",
       reason: "BROKER_POSITION_FLAT"
     };
   }
@@ -130,20 +132,39 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
     brokerHardTakeProfit: input.brokerHardTakeProfit
   });
 
-  // --- T3 path (hard TP or price crossed) ---
+  const touch = input.targetTouchPrice;
+
+  // Pending stages: manager reconciles — evaluator idles.
+  if (
+    stage === "T1_CLOSE_SUBMITTING" ||
+    stage === "T1_CLOSE_PENDING_RECONCILE" ||
+    stage === "T2_CLOSE_SUBMITTING" ||
+    stage === "T2_CLOSE_PENDING_RECONCILE" ||
+    stage === "T3_CLOSE_SUBMITTING" ||
+    stage === "T3_CLOSE_PENDING_RECONCILE" ||
+    stage === "BE_AMEND_PENDING_RECONCILE" ||
+    stage === "T1_PROTECT_AMEND_PENDING_RECONCILE" ||
+    stage === "T2_ENSURE_AMEND_PENDING_RECONCILE" ||
+    stage === "T2_PROTECT_AMEND_PENDING_RECONCILE"
+  ) {
+    return { type: "NONE", reason: "PENDING_BROKER_RECONCILE" };
+  }
+
   if (
     stage === "T2_PROTECTED" ||
     stage === "T2_CONTINUATION_CONFIRMED" ||
     stage === "T2_SECURED" ||
     stage === "T3_TRIGGERED"
   ) {
-    if (priceHit(input.side, input.currentPrice, input.tp3) || stage === "T3_TRIGGERED") {
+    if (
+      targetTouched({ side: input.side, touchPrice: touch, level: input.tp3 }) ||
+      stage === "T3_TRIGGERED"
+    ) {
       if (stage !== "T3_TRIGGERED" && canAdvanceProfitLockStage(stage, "T3_TRIGGERED")) {
-        // First observe T3, then close-remainder only if still open.
         return {
           type: "ADVANCE_STAGE",
           nextStage: "T3_TRIGGERED",
-          reason: "TP3_REACHED"
+          reason: "TP3_REACHED_EXECUTABLE"
         };
       }
       const rem = planRemainderClose({
@@ -166,25 +187,28 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
         lots: rem.roundedLots,
         volumeUnits: rem.orderVolumeUnits,
         desiredCumulativeLots: input.originalLots,
-        nextStage: "CLOSE_RECONCILIATION_PENDING",
+        submittingStage: "T3_CLOSE_SUBMITTING",
+        pendingStage: "T3_CLOSE_PENDING_RECONCILE",
+        doneStage: "CLOSE_RECONCILIATION_PENDING",
         dedupeKey: "profit_lock:t3_remainder"
       };
     }
   }
 
-  // --- OPEN → wait for TP1 ---
   if (stage === "OPEN") {
-    if (!priceHit(input.side, input.currentPrice, input.tp1)) {
+    if (touch == null) {
+      return { type: "NONE", reason: "EXECUTABLE_TOUCH_PRICE_UNAVAILABLE" };
+    }
+    if (!targetTouched({ side: input.side, touchPrice: touch, level: input.tp1 })) {
       return { type: "NONE", reason: "WAITING_TP1" };
     }
     return {
       type: "ADVANCE_STAGE",
       nextStage: advance(stage, "T1_TRIGGERED"),
-      reason: "TP1_REACHED"
+      reason: "TP1_REACHED_EXECUTABLE"
     };
   }
 
-  // --- T1_TRIGGERED → partial 50% original ---
   if (stage === "T1_TRIGGERED") {
     const plan = planT1PartialClose({
       originalLots: input.originalLots,
@@ -195,8 +219,7 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       return {
         type: "ADVANCE_STAGE",
         nextStage: "T1_PARTIAL_DONE_SL_PENDING",
-        reason: "T1_PARTIAL_ALREADY_SATISFIED_BY_BROKER",
-        nextProtection: input.protectionLevel
+        reason: "T1_PARTIAL_ALREADY_SATISFIED_BY_BROKER"
       };
     }
     if (plan.kind === "SKIP_INVALID") {
@@ -208,12 +231,13 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       lots: plan.roundedLots,
       volumeUnits: plan.orderVolumeUnits,
       desiredCumulativeLots: plan.desiredCumulativeLots,
-      nextStage: "T1_PARTIAL_DONE_SL_PENDING",
+      submittingStage: "T1_CLOSE_SUBMITTING",
+      pendingStage: "T1_CLOSE_PENDING_RECONCILE",
+      doneStage: "T1_PARTIAL_DONE_SL_PENDING",
       dedupeKey: "profit_lock:t1_partial"
     };
   }
 
-  // --- T1 partial done → SL to BE only (never re-partial) ---
   if (stage === "T1_PARTIAL_DONE_SL_PENDING") {
     if (input.entry == null) {
       return { type: "NONE", reason: "ENTRY_MISSING_FOR_BE" };
@@ -224,7 +248,6 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       proposedSl: input.entry
     });
     if (proposed == null) {
-      // Already at/better than BE — treat as secured.
       return {
         type: "ADVANCE_STAGE",
         nextStage: "T1_SECURED_BE",
@@ -236,40 +259,43 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       type: "AMEND_SL",
       stopLoss: proposed,
       takeProfit: hardTp,
+      pendingStage: "BE_AMEND_PENDING_RECONCILE",
       nextStage: "T1_SECURED_BE",
       nextProtection: "BE",
       reason: "MOVE_SL_TO_BREAKEVEN_AFTER_T1",
+      amendKind: "BE",
       dedupeKey: `profit_lock:t1_be:${proposed}`
     };
   }
 
-  // --- T1 secured BE → wait for completed 5M continuation beyond TP1 ---
   if (stage === "T1_SECURED_BE") {
     if (!input.m5ContinuationBeyondTp1) {
-      return { type: "NONE", reason: "WAITING_T1_CONTINUATION_5M" };
+      return { type: "NONE", reason: "WAITING_T1_CONTINUATION_5M_FRESH" };
     }
     return {
       type: "ADVANCE_STAGE",
       nextStage: "T1_CONTINUATION_CONFIRMED",
       nextProtection: "BE",
-      reason: "T1_CONTINUATION_5M_CONFIRMED",
+      reason: "T1_CONTINUATION_5M_CONFIRMED_FRESH",
       t1ContinuationBarTime: input.completedM5BarTime
     };
   }
 
-  // --- T1 continuation → protect around TP1 ---
   if (stage === "T1_CONTINUATION_CONFIRMED") {
     if (input.tp1 == null) {
       return { type: "NONE", reason: "TP1_MISSING" };
     }
-    const buffer = computeBrokerSafeStopBuffer(input.stopBuffer);
-    if (buffer == null) {
-      return { type: "NONE", reason: "STOP_BUFFER_UNAVAILABLE_KEEP_BE" };
+    const buf = computeBrokerSafeStopBuffer({
+      ...input.stopBuffer,
+      referencePrice: input.tp1
+    });
+    if (!buf.ok) {
+      return { type: "NONE", reason: buf.reason };
     }
     const raw = proposeProtectedStop({
       side: input.side,
       level: input.tp1,
-      buffer
+      buffer: buf.buffer
     });
     const proposed = selectStopIfImproved({
       side: input.side,
@@ -288,26 +314,29 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       type: "AMEND_SL",
       stopLoss: proposed,
       takeProfit: hardTp,
+      pendingStage: "T1_PROTECT_AMEND_PENDING_RECONCILE",
       nextStage: "T1_PROTECTED",
       nextProtection: "TP1",
       reason: "PROTECT_AROUND_TP1",
+      amendKind: "TP1_PROTECT",
       dedupeKey: `profit_lock:t1_protect:${proposed}`
     };
   }
 
-  // --- T1_PROTECTED → wait TP2 ---
   if (stage === "T1_PROTECTED") {
-    if (!priceHit(input.side, input.currentPrice, input.tp2)) {
+    if (touch == null) {
+      return { type: "NONE", reason: "EXECUTABLE_TOUCH_PRICE_UNAVAILABLE" };
+    }
+    if (!targetTouched({ side: input.side, touchPrice: touch, level: input.tp2 })) {
       return { type: "NONE", reason: "WAITING_TP2" };
     }
     return {
       type: "ADVANCE_STAGE",
       nextStage: "T2_TRIGGERED",
-      reason: "TP2_REACHED"
+      reason: "TP2_REACHED_EXECUTABLE"
     };
   }
 
-  // --- T2_TRIGGERED → partial to 80% cumulative original ---
   if (stage === "T2_TRIGGERED") {
     const plan = planT2PartialClose({
       originalLots: input.originalLots,
@@ -330,12 +359,13 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       lots: plan.roundedLots,
       volumeUnits: plan.orderVolumeUnits,
       desiredCumulativeLots: plan.desiredCumulativeLots,
-      nextStage: "T2_PARTIAL_DONE",
+      submittingStage: "T2_CLOSE_SUBMITTING",
+      pendingStage: "T2_CLOSE_PENDING_RECONCILE",
+      doneStage: "T2_PARTIAL_DONE",
       dedupeKey: "profit_lock:t2_partial"
     };
   }
 
-  // --- T2 partial done → ensure SL at least around TP1, then secured ---
   if (stage === "T2_PARTIAL_DONE") {
     if (input.tp1 == null) {
       return {
@@ -344,8 +374,11 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
         reason: "T2_SECURED_NO_TP1_LEVEL"
       };
     }
-    const buffer = computeBrokerSafeStopBuffer(input.stopBuffer);
-    if (buffer == null) {
+    const buf = computeBrokerSafeStopBuffer({
+      ...input.stopBuffer,
+      referencePrice: input.tp1
+    });
+    if (!buf.ok) {
       return {
         type: "ADVANCE_STAGE",
         nextStage: "T2_SECURED",
@@ -356,7 +389,7 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
     const raw = proposeProtectedStop({
       side: input.side,
       level: input.tp1,
-      buffer
+      buffer: buf.buffer
     });
     const proposed = selectStopIfImproved({
       side: input.side,
@@ -375,39 +408,42 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       type: "AMEND_SL",
       stopLoss: proposed,
       takeProfit: hardTp,
+      pendingStage: "T2_ENSURE_AMEND_PENDING_RECONCILE",
       nextStage: "T2_SECURED",
       nextProtection: "TP1",
       reason: "ENSURE_TP1_PROTECTION_AFTER_T2",
+      amendKind: "TP2_ENSURE",
       dedupeKey: `profit_lock:t2_ensure_tp1:${proposed}`
     };
   }
 
-  // --- T2 secured → wait 5M continuation beyond TP2 ---
   if (stage === "T2_SECURED") {
     if (!input.m5ContinuationBeyondTp2) {
-      return { type: "NONE", reason: "WAITING_T2_CONTINUATION_5M" };
+      return { type: "NONE", reason: "WAITING_T2_CONTINUATION_5M_FRESH" };
     }
     return {
       type: "ADVANCE_STAGE",
       nextStage: "T2_CONTINUATION_CONFIRMED",
-      reason: "T2_CONTINUATION_5M_CONFIRMED",
+      reason: "T2_CONTINUATION_5M_CONFIRMED_FRESH",
       t2ContinuationBarTime: input.completedM5BarTime
     };
   }
 
-  // --- T2 continuation → protect around TP2 ---
   if (stage === "T2_CONTINUATION_CONFIRMED") {
     if (input.tp2 == null) {
       return { type: "NONE", reason: "TP2_MISSING" };
     }
-    const buffer = computeBrokerSafeStopBuffer(input.stopBuffer);
-    if (buffer == null) {
-      return { type: "NONE", reason: "STOP_BUFFER_UNAVAILABLE_KEEP_TP1" };
+    const buf = computeBrokerSafeStopBuffer({
+      ...input.stopBuffer,
+      referencePrice: input.tp2
+    });
+    if (!buf.ok) {
+      return { type: "NONE", reason: buf.reason };
     }
     const raw = proposeProtectedStop({
       side: input.side,
       level: input.tp2,
-      buffer
+      buffer: buf.buffer
     });
     const proposed = selectStopIfImproved({
       side: input.side,
@@ -426,34 +462,31 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       type: "AMEND_SL",
       stopLoss: proposed,
       takeProfit: hardTp,
+      pendingStage: "T2_PROTECT_AMEND_PENDING_RECONCILE",
       nextStage: "T2_PROTECTED",
       nextProtection: "TP2",
       reason: "PROTECT_AROUND_TP2",
+      amendKind: "TP2_PROTECT",
       dedupeKey: `profit_lock:t2_protect:${proposed}`
     };
   }
 
   if (stage === "T2_PROTECTED") {
-    if (!priceHit(input.side, input.currentPrice, input.tp3)) {
+    if (touch == null) {
+      return { type: "NONE", reason: "EXECUTABLE_TOUCH_PRICE_UNAVAILABLE" };
+    }
+    if (!targetTouched({ side: input.side, touchPrice: touch, level: input.tp3 })) {
       return { type: "NONE", reason: "WAITING_TP3" };
     }
     return {
       type: "ADVANCE_STAGE",
       nextStage: "T3_TRIGGERED",
-      reason: "TP3_REACHED"
+      reason: "TP3_REACHED_EXECUTABLE"
     };
   }
 
-  void cumClosed;
+  void brokerClosedLots;
   return { type: "NONE", reason: `IDLE_AT_${stage}` };
-}
-
-function maxProt(
-  a: ProfitLockProtectionLevel,
-  b: ProfitLockProtectionLevel
-): ProfitLockProtectionLevel {
-  const rank = { NONE: 0, BE: 1, TP1: 2, TP2: 3 } as const;
-  return rank[a] >= rank[b] ? a : b;
 }
 
 /** Completed M5 close confirms continuation beyond a level. */
@@ -466,4 +499,26 @@ export function m5CloseConfirmsContinuation(args: {
   return args.side === "BUY"
     ? args.completedClose > args.level
     : args.completedClose < args.level;
+}
+
+/** Bar must be strictly newer than secured baseline and prior confirmation. */
+export function isFreshPostSecureM5Bar(args: {
+  barTime: number | null;
+  securedAfterM5BarTime: number | null;
+  alreadyConfirmedBarTime: number | null;
+}): boolean {
+  if (args.barTime == null) return false;
+  if (
+    args.securedAfterM5BarTime != null &&
+    !(args.barTime > args.securedAfterM5BarTime)
+  ) {
+    return false;
+  }
+  if (
+    args.alreadyConfirmedBarTime != null &&
+    !(args.barTime > args.alreadyConfirmedBarTime)
+  ) {
+    return false;
+  }
+  return true;
 }

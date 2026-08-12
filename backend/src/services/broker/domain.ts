@@ -106,7 +106,22 @@ export interface BrokerSymbol {
   minCommission: number | null;
   swapLong: number | null;
   swapShort: number | null;
+  /**
+   * @deprecated Prefer rawSlDistance + distanceSetIn + normalizedMinStopPriceDistance.
+   * May be unset when units cannot be normalized.
+   */
   minStopDistance: number | null;
+  /** Raw ProtoOASymbol.slDistance (unit given by distanceSetIn). */
+  rawSlDistance: number | null;
+  /** ProtoOASymbol.distanceSetIn enum name/value. */
+  distanceSetIn: string | null;
+  /** Raw ProtoOASymbol.tpDistance when present. */
+  rawTpDistance: number | null;
+  /**
+   * Normalized min stop distance in PRICE units when conversion is proven.
+   * Null when STOP_DISTANCE_NORMALIZATION_UNAVAILABLE.
+   */
+  normalizedMinStopPriceDistance: number | null;
   guaranteedStopAvailable: boolean | null;
   tradingScheduleId: string | null;
   metadataComplete: boolean;

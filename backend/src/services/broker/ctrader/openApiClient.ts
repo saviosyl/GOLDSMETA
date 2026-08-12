@@ -17,6 +17,7 @@ import {
   parseScheduleIntervals
 } from "./marketSchedule";
 import { parseCTraderVolumeRules } from "./volumeUnits";
+import { normalizeSlDistanceToPrice } from "./ctraderStopDistance";
 import {
   computeAuthoritativeMarginSnapshot,
   parseExpectedMarginEntries,
@@ -1343,6 +1344,24 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
         } catch {
           volumeRules = null;
         }
+        const rawSlDistance = asNumber(detail.slDistance);
+        const distanceSetInRaw =
+          detail.distanceSetIn != null
+            ? (detail.distanceSetIn as string | number)
+            : undefined;
+        // POINTS normalize without a market price; PERCENTAGE left null until
+        // profit-lock supplies a reference price.
+        let normalizedMinStopPriceDistance: number | undefined;
+        if (rawSlDistance != null && digits != null) {
+          const norm = normalizeSlDistanceToPrice({
+            rawSlDistance,
+            distanceSetIn: distanceSetInRaw ?? 1,
+            digits
+          });
+          if (norm.ok) {
+            normalizedMinStopPriceDistance = norm.normalizedMinStopPriceDistance;
+          }
+        }
         const enriched: RawCTraderSymbol = {
           symbolId: candidate.symbolId,
           symbolName: candidate.symbolName,
@@ -1357,10 +1376,12 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           stepVolume: volumeRules?.stepLots,
           maxVolume: volumeRules?.maxLots,
           lotSize: volumeRules?.contractSize,
-          minStopDistance:
-            asNumber(detail.slDistance) ??
-            asNumber(detail.minStopDistance) ??
-            undefined,
+          // Keep raw cTrader distance metadata; do not treat slDistance as price.
+          rawSlDistance: rawSlDistance ?? undefined,
+          distanceSetIn: distanceSetInRaw,
+          rawTpDistance: asNumber(detail.tpDistance) ?? undefined,
+          normalizedMinStopPriceDistance,
+          minStopDistance: normalizedMinStopPriceDistance,
           commissionType:
             typeof detail.commissionType === "string"
               ? detail.commissionType
@@ -1905,6 +1926,9 @@ export function createMockOpenApiClient(opts?: {
             stepVolume: 0.01,
             maxVolume: 100,
             lotSize: 100,
+            rawSlDistance: 30,
+            distanceSetIn: "SYMBOL_DISTANCE_IN_POINTS",
+            normalizedMinStopPriceDistance: 0.3,
             minStopDistance: 0.3
           }
         ])
