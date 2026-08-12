@@ -234,16 +234,32 @@ export function QualificationDashboard({
       <details className="gm-qual-history" data-testid="qual-history">
         <summary>View qualification history</summary>
         <ul>
-          {(view.recentEvaluations ?? []).slice(0, 12).map((e, i) => (
+          {(view.recentEvaluations ?? []).slice(0, 12).map((e, i) => {
+            const rich = String(e.finalReason || e.reasonLabel || "").trim();
+            const opportunityLabel =
+              rich.includes("A+") ||
+              rich.includes("ARMED") ||
+              rich.includes("FAST CONFIRMATION") ||
+              rich.includes("ORDER SUBMITTED") ||
+              rich.includes("EXPIRED") ||
+              rich.includes("CANCELLED") ||
+              rich.includes("PLAN REFRESH") ||
+              rich.includes("waiting 5M");
+            return (
             <li key={`${e.at}-${i}`} data-testid="qual-eval-row">
-              {e.direction} · {e.outcome === "QUALIFIED" ? "Passed" : "Blocked"} ·{" "}
-              {e.reasonLabel}
-              {e.confidence != null ? ` · ${Math.round(e.confidence)}%` : ""}
+              {opportunityLabel
+                ? rich
+                : `${e.direction} · ${e.outcome === "QUALIFIED" ? "Passed" : "Blocked"} · ${e.reasonLabel}${
+                    e.confidence != null
+                      ? ` · setup score ${Math.round(e.confidence)}/100`
+                      : ""
+                  }`}
               {e.failed?.includes("SPREAD_TOO_WIDE") && e.spread != null && e.maxSpread != null
                 ? ` · Spread ${e.spread} (max ${e.maxSpread})`
                 : ""}
             </li>
-          ))}
+            );
+          })}
           {view.recentPreviews.map((p, i) => (
             <li key={p.id}>
               Preview #{view.preview.completed - i} {p.direction} Passed

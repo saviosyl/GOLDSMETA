@@ -370,6 +370,18 @@ export function AutoTradePage() {
 
   const activityFeed = useMemo(() => {
     const evalLines = (qualification?.recentEvaluations ?? []).slice(0, 12).map((ev, i) => {
+      const rich =
+        String(ev.finalReason || ev.reasonLabel || "").trim();
+      const isOpportunityLabel =
+        rich.includes("A+") ||
+        rich.includes("ARMED") ||
+        rich.includes("FAST CONFIRMATION") ||
+        rich.includes("ORDER SUBMITTED") ||
+        rich.includes("EXPIRED") ||
+        rich.includes("CANCELLED") ||
+        rich.includes("PLAN REFRESH") ||
+        rich.includes("waiting 5M") ||
+        rich.includes("bars remaining");
       const dir = String(ev.direction || "").toUpperCase();
       const score =
         ev.confidence != null && Number.isFinite(ev.confidence)
@@ -377,9 +389,11 @@ export function AutoTradePage() {
           : null;
       const head = score ? `${dir} ${score}` : dir || "SETUP";
       const skipped = ev.outcome !== "QUALIFIED";
-      const msg = skipped
-        ? `${head} skipped — ${ev.reasonLabel || "blocked"}.`
-        : `${head} — ${ev.reasonLabel || "qualified"}.`;
+      const msg = isOpportunityLabel
+        ? rich
+        : skipped
+          ? `${head} skipped — ${ev.reasonLabel || "blocked"}.`
+          : `${head} — ${ev.reasonLabel || "qualified"}.`;
       return {
         id: `eval-${ev.at}-${i}`,
         at: ev.at,
