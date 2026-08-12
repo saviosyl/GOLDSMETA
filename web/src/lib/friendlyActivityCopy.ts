@@ -18,6 +18,18 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
 export function friendlyActivityMessage(raw: string | null | undefined): string {
   if (!raw) return "";
   let out = String(raw);
+  // Preserve ACTIVE_DEMO opportunity-engine Activity lines as authored.
+  if (
+    out.includes("A+") ||
+    out.includes("ARMED") ||
+    out.includes("FAST CONFIRMATION") ||
+    out.includes("ORDER SUBMITTED") ||
+    out.includes("waiting 5M") ||
+    out.includes("bars remaining") ||
+    out.includes("PLAN REFRESH UNAVAILABLE")
+  ) {
+    return out;
+  }
   for (const [re, repl] of REPLACEMENTS) {
     out = out.replace(re, repl);
   }

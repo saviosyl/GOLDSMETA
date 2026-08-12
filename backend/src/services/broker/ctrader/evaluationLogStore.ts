@@ -93,14 +93,20 @@ export function reasonLabelFor(code: string): string {
     CANDIDATE_INVALIDATED: "Armed setup invalidated",
     CANDIDATE_INVALIDATED_OPPOSITE: "Armed setup cancelled by opposite signal",
     CANDIDATE_INVALIDATED_AUTOTRADE_OFF: "Armed setup cancelled — AutoTrade off",
-    CANDIDATE_INVALIDATED_STALE: "Armed setup cancelled — stale / expired",
+    CANDIDATE_INVALIDATED_STALE:
+      "Armed candidate expired — no confirmation within window",
     ENTRY_CONFIRMATION_RECEIVED: "Entry confirmation received",
     EXECUTION_ALREADY_ATTEMPTED: "Duplicate execution suppressed",
     FINAL_SAFETY_FAILED: "Final safety check rejected execution",
     QUALIFICATION_NOT_STARTED: "Demo Auto qualification was not started",
     EXECUTION_AUTHORITY_OFF: "Demo Auto authority OFF",
     BROKER_SUBMITTED: "Broker Demo order submitted",
-    BROKER_BOUNDARY_REACHED: "Reached Demo order submission boundary"
+    BROKER_BOUNDARY_REACHED: "Reached Demo order submission boundary",
+    PLAN_REFRESH_UNAVAILABLE:
+      "Session plan refresh unavailable — still monitoring armed candidate",
+    FAST_CONFIRMATION_RECEIVED: "A+ fast confirmation — ready to execute",
+    ARMED_WINDOW_EXPIRED: "Armed confirmation window expired",
+    INVALIDATION_PRICE_BREACHED: "Invalidation / stop price breached"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
@@ -114,6 +120,23 @@ export function formatEvaluationActivityMessage(row: {
   reasonLabel?: string | null;
   finalReason?: string | null;
 }): string {
+  const fr = String(row.finalReason || "").trim();
+  // Prefer rich ACTIVE_DEMO opportunity-engine labels written into finalReason.
+  if (
+    fr &&
+    (fr.includes("A+") ||
+      fr.includes("ARMED") ||
+      fr.includes("FAST CONFIRMATION") ||
+      fr.includes("ORDER SUBMITTED") ||
+      fr.includes("EXPIRED") ||
+      fr.includes("CANCELLED") ||
+      fr.includes("PLAN_REFRESH_UNAVAILABLE") ||
+      fr.includes("PLAN REFRESH UNAVAILABLE") ||
+      fr.includes("waiting 5M") ||
+      fr.includes("bars remaining"))
+  ) {
+    return fr;
+  }
   const dir = String(row.direction || "WAIT").toUpperCase();
   const score =
     row.confidence != null && Number.isFinite(row.confidence)

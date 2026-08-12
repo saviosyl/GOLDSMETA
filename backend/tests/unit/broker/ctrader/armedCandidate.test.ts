@@ -238,7 +238,7 @@ describe("armed candidate lifecycle", () => {
     expect(result.candidate?.status).toBe("INVALIDATED");
   });
 
-  it("stale / new-session: expired session-plan validUntil invalidates armed candidate", () => {
+  it("ACTIVE_DEMO: session-plan validUntil alone does NOT invalidate armed candidate", () => {
     const armed = armedFrom();
     const result = evaluateArmedCandidateLifecycle({
       uid: "u1",
@@ -250,8 +250,52 @@ describe("armed candidate lifecycle", () => {
       confirmationState: "OUTSIDE_ZONE",
       sessionPlanValidUntil: "2026-08-10T15:05:00.000Z"
     });
+    expect(result.action).toBe("KEEP_WAITING");
+    expect(result.candidate?.status).toBe("ARMED");
+  });
+
+  it("ACTIVE_DEMO: NO_VALID_PLAN refresh keeps armed (PLAN_REFRESH_UNAVAILABLE)", () => {
+    const armed = armedFrom();
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:08:00.000Z",
+      autoTradePermitted: true,
+      existing: armed,
+      qualifiedSetup: null,
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      planRefreshUnavailable: true,
+      structurallyInvalid: false
+    });
+    expect(result.action).toBe("KEEP_WAITING");
+    expect(result.candidate?.status).toBe("ARMED");
+    expect(result.candidate?.planRefreshNote).toBe("PLAN_REFRESH_UNAVAILABLE");
+  });
+
+  it("ACTIVE_DEMO: opposite meaningful confirmation invalidates", () => {
+    const buyArmed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "sig-buy-1",
+      planSourceKey: "plan_buy",
+      entry: 3390,
+      stopLoss: 3380,
+      takeProfit: 3410,
+      confidence: 95,
+      setupScore: 92,
+      nowIso: "2026-08-10T15:00:00.000Z"
+    });
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:08:00.000Z",
+      autoTradePermitted: true,
+      existing: buyArmed,
+      qualifiedSetup: null,
+      confirmationRequired: true,
+      confirmationState: "REJECTION_CONFIRMED" // bearish — invalidates BUY
+    });
     expect(result.action).toBe("INVALIDATE");
-    expect(result.reasonCode).toBe("CANDIDATE_INVALIDATED_STALE");
+    expect(result.candidate?.status).toBe("INVALIDATED");
   });
 
   it("TEST H — low-quality WAIT setups are never armed", () => {

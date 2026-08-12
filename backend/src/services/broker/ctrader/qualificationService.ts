@@ -19,6 +19,19 @@ import {
   evaluateControlledDemoOrderAuthority,
   resolveDemoAutoAuthorityForUser
 } from "./demoAutoExecutionAuthority";
+import {
+  applyRiskMultiplier,
+  barsRemainingInArmedWindow,
+  classifyDemoSetupTier,
+  demoRiskMultiplier,
+  demoSessionPolicyAllows,
+  formatOpportunityActivity,
+  hasMeaningfulStructuralSupport,
+  isHardSessionPlanInvalidator,
+  isPlanRefreshUnavailableState,
+  loadDemoOpportunityConfig,
+  resolveTradingSessionBucket
+} from "./demoOpportunityEngine";
 import { calculateCTraderVolume } from "./sizing";
 import { resolvePepperstoneXauUsdDemoMapping } from "./brokerUnitMappings";
 import { calculatePepperstoneXauUsdDemoVolume } from "./demoXauUsdSizing";
@@ -319,7 +332,9 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
         at: r.at,
         direction: r.direction,
         outcome: r.outcome,
+        reasonCode: r.reasonCode,
         reasonLabel: r.reasonLabel,
+        finalReason: r.finalReason ?? null,
         confidence: r.confidence,
         spread: r.spread,
         maxSpread: r.maxSpread,
@@ -790,16 +805,41 @@ export async function processDecisionForQualification(args: {
       }
     }
 
+    const oppConfig = loadDemoOpportunityConfig();
+    const planLifecycle = sessionPlan?.lifecycleState ?? null;
+    // ACTIVE_DEMO: NO_VALID_PLAN / NO_TRADE alone must NOT kill an armed thesis.
+    const planRefreshUnavailable =
+      Boolean(existingArmed) &&
+      oppConfig.mode === "ACTIVE_DEMO" &&
+      isPlanRefreshUnavailableState(planLifecycle);
+    const oppositePlanDirection =
+      Boolean(existingArmed) &&
+      sessionPlan?.direction != null &&
+      existingArmed != null &&
+      sessionPlan.direction !== existingArmed.direction &&
+      sessionPlan.direction !== "WAIT" &&
+      // Only treat as hard invalidator when plan is still a real directional plan
+      !isPlanRefreshUnavailableState(planLifecycle);
     const structurallyInvalid =
       Boolean(existingArmed) &&
-      (sessionPlan?.lifecycleState === "NO_VALID_PLAN" ||
-        sessionPlan?.lifecycleState === "INVALIDATED" ||
-        sessionPlan?.lifecycleState === "EXPIRED" ||
-        sessionPlan?.lifecycleState === "NO_TRADE" ||
-        (sessionPlan?.direction != null &&
-          existingArmed != null &&
-          sessionPlan.direction !== existingArmed.direction &&
-          sessionPlan.direction !== "WAIT"));
+      (isHardSessionPlanInvalidator(planLifecycle) ||
+        (oppConfig.mode === "STRICT" &&
+          (isPlanRefreshUnavailableState(planLifecycle) ||
+            planLifecycle === "NO_TRADE")) ||
+        oppositePlanDirection);
+
+    const decisionReasons: string[] = Array.isArray(
+      (d as { reasons?: string[] }).reasons
+    )
+      ? ((d as { reasons?: string[] }).reasons as string[])
+      : Array.isArray((d as { reasonCodes?: string[] }).reasonCodes)
+        ? ((d as { reasonCodes?: string[] }).reasonCodes as string[])
+        : [];
+
+    const midPrice =
+      quote?.bid != null && quote?.ask != null
+        ? (quote.bid + quote.ask) / 2
+        : quote?.bid ?? quote?.ask ?? null;
 
     const life = evaluateArmedCandidateLifecycle({
       uid,
@@ -812,19 +852,48 @@ export async function processDecisionForQualification(args: {
           : alreadyCountedArmed
             ? { ...existingArmed, executionAttempted: true }
             : existingArmed,
-      qualifiedSetup,
+      qualifiedSetup: qualifiedSetup
+        ? {
+            ...qualifiedSetup,
+            takeProfit2: geom.tp2,
+            takeProfit3: geom.tp3,
+            originalReasons: decisionReasons
+          }
+        : null,
       confirmationRequired: settings.confirmationCandleRequired,
       confirmationState,
       candleClassification,
-      sessionPlanValidUntil: sessionPlan?.validUntil ?? null,
+      sessionPlanValidUntil: null, // do not bind armed expiry to plan refresh
       structurallyInvalid,
       structuralReason: structurallyInvalid
-        ? `SESSION_PLAN_${sessionPlan?.lifecycleState ?? "INVALID"}`
-        : null
+        ? oppositePlanDirection
+          ? "SESSION_PLAN_OPPOSITE_DIRECTION"
+          : `SESSION_PLAN_${planLifecycle ?? "INVALID"}`
+        : null,
+      planRefreshUnavailable,
+      markPrice: midPrice,
+      allowFastConfirmation:
+        oppConfig.mode === "ACTIVE_DEMO" &&
+        classifyDemoSetupTier(qualifiedSetup?.setupScore ?? existingArmed?.setupScore) ===
+          "A_PLUS" &&
+        hasMeaningfulStructuralSupport(decisionReasons)
     });
 
     if (life.action === "INVALIDATE" && life.candidate) {
       await clearArmedCandidate(uid).catch(() => undefined);
+      const invTier = classifyDemoSetupTier(life.candidate.setupScore);
+      const expired =
+        life.candidate.invalidationReason === "ARMED_WINDOW_EXPIRED" ||
+        life.reasonCode === "CANDIDATE_INVALIDATED_STALE";
+      const cancelLabel = formatOpportunityActivity({
+        tier: invTier,
+        direction: life.candidate.direction,
+        score: life.candidate.setupScore ?? life.candidate.confidence,
+        event: expired ? "EXPIRED" : "CANCELLED_INVALIDATED",
+        invalidationDetail:
+          life.candidate.invalidationReason?.replace(/_/g, " ").toLowerCase() ||
+          "setup invalidated"
+      });
       logger.info("AutoTrade armed candidate invalidated", {
         uid,
         candidateId: life.candidate.candidateId,
@@ -840,7 +909,8 @@ export async function processDecisionForQualification(args: {
           stage: state,
           direction: life.candidate.direction,
           signalId: life.candidate.signalId,
-          confidence: life.candidate.confidence,
+          decisionId: life.candidate.signalId,
+          confidence: life.candidate.setupScore ?? life.candidate.confidence,
           entry: life.candidate.entry,
           stopLoss: life.candidate.stopLoss,
           takeProfit: life.candidate.takeProfit,
@@ -849,9 +919,10 @@ export async function processDecisionForQualification(args: {
           maxSpread: settings.maxSpread,
           outcome: "IGNORED",
           reasonCode: life.reasonCode,
-          reasonLabel: reasonLabelFor(life.reasonCode),
+          reasonLabel: cancelLabel,
           passed: [],
-          failed: [life.candidate.invalidationReason ?? life.reasonCode]
+          failed: [life.candidate.invalidationReason ?? life.reasonCode],
+          finalReason: cancelLabel
         });
       } catch {
         /* ignore */
@@ -863,7 +934,8 @@ export async function processDecisionForQualification(args: {
       life.action === "READY_TO_EXECUTE" ||
       (life.action === "REPLACE_WITH_OPPOSITE" &&
         (life.reasonCode === "OPPOSITE_SETUP_READY" ||
-          life.reasonCode === "ENTRY_CONFIRMATION_RECEIVED"));
+          life.reasonCode === "ENTRY_CONFIRMATION_RECEIVED" ||
+          life.reasonCode === "FAST_CONFIRMATION_RECEIVED"));
 
     if (
       !readyToExecute &&
@@ -880,12 +952,32 @@ export async function processDecisionForQualification(args: {
         return { handled: true, message: "armed_duplicate_suppressed" };
       }
       await saveArmedCandidate({ ...life.candidate, uid }).catch(() => undefined);
+      const tier = classifyDemoSetupTier(life.candidate.setupScore);
+      const barsLeft = barsRemainingInArmedWindow({
+        armedAt: life.candidate.armedAt,
+        nowIso: new Date().toISOString(),
+        bars5m: oppConfig.armedConfirmationBars5m
+      });
+      const activityEvent =
+        life.reasonCode === "PLAN_REFRESH_UNAVAILABLE" ||
+        life.candidate.planRefreshNote === "PLAN_REFRESH_UNAVAILABLE"
+          ? ("PLAN_REFRESH_UNAVAILABLE" as const)
+          : ("ARMED_WAITING" as const);
+      const activityLabel = formatOpportunityActivity({
+        tier,
+        direction: life.candidate.direction,
+        score: life.candidate.setupScore ?? life.candidate.confidence,
+        event: activityEvent,
+        barsRemaining: barsLeft
+      });
       logger.info("AutoTrade armed candidate waiting for confirmation", {
         uid,
         candidateId: life.candidate.candidateId,
         direction: life.candidate.direction,
         reason: life.reasonCode,
-        confirmationState
+        confirmationState,
+        tier,
+        barsLeft
       });
       try {
         await appendEvaluation({
@@ -896,7 +988,8 @@ export async function processDecisionForQualification(args: {
           stage: state,
           direction: life.candidate.direction,
           signalId: life.candidate.signalId,
-          confidence: life.candidate.confidence,
+          decisionId: life.candidate.signalId,
+          confidence: life.candidate.setupScore ?? life.candidate.confidence,
           entry: life.candidate.entry,
           stopLoss: life.candidate.stopLoss,
           takeProfit: life.candidate.takeProfit,
@@ -904,10 +997,17 @@ export async function processDecisionForQualification(args: {
           spread: quote?.spread ?? null,
           maxSpread: settings.maxSpread,
           outcome: "IGNORED",
-          reasonCode: life.reasonCode,
-          reasonLabel: reasonLabelFor(life.reasonCode),
+          reasonCode:
+            activityEvent === "PLAN_REFRESH_UNAVAILABLE"
+              ? "PLAN_REFRESH_UNAVAILABLE"
+              : life.reasonCode,
+          reasonLabel: activityLabel,
           passed: ["SETUP_QUALIFIED"],
-          failed: ["CANDLE_CONFIRMATION_REQUIRED"]
+          failed:
+            activityEvent === "PLAN_REFRESH_UNAVAILABLE"
+              ? ["PLAN_REFRESH_UNAVAILABLE"]
+              : ["CANDLE_CONFIRMATION_REQUIRED"],
+          finalReason: activityLabel
         });
       } catch {
         /* ignore */
@@ -1193,7 +1293,22 @@ export async function processDecisionForQualification(args: {
       );
       return { handled: true, message: `controlled_blocked:${entryGate.code}` };
     }
-    if (!session.ok) {
+    const oppCfg = loadDemoOpportunityConfig();
+    const setupTier = classifyDemoSetupTier(
+      armedTrade?.setupScore ?? d.setupScore ?? tradeConfidence
+    );
+    const sessionBucket = resolveTradingSessionBucket();
+    const activeDemoSession = demoSessionPolicyAllows({
+      mode: oppCfg.mode,
+      allowedSessions: settings.allowedSessions,
+      tier: setupTier
+    });
+    // ACTIVE_DEMO Asia: experimental A+/A only. Major sessions keep classic allowedSessions.
+    const sessionOk =
+      oppCfg.mode === "ACTIVE_DEMO" && sessionBucket === "Asia"
+        ? activeDemoSession.ok
+        : session.ok;
+    if (!sessionOk) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
       await logEval("REJECTED", "SESSION_BLOCKED", ["SESSION_BLOCKED"], candidate.passed);
@@ -1344,8 +1459,14 @@ export async function processDecisionForQualification(args: {
         };
       }
 
+      const riskMult = demoRiskMultiplier({
+        tier: setupTier,
+        session: sessionBucket,
+        config: oppCfg
+      });
+      const effectiveRisk = applyRiskMultiplier(settings.fixedRiskAmount, riskMult || 1);
       const xauSizing = calculatePepperstoneXauUsdDemoVolume({
-        riskAmountDeposit: settings.fixedRiskAmount,
+        riskAmountDeposit: effectiveRisk > 0 ? effectiveRisk : settings.fixedRiskAmount,
         entryPrice: entryPx,
         stopLoss,
         quoteToDepositRate,
@@ -1586,11 +1707,72 @@ export async function processDecisionForQualification(args: {
       } catch {
         /* daily counter best-effort */
       }
-      await logEval("QUALIFIED", "CONTROLLED_OPENED", [], [
-        ...candidate.passed,
-        "ORDER_ACCEPTED"
-      ]);
+      const confirmMethod =
+        armedTrade?.lastReasonCode === "FAST_CONFIRMATION_RECEIVED"
+          ? "FAST_CONFIRMATION"
+          : armedTrade
+            ? "ARMED_5M_CONFIRMATION"
+            : "DIRECT";
+      const submitLabel = formatOpportunityActivity({
+        tier: setupTier,
+        direction: trade.direction,
+        score: d.setupScore ?? d.confidence ?? null,
+        event:
+          confirmMethod === "FAST_CONFIRMATION"
+            ? "FAST_CONFIRMATION_SUBMITTED"
+            : "CONFIRMED_SUBMITTED"
+      });
       try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: trade.direction,
+          signalId,
+          decisionId,
+          confidence: d.setupScore ?? tradeConfidence,
+          entry: trade.entry,
+          stopLoss: trade.stopLoss,
+          takeProfit: trade.takeProfit,
+          riskReward,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "QUALIFIED",
+          reasonCode: "BROKER_SUBMITTED",
+          reasonLabel: submitLabel,
+          passed: [...candidate.passed, "ORDER_ACCEPTED"],
+          failed: [],
+          pipeline: {
+            confirmation: confirmationState,
+            session: sessionBucket,
+            news: news.active ? "NEWS_GUARD" : "PASS",
+            quoteAge:
+              quoteAgeSeconds != null ? `${quoteAgeSeconds.toFixed(1)}s` : null,
+            dailyLimits: null,
+            openPositions: null,
+            armedCandidate: armedTrade ? "ARMED" : null,
+            executionAuthority: "ON",
+            brokerSubmissionAttempted: true,
+            brokerOrderIdMasked: trade.brokerOrderId
+              ? `${String(trade.brokerOrderId).slice(0, 2)}…${String(trade.brokerOrderId).slice(-2)}`
+              : null
+          },
+          finalReason: submitLabel
+        });
+      } catch {
+        /* never block on log failure */
+      }
+      try {
+        const riskMultJournal = demoRiskMultiplier({
+          tier: setupTier,
+          session: sessionBucket,
+          config: oppCfg
+        });
+        const signalToEntryMs = armedTrade?.armedAt
+          ? Date.now() - Date.parse(armedTrade.armedAt)
+          : null;
         await createAutoTradeJournalEntry({
           uid,
           environment: "DEMO",
@@ -1603,16 +1785,26 @@ export async function processDecisionForQualification(args: {
           stopLoss: trade.stopLoss,
           takeProfit: trade.takeProfit,
           lots: trade.lots,
-          cashRisk: settings.fixedRiskAmount,
+          cashRisk: applyRiskMultiplier(
+            settings.fixedRiskAmount,
+            riskMultJournal || 1
+          ),
           confidence: d.confidence ?? null,
           riskReward,
-          session: session.current,
+          session: sessionBucket,
           spread: quote?.spread ?? null,
           pnl: null,
           reasonForTrade: [
-            `${trade.direction} setup`,
-            d.confidence != null ? `Confidence ${Math.round(d.confidence)}%` : null,
+            submitLabel,
+            `Tier ${setupTier} (setup score — not win probability)`,
+            d.setupScore != null ? `Setup score ${Math.round(d.setupScore)}/100` : null,
+            d.confidence != null ? `Confidence ${Math.round(d.confidence)}` : null,
             riskReward != null ? `R:R ${riskReward.toFixed(2)}` : null,
+            `Risk mult ${riskMultJournal}`,
+            `Confirm ${confirmMethod}`,
+            signalToEntryMs != null
+              ? `Signal→entry ${Math.round(signalToEntryMs / 1000)}s`
+              : null,
             "Server safety gates passed"
           ]
             .filter(Boolean)

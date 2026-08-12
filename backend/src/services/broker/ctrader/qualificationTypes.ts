@@ -239,7 +239,9 @@ export type QualificationPublicView = {
     at: string;
     direction: string;
     outcome: string;
+    reasonCode?: string;
     reasonLabel: string;
+    finalReason?: string | null;
     confidence: number | null;
     spread: number | null;
     maxSpread: number | null;
