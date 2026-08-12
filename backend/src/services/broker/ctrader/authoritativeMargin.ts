@@ -15,6 +15,12 @@
  * Live execution remains impossible via existing hard locks.
  */
 
+import {
+  moneyFromDigitsSafe,
+  safeFiniteNumber,
+  safeInteger
+} from "./openApiNumeric";
+
 /** Align with Demo AutoTrade default maxQuoteAgeSeconds (15s). */
 export const MARGIN_SNAPSHOT_MAX_AGE_MS = 15_000;
 
@@ -77,19 +83,15 @@ export type MarginGateFail = {
 
 export type MarginGateResult = MarginGateOk | MarginGateFail;
 
+/**
+ * Convert monetary raw units with validated moneyDigits.
+ * Accepts number | string | bigint | Long-like via openApiNumeric.
+ */
 export function moneyFromDigits(
   value: unknown,
   moneyDigits: number
 ): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    if (typeof value === "string" && value.trim() !== "") {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return null;
-      return n / Math.pow(10, moneyDigits);
-    }
-    return null;
-  }
-  return value / Math.pow(10, moneyDigits);
+  return moneyFromDigitsSafe(value, moneyDigits);
 }
 
 /**
@@ -250,36 +252,33 @@ export function parseExpectedMarginEntries(args: {
   margins: unknown;
   moneyDigits: number;
 }): ExpectedMarginQuote[] {
+  const digits = safeInteger(args.moneyDigits);
+  if (digits == null || digits < 0 || digits > 18) return [];
   const list = Array.isArray(args.margins) ? args.margins : [];
   const out: ExpectedMarginQuote[] = [];
   for (const item of list) {
     const row = (item ?? {}) as Record<string, unknown>;
-    const volume =
-      typeof row.volume === "number"
-        ? row.volume
-        : typeof row.volume === "string"
-          ? Number(row.volume)
-          : NaN;
-    const buyRaw = row.buyMargin;
-    const sellRaw = row.sellMargin;
-    const buyMargin = moneyFromDigits(buyRaw, args.moneyDigits);
-    const sellMargin = moneyFromDigits(sellRaw, args.moneyDigits);
-    if (
-      !Number.isFinite(volume) ||
-      buyMargin == null ||
-      sellMargin == null
-    ) {
+    const volume = safeInteger(row.volume);
+    const buyMargin = moneyFromDigitsSafe(row.buyMargin, digits);
+    const sellMargin = moneyFromDigitsSafe(row.sellMargin, digits);
+    if (volume == null || buyMargin == null || sellMargin == null) {
+      continue;
+    }
+    if (!(buyMargin > 0) || !(sellMargin > 0)) {
       continue;
     }
     out.push({
       volume,
       buyMargin,
       sellMargin,
-      moneyDigits: args.moneyDigits
+      moneyDigits: digits
     });
   }
   return out;
 }
+
+/** Re-export for margin call sites that need finite numeric coercion. */
+export { safeFiniteNumber, safeInteger };
 
 export function selectSideExpectedMargin(args: {
   side: "BUY" | "SELL";

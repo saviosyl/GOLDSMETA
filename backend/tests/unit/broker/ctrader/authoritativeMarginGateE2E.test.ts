@@ -355,10 +355,17 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
     expect(assertDemoAuthoritativeMarginGate).toHaveBeenCalledTimes(1);
     const gateArgs = assertDemoAuthoritativeMarginGate.mock.calls[0]![0];
     expect(gateArgs.side).toBe("BUY");
-    expect(gateArgs.protocolVolume).toBe(1700); // 17 lots
+    expect(gateArgs.protocolVolume).toBe(1700); // 17 lots — FINAL volume
     expect(gateArgs.symbolId).toBe("41");
     expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
-    expect(submitDemoMarketOrder.mock.calls[0]![0].lots).toBe(17);
+    const submitArgs = submitDemoMarketOrder.mock.calls[0]![0];
+    expect(submitArgs.lots).toBe(17);
+    // Final-volume contract: submit lots must match the ExpectedMargin volume.
+    expect(submitArgs.lots * 100).toBe(gateArgs.protocolVolume);
+    // Gate must run before submit (call order).
+    const gateOrder = assertDemoAuthoritativeMarginGate.mock.invocationCallOrder[0]!;
+    const submitOrder = submitDemoMarketOrder.mock.invocationCallOrder[0]!;
+    expect(gateOrder).toBeLessThan(submitOrder);
     expect(isCTraderLiveEnabled()).toBe(false);
     expect(isBrokerExecutionEnabled()).toBe(false);
   });

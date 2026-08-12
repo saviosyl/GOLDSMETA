@@ -17,7 +17,8 @@
     "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts",
     "precheck:owner-auth-restore": "tsx scripts/preRestoreOwnerAuthCheck.ts",
     "gate:owner-auth-deploy": "tsx scripts/preDeployOwnerAuthHealthGate.ts",
-    "proto:ctrader-extend": "node scripts/applyCTraderLayerProtoExtensions.mjs"
+    "proto:ctrader-extend": "node scripts/applyCTraderLayerProtoExtensions.mjs",
+    "verify:ctrader-demo-margin-readonly": "tsx scripts/verifyCTraderDemoMarginReadOnly.ts"
   },
   "dependencies": {
     "@reiryoku/ctrader-layer": "^2.2.0",
