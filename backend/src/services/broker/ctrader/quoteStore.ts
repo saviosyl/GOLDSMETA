@@ -5,7 +5,11 @@
  */
 
 import { getFirestore } from "firebase-admin/firestore";
-import type { AuthoritativeQuote } from "./liveQuote";
+import {
+  loadLiveQuoteThresholds,
+  refreshAuthoritativeFreshness,
+  type AuthoritativeQuote
+} from "./liveQuote";
 
 const QUOTE_DOC = "ctraderLiveQuote";
 
@@ -44,7 +48,8 @@ export async function saveAuthoritativeQuote(
 }
 
 export async function getStoredAuthoritativeQuote(
-  ownerUid: string
+  ownerUid: string,
+  nowMs: number = Date.now()
 ): Promise<StoredAuthoritativeQuote | null> {
   const snap = await quoteDoc(ownerUid).get();
   if (!snap.exists) return null;
@@ -57,7 +62,19 @@ export async function getStoredAuthoritativeQuote(
   ) {
     return null;
   }
-  return data;
+  // SSOT: recompute freshness/executable from brokerTimestamp at read time so
+  // display paths cannot claim LIVE while execution sees a multi-minute age.
+  const refreshed = refreshAuthoritativeFreshness(
+    data,
+    nowMs,
+    loadLiveQuoteThresholds()
+  );
+  return {
+    ...data,
+    ...refreshed,
+    ownerUid: data.ownerUid,
+    updatedAt: data.updatedAt
+  };
 }
 
 /** Allocate a monotonic quote sequence per owner. */

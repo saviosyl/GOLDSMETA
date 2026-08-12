@@ -212,7 +212,7 @@ export function executionNowLabelFor(args: {
     return "BLOCKED";
   }
   if (args.marketStatus === "CLOSED") return "WAITING — MARKET CLOSED";
-  if (!args.quoteHealthy) return "WAITING — QUOTE";
+  if (!args.quoteHealthy) return "WAITING — EXECUTION QUOTE STALE";
   return "WAITING";
 }
 

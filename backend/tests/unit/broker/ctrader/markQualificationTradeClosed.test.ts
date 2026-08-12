@@ -34,7 +34,10 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
   }),
   appendTransition: async (d: unknown, to: string) => ({ ...(d as object), state: to }),
   createEmptyQualificationDoc: vi.fn(),
-  tryAddPreview: vi.fn()
+  tryAddPreview: vi.fn(),
+  normalizeAccountId: (id: unknown) =>
+    id == null ? null : String(id).trim() || null,
+  findForeignStartedQualifications: vi.fn(async () => ({ ok: true, hits: [] }))
 }));
 vi.mock("../../../../src/services/broker/ctrader/dailySafetyService", () => ({
   assertEntryAllowed: vi.fn(),

@@ -59,13 +59,19 @@ import {
 import {
   appendTransition,
   createEmptyQualificationDoc,
+  findForeignStartedQualifications,
   getActiveQualificationAccountId,
   getQualificationDoc,
+  normalizeAccountId,
   recountControlled,
   recountDemoAuto,
   saveQualificationDoc,
   tryAddPreview
 } from "./qualificationStore";
+import {
+  backfillOwnershipFromStartedQualification,
+  claimDemoQualificationOwnership
+} from "./qualificationOwnership";
 import type {
   ControlledDemoTradeRecord,
   DemoAutoTradeRecord,
@@ -155,7 +161,7 @@ export async function loadSetupSnapshot(uid: string): Promise<SetupSnapshot> {
     demoAccountSelected,
     accountIsLive,
     accountMasked: connection?.selectedAccountMasked ?? null,
-    accountId: connection?.selectedAccountId ?? null,
+    accountId: normalizeAccountId(connection?.selectedAccountId),
     symbolResolved,
     tradingScope,
     brokerQuoteHealthy,
@@ -216,7 +222,11 @@ function certifySafetyChecks(
   ];
 }
 
-async function loadOrInitDoc(
+/**
+ * Load qualification for the selected Demo account.
+ * READ path — never creates READY_TO_QUALIFY placeholders.
+ */
+async function loadQualificationDoc(
   uid: string,
   setup: SetupSnapshot
 ): Promise<QualificationDocument | null> {
@@ -273,10 +283,16 @@ async function applyLiveNewsActivationGate(
   }
 }
 
+/**
+ * Qualification GET — read-only w.r.t. Firestore user intent + qualification docs.
+ * Never creates READY_TO_QUALIFY placeholders and never mutates settings.
+ *
+ * Foreign ownership lookup runs ONLY when this UID lacks a started qualification
+ * for the selected Demo account (owner LIVE_QUALIFICATION GETs skip it).
+ */
 export async function getQualificationView(uid: string): Promise<QualificationPublicView> {
   const setup = await loadSetupSnapshot(uid);
-  const blockers = buildSetupBlockers(setup);
-  const ready = setupReady(blockers);
+  const ready = setupReady(buildSetupBlockers(setup));
 
   if (setup.accountIsLive) {
     return applyLiveNewsActivationGate(
@@ -284,57 +300,104 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
       toPublicView({
         doc: null,
         setup,
-        stateOverride: "SETUP_REQUIRED"
+        stateOverride: "SETUP_REQUIRED",
+        recordStatus: "NEVER_STARTED"
       })
     );
   }
 
-  let doc = await loadOrInitDoc(uid, setup);
-  if (doc && doc.accountId !== setup.accountId && setup.accountId) {
-    // Qualification belongs to another Demo account.
-    const view = toPublicView({ doc, setup });
-    return applyLiveNewsActivationGate(uid, {
-      ...view,
-      state: "SETUP_REQUIRED",
-      overallLabel: "Account mismatch",
-      nextAction: "Qualification belongs to another Demo account",
-      nextRequirement: `Active qualification is for ${doc.accountMasked ?? "another account"}`,
-      canStart: false,
-      blockers: [
-        {
-          id: "account_mismatch",
-          label: `Qualification belongs to Demo ${doc.accountMasked ?? "account"}`,
-          ok: false,
-          action: "Switch back to that Demo account or start fresh after support review"
-        },
-        ...view.blockers
-      ]
+  const doc = await loadQualificationDoc(uid, setup);
+
+  if (doc && setup.accountId && doc.accountId !== setup.accountId) {
+    // Qualification belongs to another Demo account under THIS uid.
+    const conflict = {
+      kind: "SELECTED_ACCOUNT_MISMATCH" as const,
+      message: `QUALIFICATION ACCOUNT MISMATCH — active qualification is for Demo ${doc.accountMasked ?? "another account"}`,
+      foreignAccountMasked: doc.accountMasked ?? null
+    };
+    const view = toPublicView({
+      doc,
+      setup,
+      accountConflict: conflict,
+      recordStatus: "ACCOUNT_MISMATCH"
     });
+    return applyLiveNewsActivationGate(uid, view);
   }
 
-  if (doc) {
-    const before = JSON.stringify(doc.safetyChecks);
-    const advanced = deriveAdvancedState(doc);
-    if (advanced !== doc.state && doc.state !== "PAUSED" && doc.state !== "BLOCKED") {
-      doc = await appendTransition(doc, advanced, "auto_evaluate", buildSha());
-      await saveQualificationDoc(doc);
-    } else if (JSON.stringify(doc.safetyChecks) !== before) {
-      await saveQualificationDoc(doc);
+  // Own started qualification for selected account — return without foreign scan.
+  if (doc?.startedAt && setup.accountId && doc.accountId === setup.accountId) {
+    const view = toPublicView({
+      doc,
+      setup,
+      recordStatus: "ACTIVE"
+    });
+    return applyLiveNewsActivationGate(uid, await withActivity(uid, view));
+  }
+
+  // No local started qualification — check foreign ownership (exact account query).
+  if (setup.accountId) {
+    const foreign = await findForeignStartedQualifications(uid, setup.accountId);
+    if (!foreign.ok) {
+      const conflict = {
+        kind: "OWNERSHIP_CHECK_UNAVAILABLE" as const,
+        message:
+          "Qualification ownership check temporarily unavailable — try again shortly",
+        foreignAccountMasked: setup.accountMasked ?? null
+      };
+      const view = toPublicView({
+        doc: null,
+        setup,
+        accountConflict: conflict,
+        recordStatus: "OWNERSHIP_CHECK_UNAVAILABLE",
+        stateOverride: "SETUP_REQUIRED"
+      });
+      return applyLiveNewsActivationGate(uid, await withActivity(uid, view));
+    }
+    if (foreign.hits.length > 0) {
+      const hit = foreign.hits[0]!;
+      const conflict = {
+        kind: "FOREIGN_STARTED_QUALIFICATION" as const,
+        message: `QUALIFICATION ACCOUNT MISMATCH — Demo ${hit.accountMasked ?? setup.accountMasked ?? "account"} already has qualification under another GoldMeta login`,
+        foreignAccountMasked: hit.accountMasked ?? setup.accountMasked ?? null
+      };
+      const view = toPublicView({
+        doc: null,
+        setup,
+        accountConflict: conflict,
+        recordStatus: "ACCOUNT_CONFLICT"
+      });
+      return applyLiveNewsActivationGate(uid, await withActivity(uid, view));
     }
   }
+
+  const metaAccountId = await getActiveQualificationAccountId(uid).catch(() => null);
+  const recordStatus =
+    doc?.startedAt
+      ? ("ACTIVE" as const)
+      : metaAccountId && setup.accountId && metaAccountId === setup.accountId && !doc
+        ? ("MISSING_RECORD" as const)
+        : ("NEVER_STARTED" as const);
 
   const view = toPublicView({
     doc,
     setup,
-    stateOverride: !ready && !doc?.startedAt ? "SETUP_REQUIRED" : undefined
+    stateOverride: !ready && !doc?.startedAt ? "SETUP_REQUIRED" : undefined,
+    recordStatus
   });
+  return applyLiveNewsActivationGate(uid, await withActivity(uid, view));
+}
+
+async function withActivity(
+  uid: string,
+  view: QualificationPublicView
+): Promise<QualificationPublicView> {
   try {
     const day = tradingDayKey();
     const [todayActivity, recent] = await Promise.all([
       countEvaluationsForDay(uid, day),
       listRecentEvaluations(uid, 24)
     ]);
-    return applyLiveNewsActivationGate(uid, {
+    return {
       ...view,
       todayActivity,
       recentEvaluations: recent.map((r) => ({
@@ -351,9 +414,9 @@ export async function getQualificationView(uid: string): Promise<QualificationPu
         passed: r.passed,
         failed: r.failed
       }))
-    });
+    };
   } catch {
-    return applyLiveNewsActivationGate(uid, view);
+    return view;
   }
 }
 
@@ -377,6 +440,42 @@ export async function startQualification(uid: string): Promise<QualificationPubl
     });
   }
 
+  // Exact foreign started-qual lookup — fail CLOSED on query errors.
+  const foreign = await findForeignStartedQualifications(uid, setup.accountId);
+  if (!foreign.ok) {
+    throw Object.assign(new Error("QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE"), {
+      code: "QUALIFICATION_OWNERSHIP_CHECK_UNAVAILABLE",
+      message: foreign.message
+    });
+  }
+  if (foreign.hits.length > 0) {
+    const hit = foreign.hits[0]!;
+    // Best-effort backfill claim for the proven foreign owner (never fabricates history).
+    await backfillOwnershipFromStartedQualification({
+      ownerUid: hit.uid,
+      accountId: hit.accountId,
+      accountMasked: hit.accountMasked
+    }).catch(() => undefined);
+    throw Object.assign(new Error("QUALIFICATION_ACCOUNT_MISMATCH"), {
+      code: "QUALIFICATION_ACCOUNT_MISMATCH",
+      message:
+        "This Pepperstone Demo account already has qualification under another GoldMeta login"
+    });
+  }
+
+  // Atomic ownership claim — concurrent starters: exactly one wins.
+  const claim = await claimDemoQualificationOwnership({
+    uid,
+    accountId: setup.accountId,
+    accountMasked: setup.accountMasked
+  });
+  if (!claim.ok) {
+    throw Object.assign(new Error(claim.code), {
+      code: claim.code,
+      message: claim.message
+    });
+  }
+
   let doc = await getQualificationDoc(uid, setup.accountId);
   if (!doc) {
     doc = createEmptyQualificationDoc({
@@ -387,6 +486,12 @@ export async function startQualification(uid: string): Promise<QualificationPubl
     });
   }
   if (doc.startedAt && doc.state !== "READY_TO_QUALIFY" && doc.state !== "SETUP_REQUIRED") {
+    // Existing owner qualification — preserve; ensure claim aligned.
+    await backfillOwnershipFromStartedQualification({
+      ownerUid: uid,
+      accountId: setup.accountId,
+      accountMasked: setup.accountMasked ?? doc.accountMasked
+    }).catch(() => undefined);
     return getQualificationView(uid);
   }
 
