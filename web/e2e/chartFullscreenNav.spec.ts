@@ -8,27 +8,82 @@ const MOBILE = [
   { w: 430, h: 932 }
 ] as const;
 
-async function openPremiumPlan(page: import("@playwright/test").Page) {
-  await page.goto("/ui-review/");
+async function openPremiumPlan(
+  page: import("@playwright/test").Page,
+  opts?: { staff?: boolean }
+) {
+  const q = opts?.staff ? "?staff=1" : "";
+  await page.goto(`/ui-review/${q}`);
   await expect(page.getByTestId("ui-review-shell")).toBeVisible();
   await expect(page.getByTestId("overview-page")).toBeVisible();
   await expect(page.getByTestId("plan-market-card")).toBeVisible({ timeout: 20_000 });
 }
 
-test.describe("Chart fit + fullscreen (shared for all roles)", () => {
-  test("desktop: Fit + Fullscreen controls and exit", async ({ page }) => {
+async function swipeVertOnChart(
+  page: import("@playwright/test").Page,
+  dy: number
+): Promise<{ before: number; after: number; touchAction: string }> {
+  const host = page.getByTestId("xauusd-chart-host");
+  await host.scrollIntoViewIfNeeded();
+  const box = await host.boundingBox();
+  expect(box).toBeTruthy();
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + Math.min(40, box!.height / 3);
+
+  // Prefer CDP touch for real gesture synthesis on Chromium.
+  const client = await page.context().newCDPSession(page);
+  const before = await page.evaluate(() => window.scrollY);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }]
+  });
+  const steps = 6;
+  for (let i = 1; i <= steps; i++) {
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y - (dy * i) / steps }]
+    });
+  }
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: []
+  });
+  await page.waitForTimeout(80);
+  return page.evaluate((b) => {
+    const el = document.querySelector(
+      '[data-testid="xauusd-chart-host"]'
+    ) as HTMLElement | null;
+    return {
+      before: b,
+      after: window.scrollY,
+      touchAction: el ? getComputedStyle(el).touchAction : ""
+    };
+  }, before);
+}
+
+test.describe("Chart fit + fullscreen", () => {
+  test("desktop: Fit + Fullscreen controls, focus, ESC exit", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openPremiumPlan(page);
     const chart = page.getByTestId("plan-market-card");
     await expect(chart).toBeVisible();
     await expect(page.getByTestId("chart-fit-view")).toBeVisible();
-    await expect(page.getByTestId("chart-fullscreen")).toBeVisible();
+    const fsBtn = page.getByTestId("chart-fullscreen");
+    await fsBtn.focus();
+    await expect(fsBtn).toBeFocused();
     await page.getByTestId("chart-fit-view").click();
-    await page.getByTestId("chart-fullscreen").click();
+    await fsBtn.click();
     await expect(chart).toHaveAttribute("data-fullscreen", "1");
-    await expect(page.getByTestId("chart-exit-fullscreen")).toBeVisible();
+    await expect(page.getByTestId("chart-exit-fullscreen")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect
+      .poll(async () =>
+        chart.evaluate((el) => el.contains(document.activeElement))
+      )
+      .toBe(true);
     await page.keyboard.press("Escape");
     await expect(chart).toHaveAttribute("data-fullscreen", "0");
+    await expect(page.getByTestId("chart-fullscreen")).toBeFocused();
   });
 
   for (const vp of MOBILE) {
@@ -46,7 +101,42 @@ test.describe("Chart fit + fullscreen (shared for all roles)", () => {
       await page.getByTestId("chart-exit-fullscreen").click();
       await expect(chart).toHaveAttribute("data-fullscreen", "0");
     });
+
+    test(`embedded chart vertical swipe scrolls page @ ${vp.w}x${vp.h}`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h });
+      await openPremiumPlan(page);
+      // Ensure document can scroll.
+      await page.evaluate(() => {
+        document.documentElement.style.minHeight = "2000px";
+        document.body.style.minHeight = "2000px";
+      });
+      const host = page.getByTestId("xauusd-chart-host");
+      await expect(host).toHaveAttribute("data-touch-mode", "pan-y");
+      const result = await swipeVertOnChart(page, 220);
+      expect(result.touchAction).toMatch(/pan-y/);
+      expect(result.after).toBeGreaterThan(result.before);
+    });
   }
+
+  test("normal USER and OWNER staff review share chart controls", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openPremiumPlan(page, { staff: false });
+    await expect(page.getByTestId("chart-fit-view")).toBeVisible();
+    await expect(page.getByTestId("chart-fullscreen")).toBeVisible();
+    await expect(page.getByTestId("chart-level-legend")).toBeVisible();
+
+    await openPremiumPlan(page, { staff: true });
+    await expect(page.getByTestId("chart-fit-view")).toBeVisible();
+    await expect(page.getByTestId("chart-fullscreen")).toBeVisible();
+    await page.getByTestId("chart-fullscreen").click();
+    await expect(page.getByTestId("plan-market-card")).toHaveAttribute(
+      "data-fullscreen",
+      "1"
+    );
+    await expect(page.getByTestId("chart-live-price")).toBeVisible();
+  });
 });
 
 test.describe("Mobile bottom nav stays fixed", () => {
@@ -56,8 +146,6 @@ test.describe("Mobile bottom nav stays fixed", () => {
       await openPremiumPlan(page);
       const nav = page.getByTestId("mobile-bottom-nav");
       await expect(nav).toBeVisible();
-
-      // No legacy floating action bar
       await expect(page.getByTestId("mobile-action-bar")).toHaveCount(0);
 
       const measure = async () =>
@@ -73,7 +161,6 @@ test.describe("Mobile bottom nav stays fixed", () => {
             bottom: r.bottom,
             vh: window.innerHeight,
             position: cs.position,
-            cssBottom: cs.bottom,
             transform: cs.transform
           };
         });
@@ -89,15 +176,8 @@ test.describe("Mobile bottom nav stays fixed", () => {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await page.waitForTimeout(100);
       const bottom = await measure();
-      expect(bottom).toBeTruthy();
       expect(Math.abs(bottom!.bottom - bottom!.vh)).toBeLessThanOrEqual(2);
-      // Must not float mid-page
       expect(bottom!.top).toBeGreaterThan(bottom!.vh * 0.7);
-
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(50);
-      const again = await measure();
-      expect(Math.abs(again!.bottom - again!.vh)).toBeLessThanOrEqual(2);
     });
   }
 

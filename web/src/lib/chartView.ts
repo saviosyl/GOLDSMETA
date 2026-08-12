@@ -43,6 +43,32 @@ export function collectLevelPrices(levels: ChartLevelPrices): number[] {
   ].filter(isFinitePrice);
 }
 
+/** Most-recent N candles (same subset Fit shows horizontally). */
+export function selectRecentCandles(
+  candles: ChartCandleLike[],
+  visibleBars = DEFAULT_VISIBLE_BARS
+): ChartCandleLike[] {
+  if (!candles.length) return [];
+  const n = Math.min(Math.max(1, visibleBars), candles.length);
+  return candles.slice(candles.length - n);
+}
+
+/** Candles covered by a visible logical index range. */
+export function selectCandlesForLogicalRange(
+  candles: ChartCandleLike[],
+  from: number,
+  to: number
+): ChartCandleLike[] {
+  if (!candles.length) return [];
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return selectRecentCandles(candles);
+  }
+  const start = Math.max(0, Math.floor(Math.min(from, to)));
+  const end = Math.min(candles.length - 1, Math.ceil(Math.max(from, to)));
+  if (end < start) return [];
+  return candles.slice(start, end + 1);
+}
+
 /**
  * Compute a useful vertical price range from candles + overlays.
  * Returns null when no usable span exists (caller should fall back).
@@ -72,6 +98,23 @@ export function computeUsefulPriceRange(
   }
   const pad = (max - min) * Math.max(0, padRatio);
   return { min: min - pad, max: max + pad };
+}
+
+/**
+ * Vertical Fit geometry aligned with horizontal recent-N Fit.
+ * Hidden older candles (e.g. outlier spikes) must not dominate.
+ */
+export function computeFitPriceRange(
+  candles: ChartCandleLike[],
+  levels: ChartLevelPrices,
+  visibleBars = DEFAULT_VISIBLE_BARS,
+  padRatio = DEFAULT_PRICE_PAD_RATIO
+): { min: number; max: number } | null {
+  return computeUsefulPriceRange(
+    selectRecentCandles(candles, visibleBars),
+    levels,
+    padRatio
+  );
 }
 
 /**

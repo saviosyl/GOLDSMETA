@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { PublicPageShell } from "./layout/PublicPageShell";
@@ -43,16 +43,67 @@ function SessionLoading() {
   );
 }
 
-export function AccountAccessGate({ children }: { children: ReactNode }) {
-  const { user, account, loading, refreshAccount } = useAuth();
-  const location = useLocation();
+function AccountLookupFailure({
+  message,
+  onRetry,
+  onSignOut,
+  retrying
+}: {
+  message: string;
+  onRetry: () => void;
+  onSignOut: () => void;
+  retrying: boolean;
+}) {
+  return (
+    <PublicPageShell testId="account-lookup-error">
+      <div className="gm-main">
+        <div className="gm-main-inner">
+          <div className="gm-auth-card" role="alert" data-testid="account-lookup-error-card">
+            <h1 className="gm-auth-title">Account check failed</h1>
+            <p className="gm-meta" data-testid="account-lookup-error-message">
+              {message}
+            </p>
+            <div className="gm-auth-actions" style={{ display: "grid", gap: 8, marginTop: 16 }}>
+              <button
+                type="button"
+                className="gm-btn-gold"
+                data-testid="account-lookup-retry"
+                onClick={onRetry}
+                disabled={retrying}
+                aria-busy={retrying}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </button>
+              <button
+                type="button"
+                className="gm-btn-outline"
+                data-testid="account-lookup-sign-out"
+                onClick={onSignOut}
+                disabled={retrying}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </PublicPageShell>
+  );
+}
 
-  // Soft refresh once if account state not loaded yet (never during render).
-  useEffect(() => {
-    if (!loading && user && !account) {
-      void refreshAccount();
-    }
-  }, [loading, user, account, refreshAccount]);
+export function AccountAccessGate({ children }: { children: ReactNode }) {
+  const {
+    user,
+    account,
+    loading,
+    accountLoading,
+    accountError,
+    accountResolved,
+    refreshAccount,
+    signOut
+  } = useAuth();
+  const location = useLocation();
+  const [retrying, setRetrying] = useState(false);
 
   if (loading) {
     return <SessionLoading />;
@@ -60,9 +111,29 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
 
   if (!user) return <>{children}</>;
 
-  // Avoid flashing app chrome while /me is still resolving for a signed-in user.
-  if (!account) {
+  // Mid-flight /auth/me — never flash protected UI.
+  if (accountLoading || !accountResolved) {
     return <SessionLoading />;
+  }
+
+  // Durable failure: terminal friendly UI (not endless spinner).
+  if (accountError || !account) {
+    return (
+      <AccountLookupFailure
+        message={
+          accountError ||
+          "We could not verify your GoldMeta account right now. Check your connection and try again."
+        }
+        retrying={retrying || accountLoading}
+        onRetry={() => {
+          setRetrying(true);
+          void refreshAccount().finally(() => setRetrying(false));
+        }}
+        onSignOut={() => {
+          void signOut();
+        }}
+      />
+    );
   }
 
   const access = account.access ?? (user.emailVerified ? "UNKNOWN" : "VERIFY_EMAIL");
@@ -75,7 +146,7 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
 
   if (
     access === "VERIFY_EMAIL" ||
-    (!user.emailVerified && account?.role !== "OWNER" && account?.role !== "ADMIN")
+    (!user.emailVerified && account.role !== "OWNER" && account.role !== "ADMIN")
   ) {
     if (path === "/verify-email" || PENDING_ALLOWED.has(path)) {
       if (path === "/verify-email") return <>{children}</>;
@@ -83,7 +154,7 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
     return <VerifyEmailPage />;
   }
 
-  if (access === "AWAITING_APPROVAL" || account?.role === "USER_PENDING") {
+  if (access === "AWAITING_APPROVAL" || account.role === "USER_PENDING") {
     if (PENDING_ALLOWED.has(path)) return <>{children}</>;
     return <AwaitingApprovalPage />;
   }
@@ -97,7 +168,7 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
     return <AccountReadyPage />;
   }
 
-  if (path === "/admin/users" && account && account.role !== "OWNER" && account.role !== "ADMIN") {
+  if (path === "/admin/users" && account.role !== "OWNER" && account.role !== "ADMIN") {
     return <Navigate to="/" replace />;
   }
 

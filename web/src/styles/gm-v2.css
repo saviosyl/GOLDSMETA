@@ -883,11 +883,18 @@ body,
   width: 100%;
   min-height: 260px;
   height: 280px;
-  touch-action: none;
   overscroll-behavior: contain;
 }
 
+/* Embedded: vertical page scroll must remain possible through the chart. */
+.gm-xau-chart-host.is-embedded-host {
+  touch-action: pan-y;
+}
+
+/* Fullscreen: chart owns gestures (page scroll is locked). */
+.gm-xau-chart-host.is-fullscreen-host,
 .gm-xau-chart-card.is-fullscreen .gm-xau-chart-host {
+  touch-action: none;
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   collectLevelPrices,
   computeDefaultLogicalRange,
+  computeFitPriceRange,
   computeSpread,
   computeUsefulPriceRange,
   DEFAULT_RIGHT_OFFSET_BARS,
-  DEFAULT_VISIBLE_BARS
+  DEFAULT_VISIBLE_BARS,
+  selectCandlesForLogicalRange,
+  selectRecentCandles
 } from "./chartView";
 
 describe("chartView helpers", () => {
@@ -52,6 +55,44 @@ describe("chartView helpers", () => {
     expect(r).not.toBeNull();
     expect(r!.to).toBe(199 + DEFAULT_RIGHT_OFFSET_BARS);
     expect(r!.to - r!.from).toBeGreaterThanOrEqual(DEFAULT_VISIBLE_BARS);
+  });
+
+  it("Fit vertical range ignores hidden oldest outlier spikes", () => {
+    const bars = Array.from({ length: 120 }, (_, i) => ({
+      time: i,
+      open: 2350,
+      high: 2351,
+      low: 2349,
+      close: 2350
+    }));
+    // Extreme spike only in the oldest 30 bars (hidden by recent-90 Fit).
+    for (let i = 0; i < 30; i++) {
+      bars[i] = { time: i, open: 1000, high: 5000, low: 500, close: 1000 };
+    }
+    const allRange = computeUsefulPriceRange(bars, { currentPrice: 2350 });
+    const fitRange = computeFitPriceRange(bars, {
+      currentPrice: 2350,
+      poc: 2350.5,
+      support: 2348
+    });
+    expect(selectRecentCandles(bars, 90)).toHaveLength(90);
+    expect(allRange!.max).toBeGreaterThan(4000);
+    expect(fitRange).not.toBeNull();
+    // Recent band ~2348–2351 — must not be dominated by the 5000 spike.
+    expect(fitRange!.max).toBeLessThan(2400);
+    expect(fitRange!.min).toBeGreaterThan(2300);
+  });
+
+  it("logical-range slice matches visible window", () => {
+    const bars = Array.from({ length: 10 }, (_, i) => ({
+      time: i,
+      open: i,
+      high: i + 1,
+      low: i - 1,
+      close: i
+    }));
+    const slice = selectCandlesForLogicalRange(bars, 7, 9);
+    expect(slice.map((b) => b.time)).toEqual([7, 8, 9]);
   });
 
   it("computes spread only when bid/ask finite", () => {

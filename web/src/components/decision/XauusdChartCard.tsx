@@ -4,7 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import {
   ColorType,
@@ -25,8 +26,11 @@ import { fmtPrice } from "../../lib/intradayFormat";
 import { useShellQuote } from "../../lib/quoteContext";
 import {
   computeDefaultLogicalRange,
+  computeFitPriceRange,
   computeSpread,
   computeUsefulPriceRange,
+  selectCandlesForLogicalRange,
+  selectRecentCandles,
   type ChartCandleLike
 } from "../../lib/chartView";
 
@@ -55,6 +59,9 @@ type LineSpec = {
   lineWidth?: number;
   lineStyle?: number;
 };
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function buildLines(levels: LevelOverlays): LineSpec[] {
   const candidates: Array<{
@@ -103,7 +110,9 @@ function applyUsefulView(
   chart: IChartApi,
   series: ISeriesApi<"Candlestick">,
   candles: ChartCandleLike[],
-  levels: LevelOverlays
+  levels: LevelOverlays,
+  getCandles: () => ChartCandleLike[],
+  getLevels: () => LevelOverlays
 ): void {
   const logical = computeDefaultLogicalRange(candles.length);
   if (logical) {
@@ -116,11 +125,27 @@ function applyUsefulView(
     chart.timeScale().fitContent();
   }
 
-  // Vertical: include candles + overlays in autoscaled range (v4 has no setVisibleRange on price scale).
-  const priceRange = computeUsefulPriceRange(candles, levels);
+  // Vertical Fit uses the SAME recent subset as horizontal Fit — not all history.
+  const fitRange = computeFitPriceRange(candles, levels);
+  void fitRange;
+
+  // Ongoing autoscaling follows the *visible* logical window (not hidden old spikes).
+  // When the user manually scales the price axis, Lightweight Charts disables autoScale.
   series.applyOptions({
     autoscaleInfoProvider: () => {
-      const next = computeUsefulPriceRange(candles, levels);
+      const all = getCandles();
+      const lvl = getLevels();
+      let slice: ChartCandleLike[] = [];
+      try {
+        const vr = chart.timeScale().getVisibleLogicalRange();
+        if (vr) {
+          slice = selectCandlesForLogicalRange(all, vr.from, vr.to);
+        }
+      } catch {
+        slice = [];
+      }
+      if (!slice.length) slice = selectRecentCandles(all);
+      const next = computeUsefulPriceRange(slice, lvl);
       if (!next) return null;
       return {
         priceRange: {
@@ -135,7 +160,6 @@ function applyUsefulView(
   } catch {
     /* ignore */
   }
-  void priceRange;
 }
 
 export function XauusdChartCard({
@@ -159,10 +183,14 @@ export function XauusdChartCard({
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const pendingBarsRef = useRef<ChartCandleLike[]>([]);
+  const levelsRef = useRef<LevelOverlays>({});
   const userAdjustedViewRef = useRef(false);
   const suppressRangeEventRef = useRef(false);
   const needsAutoFitRef = useRef(true);
   const prevTfRef = useRef<ChartTimeframe>(defaultTimeframe);
+  const fullscreenBtnRef = useRef<HTMLButtonElement | null>(null);
+  const exitBtnRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [chartReady, setChartReady] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -187,6 +215,10 @@ export function XauusdChartCard({
     }),
     [resistance, vah, poc, val, support, livePx]
   );
+
+  useEffect(() => {
+    levelsRef.current = levels;
+  }, [levels]);
 
   const candleData = useMemo(() => {
     const mapped = bars
@@ -228,14 +260,20 @@ export function XauusdChartCard({
     const candles = pendingBarsRef.current;
     if (!candles.length) return;
     suppressRangeEventRef.current = true;
-    applyUsefulView(chart, series, candles, levels);
+    applyUsefulView(
+      chart,
+      series,
+      candles,
+      levelsRef.current,
+      () => pendingBarsRef.current,
+      () => levelsRef.current
+    );
     userAdjustedViewRef.current = false;
     needsAutoFitRef.current = false;
-    // Release suppress after library finishes range callbacks.
     requestAnimationFrame(() => {
       suppressRangeEventRef.current = false;
     });
-  }, [levels]);
+  }, []);
 
   useEffect(() => {
     if (prevTfRef.current !== tf) {
@@ -281,11 +319,12 @@ export function XauusdChartCard({
         crosshair: {
           mode: 1
         },
+        // Embedded: allow vertical page scroll; fullscreen strengthens gestures later.
         handleScroll: {
           mouseWheel: true,
           pressedMouseMove: true,
           horzTouchDrag: true,
-          vertTouchDrag: true
+          vertTouchDrag: false
         },
         handleScale: {
           axisPressedMouseMove: true,
@@ -319,14 +358,14 @@ export function XauusdChartCard({
         }>;
         series.setData(initial);
         suppressRangeEventRef.current = true;
-        applyUsefulView(chart, series, pendingBarsRef.current, {
-          resistance,
-          vah,
-          poc,
-          val,
-          support,
-          currentPrice: livePx
-        });
+        applyUsefulView(
+          chart,
+          series,
+          pendingBarsRef.current,
+          levelsRef.current,
+          () => pendingBarsRef.current,
+          () => levelsRef.current
+        );
         needsAutoFitRef.current = false;
         userAdjustedViewRef.current = false;
         requestAnimationFrame(() => {
@@ -380,7 +419,7 @@ export function XauusdChartCard({
       seriesRef.current = null;
       linesRef.current = [];
     };
-  }, []);
+  }, [fitView]);
 
   // Candle updates: never wipe manual zoom/pan on live refresh / quote ticks.
   useEffect(() => {
@@ -425,7 +464,7 @@ export function XauusdChartCard({
     }
   }, [levels, candleData.length, chartReady]);
 
-  // Fullscreen: resize chart to host; optional native Fullscreen API.
+  // Fullscreen: resize, native API optional, gesture mode, body scroll lock.
   useEffect(() => {
     const host = hostRef.current;
     const chart = chartRef.current;
@@ -438,6 +477,15 @@ export function XauusdChartCard({
       chart.applyOptions({ width: w, height: h });
     };
     applySize();
+
+    chart.applyOptions({
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: fullscreen
+      }
+    });
 
     const prevOverflow = document.body.style.overflow;
     if (fullscreen) {
@@ -457,7 +505,6 @@ export function XauusdChartCard({
 
     const onFsChange = () => {
       if (!document.fullscreenElement && fullscreen) {
-        // Native exit (ESC) — sync React state.
         setFullscreen(false);
       }
     };
@@ -469,24 +516,76 @@ export function XauusdChartCard({
     };
   }, [fullscreen, chartReady]);
 
+  // Focus trap + restore for accessible fullscreen dialog (CSS fallback included).
   useEffect(() => {
     if (!fullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
+    const card = cardRef.current;
+    restoreFocusRef.current =
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null) ??
+      fullscreenBtnRef.current;
+
+    const focusExit = () => {
+      exitBtnRef.current?.focus();
+    };
+    requestAnimationFrame(focusExit);
+
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         setFullscreen(false);
+        return;
+      }
+      if (e.key !== "Tab" || !card) return;
+      const nodes = Array.from(
+        card.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ).filter((n) => !n.hasAttribute("disabled") && n.offsetParent !== null);
+      if (!nodes.length) {
+        e.preventDefault();
+        return;
+      }
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !card.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !card.contains(active)) {
+        e.preventDefault();
+        first.focus();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      const restore = restoreFocusRef.current ?? fullscreenBtnRef.current;
+      requestAnimationFrame(() => restore?.focus?.());
+    };
   }, [fullscreen]);
+
+  const openFullscreen = () => {
+    restoreFocusRef.current = fullscreenBtnRef.current;
+    setFullscreen(true);
+  };
+
+  const closeFullscreen = () => {
+    setFullscreen(false);
+  };
+
+  const onCardKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
+    if (fullscreen && e.key === "Escape") {
+      e.preventDefault();
+      closeFullscreen();
+    }
+  };
 
   const hasBars = candleData.length > 0;
   const updatedLabel = quote?.updatedLabel ?? null;
 
   const hostStyle: CSSProperties | undefined = fullscreen
-    ? { flex: 1, minHeight: 0, height: "auto" }
-    : undefined;
+    ? { flex: 1, minHeight: 0, height: "auto", touchAction: "none" }
+    : { touchAction: "pan-y" };
 
   return (
     <section
@@ -496,9 +595,11 @@ export function XauusdChartCard({
       className={`gm-xau-chart-card${fullscreen ? " is-fullscreen" : ""}`}
       data-testid="plan-market-card"
       data-fullscreen={fullscreen ? "1" : "0"}
+      data-embedded-touch={fullscreen ? "capture" : "pan-y"}
       aria-label="XAUUSD candlestick chart"
       role={fullscreen ? "dialog" : undefined}
       aria-modal={fullscreen || undefined}
+      onKeyDown={onCardKeyDown}
     >
       <div className="gm-xau-chart-card__head">
         <div className="gm-xau-chart-card__title">
@@ -557,30 +658,45 @@ export function XauusdChartCard({
               <Scan aria-hidden size={16} strokeWidth={2.25} />
               <span>Fit</span>
             </button>
-            <button
-              type="button"
-              className="gm-xau-chart-icon-btn"
-              data-testid={fullscreen ? "chart-exit-fullscreen" : "chart-fullscreen"}
-              aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-              title={fullscreen ? "Exit full screen" : "Full screen"}
-              onClick={() => setFullscreen((v) => !v)}
-            >
-              {fullscreen ? (
+            {fullscreen ? (
+              <button
+                ref={exitBtnRef}
+                type="button"
+                className="gm-xau-chart-icon-btn"
+                data-testid="chart-exit-fullscreen"
+                aria-label="Exit full screen"
+                title="Exit full screen"
+                onClick={closeFullscreen}
+              >
                 <Minimize2 aria-hidden size={16} strokeWidth={2.25} />
-              ) : (
+                <span>Exit</span>
+              </button>
+            ) : (
+              <button
+                ref={fullscreenBtnRef}
+                type="button"
+                className="gm-xau-chart-icon-btn"
+                data-testid="chart-fullscreen"
+                aria-label="Full screen"
+                title="Full screen"
+                onClick={openFullscreen}
+              >
                 <Maximize2 aria-hidden size={16} strokeWidth={2.25} />
-              )}
-              <span>{fullscreen ? "Exit" : "Full"}</span>
-            </button>
+                <span>Full</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div
         ref={hostRef}
-        className={`gm-xau-chart-host${!hasBars ? " is-empty" : ""}`}
+        className={`gm-xau-chart-host${!hasBars ? " is-empty" : ""}${
+          fullscreen ? " is-fullscreen-host" : " is-embedded-host"
+        }`}
         data-testid="xauusd-chart-host"
         data-has-bars={hasBars ? "1" : "0"}
+        data-touch-mode={fullscreen ? "capture" : "pan-y"}
         style={hostStyle}
       />
 

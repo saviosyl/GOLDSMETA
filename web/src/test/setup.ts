@@ -55,6 +55,7 @@ vi.mock("lightweight-charts", () => {
   const timeScale = {
     fitContent: vi.fn(),
     setVisibleLogicalRange: vi.fn(),
+    getVisibleLogicalRange: vi.fn(() => ({ from: 30, to: 119 })),
     subscribeVisibleLogicalRangeChange: vi.fn(),
     unsubscribeVisibleLogicalRangeChange: vi.fn()
   };

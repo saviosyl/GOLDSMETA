@@ -1532,8 +1532,15 @@ export default function UiReviewApp() {
         // Default review role matches ordinary approved users (webhook URL hidden).
         // Use ?staff=1 or ?role=OWNER for admin chrome in UI review.
         role: staffPreview ? "OWNER" : "USER",
+        access: "APP",
+        emailVerified: true,
+        approvalStatus: "APPROVED",
+        uidMasked: "re****ew",
         profile: { brokerMessage: "Broker access is separate from account approval." }
       } as AuthContextValue["account"],
+      accountLoading: false,
+      accountError: null,
+      accountResolved: true,
       refreshAccount: async () => null,
       signOut: async () => undefined,
       apiBaseUrl: "review://local"
