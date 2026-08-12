@@ -14,13 +14,17 @@ import {
   armedWindowMs,
   classifyDemoSetupTier,
   DEFAULT_DEMO_OPPORTUNITY_CONFIG,
+  hasFastDirectionalConfirmation,
   loadDemoOpportunityConfig,
+  type DemoOpportunityConfig,
   type DemoSetupTier
 } from "./demoOpportunityEngine";
 
 /** ACTIVE_DEMO short window (default 15m). STRICT legacy callers may pass override. */
-export function maxArmedCandidateAgeMs(): number {
-  return armedWindowMs(loadDemoOpportunityConfig());
+export function maxArmedCandidateAgeMs(
+  config: DemoOpportunityConfig = loadDemoOpportunityConfig()
+): number {
+  return armedWindowMs(config);
 }
 
 /**
@@ -160,14 +164,17 @@ export function createArmedCandidate(args: {
   originalReasons?: string[];
   invalidationPrice?: number | null;
   nowIso: string;
+  /** Prefer resolved runtime config so DEMO_ARMED_CONFIRMATION_BARS_5M is honoured. */
+  opportunityConfig?: DemoOpportunityConfig;
   armedWindowMsOverride?: number;
 }): ArmedCandidate {
-  const windowMs = args.armedWindowMsOverride ?? armedWindowMs(DEFAULT_DEMO_OPPORTUNITY_CONFIG);
+  const cfg = args.opportunityConfig ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
+  const windowMs = args.armedWindowMsOverride ?? armedWindowMs(cfg);
   const armedMs = Date.parse(args.nowIso);
   const expiresAt = Number.isFinite(armedMs)
     ? new Date(armedMs + windowMs).toISOString()
     : null;
-  const tier = classifyDemoSetupTier(args.setupScore);
+  const tier = classifyDemoSetupTier(args.setupScore, cfg);
   return {
     candidateId: buildArmedCandidateId({
       symbol: "XAUUSD",
@@ -284,8 +291,15 @@ export type ArmedLifecycleInput = {
   planRefreshUnavailable?: boolean;
   /** Mid price for stop/invalidation breach checks. */
   markPrice?: number | null;
-  /** A+ fast confirmation: treat decision-time support as ready. */
+  /**
+   * A+ fast path may be considered when true. Actual fast-ready still requires
+   * hasFastDirectionalConfirmation (directional evidence, not generic structure).
+   */
   allowFastConfirmation?: boolean;
+  /** Resolved runtime opportunity config (armed window, tier thresholds). */
+  opportunityConfig?: DemoOpportunityConfig;
+  /** Decision reasons for A+ fast directional confirmation. */
+  decisionReasons?: string[];
 };
 
 /**
@@ -432,6 +446,24 @@ export function evaluateArmedCandidateLifecycle(
     input.qualifiedSetup &&
     input.qualifiedSetup.direction !== existing.direction
   ) {
+    const cfg = input.opportunityConfig ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
+    const oppTier = classifyDemoSetupTier(
+      input.qualifiedSetup.setupScore,
+      cfg
+    );
+    // ACTIVE_DEMO: a BELOW opposite setup must not invalidate/replace A/A+.
+    if (cfg.mode === "ACTIVE_DEMO" && oppTier === "BELOW") {
+      return {
+        action: "KEEP_WAITING",
+        candidate: {
+          ...existing,
+          updatedAt: input.nowIso,
+          lastReasonCode: "CANDIDATE_WAITING_CONFIRMATION"
+        },
+        reasonCode: "TIER_BELOW_A_IGNORED",
+        cancelled: null
+      };
+    }
     const cancelled: ArmedCandidate = {
       ...existing,
       status: "INVALIDATED",
@@ -510,17 +542,41 @@ function armOrReadyFromQualified(
   input: ArmedLifecycleInput & { priorCancelled: ArmedCandidate | null }
 ): ArmedLifecycleResult {
   const setup = input.qualifiedSetup!;
-  const tier = classifyDemoSetupTier(setup.setupScore);
-  // A+ fast path: if decision already carries meaningful directional confirmation, execute-ready.
-  // Neutral/pending confirmation → still arm and wait (never skip final safety gates).
+  const cfg = input.opportunityConfig ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
+  const tier = classifyDemoSetupTier(setup.setupScore, cfg);
+
+  // ACTIVE_DEMO: BELOW must never arm, replace, or fast-confirm.
+  if (cfg.mode === "ACTIVE_DEMO" && tier === "BELOW") {
+    if (input.existing && input.existing.status === "ARMED") {
+      return {
+        action: "KEEP_WAITING",
+        candidate: {
+          ...input.existing,
+          updatedAt: input.nowIso,
+          lastReasonCode: "CANDIDATE_WAITING_CONFIRMATION"
+        },
+        reasonCode: "TIER_BELOW_A_IGNORED",
+        cancelled: null
+      };
+    }
+    return {
+      action: "NONE",
+      candidate: null,
+      reasonCode: "TIER_BELOW_A",
+      cancelled: input.priorCancelled
+    };
+  }
+
+  // A+ fast path: requires directional decision evidence — NOT the ordinary
+  // confirmationCandleRequired / isEntryConfirmationReady path alone.
   const fastReady =
     Boolean(input.allowFastConfirmation) &&
     tier === "A_PLUS" &&
-    isEntryConfirmationReady({
-      confirmationRequired: true,
+    hasFastDirectionalConfirmation({
       direction: setup.direction,
-      confirmationState: input.confirmationState,
-      candleClassification: input.candleClassification
+      reasons: setup.originalReasons ?? input.decisionReasons,
+      confirmationClassification:
+        input.candleClassification ?? input.confirmationState
     });
   const ready =
     fastReady ||
@@ -549,23 +605,31 @@ function armOrReadyFromQualified(
       };
     }
     if (ready) {
+      const reasonCode = fastReady
+        ? "FAST_CONFIRMATION_RECEIVED"
+        : "ENTRY_CONFIRMATION_RECEIVED";
       const c: ArmedCandidate = {
         ...input.existing,
         // Refresh live confidence/score if the same setup re-qualified.
+        // Preserve original TP ladder when re-evaluating the same thesis.
+        takeProfit2: input.existing.takeProfit2 ?? setup.takeProfit2 ?? null,
+        takeProfit3: input.existing.takeProfit3 ?? setup.takeProfit3 ?? null,
         confidence: setup.confidence ?? input.existing.confidence,
         setupScore: setup.setupScore ?? input.existing.setupScore,
         updatedAt: input.nowIso,
-        lastReasonCode: "ENTRY_CONFIRMATION_RECEIVED"
+        lastReasonCode: reasonCode
       };
       return {
         action: "READY_TO_EXECUTE",
         candidate: c,
-        reasonCode: "ENTRY_CONFIRMATION_RECEIVED",
+        reasonCode,
         cancelled: input.priorCancelled
       };
     }
     const kept: ArmedCandidate = {
       ...input.existing,
+      takeProfit2: input.existing.takeProfit2 ?? setup.takeProfit2 ?? null,
+      takeProfit3: input.existing.takeProfit3 ?? setup.takeProfit3 ?? null,
       confidence: setup.confidence ?? input.existing.confidence,
       setupScore: setup.setupScore ?? input.existing.setupScore,
       updatedAt: input.nowIso,
@@ -592,7 +656,8 @@ function armOrReadyFromQualified(
     confidence: setup.confidence,
     setupScore: setup.setupScore,
     originalReasons: setup.originalReasons,
-    nowIso: input.nowIso
+    nowIso: input.nowIso,
+    opportunityConfig: cfg
   });
 
   if (ready) {

@@ -303,8 +303,22 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     expect(submitDemoMarketOrder, `result=${JSON.stringify(result)}`).toHaveBeenCalledTimes(1);
   });
 
-  it("Intent OFF → ZERO submits", async () => {
+  it("Intent OFF → ZERO submits + armed candidate invalidated", async () => {
     settingsState.autoTradeEnabledIntent = false;
+    const armed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "dec_armed_off",
+      planSourceKey: "plan_1",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      takeProfit2: 3425,
+      confidence: 94,
+      setupScore: 94,
+      nowIso: new Date().toISOString()
+    });
+    getArmedCandidate.mockResolvedValue(armed);
     const store = {
       getDecision: vi.fn(async () => decision()),
       getActiveSessionPlan: vi.fn(async () => ({
@@ -319,6 +333,206 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
       store: store as never
     });
     expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(clearArmedCandidate).toHaveBeenCalled();
+  });
+
+  it("OAuth trading scope lost → ZERO submits + armed invalidated", async () => {
+    const { getConnection } = await import(
+      "../../../../src/services/broker/ctrader/connectionStore"
+    );
+    vi.mocked(getConnection).mockResolvedValue({
+      selectedAccountId: "48014710",
+      selectedAccountIsLive: false,
+      selectedAccountMasked: "48…10",
+      oauthScope: "accounts",
+      brokerConfirmedPepperstone: true,
+      symbolId: "41",
+      symbolName: "XAUUSD",
+      environment: "DEMO",
+      leverage: 100,
+      lastQuoteAt: new Date().toISOString()
+    } as never);
+    const armed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "dec_oauth",
+      planSourceKey: "plan_1",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 94,
+      setupScore: 94,
+      nowIso: new Date().toISOString()
+    });
+    getArmedCandidate.mockResolvedValue(armed);
+    const store = {
+      getDecision: vi.fn(async () => decision()),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_oauth_lost",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(clearArmedCandidate).toHaveBeenCalled();
+    // restore trading scope for later tests
+    vi.mocked(getConnection).mockResolvedValue({
+      selectedAccountId: "48014710",
+      selectedAccountIsLive: false,
+      selectedAccountMasked: "48…10",
+      oauthScope: "trading",
+      brokerConfirmedPepperstone: true,
+      symbolId: "41",
+      symbolName: "XAUUSD",
+      environment: "DEMO",
+      leverage: 100,
+      lastQuoteAt: new Date().toISOString()
+    } as never);
+  });
+
+  it("BELOW tier (setupScore 78) + high confidence → ZERO + TIER_BELOW_A", async () => {
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_below",
+          setupScore: 78,
+          confidence: 88,
+          reasons: ["TREND_AGREEMENT", "MTF_BULLISH"],
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_below",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    const tierReject = appendEvaluation.mock.calls.some(
+      (c) => (c[0] as { reasonCode?: string }).reasonCode === "TIER_BELOW_A"
+    );
+    expect(tierReject).toBe(true);
+  });
+
+  it("A+ structural-only (no directional) → ARMED, ZERO submit", async () => {
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_aplus_struct",
+          setupScore: 94,
+          confidence: 94,
+          reasons: ["TREND_AGREEMENT", "POC"],
+          marketStructure: { confirmationClassification: "OUTSIDE_ZONE" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "OUTSIDE_ZONE",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_aplus_struct",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(saveArmedCandidate).toHaveBeenCalled();
+    const saved = saveArmedCandidate.mock.calls.at(-1)?.[0] as { status?: string };
+    expect(saved?.status).toBe("ARMED");
+  });
+
+  it("original TP2/TP3 survive later WAIT confirmation → exactly ONE submit", async () => {
+    // Entry 3400 / SL 3390 / TP1 3410 (=1R) / TP2 3420 (=2R) — minRR 1.5 needs TP2.
+    const armed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "dec_tp_ladder",
+      planSourceKey: "plan_tp",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3410,
+      takeProfit2: 3420,
+      takeProfit3: 3430,
+      confidence: 86,
+      setupScore: 86,
+      nowIso: new Date().toISOString()
+    });
+    getArmedCandidate.mockResolvedValue(armed);
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_tp_confirm",
+          decision: "WAIT",
+          setupScore: 40,
+          confidence: 40,
+          // Later cycle omits TP ladder — armed thesis must retain it.
+          takeProfits: [],
+          entry: undefined,
+          stopLoss: undefined,
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY",
+        planSourceKey: "plan_tp"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_tp_confirm",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("NO_TRADE after armed → invalidated / ZERO order", async () => {
+    const armed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "dec_armed_nt",
+      planSourceKey: "plan_1",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 91,
+      setupScore: 91,
+      nowIso: new Date().toISOString()
+    });
+    getArmedCandidate.mockResolvedValue(armed);
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_no_trade",
+          decision: "WAIT",
+          marketStructure: { confirmationClassification: "OUTSIDE_ZONE" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "NO_TRADE",
+        confirmationState: "OUTSIDE_ZONE",
+        direction: "WAIT"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_no_trade",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(clearArmedCandidate).toHaveBeenCalled();
   });
 
   it("Paused → ZERO submits", async () => {

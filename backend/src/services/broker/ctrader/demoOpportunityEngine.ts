@@ -6,6 +6,12 @@
  *
  * Setup score is NOT win probability.
  * Live execution remains impossible via existing hard locks.
+ *
+ * Session-plan semantics (GoldMeta):
+ * - NO_VALID_PLAN — external plan absent/incomplete refresh. Soft for an
+ *   already-armed thesis → PLAN_REFRESH_UNAVAILABLE (keep monitoring).
+ * - NO_TRADE — hard/non-actionable (e.g. mismatch / chart-role). Invalidates.
+ * - INVALIDATED / EXPIRED — hard invalidators.
  */
 
 import type { SessionName } from "./sessionGuard";
@@ -40,6 +46,27 @@ export const DEFAULT_DEMO_OPPORTUNITY_CONFIG: DemoOpportunityConfig = {
   riskMultiplierAsia: 0.5
 };
 
+function parseBoundedNumber(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (raw == null || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) return fallback;
+  return n;
+}
+
+function parseRiskMult(raw: string | undefined, fallback: number): number {
+  // Experimental PR: multipliers must be >0 and <=1.
+  return parseBoundedNumber(raw, fallback, Number.EPSILON, 1);
+}
+
+/**
+ * Load Demo opportunity config from env with validated bounds.
+ * Invalid values fail closed to defaults (never invent >1 risk mult).
+ */
 export function loadDemoOpportunityConfig(
   source: NodeJS.ProcessEnv = process.env
 ): DemoOpportunityConfig {
@@ -48,16 +75,54 @@ export function loadDemoOpportunityConfig(
     .toUpperCase();
   const mode: DemoOpportunityMode =
     modeRaw === "STRICT" ? "STRICT" : "ACTIVE_DEMO";
-  const bars = Number(source.DEMO_ARMED_CONFIRMATION_BARS_5M ?? 3);
+
+  const bars = Math.floor(
+    parseBoundedNumber(source.DEMO_ARMED_CONFIRMATION_BARS_5M, 3, 1, 12)
+  );
+  let aPlusMinScore = Math.floor(
+    parseBoundedNumber(source.DEMO_A_PLUS_MIN_SCORE, 90, 50, 100)
+  );
+  let aMinScore = Math.floor(
+    parseBoundedNumber(source.DEMO_A_MIN_SCORE, 80, 50, 100)
+  );
+  // Enforce A minimum < A+ minimum; fail closed to defaults if inverted.
+  if (!(aMinScore < aPlusMinScore)) {
+    aPlusMinScore = DEFAULT_DEMO_OPPORTUNITY_CONFIG.aPlusMinScore;
+    aMinScore = DEFAULT_DEMO_OPPORTUNITY_CONFIG.aMinScore;
+  }
+
+  const asiaRaw = String(source.DEMO_ASIA_EXPERIMENTAL_ENABLED ?? "true")
+    .trim()
+    .toLowerCase();
+  const asiaExperimentalEnabled =
+    asiaRaw === "0" || asiaRaw === "false" || asiaRaw === "off"
+      ? false
+      : true;
+
   return {
-    ...DEFAULT_DEMO_OPPORTUNITY_CONFIG,
     mode,
-    armedConfirmationBars5m:
-      Number.isFinite(bars) && bars >= 1 && bars <= 12 ? Math.floor(bars) : 3
+    armedConfirmationBars5m: bars,
+    aPlusMinScore,
+    aMinScore,
+    asiaExperimentalEnabled,
+    riskMultiplierAPlusMajor: parseRiskMult(
+      source.DEMO_RISK_MULT_A_PLUS_MAJOR,
+      DEFAULT_DEMO_OPPORTUNITY_CONFIG.riskMultiplierAPlusMajor
+    ),
+    riskMultiplierAMajor: parseRiskMult(
+      source.DEMO_RISK_MULT_A_MAJOR,
+      DEFAULT_DEMO_OPPORTUNITY_CONFIG.riskMultiplierAMajor
+    ),
+    riskMultiplierAsia: parseRiskMult(
+      source.DEMO_RISK_MULT_ASIA,
+      DEFAULT_DEMO_OPPORTUNITY_CONFIG.riskMultiplierAsia
+    )
   };
 }
 
-export function armedWindowMs(config: DemoOpportunityConfig = DEFAULT_DEMO_OPPORTUNITY_CONFIG): number {
+export function armedWindowMs(
+  config: DemoOpportunityConfig = DEFAULT_DEMO_OPPORTUNITY_CONFIG
+): number {
   return config.armedConfirmationBars5m * 5 * 60 * 1000;
 }
 
@@ -65,7 +130,10 @@ export function classifyDemoSetupTier(
   setupScore: number | null | undefined,
   config: DemoOpportunityConfig = DEFAULT_DEMO_OPPORTUNITY_CONFIG
 ): DemoSetupTier {
-  const score = typeof setupScore === "number" && Number.isFinite(setupScore) ? setupScore : null;
+  const score =
+    typeof setupScore === "number" && Number.isFinite(setupScore)
+      ? setupScore
+      : null;
   if (score == null) return "BELOW";
   if (score >= config.aPlusMinScore) return "A_PLUS";
   if (score >= config.aMinScore) return "A";
@@ -75,6 +143,7 @@ export function classifyDemoSetupTier(
 /**
  * Meaningful structural support from existing decision reason strings.
  * Does not invent indicators — only recognises known GoldMeta reason tokens.
+ * Structural support alone is NOT sufficient for A+ fast confirmation.
  */
 export function hasMeaningfulStructuralSupport(
   reasons: string[] | null | undefined
@@ -105,14 +174,99 @@ export function hasMeaningfulStructuralSupport(
   return tokens.some((t) => joined.includes(t));
 }
 
+/**
+ * Direction-aware A+ fast-confirmation evidence from a COMPLETED decision.
+ * Requires existing GoldMeta diagnostics that actually support the trade side.
+ * Generic structural tokens (e.g. TREND alone) are insufficient.
+ */
+export function hasFastDirectionalConfirmation(args: {
+  direction: "BUY" | "SELL";
+  reasons?: string[] | null;
+  confirmationClassification?: string | null;
+}): boolean {
+  const dir = args.direction;
+  const cls = String(args.confirmationClassification ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+  const joined = (args.reasons ?? [])
+    .map((r) => String(r).toUpperCase())
+    .join(" ");
+
+  const buyClassExact = (ACCEPTED_BUY_CONFIRMATIONS as readonly string[]).includes(
+    cls
+  );
+  const sellClassExact = (
+    ACCEPTED_SELL_CONFIRMATIONS as readonly string[]
+  ).includes(cls);
+
+  if (dir === "BUY") {
+    // Explicit opposite / bearish rejection must not fast-confirm BUY.
+    if (
+      sellClassExact ||
+      cls.includes("BEARISH") ||
+      (cls.includes("REJECTION") && !cls.includes("BULLISH"))
+    ) {
+      return /\b(BULLISH|BUY_CONFIRM|MTF_BULLISH|BULLISH_CONTINUATION|BULLISH_REJECTION|BREAKOUT_HELD|DIRECTIONAL_BULLISH)\b/.test(
+        joined
+      );
+    }
+    const buyClass =
+      buyClassExact ||
+      (cls.includes("BULLISH") &&
+        (cls.includes("BREAKOUT") ||
+          cls.includes("REJECTION") ||
+          cls.includes("CONTINUATION") ||
+          cls.includes("CONFIRMED") ||
+          cls.includes("HELD"))) ||
+      ((cls === "BREAKOUT_CONFIRMED" ||
+        cls === "BREAKOUT_HELD" ||
+        cls === "BREAKOUT_RETEST") &&
+        !cls.includes("BEARISH"));
+    const buyReasons =
+      /\b(BULLISH|BUY_CONFIRM|MTF_BULLISH|BULLISH_CONTINUATION|BULLISH_REJECTION|BREAKOUT_HELD|DIRECTIONAL_BULLISH)\b/.test(
+        joined
+      ) ||
+      (joined.includes("BREAKOUT") &&
+        joined.includes("RETEST") &&
+        !joined.includes("BEARISH"));
+    return Boolean(buyClass || buyReasons);
+  }
+
+  // SELL
+  if (
+    buyClassExact ||
+    cls.includes("BULLISH") ||
+    cls === "BREAKOUT_CONFIRMED" ||
+    cls === "BREAKOUT_HELD"
+  ) {
+    return /\b(BEARISH|SELL_CONFIRM|MTF_BEARISH|BEARISH_CONTINUATION|BEARISH_REJECTION|DIRECTIONAL_BEARISH)\b/.test(
+      joined
+    );
+  }
+  const sellClass =
+    sellClassExact ||
+    (cls.includes("BEARISH") &&
+      (cls.includes("BREAKOUT") ||
+        cls.includes("REJECTION") ||
+        cls.includes("CONTINUATION") ||
+        cls.includes("CONFIRMED") ||
+        cls.includes("HELD"))) ||
+    cls === "REJECTION_CONFIRMED";
+  const sellReasons =
+    /\b(BEARISH|SELL_CONFIRM|MTF_BEARISH|BEARISH_CONTINUATION|BEARISH_REJECTION|DIRECTIONAL_BEARISH)\b/.test(
+      joined
+    );
+  return Boolean(sellClass || sellReasons);
+}
+
 export type MajorSession = "Asia" | "London" | "NewYork" | "Overlap";
 
 export function resolveTradingSessionBucket(now = new Date()): MajorSession {
   const h = now.getUTCHours();
   // Overlap approximate UTC 12–16
   if (h >= 12 && h < 16) return "Overlap";
-  const s = currentSessionUtc(now);
-  return s;
+  return currentSessionUtc(now);
 }
 
 export function isAsiaSession(now = new Date()): boolean {
@@ -138,14 +292,19 @@ export function demoSessionPolicyAllows(args: {
   const config = args.config ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
   const now = args.now ?? new Date();
   const current = resolveTradingSessionBucket(now);
-  const asiaExperimental = current === "Asia" && config.asiaExperimentalEnabled;
+  const asiaSession = current === "Asia";
 
   if (args.mode === "STRICT") {
     // Defer to classic sessionAllowed — this helper only annotates.
-    return { ok: true, current, reason: null, asiaExperimental: false };
+    return {
+      ok: true,
+      current,
+      reason: null,
+      asiaExperimental: false
+    };
   }
 
-  if (current === "Asia") {
+  if (asiaSession) {
     if (!config.asiaExperimentalEnabled) {
       return {
         ok: false,
@@ -158,65 +317,97 @@ export function demoSessionPolicyAllows(args: {
       return {
         ok: false,
         current,
-        reason: "SESSION_BLOCKED",
+        reason: "TIER_BELOW_A",
         asiaExperimental: true
       };
     }
     return { ok: true, current, reason: null, asiaExperimental: true };
   }
 
-  // Major sessions always allowed in ACTIVE_DEMO when tier is tradable.
+  // Major sessions: tier BELOW is not tradable in ACTIVE_DEMO.
   if (args.tier === "BELOW") {
-    return { ok: false, current, reason: "TIER_BELOW_A", asiaExperimental: false };
+    return {
+      ok: false,
+      current,
+      reason: "TIER_BELOW_A",
+      asiaExperimental: false
+    };
   }
   return { ok: true, current, reason: null, asiaExperimental: false };
 }
 
 /**
  * Risk multiplier for position sizing only — never alters SL.
+ * BELOW / unknown → 0 (fail closed for ACTIVE_DEMO callers).
  */
 export function demoRiskMultiplier(args: {
   tier: DemoSetupTier;
-  session: MajorSession | string;
+  session: string;
   config?: DemoOpportunityConfig;
 }): number {
   const config = args.config ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG;
   const session = String(args.session);
   const asia = /^asia$/i.test(session);
+  if (args.tier === "BELOW") return 0;
   if (asia) return config.riskMultiplierAsia;
   if (args.tier === "A_PLUS") return config.riskMultiplierAPlusMajor;
   if (args.tier === "A") return config.riskMultiplierAMajor;
   return 0;
 }
 
+/** Valid experimental multiplier: finite, >0, <=1. */
+export function isValidDemoRiskMultiplier(mult: number): boolean {
+  return Number.isFinite(mult) && mult > 0 && mult <= 1;
+}
+
 export function applyRiskMultiplier(
   baseRisk: number,
   multiplier: number
 ): number {
-  if (!(baseRisk > 0) || !(multiplier > 0)) return 0;
+  if (!(baseRisk > 0) || !isValidDemoRiskMultiplier(multiplier)) return 0;
   return Math.round(baseRisk * multiplier * 100) / 100;
 }
 
 /**
- * Session-plan lifecycle states that REFRESH the external plan but must NOT
- * alone invalidate an already-armed setup thesis.
+ * Soft plan-refresh only. NO_TRADE is intentionally excluded — GoldMeta treats
+ * NO_TRADE as hard/non-actionable (mismatch / chart-role).
  */
 export function isPlanRefreshUnavailableState(
   lifecycleState: string | null | undefined
 ): boolean {
-  const s = String(lifecycleState ?? "").toUpperCase();
-  return s === "NO_VALID_PLAN" || s === "NO_TRADE";
+  return String(lifecycleState ?? "").toUpperCase() === "NO_VALID_PLAN";
 }
 
 /**
- * Hard structural invalidators from the session plan (real thesis breakers).
- * Opposite direction on a still-valid plan is handled separately.
+ * Hard structural invalidators from the session plan.
+ * NO_TRADE is hard (non-actionable). Opposite direction handled separately.
  */
 export function isHardSessionPlanInvalidator(
   lifecycleState: string | null | undefined
 ): boolean {
   const s = String(lifecycleState ?? "").toUpperCase();
-  return s === "INVALIDATED" || s === "EXPIRED";
+  return s === "INVALIDATED" || s === "EXPIRED" || s === "NO_TRADE";
+}
+
+/**
+ * Broker-side mark for stop/invalidation breach checks.
+ * BUY (long): use bid — stop is hit when the market trades/bids through SL.
+ * SELL (short): use ask — stop is hit when the offer trades through SL.
+ * Midpoint is avoided because it can delay recognising a real breach.
+ */
+export function markPriceForInvalidation(args: {
+  direction: "BUY" | "SELL";
+  bid: number | null | undefined;
+  ask: number | null | undefined;
+}): number | null {
+  if (args.direction === "BUY") {
+    return typeof args.bid === "number" && Number.isFinite(args.bid)
+      ? args.bid
+      : null;
+  }
+  return typeof args.ask === "number" && Number.isFinite(args.ask)
+    ? args.ask
+    : null;
 }
 
 /**
@@ -249,7 +440,8 @@ export function barsRemainingInArmedWindow(args: {
   nowIso: string;
   bars5m?: number;
 }): number {
-  const bars = args.bars5m ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG.armedConfirmationBars5m;
+  const bars =
+    args.bars5m ?? DEFAULT_DEMO_OPPORTUNITY_CONFIG.armedConfirmationBars5m;
   const armedMs = Date.parse(args.armedAt);
   const nowMs = Date.parse(args.nowIso);
   if (!Number.isFinite(armedMs) || !Number.isFinite(nowMs)) return 0;
@@ -278,7 +470,8 @@ export function formatOpportunityActivity(args: {
     args.score != null && Number.isFinite(args.score)
       ? `${Math.round(args.score)}/100`
       : null;
-  const tierLabel = args.tier === "A_PLUS" ? "A+" : args.tier === "A" ? "A" : "SETUP";
+  const tierLabel =
+    args.tier === "A_PLUS" ? "A+" : args.tier === "A" ? "A" : "SETUP";
   const head = score ? `${tierLabel} ${dir} ${score}` : `${tierLabel} ${dir}`;
   switch (args.event) {
     case "FAST_CONFIRMATION_SUBMITTED":
@@ -287,10 +480,14 @@ export function formatOpportunityActivity(args: {
       return `${head} — CONFIRMED — ORDER SUBMITTED`;
     case "ARMED_WAITING":
       return `${head} — ARMED — waiting 5M confirmation${
-        args.barsRemaining != null ? ` — ${args.barsRemaining} bars remaining` : ""
+        args.barsRemaining != null
+          ? ` — ${args.barsRemaining} bars remaining`
+          : ""
       }`;
     case "CANCELLED_INVALIDATED":
-      return `${head} — CANCELLED — ${args.invalidationDetail || "setup invalidated"}`;
+      return `${head} — CANCELLED — ${
+        args.invalidationDetail || "setup invalidated"
+      }`;
     case "EXPIRED":
       return `${head} — EXPIRED — no confirmation within armed window`;
     case "PLAN_REFRESH_UNAVAILABLE":

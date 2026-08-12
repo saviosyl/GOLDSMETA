@@ -11,26 +11,30 @@ SL/TP, RR, score) had already passed.
 ## New armed lifecycle
 
 1. Arm on qualified A+/A setup with independent `expiresAt` (default **3 × 5M = 15m**).
-2. `NO_VALID_PLAN` / `NO_TRADE` → **`PLAN_REFRESH_UNAVAILABLE`** — keep waiting.
-3. Invalidate only on: stop breach, hard plan INVALIDATED/EXPIRED, opposite
-   meaningful confirmation, opposite strong setup, armed-window expiry,
-   emergency stop, pause/off, authority lost.
+2. `NO_VALID_PLAN` → **`PLAN_REFRESH_UNAVAILABLE`** — keep waiting.
+3. `NO_TRADE` → **hard invalidate** (GoldMeta non-actionable: mismatch / chart-role).
+4. `INVALIDATED` / `EXPIRED` → hard invalidate.
+5. Other real invalidators: stop breach (bid for BUY / ask for SELL), opposite
+   meaningful confirmation, opposite strong A/A+ setup, armed-window expiry,
+   emergency stop, pause/off, autonomous authority lost.
 
-## Tiers (setup score ≠ win probability)
+## Tiers (setup score ≠ win probability / ≠ confidence)
 
 | Tier | Score | Confirmation |
 |------|------:|--------------|
-| A+ | ≥ 90 + structural reason tokens | Fast confirm if decision already has meaningful directional confirmation; else wait ≤15m |
-| A | 80–89 | Wait for directional 5M confirmation within 15m |
+| A+ | ≥ configured A+ (default 90) + structural + **directional** decision evidence | Fast confirm when completed decision already has direction-aware support; else wait ≤15m |
+| A | ≥ configured A (default 80) and &lt; A+ | Wait for directional 5M confirmation within 15m |
+| BELOW | &lt; A | **Hard reject** `TIER_BELOW_A` — no arm / replace / submit |
 
-## Accepted confirmation classifications
+Confidence alone must not promote a BELOW setupScore into the order pipeline.
 
-Documented via `resolveAuthoritativeConfirmation` +
-`ACCEPTED_BUY_CONFIRMATIONS` / `ACCEPTED_SELL_CONFIRMATIONS` in
-`demoOpportunityEngine.ts`.
+## Session-plan semantics
 
-Neutral / pending (`OUTSIDE_ZONE`, `APPROACHING_ZONE`, …) → **keep waiting**.
-Opposite meaningful confirmation → **invalidate**.
+| State | Armed thesis behaviour |
+|-------|------------------------|
+| `NO_VALID_PLAN` | Soft — `PLAN_REFRESH_UNAVAILABLE`, keep ARMED until own expiry |
+| `NO_TRADE` | Hard — invalidate / block (non-actionable) |
+| `INVALIDATED` / `EXPIRED` | Hard — invalidate |
 
 ## Asia Demo experiment
 
@@ -43,14 +47,28 @@ Asia: allowed for A+/A with **0.50×** fixed Demo risk. Session recorded on jour
 |--|--:|--:|
 | A+ | 1.00 | 0.50 |
 | A | 0.75 | 0.50 |
+| BELOW | 0 (fail closed) | 0 |
 
-## Mode
+ACTIVE_DEMO never falls back via `riskMult \|\| 1`. Invalid multiplier → reject.
 
-`DEMO_OPPORTUNITY_MODE=ACTIVE_DEMO` (default) or `STRICT` (legacy plan-kill behaviour).
+## Runtime config (env)
+
+| Variable | Default | Bounds |
+|----------|---------|--------|
+| `DEMO_OPPORTUNITY_MODE` | `ACTIVE_DEMO` | `ACTIVE_DEMO` \| `STRICT` |
+| `DEMO_ARMED_CONFIRMATION_BARS_5M` | `3` | 1–12 |
+| `DEMO_A_PLUS_MIN_SCORE` | `90` | 50–100; must be &gt; A min |
+| `DEMO_A_MIN_SCORE` | `80` | 50–100; must be &lt; A+ min |
+| `DEMO_ASIA_EXPERIMENTAL_ENABLED` | `true` | bool |
+| `DEMO_RISK_MULT_A_PLUS_MAJOR` | `1` | &gt;0 and ≤1 |
+| `DEMO_RISK_MULT_A_MAJOR` | `0.75` | &gt;0 and ≤1 |
+| `DEMO_RISK_MULT_ASIA` | `0.5` | &gt;0 and ≤1 |
+
+Invalid values fail closed to defaults. Multiplier &gt;1 not allowed in this PR.
 
 ## Next Candle Edge
 
-Remains **SHADOW only** in this PR — not wired to Demo execution.
+Remains **SHADOW only** — not wired to Demo execution.
 
 ## Live hard locks
 

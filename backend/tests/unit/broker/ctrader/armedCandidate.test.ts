@@ -19,6 +19,7 @@ import {
   saveArmedCandidate,
   useArmedCandidateMemoryStore
 } from "../../../../src/services/broker/ctrader/armedCandidateStore";
+import { loadDemoOpportunityConfig } from "../../../../src/services/broker/ctrader/demoOpportunityEngine";
 
 const baseSetup = {
   direction: "SELL" as const,
@@ -28,7 +29,7 @@ const baseSetup = {
   stopLoss: 3410,
   takeProfit: 3380,
   confidence: 94,
-  setupScore: -81
+  setupScore: 86
 };
 
 function armedFrom(setup = baseSetup, uid = "u1"): ArmedCandidate {
@@ -296,6 +297,187 @@ describe("armed candidate lifecycle", () => {
     });
     expect(result.action).toBe("INVALIDATE");
     expect(result.candidate?.status).toBe("INVALIDATED");
+  });
+
+  it("A+ directional decision evidence → fast-ready; structural-only → ARMED", () => {
+    const aPlusDirectional = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-aplus",
+        planSourceKey: "plan_aplus",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        takeProfit2: 3425,
+        confidence: 94,
+        setupScore: 94,
+        originalReasons: ["MTF_BULLISH", "MARKET_STRUCTURE"]
+      },
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      candleClassification: "OUTSIDE_ZONE",
+      allowFastConfirmation: true,
+      decisionReasons: ["MTF_BULLISH", "MARKET_STRUCTURE"]
+    });
+    expect(aPlusDirectional.action).toBe("READY_TO_EXECUTE");
+    expect(aPlusDirectional.reasonCode).toBe("FAST_CONFIRMATION_RECEIVED");
+
+    const aPlusStructureOnly = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-aplus-struct",
+        planSourceKey: "plan_struct",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        confidence: 94,
+        setupScore: 94,
+        originalReasons: ["TREND_AGREEMENT", "POC"]
+      },
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      candleClassification: "OUTSIDE_ZONE",
+      allowFastConfirmation: false,
+      decisionReasons: ["TREND_AGREEMENT", "POC"]
+    });
+    expect(aPlusStructureOnly.action).toBe("ARM");
+    expect(aPlusStructureOnly.candidate?.status).toBe("ARMED");
+  });
+
+  it("A with same directional evidence waits for normal confirmation (no fast path)", () => {
+    const aWait = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-a",
+        planSourceKey: "plan_a",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        confidence: 86,
+        setupScore: 86,
+        originalReasons: ["MTF_BULLISH", "MARKET_STRUCTURE"]
+      },
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      candleClassification: "OUTSIDE_ZONE",
+      allowFastConfirmation: false,
+      decisionReasons: ["MTF_BULLISH", "MARKET_STRUCTURE"]
+    });
+    expect(aWait.action).toBe("ARM");
+    expect(aWait.reasonCode).toBe("CANDIDATE_ARMED");
+  });
+
+  it("BELOW opposite setup cannot replace an existing A/A+ armed candidate", () => {
+    const armed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "sig-buy-a",
+      planSourceKey: "plan_buy",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 92,
+      setupScore: 92,
+      nowIso: "2026-08-10T15:00:00.000Z"
+    });
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:05:00.000Z",
+      autoTradePermitted: true,
+      existing: armed,
+      qualifiedSetup: {
+        direction: "SELL",
+        signalId: "sig-below-sell",
+        planSourceKey: "plan_below",
+        entry: 3400,
+        stopLoss: 3410,
+        takeProfit: 3380,
+        confidence: 88,
+        setupScore: 78
+      },
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE"
+    });
+    expect(result.action).toBe("KEEP_WAITING");
+    expect(result.reasonCode).toBe("TIER_BELOW_A_IGNORED");
+    expect(result.candidate?.direction).toBe("BUY");
+    expect(result.candidate?.status).toBe("ARMED");
+  });
+
+  it("configured armed window: bars=3 → 15m expiry; bars=6 → 30m", () => {
+    const cfg3 = loadDemoOpportunityConfig({
+      DEMO_ARMED_CONFIRMATION_BARS_5M: "3"
+    } as NodeJS.ProcessEnv);
+    const cfg6 = loadDemoOpportunityConfig({
+      DEMO_ARMED_CONFIRMATION_BARS_5M: "6"
+    } as NodeJS.ProcessEnv);
+    const a3 = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "sig-w3",
+      planSourceKey: null,
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 90,
+      setupScore: 90,
+      nowIso: "2026-08-10T15:00:00.000Z",
+      opportunityConfig: cfg3
+    });
+    const a6 = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "sig-w6",
+      planSourceKey: null,
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 90,
+      setupScore: 90,
+      nowIso: "2026-08-10T15:00:00.000Z",
+      opportunityConfig: cfg6
+    });
+    expect(a3.expiresAt).toBe("2026-08-10T15:15:00.000Z");
+    expect(a6.expiresAt).toBe("2026-08-10T15:30:00.000Z");
+  });
+
+  it("BUY invalidation uses bid breach of stop", () => {
+    const buyArmed = createArmedCandidate({
+      uid: "u1",
+      direction: "BUY",
+      signalId: "sig-buy-stop",
+      planSourceKey: "plan_buy",
+      entry: 3400,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      confidence: 92,
+      setupScore: 92,
+      nowIso: "2026-08-10T15:00:00.000Z"
+    });
+    const hit = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:05:00.000Z",
+      autoTradePermitted: true,
+      existing: buyArmed,
+      qualifiedSetup: null,
+      confirmationRequired: true,
+      confirmationState: "OUTSIDE_ZONE",
+      markPrice: 3389.5 // bid through stop
+    });
+    expect(hit.action).toBe("INVALIDATE");
+    expect(hit.candidate?.invalidationReason).toBe("INVALIDATION_PRICE_BREACHED");
   });
 
   it("TEST H — low-quality WAIT setups are never armed", () => {

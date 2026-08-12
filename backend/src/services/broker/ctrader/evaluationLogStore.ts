@@ -106,7 +106,13 @@ export function reasonLabelFor(code: string): string {
       "Session plan refresh unavailable — still monitoring armed candidate",
     FAST_CONFIRMATION_RECEIVED: "A+ fast confirmation — ready to execute",
     ARMED_WINDOW_EXPIRED: "Armed confirmation window expired",
-    INVALIDATION_PRICE_BREACHED: "Invalidation / stop price breached"
+    INVALIDATION_PRICE_BREACHED: "Invalidation / stop price breached",
+    TIER_BELOW_A: "Setup score below A threshold (ACTIVE_DEMO)",
+    RISK_MULTIPLIER_INVALID: "Demo risk multiplier invalid — fail closed",
+    AUTOTRADE_INTENT_OFF: "Demo Auto intent OFF — armed thesis cancelled",
+    TRADING_OAUTH_REQUIRED: "Trading OAuth scope required",
+    DEMO_ACCOUNT_NOT_SELECTED: "Demo account not selected",
+    DEMO_SUBMISSION_FLAG_OFF: "Demo submission flag off"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }

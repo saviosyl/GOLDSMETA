@@ -15,6 +15,7 @@ import {
 import { submitDemoMarketOrder } from "./demoOrderExecution";
 import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 import {
+  AUTONOMOUS_DEMO_ORDER_STATES,
   assertAutonomousDemoSubmissionAllowed,
   evaluateControlledDemoOrderAuthority,
   resolveDemoAutoAuthorityForUser
@@ -26,10 +27,13 @@ import {
   demoRiskMultiplier,
   demoSessionPolicyAllows,
   formatOpportunityActivity,
+  hasFastDirectionalConfirmation,
   hasMeaningfulStructuralSupport,
   isHardSessionPlanInvalidator,
   isPlanRefreshUnavailableState,
+  isValidDemoRiskMultiplier,
   loadDemoOpportunityConfig,
+  markPriceForInvalidation,
   resolveTradingSessionBucket
 } from "./demoOpportunityEngine";
 import { calculateCTraderVolume } from "./sizing";
@@ -662,6 +666,43 @@ export async function processDecisionForQualification(args: {
         doc.demoAutoTrades.some((t) => t.signalId === existingArmed.signalId)
       : false;
 
+    const oppConfig = loadDemoOpportunityConfig();
+
+    // Autonomous Demo Auto: authority loss must cancel an armed thesis so a
+    // stale candidate cannot fire immediately after re-enable.
+    // CONTROLLED_DEMO_QUALIFICATION keeps its separately documented semantics.
+    let autoTradePermitted =
+      !settings.autoTradePaused && !settings.emergencyStopActive;
+    let autoTradeOffReason: string | null = settings.emergencyStopActive
+      ? "EMERGENCY_STOP"
+      : settings.autoTradePaused
+        ? "AUTOTRADE_PAUSED"
+        : null;
+    if (
+      AUTONOMOUS_DEMO_ORDER_STATES.includes(state) &&
+      !isCTraderLiveEnabled()
+    ) {
+      const demoAuthority = await resolveDemoAutoAuthorityForUser(uid);
+      if (!demoAuthority.submissionAuthorized) {
+        autoTradePermitted = false;
+        autoTradeOffReason =
+          demoAuthority.reasons[0] ??
+          (demoAuthority.emergencyStop
+            ? "EMERGENCY_STOP"
+            : demoAuthority.paused
+              ? "AUTOTRADE_PAUSED"
+              : !demoAuthority.intentEnabled
+                ? "AUTOTRADE_INTENT_OFF"
+                : !demoAuthority.selectedDemoAccount
+                  ? "DEMO_ACCOUNT_NOT_SELECTED"
+                  : demoAuthority.tradingScope !== "trading"
+                    ? "TRADING_OAUTH_REQUIRED"
+                    : !demoAuthority.demoSubmissionFlag
+                      ? "DEMO_SUBMISSION_FLAG_OFF"
+                      : "EXECUTION_AUTHORITY_OFF");
+      }
+    }
+
     let qualifiedSetup: {
       direction: "BUY" | "SELL";
       signalId: string;
@@ -746,22 +787,65 @@ export async function processDecisionForQualification(args: {
         ].includes(f)
       );
       if (!hardFail) {
-        qualifiedSetup = {
-          direction: decisionDirection,
-          signalId: d.decisionId,
-          planSourceKey,
-          entry: geom.entry,
-          stopLoss: geom.stopLoss,
-          takeProfit: geom.takeProfit,
-          confidence: d.confidence ?? null,
-          setupScore: d.setupScore ?? null
-        };
-        logger.info("AutoTrade setup qualified", {
-          uid,
-          signalId: d.decisionId,
-          direction: decisionDirection,
-          setupScore: d.setupScore ?? null
-        });
+        const setupTierPre = classifyDemoSetupTier(
+          d.setupScore ?? null,
+          oppConfig
+        );
+        // ACTIVE_DEMO: setupScore tier is authoritative — confidence alone must
+        // not arm/execute BELOW-A setups.
+        if (oppConfig.mode === "ACTIVE_DEMO" && setupTierPre === "BELOW") {
+          try {
+            await appendEvaluation({
+              uid,
+              accountMasked: setup.accountMasked,
+              at: new Date().toISOString(),
+              tradingDay: tradingDayKey(),
+              stage: state,
+              direction: decisionDirection,
+              signalId: d.decisionId,
+              decisionId: d.decisionId,
+              confidence: d.setupScore ?? d.confidence ?? null,
+              entry: geom.entry,
+              stopLoss: geom.stopLoss,
+              takeProfit: geom.takeProfit,
+              riskReward: null,
+              spread: quote?.spread ?? null,
+              maxSpread: settings.maxSpread,
+              outcome: "REJECTED",
+              reasonCode: "TIER_BELOW_A",
+              reasonLabel: reasonLabelFor("TIER_BELOW_A"),
+              passed: preCandidate.passed,
+              failed: ["TIER_BELOW_A"],
+              finalReason: `SETUP ${decisionDirection} ${
+                d.setupScore != null ? Math.round(d.setupScore) : "?"
+              }/100 skipped — TIER_BELOW_A (setup score below A threshold; confidence is not a substitute)`
+            });
+          } catch {
+            /* ignore */
+          }
+          if (!existingArmed) {
+            return { handled: true, message: "arm_hard_reject:TIER_BELOW_A" };
+          }
+          // Keep monitoring existing armed A/A+ thesis; do not arm/replace with BELOW.
+        } else {
+          qualifiedSetup = {
+            direction: decisionDirection,
+            signalId: d.decisionId,
+            planSourceKey,
+            entry: geom.entry,
+            stopLoss: geom.stopLoss,
+            takeProfit: geom.takeProfit,
+            confidence: d.confidence ?? null,
+            setupScore: d.setupScore ?? null
+          };
+          logger.info("AutoTrade setup qualified", {
+            uid,
+            signalId: d.decisionId,
+            direction: decisionDirection,
+            setupScore: d.setupScore ?? null,
+            tier: setupTierPre
+          });
+        }
       } else {
         // Persist arm-stage hard rejects so missed BUY/SELL never disappear silently.
         try {
@@ -805,9 +889,9 @@ export async function processDecisionForQualification(args: {
       }
     }
 
-    const oppConfig = loadDemoOpportunityConfig();
     const planLifecycle = sessionPlan?.lifecycleState ?? null;
-    // ACTIVE_DEMO: NO_VALID_PLAN / NO_TRADE alone must NOT kill an armed thesis.
+    // ACTIVE_DEMO: NO_VALID_PLAN alone must NOT kill an armed thesis.
+    // NO_TRADE remains a hard invalidator (GoldMeta non-actionable).
     const planRefreshUnavailable =
       Boolean(existingArmed) &&
       oppConfig.mode === "ACTIVE_DEMO" &&
@@ -819,13 +903,13 @@ export async function processDecisionForQualification(args: {
       sessionPlan.direction !== existingArmed.direction &&
       sessionPlan.direction !== "WAIT" &&
       // Only treat as hard invalidator when plan is still a real directional plan
-      !isPlanRefreshUnavailableState(planLifecycle);
+      !isPlanRefreshUnavailableState(planLifecycle) &&
+      !isHardSessionPlanInvalidator(planLifecycle);
     const structurallyInvalid =
       Boolean(existingArmed) &&
       (isHardSessionPlanInvalidator(planLifecycle) ||
         (oppConfig.mode === "STRICT" &&
-          (isPlanRefreshUnavailableState(planLifecycle) ||
-            planLifecycle === "NO_TRADE")) ||
+          isPlanRefreshUnavailableState(planLifecycle)) ||
         oppositePlanDirection);
 
     const decisionReasons: string[] = Array.isArray(
@@ -836,16 +920,20 @@ export async function processDecisionForQualification(args: {
         ? ((d as { reasonCodes?: string[] }).reasonCodes as string[])
         : [];
 
-    const midPrice =
-      quote?.bid != null && quote?.ask != null
-        ? (quote.bid + quote.ask) / 2
-        : quote?.bid ?? quote?.ask ?? null;
+    const markSide =
+      existingArmed != null
+        ? markPriceForInvalidation({
+            direction: existingArmed.direction,
+            bid: quote?.bid ?? null,
+            ask: quote?.ask ?? null
+          })
+        : null;
 
     const life = evaluateArmedCandidateLifecycle({
       uid,
       nowIso: new Date().toISOString(),
-      autoTradePermitted: !settings.autoTradePaused && !settings.emergencyStopActive,
-      autoTradeOffReason: settings.emergencyStopActive ? "EMERGENCY_STOP" : "AUTOTRADE_PAUSED",
+      autoTradePermitted,
+      autoTradeOffReason,
       existing:
         existingArmed == null
           ? null
@@ -871,12 +959,24 @@ export async function processDecisionForQualification(args: {
           : `SESSION_PLAN_${planLifecycle ?? "INVALID"}`
         : null,
       planRefreshUnavailable,
-      markPrice: midPrice,
+      markPrice: markSide,
+      opportunityConfig: oppConfig,
+      decisionReasons,
       allowFastConfirmation:
         oppConfig.mode === "ACTIVE_DEMO" &&
-        classifyDemoSetupTier(qualifiedSetup?.setupScore ?? existingArmed?.setupScore) ===
-          "A_PLUS" &&
-        hasMeaningfulStructuralSupport(decisionReasons)
+        classifyDemoSetupTier(
+          qualifiedSetup?.setupScore ?? existingArmed?.setupScore,
+          oppConfig
+        ) === "A_PLUS" &&
+        hasMeaningfulStructuralSupport(decisionReasons) &&
+        hasFastDirectionalConfirmation({
+          direction: (qualifiedSetup?.direction ??
+            existingArmed?.direction ??
+            "BUY") as "BUY" | "SELL",
+          reasons: decisionReasons,
+          confirmationClassification:
+            candleClassification ?? confirmationState
+        })
     });
 
     if (life.action === "INVALIDATE" && life.candidate) {
@@ -1095,13 +1195,14 @@ export async function processDecisionForQualification(args: {
   }
 
   // Prefer armed candidate geometry when confirmation finally arrives on a later cycle.
+  // Original TP2/TP3 must survive WAIT/confirmation cycles that omit them.
   const direction = armedTrade?.direction ?? decisionDirection;
   const entry = armedTrade?.entry ?? geom.entry;
   const stopLoss = armedTrade?.stopLoss ?? geom.stopLoss;
   const takeProfit = armedTrade?.takeProfit ?? geom.takeProfit;
   const tp1 = armedTrade?.takeProfit ?? geom.tp1;
-  const tp2 = geom.tp2;
-  const tp3 = geom.tp3;
+  const tp2 = armedTrade?.takeProfit2 ?? geom.tp2;
+  const tp3 = armedTrade?.takeProfit3 ?? geom.tp3;
   const signalId = armedTrade?.signalId ?? d.decisionId;
   const tradeConfidence = armedTrade?.confidence ?? d.confidence ?? null;
 
@@ -1114,11 +1215,14 @@ export async function processDecisionForQualification(args: {
   // present). GoldMeta plans are typically TP1=1R / TP2=2R / TP3=3R — checking
   // only TP1 against minRiskReward (default 1.5) incorrectly rejected every setup.
   // Order submission still uses strategy TP1 as the primary broker take-profit.
+  // When confirming a retained armed candidate, RR comes from ORIGINAL geometry.
   const rrTakeProfit = tp2 ?? tp3 ?? takeProfit;
   const risk =
     entry != null && stopLoss != null ? Math.abs(entry - stopLoss) : null;
   const reward =
     entry != null && rrTakeProfit != null ? Math.abs(rrTakeProfit - entry) : null;
+  const riskRewardFromGeometry =
+    risk && risk > 0 && reward != null ? reward / risk : null;
   const riskRewardFromDecision =
     typeof d.riskReward?.tp2 === "number"
       ? d.riskReward.tp2
@@ -1127,9 +1231,9 @@ export async function processDecisionForQualification(args: {
         : typeof d.riskReward?.tp1 === "number"
           ? d.riskReward.tp1
           : null;
-  const riskReward =
-    riskRewardFromDecision ??
-    (risk && risk > 0 && reward != null ? reward / risk : null);
+  const riskReward = armedTrade
+    ? riskRewardFromGeometry ?? riskRewardFromDecision
+    : riskRewardFromDecision ?? riskRewardFromGeometry;
 
   const candidate = evaluateQualificationCandidate({
     direction,
@@ -1464,9 +1568,47 @@ export async function processDecisionForQualification(args: {
         session: sessionBucket,
         config: oppCfg
       });
-      const effectiveRisk = applyRiskMultiplier(settings.fixedRiskAmount, riskMult || 1);
+      let effectiveRisk: number;
+      if (oppCfg.mode === "ACTIVE_DEMO") {
+        // Fail closed — never fall back to base risk via `riskMult || 1`.
+        if (!isValidDemoRiskMultiplier(riskMult)) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          await logEval(
+            "REJECTED",
+            "RISK_MULTIPLIER_INVALID",
+            ["RISK_MULTIPLIER_INVALID", "TIER_BELOW_A"],
+            candidate.passed
+          );
+          return { handled: true, message: "lots_invalid:RISK_MULTIPLIER_INVALID" };
+        }
+        effectiveRisk = applyRiskMultiplier(settings.fixedRiskAmount, riskMult);
+        if (!(effectiveRisk > 0)) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          await logEval(
+            "REJECTED",
+            "RISK_MULTIPLIER_INVALID",
+            ["RISK_MULTIPLIER_INVALID"],
+            candidate.passed
+          );
+          return { handled: true, message: "lots_invalid:RISK_MULTIPLIER_INVALID" };
+        }
+      } else {
+        // STRICT: legacy base-risk when multiplier unavailable.
+        effectiveRisk =
+          isValidDemoRiskMultiplier(riskMult)
+            ? applyRiskMultiplier(settings.fixedRiskAmount, riskMult)
+            : settings.fixedRiskAmount;
+      }
       const xauSizing = calculatePepperstoneXauUsdDemoVolume({
-        riskAmountDeposit: effectiveRisk > 0 ? effectiveRisk : settings.fixedRiskAmount,
+        riskAmountDeposit: effectiveRisk,
         entryPrice: entryPx,
         stopLoss,
         quoteToDepositRate,
@@ -1785,10 +1927,11 @@ export async function processDecisionForQualification(args: {
           stopLoss: trade.stopLoss,
           takeProfit: trade.takeProfit,
           lots: trade.lots,
-          cashRisk: applyRiskMultiplier(
-            settings.fixedRiskAmount,
-            riskMultJournal || 1
-          ),
+          cashRisk:
+            oppCfg.mode === "ACTIVE_DEMO" &&
+            isValidDemoRiskMultiplier(riskMultJournal)
+              ? applyRiskMultiplier(settings.fixedRiskAmount, riskMultJournal)
+              : settings.fixedRiskAmount,
           confidence: d.confidence ?? null,
           riskReward,
           session: sessionBucket,
