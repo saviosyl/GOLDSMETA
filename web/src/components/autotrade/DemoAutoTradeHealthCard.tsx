@@ -69,9 +69,24 @@ export function DemoAutoTradeHealthCard(props: {
           : "BLOCKED");
 
   const qualLabel =
-    !a?.startedAt && (a?.qualificationState === "READY_TO_QUALIFY" || !a?.qualificationState)
-      ? "NOT STARTED"
-      : (q?.overallLabel || a?.qualificationState || "—").toString();
+    q?.accountConflict ||
+    q?.recordStatus === "ACCOUNT_CONFLICT" ||
+    q?.recordStatus === "ACCOUNT_MISMATCH"
+      ? "QUALIFICATION ACCOUNT MISMATCH"
+      : !a?.startedAt &&
+          (a?.qualificationState === "READY_TO_QUALIFY" || !a?.qualificationState)
+        ? "NOT STARTED"
+        : (q?.overallLabel || a?.qualificationState || "—").toString();
+  const demoAutoDetail =
+    !demoOn && a
+      ? !a.startedAt
+        ? "Qualification not started"
+        : a.reasons?.includes("INTENT_OFF")
+          ? "Owner intent disabled"
+          : a.label === "PAUSED"
+            ? "Paused"
+            : "OFF"
+      : null;
 
   const lastBrokerOrder =
     maskOrderId(
@@ -124,7 +139,15 @@ export function DemoAutoTradeHealthCard(props: {
         <div>
           <dt>Demo Auto</dt>
           <dd data-testid="health-demo-auto">
-            {demoOn ? "ON" : a?.label === "PAUSED" ? "PAUSED" : a ? "OFF" : "—"}
+            {demoOn
+              ? "ON"
+              : a?.label === "PAUSED"
+                ? "PAUSED"
+                : a
+                  ? demoAutoDetail
+                    ? `OFF — ${demoAutoDetail}`
+                    : "OFF"
+                  : "—"}
           </dd>
         </div>
         <div>

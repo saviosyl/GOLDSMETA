@@ -120,6 +120,17 @@ export type QualificationPublicView = {
   }>;
   startedAt: string | null;
   updatedAt: string | null;
+  recordStatus?:
+    | "ACTIVE"
+    | "NEVER_STARTED"
+    | "MISSING_RECORD"
+    | "ACCOUNT_MISMATCH"
+    | "ACCOUNT_CONFLICT";
+  accountConflict?: {
+    kind: "FOREIGN_STARTED_QUALIFICATION" | "SELECTED_ACCOUNT_MISMATCH";
+    message: string;
+    foreignAccountMasked: string | null;
+  } | null;
   /** Pepperstone Demo Auto SSOT when returned by qualification API. */
   demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi | null;
 };

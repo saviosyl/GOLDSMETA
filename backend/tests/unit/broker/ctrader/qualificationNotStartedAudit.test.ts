@@ -47,7 +47,10 @@ vi.mock("../../../../src/services/broker/ctrader/qualificationStore", () => ({
   createEmptyQualificationDoc: vi.fn(),
   tryAddPreview: vi.fn(),
   recountControlled: vi.fn(),
-  recountDemoAuto: vi.fn()
+  recountDemoAuto: vi.fn(),
+  normalizeAccountId: (id: unknown) =>
+    id == null ? null : String(id).trim() || null,
+  findForeignStartedQualifications: vi.fn(async () => [])
 }));
 
 vi.mock("../../../../src/services/broker/ctrader/connectionStore", () => ({

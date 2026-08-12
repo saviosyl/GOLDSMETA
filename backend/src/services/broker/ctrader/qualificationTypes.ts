@@ -251,4 +251,19 @@ export type QualificationPublicView = {
   }>;
   startedAt: string | null;
   updatedAt: string | null;
+  /**
+   * Distinguishes genuine never-started accounts from pointer/conflict cases.
+   * ACTIVE = this UID has a started qualification for the selected Demo account.
+   */
+  recordStatus?:
+    | "ACTIVE"
+    | "NEVER_STARTED"
+    | "MISSING_RECORD"
+    | "ACCOUNT_MISMATCH"
+    | "ACCOUNT_CONFLICT";
+  accountConflict?: {
+    kind: "FOREIGN_STARTED_QUALIFICATION" | "SELECTED_ACCOUNT_MISMATCH";
+    message: string;
+    foreignAccountMasked: string | null;
+  } | null;
 };

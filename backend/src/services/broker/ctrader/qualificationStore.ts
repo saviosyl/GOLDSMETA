@@ -16,12 +16,77 @@ import type {
 } from "./qualificationTypes";
 import { QUALIFICATION_GATES } from "./qualificationTypes";
 
+/** Normalize cTrader account ids so number/string forms share one document key. */
+export function normalizeAccountId(
+  accountId: string | number | null | undefined
+): string | null {
+  if (accountId == null) return null;
+  const s = String(accountId).trim();
+  return s.length ? s : null;
+}
+
 function docRef(uid: string, accountId: string) {
-  return getFirestore().doc(`users/${uid}/autotradeQualification/${accountId}`);
+  const id = normalizeAccountId(accountId);
+  if (!id) {
+    throw new Error("QUALIFICATION_ACCOUNT_ID_REQUIRED");
+  }
+  return getFirestore().doc(`users/${uid}/autotradeQualification/${id}`);
 }
 
 function metaRef(uid: string) {
   return getFirestore().doc(`users/${uid}/autotradeQualificationMeta/current`);
+}
+
+export type ForeignQualificationHit = {
+  uid: string;
+  accountId: string;
+  state: string;
+  startedAt: string;
+  accountMasked: string | null;
+};
+
+/**
+ * Find started qualification docs for the same Demo account under a different UID.
+ * Used to surface QUALIFICATION ACCOUNT MISMATCH instead of a silent 0/20 restart.
+ */
+export async function findForeignStartedQualifications(
+  uid: string,
+  accountId: string | number | null | undefined
+): Promise<ForeignQualificationHit[]> {
+  const normalized = normalizeAccountId(accountId);
+  if (!normalized) return [];
+  try {
+    const snap = await getFirestore()
+      .collectionGroup("autotradeQualification")
+      .limit(80)
+      .get();
+    const hits: ForeignQualificationHit[] = [];
+    for (const doc of snap.docs) {
+      const pathUid = doc.ref.path.split("/")[1];
+      if (!pathUid || pathUid === uid) continue;
+      const data = doc.data() as Record<string, unknown>;
+      const docAccount =
+        normalizeAccountId((data.accountId as string | number | undefined) ?? doc.id) ??
+        doc.id;
+      if (docAccount !== normalized) continue;
+      const startedAt =
+        typeof data.startedAt === "string" && data.startedAt.trim()
+          ? data.startedAt
+          : null;
+      if (!startedAt) continue;
+      hits.push({
+        uid: pathUid,
+        accountId: docAccount,
+        state: (data.state as string) || "UNKNOWN",
+        startedAt,
+        accountMasked:
+          typeof data.accountMasked === "string" ? data.accountMasked : null
+      });
+    }
+    return hits;
+  } catch {
+    return [];
+  }
 }
 
 export function emptySafetyChecks(_nowIso: string): SafetyCheckRecord[] {
@@ -153,16 +218,17 @@ export async function getQualificationDoc(
   uid: string,
   accountId: string
 ): Promise<QualificationDocument | null> {
-  const snap = await docRef(uid, accountId).get();
+  const id = normalizeAccountId(accountId);
+  if (!id) return null;
+  const snap = await docRef(uid, id).get();
   if (!snap.exists) return null;
-  return normalize(snap.data() ?? {}, uid, accountId);
+  return normalize(snap.data() ?? {}, uid, id);
 }
 
 export async function getActiveQualificationAccountId(uid: string): Promise<string | null> {
   const snap = await metaRef(uid).get();
   if (!snap.exists) return null;
-  const accountId = String(snap.data()?.accountId ?? "").trim();
-  return accountId || null;
+  return normalizeAccountId(snap.data()?.accountId as string | number | undefined);
 }
 
 export async function setActiveQualificationAccount(
@@ -170,9 +236,11 @@ export async function setActiveQualificationAccount(
   accountId: string,
   accountMasked: string | null
 ): Promise<void> {
+  const id = normalizeAccountId(accountId);
+  if (!id) return;
   await metaRef(uid).set(
     {
-      accountId,
+      accountId: id,
       accountMasked,
       updatedAt: new Date().toISOString()
     },
@@ -181,12 +249,17 @@ export async function setActiveQualificationAccount(
 }
 
 export async function saveQualificationDoc(doc: QualificationDocument): Promise<void> {
+  const accountId = normalizeAccountId(doc.accountId);
+  if (!accountId) {
+    throw new Error("QUALIFICATION_ACCOUNT_ID_REQUIRED");
+  }
   const payload = {
     ...doc,
+    accountId,
     updatedAt: new Date().toISOString()
   };
-  await docRef(doc.uid, doc.accountId).set(payload, { merge: true });
-  await setActiveQualificationAccount(doc.uid, doc.accountId, doc.accountMasked);
+  await docRef(doc.uid, accountId).set(payload, { merge: true });
+  await setActiveQualificationAccount(doc.uid, accountId, doc.accountMasked);
 }
 
 export async function appendTransition(

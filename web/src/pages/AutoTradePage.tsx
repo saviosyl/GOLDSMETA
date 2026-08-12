@@ -1210,7 +1210,11 @@ export function AutoTradePage() {
           </span>
           <div>
             <strong>Shadow Mode</strong>
-            <p>Simulate ideas only</p>
+            <p>
+              {heroState === "SHADOW"
+                ? "Simulate ideas only — no broker orders"
+                : "Not active"}
+            </p>
           </div>
           <PremiumStatusChip tone={heroState === "SHADOW" ? "amber" : "off"}>
             {heroState === "SHADOW" ? "ON" : "OFF"}
@@ -1263,15 +1267,19 @@ export function AutoTradePage() {
         data-testid="autotrade-emergency-bar"
       >
         <div className="gm-prem-pill-actions">
-          <button
-            type="button"
-            className="gm-btn"
-            disabled={busy || !status?.mode || status.mode === "OFF"}
-            onClick={() => void run(() => api.autoTradeSetMode("OFF"))}
-            data-testid="autotrade-pause"
-          >
-            Pause AutoTrade
-          </button>
+          {demoAutoAuthority?.enabled ||
+          qualification?.demoAuto?.enabled ||
+          (status?.mode && status.mode !== "OFF") ? (
+            <button
+              type="button"
+              className="gm-btn"
+              disabled={busy || Boolean(demoAutoAuthority && !demoAutoAuthority.enabled)}
+              onClick={() => void run(() => api.autoTradeSetMode("OFF"))}
+              data-testid="autotrade-pause"
+            >
+              Pause AutoTrade
+            </button>
+          ) : null}
           <button
             type="button"
             className="gm-btn gm-btn-danger"
@@ -1386,8 +1394,16 @@ export function AutoTradePage() {
               <Shield size={16} />
             </span>
             <div>
-              <strong>No live orders are sent in Shadow Mode</strong>
-              <p>You stay in full control until owner approval is granted.</p>
+              <strong>
+                {heroState === "SHADOW"
+                  ? "No live orders are sent in Shadow Mode"
+                  : "Live execution remains hard-locked"}
+              </strong>
+              <p>
+                {heroState === "SHADOW"
+                  ? "You stay in full control until owner approval is granted."
+                  : "Pepperstone Live order submission cannot be enabled from this screen."}
+              </p>
             </div>
           </div>
         )}

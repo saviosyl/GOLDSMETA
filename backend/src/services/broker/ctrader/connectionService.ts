@@ -554,12 +554,14 @@ export async function selectBrokerAccountForUser(args: {
 
   const now = new Date().toISOString();
   const environment = match.isLive ? "LIVE" : "DEMO";
+  // Persist ctid as string so qualification docs / settings share one key space.
+  const selectedAccountId = String(match.ctidTraderAccountId);
   await saveConnection({
     ...freshConn,
     environment,
     updatedAt: now,
     lastSyncAt: now,
-    selectedAccountId: match.ctidTraderAccountId,
+    selectedAccountId,
     selectedTraderLogin: match.traderLogin ?? null,
     selectedAccountMasked: match.accountIdMasked,
     selectedAccountKeyHash: match.accountKeyHash,
