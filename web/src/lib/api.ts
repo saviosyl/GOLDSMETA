@@ -1465,4 +1465,8 @@ export class ApiClient {
   microEdgeModels(): Promise<Record<string, unknown>> {
     return this.request("/v1/micro-edge/models");
   }
+
+  microEdgeMarketDataDiagnostics(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/market-data/diagnostics");
+  }
 }

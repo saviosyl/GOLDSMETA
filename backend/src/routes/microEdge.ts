@@ -18,20 +18,21 @@ import {
 import { MemoryMicroEdgeStore } from "../services/microEdge/storage/firestoreMicroEdgeStore";
 import { aggregatePerformance } from "../services/microEdge/outcomes/metrics";
 import { logisticTrainingMeta } from "../services/microEdge/models/logisticModel";
-import { MicroCTraderReadOnlyClient } from "../services/microEdge/marketData/microCTraderClient";
-import { getCollectorStatus } from "../services/microEdge/runtime/collector";
+import {
+  buildMarketDataDiagnosticsPayload,
+  buildMarketDataStatusPayload,
+  getMicroMarketClient
+} from "../services/microEdge/marketData/marketDataService";
 
-/** Process-local shadow store for V1 API until Firestore wiring is live in workers. */
+/** Process-local shadow store for predictions until workers wire Firestore. */
 const memoryStore = new MemoryMicroEdgeStore();
-
-/** Scaffold client — LIVE_NOT_CONNECTED until genuine OpenAPI reads are wired. */
-const marketClient = new MicroCTraderReadOnlyClient();
+const marketClient = getMicroMarketClient();
 
 export function getMicroEdgeMemoryStoreForTests(): MemoryMicroEdgeStore {
   return memoryStore;
 }
 
-export function getMicroEdgeMarketClientForTests(): MicroCTraderReadOnlyClient {
+export function getMicroEdgeMarketClientForTests() {
   return marketClient;
 }
 
@@ -41,14 +42,8 @@ export const buildMicroEdgeRouter = (): Router => {
 
   router.get("/v1/micro-edge/status", ...gate, async (_req, res) => {
     const latest = await memoryStore.getLatestPrediction();
-    const collector = getCollectorStatus(marketClient, {
-      lastQuoteTs: latest?.quoteTs ?? null,
-      lastM1CloseTs: latest?.candleCloseTs ?? null,
-      quote: null,
-      lastM1: null,
-      nowMs: Date.now()
-    });
-    const feedConnected = marketClient.isLiveMarketFeedConnected();
+    const marketData = await buildMarketDataStatusPayload();
+    const healthy = Boolean(marketData.collectorHealthy);
     res.json({
       shadowOnly: MICRO_SHADOW_ONLY,
       brokerExecutionEnabled: MICRO_BROKER_EXECUTION_ENABLED,
@@ -60,32 +55,44 @@ export const buildMicroEdgeRouter = (): Router => {
       primaryResearchHorizon: MICRO_PRIMARY_HORIZON,
       lastPredictionId: latest?.predictionId ?? null,
       lastCandleCloseTs: latest?.candleCloseTs ?? null,
-      disclaimer: "MICRO EDGE V1 HAS NO BROKER ORDER PATH",
+      disclaimer: "MICRO EDGE MARKET DATA V1 IS READ-ONLY. NO BROKER ORDER PATH EXISTS.",
       mutationSurface: "NONE",
-      marketFeedConnected: feedConnected,
-      marketFeedStatus: marketClient.marketFeedStatusMessage(),
-      interfaceReady: marketClient.isInterfaceReady(),
-      connectionState: marketClient.connectionState(),
-      capabilityStates: marketClient.capabilityStates(),
-      collector,
-      overallMicroDecision: collector.healthy
-        ? latest?.overallMicroDecision ?? "WAIT"
-        : "WAIT",
-      dataUnavailable: collector.dataUnavailable,
-      degradedReason: collector.healthy ? null : "DATA UNAVAILABLE"
+      marketFeedConnected: marketData.liveConnected,
+      marketFeedStatus: marketData.marketFeedStatus,
+      interfaceReady: true,
+      connectionState: marketData.connectionState,
+      capabilityStates: marketData.capabilityStates,
+      marketData,
+      collector: marketData.collector,
+      overallMicroDecision: healthy ? latest?.overallMicroDecision ?? "WAIT" : "WAIT",
+      dataUnavailable: !healthy,
+      degradedReason: healthy ? null : "DATA UNAVAILABLE",
+      dataCollectionActive: marketData.dataCollectionActive,
+      modelStatus: "RESEARCH / NOT TRAINED ON LIVE DATA"
+    });
+  });
+
+  router.get("/v1/micro-edge/market-data/diagnostics", ...gate, async (_req, res) => {
+    const diagnostics = await buildMarketDataDiagnosticsPayload();
+    res.json({
+      ...diagnostics,
+      shadowOnly: true,
+      brokerExecutionEnabled: false,
+      disclaimer: "Read-only diagnostics. No tokens. No trading endpoints."
     });
   });
 
   router.get("/v1/micro-edge/latest", ...gate, async (_req, res) => {
     const latest = await memoryStore.getLatestPrediction();
-    const feedConnected = marketClient.isLiveMarketFeedConnected();
+    const marketData = await buildMarketDataStatusPayload();
     res.json({
       prediction: latest,
       shadowOnly: true,
       brokerExecutionEnabled: false,
-      marketFeedConnected: feedConnected,
-      marketFeedStatus: marketClient.marketFeedStatusMessage(),
-      connectionState: marketClient.connectionState()
+      marketFeedConnected: marketData.liveConnected,
+      marketFeedStatus: marketData.marketFeedStatus,
+      connectionState: marketData.connectionState,
+      modelStatus: "UNTRAINED PLACEHOLDER — NOT FOR TRADING"
     });
   });
 
@@ -94,12 +101,13 @@ export const buildMicroEdgeRouter = (): Router => {
     const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
     const items = await memoryStore.listPredictions(limit);
     const outcomes = await memoryStore.listOutcomes(limit * 3);
+    const marketData = await buildMarketDataStatusPayload();
     res.json({
       items,
       outcomes,
       shadowOnly: true,
       disclaimer: "Shadow signal history only — no broker orders.",
-      marketFeedStatus: marketClient.marketFeedStatusMessage()
+      marketFeedStatus: marketData.marketFeedStatus
     });
   });
 
@@ -111,13 +119,16 @@ export const buildMicroEdgeRouter = (): Router => {
       summary,
       shadowOnly: true,
       disclaimer:
-        "Hypothetical NET results after cost proxies. Not executable Pepperstone performance."
+        "Hypothetical NET results after cost proxies. Not executable Pepperstone performance. Model not trained on live Micro data."
     });
   });
 
   router.get("/v1/micro-edge/models", ...gate, async (_req, res) => {
     res.json({
-      champion: logisticTrainingMeta,
+      champion: {
+        ...logisticTrainingMeta,
+        status: "RESEARCH / NOT TRAINED ON LIVE DATA"
+      },
       baselines: ["baseline-always-no-edge-v1", "baseline-mom5-sign-v1"],
       challenger: { kind: "TREE_GBM_CHALLENGER", promoted: false },
       sequencePlaceholder: { implemented: false },
