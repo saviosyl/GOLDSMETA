@@ -37,6 +37,7 @@ import {
   resolveExecutionSetupTier,
   resolveTradingSessionBucket
 } from "./demoOpportunityEngine";
+import { applyDemoOvernightOverlay } from "./demoOvernightGuard";
 import { calculateCTraderVolume } from "./sizing";
 import { resolvePepperstoneXauUsdDemoMapping } from "./brokerUnitMappings";
 import { calculatePepperstoneXauUsdDemoVolume } from "./demoXauUsdSizing";
@@ -732,7 +733,9 @@ export async function processDecisionForQualification(args: {
   const d = await store.getDecision(uid, decisionId);
   if (!d) return { handled: false, message: "no_decision" };
 
-  const settings = await getUserAutoTradeSettings(uid, "demo");
+  const savedSettings = await getUserAutoTradeSettings(uid, "demo");
+  const overnight = applyDemoOvernightOverlay(savedSettings);
+  const settings = overnight.effectiveSettings;
   if (settings.autoTradePaused || settings.emergencyStopActive) {
     const existingArmed = await getArmedCandidate(uid).catch(() => null);
     if (existingArmed) {
@@ -1430,7 +1433,8 @@ export async function processDecisionForQualification(args: {
           brokerSubmissionAttempted: extras?.brokerSubmissionAttempted ?? false,
           brokerOrderIdMasked: extras?.brokerOrderIdMasked ?? null
         },
-        finalReason: outcome === "QUALIFIED" ? null : reasonLabelFor(reasonCode)
+        finalReason: outcome === "QUALIFIED" ? null : reasonLabelFor(reasonCode),
+        overnightRunId: overnight.runId
       });
     } catch {
       /* never block qualification on log failure */
@@ -1506,7 +1510,21 @@ export async function processDecisionForQualification(args: {
     if (!allowsDemoOrderSubmission(state)) {
       return { handled: false, message: "orders_not_allowed" };
     }
-    const entryGate = await assertEntryAllowed(uid, "demo");
+    // DEMO overnight overlay: block NEW entries after cutoff (lifecycle may continue).
+    if (!overnight.entriesAllowed) {
+      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
+      await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        "OVERNIGHT_WINDOW_ENDED",
+        ["OVERNIGHT_WINDOW_ENDED"],
+        candidate.passed
+      );
+      return { handled: true, message: "controlled_blocked:OVERNIGHT_WINDOW_ENDED" };
+    }
+    const entryGate = await assertEntryAllowed(uid, "demo", {
+      settingsOverride: settings
+    });
     if (!entryGate.allowed) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
@@ -1610,6 +1628,9 @@ export async function processDecisionForQualification(args: {
 
     let sizedLots: number | null = null;
     let sizingRejectMessage = "lots_invalid";
+    let requestedRiskAmountDeposit: number | null = overnight.savedRisk;
+    let effectiveRiskAmountDeposit: number | null = null;
+    let riskCapReasonJournal: string | null = overnight.riskCapReason;
 
     if (unitMapping) {
       const connection = await getConnection(uid);
@@ -1706,6 +1727,8 @@ export async function processDecisionForQualification(args: {
         session: sessionBucket,
         config: oppCfg
       });
+      const riskCapReasons: string[] = [];
+      if (overnight.riskCapReason) riskCapReasons.push(overnight.riskCapReason);
       let effectiveRisk: number;
       if (oppCfg.mode === "ACTIVE_DEMO") {
         // Fail closed — never fall back to base risk via `riskMult || 1`.
@@ -1723,7 +1746,13 @@ export async function processDecisionForQualification(args: {
           );
           return { handled: true, message: "lots_invalid:RISK_MULTIPLIER_INVALID" };
         }
+        // settings.fixedRiskAmount already reflects overnight risk cap when enabled.
         effectiveRisk = applyRiskMultiplier(settings.fixedRiskAmount, riskMult);
+        if (sessionBucket === "Asia" && riskMult < 1) {
+          riskCapReasons.push("ASIA_EXPERIMENTAL_RISK");
+        } else if (setupTier === "A" && riskMult < 1) {
+          riskCapReasons.push("TIER_A_RISK_MULT");
+        }
         if (!(effectiveRisk > 0)) {
           doc = {
             ...doc,
@@ -1745,6 +1774,10 @@ export async function processDecisionForQualification(args: {
             ? applyRiskMultiplier(settings.fixedRiskAmount, riskMult)
             : settings.fixedRiskAmount;
       }
+      effectiveRiskAmountDeposit = effectiveRisk;
+      riskCapReasonJournal = riskCapReasons.length
+        ? riskCapReasons.join("+")
+        : null;
       const xauSizing = calculatePepperstoneXauUsdDemoVolume({
         riskAmountDeposit: effectiveRisk,
         entryPrice: entryPx,
@@ -2165,6 +2198,12 @@ export async function processDecisionForQualification(args: {
         const signalToEntryMs = armedTrade?.armedAt
           ? Date.now() - Date.parse(armedTrade.armedAt)
           : null;
+        const journalCashRisk =
+          effectiveRiskAmountDeposit ??
+          (oppCfg.mode === "ACTIVE_DEMO" &&
+          isValidDemoRiskMultiplier(riskMultJournal)
+            ? applyRiskMultiplier(settings.fixedRiskAmount, riskMultJournal)
+            : settings.fixedRiskAmount);
         await createAutoTradeJournalEntry({
           uid,
           environment: "DEMO",
@@ -2177,11 +2216,11 @@ export async function processDecisionForQualification(args: {
           stopLoss: trade.stopLoss,
           takeProfit: trade.takeProfit,
           lots: trade.lots,
-          cashRisk:
-            oppCfg.mode === "ACTIVE_DEMO" &&
-            isValidDemoRiskMultiplier(riskMultJournal)
-              ? applyRiskMultiplier(settings.fixedRiskAmount, riskMultJournal)
-              : settings.fixedRiskAmount,
+          cashRisk: journalCashRisk,
+          requestedRiskAmountDeposit,
+          effectiveRiskAmountDeposit: journalCashRisk,
+          riskCapReason: riskCapReasonJournal,
+          overnightRunId: overnight.runId,
           confidence: d.confidence ?? null,
           riskReward,
           session: sessionBucket,
@@ -2194,6 +2233,12 @@ export async function processDecisionForQualification(args: {
             d.confidence != null ? `Confidence ${Math.round(d.confidence)}` : null,
             riskReward != null ? `R:R ${riskReward.toFixed(2)}` : null,
             `Risk mult ${riskMultJournal}`,
+            requestedRiskAmountDeposit != null
+              ? `Requested risk ${requestedRiskAmountDeposit}`
+              : null,
+            `Effective risk ${journalCashRisk}`,
+            riskCapReasonJournal ? `Risk cap ${riskCapReasonJournal}` : null,
+            overnight.runId ? `Run ${overnight.runId}` : null,
             `Confirm ${confirmMethod}`,
             signalToEntryMs != null
               ? `Signal→entry ${Math.round(signalToEntryMs / 1000)}s`

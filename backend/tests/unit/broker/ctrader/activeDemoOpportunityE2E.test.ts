@@ -215,6 +215,8 @@ vi.mock("../../../../src/services/broker/ctrader/sessionGuard", async () => {
   >("../../../../src/services/broker/ctrader/sessionGuard");
   return {
     ...actual,
+    // Pin major session so risk multipliers are time-stable (Asia half-risk otherwise).
+    currentSessionUtc: vi.fn(() => "London"),
     sessionAllowed: vi.fn(() => ({ ok: true, current: "London", reason: null }))
   };
 });
@@ -897,14 +899,98 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     const sizingArg = calculatePepperstoneXauUsdDemoVolume.mock.calls.at(-1)?.[0] as {
       riskAmountDeposit?: number;
     };
-    expect(sizingArg?.riskAmountDeposit).toBe(37.5); // 50 * 0.75
+    expect(sizingArg?.riskAmountDeposit).toBe(37.5); // 50 * 0.75 (London A)
     const journalArg = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
       reasonForTrade?: string;
       cashRisk?: number;
+      requestedRiskAmountDeposit?: number;
+      effectiveRiskAmountDeposit?: number;
+      riskCapReason?: string | null;
     };
     expect(journalArg?.cashRisk).toBe(37.5);
+    expect(journalArg?.requestedRiskAmountDeposit).toBe(50);
+    expect(journalArg?.effectiveRiskAmountDeposit).toBe(37.5);
+    expect(journalArg?.riskCapReason).toMatch(/TIER_A_RISK_MULT/);
     expect(journalArg?.reasonForTrade).toMatch(/Tier A\b/);
     expect(journalArg?.reasonForTrade).not.toMatch(/Tier A_PLUS|Tier A\+/);
+  });
+
+  it("overnight cutoff → ZERO submit + OVERNIGHT_WINDOW_ENDED", async () => {
+    process.env.DEMO_OVERNIGHT_MODE = "true";
+    process.env.DEMO_OVERNIGHT_RUN_UNTIL = "2026-08-12T00:00:00.000Z";
+    const store = {
+      getDecision: vi.fn(async () => decision()),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY",
+        validUntil: new Date(Date.now() + 3600_000).toISOString()
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_overnight_ended",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    const rejected = appendEvaluation.mock.calls
+      .map((c) => c[0])
+      .find((r) => r?.reasonCode === "OVERNIGHT_WINDOW_ENDED");
+    expect(rejected).toBeTruthy();
+    delete process.env.DEMO_OVERNIGHT_MODE;
+    delete process.env.DEMO_OVERNIGHT_RUN_UNTIL;
+  });
+
+  it("Asia session → effective risk 25 (50 * 0.5) with explicit risk-cap reason", async () => {
+    const sessionGuard = await import(
+      "../../../../src/services/broker/ctrader/sessionGuard"
+    );
+    vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("Asia");
+    vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
+      ok: true,
+      current: "Asia",
+      reason: null
+    });
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_asia_a_plus",
+          setupScore: 95,
+          confidence: 95,
+          reasons: ["MTF_BULLISH", "MARKET_STRUCTURE"],
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_asia_a_plus",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    const sizingArg = calculatePepperstoneXauUsdDemoVolume.mock.calls.at(-1)?.[0] as {
+      riskAmountDeposit?: number;
+    };
+    expect(sizingArg?.riskAmountDeposit).toBe(25); // Asia experimental half-risk
+    const journalArg = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
+      requestedRiskAmountDeposit?: number;
+      effectiveRiskAmountDeposit?: number;
+      riskCapReason?: string | null;
+    };
+    expect(journalArg?.requestedRiskAmountDeposit).toBe(50);
+    expect(journalArg?.effectiveRiskAmountDeposit).toBe(25);
+    expect(journalArg?.riskCapReason).toMatch(/ASIA_EXPERIMENTAL_RISK/);
+    vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("London");
+    vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
+      ok: true,
+      current: "London",
+      reason: null
+    });
   });
 
   it("A + confirmationCandleRequired=false still waits without 5M confirm", async () => {
