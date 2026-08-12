@@ -46,6 +46,23 @@ jobs:
           GOLDMETA_PINNED_OWNER_UID: testPinnedOwnerUid000000000001
           GOLDMETA_OWNER_EMAIL: saviosyl@gmail.com
 
+      - name: Micro Edge — import boundary + broker mutation ban
+        run: npm run gate:micro-edge-imports && npm run gate:micro-edge-mutations
+
+      - name: Micro Edge — protected Core unchanged vs PR base
+        if: github.event_name == 'pull_request'
+        run: npm run gate:micro-edge-core
+        env:
+          MICRO_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+      - name: Micro Edge unit tests
+        run: npm run test:micro-edge
+        env:
+          NODE_ENV: test
+          APP_ENV: test
+          STORAGE_BACKEND: memory
+          MICRO_BROKER_EXECUTION_ENABLED: "false"
+
       - name: Static gate — workflows must not invoke owner restore
         run: npx vitest run tests/unit/auth/deployMustNotRestoreOwner.test.ts
         env:
