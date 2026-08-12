@@ -1,6 +1,7 @@
 import { useId, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { friendlyAuthError } from "../lib/authErrors";
 import { ApiError } from "../types/models";
 import {
   OWNER_EXISTS_MESSAGE,
@@ -71,11 +72,13 @@ export function RegisterPage() {
       if (err instanceof ApiError) {
         // One primary banner only — do not also set a duplicate field error.
         setError(
-          err.message.includes("already exists") ? OWNER_EXISTS_MESSAGE : err.message
+          err.message.includes("already exists")
+            ? OWNER_EXISTS_MESSAGE
+            : friendlyAuthError(err)
         );
         setFieldErrors({});
       } else {
-        setError(err instanceof Error ? err.message : "Registration failed");
+        setError(friendlyAuthError(err) || "Registration failed");
       }
     } finally {
       setBusy(false);

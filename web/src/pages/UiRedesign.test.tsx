@@ -170,7 +170,10 @@ describe("OverviewPage redesign", () => {
     expect(await screen.findByTestId("intraday-action-label")).toHaveTextContent(/PREPARE|WAIT|HOLD/i);
     expect(screen.getByTestId("todays-intraday-plan")).toBeInTheDocument();
     expect(screen.getByTestId("setup-status-card")).toBeInTheDocument();
-    expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
+    // Legacy floating action bar removed — primary nav is fixed bottom only.
+    expect(screen.queryByTestId("mobile-action-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chart-fit-view")).toBeInTheDocument();
+    expect(screen.getByTestId("chart-fullscreen")).toBeInTheDocument();
     expect(screen.queryByTestId("premium-insight-strip")).not.toBeInTheDocument();
     expect(screen.queryByText("dec_hidden_id_abc123")).not.toBeInTheDocument();
     const analysis = screen.getByTestId("advanced-analysis-section");

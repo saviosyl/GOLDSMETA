@@ -58,8 +58,9 @@ test.describe("V5.4 responsive viewport matrix", () => {
           bg: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
           navy: getComputedStyle(document.documentElement).getPropertyValue("--navy").trim()
         }));
-        expect(theme.bg.toLowerCase()).toBe("#f7f8fa");
-        expect(theme.navy.toLowerCase()).toBe("#11284a");
+        // Must match web/src/styles/tokens.css --surface-page / --navy
+        expect(theme.bg.toLowerCase()).toBe("#f4f6fa");
+        expect(theme.navy.toLowerCase()).toBe("#0a2345");
       }
     });
   }

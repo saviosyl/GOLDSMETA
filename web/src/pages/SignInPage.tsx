@@ -29,6 +29,7 @@ export function SignInPage() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     setError(null);
     setMessage(null);
     setBusy(true);

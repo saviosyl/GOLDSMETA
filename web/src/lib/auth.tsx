@@ -57,12 +57,21 @@ interface AuthContextValue {
   registrationEnabled: boolean;
   apiBaseUrl: string;
   account: AuthMeResponse | null;
+  /** True while /auth/me is in flight for a signed-in user. */
+  accountLoading: boolean;
+  /** Friendly error when /auth/me failed durably (null when OK / idle). */
+  accountError: string | null;
+  /** True after /auth/me succeeds or fails (not mid-flight). */
+  accountResolved: boolean;
   refreshAccount: () => Promise<AuthMeResponse | null>;
 }
 
 export type { AuthContextValue };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const ACCOUNT_LOOKUP_FAILED =
+  "We could not verify your GoldMeta account right now. Check your connection and try again.";
 
 const resolveApiBase = (): string => {
   const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
@@ -75,6 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState<AuthMeResponse | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountResolved, setAccountResolved] = useState(false);
   const configured = isFirebaseConfigured();
   const apiBaseUrl = resolveApiBase();
   const registrationEnabled = isPublicRegistrationEnabled();
@@ -91,15 +103,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAccount = useCallback(async () => {
     if (!user) {
       setAccount(null);
+      setAccountError(null);
+      setAccountLoading(false);
+      setAccountResolved(true);
       return null;
     }
+    setAccountLoading(true);
+    setAccountError(null);
     try {
       const me = await api.getAuthMe();
       setAccount(me);
+      setAccountError(null);
+      setAccountResolved(true);
       return me;
-    } catch {
+    } catch (err) {
       setAccount(null);
+      setAccountError(friendlyAuthError(err) || ACCOUNT_LOOKUP_FAILED);
+      setAccountResolved(true);
       return null;
+    } finally {
+      setAccountLoading(false);
     }
   }, [api, user]);
 
@@ -118,6 +141,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsub = subscribeAuth((next) => {
           setUser(next);
           setLoading(false);
+          if (!next) {
+            setAccount(null);
+            setAccountError(null);
+            setAccountLoading(false);
+            setAccountResolved(true);
+          } else {
+            // New signed-in user — require a fresh /me resolution.
+            setAccountResolved(false);
+            setAccountError(null);
+          }
         });
       });
     return () => {
@@ -127,8 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [configured]);
 
   useEffect(() => {
+    if (!user) return;
     void refreshAccount();
-  }, [refreshAccount]);
+  }, [user, refreshAccount]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {
@@ -145,6 +179,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     clearUserCaches();
     setAccount(null);
+    setAccountError(null);
+    setAccountLoading(false);
+    setAccountResolved(true);
     await firebaseSignOut();
   }, []);
 
@@ -160,6 +197,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       registrationEnabled,
       apiBaseUrl,
       account,
+      accountLoading,
+      accountError,
+      accountResolved,
       refreshAccount
     }),
     [
@@ -173,6 +213,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       registrationEnabled,
       apiBaseUrl,
       account,
+      accountLoading,
+      accountError,
+      accountResolved,
       refreshAccount
     ]
   );
