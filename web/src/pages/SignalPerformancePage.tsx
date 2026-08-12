@@ -50,9 +50,9 @@ export function SignalPerformancePage({ embedded = false }: { embedded?: boolean
           {error}
         </div>
       )}
-      {!summary ? (
+      {!summary && !error ? (
         <p className="muted">Loading…</p>
-      ) : (
+      ) : summary ? (
         <div className="signal-perf-grid" data-testid="signal-perf-grid">
           {(
             [
@@ -90,7 +90,7 @@ export function SignalPerformancePage({ embedded = false }: { embedded?: boolean
             </div>
           ))}
         </div>
-      )}
+      ) : null}
       <p className="muted" style={{ marginTop: "1rem" }}>
         Label: {summary?.label ?? "HYPOTHETICAL SIGNAL PERFORMANCE"}
       </p>

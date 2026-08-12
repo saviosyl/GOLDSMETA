@@ -236,7 +236,8 @@ describe("OverviewPage compact dashboard", () => {
     expect(screen.getByTestId("overview-page").textContent).not.toMatch(/tester@example.com/);
     expect(screen.getByTestId("intraday-action-label")).toHaveTextContent(/PREPARE|WAIT|HOLD/);
     expect(screen.getByTestId("setup-status-card")).toBeInTheDocument();
-    expect(screen.getByTestId("mobile-action-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("mobile-action-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("plan-market-card")).toBeInTheDocument();
     expect(screen.queryByTestId("promo-snapshot-modal")).not.toBeInTheDocument();
     const analysis = screen.getByTestId("advanced-analysis-section");
     expect(analysis).not.toHaveAttribute("open");

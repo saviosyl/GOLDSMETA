@@ -37,7 +37,6 @@ import { SystemStatusCollapse } from "../components/intraday/SystemStatusCollaps
 import { ResearchMatrix } from "../components/intraday/ResearchMatrix";
 import { IndicatorChips } from "../components/intraday/IndicatorChips";
 import { CockpitAlerts } from "../components/intraday/CockpitAlerts";
-import { StickyMobileActionBar } from "../components/intraday/StickyMobileActionBar";
 import { DecisionDashboard } from "../components/decision/DecisionDashboard";
 import { DetailedReportSections } from "../components/decision/DetailedReportSections";
 import { TradePlanSummary } from "../components/decision/TradePlanSummary";
@@ -1339,11 +1338,6 @@ export function OverviewPage() {
         </SectionCard>
       )}
 
-      <StickyMobileActionBar
-        onRefresh={refresh}
-        refreshing={refreshing || loading}
-        validPlan={validActionable}
-      />
     </div>
   );
 }

@@ -22,6 +22,16 @@ describe("Mobile layout guards", () => {
     expect(redesign).toMatch(
       /\.gm-main-inner\s*\{[^}]*padding:[^;]*calc\(96px \+ var\(--safe-bottom\)\)/s
     );
+    expect(gmV2).toMatch(
+      /\.gm-main-inner\s*\{[^}]*padding:[^;]*var\(--mobile-nav-h\)/s
+    );
+  });
+
+  it("anchors mobile bottom nav to viewport bottom with safe-area", () => {
+    expect(gmV2).toMatch(/\.gm-mobile-nav\s*\{[^}]*position:\s*fixed\s*!important/s);
+    expect(gmV2).toMatch(/\.gm-mobile-nav\s*\{[^}]*bottom:\s*0\s*!important/s);
+    expect(gmV2).toMatch(/\.gm-mobile-nav\s*\{[^}]*var\(--safe-bottom\)/s);
+    expect(gmV2).toMatch(/\.gm-mobile-action-bar\s*\{[^}]*display:\s*none\s*!important/s);
   });
 
   it("forces Risk Planner to single column below 900px", () => {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { PublicPageShell } from "./layout/PublicPageShell";
@@ -28,33 +28,44 @@ const READY_HANDOFF_PATHS = new Set([
   "/registration-complete"
 ]);
 
+function SessionLoading() {
+  return (
+    <PublicPageShell testId="session-loading">
+      <div className="gm-main">
+        <div className="gm-main-inner">
+          <div className="gm-section brand-loading" role="status">
+            <img src="/brand/mark-official.png" alt="" width={48} height={48} />
+            <p>Checking GoldMeta session…</p>
+          </div>
+        </div>
+      </div>
+    </PublicPageShell>
+  );
+}
+
 export function AccountAccessGate({ children }: { children: ReactNode }) {
   const { user, account, loading, refreshAccount } = useAuth();
   const location = useLocation();
 
+  // Soft refresh once if account state not loaded yet (never during render).
+  useEffect(() => {
+    if (!loading && user && !account) {
+      void refreshAccount();
+    }
+  }, [loading, user, account, refreshAccount]);
+
   if (loading) {
-    return (
-      <PublicPageShell testId="session-loading">
-        <div className="gm-main">
-          <div className="gm-main-inner">
-            <div className="gm-section brand-loading" role="status">
-              <img src="/brand/mark-official.png" alt="" width={48} height={48} />
-              <p>Checking GoldMeta session…</p>
-            </div>
-          </div>
-        </div>
-      </PublicPageShell>
-    );
+    return <SessionLoading />;
   }
 
   if (!user) return <>{children}</>;
 
-  // Soft refresh once if account state not loaded yet.
+  // Avoid flashing app chrome while /me is still resolving for a signed-in user.
   if (!account) {
-    void refreshAccount();
+    return <SessionLoading />;
   }
 
-  const access = account?.access ?? (user.emailVerified ? "UNKNOWN" : "VERIFY_EMAIL");
+  const access = account.access ?? (user.emailVerified ? "UNKNOWN" : "VERIFY_EMAIL");
   const path = location.pathname;
 
   if (access === "SUSPENDED") {
