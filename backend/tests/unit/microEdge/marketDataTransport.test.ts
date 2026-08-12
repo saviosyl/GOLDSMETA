@@ -8,10 +8,7 @@ import {
 } from "../../../src/services/microEdge/marketData/microCTraderProtocol";
 import { FakeMicroCTraderTransport } from "../../../src/services/microEdge/marketData/microCTraderTransport";
 import { resolveMicroXauUsd } from "../../../src/services/microEdge/marketData/microCTraderSymbolResolver";
-import {
-  validateSpotPayload,
-  fetchOneShotQuote
-} from "../../../src/services/microEdge/marketData/microCTraderQuotes";
+import { validateSpotPayload } from "../../../src/services/microEdge/marketData/microCTraderQuotes";
 import {
   detectCompletedM1,
   filterBarsAtOrBeforeCutoff,
@@ -55,6 +52,9 @@ describe("Micro market-data protocol + transport", () => {
 
   it("bans mutation commands and allows read commands", () => {
     expect(() => assertReadOnlyCommand("ProtoOAGetTrendbarsReq")).not.toThrow();
+    expect(() =>
+      assertReadOnlyCommand("ProtoOAGetAccountListByAccessTokenReq")
+    ).not.toThrow();
     for (const cmd of MICRO_BANNED_MUTATION_COMMANDS) {
       expect(() => assertReadOnlyCommand(cmd)).toThrow(/BANNED|NOT_ALLOWED/);
     }
@@ -94,25 +94,6 @@ describe("Micro market-data protocol + transport", () => {
       })
     ).toEqual({ error: "quote_invalid" });
     expect(validateSpotPayload({})).toEqual({ error: "quote_missing" });
-  });
-
-  it("fetches one-shot quote via fake transport", async () => {
-    const fake = new FakeMicroCTraderTransport();
-    await fake.connect();
-    fake.nextSpot = {
-      bid: 2100 * MICRO_SPOT_PRICE_SCALE,
-      ask: 2100.3 * MICRO_SPOT_PRICE_SCALE,
-      timestamp: Date.parse("2026-08-12T12:00:00.000Z"),
-      symbolId: 41
-    };
-    const q = await fetchOneShotQuote({
-      transport: fake,
-      symbolId: "41",
-      nowMs: Date.parse("2026-08-12T12:00:01.000Z")
-    });
-    expect(q.bid).toBeCloseTo(2100, 5);
-    expect(q.ask).toBeCloseTo(2100.3, 5);
-    expect(q.spread).toBeCloseTo(0.3, 5);
   });
 
   it("completed M1 detection rejects forming bar and is idempotent", () => {
@@ -239,10 +220,11 @@ describe("Micro market-data protocol + transport", () => {
       symbolId: 41
     };
     await session.connect();
+    await new Promise((r) => setImmediate(r));
     expect(session.mutationSurface).toBe("NONE");
+    expect(fake.getSubscribeSpotsCallCount()).toBe(1);
     const q = await session.refreshQuote();
     expect(q.bid).toBeCloseTo(2400, 4);
-    // Seed a completed M1 so LIVE_CONNECTED health can pass.
     await store.upsertBar(
       makeRawBar({
         symbol: "XAUUSD",
@@ -262,12 +244,17 @@ describe("Micro market-data protocol + transport", () => {
     expect(state.symbol?.symbolName).toBe("XAUUSD");
     expect(state.liveConnected).toBe(true);
     expect(await store.countQuotes()).toBe(1);
+    // polling must not create more subscriptions
+    await session.getState();
+    expect(fake.getSubscribeSpotsCallCount()).toBe(1);
   });
 
   it("quote sample interval collapses duplicates in same bucket", async () => {
     let t = Date.parse("2026-08-12T12:00:00.000Z");
     const store2 = new MemoryMicroMarketDataStore();
     const fake2 = new FakeMicroCTraderTransport();
+    fake2.configuredAccountId = "123";
+    fake2.authorizedAccountIds = ["123"];
     const { MicroLiveMarketSession } = await import(
       "../../../src/services/microEdge/marketData/liveSession"
     );
@@ -279,7 +266,7 @@ describe("Micro market-data protocol + transport", () => {
         clientSecret: "t",
         accessToken: "a",
         refreshToken: "r",
-        accountId: "1",
+        accountId: "123",
         environment: "DEMO",
         tokenUrl: "x",
         authUrl: "y",
@@ -295,25 +282,25 @@ describe("Micro market-data protocol + transport", () => {
       symbolId: 41
     };
     await s.connect();
-    await s.refreshQuote();
+    await new Promise((r) => setImmediate(r));
+    expect(await store2.countQuotes()).toBe(1);
     t += 1000;
-    fake2.nextSpot = {
+    s.ingestSpotEventForTests({
       bid: 1 * MICRO_SPOT_PRICE_SCALE,
       ask: 1.1 * MICRO_SPOT_PRICE_SCALE,
       timestamp: t,
       symbolId: 41
-    };
-    await s.refreshQuote();
+    });
     expect(await store2.countQuotes()).toBe(1);
     t += 5000;
-    fake2.nextSpot = {
+    s.ingestSpotEventForTests({
       bid: 1 * MICRO_SPOT_PRICE_SCALE,
       ask: 1.1 * MICRO_SPOT_PRICE_SCALE,
       timestamp: t,
       symbolId: 41
-    };
-    await s.refreshQuote();
+    });
     expect(await store2.countQuotes()).toBe(2);
+    expect(fake2.getSubscribeSpotsCallCount()).toBe(1);
   });
 
   it("rate-limit pacing retries then succeeds", async () => {

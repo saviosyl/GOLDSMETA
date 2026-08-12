@@ -72,7 +72,7 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
     symbolResolved: liveSession
       ? Boolean(liveState?.symbol ?? (await store.getSymbolMetadata()))
       : undefined,
-    credentialsConfigured: pub.configured ? true : false,
+    credentialsConfigured: liveState?.credentialsConfigured ?? pub.configured,
     heartbeatAt: liveState?.collectorHeartbeatAt ?? null,
     lastConnectedAt: liveState?.lastConnectedAt,
     lastDisconnectedAt: liveState?.lastDisconnectedAt,
