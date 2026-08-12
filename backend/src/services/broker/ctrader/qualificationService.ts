@@ -40,8 +40,10 @@ import {
 import { calculateCTraderVolume } from "./sizing";
 import { resolvePepperstoneXauUsdDemoMapping } from "./brokerUnitMappings";
 import { calculatePepperstoneXauUsdDemoVolume } from "./demoXauUsdSizing";
+import { assertDemoAuthoritativeMarginGate } from "./demoMarginService";
 import { resolveQuoteToDepositFx } from "./quoteToDepositFx";
 import { createOpenApiClient } from "./openApiClient";
+import { lotsToOrderVolumeUnits } from "./volumeUnits";
 import { getDailySafetyDoc } from "./dailySafetyStore";
 import { evaluateQualificationCandidate } from "./qualificationEvaluator";
 import type { GoldMetaStore } from "../../storage/types";
@@ -1642,13 +1644,16 @@ export async function processDecisionForQualification(args: {
         minLots: symbol.minVolume,
         stepLots: symbol.volumeStep,
         maxLots: symbol.maxVolume,
+        // ACTIVE_DEMO: do not fail on ProtoOATrader lacking freeMargin.
+        // Authoritative freeMargin + ProtoOAExpectedMarginReq run after final volume.
         freeMargin: diagnostics.account?.freeMargin ?? null,
         leverage:
           diagnostics.account?.leverage ?? connection.leverage ?? null,
         remainingDailyLossCapacity,
         maxPositionExposureLots: settings.maxPositionExposureLots,
         sizingMode: settings.sizingMode,
-        manualLotSize: settings.manualLotSize
+        manualLotSize: settings.manualLotSize,
+        deferBrokerMarginGate: oppCfg.mode === "ACTIVE_DEMO"
       });
 
       if (!xauSizing.ok || xauSizing.volumeLots == null || xauSizing.volumeLots <= 0) {
@@ -1665,6 +1670,68 @@ export async function processDecisionForQualification(args: {
         return { handled: true, message: `lots_invalid:${reason}` };
       }
       sizedLots = xauSizing.volumeLots;
+
+      // Authoritative margin: refresh snapshot + ExpectedMargin for FINAL volume.
+      if (oppCfg.mode === "ACTIVE_DEMO") {
+        const protocolVolume =
+          xauSizing.protocolVolume ?? lotsToOrderVolumeUnits(sizedLots);
+        const symbolId = symbol.symbolId ?? connection.symbolId;
+        if (!symbolId) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          await logEval(
+            "REJECTED",
+            "MARGIN_UNAVAILABLE",
+            ["MARGIN_UNAVAILABLE"],
+            candidate.passed
+          );
+          return { handled: true, message: "lots_invalid:MARGIN_UNAVAILABLE" };
+        }
+        const marginGate = await assertDemoAuthoritativeMarginGate({
+          ownerUid: uid,
+          side: direction as "BUY" | "SELL",
+          protocolVolume,
+          symbolId: String(symbolId)
+        });
+        if (!marginGate.ok) {
+          doc = {
+            ...doc,
+            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+          };
+          await saveQualificationDoc(doc);
+          logger.info("AutoTrade authoritative margin gate rejected", {
+            uid,
+            signalId,
+            reason: marginGate.reason,
+            notes: marginGate.notes,
+            protocolVolume,
+            marginAgeMs: marginGate.marginAgeMs,
+            freeMargin: marginGate.marginSnapshot?.freeMargin ?? null,
+            expectedMargin: marginGate.expectedMargin
+          });
+          await logEval(
+            "REJECTED",
+            marginGate.reason,
+            [marginGate.reason],
+            candidate.passed,
+            { brokerSubmissionAttempted: false }
+          );
+          return { handled: true, message: `lots_invalid:${marginGate.reason}` };
+        }
+        logger.info("AutoTrade authoritative margin gate passed", {
+          uid,
+          signalId,
+          protocolVolume,
+          freeMargin: marginGate.freeMargin,
+          expectedMargin: marginGate.expectedMargin,
+          marginSource: marginGate.marginSource,
+          marginAgeMs: marginGate.marginAgeMs,
+          openPositionCount: marginGate.marginSnapshot.openPositionCount
+        });
+      }
     } else if (oppCfg.mode === "ACTIVE_DEMO") {
       // ACTIVE_DEMO is Pepperstone Demo XAUUSD — never fall back to full-risk
       // generic sizing when the proven unit mapping is missing/unproven.
