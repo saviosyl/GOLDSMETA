@@ -1,15 +1,10 @@
 import {
-  MICRO_COST_MODEL_VERSION,
-  MICRO_EXECUTION_BUFFER,
-  MICRO_LABEL_VERSION,
-  MICRO_MODEL_VERSION,
   MICRO_TARGET_QUOTE_TOLERANCE_SECONDS,
   type MicroHorizon
 } from "../config";
 import { horizonMs, nowIso } from "../clock";
-import { estimateFriction } from "../prediction/costModel";
 import { labelFromNets } from "../prediction/labels";
-import type { MicroOutcome, MicroPrediction, MicroQuote } from "../types";
+import type { MicroCostAssumptions, MicroOutcome, MicroPrediction, MicroQuote } from "../types";
 import { argmaxClass } from "../models/modelInterface";
 
 /**
@@ -34,6 +29,25 @@ export function resolveTargetQuote(args: {
   return { quote: null, reason: "UNSCORABLE_DATA_GAP" };
 }
 
+/** Prefer frozen prediction costAssumptions; never silently use today's globals. */
+export function frozenCostAssumptions(pred: MicroPrediction): MicroCostAssumptions {
+  if (pred.costAssumptions) return pred.costAssumptions;
+  throw new Error(
+    "MISSING_FROZEN_COST_ASSUMPTIONS: prediction lacks costAssumptions; cannot score with current config"
+  );
+}
+
+function versionFieldsFromPrediction(pred: MicroPrediction) {
+  return {
+    modelVersion: pred.modelVersion,
+    costModelVersion: pred.costModelVersion,
+    labelVersion: pred.labelVersion,
+    featureVersion: pred.featureVersion,
+    calibrationVersion: pred.calibrationVersion,
+    regimeVersion: pred.regimeVersion
+  };
+}
+
 export function scoreHorizon(args: {
   prediction: MicroPrediction;
   horizon: MicroHorizon;
@@ -41,16 +55,14 @@ export function scoreHorizon(args: {
   nowMs?: number;
 }): MicroOutcome {
   const pred = args.prediction;
+  const versions = versionFieldsFromPrediction(pred);
+  const costs = frozenCostAssumptions(pred);
   const targetMs = pred.candleCloseEpochMs + horizonMs(args.horizon);
   const { quote, reason } = resolveTargetQuote({
     targetMs,
     quotes: args.pathQuotes
   });
   const predictedClass = argmaxClass(pred.horizons[args.horizon]);
-  const friction = estimateFriction({
-    currentSpread: pred.spread,
-    historicalSpreads: [pred.spread]
-  });
 
   if (!quote) {
     return {
@@ -79,9 +91,8 @@ export function scoreHorizon(args: {
       classCorrect: null,
       brierComponents: null,
       logLossComponent: null,
-      modelVersion: MICRO_MODEL_VERSION,
-      costModelVersion: MICRO_COST_MODEL_VERSION,
-      labelVersion: MICRO_LABEL_VERSION,
+      ...versions,
+      costAssumptions: costs,
       mfeLong: null,
       maeLong: null,
       mfeShort: null,
@@ -93,15 +104,17 @@ export function scoreHorizon(args: {
   // Executable-side gross already includes spread — do NOT subtract spread again.
   const grossLong = quote.bid - pred.ask;
   const grossShort = pred.bid - quote.ask;
-  const slip = friction.entrySlippageProxy + friction.exitSlippageProxy;
-  const netLong = grossLong - slip - MICRO_EXECUTION_BUFFER;
-  const netShort = grossShort - slip - MICRO_EXECUTION_BUFFER;
+  const slip = costs.entrySlippageProxy + costs.exitSlippageProxy;
+  const netLong = grossLong - slip - costs.executionBuffer;
+  const netShort = grossShort - slip - costs.executionBuffer;
   const actualSignedMove = quote.mid - pred.mid;
   const actualAbsoluteMove = Math.abs(actualSignedMove);
   const { actualClass } = labelFromNets({
     horizon: args.horizon,
     netLong,
-    netShort
+    netShort,
+    theta: pred.labelThetaByHorizon?.[args.horizon],
+    labelVersion: pred.labelVersion
   });
 
   const hz = pred.horizons[args.horizon];
@@ -144,17 +157,16 @@ export function scoreHorizon(args: {
     grossShort,
     netLong,
     netShort,
-    estimatedCosts: slip + MICRO_EXECUTION_BUFFER,
+    estimatedCosts: slip + costs.executionBuffer,
     slippageProxy: slip,
-    executionBuffer: MICRO_EXECUTION_BUFFER,
+    executionBuffer: costs.executionBuffer,
     predictedClass,
     directionCorrect: dirPred === dirAct,
     classCorrect: predictedClass === actualClass,
     brierComponents: brier,
     logLossComponent: logLoss,
-    modelVersion: MICRO_MODEL_VERSION,
-    costModelVersion: MICRO_COST_MODEL_VERSION,
-    labelVersion: MICRO_LABEL_VERSION,
+    ...versions,
+    costAssumptions: costs,
     mfeLong,
     maeLong,
     mfeShort,

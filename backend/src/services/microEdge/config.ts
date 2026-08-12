@@ -26,6 +26,12 @@ export const MICRO_SLIPPAGE_LATENCY_MS = 250;
 /** Execution buffer in price units (USD/oz). */
 export const MICRO_EXECUTION_BUFFER = 0.02;
 
+/** Max quote age (ms) for collector health / freshness. */
+export const MICRO_QUOTE_MAX_AGE_MS = 30_000;
+
+/** Max age (ms) of last completed M1 close for collector health. */
+export const MICRO_M1_MAX_AGE_MS = 5 * 60_000;
+
 /** Minimum positive NET edge theta by horizon (USD/oz). Validation-selected, frozen for V1. */
 export const MICRO_THETA: Record<MicroHorizon, number> = {
   "1m": 0.05,

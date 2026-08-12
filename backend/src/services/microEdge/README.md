@@ -9,12 +9,18 @@ Isolated prediction/research bot. **No broker order path.**
 
 ## Market data
 
-Read-only adapter (`marketData/microCTraderClient.ts`):
+Read-only adapter scaffold (`marketData/microCTraderClient.ts`):
 
-- M1 / M5 / M15 trendbars (tick volume)
-- Bid/Ask spot
-- Historical ticks / DOM / live trendbar subs are **feature-gated** until a dedicated persistent Micro collector is deployed
-- Dedicated `scope=accounts` OAuth is **not** introduced in V1 (must not disturb Core OAuth)
+| State | Meaning |
+|-------|---------|
+| `INTERFACE_READY` | Methods/types exist |
+| `MOCK_SEEDED` | In-memory test/offline injection only |
+| `LIVE_NOT_CONNECTED` | **V1 default** — no genuine cTrader OpenAPI session |
+| `FEATURE_GATED` | DOM / ticks / live trendbar subs pending Micro collector |
+
+Until live OpenAPI reads are wired, status/UI must report **Market feed not connected**.
+Do **not** import Core `services/broker/ctrader`.
+Dedicated `scope=accounts` OAuth is **not** introduced in V1.
 
 ## Retention
 
