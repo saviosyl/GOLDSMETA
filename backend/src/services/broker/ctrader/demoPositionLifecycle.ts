@@ -35,7 +35,10 @@ import { evaluateNewsGuard } from "./newsGuard";
 import { setEmergencyStop } from "./userAutoTradeSettings";
 import { lotsToValidatedBrokerVolume } from "./volumeUnits";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
-import { brokerHardTakeProfitForAmend } from "./demoProfitLockStops";
+import {
+  brokerHardTakeProfitForAmend,
+  brokerTp3Preserved
+} from "./demoProfitLockStops";
 import {
   runDemoProfitLockPass,
   type ProfitLockDeps
@@ -229,7 +232,8 @@ function buildManagementInput(
   };
 }
 
-async function verifyAndRepairProtection(
+/** Exported for PROFIT_LOCK_V1 initial SL+TP3 verification unit tests. */
+export async function verifyAndRepairProtection(
   doc: DemoPositionLifecycle,
   opts?: { profitLockActive?: boolean }
 ): Promise<DemoPositionLifecycle> {
@@ -284,19 +288,37 @@ async function verifyAndRepairProtection(
     unrealisedPnl: match.unrealisedPnl
   };
 
-  if (match.stopLoss != null && Number.isFinite(match.stopLoss)) {
+  const slOk = match.stopLoss != null && Number.isFinite(match.stopLoss);
+  const expectedHardTp = opts?.profitLockActive
+    ? brokerHardTakeProfitForAmend({
+        tp3: doc.tp3,
+        brokerHardTakeProfit: doc.brokerHardTakeProfit
+      }) ?? null
+    : null;
+  const tp3Ok =
+    !opts?.profitLockActive ||
+    brokerTp3Preserved({
+      brokerTp: match.takeProfit,
+      expectedTp3: expectedHardTp
+    });
+
+  // LEGACY: SL alone is enough. PROFIT_LOCK_V1: require SL + broker hard TP3.
+  if (slOk && tp3Ok) {
     const verified = appendLifecycleEvent(next, {
       at: new Date().toISOString(),
       kind: "SL_VERIFIED",
-      reason: "Broker Stop Loss confirmed",
+      reason: opts?.profitLockActive
+        ? `Broker SL + hard TP3 confirmed (TP=${match.takeProfit})`
+        : "Broker Stop Loss confirmed",
       newSl: match.stopLoss,
       brokerAck: true,
-      dedupeKey: `sl_verified:${doc.correlationId}:${match.stopLoss}`
+      dedupeKey: `sl_verified:${doc.correlationId}:${match.stopLoss}:${match.takeProfit ?? "na"}`
     });
     next = {
       ...verified.doc,
       protectionVerified: true,
       protectionFailure: false,
+      profitLockLastBlocker: null,
       managementState:
         verified.doc.managementState === "HOLD" ||
         verified.doc.managementState === "SL_PROTECTED"
@@ -307,22 +329,31 @@ async function verifyAndRepairProtection(
     return next;
   }
 
-  // Attempt to apply required SL once
-  const amendKey = `sl_repair:${doc.correlationId}:${doc.initialSl}`;
+  // Repair: never weaken SL. For PROFIT_LOCK_V1 also attach exact hard TP3.
+  const repairSl = doc.initialSl;
+  const repairTp = opts?.profitLockActive
+    ? expectedHardTp
+    : doc.tp1;
+  const amendKey = opts?.profitLockActive
+    ? `sl_tp3_repair:${doc.correlationId}:${repairSl}:${repairTp ?? "na"}`
+    : `sl_repair:${doc.correlationId}:${repairSl}`;
   if (doc.appliedDedupeKeys.includes(amendKey)) {
+    // Prior repair accepted but broker still not confirmed — remain unverified.
+    next = {
+      ...next,
+      protectionVerified: false,
+      profitLockLastBlocker: opts?.profitLockActive
+        ? "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+        : next.profitLockLastBlocker
+    };
+    await savePositionLifecycle(next);
     return next;
   }
   try {
-    const repairTp = opts?.profitLockActive
-      ? brokerHardTakeProfitForAmend({
-          tp3: doc.tp3,
-          brokerHardTakeProfit: doc.brokerHardTakeProfit
-        })
-      : doc.tp1;
     const result = await amendDemoStopLoss({
       ownerUid: doc.uid,
       positionId: doc.brokerPositionId,
-      stopLoss: doc.initialSl,
+      stopLoss: repairSl,
       takeProfit: repairTp
     });
     if (result.accepted) {
@@ -330,24 +361,66 @@ async function verifyAndRepairProtection(
         at: new Date().toISOString(),
         kind: "SL_AMENDED",
         reason: opts?.profitLockActive
-          ? "Applied required Stop Loss after broker ack (preserve broker hard TP3)"
+          ? "Repair Demo SL + broker hard TP3 requested — awaiting broker reconcile proof"
           : "Applied required Stop Loss after broker ack",
-        oldSl: null,
-        newSl: doc.initialSl,
+        oldSl: match.stopLoss,
+        newSl: repairSl,
         brokerAck: true,
         dedupeKey: amendKey
       });
+      // Do NOT mark protectionVerified from accepted alone — re-reconcile.
+      let proof;
+      try {
+        proof = await reconcileDemoBrokerPositions(doc.uid);
+      } catch {
+        proof = null;
+      }
+      const proven = proof?.find((p) => p.positionId === doc.brokerPositionId);
+      const provenSlOk =
+        proven?.stopLoss != null && Number.isFinite(proven.stopLoss);
+      const provenTp3Ok =
+        !opts?.profitLockActive ||
+        brokerTp3Preserved({
+          brokerTp: proven?.takeProfit,
+          expectedTp3: expectedHardTp
+        });
+      if (proven && provenSlOk && provenTp3Ok) {
+        next = {
+          ...amended.doc,
+          currentSl: proven.stopLoss,
+          protectionVerified: true,
+          protectionFailure: false,
+          profitLockLastBlocker: null,
+          managementState: "SL_PROTECTED"
+        };
+        await savePositionLifecycle(next);
+        return next;
+      }
       next = {
         ...amended.doc,
-        currentSl: doc.initialSl,
-        protectionVerified: true,
-        managementState: "SL_PROTECTED"
+        currentSl: proven?.stopLoss ?? repairSl,
+        protectionVerified: false,
+        profitLockLastBlocker: opts?.profitLockActive
+          ? "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+          : "SL_REPAIR_PENDING_BROKER_PROOF"
       };
       await savePositionLifecycle(next);
       return next;
     }
   } catch {
-    /* fall through to failure */
+    /* fall through */
+  }
+
+  // PROFIT_LOCK_V1 with SL present but TP3 unconfirmed: keep SL, do not emergency-stop.
+  if (opts?.profitLockActive && slOk) {
+    next = {
+      ...next,
+      protectionVerified: false,
+      protectionFailure: false,
+      profitLockLastBlocker: "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+    };
+    await savePositionLifecycle(next);
+    return next;
   }
 
   const failed = appendLifecycleEvent(next, {

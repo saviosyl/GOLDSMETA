@@ -114,32 +114,16 @@ export function normalizeSlDistanceToPrice(args: {
   }
 
   if (mode === "SYMBOL_DISTANCE_IN_PERCENTAGE") {
-    // Official docs: distanceSetIn shared with gslCharge; percentage mode uses
-    // hundredths of a percent (100 = 1%) applied to position/reference price.
-    const ref =
-      typeof args.referencePrice === "number" &&
-      Number.isFinite(args.referencePrice) &&
-      args.referencePrice > 0
-        ? args.referencePrice
-        : null;
-    if (ref == null) {
-      return {
-        ok: false,
-        reason: "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE",
-        rawSlDistance: raw,
-        distanceSetIn: mode,
-        detail: "referencePrice required for PERCENTAGE distance"
-      };
-    }
-    const fraction = raw / 10_000; // 100 → 0.01 = 1%
-    const tickSize =
-      digits != null ? Math.pow(10, -digits) : Number.NaN;
+    // Fail closed: official Open API docs establish distanceSetIn=PERCENTAGE
+    // but do not sufficiently prove the raw slDistance numeric scale.
+    // Do not derive scaling from gslCharge / commission / fee fields.
     return {
-      ok: true,
+      ok: false,
+      reason: "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE",
       rawSlDistance: raw,
       distanceSetIn: mode,
-      normalizedMinStopPriceDistance: Number((ref * fraction).toFixed(12)),
-      tickSize: Number.isFinite(tickSize) ? tickSize : 0
+      detail:
+        "SYMBOL_DISTANCE_IN_PERCENTAGE slDistance scale not independently proven — refuse invented conversion"
     };
   }
 

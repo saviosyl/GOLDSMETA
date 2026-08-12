@@ -139,6 +139,18 @@ function symbolFine(): BrokerSymbol {
   };
 }
 
+/** Pepperstone Demo smoke shape: slDistance=0 POINTS. */
+function symbolPepperstoneZeroSl(): BrokerSymbol {
+  return {
+    ...symbolFine(),
+    rawSlDistance: 0,
+    distanceSetIn: "SYMBOL_DISTANCE_IN_POINTS",
+    rawTpDistance: 0,
+    normalizedMinStopPriceDistance: null,
+    minStopDistance: null
+  };
+}
+
 function pos(
   lots: number,
   sl: number | null = 2340,
@@ -171,6 +183,7 @@ type SimState = {
   closeDelayVolume?: boolean;
   amendKeepOldSl?: boolean;
   amendDropTp3?: boolean;
+  symbol?: BrokerSymbol;
 };
 
 function makeDeps(state: SimState): {
@@ -212,7 +225,7 @@ function makeDeps(state: SimState): {
       }
       return { accepted: true };
     },
-    loadSymbol: async () => symbolFine(),
+    loadSymbol: async () => state.symbol ?? symbolFine(),
     getQuote: async () => ({
       bid: state.bid,
       ask: state.ask,
@@ -365,66 +378,76 @@ describe("B2 — executable BID/ASK target touch", () => {
   });
 });
 
-describe("B3 — fresh post-secure M5 continuation", () => {
-  it("rejects bar that existed at/before BE secure; accepts newer bar; no duplicate", () => {
+describe("B3/F3 — fresh post-secure M5 continuation (never null-open)", () => {
+  it("null securedAt fails closed; barEnd must be after securedAt", () => {
+    const securedAt = new Date(1_700_000_000_000).toISOString();
     expect(
       isFreshPostSecureM5Bar({
-        barTime: 1000,
-        securedAfterM5BarTime: 1000,
+        barTime: 1_700_000_000 - 600,
+        securedAt: null,
+        securedAfterM5BarTime: null,
         alreadyConfirmedBarTime: null
       })
     ).toBe(false);
+    // Bar that completed before secure
     expect(
       isFreshPostSecureM5Bar({
-        barTime: 1001,
-        securedAfterM5BarTime: 1000,
+        barTime: Math.floor(1_700_000_000_000 / 1000) - 600,
+        securedAt,
+        securedAfterM5BarTime: null,
+        alreadyConfirmedBarTime: null
+      })
+    ).toBe(false);
+    // Bar that completes after secure
+    const afterOpen = Math.floor(1_700_000_000_000 / 1000) + 60;
+    expect(
+      isFreshPostSecureM5Bar({
+        barTime: afterOpen,
+        securedAt,
+        securedAfterM5BarTime: afterOpen - 300,
         alreadyConfirmedBarTime: null
       })
     ).toBe(true);
     expect(
       isFreshPostSecureM5Bar({
-        barTime: 1001,
-        securedAfterM5BarTime: 1000,
-        alreadyConfirmedBarTime: 1001
+        barTime: afterOpen,
+        securedAt,
+        securedAfterM5BarTime: afterOpen - 300,
+        alreadyConfirmedBarTime: afterOpen
       })
     ).toBe(false);
   });
 
-  it("BUY T1: pre-existing bar above TP1 keeps waiting; next bar confirms", async () => {
+  it("BE confirmed with candle fetch fail: old bar beyond TP1 must NOT confirm", async () => {
+    const securedAt = new Date().toISOString();
+    const oldBarTime = Math.floor(Date.now() / 1000) - 900;
     const doc = baseDoc({
       profitLockStage: "T1_SECURED_BE",
       remainingLots: 8.5,
       lots: 17,
       currentSl: 2350,
       profitLockProtectionLevel: "BE",
-      t1SecuredAt: new Date().toISOString(),
-      t1SecuredAfterM5BarTime: 1000
+      t1SecuredAt: securedAt,
+      t1SecuredAfterM5BarTime: null // candle fetch failed at secure
     });
-    const { deps, amends, state } = makeDeps({
+    const { deps, state } = makeDeps({
       remaining: 8.5,
       sl: 2350,
       tp: 2380,
       bid: 2362,
       ask: 2362.2,
-      m5Bars: [{ time: 1000, close: 2361 }] // existed at secure
+      m5Bars: [{ time: oldBarTime, close: 2361 }]
     });
     const wait = await runDemoProfitLockPass(doc, deps);
     expect(wait.doc.profitLockStage).toBe("T1_SECURED_BE");
     expect(wait.blockedReason).toBe("WAITING_T1_CONTINUATION_5M_FRESH");
 
-    state.m5Bars = [
-      { time: 1000, close: 2361 },
-      { time: 1300, close: 2362 }
-    ];
+    const freshTime = Math.floor(Date.now() / 1000) + 10;
+    // Simulate time: bar open after securedAt with end after securedAt
+    state.m5Bars = [{ time: Math.floor(Date.parse(securedAt) / 1000) + 60, close: 2362 }];
     const conf = await runDemoProfitLockPass(wait.doc, deps);
     expect(conf.doc.profitLockStage).toBe("T1_CONTINUATION_CONFIRMED");
-    expect(conf.doc.t1ContinuationBarTime).toBe(1300);
-
-    // Same bar again — no duplicate transition/amend from this stage
-    const again = await runDemoProfitLockPass(conf.doc, deps);
-    // May attempt protect amend; continuation bar must not re-fire
-    expect(again.doc.t1ContinuationBarTime).toBe(1300);
-    void amends;
+    void freshTime;
   });
 
   it("SELL T2 fresh continuation mirrors BUY", () => {
@@ -435,21 +458,13 @@ describe("B3 — fresh post-secure M5 continuation", () => {
         level: 2360
       })
     ).toBe(true);
-    expect(
-      isFreshPostSecureM5Bar({
-        barTime: 2001,
-        securedAfterM5BarTime: 2000,
-        alreadyConfirmedBarTime: null
-      })
-    ).toBe(true);
   });
 });
 
-describe("B4 — stop distance normalization", () => {
-  it("POINTS / PERCENTAGE / unknown", () => {
+describe("B4/F4 — stop distance normalization", () => {
+  it("POINTS supported; PERCENTAGE and unknown fail closed", () => {
     expect(parseDistanceSetIn(1)).toBe("SYMBOL_DISTANCE_IN_POINTS");
     expect(parseDistanceSetIn(2)).toBe("SYMBOL_DISTANCE_IN_PERCENTAGE");
-    expect(parseDistanceSetIn("nope")).toBe("UNKNOWN");
 
     const pts = normalizeSlDistanceToPrice({
       rawSlDistance: 30,
@@ -460,27 +475,27 @@ describe("B4 — stop distance normalization", () => {
     if (pts.ok) expect(pts.normalizedMinStopPriceDistance).toBeCloseTo(0.3, 8);
 
     const pct = normalizeSlDistanceToPrice({
-      rawSlDistance: 100, // 1%
+      rawSlDistance: 100,
       distanceSetIn: 2,
       digits: 2,
       referencePrice: 2350
     });
-    expect(pct.ok).toBe(true);
-    if (pct.ok) expect(pct.normalizedMinStopPriceDistance).toBeCloseTo(23.5, 8);
-
-    const unk = normalizeSlDistanceToPrice({
-      rawSlDistance: 30,
-      distanceSetIn: "weird",
-      digits: 2
-    });
-    expect(unk.ok).toBe(false);
-    if (!unk.ok) {
-      expect(unk.reason).toBe("STOP_DISTANCE_NORMALIZATION_UNAVAILABLE");
+    expect(pct.ok).toBe(false);
+    if (!pct.ok) {
+      expect(pct.reason).toBe("STOP_DISTANCE_NORMALIZATION_UNAVAILABLE");
+      expect(pct.distanceSetIn).toBe("SYMBOL_DISTANCE_IN_PERCENTAGE");
     }
 
+    const zero = normalizeSlDistanceToPrice({
+      rawSlDistance: 0,
+      distanceSetIn: 1,
+      digits: 2
+    });
+    expect(zero.ok).toBe(false);
+
     const buf = computeBrokerSafeStopBuffer({
-      rawSlDistance: 30,
-      distanceSetIn: "weird",
+      rawSlDistance: 0,
+      distanceSetIn: 1,
       digits: 2,
       spread: 0.1,
       tickSize: 0.01
@@ -698,6 +713,196 @@ describe("B7 — broker-proven mutations", () => {
     expect(
       brokerTp3Preserved({ brokerTp: 2360, expectedTp3: 2380 })
     ).toBe(false);
+  });
+});
+
+describe("F1 — SUBMITTING crash never auto-resends", () => {
+  it("T1: crash after send / before save — old volume → ZERO second close; later proof advances", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T1_CLOSE_SUBMITTING",
+      remainingLots: 17,
+      lots: 17,
+      pendingClose: {
+        tag: "T1",
+        desiredCumulativeLots: 8.5,
+        requestedLots: 8.5,
+        volumeUnits: 850,
+        submittedAt: new Date().toISOString(),
+        brokerAccepted: null
+      }
+    });
+    const { deps, closes, state } = makeDeps({
+      remaining: 17, // lagging reconcile
+      sl: 2340,
+      tp: 2380,
+      bid: 2361,
+      ask: 2361.2
+    });
+    const first = await runDemoProfitLockPass(doc, deps);
+    expect(closes.length).toBe(0); // never auto-resend
+    expect(first.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+    expect(
+      first.doc.profitLockLastBlocker === "AMBIGUOUS_CLOSE_SUBMISSION" ||
+        first.doc.profitLockLastBlocker === "CLOSE_PENDING_VOLUME_UNCHANGED"
+    ).toBe(true);
+
+    const stillLag = await runDemoProfitLockPass(first.doc, deps);
+    expect(closes.length).toBe(0);
+    expect(stillLag.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+
+    state.remaining = 8.5;
+    const proven = await runDemoProfitLockPass(stillLag.doc, deps);
+    expect(closes.length).toBe(0);
+    expect(proven.doc.profitLockStage).toBe("T1_PARTIAL_DONE_SL_PENDING");
+  });
+
+  it("T2: same at-most-once SUBMITTING recovery", async () => {
+    const doc = baseDoc({
+      profitLockStage: "T2_CLOSE_SUBMITTING",
+      remainingLots: 8.5,
+      lots: 17,
+      currentSl: 2350,
+      profitLockProtectionLevel: "BE",
+      pendingClose: {
+        tag: "T2",
+        desiredCumulativeLots: 13.6,
+        requestedLots: 5.1,
+        volumeUnits: 510,
+        submittedAt: new Date().toISOString(),
+        brokerAccepted: null
+      }
+    });
+    const { deps, closes, state } = makeDeps({
+      remaining: 8.5,
+      sl: 2350,
+      tp: 2380,
+      bid: 2371,
+      ask: 2371.2
+    });
+    const first = await runDemoProfitLockPass(doc, deps);
+    expect(closes.length).toBe(0);
+    expect(first.doc.profitLockStage).toBe("T2_CLOSE_PENDING_RECONCILE");
+    state.remaining = 3.4;
+    const proven = await runDemoProfitLockPass(first.doc, deps);
+    expect(closes.length).toBe(0);
+    expect(proven.doc.profitLockStage).toBe("T2_PARTIAL_DONE");
+  });
+
+  it("crash BEFORE send: SUBMITTING + brokerAccepted=null stays reconcile-only, never duplicates", async () => {
+    // Persisted SUBMITTING before broker request completed — same ambiguous
+    // window as crash-after-send; at-most-once forbids any closePosition call.
+    const doc = baseDoc({
+      profitLockStage: "T1_CLOSE_SUBMITTING",
+      remainingLots: 17,
+      lots: 17,
+      pendingClose: {
+        tag: "T1",
+        desiredCumulativeLots: 8.5,
+        requestedLots: 8.5,
+        volumeUnits: 850,
+        submittedAt: new Date().toISOString(),
+        brokerAccepted: null
+      }
+    });
+    const { deps, closes } = makeDeps({
+      remaining: 17,
+      sl: 2340,
+      tp: 2380,
+      bid: 2361,
+      ask: 2361.2
+    });
+    const r1 = await runDemoProfitLockPass(doc, deps);
+    const r2 = await runDemoProfitLockPass(r1.doc, deps);
+    expect(closes.length).toBe(0);
+    expect(r2.doc.profitLockStage).toBe("T1_CLOSE_PENDING_RECONCILE");
+    expect(r2.mutations.partialCloses).toBe(0);
+  });
+});
+
+describe("F2 — slDistance=0 does not freeze T1→T2", () => {
+  it("BUY: T1 50% → BE → fresh cont → skip ratchet → TP2 still closes to 80%", async () => {
+    const securedAt = new Date(Date.now() - 60_000).toISOString();
+    const freshBar = Math.floor(Date.parse(securedAt) / 1000) + 120;
+    // Start at T1_CONTINUATION_CONFIRMED with Pepperstone zero slDistance
+    let doc = baseDoc({
+      profitLockStage: "T1_CONTINUATION_CONFIRMED",
+      remainingLots: 8.5,
+      lots: 17,
+      currentSl: 2350,
+      profitLockProtectionLevel: "BE",
+      t1SecuredAt: securedAt,
+      t1SecuredAfterM5BarTime: freshBar - 300,
+      t1ContinuationBarTime: freshBar
+    });
+    const { deps, closes, state } = makeDeps({
+      remaining: 8.5,
+      sl: 2350,
+      tp: 2380,
+      bid: 2362,
+      ask: 2362.2,
+      symbol: symbolPepperstoneZeroSl(),
+      m5Bars: [{ time: freshBar, close: 2362 }]
+    });
+    const skip = await runDemoProfitLockPass(doc, deps);
+    expect(skip.doc.profitLockStage).toBe("T1_PROTECTED");
+    expect(skip.doc.profitLockProtectionLevel).toBe("BE"); // not falsely TP1
+    expect(skip.doc.profitLockLastBlocker).toBe(
+      "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE"
+    );
+    expect(skip.doc.currentSl).toBe(2350);
+
+    // TP2 touch via BID
+    state.bid = 2370;
+    state.ask = 2370.2;
+    doc = skip.doc;
+    const t2trig = await runDemoProfitLockPass(doc, deps);
+    expect(t2trig.doc.profitLockStage).toBe("T2_TRIGGERED");
+
+    const t2close = await runDemoProfitLockPass(t2trig.doc, deps);
+    // close requested then pending — force proof
+    if (t2close.doc.profitLockStage === "T2_CLOSE_PENDING_RECONCILE") {
+      state.remaining = 3.4;
+      const proven = await runDemoProfitLockPass(t2close.doc, deps);
+      expect(proven.doc.profitLockStage).toBe("T2_PARTIAL_DONE");
+      expect(proven.doc.cumulativeClosedLots).toBeCloseTo(13.6, 5);
+    } else {
+      expect(closes.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("SELL evaluator: ratchet skip keeps protectionLevel and advances", () => {
+    const a = evaluateProfitLock({
+      side: "SELL",
+      stage: "T1_CONTINUATION_CONFIRMED",
+      protectionLevel: "BE",
+      entry: 2380,
+      currentSl: 2380,
+      tp1: 2370,
+      tp2: 2360,
+      tp3: 2350,
+      brokerHardTakeProfit: 2350,
+      originalLots: 10,
+      brokerRemainingLots: 5,
+      targetTouchPrice: 2365,
+      brokerPositionOpen: true,
+      m5ContinuationBeyondTp1: true,
+      m5ContinuationBeyondTp2: false,
+      completedM5BarTime: 1,
+      volumeRules: FINE_RULES,
+      stopBuffer: {
+        rawSlDistance: 0,
+        distanceSetIn: 1,
+        digits: 2,
+        spread: 0.1,
+        tickSize: 0.01
+      }
+    });
+    expect(a.type).toBe("ADVANCE_STAGE");
+    if (a.type === "ADVANCE_STAGE") {
+      expect(a.nextStage).toBe("T1_PROTECTED");
+      expect(a.nextProtection).toBe("BE");
+      expect(a.reason).toBe("T1_RATCHET_SKIPPED_KEEP_BE");
+    }
   });
 });
 

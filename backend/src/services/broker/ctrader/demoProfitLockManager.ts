@@ -347,6 +347,7 @@ export async function runDemoProfitLockPass(
   const freshT1 =
     isFreshPostSecureM5Bar({
       barTime: m5Time,
+      securedAt: doc.t1SecuredAt,
       securedAfterM5BarTime: doc.t1SecuredAfterM5BarTime,
       alreadyConfirmedBarTime: doc.t1ContinuationBarTime
     }) &&
@@ -358,6 +359,7 @@ export async function runDemoProfitLockPass(
   const freshT2 =
     isFreshPostSecureM5Bar({
       barTime: m5Time,
+      securedAt: doc.t2SecuredAt,
       securedAfterM5BarTime: doc.t2SecuredAfterM5BarTime,
       alreadyConfirmedBarTime: doc.t2ContinuationBarTime
     }) &&
@@ -412,22 +414,31 @@ export async function runDemoProfitLockPass(
   }
 
   if (action.type === "ADVANCE_STAGE") {
+    const ratchetSkipped =
+      action.reason === "T1_RATCHET_SKIPPED_KEEP_BE" ||
+      action.reason === "T2_RATCHET_SKIPPED_KEEP_CURRENT_SL";
     const extras: Partial<DemoPositionLifecycle> = {
+      // For ratchet-skip, nextProtection is current level (e.g. BE) — do not raise to TP1/TP2.
       profitLockProtectionLevel: action.nextProtection
-        ? maxProtectionLevel(
-            doc.profitLockProtectionLevel ?? "NONE",
-            action.nextProtection
-          )
+        ? ratchetSkipped
+          ? action.nextProtection
+          : maxProtectionLevel(
+              doc.profitLockProtectionLevel ?? "NONE",
+              action.nextProtection
+            )
         : doc.profitLockProtectionLevel,
       t1ContinuationBarTime:
         action.t1ContinuationBarTime ?? doc.t1ContinuationBarTime,
       t2ContinuationBarTime:
         action.t2ContinuationBarTime ?? doc.t2ContinuationBarTime,
-      profitLockLastBlocker: null,
+      profitLockLastBlocker: ratchetSkipped
+        ? "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE"
+        : null,
       lastRecommendation: `PROFIT_LOCK:${action.reason}`
     };
     if (action.nextStage === "T1_SECURED_BE") {
       extras.t1SecuredAt = stamp();
+      // May be null if candle fetch failed — freshness then requires securedAt only.
       extras.t1SecuredAfterM5BarTime = m5Time;
       extras.currentRisk = 0;
     }
@@ -443,7 +454,14 @@ export async function runDemoProfitLockPass(
     });
     doc = withStage(ev.applied ? ev.doc : doc, action.nextStage, extras);
     await deps.save(doc);
-    return { doc, mutations, action, blockedReason: null };
+    return {
+      doc,
+      mutations,
+      action,
+      blockedReason: ratchetSkipped
+        ? "STOP_DISTANCE_NORMALIZATION_UNAVAILABLE"
+        : null
+    };
   }
 
   if (action.type === "RECONCILE_CLOSED") {
@@ -583,7 +601,7 @@ async function reconcilePendingClose(
   deps: ProfitLockDeps,
   mutations: ProfitLockMutationCounters,
   stamp: () => string,
-  knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED"
+  _knownMatch: BrokerOpenPosition | null | "RECONCILE_FAILED"
 ): Promise<{
   doc: DemoPositionLifecycle;
   mutations: ProfitLockMutationCounters;
@@ -611,7 +629,8 @@ async function reconcilePendingClose(
           ? "T3_CLOSE_PENDING_RECONCILE"
           : (stage as ProfitLockStage);
 
-  // SUBMITTING without completed call: if volume unchanged, allow one send.
+  // Crash window: SUBMITTING + brokerAccepted=null is AMBIGUOUS.
+  // Never auto-resend — at-most-once. Reconcile-only until broker volume proves close.
   if (
     (stage === "T1_CLOSE_SUBMITTING" ||
       stage === "T2_CLOSE_SUBMITTING" ||
@@ -619,61 +638,12 @@ async function reconcilePendingClose(
     intent &&
     intent.brokerAccepted == null
   ) {
-    const pre = knownMatch === "RECONCILE_FAILED"
-      ? "RECONCILE_FAILED"
-      : knownMatch !== null && knownMatch !== undefined
-        ? knownMatch
-        : await reconcileMatch(deps, doc.uid, doc.brokerPositionId);
-    if (pre === "RECONCILE_FAILED") {
-      doc = {
-        ...doc,
-        profitLockLastBlocker: "RECONCILE_FAILED",
-        updatedAt: stamp()
-      };
-      await deps.save(doc);
-      return { doc, mutations, action: null, blockedReason: "RECONCILE_FAILED" };
-    }
-    if (
-      pre &&
-      intent.tag !== "T3_REMAINDER" &&
-      cumulativeSatisfied(
-        originalLots,
-        pre.volumeLots ?? 0,
-        intent.desiredCumulativeLots
-      )
-    ) {
-      doc = withStage(doc, doneStage, {
-        pendingClose: null,
-        remainingLots: pre.volumeLots,
-        cumulativeClosedLots: brokerClosedLots(originalLots, pre.volumeLots ?? 0),
-        tp1Status: intent.tag === "T1" ? "PARTIAL_CLOSED" : doc.tp1Status,
-        tp2Status: intent.tag === "T2" ? "PARTIAL_CLOSED" : doc.tp2Status
-      });
-      await deps.save(doc);
-      return { doc, mutations, action: null, blockedReason: null };
-    }
-    if (!doc.brokerPositionId) {
-      return { doc, mutations, action: null, blockedReason: "NO_BROKER_POSITION_ID" };
-    }
-    try {
-      const result = await deps.closePosition({
-        ownerUid: doc.uid,
-        positionId: doc.brokerPositionId,
-        volumeUnits: intent.volumeUnits
-      });
-      mutations.partialCloses += 1;
-      doc = withStage(doc, pendingStage, {
-        pendingClose: { ...intent, brokerAccepted: result.accepted }
-      });
-      await deps.save(doc);
-    } catch {
-      doc = withStage(doc, pendingStage, {
-        pendingClose: { ...intent, brokerAccepted: false },
-        profitLockLastBlocker: "CLOSE_SEND_FAILED_PENDING_PROOF"
-      });
-      await deps.save(doc);
-      return { doc, mutations, action: null, blockedReason: "CLOSE_SEND_FAILED" };
-    }
+    doc = withStage(doc, pendingStage, {
+      pendingClose: intent,
+      profitLockLastBlocker: "AMBIGUOUS_CLOSE_SUBMISSION"
+    });
+    await deps.save(doc);
+    // Fall through to reconcile-only path below — ZERO closePosition calls here.
   }
 
   const match = await reconcileMatch(deps, doc.uid, doc.brokerPositionId);

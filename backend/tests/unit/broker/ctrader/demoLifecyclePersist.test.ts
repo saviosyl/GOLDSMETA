@@ -12,12 +12,16 @@ vi.mock("../../../../src/services/broker/ctrader/positionLifecycleStore", () => 
 }));
 
 // Keep other lifecycle deps from pulling real broker I/O
+const amendDemoStopLoss = vi.fn();
+const reconcileDemoBrokerPositions = vi.fn(async () => [] as unknown[]);
+
 vi.mock("../../../../src/services/broker/ctrader/demoPositionMutations", () => ({
-  amendDemoStopLoss: vi.fn(),
+  amendDemoStopLoss: (...a: unknown[]) => amendDemoStopLoss(...a),
   closeDemoBrokerPosition: vi.fn(),
   fetchConfirmedCloseForPosition: vi.fn(),
   loadDemoXauUsdSymbol: vi.fn(),
-  reconcileDemoBrokerPositions: vi.fn(async () => [])
+  reconcileDemoBrokerPositions: (...a: unknown[]) =>
+    reconcileDemoBrokerPositions(...a)
 }));
 vi.mock("../../../../src/services/broker/ctrader/autoTradeJournal", () => ({
   updateAutoTradeJournalOnClose: vi.fn(async () => ({ updated: true }))
@@ -45,16 +49,84 @@ vi.mock("../../../../src/services/decisionEngine/management", () => ({
   evaluateManagement: vi.fn(() => ({ action: "HOLD", explanation: "ok" }))
 }));
 
-import { createDemoPositionLifecycle } from "../../../../src/services/broker/ctrader/demoPositionLifecycle";
+import {
+  createDemoPositionLifecycle,
+  verifyAndRepairProtection
+} from "../../../../src/services/broker/ctrader/demoPositionLifecycle";
 import {
   aggregateClosingDeals,
   parseBrokerClosedDeals
 } from "../../../../src/services/broker/ctrader/openApiClient";
+import {
+  emptyProfitLockState,
+  emptyTpStatuses,
+  type DemoPositionLifecycle
+} from "../../../../src/services/broker/ctrader/positionLifecycleTypes";
+import { isCTraderLiveEnabled } from "../../../../src/services/broker/ctrader/flags";
+
+function lockDoc(
+  overrides: Partial<DemoPositionLifecycle> = {}
+): DemoPositionLifecycle {
+  return {
+    id: "c1",
+    uid: "u1",
+    environment: "DEMO",
+    correlationId: "c1",
+    brokerOrderId: "o1",
+    brokerPositionId: "p1",
+    accountId: "48014710",
+    accountMasked: "48…10",
+    symbol: "XAUUSD",
+    side: "BUY",
+    entry: 2350,
+    currentPrice: 2350,
+    lots: 17,
+    remainingLots: 17,
+    initialSl: 2340,
+    currentSl: 2340,
+    tp1: 2360,
+    tp2: 2370,
+    tp3: 2380,
+    ...emptyTpStatuses(),
+    openedAt: new Date().toISOString(),
+    closedAt: null,
+    realisedPnl: null,
+    unrealisedPnl: 0,
+    brokerPnlConfirmed: false,
+    closePrice: null,
+    grossPnl: null,
+    commission: null,
+    swap: null,
+    netPnl: null,
+    brokerDealId: null,
+    initialRisk: 10,
+    currentRisk: 10,
+    qualificationStage: "LIVE_QUALIFICATION",
+    decisionId: "d1",
+    setupRef: "d1",
+    source: "demo_auto",
+    managementState: "HOLD",
+    lastRecommendation: null,
+    protectionVerified: false,
+    protectionFailure: false,
+    events: [],
+    appliedDedupeKeys: [],
+    updatedAt: new Date().toISOString(),
+    status: "OPEN",
+    ...emptyProfitLockState(),
+    managementPolicy: "PROFIT_LOCK_V1",
+    profitLockStage: "OPEN",
+    brokerHardTakeProfit: 2380,
+    ...overrides
+  };
+}
 
 describe("createDemoPositionLifecycle persist", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     savePositionLifecycle.mockResolvedValue(undefined);
+    amendDemoStopLoss.mockResolvedValue({ accepted: true });
+    reconcileDemoBrokerPositions.mockResolvedValue([]);
   });
 
   it("B1: PROFIT_LOCK_V1 keeps strategy TP1 when broker hard TP is TP3", async () => {
@@ -159,6 +231,166 @@ describe("createDemoPositionLifecycle persist", () => {
     expect(doc.accountId).toBe("48014710");
     expect(doc.entry).toBe(4376.6);
     expect(savePositionLifecycle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("F5 — PROFIT_LOCK_V1 initial SL + TP3 verification", () => {
+  it("SL + correct TP3 → verified", async () => {
+    reconcileDemoBrokerPositions.mockResolvedValue([
+      {
+        positionId: "p1",
+        symbolId: "41",
+        side: "BUY",
+        volumeLots: 17,
+        volumeUnits: 1700,
+        entryPrice: 2350,
+        stopLoss: 2340,
+        takeProfit: 2380,
+        unrealisedPnl: 0,
+        usedMargin: null,
+        openTimestamp: null
+      }
+    ]);
+    const next = await verifyAndRepairProtection(lockDoc(), {
+      profitLockActive: true
+    });
+    expect(next.protectionVerified).toBe(true);
+    expect(amendDemoStopLoss).not.toHaveBeenCalled();
+  });
+
+  it("SL exists + wrong TP → repair then reconcile to TP3", async () => {
+    reconcileDemoBrokerPositions
+      .mockResolvedValueOnce([
+        {
+          positionId: "p1",
+          side: "BUY",
+          volumeLots: 17,
+          volumeUnits: 1700,
+          entryPrice: 2350,
+          stopLoss: 2340,
+          takeProfit: 2360, // wrong (strategy TP1 leaked)
+          unrealisedPnl: 0,
+          usedMargin: null,
+          openTimestamp: null,
+          symbolId: "41"
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          positionId: "p1",
+          side: "BUY",
+          volumeLots: 17,
+          volumeUnits: 1700,
+          entryPrice: 2350,
+          stopLoss: 2340,
+          takeProfit: 2380,
+          unrealisedPnl: 0,
+          usedMargin: null,
+          openTimestamp: null,
+          symbolId: "41"
+        }
+      ]);
+    const next = await verifyAndRepairProtection(lockDoc(), {
+      profitLockActive: true
+    });
+    expect(amendDemoStopLoss).toHaveBeenCalledWith(
+      expect.objectContaining({ stopLoss: 2340, takeProfit: 2380 })
+    );
+    expect(next.protectionVerified).toBe(true);
+  });
+
+  it("SL exists + TP null → repair then reconcile", async () => {
+    reconcileDemoBrokerPositions
+      .mockResolvedValueOnce([
+        {
+          positionId: "p1",
+          side: "BUY",
+          volumeLots: 17,
+          volumeUnits: 1700,
+          entryPrice: 2350,
+          stopLoss: 2340,
+          takeProfit: null,
+          unrealisedPnl: 0,
+          usedMargin: null,
+          openTimestamp: null,
+          symbolId: "41"
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          positionId: "p1",
+          side: "BUY",
+          volumeLots: 17,
+          volumeUnits: 1700,
+          entryPrice: 2350,
+          stopLoss: 2340,
+          takeProfit: 2380,
+          unrealisedPnl: 0,
+          usedMargin: null,
+          openTimestamp: null,
+          symbolId: "41"
+        }
+      ]);
+    const next = await verifyAndRepairProtection(lockDoc(), {
+      profitLockActive: true
+    });
+    expect(amendDemoStopLoss).toHaveBeenCalledWith(
+      expect.objectContaining({ stopLoss: 2340, takeProfit: 2380 })
+    );
+    expect(next.protectionVerified).toBe(true);
+  });
+
+  it("repair accepted but broker still old TP → not verified", async () => {
+    reconcileDemoBrokerPositions.mockResolvedValue([
+      {
+        positionId: "p1",
+        side: "BUY",
+        volumeLots: 17,
+        volumeUnits: 1700,
+        entryPrice: 2350,
+        stopLoss: 2340,
+        takeProfit: 2360,
+        unrealisedPnl: 0,
+        usedMargin: null,
+        openTimestamp: null,
+        symbolId: "41"
+      }
+    ]);
+    const next = await verifyAndRepairProtection(lockDoc(), {
+      profitLockActive: true
+    });
+    expect(next.protectionVerified).toBe(false);
+    expect(next.profitLockLastBlocker).toBe(
+      "BROKER_TP3_INITIAL_PROTECTION_UNCONFIRMED"
+    );
+    expect(next.protectionFailure).toBe(false);
+  });
+
+  it("LEGACY_V1: SL alone verifies without TP3", async () => {
+    reconcileDemoBrokerPositions.mockResolvedValue([
+      {
+        positionId: "p1",
+        side: "BUY",
+        volumeLots: 17,
+        volumeUnits: 1700,
+        entryPrice: 2350,
+        stopLoss: 2340,
+        takeProfit: null,
+        unrealisedPnl: 0,
+        usedMargin: null,
+        openTimestamp: null,
+        symbolId: "41"
+      }
+    ]);
+    const next = await verifyAndRepairProtection(
+      lockDoc({ managementPolicy: "LEGACY_V1", brokerHardTakeProfit: null }),
+      { profitLockActive: false }
+    );
+    expect(next.protectionVerified).toBe(true);
+  });
+
+  it("Live hard lock remains false (zero Live mutations in this path)", () => {
+    expect(isCTraderLiveEnabled()).toBe(false);
   });
 });
 

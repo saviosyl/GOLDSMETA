@@ -290,7 +290,13 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       referencePrice: input.tp1
     });
     if (!buf.ok) {
-      return { type: "NONE", reason: buf.reason };
+      // Ratchet optional — keep BE, continue monitoring TP2.
+      return {
+        type: "ADVANCE_STAGE",
+        nextStage: "T1_PROTECTED",
+        nextProtection: input.protectionLevel, // stay BE; do not claim TP1
+        reason: "T1_RATCHET_SKIPPED_KEEP_BE"
+      };
     }
     const raw = proposeProtectedStop({
       side: input.side,
@@ -438,7 +444,13 @@ export function evaluateProfitLock(input: ProfitLockEvalInput): ProfitLockAction
       referencePrice: input.tp2
     });
     if (!buf.ok) {
-      return { type: "NONE", reason: buf.reason };
+      // Keep current best SL; continue toward broker hard TP3.
+      return {
+        type: "ADVANCE_STAGE",
+        nextStage: "T2_PROTECTED",
+        nextProtection: input.protectionLevel,
+        reason: "T2_RATCHET_SKIPPED_KEEP_CURRENT_SL"
+      };
     }
     const raw = proposeProtectedStop({
       side: input.side,
@@ -501,13 +513,31 @@ export function m5CloseConfirmsContinuation(args: {
     : args.completedClose < args.level;
 }
 
-/** Bar must be strictly newer than secured baseline and prior confirmation. */
+const M5_SECONDS = 5 * 60;
+
+/**
+ * Continuation candle must be provably AFTER the secure event.
+ * A null/missing secure baseline is NOT "any bar is fresh" — fail closed.
+ */
 export function isFreshPostSecureM5Bar(args: {
+  /** Completed M5 bar open time (unix seconds). */
   barTime: number | null;
+  /** ISO timestamp when BE/T2 secure was broker-confirmed. */
+  securedAt: string | null | undefined;
   securedAfterM5BarTime: number | null;
   alreadyConfirmedBarTime: number | null;
+  barPeriodSeconds?: number;
 }): boolean {
   if (args.barTime == null) return false;
+  const securedMs =
+    args.securedAt != null ? Date.parse(args.securedAt) : Number.NaN;
+  if (!Number.isFinite(securedMs)) {
+    // Missing secure timestamp → cannot prove freshness.
+    return false;
+  }
+  const period = args.barPeriodSeconds ?? M5_SECONDS;
+  const barEndMs = (args.barTime + period) * 1000;
+  if (!(barEndMs > securedMs)) return false;
   if (
     args.securedAfterM5BarTime != null &&
     !(args.barTime > args.securedAfterM5BarTime)
