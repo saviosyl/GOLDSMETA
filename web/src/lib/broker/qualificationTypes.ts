@@ -118,4 +118,6 @@ export type QualificationPublicView = {
   }>;
   startedAt: string | null;
   updatedAt: string | null;
+  /** Pepperstone Demo Auto SSOT when returned by qualification API. */
+  demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi | null;
 };

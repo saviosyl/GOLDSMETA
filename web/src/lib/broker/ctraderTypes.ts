@@ -7,8 +7,9 @@ export type BrokerOptionId =
 
 export interface BrokerControlCentreResponse {
   defaultBroker: BrokerOptionId;
-  autoTrade: "OFF";
-  orderSubmissionEnabled?: false;
+  autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
+  orderSubmissionEnabled?: boolean;
+  demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi;
   brokers: Array<{
     id: BrokerOptionId;
     name: string;
@@ -30,8 +31,8 @@ export interface BrokerControlCentreResponse {
     connected: boolean;
     demonstrationAvailable: true;
     automationMode: string;
-    autoTrade: "OFF";
-    orderSubmissionEnabled: false;
+    autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
+    orderSubmissionEnabled: boolean;
     liveEnabled: false;
     wizardSteps: Array<{
       step: number;
@@ -85,7 +86,9 @@ export interface CTraderDiagnosticsReport {
   marginMetadataAvailable: boolean;
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
-  autoTrade: "OFF";
+  autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
+  orderSubmissionEnabled?: boolean;
+  demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi;
   environment: "DEMO" | "LIVE";
   connection: {
     accountMasked: string | null;
@@ -129,7 +132,6 @@ export interface CTraderDiagnosticsReport {
     lotSize?: number | null;
   } | null;
   technical?: Record<string, unknown>;
-  orderSubmissionEnabled?: false;
   label?: string;
 }
 

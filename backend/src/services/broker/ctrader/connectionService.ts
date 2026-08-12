@@ -1,9 +1,14 @@
 /**
- * Orchestrates cTrader Demo read-only connection lifecycle.
- * AutoTrade OFF. No order submission.
+ * Orchestrates cTrader Demo connection lifecycle + diagnostics.
+ * Live order submission stays locked. Demo Auto follows demoAutoExecutionAuthority.
  */
 
 import { loadCTraderConfig } from "./config";
+import {
+  demoAutoSurfaceLabels,
+  resolveDemoAutoAuthorityForUser,
+  type DemoAutoAuthorityApi
+} from "./demoAutoExecutionAuthority";
 import {
   consumeOAuthStateAtomic,
   disconnectConnection,
@@ -88,9 +93,10 @@ export type DiagnosticsReport = {
   marginEligibility: "OK" | "UNKNOWN" | "INSUFFICIENT";
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
-  autoTrade: "OFF";
+  autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
   environment: "DEMO" | "LIVE";
-  orderSubmissionEnabled: false;
+  orderSubmissionEnabled: boolean;
+  demoAutoAuthority?: DemoAutoAuthorityApi;
   connection: {
     accountMasked: string | null;
     brokerName: string | null;
@@ -741,6 +747,18 @@ export async function buildDiagnostics(
     }
   }
 
+  let demoAutoAuthority: DemoAutoAuthorityApi | undefined;
+  let autoTrade: DiagnosticsReport["autoTrade"] = "OFF";
+  let orderSubmissionEnabled = false;
+  try {
+    demoAutoAuthority = await resolveDemoAutoAuthorityForUser(ownerUid);
+    const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+    autoTrade = surface.autoTrade;
+    orderSubmissionEnabled = surface.orderSubmissionEnabled;
+  } catch {
+    /* keep OFF defaults */
+  }
+
   return {
     credentialsConfigured: config.configured && Boolean(loadTokenEncryptionSecret()),
     oauthConnected,
@@ -763,9 +781,10 @@ export async function buildDiagnostics(
     marginEligibility: marginMeta ? "OK" : "UNKNOWN",
     marketStatusAvailable: quote?.marketStatus != null,
     tradingSafelyLocked: true,
-    autoTrade: "OFF",
+    autoTrade,
     environment: connection?.environment === "LIVE" ? "LIVE" : "DEMO",
-    orderSubmissionEnabled: false,
+    orderSubmissionEnabled,
+    demoAutoAuthority,
     connection: {
       accountMasked: connection?.selectedAccountMasked ?? null,
       brokerName: connection?.brokerName ?? null,

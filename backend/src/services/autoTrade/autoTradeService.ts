@@ -44,14 +44,8 @@ import {
   type TradeIntentState,
   type TradingSessionId
 } from "./types";
-import {
-  getActiveQualificationAccountId,
-  getQualificationDoc
-} from "../broker/ctrader/qualificationStore";
-import { deriveAdvancedState } from "../broker/ctrader/qualificationMachine";
-import { getUserAutoTradeSettings } from "../broker/ctrader/userAutoTradeSettings";
-import { evaluateDemoAutoExecutionAuthority } from "../broker/ctrader/demoAutoExecutionAuthority";
-import { isCTraderDemoOrderSubmissionEnabled } from "../broker/ctrader/flags";
+import { resolveDemoAutoAuthorityForUser } from "../broker/ctrader/demoAutoExecutionAuthority";
+import type { DemoAutoAuthorityApi } from "../broker/ctrader/demoAutoExecutionAuthority";
 import {
   badgeForBroker,
   DEFAULT_T212_RISK_LIMITS,
@@ -368,32 +362,17 @@ export class AutoTradeService {
       t212View.selectedInstrument = t212Instrument;
     }
 
-    // Pepperstone Demo Auto authority (qualification) may be ON while legacy
-    // risk.mode remains OFF. Surface DEMO displayStatus for API consumers without
-    // enabling the legacy IG/T212 execution path (mode stays OFF).
+    // Pepperstone Demo Auto authority is the SSOT. Legacy risk.mode OFF must not
+    // flip Demo Auto OFF when authority says ON. Never auto-enable from false intent.
     let displayStatus = displayStatusFor(
       risk.mode,
       risk.locked || risk.emergencyStopActive
     );
-    if (
-      selectedBroker === "PEPPERSTONE_CTRADER" &&
-      !(risk.locked || risk.emergencyStopActive)
-    ) {
+    let demoAutoAuthority: DemoAutoAuthorityApi | null = null;
+    if (selectedBroker === "PEPPERSTONE_CTRADER") {
       try {
-        const accountId = await getActiveQualificationAccountId(userId);
-        const qual = accountId
-          ? await getQualificationDoc(userId, accountId)
-          : null;
-        const demoSettings = await getUserAutoTradeSettings(userId, "demo");
-        const authority = evaluateDemoAutoExecutionAuthority({
-          qualificationState: qual ? deriveAdvancedState(qual) : null,
-          autoTradeEnabledIntent: demoSettings.autoTradeEnabledIntent,
-          autoTradePaused: demoSettings.autoTradePaused,
-          emergencyStopActive: demoSettings.emergencyStopActive,
-          selectedAccountIsLive: false,
-          demoOrderSubmissionEnabled: isCTraderDemoOrderSubmissionEnabled()
-        });
-        if (authority.demoExecutionEnabled) {
+        demoAutoAuthority = await resolveDemoAutoAuthorityForUser(userId);
+        if (demoAutoAuthority.enabled && !(risk.locked || risk.emergencyStopActive)) {
           displayStatus = "DEMO";
         }
       } catch {
@@ -408,7 +387,9 @@ export class AutoTradeService {
       lockReason: risk.lockReason,
       emergencyStopActive: risk.emergencyStopActive,
       liveExecutionFeatureEnabled: LIVE_EXECUTION_FEATURE_FLAG,
-      demoOrderSubmissionEnabled: DEMO_ORDER_SUBMISSION_ENABLED,
+      demoOrderSubmissionEnabled:
+        demoAutoAuthority?.demoSubmissionFlag ?? DEMO_ORDER_SUBMISSION_ENABLED,
+      demoAutoAuthority,
       brokerExecutionEnabled: false,
       t212PaperOrderSubmissionEnabled: false,
       t212LiveExecutionFeatureEnabled: false,

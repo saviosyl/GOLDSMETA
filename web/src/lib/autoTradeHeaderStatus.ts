@@ -54,11 +54,18 @@ export function deriveAutoTradeHeaderStatus(args: {
     };
   }
 
-  const qState = qualification?.state;
+  const authority =
+    status?.demoAutoAuthority ?? qualification?.demoAutoAuthority ?? null;
+  const qState = qualification?.state ?? authority?.qualificationState ?? undefined;
   const liveLocked = qualification?.liveOrders === "LOCKED" || status?.locked === true;
-  const demoAutoEnabled = Boolean(qualification?.demoAuto?.enabled);
+  const demoAutoEnabled =
+    Boolean(authority?.enabled) || Boolean(qualification?.demoAuto?.enabled);
   const demoAutoReady = Boolean(qualification?.demoAuto?.ready);
-  const emergency = Boolean(status?.emergencyStopActive) || Boolean(status?.locked && qState === "BLOCKED");
+  const emergency =
+    Boolean(authority?.emergencyStop) ||
+    Boolean(status?.emergencyStopActive) ||
+    Boolean(status?.locked && qState === "BLOCKED");
+  const startedAt = qualification?.startedAt ?? authority?.startedAt ?? null;
 
   if (qState === "BLOCKED" || emergency) {
     return {
@@ -70,7 +77,7 @@ export function deriveAutoTradeHeaderStatus(args: {
     };
   }
 
-  if (qState === "PAUSED") {
+  if (qState === "PAUSED" || authority?.paused) {
     return {
       label: "DEMO · PAUSED",
       environment: "DEMO",
@@ -80,9 +87,12 @@ export function deriveAutoTradeHeaderStatus(args: {
     };
   }
 
-  if (qState === "DEMO_AUTO_ENABLED" || demoAutoEnabled) {
+  // Demo Auto SSOT: authority ON wins over legacy risk.mode OFF.
+  if (authority?.enabled || qState === "DEMO_AUTO_ENABLED" || demoAutoEnabled) {
     const modeActive =
-      status?.mode === "IG_DEMO_AUTO" || status?.displayStatus === "DEMO";
+      authority?.enabled ||
+      status?.mode === "IG_DEMO_AUTO" ||
+      status?.displayStatus === "DEMO";
     return {
       label: modeActive ? "DEMO AUTO · ACTIVE" : "DEMO AUTO · READY",
       environment: "DEMO",
@@ -90,6 +100,23 @@ export function deriveAutoTradeHeaderStatus(args: {
       tone: "success",
       nextAction: qualification?.nextAction ?? null
     };
+  }
+
+  // Qualification never started — do not show misleading QUALIFYING.
+  if (!startedAt) {
+    const awaitingStart =
+      qState == null ||
+      qState === "READY_TO_QUALIFY" ||
+      qState === "SETUP_REQUIRED";
+    if (awaitingStart) {
+      return {
+        label: "DEMO AUTO NOT ACTIVE",
+        environment: "DEMO",
+        stateKey: "OFF",
+        tone: "warning",
+        nextAction: "Start Demo Auto qualification"
+      };
+    }
   }
 
   if (qState === "DEMO_AUTO_READY" || (demoAutoReady && !demoAutoEnabled)) {

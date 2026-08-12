@@ -155,7 +155,19 @@ export function deriveAdvancedState(
   return doc.state === "READY_TO_QUALIFY" ? "READY_TO_QUALIFY" : "SETUP_REQUIRED";
 }
 
-export function overallLabel(state: QualificationState): string {
+export function overallLabel(
+  state: QualificationState,
+  opts?: { startedAt?: string | null }
+): string {
+  // When qualification has never been started, do not show misleading "Qualifying".
+  if (
+    !opts?.startedAt &&
+    (state === "READY_TO_QUALIFY" ||
+      state === "SETUP_REQUIRED" ||
+      state === "PREVIEW_QUALIFICATION")
+  ) {
+    return "Demo Auto not active";
+  }
   switch (state) {
     case "SETUP_REQUIRED":
       return "Setup required";
@@ -199,7 +211,11 @@ export function nextActionFor(
   }
   switch (state) {
     case "READY_TO_QUALIFY":
-      return "Start qualification";
+      return "Start Demo Auto qualification";
+    case "SETUP_REQUIRED":
+      return firstBlockerLabel(blockers)
+        ? firstBlockerLabel(blockers)
+        : "Start Demo Auto qualification";
     case "PREVIEW_QUALIFICATION":
       return "Waiting for valid market setup";
     case "CONTROLLED_DEMO_QUALIFICATION":
@@ -297,7 +313,7 @@ export function toPublicView(args: {
 
   return {
     state,
-    overallLabel: overallLabel(state),
+    overallLabel: overallLabel(state, { startedAt: doc?.startedAt ?? null }),
     accountMasked: args.setup.accountMasked ?? doc?.accountMasked ?? null,
     accountIdPresent: Boolean(args.setup.accountId),
     environment: "DEMO",
