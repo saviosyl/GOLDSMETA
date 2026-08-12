@@ -16,6 +16,7 @@ import {
 import type { DemoPositionLifecycle } from "./positionLifecycleTypes";
 import {
   appendLifecycleEvent,
+  emptyProfitLockState,
   emptyTpStatuses
 } from "./positionLifecycleTypes";
 import {
@@ -34,6 +35,14 @@ import { evaluateNewsGuard } from "./newsGuard";
 import { setEmergencyStop } from "./userAutoTradeSettings";
 import { lotsToValidatedBrokerVolume } from "./volumeUnits";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
+import { brokerHardTakeProfitForAmend } from "./demoProfitLockStops";
+import {
+  runDemoProfitLockPass,
+  type ProfitLockDeps
+} from "./demoProfitLockManager";
+import { loadCompletedM5BarsForProfitLock } from "./demoProfitLockCandles";
+import { getConnection } from "./connectionStore";
+import { isDemoProfitLockLadderEnabled } from "./demoProfitLockFlag";
 
 function riskDistance(entry: number | null, sl: number | null): number | null {
   if (entry == null || sl == null) return null;
@@ -146,7 +155,10 @@ export async function createDemoPositionLifecycle(args: {
     events: [],
     appliedDedupeKeys: [],
     updatedAt: new Date().toISOString(),
-    status: "OPEN"
+    status: "OPEN",
+    ...emptyProfitLockState(),
+    brokerHardTakeProfit:
+      tps.tp3 != null && Number.isFinite(tps.tp3) ? tps.tp3 : null
   };
   const opened = appendLifecycleEvent(doc, {
     at: args.openedAt,
@@ -191,7 +203,8 @@ function buildManagementInput(
 }
 
 async function verifyAndRepairProtection(
-  doc: DemoPositionLifecycle
+  doc: DemoPositionLifecycle,
+  opts?: { profitLockActive?: boolean }
 ): Promise<DemoPositionLifecycle> {
   if (!doc.brokerPositionId || doc.initialSl == null) {
     const failed = appendLifecycleEvent(doc, {
@@ -273,17 +286,25 @@ async function verifyAndRepairProtection(
     return next;
   }
   try {
+    const repairTp = opts?.profitLockActive
+      ? brokerHardTakeProfitForAmend({
+          tp3: doc.tp3,
+          brokerHardTakeProfit: doc.brokerHardTakeProfit
+        })
+      : doc.tp1;
     const result = await amendDemoStopLoss({
       ownerUid: doc.uid,
       positionId: doc.brokerPositionId,
       stopLoss: doc.initialSl,
-      takeProfit: doc.tp1
+      takeProfit: repairTp
     });
     if (result.accepted) {
       const amended = appendLifecycleEvent(next, {
         at: new Date().toISOString(),
         kind: "SL_AMENDED",
-        reason: "Applied required Stop Loss after broker ack",
+        reason: opts?.profitLockActive
+          ? "Applied required Stop Loss after broker ack (preserve broker hard TP3)"
+          : "Applied required Stop Loss after broker ack",
         oldSl: null,
         newSl: doc.initialSl,
         brokerAck: true,
@@ -478,6 +499,24 @@ async function resolveMissingBrokerPosition(
   return markCloseReconciliationPending(doc);
 }
 
+function buildProfitLockDeps(): ProfitLockDeps {
+  return {
+    reconcilePositions: reconcileDemoBrokerPositions,
+    amendStopLoss: amendDemoStopLoss,
+    closePosition: closeDemoBrokerPosition,
+    loadSymbol: loadDemoXauUsdSymbol,
+    getQuote: async (ownerUid) =>
+      getExecutableQuoteForAutoTrade({ ownerUid }).catch(() => null),
+    getCompletedM5Bars: (ownerUid) =>
+      loadCompletedM5BarsForProfitLock({ ownerUid }),
+    isSelectedAccountLive: async (ownerUid) => {
+      const conn = await getConnection(ownerUid);
+      return Boolean(conn?.selectedAccountIsLive || conn?.environment === "LIVE");
+    },
+    save: savePositionLifecycle
+  };
+}
+
 export async function manageOpenDemoPosition(
   uid: string,
   correlationId: string
@@ -490,10 +529,22 @@ export async function manageOpenDemoPosition(
     return resolveMissingBrokerPosition(doc);
   }
 
+  const settings = await getUserAutoTradeSettings(uid, "demo");
+  const profitLockActive = isDemoProfitLockLadderEnabled(settings);
+
   // First: protection verification
   if (!doc.protectionVerified && !doc.protectionFailure) {
-    doc = await verifyAndRepairProtection(doc);
+    doc = await verifyAndRepairProtection(doc, { profitLockActive });
     if (doc.protectionFailure || doc.status !== "OPEN") return doc;
+  }
+
+  // Deterministic T1/T2/T3 profit-lock ladder (Demo only, flag default false).
+  if (profitLockActive) {
+    const result = await runDemoProfitLockPass(doc, buildProfitLockDeps());
+    if (result.doc.status === "CLOSE_RECONCILIATION_PENDING") {
+      return resolveMissingBrokerPosition(result.doc);
+    }
+    return result.doc;
   }
 
   let brokerPositions: Awaited<ReturnType<typeof reconcileDemoBrokerPositions>> =
@@ -569,7 +620,6 @@ export async function manageOpenDemoPosition(
     }
   }
 
-  const settings = await getUserAutoTradeSettings(uid, "demo");
   const news = evaluateNewsGuard({
     mode: settings.newsFilterEnabled ? settings.newsImpactMode : "OFF",
     minutesBefore: settings.newsMinutesBefore,

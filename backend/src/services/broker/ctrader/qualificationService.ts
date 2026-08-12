@@ -98,6 +98,7 @@ import { createDemoPositionLifecycle } from "./demoPositionLifecycle";
 import { strategyProvidedTakeProfits } from "./positionLifecycleTypes";
 import { newsProtectionBlocksLiveActivation } from "./liveNewsGate";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
+import { isDemoProfitLockLadderEnabled } from "./demoProfitLockFlag";
 import { logger } from "../../logging/logger";
 import {
   evaluateArmedCandidateLifecycle,
@@ -1225,7 +1226,10 @@ export async function processDecisionForQualification(args: {
   // Qualification RR gate uses the best strategy TP that exists (TP2/TP3 when
   // present). GoldMeta plans are typically TP1=1R / TP2=2R / TP3=3R — checking
   // only TP1 against minRiskReward (default 1.5) incorrectly rejected every setup.
-  // Order submission still uses strategy TP1 as the primary broker take-profit.
+  // Default order submission still uses strategy TP1 as the broker take-profit.
+  // When demoProfitLockLadderEnabled is explicitly true and TP3 exists, the
+  // broker hard TP is TP3 (position-management ladder). Missing TP3 keeps
+  // existing fail-closed / TP1 behaviour — never invent targets.
   // When confirming a retained armed candidate, RR comes from ORIGINAL geometry.
   const rrTakeProfit = tp2 ?? tp3 ?? takeProfit;
   const risk =
@@ -1830,12 +1834,23 @@ export async function processDecisionForQualification(args: {
 
     const correlationId = newId("corr");
     try {
+      const profitLockActive = isDemoProfitLockLadderEnabled(settings);
+      const brokerOrderTakeProfit =
+        profitLockActive && tp3 != null && Number.isFinite(tp3)
+          ? tp3
+          : takeProfit;
+      if (profitLockActive && (tp3 == null || !Number.isFinite(tp3))) {
+        logger.info(
+          "demoProfitLockLadderEnabled but TP3 unavailable — preserving existing broker TP1 fail-closed path",
+          { uid, signalId, decisionId }
+        );
+      }
       const result = await submitDemoMarketOrder({
         ownerUid: uid,
         side: direction as "BUY" | "SELL",
         lots: sizedLots,
         stopLoss,
-        takeProfit,
+        takeProfit: brokerOrderTakeProfit,
         entryHint: entryPx,
         comment: `GMQ ${correlationId}`,
         label: correlationId.slice(0, 30)
