@@ -589,7 +589,9 @@ function armOrReadyFromQualified(
       confirmationClassification:
         input.candleClassification ?? input.confirmationState
     });
-  // ACTIVE_DEMO A-tier always requires directional confirmation.
+  // ACTIVE_DEMO A and A+ always require confirmation via this gate.
+  // A+ may still become ready immediately through fastReady above when
+  // valid directional fast-confirm evidence exists — never via setting=false.
   const confirmationRequired = confirmationRequiredForTier({
     mode: cfg.mode,
     tier,

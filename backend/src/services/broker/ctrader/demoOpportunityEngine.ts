@@ -171,16 +171,21 @@ export function resolveExecutionSetupTier(args: {
 }
 
 /**
- * ACTIVE_DEMO A-tier must always require directional 5M confirmation,
- * regardless of the editable confirmationCandleRequired setting.
- * A+ may use the fast-directional path separately.
+ * ACTIVE_DEMO confirmation contract (editable setting cannot disable):
+ * - A: directional 5M confirmation ALWAYS mandatory
+ * - A+: confirmation ALSO mandatory — but valid
+ *   hasFastDirectionalConfirmation may satisfy it immediately via the
+ *   separate fastReady path (not by treating confirmationRequired=false)
+ * STRICT retains user-setting semantics.
  */
 export function confirmationRequiredForTier(args: {
   mode: DemoOpportunityMode;
   tier: DemoSetupTier;
   settingConfirmationRequired: boolean;
 }): boolean {
-  if (args.mode === "ACTIVE_DEMO" && args.tier === "A") return true;
+  if (args.mode === "ACTIVE_DEMO" && (args.tier === "A" || args.tier === "A_PLUS")) {
+    return true;
+  }
   return args.settingConfirmationRequired;
 }
 

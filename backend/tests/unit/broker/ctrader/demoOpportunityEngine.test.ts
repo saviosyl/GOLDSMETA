@@ -150,6 +150,20 @@ describe("demo opportunity engine", () => {
         settingConfirmationRequired: false
       })
     ).toBe(true);
+    expect(
+      confirmationRequiredForTier({
+        mode: "ACTIVE_DEMO",
+        tier: "A_PLUS",
+        settingConfirmationRequired: false
+      })
+    ).toBe(true);
+    expect(
+      confirmationRequiredForTier({
+        mode: "STRICT",
+        tier: "A_PLUS",
+        settingConfirmationRequired: false
+      })
+    ).toBe(false);
   });
 
   it("risk multipliers: A+ major 1.0, A major 0.75, Asia 0.50; BELOW=0", () => {

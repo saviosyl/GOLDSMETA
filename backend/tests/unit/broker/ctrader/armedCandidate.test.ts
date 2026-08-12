@@ -405,6 +405,34 @@ describe("armed candidate lifecycle", () => {
     expect(result.candidate?.status).toBe("ARMED");
   });
 
+  it("ACTIVE_DEMO A+ with setting=false and structural-only → ARMED not direct ready", () => {
+    const result = evaluateArmedCandidateLifecycle({
+      uid: "u1",
+      nowIso: "2026-08-10T15:00:00.000Z",
+      autoTradePermitted: true,
+      existing: null,
+      qualifiedSetup: {
+        direction: "BUY",
+        signalId: "sig-aplus-setting-false",
+        planSourceKey: "plan_aplus",
+        entry: 3400,
+        stopLoss: 3390,
+        takeProfit: 3415,
+        confidence: 94,
+        setupScore: 94,
+        originalReasons: ["TREND_AGREEMENT", "POC"]
+      },
+      confirmationRequired: false,
+      confirmationState: "OUTSIDE_ZONE",
+      candleClassification: "OUTSIDE_ZONE",
+      allowFastConfirmation: false,
+      decisionReasons: ["TREND_AGREEMENT", "POC"]
+    });
+    expect(result.action).toBe("ARM");
+    expect(result.reasonCode).not.toBe("FAST_CONFIRMATION_RECEIVED");
+    expect(result.candidate?.status).toBe("ARMED");
+  });
+
   it("contradictory opposite class + same-side reasons → no A+ fast-ready", () => {
     const result = evaluateArmedCandidateLifecycle({
       uid: "u1",

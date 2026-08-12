@@ -452,7 +452,8 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     expect(tierReject).toBe(true);
   });
 
-  it("A+ structural-only (no directional) → ARMED, ZERO submit", async () => {
+  it("CASE1 A+ 94 setting=false structural-only OUTSIDE_ZONE → ARMED, ZERO submit", async () => {
+    settingsState.confirmationCandleRequired = false;
     const store = {
       getDecision: vi.fn(async () =>
         decision({
@@ -478,6 +479,62 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     expect(saveArmedCandidate).toHaveBeenCalled();
     const saved = saveArmedCandidate.mock.calls.at(-1)?.[0] as { status?: string };
     expect(saved?.status).toBe("ARMED");
+  });
+
+  it("CASE2 A+ BUY setting=false + BEARISH_REJECTION + MTF_BULLISH → ZERO / no fast exec", async () => {
+    settingsState.confirmationCandleRequired = false;
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_aplus_opp",
+          setupScore: 94,
+          confidence: 94,
+          reasons: ["MTF_BULLISH", "TREND_AGREEMENT"],
+          marketStructure: { confirmationClassification: "BEARISH_REJECTION" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BEARISH_REJECTION",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_aplus_opp",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+  });
+
+  it("CASE3 A+ BUY setting=false + valid bullish fast evidence → ONE FAST submit", async () => {
+    settingsState.confirmationCandleRequired = false;
+    const store = {
+      getDecision: vi.fn(async () =>
+        decision({
+          decisionId: "dec_aplus_fast",
+          setupScore: 94,
+          confidence: 94,
+          reasons: ["MTF_BULLISH", "MARKET_STRUCTURE", "BREAKOUT"],
+          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+        })
+      ),
+      getActiveSessionPlan: vi.fn(async () => ({
+        lifecycleState: "ACTIVE",
+        confirmationState: "BREAKOUT_CONFIRMED",
+        direction: "BUY"
+      }))
+    };
+    await processDecisionForQualification({
+      uid: "u1",
+      decisionId: "dec_aplus_fast",
+      store: store as never
+    });
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    const journal = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
+      reasonForTrade?: string;
+    };
+    expect(journal?.reasonForTrade ?? "").toMatch(/FAST CONFIRMATION|Confirm FAST_CONFIRMATION/);
   });
 
   it("original TP2/TP3 survive later WAIT confirmation → exactly ONE submit", async () => {
