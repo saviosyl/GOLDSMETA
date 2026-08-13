@@ -198,7 +198,7 @@ function bestStump(
 export function trainStumpBoost(
   X: number[][],
   yRaw: number[],
-  opts?: { stumps?: number; lr?: number; clipAbs?: number }
+  opts?: { stumps?: number; lr?: number; clipAbs?: number; maxFitRows?: number }
 ): StumpBoostModel {
   const clip = opts?.clipAbs ?? trainClipAbs(yRaw);
   const y = yRaw.map((v) => Math.max(-clip, Math.min(clip, v)));
@@ -206,8 +206,13 @@ export function trainStumpBoost(
   const residual = y.map((yi, i) => yi - predictRidge(base, X[i]!));
   const stumps: Stump[] = [];
   const lr = opts?.lr ?? 0.35;
-  const nStumps = opts?.stumps ?? 12;
+  const nStumps = opts?.stumps ?? 8;
   const d = X[0]?.length ?? 0;
+  const maxFit = opts?.maxFitRows ?? 40_000;
+  const stride = X.length > maxFit ? Math.ceil(X.length / maxFit) : 1;
+  const fitIdx: number[] = [];
+  for (let i = 0; i < X.length; i += stride) fitIdx.push(i);
+  const Xfit = fitIdx.map((i) => X[i]!);
   // Deterministic feature subsample per stump
   for (let t = 0; t < nStumps; t++) {
     const featureSample: number[] = [];
@@ -215,7 +220,8 @@ export function trainStumpBoost(
       if ((j + t * 7) % 3 === 0) featureSample.push(j);
     }
     if (!featureSample.length && d) featureSample.push(t % d);
-    const stump = bestStump(X, residual, featureSample);
+    const resFit = fitIdx.map((i) => residual[i]!);
+    const stump = bestStump(Xfit, resFit, featureSample);
     stumps.push(stump);
     for (let i = 0; i < X.length; i++) {
       const pred =

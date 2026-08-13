@@ -354,21 +354,26 @@ export async function runGoldHunterV11Pipeline(args: {
   const trainLab = trainRows.map((r) => relabel(r.labels, theta));
   const valLab = split.validation.map((r) => relabel(r.labels, theta));
 
-  // ---- V1 multinomial diagnostics (subsample train for speed) ----
+  // ---- V1 multinomial diagnostics (subsample train + val for speed) ----
   log("v1_diag_start");
   const v1Diagnostics: HorizonRankDiagnosis[] = [];
+  const valDiagStride = Math.max(1, Math.ceil(split.validation.length / 80_000));
+  const valDiagRows = split.validation.filter((_, i) => i % valDiagStride === 0);
+  const valDiagLab = valDiagRows.map((r) => relabel(r.labels, theta));
+  const multiBundles: ReturnType<typeof trainHorizonModel>[] = [];
   for (const h of GH_HORIZONS_SEC) {
     const bundle = trainHorizonModel(
       h,
       trainRows.map((r) => r.features),
       trainLab.map((l) => l[h]!),
-      split.validation.map((r) => r.features),
-      valLab.map((l) => l[h]!)
+      valDiagRows.map((r) => r.features),
+      valDiagLab.map((l) => l[h]!)
     );
+    multiBundles.push(bundle);
     const pUp: number[] = [];
     const pDown: number[] = [];
     const pNoEdge: number[] = [];
-    for (const r of split.validation) {
+    for (const r of valDiagRows) {
       const pr = predictHorizon(bundle, r.features);
       pUp.push(pr.pUp);
       pDown.push(pr.pDown);
@@ -380,7 +385,7 @@ export async function runGoldHunterV11Pipeline(args: {
         pUp,
         pDown,
         pNoEdge,
-        labels: valLab.map((l) => l[h]!)
+        labels: valDiagLab.map((l) => l[h]!)
       })
     );
   }
@@ -532,16 +537,7 @@ export async function runGoldHunterV11Pipeline(args: {
       };
     });
 
-  // Multinomial baseline scores from V1 bundles (reuse diag training)
-  const multiBundles = GH_HORIZONS_SEC.map((h) =>
-    trainHorizonModel(
-      h,
-      trainRows.map((r) => r.features),
-      trainLab.map((l) => l[h]!),
-      split.validation.map((r) => r.features),
-      valLab.map((l) => l[h]!)
-    )
-  );
+  // Multinomial baseline scores reuse diag-trained bundles
   const buildMultiScores = (rows: typeof split.validation): V11ScoreRow[] =>
     rows.map((r) => {
       const byHorizon: V11ScoreRow["scores"]["byHorizon"] = {};
@@ -569,22 +565,33 @@ export async function runGoldHunterV11Pipeline(args: {
       };
     });
 
+  // Optimizer uses a deterministic validation subsample for search speed;
+  // final selected policy is re-scored on full validation before freeze.
+  const valOptStride = Math.max(1, Math.ceil(split.validation.length / 120_000));
+  const valOptRows = split.validation.filter((_, i) => i % valOptStride === 0);
+  const valOptX = valX.filter((_, i) => i % valOptStride === 0);
+  log("optimizer_val_subsample", {
+    full: split.validation.length,
+    used: valOptRows.length,
+    stride: valOptStride
+  });
+
   const families: ScoredFamily[] = [
     {
       family: "multinomial_v1_baseline",
-      scoreRows: buildMultiScores(split.validation)
+      scoreRows: buildMultiScores(valOptRows)
     },
     {
       family: "independent_binary",
-      scoreRows: buildBinaryScores(split.validation, valX)
+      scoreRows: buildBinaryScores(valOptRows, valOptX)
     },
     {
       family: "direct_edge_ridge",
-      scoreRows: buildEdgeScores(split.validation, valX, ridgeBundles)
+      scoreRows: buildEdgeScores(valOptRows, valOptX, ridgeBundles)
     },
     {
       family: "stump_boost_edge",
-      scoreRows: buildEdgeScores(split.validation, valX, stumpBundles)
+      scoreRows: buildEdgeScores(valOptRows, valOptX, stumpBundles)
     }
   ];
 
