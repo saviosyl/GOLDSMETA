@@ -142,7 +142,6 @@ export function buildV12MicroFeatures(args: {
   const burstRatio = tickRateMean > 0 ? tick1 / tickRateMean : 1;
 
   const pastSpreads = spreads.slice(0, -1);
-  const sortedPast = [...pastSpreads].sort((a, b) => a - b);
   const spreadMed30 = (() => {
     const s = spreads.slice(-30);
     const o = [...s].sort((a, b) => a - b);
@@ -284,10 +283,9 @@ export function featureVectorToV12Array(
   f: GhFeatureVector,
   history: GhSecondPoint[]
 ): { x: number[]; regime: V12Regime } | null {
-  const m1Return = f.m1DistClose; // proxy already in vector space
   const micro = buildV12MicroFeatures({
     history,
-    m1Return: f.m5Return ? f.m5Return : 0,
+    m1Return: f.m1DistClose,
     m5Return: f.m5Return
   });
   if (!micro) return null;

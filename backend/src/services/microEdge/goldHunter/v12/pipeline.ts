@@ -597,9 +597,31 @@ export async function runGoldHunterV12Pipeline(args: {
   if (!best) {
     if (args.persist && args.dataDir) {
       mkdirSync(args.dataDir, { recursive: true });
+      const negativeArchive = {
+        ...baseResult,
+        candidateSearch: candidates.map((c) => ({
+          family: c.family,
+          architecture: c.policy.architecture,
+          rankWindowSec: c.policy.rankWindowSec,
+          rankPercentile: c.policy.rankPercentile,
+          exit: c.policy.exit.architecture,
+          maxHoldSec: c.policy.exit.maxHoldSec,
+          eligible: c.stability.eligible,
+          rejectReason: c.stability.rejectReason,
+          score: c.stability.score,
+          medianExpectancy: c.stability.medianExpectancy,
+          foldCount: c.folds.length,
+          folds: c.folds
+        })),
+        note: "No eligible walk-forward candidate — V1.3 historical optimizer superseded by GOLD_HUNTER FAST"
+      };
       writeFileSync(
         join(args.dataDir, "phase2b3-v12-report.json"),
-        JSON.stringify(baseResult, null, 2)
+        JSON.stringify(negativeArchive, null, 2)
+      );
+      writeFileSync(
+        join(args.dataDir, "phase2b3-v12-candidates.json"),
+        JSON.stringify(negativeArchive.candidateSearch, null, 2)
       );
     }
     return baseResult;

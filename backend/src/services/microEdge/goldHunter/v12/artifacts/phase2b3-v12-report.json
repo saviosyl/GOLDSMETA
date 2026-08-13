@@ -1,0 +1,55 @@
+{
+  "researchRunId": "GH_REAL_V12_2bd2ff9d350f127b",
+  "strategyVersion": "GOLD_HUNTER_V1_2",
+  "preservedV11FrozenSha": "e5e5e55ec72b4598003c04a97eb7e1676572078089526012228f52a468e5b84d",
+  "dataFromUtc": "2026-05-14T11:49:08.492Z",
+  "dataToUtc": "2026-07-09T11:49:08.492Z",
+  "bidTicks": 0,
+  "askTicks": 0,
+  "gridStats": {
+    "totalSeconds": 4838401,
+    "validSeconds": 3188122,
+    "staleGapSeconds": 1650278,
+    "invalidSeconds": 1,
+    "coveragePct": 65.89205814069565
+  },
+  "datasetHash": "2bd2ff9d350f127b",
+  "gitSha": "48b2b8b6f99fbb6564fabaf9d4c443f4abcd02b9",
+  "foldCount": 7,
+  "foldResults": [],
+  "stability": {
+    "eligible": false,
+    "rejectReason": "NO_FOLDS",
+    "medianExpectancy": 0,
+    "positiveFolds": 0,
+    "foldCount": 0,
+    "aggregateNet": 0,
+    "aggregateExpectancy": 0,
+    "aggregatePf": 0,
+    "aggregateDd": 0,
+    "aggregateTrades": 0,
+    "tradesPerHour": 0,
+    "score": -1000000000
+  },
+  "selectedFamily": null,
+  "selectedPolicy": null,
+  "frozenConfig": null,
+  "frozenConfigSha256": null,
+  "validationAggregate": null,
+  "validationActivity": null,
+  "holdout": null,
+  "knownStressReplay": [],
+  "qualificationStatus": "NO_ROBUST_FAST_EDGE",
+  "brokerOrders": 0,
+  "evaluationBrokerRequests": 0,
+  "mutationSurface": "NONE",
+  "featureDropped": [
+    "regimeTrend",
+    "f103",
+    "f104"
+  ],
+  "liveShadowPrep": {
+    "readyForReview": false,
+    "note": "Historical research incomplete or negative \u2014 no live-shadow deploy"
+  }
+}

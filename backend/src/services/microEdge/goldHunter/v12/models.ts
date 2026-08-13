@@ -11,7 +11,6 @@ import {
   predictBinaryProb,
   predictBinarySides,
   predictEdge,
-  predictStumpBoost,
   trainBinaryLogistic,
   trainDirectEdgeHorizon,
   trainIndependentBinaryHorizon,
