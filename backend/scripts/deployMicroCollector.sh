@@ -14,14 +14,25 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "Building image ${IMAGE}"
-ln -sfn Dockerfile.micro-collector Dockerfile
+# Copy (do not symlink) so the Cloud Build tarball contains a real Dockerfile.
+cp -f Dockerfile.micro-collector Dockerfile
 cleanup() { rm -f Dockerfile; }
 trap cleanup EXIT
+# Slim context: package manifests + sources only (npm ci runs inside the image).
+CONTEXT_DIR="$(mktemp -d)"
+cleanup2() { rm -f Dockerfile; rm -rf "$CONTEXT_DIR"; }
+trap cleanup2 EXIT
+mkdir -p "$CONTEXT_DIR/scripts/microEdge"
+cp package.json package-lock.json tsconfig.json Dockerfile "$CONTEXT_DIR/"
+cp -R src "$CONTEXT_DIR/src"
+cp scripts/microEdge/runLiveCollectorWorker.ts "$CONTEXT_DIR/scripts/microEdge/"
+cp scripts/microEdge/phase2aHistoricalSmokeCli.ts "$CONTEXT_DIR/scripts/microEdge/"
 gcloud builds submit \
   --project="$PROJECT" \
   --tag="$IMAGE" \
   --timeout=1200s \
-  .
+  --gcs-log-dir="gs://${PROJECT}_cloudbuild/logs" \
+  "$CONTEXT_DIR"
 
 echo "Deploying Cloud Run service ${SERVICE}"
 # MICRO_COLLECTOR_VAULT_UID maps the existing pinned-owner secret (same UID as Micro vault).
