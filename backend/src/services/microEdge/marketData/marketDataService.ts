@@ -34,7 +34,19 @@ export function attachMicroLiveSession(session: MicroLiveMarketSession | null): 
   client.attachLiveSession(session);
 }
 
-export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<Record<string, unknown>> {
+export type BuildMarketDataStatusOptions = {
+  /**
+   * When the Micro OAuth vault is authorized for the calling user, pass true so
+   * API health does not report oauth_missing merely because the collector process
+   * has not started (env MICRO_CTRADER_ACCESS_TOKEN is intentionally unused).
+   */
+  vaultOAuthConfigured?: boolean;
+};
+
+export async function buildMarketDataStatusPayload(
+  nowMs = Date.now(),
+  opts: BuildMarketDataStatusOptions = {}
+): Promise<Record<string, unknown>> {
   const store = getMicroMarketDataStore();
   const statusStore = getMicroCollectorStatusStore();
   const persistent = await statusStore.get();
@@ -126,7 +138,9 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
         : undefined,
     credentialsConfigured: usePersistent
       ? Boolean(persistent?.oauthStatus && persistent.oauthStatus !== "AWAITING_USER_AUTHORIZATION")
-      : liveState?.credentialsConfigured ?? pub.configured,
+      : liveState?.credentialsConfigured ??
+        opts.vaultOAuthConfigured ??
+        pub.configured,
     heartbeatAt: persistent?.heartbeatAt ?? liveState?.collectorHeartbeatAt ?? null,
     lastConnectedAt: liveState?.lastConnectedAt,
     lastDisconnectedAt: liveState?.lastDisconnectedAt,

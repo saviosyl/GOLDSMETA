@@ -335,6 +335,18 @@ describe("Micro production-readiness corrective", () => {
     expect(payload.historicalObservationCounts).toMatchObject({ M1: 1 });
   });
 
+  it("vault OAuth configured without collector does not report oauth_missing", async () => {
+    resetMicroMarketDataStoreForTests();
+    const payload = await buildMarketDataStatusPayload(Date.now(), {
+      vaultOAuthConfigured: true
+    });
+    const reasons = (payload.healthReasons as string[]) ?? [];
+    expect(reasons).not.toContain("oauth_missing");
+    expect(reasons).toEqual(
+      expect.arrayContaining(["market_feed_not_connected"])
+    );
+  });
+
   it("deployed mode forbids memory storage and requires vault UID + encryption key", () => {
     const env = {
       ...process.env,
