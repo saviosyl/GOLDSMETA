@@ -6,6 +6,8 @@ import { classifySession, classifyRegime } from "../sessionRegime";
 import {
   consecutiveV11,
   decideV11Action,
+  ensembleBuyScore,
+  ensembleSellScore,
   type V11PolicyConfig,
   type V11SideScores
 } from "./policy";
@@ -64,19 +66,31 @@ export function runV11ShadowReplay(
           : row.ask - open.entryPrice;
       if (adverse >= policy.protectiveStop) exitReason = "PROTECTIVE_STOP";
 
-      // EDGE_GONE / EDGE_FLIPPED
-      const buy = row.scores.buyScore;
-      const sell = row.scores.sellScore;
-      if (open.side === "BUY" && buy < policy.minEdge * 0.25) {
+      // EDGE_GONE / EDGE_FLIPPED — use architecture ensemble, not a fixed horizon
+      const buy = ensembleBuyScore(policy.architecture, row.scores.byHorizon);
+      const sell = ensembleSellScore(policy.architecture, row.scores.byHorizon);
+      const edgeFloor =
+        policy.rankQuantile != null
+          ? Math.min(policy.buyScoreFloor, policy.sellScoreFloor) * 0.25
+          : policy.minEdge * 0.25;
+      if (open.side === "BUY" && buy < edgeFloor) {
         exitReason = exitReason ?? "EDGE_GONE";
       }
-      if (open.side === "SELL" && sell < policy.minEdge * 0.25) {
+      if (open.side === "SELL" && sell < edgeFloor) {
         exitReason = exitReason ?? "EDGE_GONE";
       }
-      if (open.side === "BUY" && sell > buy && sell >= policy.minEdge) {
+      if (
+        open.side === "BUY" &&
+        sell > buy &&
+        sell >= Math.max(policy.minEdge, policy.sellScoreFloor * 0.5)
+      ) {
         exitReason = exitReason ?? "EDGE_FLIPPED";
       }
-      if (open.side === "SELL" && buy > sell && buy >= policy.minEdge) {
+      if (
+        open.side === "SELL" &&
+        buy > sell &&
+        buy >= Math.max(policy.minEdge, policy.buyScoreFloor * 0.5)
+      ) {
         exitReason = exitReason ?? "EDGE_FLIPPED";
       }
 

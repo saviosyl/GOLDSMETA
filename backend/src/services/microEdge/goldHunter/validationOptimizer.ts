@@ -139,8 +139,25 @@ export function evaluateCandidateEligibility(
       sellCount
     };
   }
+  if (!(stats.profitFactor > 1)) {
+    return {
+      eligible: false,
+      rejectReason: "PROFIT_FACTOR_LE_1",
+      lowSampleValidation: stats.tradeCount < minPreferred,
+      score: Number.NEGATIVE_INFINITY,
+      stats,
+      buyCount,
+      sellCount
+    };
+  }
+  const netsDesc = [...trades.map((t) => t.netMove)].sort((a, b) => b - a);
+  const netExBest =
+    netsDesc.reduce((a, b) => a + b, 0) - (netsDesc[0] ?? 0);
   const maxAbs = Math.max(...trades.map((t) => Math.abs(t.netMove)), 0);
-  if (stats.tradeCount >= 3 && maxAbs > 0.55 * Math.abs(stats.netPnl)) {
+  if (
+    stats.tradeCount >= 3 &&
+    (maxAbs > 0.55 * Math.abs(stats.netPnl) || netExBest <= 0)
+  ) {
     return {
       eligible: false,
       rejectReason: "SINGLE_TRADE_DOMINATION",

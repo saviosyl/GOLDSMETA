@@ -112,6 +112,37 @@ describe("primary-horizon policy", () => {
     expect(action).toBe("BUY");
   });
 
+  it("compressed probabilities can still create ranked BUY candidates", () => {
+    const byHorizon = {
+      5: { buyScore: 0.42, sellScore: 0.4 },
+      15: { buyScore: 0.54, sellScore: 0.41 },
+      30: { buyScore: 0.44, sellScore: 0.43 },
+      60: { buyScore: 0.4, sellScore: 0.45 }
+    };
+    const action = decideV11Action({
+      scores: { buyScore: 0.54, sellScore: 0.41, byHorizon },
+      policy: {
+        architecture: "B_15s_primary",
+        primaryHorizon: 15,
+        contextHorizons: [5, 30],
+        minEdge: 0,
+        rankQuantile: 0.99,
+        buyScoreFloor: 0.52,
+        sellScoreFloor: 0.52,
+        maxSpread: 0.17,
+        consecutiveEvals: 1,
+        maxHoldSec: 10,
+        protectiveStop: 0.5,
+        opposeVetoScore: 999,
+        theta: 0.05
+      },
+      spread: 0.12,
+      regime: "TREND",
+      dataOk: true
+    });
+    expect(action).toBe("BUY");
+  });
+
   it("rejects negative / below-floor expected edge", () => {
     const action = decideV11Action({
       scores: {
@@ -176,6 +207,48 @@ describe("eligibility + freeze", () => {
     const ev = evaluateCandidateEligibility([]);
     expect(ev.eligible).toBe(false);
     expect(ev.rejectReason).toBe("ZERO_TRADES");
+  });
+
+  it("profit factor <= 1 cannot win", () => {
+    const mk = (i: number, net: number) => ({
+      tradeId: `pf${i}`,
+      date: `2026-07-${String((i % 10) + 1).padStart(2, "0")}`,
+      strategyVersion: "t",
+      modelVersion: "t",
+      entryTimestampMs: i * 1000,
+      exitTimestampMs: i * 1000 + 1000,
+      durationSeconds: 1,
+      side: "BUY" as const,
+      entryBid: 1,
+      entryAsk: 1.1,
+      entryPrice: 1.1,
+      exitBid: 1,
+      exitAsk: 1.1,
+      exitPrice: 1,
+      entrySpread: 0.1,
+      grossMove: net,
+      additionalFriction: 0,
+      netMove: net,
+      mfe: net,
+      mae: 0,
+      entryProbs: {} as never,
+      exitProbs: null,
+      entryReason: "t",
+      exitReason: "MAX_HOLD" as const,
+      session: "LONDON" as const,
+      regime: "TREND" as const,
+      result: (net > 0 ? "WIN" : "LOSS") as "WIN" | "LOSS"
+    });
+    // 40 tiny wins + 40 equal losses → net~0 / PF~1
+    const trades = [
+      ...Array.from({ length: 40 }, (_, i) => mk(i, 0.1)),
+      ...Array.from({ length: 40 }, (_, i) => mk(i + 40, -0.1))
+    ];
+    const ev = evaluateCandidateEligibility(trades);
+    expect(ev.eligible).toBe(false);
+    expect(["NEGATIVE_EXPECTANCY", "PROFIT_FACTOR_LE_1"]).toContain(
+      ev.rejectReason
+    );
   });
 
   it("single-outlier domination is rejected", () => {
