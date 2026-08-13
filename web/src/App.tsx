@@ -63,6 +63,11 @@ const AutoTradePage = lazy(() =>
 const MicroEdgePage = lazy(() =>
   import("./pages/MicroEdgePage").then((m) => ({ default: m.MicroEdgePage }))
 );
+const MicroEdgeConnectCallbackPage = lazy(() =>
+  import("./pages/MicroEdgeConnectCallbackPage").then((m) => ({
+    default: m.MicroEdgeConnectCallbackPage
+  }))
+);
 const BrokerControlCentrePage = lazy(() =>
   import("./pages/broker/BrokerControlCentrePage").then((m) => ({
     default: m.BrokerControlCentrePage
@@ -286,6 +291,14 @@ function ProtectedApp() {
             element={
               <LazyRoute label="Micro Edge">
                 <MicroEdgePage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/micro-edge/connect/callback"
+            element={
+              <LazyRoute label="Micro Edge Connect">
+                <MicroEdgeConnectCallbackPage />
               </LazyRoute>
             }
           />

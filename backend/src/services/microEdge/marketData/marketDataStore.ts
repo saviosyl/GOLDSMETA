@@ -12,8 +12,28 @@ import type {
   MicroSymbolMetadata,
   MicroTimeframe
 } from "./types";
+import type { MicroBoundaryQuote } from "./historicalTicks";
+import {
+  assertMicroStorageModeAllowed,
+  resolveMicroStorageMode,
+  type MicroStorageMode
+} from "./storageMode";
 
 export type UpsertBarResult = "created" | "skipped_identical" | "conflict";
+
+export type MicroBoundaryCheckpoint = {
+  kind: "BOUNDARY_QUOTES";
+  cursorFromMs: number;
+  cursorToMs: number;
+  status: "IDLE" | "RUNNING" | "COMPLETED" | "FAILED" | "PAUSED";
+  inserted: number;
+  skipped: number;
+  unscorable: number;
+  attempts: number;
+  lastSuccessAt: string | null;
+  lastErrorCode: string | null;
+  updatedAt: string;
+};
 
 export interface MicroMarketDataStore {
   upsertBar(bar: MicroRawBarRecord): Promise<UpsertBarResult>;
@@ -34,6 +54,12 @@ export interface MicroMarketDataStore {
   getCheckpoint(tf: MicroTimeframe): Promise<MicroBackfillCheckpoint | null>;
   saveCollectorHeartbeat(at: string, payload: Record<string, unknown>): Promise<void>;
   getCollectorHeartbeat(): Promise<{ at: string; payload: Record<string, unknown> } | null>;
+  saveBoundaryQuote(q: MicroBoundaryQuote): Promise<"created" | "skipped">;
+  getBoundaryQuote(id: string): Promise<MicroBoundaryQuote | null>;
+  countBoundaryQuotes(): Promise<number>;
+  listBoundaryQuotes(limit?: number): Promise<MicroBoundaryQuote[]>;
+  saveBoundaryCheckpoint(c: MicroBoundaryCheckpoint): Promise<void>;
+  getBoundaryCheckpoint(): Promise<MicroBoundaryCheckpoint | null>;
 }
 
 function assertMicroMarketPath(relative: string): void {
@@ -58,8 +84,10 @@ function barsEqual(a: MicroRawBarRecord, b: MicroRawBarRecord): boolean {
 export class MemoryMicroMarketDataStore implements MicroMarketDataStore {
   bars = new Map<string, MicroRawBarRecord>();
   quotes = new Map<string, MicroRawQuoteRecord>();
+  boundaryQuotes = new Map<string, MicroBoundaryQuote>();
   symbol: MicroSymbolMetadata | null = null;
   checkpoints = new Map<MicroTimeframe, MicroBackfillCheckpoint>();
+  boundaryCheckpoint: MicroBoundaryCheckpoint | null = null;
   heartbeat: { at: string; payload: Record<string, unknown> } | null = null;
   conflicts: Array<{ id: string; existing: MicroRawBarRecord; incoming: MicroRawBarRecord }> =
     [];
@@ -158,6 +186,36 @@ export class MemoryMicroMarketDataStore implements MicroMarketDataStore {
     payload: Record<string, unknown>;
   } | null> {
     return this.heartbeat;
+  }
+
+  async saveBoundaryQuote(q: MicroBoundaryQuote): Promise<"created" | "skipped"> {
+    assertMicroMarketPath(`boundaryQuotes/${q.id}`);
+    if (this.boundaryQuotes.has(q.id)) return "skipped";
+    this.boundaryQuotes.set(q.id, q);
+    return "created";
+  }
+
+  async getBoundaryQuote(id: string): Promise<MicroBoundaryQuote | null> {
+    return this.boundaryQuotes.get(id) ?? null;
+  }
+
+  async countBoundaryQuotes(): Promise<number> {
+    return this.boundaryQuotes.size;
+  }
+
+  async listBoundaryQuotes(limit = 10_000): Promise<MicroBoundaryQuote[]> {
+    return [...this.boundaryQuotes.values()]
+      .sort((a, b) => a.boundaryTimestampMs - b.boundaryTimestampMs)
+      .slice(0, limit);
+  }
+
+  async saveBoundaryCheckpoint(c: MicroBoundaryCheckpoint): Promise<void> {
+    assertMicroMarketPath("checkpoints/BOUNDARY_QUOTES");
+    this.boundaryCheckpoint = c;
+  }
+
+  async getBoundaryCheckpoint(): Promise<MicroBoundaryCheckpoint | null> {
+    return this.boundaryCheckpoint;
   }
 }
 
@@ -280,6 +338,43 @@ export class FirestoreMicroMarketDataStore implements MicroMarketDataStore {
       ? (snap.data() as { at: string; payload: Record<string, unknown> })
       : null;
   }
+
+  async saveBoundaryQuote(q: MicroBoundaryQuote): Promise<"created" | "skipped"> {
+    const ref = this.col("boundaryQuotes").doc(q.id);
+    return getFirestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (snap.exists) return "skipped";
+      tx.create(ref, q);
+      return "created";
+    });
+  }
+
+  async getBoundaryQuote(id: string): Promise<MicroBoundaryQuote | null> {
+    const snap = await this.col("boundaryQuotes").doc(id).get();
+    return snap.exists ? (snap.data() as MicroBoundaryQuote) : null;
+  }
+
+  async countBoundaryQuotes(): Promise<number> {
+    const snap = await this.col("boundaryQuotes").count().get();
+    return snap.data().count;
+  }
+
+  async listBoundaryQuotes(limit = 10_000): Promise<MicroBoundaryQuote[]> {
+    const snap = await this.col("boundaryQuotes")
+      .orderBy("boundaryTimestampMs", "asc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => d.data() as MicroBoundaryQuote);
+  }
+
+  async saveBoundaryCheckpoint(c: MicroBoundaryCheckpoint): Promise<void> {
+    await this.col("checkpoints").doc("BOUNDARY_QUOTES").set(c, { merge: true });
+  }
+
+  async getBoundaryCheckpoint(): Promise<MicroBoundaryCheckpoint | null> {
+    const snap = await this.col("checkpoints").doc("BOUNDARY_QUOTES").get();
+    return snap.exists ? (snap.data() as MicroBoundaryCheckpoint) : null;
+  }
 }
 
 export function makeRawBar(args: {
@@ -313,4 +408,35 @@ export function makeRawBar(args: {
     environment: args.environment,
     collectedAt: args.collectedAt ?? new Date().toISOString()
   };
+}
+
+let defaultMarketStore: MicroMarketDataStore | null = null;
+/** Shared memory singleton for cross-instance memory-mode tests. */
+let sharedMemoryMarketStore: MemoryMicroMarketDataStore | null = null;
+
+export function createMicroMarketDataStore(args?: {
+  mode?: MicroStorageMode;
+  sharedMemory?: MemoryMicroMarketDataStore;
+}): MicroMarketDataStore {
+  const mode = args?.mode ?? resolveMicroStorageMode();
+  assertMicroStorageModeAllowed(mode);
+  if (mode === "firestore") return new FirestoreMicroMarketDataStore();
+  if (args?.sharedMemory) return args.sharedMemory;
+  if (!sharedMemoryMarketStore) {
+    sharedMemoryMarketStore = new MemoryMicroMarketDataStore();
+  }
+  return sharedMemoryMarketStore;
+}
+
+export function getMicroMarketDataStore(): MicroMarketDataStore {
+  if (!defaultMarketStore) defaultMarketStore = createMicroMarketDataStore();
+  return defaultMarketStore;
+}
+
+export function resetMicroMarketDataStoreForTests(
+  shared?: MemoryMicroMarketDataStore
+): MemoryMicroMarketDataStore {
+  sharedMemoryMarketStore = shared ?? new MemoryMicroMarketDataStore();
+  defaultMarketStore = sharedMemoryMarketStore;
+  return sharedMemoryMarketStore;
 }

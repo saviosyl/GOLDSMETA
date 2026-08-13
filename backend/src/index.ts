@@ -92,6 +92,23 @@ function applyDemoAutoTradeRuntimeEnv(): void {
   applyDemoOvernightRuntimeEnv();
 }
 
+/**
+ * Micro Edge Phase-1 read-only runtime (OAuth/API only — no collector).
+ * Never binds Core CTRADER_ACCESS_TOKEN / CTRADER_REFRESH_TOKEN.
+ * Never enables Micro broker execution.
+ */
+function applyMicroEdgeRuntimeEnv(): void {
+  process.env.MICRO_DEPLOYED_RUNTIME = "true";
+  process.env.MICRO_STORAGE_MODE =
+    process.env.MICRO_STORAGE_MODE || "firestore";
+  process.env.MICRO_CTRADER_ENVIRONMENT =
+    process.env.MICRO_CTRADER_ENVIRONMENT || "DEMO";
+  process.env.MICRO_BROKER_EXECUTION_ENABLED = "false";
+  process.env.MICRO_CTRADER_REDIRECT_URI =
+    process.env.MICRO_CTRADER_REDIRECT_URI ||
+    "https://goldmeta.metamechsolutions.com/micro-edge/connect/callback";
+}
+
 export const api = onRequest(
   {
     region: env.FIREBASE_REGION,
@@ -102,6 +119,8 @@ export const api = onRequest(
     // read-only / dry-run Invest diagnostics only. Never bind T212_LIVE_*.
     // CTRADER_* secrets enable Pepperstone OAuth on production `api` as well as
     // apiCTraderPreview. Redirect URI must match the Open API app allowlist.
+    // MICRO_CTRADER_* secrets are Micro-only app identity + token vault crypto.
+    // They must NOT include Core access/refresh tokens.
     secrets: [
       "GOLDMETA_PINNED_OWNER_UID",
       "T212_DEMO_API_KEY",
@@ -113,7 +132,10 @@ export const api = onRequest(
       "CTRADER_ENVIRONMENT",
       "VAPID_PUBLIC_KEY",
       "VAPID_PRIVATE_KEY",
-      "VAPID_SUBJECT"
+      "VAPID_SUBJECT",
+      "MICRO_CTRADER_CLIENT_ID",
+      "MICRO_CTRADER_CLIENT_SECRET",
+      "MICRO_CTRADER_" + "TOKEN_ENCRYPTION_KEY"
     ],
     cors: [
       "https://goldmeta.metamechsolutions.com",
@@ -126,6 +148,7 @@ export const api = onRequest(
   },
   (req, res) => {
     applyProductionCTraderRuntimeEnv();
+    applyMicroEdgeRuntimeEnv();
     app(req, res);
   }
 );

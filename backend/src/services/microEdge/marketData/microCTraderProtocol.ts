@@ -30,9 +30,21 @@ export const MICRO_ALLOWED_READ_COMMANDS = new Set([
   "ProtoOASymbolByIdReq",
   "ProtoOAAssetListReq",
   "ProtoOAGetTrendbarsReq",
+  "ProtoOAGetTickDataReq",
   "ProtoOASubscribeSpotsReq",
   "ProtoOAUnsubscribeSpotsReq"
 ]);
+
+/** ProtoOAQuoteType for historical ticks. */
+export const MICRO_QUOTE_TYPE = {
+  BID: 1,
+  ASK: 2
+} as const;
+
+export type MicroHistoricalQuoteSide = keyof typeof MICRO_QUOTE_TYPE;
+
+/** Official max span for a single GetTickData request. */
+export const MICRO_GET_TICK_DATA_MAX_WINDOW_MS = 604_800_000;
 
 /**
  * Explicitly banned mutation command names.
