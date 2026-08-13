@@ -32,11 +32,17 @@ def main() -> None:
     bindings_ok, plain = mod.verify_cloudrun_bindings(session, project)
     mod.wire_secrets(session, project, plain)
     mod.probe_vault()
+    # Dedicated durable sink bucket (created/managed outside app secrets).
+    if project and not (os.environ.get("GOLD_HUNTER_FAST_GCS_BUCKET") or "").strip():
+        os.environ["GOLD_HUNTER_FAST_GCS_BUCKET"] = f"{project}-gold-hunter-fast"
     print(
         {
             "event": "gh_fast_probe_ready",
             "bindings": bindings_ok,
             "fastEnabled": os.environ.get("GOLD_HUNTER_FAST_SHADOW_ENABLED"),
+            "durableBucketConfigured": bool(
+                (os.environ.get("GOLD_HUNTER_FAST_GCS_BUCKET") or "").strip()
+            ),
         },
         flush=True,
     )

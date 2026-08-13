@@ -1,0 +1,99 @@
+{
+  "event": "gh_fast_real_probe_report",
+  "classificationHint": "PIPELINE_VERIFIED_CANDIDATE",
+  "runtimeMinutes": 1.014,
+  "environment": "DEMO",
+  "permissionScope": "SCOPE_VIEW",
+  "mutationSurface": "NONE",
+  "brokerRequests": 0,
+  "brokerOrders": 0,
+  "symbolId": "41",
+  "spotSubscribed": true,
+  "depthSubscribed": true,
+  "realSpotEventCount": 96,
+  "realDepthEventCount": 115,
+  "newQuotes": 1024,
+  "deletedQuotes": 1014,
+  "decodedBid": 511,
+  "decodedAsk": 513,
+  "invalidDepth": 0,
+  "depthBookAvailablePct": 1,
+  "bestDepthBid": 4360.48,
+  "bestDepthAsk": 4360.65,
+  "spotBid": 4360.48,
+  "spotAsk": 4360.65,
+  "depthSpread": 0.17000000000007276,
+  "spotSpread": 0.17000000000007276,
+  "depthSize": {
+    "min": 1,
+    "median": 10,
+    "p95": 50,
+    "max": 50,
+    "scaleNote": "raw/OpenAPI size \u00f7 100"
+  },
+  "depthLevels": {
+    "min": 10,
+    "median": 10,
+    "p95": 10
+  },
+  "deletedQuoteHitRate": 1,
+  "bookReconstructionExceptions": 0,
+  "crossedSnapshots": 0,
+  "bestBidAskSane": 115,
+  "eventsPerSec": 3.4687972644177023,
+  "decisions": 211,
+  "decisionsPerSec": 3.4687972644177023,
+  "setupA": 2,
+  "setupB": 0,
+  "setupC": 0,
+  "shadowEntries": 2,
+  "shadowExits": 2,
+  "completedShadowTrades": 2,
+  "openShadowTrade": false,
+  "closedDiagnostic": [
+    {
+      "side": "SELL",
+      "setup": "A_MOMENTUM_IGNITION",
+      "netMove": 0.22999999999996362,
+      "result": "WIN",
+      "exitReason": "TRAIL_HIT",
+      "durationMs": 5054
+    },
+    {
+      "side": "BUY",
+      "setup": "A_MOMENTUM_IGNITION",
+      "netMove": -0.8299999999995271,
+      "result": "LOSS",
+      "exitReason": "HARD_PROTECTION",
+      "durationMs": 6577
+    }
+  ],
+  "computeLatencyMs": {
+    "p50": 0.04095200076699257,
+    "p95": 0.1261110007762909,
+    "p99": 0.2311920002102852
+  },
+  "queueWaitMs": {
+    "p50": 0.0034560002386569977,
+    "p95": 0.004276998341083527,
+    "p99": 0.005313001573085785
+  },
+  "processingLatencyMs": {
+    "p50": 0.10795800015330315,
+    "p95": 0.21517400071024895,
+    "p99": 0.4007199965417385
+  },
+  "persistenceQueue": {
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  },
+  "durableMode": "GCS",
+  "chunksUploaded": 1,
+  "chunksWritten": 1,
+  "persistenceHealthWarning": null,
+  "eventsDropped": 0,
+  "latencyInterpretation": "eventToDecision is LOCAL COMPUTE only \u2014 not network or broker execution latency",
+  "preservedFrom": "run_1786660981124",
+  "note": "REAL DEMO SCOPE_VIEW Level-II probe \u2014 no secrets; durable GCS upload verified"
+}

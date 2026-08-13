@@ -15,7 +15,10 @@ import {
 import { createMicroTokenVault } from "../../src/services/microEdge/marketData/tokenVault";
 import { RealMicroCTraderTransport } from "../../src/services/microEdge/marketData/microCTraderTransport";
 import { resolveMicroXauUsd } from "../../src/services/microEdge/marketData/microCTraderSymbolResolver";
-import { MICRO_SPOT_PRICE_SCALE } from "../../src/services/microEdge/marketData/microCTraderProtocol";
+import {
+  MICRO_SPOT_PRICE_SCALE,
+  spotPriceFromRelative
+} from "../../src/services/microEdge/marketData/microCTraderProtocol";
 import {
   GoldHunterFastLiveBridge,
   parseProtoOADepthEventPayload,
@@ -124,16 +127,10 @@ async function main(): Promise<void> {
   transport.on("ProtoOASpotEvent", (_n, payload) => {
     try {
       spotCount += 1;
-      const bid =
-        typeof payload.bid === "number"
-          ? payload.bid / MICRO_SPOT_PRICE_SCALE
-          : null;
-      const ask =
-        typeof payload.ask === "number"
-          ? payload.ask / MICRO_SPOT_PRICE_SCALE
-          : null;
-      if (bid != null) lastSpotBid = bid;
-      if (ask != null) lastSpotAsk = ask;
+      const bid = spotPriceFromRelative(payload.bid);
+      const ask = spotPriceFromRelative(payload.ask);
+      if (bid != null && bid > 0) lastSpotBid = bid;
+      if (ask != null && ask > 0) lastSpotAsk = ask;
       bridge.ingestRawForTests("SPOT", payload);
     } catch {
       exceptions += 1;
@@ -208,8 +205,12 @@ async function main(): Promise<void> {
   const sizesSorted = [...sizes].sort((a, b) => a - b);
   const levelsSorted = [...levels].sort((a, b) => a - b);
   const health = bridge.health();
+  const eng = bridge.engine.status();
+  if (lastSpotBid == null && eng.bid != null) lastSpotBid = eng.bid;
+  if (lastSpotAsk == null && eng.ask != null) lastSpotAsk = eng.ask;
   const runtimeMin = (Date.now() - started) / 60_000;
   const q = bridge.queue.stats();
+  const persist = bridge.collector?.stats() ?? null;
 
   const report = {
     event: "gh_fast_real_probe_report",
@@ -289,8 +290,11 @@ async function main(): Promise<void> {
       p95: q.processing.p95,
       p99: q.processing.p99
     },
-    persistenceQueue: bridge.collector?.stats().persistenceQueue ?? null,
-    durableMode: bridge.collector?.stats().durableMode ?? null,
+    persistenceQueue: persist?.persistenceQueue ?? null,
+    durableMode: persist?.durableMode ?? null,
+    chunksUploaded: persist?.chunksUploaded ?? 0,
+    chunksWritten: persist?.chunksWritten ?? 0,
+    persistenceHealthWarning: persist?.healthWarning ?? null,
     eventsDropped: health.eventsDropped,
     outDir,
     latencyInterpretation:

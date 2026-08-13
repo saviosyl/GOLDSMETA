@@ -48,18 +48,28 @@ async function tryUploadGcs(
   bucket: string,
   objectPath: string,
   body: Buffer
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const mod = await import("@google-cloud/storage");
-    const storage = new mod.Storage();
+    const saRaw = (process.env.GCP_SERVICE_ACCOUNT_JSON ?? "").trim();
+    const storage = saRaw
+      ? new mod.Storage({
+          credentials: JSON.parse(saRaw) as {
+            client_email: string;
+            private_key: string;
+          },
+          projectId: (JSON.parse(saRaw) as { project_id?: string }).project_id
+        })
+      : new mod.Storage();
     await storage.bucket(bucket).file(objectPath).save(body, {
       contentType: "application/gzip",
       resumable: false,
       metadata: { cacheControl: "no-store" }
     });
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg.slice(0, 180) };
   }
 }
 
@@ -73,6 +83,7 @@ export class GhFastDurableSink {
   private writeErrors = 0;
   private uploadErrors = 0;
   private healthWarning: string | null = null;
+  private lastUploadError: string | null = null;
   private readonly chunkRows: number;
   private readonly maxQueue: number;
   private readonly runId: string;
@@ -206,12 +217,13 @@ export class GhFastDurableSink {
       };
       if (this.gcsBucket) {
         const objectPath = `${this.gcsPrefix}/${name}`;
-        const ok = await tryUploadGcs(this.gcsBucket, objectPath, gz);
-        if (ok) {
+        const up = await tryUploadGcs(this.gcsBucket, objectPath, gz);
+        if (up.ok) {
           gcsObject = `gs://${this.gcsBucket}/${objectPath}`;
           manifest.gcsObject = gcsObject;
           manifest.uploadedAt = new Date().toISOString();
           this.chunksUploaded += 1;
+          this.lastUploadError = null;
           // Upload companion manifest
           const manBody = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
           await tryUploadGcs(
@@ -221,7 +233,8 @@ export class GhFastDurableSink {
           );
         } else {
           this.uploadErrors += 1;
-          this.healthWarning = "GCS_UPLOAD_FAILED — local buffer retained";
+          this.lastUploadError = up.error;
+          this.healthWarning = `GCS_UPLOAD_FAILED — local buffer retained (${up.error})`;
         }
       }
       await appendFile(
