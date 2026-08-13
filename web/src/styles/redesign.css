@@ -7312,3 +7312,79 @@ body.gm-drawer-open {
   max-width: 100%;
   box-sizing: border-box;
 }
+
+/* —— Micro Edge (shadow research) —— */
+.gm-micro-edge-page .gm-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.gm-micro-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gm-chip-warn {
+  border-color: color-mix(in srgb, var(--warning, #c47b2d) 55%, var(--border));
+  background: color-mix(in srgb, var(--warning, #c47b2d) 14%, var(--surface-card));
+}
+
+.gm-chip-soft {
+  opacity: 0.9;
+  font-size: 0.72rem;
+}
+
+.gm-micro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px 16px;
+  font-size: 0.9rem;
+}
+
+.gm-micro-horizon-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .gm-micro-horizon-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gm-micro-horizon-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.gm-micro-horizon-card.is-strongest {
+  border-color: color-mix(in srgb, var(--navy) 45%, var(--border));
+}
+
+.gm-micro-probs,
+.gm-micro-meta {
+  display: grid;
+  gap: 4px;
+  font-size: 0.86rem;
+}
+
+.gm-micro-decision-value {
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  margin: 0 0 8px;
+}
+
+.gm-micro-disclaimer {
+  margin-top: 12px;
+  font-size: 0.82rem;
+}

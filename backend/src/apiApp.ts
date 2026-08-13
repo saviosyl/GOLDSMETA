@@ -23,6 +23,7 @@ import { buildSetupsRouter } from "./routes/setups";
 import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
 import { buildAutoTradeRouter } from "./routes/autoTrade";
+import { buildMicroEdgeRouter } from "./routes/microEdge";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
 import { buildCTraderRouter } from "./routes/ctrader";
@@ -135,6 +136,7 @@ export const createApiApp = (
   app.use(buildSettingsRouter(store));
   app.use(buildTradingRouter(tradingService));
   app.use(buildAutoTradeRouter(autoTradeService, store));
+  app.use(buildMicroEdgeRouter());
   app.use(buildCTraderRouter(store));
   app.use(buildAuthIntegrityRouter(store));
   app.use(buildSystemRouter());
