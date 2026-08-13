@@ -304,6 +304,7 @@ describe("Micro auth + persistent spot corrective", () => {
     const state = await session.getState();
     expect(state.credentialsConfigured).toBe(true);
     expect(state.spotSubscribed).toBe(true);
+    expect(state.depthSubscribed).toBe(true);
     expect(session.mutationSurface).toBe("NONE");
   });
 

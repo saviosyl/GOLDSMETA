@@ -12,6 +12,10 @@ import type {
 import type { ShadowEngineState } from "./shadowEngine";
 import { createShadowEngine } from "./shadowEngine";
 import { GOLD_HUNTER_STRATEGY_VERSION } from "./config";
+import {
+  getGoldHunterFastLiveBridge,
+  type GhFastLiveUi
+} from "./fast/liveBridge";
 
 export type GoldHunterLiveStatus = {
   huntState: ShadowEngineState["status"];
@@ -32,6 +36,8 @@ export type GoldHunterLiveStatus = {
     available: boolean;
   };
   researchModel: boolean;
+  /** Event-driven FAST live strip (shadow-only). */
+  fast: GhFastLiveUi | null;
   updatedAtMs: number;
 };
 
@@ -131,6 +137,12 @@ export class MemoryGoldHunterStore {
 
   getStatus(): GoldHunterLiveStatus {
     const art = this.artifact;
+    let fast: GhFastLiveUi | null = null;
+    try {
+      fast = getGoldHunterFastLiveBridge().uiStatus();
+    } catch {
+      fast = null;
+    }
     return {
       huntState: this.shadow.status,
       forecast: this.forecast,
@@ -150,6 +162,7 @@ export class MemoryGoldHunterStore {
         art.qualificationStatus === "TRAINED_RESEARCH" ||
         art.qualificationStatus === "NOT_TRAINED" ||
         art.qualificationStatus === "INSUFFICIENT_DATA",
+      fast,
       updatedAtMs: Date.now()
     };
   }

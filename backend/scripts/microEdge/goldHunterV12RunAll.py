@@ -49,7 +49,9 @@ def main() -> None:
         )
     )
     meta = data_dir / "bars-meta.json"
-    if meta.is_file() and os.environ.get("GOLD_HUNTER_REUSE_LOCAL") == "1":
+    ticks = data_dir / "ticks-bidask.ndjson.gz"
+    if meta.is_file() and ticks.is_file():
+        os.environ["GOLD_HUNTER_REUSE_LOCAL"] = "1"
         print({"event": "gh_v12_skip_fetch_reuse"}, flush=True)
     else:
         os.environ["GOLD_HUNTER_REUSE_LOCAL"] = "0"

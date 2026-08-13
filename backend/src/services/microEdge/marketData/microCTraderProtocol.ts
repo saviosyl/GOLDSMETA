@@ -33,6 +33,9 @@ export const MICRO_ALLOWED_READ_COMMANDS = new Set([
   "ProtoOAGetTickDataReq",
   "ProtoOASubscribeSpotsReq",
   "ProtoOAUnsubscribeSpotsReq",
+  /** VIEW: Level-II depth quotes — read-only; never implies trade scope. */
+  "ProtoOASubscribeDepthQuotesReq",
+  "ProtoOAUnsubscribeDepthQuotesReq",
   /** VIEW: balance / deposit currency — never exposes internal account id to clients. */
   "ProtoOATraderReq"
 ]);

@@ -64,6 +64,35 @@ type DailySummary = {
   sellPnl: number;
 };
 
+type GhFastLive = {
+  state?: string;
+  bid?: number | null;
+  ask?: number | null;
+  spread?: number | null;
+  eventRate1s?: number | null;
+  bidDepth?: number | null;
+  askDepth?: number | null;
+  depthImbalance?: number | null;
+  velocity?: number | null;
+  acceleration?: number | null;
+  setup?: string | null;
+  setupQuality?: number | null;
+  action?: string | null;
+  decisionLatencyMs?: number | null;
+  open?: {
+    side?: string;
+    entry?: number;
+    executableExit?: number;
+    openPnl?: number;
+    mfe?: number;
+    mae?: number;
+    durationMs?: number;
+    profitLock?: boolean;
+    trail?: number | null;
+    exitPressure?: string | null;
+  } | null;
+};
+
 type GhStatus = {
   huntState?: string;
   forecast?: GhForecast | null;
@@ -94,8 +123,34 @@ type GhStatus = {
     marketFeedStatus?: string;
     quoteAgeMs?: number | null;
   };
+  /** GOLD_HUNTER FAST event-driven live strip (shadow-only). */
+  fast?: GhFastLive | null;
   banner?: string;
 };
+
+function formatGhState(state: string): string {
+  const map: Record<string, string> = {
+    HUNTING: "HUNTING",
+    PRESSURE_DETECTED: "PRESSURE",
+    PRESSURE_UP: "PRESSURE UP",
+    PRESSURE_DOWN: "PRESSURE DOWN",
+    ARMED: "ARMED",
+    STRIKE_BUY: "STRIKE BUY",
+    STRIKE_SELL: "STRIKE SELL",
+    RUNNER: "RUNNER",
+    HARVEST: "HARVEST",
+    ABORT: "ABORT",
+    REHUNT: "REHUNT",
+    DATA_STALE: "DATA STALE",
+    SPREAD_BLOCKED: "SPREAD BLOCKED",
+    TARGET_FOUND: "TARGET FOUND",
+    SHADOW_BUY: "SHADOW BUY",
+    SHADOW_SELL: "SHADOW SELL",
+    COOLDOWN: "COOLDOWN",
+    MARKET_CLOSED: "MARKET CLOSED"
+  };
+  return map[state] ?? state.replace(/_/g, " ");
+}
 
 function pct(x: number | undefined | null): string {
   if (x == null || Number.isNaN(x)) return "—";
@@ -199,7 +254,8 @@ export function MicroEdgePage() {
   }, []);
 
   const forecast = gh?.forecast ?? null;
-  const huntState = gh?.huntState ?? "HUNTING";
+  const fast = gh?.fast ?? null;
+  const huntState = fast?.state ?? gh?.huntState ?? "HUNTING";
   const balance = gh?.pepperstoneDemoBalance ?? gh?.accountBalance;
   const researchModel = Boolean(gh?.researchModel);
 
@@ -259,8 +315,8 @@ export function MicroEdgePage() {
           <h1 className="gm-gh-brand" data-testid="gold-hunter-brand">
             GOLD_HUNTER
           </h1>
-          <p className="gm-gh-subtitle">Continuous XAUUSD Opportunity Engine</p>
-          <p className="gm-gh-powered">Powered by Micro Edge Research</p>
+          <p className="gm-gh-subtitle">FAST Event-Driven XAUUSD Scalper</p>
+          <p className="gm-gh-powered">Powered by Micro Edge Research · Shadow Only</p>
         </div>
         <div className="gm-micro-badges">
           <span className="gm-chip gm-chip-warn" data-testid="gh-shadow-badge">
@@ -268,6 +324,9 @@ export function MicroEdgePage() {
           </span>
           <span className="gm-chip" data-testid="gh-no-orders-badge">
             NO BROKER ORDERS
+          </span>
+          <span className="gm-chip gm-chip-soft" data-testid="gh-fast-badge">
+            GOLD_HUNTER FAST
           </span>
           {researchModel ? (
             <span className="gm-chip gm-chip-soft" data-testid="gh-research-model">
@@ -345,19 +404,55 @@ export function MicroEdgePage() {
       <section className="gm-gh-live" data-testid="gh-live-strip">
         <div className="gm-gh-live-top">
           <span className="gm-gh-state" data-testid="gh-hunt-state">
-            {huntState.replace(/_/g, " ")}
+            {formatGhState(huntState)}
           </span>
           <span className="gm-gh-action" data-testid="gh-action">
-            {forecast?.action ?? "WAIT"}
+            {fast?.action ?? forecast?.action ?? "WAIT"}
           </span>
         </div>
-        <div className="gm-gh-quote">
-          <span>Bid {num(forecast?.bid, 2)}</span>
-          <span>Ask {num(forecast?.ask, 2)}</span>
-          <span>Mid {num(forecast?.mid, 2)}</span>
-          <span>Spread {num(forecast?.spread, 3)}</span>
-          <span>Age {forecast?.quoteAgeMs != null ? `${Math.round(forecast.quoteAgeMs)}ms` : "—"}</span>
+        <div className="gm-gh-quote" data-testid="gh-fast-metrics">
+          <span>Bid {num(fast?.bid ?? forecast?.bid, 2)}</span>
+          <span>Ask {num(fast?.ask ?? forecast?.ask, 2)}</span>
+          <span>Spread {num(fast?.spread ?? forecast?.spread, 3)}</span>
+          <span>Evt/s {num(fast?.eventRate1s, 0)}</span>
+          <span>BidDepth {num(fast?.bidDepth, 0)}</span>
+          <span>AskDepth {num(fast?.askDepth, 0)}</span>
+          <span>Imb {num(fast?.depthImbalance, 3)}</span>
+          <span>Vel {num(fast?.velocity, 5)}</span>
+          <span>Accel {num(fast?.acceleration, 5)}</span>
+          <span>Setup {fast?.setup ?? "—"}</span>
+          <span>Qual {num(fast?.setupQuality, 2)}</span>
+          <span>
+            Lat{" "}
+            {fast?.decisionLatencyMs != null
+              ? `${Math.round(fast.decisionLatencyMs)}ms`
+              : "—"}
+          </span>
+          <span>
+            Age{" "}
+            {forecast?.quoteAgeMs != null
+              ? `${Math.round(forecast.quoteAgeMs)}ms`
+              : "—"}
+          </span>
         </div>
+        {fast?.open ? (
+          <div className="gm-gh-fast-open" data-testid="gh-fast-open">
+            <span>{fast.open.side}</span>
+            <span>Entry {num(fast.open.entry, 2)}</span>
+            <span>Exit {num(fast.open.executableExit, 2)}</span>
+            <span>P/L {signed(fast.open.openPnl)}</span>
+            <span>MFE {num(fast.open.mfe, 3)}</span>
+            <span>MAE {num(fast.open.mae, 3)}</span>
+            <span>
+              Dur{" "}
+              {fast.open.durationMs != null
+                ? `${(fast.open.durationMs / 1000).toFixed(1)}s`
+                : "—"}
+            </span>
+            <span>Lock {fast.open.profitLock ? "ON" : "off"}</span>
+            <span>Trail {num(fast.open.trail, 3)}</span>
+          </div>
+        ) : null}
         <div className="gm-gh-horizons" data-testid="gh-horizons">
           {[5, 15, 30, 60].map((h) => {
             const hz = forecast?.horizons?.[String(h)] ?? forecast?.horizons?.[h as never];

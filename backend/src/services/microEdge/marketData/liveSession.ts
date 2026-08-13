@@ -48,6 +48,10 @@ export type MicroLiveSessionState = {
   spotSubscribed: boolean;
   spotSubscribedAt: string | null;
   lastSpotEventAt: string | null;
+  /** VIEW-only Level-II depth subscription (read-only; not required for LIVE_CONNECTED). */
+  depthSubscribed: boolean;
+  depthSubscribedAt: string | null;
+  lastDepthEventAt: string | null;
   lastQuote: MicroQuote | null;
   lastQuoteTs: string | null;
   quoteAgeMs: number | null;
@@ -62,6 +66,7 @@ export type MicroLiveSessionState = {
   collectorHeartbeatAt: string | null;
   m1CompletedEvents: number;
   subscribeSpotsCallCount: number;
+  subscribeDepthCallCount: number;
 };
 
 export type LiveSessionOptions = {
@@ -79,9 +84,13 @@ export class MicroLiveMarketSession {
   private lastQuote: MicroQuote | null = null;
   private spotBook: MicroSpotBook | null = null;
   private spotHandler: MicroTransportEventHandler | null = null;
+  private depthHandler: MicroTransportEventHandler | null = null;
   private spotSubscribed = false;
   private spotSubscribedAt: string | null = null;
   private lastSpotEventAt: string | null = null;
+  private depthSubscribed = false;
+  private depthSubscribedAt: string | null = null;
+  private lastDepthEventAt: string | null = null;
   private seenM1 = new Set<number>();
   private lastConnectedAt: string | null = null;
   private lastDisconnectedAt: string | null = null;
@@ -92,6 +101,12 @@ export class MicroLiveMarketSession {
   private lastQuotePersistMs = 0;
   private readonly quoteSampleIntervalMs: number;
   private readonly nowMs: () => number;
+  private depthEventListeners = new Set<
+    (payload: Record<string, unknown>) => void
+  >();
+  private spotEventListeners = new Set<
+    (payload: Record<string, unknown>) => void
+  >();
 
   constructor(private readonly opts: LiveSessionOptions) {
     this.quoteSampleIntervalMs =
@@ -174,16 +189,24 @@ export class MicroLiveMarketSession {
     });
 
     await this.subscribeSpotsOnce();
+    await this.subscribeDepthOnce();
   }
 
   private clearSpotState(): void {
     if (this.transport && this.spotHandler) {
       this.transport.off("ProtoOASpotEvent", this.spotHandler);
     }
+    if (this.transport && this.depthHandler) {
+      this.transport.off("ProtoOADepthEvent", this.depthHandler);
+    }
     this.spotHandler = null;
+    this.depthHandler = null;
     this.spotSubscribed = false;
     this.spotSubscribedAt = null;
     this.lastSpotEventAt = null;
+    this.depthSubscribed = false;
+    this.depthSubscribedAt = null;
+    this.lastDepthEventAt = null;
     this.spotBook = null;
     this.lastQuote = null;
   }
@@ -199,6 +222,22 @@ export class MicroLiveMarketSession {
     await this.transport.subscribeSpots(this.symbol.symbolId);
     this.spotSubscribed = true;
     this.spotSubscribedAt = new Date(this.nowMs()).toISOString();
+  }
+
+  private async subscribeDepthOnce(): Promise<void> {
+    if (!this.transport || !this.symbol) return;
+    if (this.depthSubscribed) return;
+    this.depthHandler = (_name, payload) => {
+      this.onDepthEvent(payload);
+    };
+    this.transport.on("ProtoOADepthEvent", this.depthHandler);
+    await this.transport.subscribeDepthQuotes(this.symbol.symbolId);
+    this.depthSubscribed = true;
+    this.depthSubscribedAt = new Date(this.nowMs()).toISOString();
+    microLog("MICRO_DEPTH_SUBSCRIBED", {
+      symbolId: this.symbol.symbolId,
+      mutationSurface: "NONE"
+    });
   }
 
   private onSpotEvent(payload: Record<string, unknown>): void {
@@ -219,6 +258,24 @@ export class MicroLiveMarketSession {
       symbolId: this.symbol.symbolId,
       lastSpotEventAt: this.lastSpotEventAt
     });
+    for (const listener of this.spotEventListeners) listener(payload);
+  }
+
+  private onDepthEvent(payload: Record<string, unknown>): void {
+    this.lastDepthEventAt = new Date(this.nowMs()).toISOString();
+    this.heartbeatAt = new Date(this.nowMs()).toISOString();
+    for (const listener of this.depthEventListeners) listener(payload);
+  }
+
+  /** Read-only listeners for GOLD_HUNTER FAST event-driven engine (no broker mutation). */
+  onSpotForFast(listener: (payload: Record<string, unknown>) => void): () => void {
+    this.spotEventListeners.add(listener);
+    return () => this.spotEventListeners.delete(listener);
+  }
+
+  onDepthForFast(listener: (payload: Record<string, unknown>) => void): () => void {
+    this.depthEventListeners.add(listener);
+    return () => this.depthEventListeners.delete(listener);
   }
 
   private async maybePersistQuoteSample(quote: MicroQuote): Promise<void> {
@@ -458,6 +515,9 @@ export class MicroLiveMarketSession {
       spotSubscribed: this.spotSubscribed,
       spotSubscribedAt: this.spotSubscribedAt,
       lastSpotEventAt: this.lastSpotEventAt,
+      depthSubscribed: this.depthSubscribed,
+      depthSubscribedAt: this.depthSubscribedAt,
+      lastDepthEventAt: this.lastDepthEventAt,
       lastQuote: this.lastQuote,
       lastQuoteTs: this.lastQuote?.brokerTimestamp ?? null,
       quoteAgeMs,
@@ -471,7 +531,8 @@ export class MicroLiveMarketSession {
       healthReasons: unique,
       collectorHeartbeatAt: this.heartbeatAt,
       m1CompletedEvents: this.m1CompletedEvents,
-      subscribeSpotsCallCount: this.transport?.getSubscribeSpotsCallCount() ?? 0
+      subscribeSpotsCallCount: this.transport?.getSubscribeSpotsCallCount() ?? 0,
+      subscribeDepthCallCount: this.transport?.getSubscribeDepthCallCount() ?? 0
     };
   }
 }

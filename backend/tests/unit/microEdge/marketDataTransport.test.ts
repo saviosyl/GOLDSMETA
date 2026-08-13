@@ -223,6 +223,7 @@ describe("Micro market-data protocol + transport", () => {
     await new Promise((r) => setImmediate(r));
     expect(session.mutationSurface).toBe("NONE");
     expect(fake.getSubscribeSpotsCallCount()).toBe(1);
+    expect(fake.getSubscribeDepthCallCount()).toBe(1);
     const q = await session.refreshQuote();
     expect(q.bid).toBeCloseTo(2400, 4);
     await store.upsertBar(
@@ -243,10 +244,13 @@ describe("Micro market-data protocol + transport", () => {
     const state = await session.getState();
     expect(state.symbol?.symbolName).toBe("XAUUSD");
     expect(state.liveConnected).toBe(true);
+    expect(state.depthSubscribed).toBe(true);
+    expect(state.subscribeDepthCallCount).toBe(1);
     expect(await store.countQuotes()).toBe(1);
     // polling must not create more subscriptions
     await session.getState();
     expect(fake.getSubscribeSpotsCallCount()).toBe(1);
+    expect(fake.getSubscribeDepthCallCount()).toBe(1);
   });
 
   it("quote sample interval collapses duplicates in same bucket", async () => {
