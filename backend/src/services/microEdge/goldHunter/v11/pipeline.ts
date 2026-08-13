@@ -484,9 +484,12 @@ export async function runGoldHunterV11Pipeline(args: {
       const byHorizon: V11ScoreRow["scores"]["byHorizon"] = {};
       for (const b of binaryBundles) {
         const p = predictBinarySides(b, X[i]!);
+        // Rank on raw tradeable probability; calibrated nets remain available
+        // via pBuy/pSell metadata for reporting. Absolute calibrated floors
+        // alone compressed V1 into ZERO_TRADES.
         byHorizon[b.horizonSec] = {
-          buyScore: p.calibratedBuyNet,
-          sellScore: p.calibratedSellNet,
+          buyScore: p.pBuy,
+          sellScore: p.pSell,
           pBuy: p.pBuy,
           pSell: p.pSell
         };
@@ -544,8 +547,8 @@ export async function runGoldHunterV11Pipeline(args: {
       for (const b of multiBundles) {
         const p = predictHorizon(b, r.features);
         byHorizon[b.horizonSec] = {
-          buyScore: p.expectedNetBuy,
-          sellScore: p.expectedNetSell,
+          buyScore: p.pUp,
+          sellScore: p.pDown,
           pBuy: p.pUp,
           pSell: p.pDown
         };
@@ -643,7 +646,8 @@ export async function runGoldHunterV11Pipeline(args: {
           sellScore: sellScores[i]!
         }
       }));
-      for (const minEdge of [0.02, 0.05, 0.1]) {
+      // Absolute edge floors
+      for (const minEdge of [0, 0.02, 0.05, 0.1]) {
         consider(fam.family, rows, {
           architecture: arch.id,
           primaryHorizon: arch.primary,
@@ -656,7 +660,27 @@ export async function runGoldHunterV11Pipeline(args: {
           consecutiveEvals: 1,
           maxHoldSec: 30,
           protectiveStop: stopCandidates[2] ?? 0.6,
-          opposeVetoScore: Math.max(0.15, minEdge * 2),
+          opposeVetoScore: 0.9, // loose veto in stage1
+          theta
+        }, familyBest);
+      }
+      // Rank / quantile entry — critical when absolute probs are compressed
+      for (const rq of [0.9, 0.95, 0.98, 0.99] as const) {
+        const buyFloor = quantile(buyScores, rq);
+        const sellFloor = quantile(sellScores, rq);
+        consider(fam.family, rows, {
+          architecture: arch.id,
+          primaryHorizon: arch.primary,
+          contextHorizons: arch.context,
+          minEdge: 0,
+          rankQuantile: rq,
+          buyScoreFloor: buyFloor,
+          sellScoreFloor: sellFloor,
+          maxSpread: spreadP90,
+          consecutiveEvals: 1,
+          maxHoldSec: 30,
+          protectiveStop: stopCandidates[2] ?? 0.6,
+          opposeVetoScore: 0.9,
           theta
         }, familyBest);
       }
