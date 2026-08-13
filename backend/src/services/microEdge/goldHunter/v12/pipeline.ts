@@ -430,8 +430,11 @@ export async function runGoldHunterV12Pipeline(args: {
               if (family === "direct_edge_ridge" && (pct === 0.9 || mh === 30)) {
                 continue;
               }
-              if (family === "shallow_boost_edge" && ex === "FIXED_MAX_HOLD") {
-                continue;
+              // Shallow boost is costly on 56d — evaluate one representative cell.
+              if (family === "shallow_boost_edge") {
+                if (!(rw === 900 && pct === 0.95 && ex === "HYBRID_TRAIL_FADE" && mh === 60)) {
+                  continue;
+                }
               }
               if (family === "independent_binary" && rw === 1800 && pct === 0.9) {
                 continue;
@@ -499,6 +502,17 @@ export async function runGoldHunterV12Pipeline(args: {
 
               if (!foldResults.length) continue;
               const stability = scoreStability(foldResults);
+              log("candidate_done", {
+                family,
+                arch: arch.id,
+                rw,
+                pct,
+                ex,
+                mh,
+                eligible: stability.eligible,
+                score: Number(stability.score.toFixed(4)),
+                medianExp: Number(stability.medianExpectancy.toFixed(5))
+              });
               const policy: V12PolicyConfig = {
                 family,
                 architecture: arch.id,
