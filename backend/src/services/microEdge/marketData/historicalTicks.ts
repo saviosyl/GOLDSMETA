@@ -232,7 +232,8 @@ export async function fetchHistoricalTicksWindow(args: {
     } catch (e) {
       throw e;
     }
-    all.push(...decoded);
+    // Avoid push(...hugeArray) — large tick pages blow the call stack.
+    for (const t of decoded) all.push(t);
 
     if (!res.hasMore) break;
     if (!decoded.length) break;

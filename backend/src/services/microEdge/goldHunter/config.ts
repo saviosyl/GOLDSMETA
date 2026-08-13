@@ -3,7 +3,11 @@
  * Fail-closed: never enables broker execution.
  */
 
-/** Real-data optimizer revision — never mix with SYNTHETIC_SMOKE metrics. */
+/**
+ * V1 real-data identity (preserved baseline).
+ * V1.1 lives under ./v11 and must NOT overwrite V1 artifacts
+ * (GH_REAL_7D_20260813_d1b08b82 / GOLD_HUNTER_V1_REAL_7D).
+ */
 export const GOLD_HUNTER_STRATEGY_VERSION = "GOLD_HUNTER_V1_0_R1" as const;
 export const GOLD_HUNTER_FEATURE_SCHEMA_VERSION = "gh-features-v1.0.1" as const;
 export const GOLD_HUNTER_LABEL_VERSION = "gh-label-bidask-v1.0.0" as const;

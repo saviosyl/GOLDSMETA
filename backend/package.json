@@ -25,6 +25,8 @@
     "micro-edge:phase2a-smoke": "tsx scripts/microEdge/phase2aHistoricalSmokeCli.ts",
     "gold-hunter:research": "tsx scripts/microEdge/goldHunterResearchCli.ts",
     "gold-hunter:real7d": "tsx scripts/microEdge/goldHunterReal7dCli.ts",
+    "gold-hunter:v11-fetch": "tsx scripts/microEdge/goldHunterV11FetchCli.ts",
+    "gold-hunter:v11-research": "tsx scripts/microEdge/goldHunterV11ResearchCli.ts",
 
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",

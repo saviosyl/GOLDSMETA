@@ -24,3 +24,8 @@ export * from "./validationOptimizer";
 export * from "./protectiveStop";
 export * from "./frozenConfig";
 export * from "./researchReports";
+export * from "./v11/versions";
+export * from "./v11/policy";
+export * from "./v11/models";
+export * from "./v11/frozenConfig";
+export { runGoldHunterV11Pipeline } from "./v11/pipeline";
