@@ -4,6 +4,8 @@
 FROM node:20-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
+# postinstall applies cTrader proto extensions — must exist before npm ci.
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
 RUN npm ci --omit=dev
 COPY tsconfig.json ./
 COPY src ./src
