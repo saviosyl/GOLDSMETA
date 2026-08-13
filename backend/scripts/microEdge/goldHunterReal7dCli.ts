@@ -122,14 +122,23 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
 
   const reuseLocal = process.env.GOLD_HUNTER_REUSE_LOCAL === "1";
+  const fetchOnly = process.env.GOLD_HUNTER_FETCH_ONLY === "1";
   const ticksPath = join(outDir, "ticks-bidask.ndjson.gz");
   const barsM1Path = join(outDir, "bars-m1.ndjson.gz");
   const barsM5Path = join(outDir, "bars-m5.ndjson.gz");
   const barsM15Path = join(outDir, "bars-m15.ndjson.gz");
   const metaPath = join(outDir, "bars-meta.json");
 
-  let fromMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  let toMs = Date.now();
+  // Optional pinned window (used by V1.1 Aug6–13 post-audit fetch).
+  const pinnedFrom = (process.env.GOLD_HUNTER_FROM_UTC ?? "").trim();
+  const pinnedTo = (process.env.GOLD_HUNTER_TO_UTC ?? "").trim();
+  let fromMs = pinnedFrom
+    ? Date.parse(pinnedFrom)
+    : Date.now() - 7 * 24 * 60 * 60 * 1000;
+  let toMs = pinnedTo ? Date.parse(pinnedTo) : Date.now();
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+    throw new Error("GOLD_HUNTER_WINDOW_INVALID");
+  }
   const minIntervalMs = Number(
     process.env.MICRO_HISTORICAL_MIN_INTERVAL_MS ?? GH_HISTORICAL_MIN_INTERVAL_MS
   );
@@ -147,7 +156,9 @@ async function main(): Promise<void> {
           : `****${creds.accountId.slice(-4)}`,
       mutationSurface: "NONE",
       minIntervalMs,
-      reuseLocal
+      reuseLocal,
+      fetchOnly,
+      pinnedWindow: Boolean(pinnedFrom && pinnedTo)
     })
   );
 
@@ -162,7 +173,19 @@ async function main(): Promise<void> {
     existsSync(barsM1Path) &&
     existsSync(barsM5Path) &&
     existsSync(barsM15Path) &&
-    existsSync(metaPath);
+    existsSync(metaPath) &&
+    (() => {
+      if (!pinnedFrom || !pinnedTo) return true;
+      try {
+        const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
+          fromUtc: string;
+          toUtc: string;
+        };
+        return meta.fromUtc === pinnedFrom && meta.toUtc === pinnedTo;
+      } catch {
+        return false;
+      }
+    })();
 
   if (canReuse) {
     const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
@@ -379,6 +402,22 @@ async function main(): Promise<void> {
     throw Object.assign(new Error("REAL_HISTORY_EMPTY"), {
       code: "REAL_HISTORY_EMPTY"
     });
+  }
+
+  if (fetchOnly) {
+    console.log(
+      JSON.stringify({
+        event: "gh_real7d_fetch_only_done",
+        ticks: ticks.length,
+        M1: m1Bars.length,
+        M5: m5Bars.length,
+        M15: m15Bars.length,
+        fromUtc: new Date(fromMs).toISOString(),
+        toUtc: new Date(toMs).toISOString(),
+        outDir
+      })
+    );
+    return;
   }
 
   console.log(JSON.stringify({ event: "gh_real7d_pipeline_start" }));

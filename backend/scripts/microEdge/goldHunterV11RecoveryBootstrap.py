@@ -308,35 +308,79 @@ def run_cmd(label: str, cmd: list[str]) -> None:
 
 
 def main() -> None:
+    probe_only = "--probe-only" in sys.argv
     sa = load_sa()
     project = _project_id() or str(sa.get("project_id") or "").strip()
     if not project:
         die("GCLOUD_NOT_AUTHENTICATED", detail="no project id from env/SA")
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(BACKEND.parent),
+        text=True,
+    ).strip()
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(BACKEND.parent),
+        text=True,
+    ).strip()
     print(
         json.dumps(
             {
                 "event": "gh_v11_recovery_bootstrap",
                 "project": project,
                 "identity": sa.get("client_email"),
-                "branch_hint": subprocess.check_output(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=str(BACKEND.parent),
-                    text=True,
-                ).strip(),
-                "head": subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=str(BACKEND.parent),
-                    text=True,
-                ).strip(),
+                "branch_hint": branch,
+                "head": head,
             }
         )
     )
     session = session_for(sa)
     bindings_ok, plain_env = verify_cloudrun_bindings(session, project)
-    wire_secrets(session, project, plain_env)
+    secret_summary = wire_secrets(session, project, plain_env)
     # Import check for crypto helper export — if missing, probe uses length check only
     probe_vault()
-    print(json.dumps({"event": "gh_v11_next_stage", "status": "RUNNING", "cloudrun_bindings_verified": bindings_ok}))
+    print(
+        json.dumps(
+            {
+                "event": "gh_v11_status_update",
+                "branch": branch,
+                "head": head,
+                "gcloud_project": project,
+                "cloudrun_secret_bindings_verified": "YES" if bindings_ok else "NO",
+                "encryption_key_available": (
+                    "YES" if secret_summary["encryption_key_available"] else "NO"
+                ),
+                "vault_uid_available": (
+                    "YES" if secret_summary["vault_uid_available"] else "NO"
+                ),
+                "client_credentials_available": (
+                    "YES"
+                    if secret_summary["client_id_available"]
+                    and secret_summary["client_secret_available"]
+                    else "NO"
+                ),
+                "vault_decrypted": "YES",
+                "scope": "accounts",
+                "environment": "DEMO",
+                "account_broker": "Pepperstone DEMO (hint unverified; accountTail present)",
+                "next_stage": "BLOCKED" if not bindings_ok else "RUNNING",
+            }
+        )
+    )
+    if probe_only:
+        print(json.dumps({"event": "gh_v11_probe_only_done"}))
+        return
+    print(
+        json.dumps(
+            {
+                "event": "gh_v11_next_stage",
+                "status": "RUNNING",
+                "cloudrun_bindings_verified": bindings_ok,
+            }
+        )
+    )
+    # Reuse local 28d artifacts when present (Cursor reset recovery).
+    os.environ.setdefault("GOLD_HUNTER_REUSE_LOCAL", "1")
     run_cmd(
         "fetch",
         ["npx", "--yes", "tsx", "scripts/microEdge/goldHunterV11FetchCli.ts"],
@@ -365,6 +409,17 @@ def main() -> None:
                 "ticks_bytes": ticks.stat().st_size,
             }
         )
+    )
+    # Aug6–13 known-period post-audit dataset (fetch only; no V1 retune).
+    os.environ["GOLD_HUNTER_FROM_UTC"] = "2026-08-06T11:49:08.494Z"
+    os.environ["GOLD_HUNTER_TO_UTC"] = "2026-08-13T11:49:08.494Z"
+    os.environ["GOLD_HUNTER_FETCH_ONLY"] = "1"
+    os.environ["GOLD_HUNTER_DATA_DIR"] = str(
+        BACKEND / ".gold-hunter-data" / "real-7d"
+    )
+    run_cmd(
+        "audit_fetch",
+        ["npx", "--yes", "tsx", "scripts/microEdge/goldHunterReal7dCli.ts"],
     )
     run_cmd(
         "research",
