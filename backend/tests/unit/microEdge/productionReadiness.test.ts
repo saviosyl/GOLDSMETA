@@ -440,15 +440,26 @@ describe("Micro production-readiness corrective", () => {
     }
   });
 
-  it("requested-window invariant rejects out-of-range ticks", () => {
+  it("requested-window filter drops out-of-range edge ticks (no throw)", () => {
     const newest = 1_700_000_000_000;
-    expect(() =>
-      decodeHistoricalTickData(
-        [{ timestamp: newest + 5_000, tick: 210_000_000 }],
-        { side: "BID", fromMs: newest, toMs: newest + 1000 }
-      )
-    ).toThrow(/HISTORICAL_TICK_TIMESTAMP_INVALID/);
+    const decoded = decodeHistoricalTickData(
+      [
+        { timestamp: newest + 5_000, tick: 210_000_000 }, // after toMs → drop
+        { timestamp: 1000, tick: 209_999_000 } // inside window after decode
+      ],
+      { side: "BID", fromMs: newest, toMs: newest + 1000 }
+    );
+    // newest+5000 dropped; newest+5000-1000=newest+4000 still > toMs → also outside
+    // With newest-first: first absolute=newest+5000 (out), second=newest+4000 (out)
+    expect(decoded).toEqual([]);
+    const inside = decodeHistoricalTickData(
+      [{ timestamp: newest + 500, tick: 210_000_000 }],
+      { side: "BID", fromMs: newest, toMs: newest + 1000 }
+    );
+    expect(inside).toHaveLength(1);
+    expect(inside[0]!.brokerTimestampMs).toBe(newest + 500);
   });
+
 
   it("persistent heartbeat staleness marks not connected", () => {
     const now = Date.now();

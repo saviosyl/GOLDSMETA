@@ -119,25 +119,16 @@ export function decodeHistoricalTickData(
     previousAbsolute = absoluteTs;
   }
 
-  if (opts.fromMs != null || opts.toMs != null) {
-    for (const t of wireOrder) {
-      if (opts.fromMs != null && t.brokerTimestampMs < opts.fromMs) {
-        throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
-          code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
-          reason: "before_fromMs"
-        });
-      }
-      if (opts.toMs != null && t.brokerTimestampMs > opts.toMs) {
-        throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
-          code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
-          reason: "after_toMs"
-        });
-      }
-    }
-  }
+  // Broker pages may include edge ticks just outside the requested window.
+  // Drop those; keep fail-closed for structural corruption above.
+  const inWindow = wireOrder.filter((t) => {
+    if (opts.fromMs != null && t.brokerTimestampMs < opts.fromMs) return false;
+    if (opts.toMs != null && t.brokerTimestampMs > opts.toMs) return false;
+    return true;
+  });
 
   // Normalize ascending for boundary samplers.
-  return [...wireOrder].sort((a, b) => a.brokerTimestampMs - b.brokerTimestampMs);
+  return [...inWindow].sort((a, b) => a.brokerTimestampMs - b.brokerTimestampMs);
 }
 
 export function assertTickWindowWithinLimit(
