@@ -98,11 +98,11 @@ export class MemoryGoldHunterStore {
     this.daily.set(`${summary.strategyVersion}:${summary.date}`, summary);
   }
 
-  getDaily(date: string, strategyVersion = GOLD_HUNTER_STRATEGY_VERSION): GhDailySummary | null {
+  getDaily(date: string, strategyVersion: string = GOLD_HUNTER_STRATEGY_VERSION): GhDailySummary | null {
     return this.daily.get(`${strategyVersion}:${date}`) ?? null;
   }
 
-  listDailyDates(strategyVersion = GOLD_HUNTER_STRATEGY_VERSION): string[] {
+  listDailyDates(strategyVersion: string = GOLD_HUNTER_STRATEGY_VERSION): string[] {
     return [...this.daily.keys()]
       .filter((k) => k.startsWith(`${strategyVersion}:`))
       .map((k) => k.split(":")[1]!)
