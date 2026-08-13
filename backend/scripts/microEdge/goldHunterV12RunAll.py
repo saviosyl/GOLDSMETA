@@ -21,11 +21,6 @@ def main() -> None:
     os.environ.setdefault("NODE_OPTIONS", "--max-old-space-size=14000")
     os.environ.setdefault("GOLD_HUNTER_V12_TRAIN_STRIDE", "8")
     os.environ.setdefault("GOLD_HUNTER_V12_SAMPLE_STRIDE", "3")
-    # First fetch must not reuse empty dir.
-    os.environ["GOLD_HUNTER_REUSE_LOCAL"] = os.environ.get(
-        "GOLD_HUNTER_V12_FORCE_REUSE", "0"
-    )
-
     boot_path = BACKEND / "scripts/microEdge/goldHunterV11RecoveryBootstrap.py"
     spec = importlib.util.spec_from_file_location("ghboot", boot_path)
     mod = importlib.util.module_from_spec(spec)
