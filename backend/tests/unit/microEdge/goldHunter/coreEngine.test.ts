@@ -162,7 +162,7 @@ describe("as-of features — no look-ahead", () => {
       ticks.push({ timestampMs: t, side: "BID" as const, price: 2400 + i * 0.01 });
       ticks.push({ timestampMs: t + 1, side: "ASK" as const, price: 2400.15 + i * 0.01 });
     }
-    const seconds = buildAsOfSecondRows(ticks);
+    const { rows: seconds } = buildAsOfSecondRows(ticks);
     const hist = seconds
       .filter((s) => s.scorable)
       .slice(0, 65)
@@ -186,7 +186,7 @@ describe("as-of features — no look-ahead", () => {
       { timestampMs: 1000, side: "BID" as const, price: 2400 },
       { timestampMs: 1001, side: "ASK" as const, price: 2400.2 }
     ];
-    const seconds = buildAsOfSecondRows(ticks, {
+    const { rows: seconds } = buildAsOfSecondRows(ticks, {
       fromMs: 1000,
       toMs: 5000,
       sideFreshnessMs: 2000
@@ -339,7 +339,7 @@ describe("daily P/L + version separation", () => {
     const base: GhShadowTrade = {
       tradeId: "t1",
       date: "2026-08-13",
-      strategyVersion: "GOLD_HUNTER_V1_0",
+      strategyVersion: GOLD_HUNTER_STRATEGY_VERSION,
       modelVersion: "m",
       entryTimestampMs: Date.parse("2026-08-13T10:00:00Z"),
       exitTimestampMs: Date.parse("2026-08-13T10:00:21Z"),
@@ -373,7 +373,7 @@ describe("daily P/L + version separation", () => {
     const v11 = { ...base, tradeId: "t2", strategyVersion: "GOLD_HUNTER_V1_1", netMove: -1, result: "LOSS" as const };
     const s = buildDailySummary([base, v11], {
       date: "2026-08-13",
-      strategyVersion: "GOLD_HUNTER_V1_0"
+      strategyVersion: GOLD_HUNTER_STRATEGY_VERSION
     });
     expect(s.tradeCount).toBe(1);
     expect(s.netPnl).toBeCloseTo(0.04, 8);
@@ -408,7 +408,7 @@ describe("labeled research rows", () => {
         price: 2400.15 + Math.sin(i / 10) * 0.2
       });
     }
-    const seconds = buildAsOfSecondRows(ticks);
+    const { rows: seconds } = buildAsOfSecondRows(ticks);
     const { rows } = buildLabeledResearchRows({ seconds, theta: 0.05 });
     expect(rows.length).toBeGreaterThan(10);
     const sample = rows[10]!;

@@ -319,10 +319,9 @@ export function evaluateShadow(
 
   const action = decideAction(forecast, input.thresholds);
   const recent = [...state.recentActions, action].slice(-8);
-  const agreed = consecutiveAgreement(
-    recent,
-    GH_DEFAULT_ENTRY.consecutiveEvals
-  );
+  const confirm =
+    input.thresholds?.consecutiveEvals ?? GH_DEFAULT_ENTRY.consecutiveEvals;
+  const agreed = consecutiveAgreement(recent, confirm);
 
   let status: GhHuntState = "HUNTING";
   if (action === "BUY" || action === "SELL") status = "TARGET_FOUND";

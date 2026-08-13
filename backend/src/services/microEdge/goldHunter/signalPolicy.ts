@@ -16,6 +16,7 @@ export type EntryThresholds = {
   pDown15: number;
   pDown30: number;
   p60OpposeMax: number;
+  consecutiveEvals: number;
 };
 
 export const DEFAULT_ENTRY_THRESHOLDS: EntryThresholds = {
@@ -25,7 +26,8 @@ export const DEFAULT_ENTRY_THRESHOLDS: EntryThresholds = {
   pDown5: GH_DEFAULT_ENTRY.pDown5,
   pDown15: GH_DEFAULT_ENTRY.pDown15,
   pDown30: GH_DEFAULT_ENTRY.pDown30,
-  p60OpposeMax: GH_DEFAULT_ENTRY.p60OpposeMax
+  p60OpposeMax: GH_DEFAULT_ENTRY.p60OpposeMax,
+  consecutiveEvals: GH_DEFAULT_ENTRY.consecutiveEvals
 };
 
 export function isBuyCandidate(
@@ -43,8 +45,10 @@ export function isBuyCandidate(
   if (h15.pUp < thresholds.pUp15) return false;
   if (h30.pUp < thresholds.pUp30) return false;
   if (h60.pDown > thresholds.p60OpposeMax) return false;
+  // Reject if calibrated expected net edge for buy is negative across short horizons.
   const edges = [h5.expectedNetBuy, h15.expectedNetBuy, h30.expectedNetBuy];
   if (!edges.some((e) => e > 0)) return false;
+  if (edges.every((e) => e <= 0)) return false;
   return true;
 }
 

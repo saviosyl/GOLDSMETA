@@ -34,7 +34,9 @@ async function main(): Promise<void> {
   const result = await runGoldHunterResearchPipeline({
     ticks,
     persist: true,
-    dataDir: join(process.cwd(), ".gold-hunter-data")
+    dataDir: join(process.cwd(), ".gold-hunter-data"),
+    dataSource: path ? "PEPPERSTONE_DEMO_REAL" : "SYNTHETIC_SMOKE",
+    requireRealData: Boolean(path)
   });
 
   const store = getGoldHunterStore();

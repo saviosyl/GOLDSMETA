@@ -16,17 +16,35 @@ describe("GOLD_HUNTER research pipeline", () => {
       seconds: 60 * 45,
       seed: 99
     });
-    const result = await runGoldHunterResearchPipeline({ ticks, persist: false });
+    const result = await runGoldHunterResearchPipeline({
+      ticks,
+      persist: false,
+      dataSource: "SYNTHETIC_SMOKE"
+    });
     expect(result.bidTicks).toBeGreaterThan(0);
     expect(result.askTicks).toBeGreaterThan(0);
+    expect(result.dataSource).toBe("SYNTHETIC_SMOKE");
     expect(result.trainCount + result.validationCount + result.holdoutCount).toBeGreaterThan(0);
     expect(result.artifact.brokerExecutionEnabled ?? false).toBeFalsy();
-    expect(["HOLDOUT_POSITIVE", "HOLDOUT_NEGATIVE", "INSUFFICIENT_DATA", "TRAINED_RESEARCH"]).toContain(
-      result.artifact.qualificationStatus
-    );
+    expect([
+      "HOLDOUT_POSITIVE",
+      "HOLDOUT_NEGATIVE",
+      "INSUFFICIENT_DATA",
+      "TRAINED_RESEARCH",
+      "INSUFFICIENT_EDGE"
+    ]).toContain(result.qualificationStatus);
     // baselines present
     expect(result.baselines.always_wait.tradeCount).toBe(0);
-  }, 120_000);
+    // Real mode must not silently accept synthetic
+    await expect(
+      runGoldHunterResearchPipeline({
+        ticks,
+        persist: false,
+        dataSource: "SYNTHETIC_SMOKE",
+        requireRealData: true
+      })
+    ).rejects.toMatchObject({ code: "REAL_DATA_REQUIRED" });
+  }, 180_000);
 
   it("fails closed on high invalid price rate", () => {
     const bid = emptyTickAudit("BID");

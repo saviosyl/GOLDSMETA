@@ -3,11 +3,13 @@
  * Fail-closed: never enables broker execution.
  */
 
-export const GOLD_HUNTER_STRATEGY_VERSION = "GOLD_HUNTER_V1_0" as const;
-export const GOLD_HUNTER_FEATURE_SCHEMA_VERSION = "gh-features-v1.0.0" as const;
+/** Real-data optimizer revision — never mix with SYNTHETIC_SMOKE metrics. */
+export const GOLD_HUNTER_STRATEGY_VERSION = "GOLD_HUNTER_V1_0_R1" as const;
+export const GOLD_HUNTER_FEATURE_SCHEMA_VERSION = "gh-features-v1.0.1" as const;
 export const GOLD_HUNTER_LABEL_VERSION = "gh-label-bidask-v1.0.0" as const;
 export const GOLD_HUNTER_MODEL_FAMILY = "multinomial-logistic-v1" as const;
-export const GOLD_HUNTER_MODEL_VERSION = "gh-model-v1.0.0" as const;
+export const GOLD_HUNTER_MODEL_VERSION = "gh-model-v1.0.1-real7d" as const;
+export const GOLD_HUNTER_SYNTHETIC_SMOKE_LABEL = "SYNTHETIC_SMOKE" as const;
 
 export const GH_HORIZONS_SEC = [5, 15, 30, 60] as const;
 export type GhHorizonSec = (typeof GH_HORIZONS_SEC)[number];
@@ -42,6 +44,17 @@ export const GH_THETA_CANDIDATES = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5] as const;
 
 /** Candidate max-hold seconds for validation selection. */
 export const GH_MAX_HOLD_CANDIDATES = [15, 30, 45, 60] as const;
+
+/** Validation entry-policy search grids (mirrored for SELL). */
+export const GH_P5_CANDIDATES = [0.6, 0.65, 0.7, 0.75, 0.8] as const;
+export const GH_P15_CANDIDATES = [0.6, 0.65, 0.68, 0.7, 0.75] as const;
+export const GH_P30_CANDIDATES = [0.55, 0.6, 0.63, 0.65, 0.7] as const;
+export const GH_P60_VETO_CANDIDATES = [0.5, 0.55, 0.6] as const;
+export const GH_CONFIRMATION_CANDIDATES = [1, 2, 3] as const;
+
+/** Preferred / minimum validation participation. */
+export const GH_MIN_VALIDATION_TRADES_PREFERRED = 50;
+export const GH_MIN_VALIDATION_TRADES_FLOOR = 30;
 
 /** Default research friction on top of Bid/Ask (already includes spread). */
 export const GH_DEFAULT_ENTRY_SLIPPAGE = 0.02;

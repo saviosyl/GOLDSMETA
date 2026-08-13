@@ -1,6 +1,10 @@
 /**
  * Build as-of 1-second XAUUSD states without look-ahead.
  * Latest BID/ASK may carry forward only while each side remains within freshness.
+ *
+ * Microstructure for historical training is reconstructed from ticks in the
+ * prior second (spotEventCount≈tick count, bid/ask updates, up/down mid ticks).
+ * Live-only ProtoOASpotEvent metadata fields are NOT fabricated.
  */
 import { GH_HORIZONS_SEC, GH_SIDE_FRESHNESS_MS } from "./config";
 import { buildFeaturesAtSecond, type GhBarCtx, type GhSecondPoint } from "./features";
@@ -25,6 +29,14 @@ export type AsOfSecondRow = {
   micro: GhMicrostructureInterval;
 };
 
+export type AsOfGridStats = {
+  totalSeconds: number;
+  validSeconds: number;
+  staleGapSeconds: number;
+  invalidSeconds: number;
+  coveragePct: number;
+};
+
 /**
  * Construct second-level states from ticks. No future Bid/Ask for second t.
  */
@@ -36,9 +48,20 @@ export function buildAsOfSecondRows(
     sideFreshnessMs?: number;
     microBySecond?: Map<number, GhMicrostructureInterval>;
   }
-): AsOfSecondRow[] {
+): { rows: AsOfSecondRow[]; stats: AsOfGridStats } {
   const sideMax = opts?.sideFreshnessMs ?? GH_SIDE_FRESHNESS_MS;
-  if (!ticksSorted.length) return [];
+  if (!ticksSorted.length) {
+    return {
+      rows: [],
+      stats: {
+        totalSeconds: 0,
+        validSeconds: 0,
+        staleGapSeconds: 0,
+        invalidSeconds: 0,
+        coveragePct: 0
+      }
+    };
+  }
 
   const start =
     opts?.fromMs ??
@@ -52,14 +75,45 @@ export function buildAsOfSecondRows(
   let bidUpdatedMs: number | null = null;
   let askUpdatedMs: number | null = null;
   let tickIdx = 0;
+  let lastBid: number | null = null;
+  let lastAsk: number | null = null;
+  let lastMid: number | null = null;
 
   const rows: AsOfSecondRow[] = [];
+  let staleGapSeconds = 0;
+  let invalidSeconds = 0;
+  let validSeconds = 0;
+
   for (let t = start; t <= end; t += 1000) {
+    const micro = emptyMicrostructure();
+    const intervalStart = t - 999;
     while (
       tickIdx < ticksSorted.length &&
       ticksSorted[tickIdx]!.timestampMs <= t
     ) {
       const tk = ticksSorted[tickIdx]!;
+      if (tk.timestampMs >= intervalStart) {
+        // Historical-reconstructible microstructure (not live spot metadata).
+        micro.spotEventCount += 1;
+        if (tk.side === "BID" && tk.price > 0) {
+          micro.bidUpdateCount += 1;
+          if (lastBid != null && tk.price !== lastBid) micro.bidPriceChangeCount += 1;
+          lastBid = tk.price;
+        }
+        if (tk.side === "ASK" && tk.price > 0) {
+          micro.askUpdateCount += 1;
+          if (lastAsk != null && tk.price !== lastAsk) micro.askPriceChangeCount += 1;
+          lastAsk = tk.price;
+        }
+        if (lastBid != null && lastAsk != null) {
+          const mid = (lastBid + lastAsk) / 2;
+          if (lastMid != null) {
+            if (mid > lastMid) micro.upTickCount += 1;
+            else if (mid < lastMid) micro.downTickCount += 1;
+          }
+          lastMid = mid;
+        }
+      }
       if (tk.price > 0 && Number.isFinite(tk.price)) {
         if (tk.side === "BID") {
           bid = tk.price;
@@ -77,9 +131,11 @@ export function buildAsOfSecondRows(
     if (bid == null || ask == null) {
       scorable = false;
       reason = "missing_side";
+      invalidSeconds += 1;
     } else if (ask < bid) {
       scorable = false;
       reason = "ask_lt_bid";
+      invalidSeconds += 1;
     } else if (
       bidUpdatedMs == null ||
       askUpdatedMs == null ||
@@ -88,6 +144,9 @@ export function buildAsOfSecondRows(
     ) {
       scorable = false;
       reason = "DATA_GAP";
+      staleGapSeconds += 1;
+    } else {
+      validSeconds += 1;
     }
 
     rows.push({
@@ -98,10 +157,21 @@ export function buildAsOfSecondRows(
       askUpdatedMs: askUpdatedMs ?? 0,
       scorable,
       reason,
-      micro: opts?.microBySecond?.get(t) ?? emptyMicrostructure()
+      micro: opts?.microBySecond?.get(t) ?? micro
     });
   }
-  return rows;
+
+  const totalSeconds = rows.length;
+  return {
+    rows,
+    stats: {
+      totalSeconds,
+      validSeconds,
+      staleGapSeconds,
+      invalidSeconds,
+      coveragePct: totalSeconds ? (100 * validSeconds) / totalSeconds : 0
+    }
+  };
 }
 
 export type LabeledResearchRow = {

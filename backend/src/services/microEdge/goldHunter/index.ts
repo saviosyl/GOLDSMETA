@@ -20,3 +20,7 @@ export * from "./baselines";
 export * from "./goldHunterStore";
 export * from "./researchPipeline";
 export * from "./accountTraderRead";
+export * from "./validationOptimizer";
+export * from "./protectiveStop";
+export * from "./frozenConfig";
+export * from "./researchReports";
