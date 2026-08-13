@@ -29,3 +29,5 @@ export * from "./v11/policy";
 export * from "./v11/models";
 export * from "./v11/frozenConfig";
 export { runGoldHunterV11Pipeline } from "./v11/pipeline";
+export * from "./v12/versions";
+export { runGoldHunterV12Pipeline } from "./v12/pipeline";
