@@ -168,7 +168,15 @@ export function evaluateCandidateEligibility(
       sellCount
     };
   }
-  if (stats.maxDrawdown > Math.max(1.5, 3 * Math.abs(stats.expectancy) * Math.sqrt(stats.tradeCount))) {
+  // Drawdown is a secondary ranking signal. Hard-reject only when DD
+  // overwhelms realized net P/L (gold USD/oz paths routinely see $5–15
+  // interim DD even with positive expectancy).
+  const ddCap = Math.max(
+    15,
+    5 * Math.abs(stats.netPnl),
+    8 * Math.abs(stats.expectancy) * Math.sqrt(stats.tradeCount)
+  );
+  if (stats.maxDrawdown > ddCap) {
     return {
       eligible: false,
       rejectReason: "PATHOLOGICAL_DRAWDOWN",
