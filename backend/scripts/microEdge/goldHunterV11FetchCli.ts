@@ -202,8 +202,8 @@ async function main(): Promise<void> {
         const asks = ndjsonGzToRows<{ timestampMs: number; price: number }>(
           readFileSync(askPath)
         );
-        allBids.push(...bids);
-        allAsks.push(...asks);
+        for (const b of bids) allBids.push(b);
+        for (const a of asks) allAsks.push(a);
         console.log(
           JSON.stringify({
             event: "gh_v11_window_resume",
@@ -238,7 +238,7 @@ async function main(): Promise<void> {
         timestampMs: t.brokerTimestampMs,
         price: t.price
       }));
-      allBids.push(...bids);
+      for (const b of bids) allBids.push(b);
       await writeFile(bidPath, rowsToNdjson(bids));
 
       console.log(
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
         timestampMs: t.brokerTimestampMs,
         price: t.price
       }));
-      allAsks.push(...asks);
+      for (const a of asks) allAsks.push(a);
       await writeFile(askPath, rowsToNdjson(asks));
 
       ckManifest.windows = [
