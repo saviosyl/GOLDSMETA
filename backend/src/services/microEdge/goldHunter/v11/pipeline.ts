@@ -73,6 +73,9 @@ import {
   type V11ModelFamily,
   type V11QualificationStatus
 } from "./versions";
+import { computeActivityMetrics, type ActivityReport } from "./activityMetrics";
+import { writeRecoveryState } from "./recoveryState";
+import { execSync } from "node:child_process";
 
 function relabel(
   labels: Record<number, GhLabel>,
@@ -202,32 +205,50 @@ export type V11PipelineResult = {
   selectedPolicy: V11PolicyConfig | null;
   frozenConfig: FrozenV11Config | null;
   frozenConfigSha256: string | null;
-  validation: ReturnType<typeof computePolicyBacktest> & {
+  validation: (ReturnType<typeof computePolicyBacktest> & {
     tradesPerDay: number;
+    tradesPerHour: number;
     daily: ReturnType<typeof dailyStats>;
-  } | null;
+    activity: ActivityReport;
+  }) | null;
+  /** After Cursor reset: not claimed as sacred never-seen holdout. */
+  holdoutLabel: "RECOVERY_DIAGNOSTIC_HOLDOUT" | "SACRED_HOLDOUT" | null;
   holdout: (ReturnType<typeof computePolicyBacktest> & {
     tradesPerDay: number;
+    tradesPerHour: number;
     daily: ReturnType<typeof dailyStats>;
     robustness: ReturnType<typeof robustness>;
     maxLosingStreak: number;
     holdBuckets: ReturnType<typeof holdTimeBuckets>;
     session: ReturnType<typeof slicePerformance>;
     regime: ReturnType<typeof slicePerformance>;
+    activity: ActivityReport;
   }) | null;
   postHoldoutAudit: {
+    label: "POST_HOLDOUT_FORWARD_AUDIT_KNOWN_PERIOD";
     trades: number;
+    tradesPerHour: number;
     netPnl: number;
     profitFactor: number;
     expectancy: number;
     maxDrawdown: number;
+    activity: ActivityReport;
   } | null;
   qualificationStatus: V11QualificationStatus;
   featureDropped: string[];
   brokerOrders: 0;
   evaluationBrokerRequests: 0;
   mutationSurface: "NONE";
+  gitSha: string;
 };
+
+function resolveGitSha(): string {
+  try {
+    return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return process.env.GIT_SHA ?? "unknown";
+  }
+}
 
 function log(event: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ event: `gh_v11_${event}`, ...extra }));
@@ -251,14 +272,32 @@ export async function runGoldHunterV11Pipeline(args: {
   dataDir?: string;
   /** Subsample step for heavy training (1 = full). */
   trainStride?: number;
+  /** Recovery runs label holdout as diagnostic, not sacred. */
+  recoveryMode?: boolean;
+  gitSha?: string;
 }): Promise<V11PipelineResult> {
   const trainStride = Math.max(1, args.trainStride ?? 2);
+  const gitSha = args.gitSha ?? resolveGitSha();
+  const recoveryMode = args.recoveryMode !== false; // default true after reset
   const datasetHashSeed = hashDataset(
     args.ticks.map((t) => ({ timestampMs: t.timestampMs }))
   );
   const researchRunId = `GH_REAL_28D_PRE_V1_${datasetHashSeed.slice(0, 8)}`;
+  const checkpoint = (
+    stage: Parameters<typeof writeRecoveryState>[1]["stage"],
+    extra?: Partial<Parameters<typeof writeRecoveryState>[1]>
+  ): void => {
+    if (!args.persist || !args.dataDir) return;
+    writeRecoveryState(args.dataDir, {
+      runId: researchRunId,
+      gitSha,
+      stage,
+      datasetHash: datasetHashSeed,
+      ...extra
+    });
+  };
 
-  log("asof_start", { ticks: args.ticks.length });
+  log("asof_start", { ticks: args.ticks.length, gitSha, recoveryMode });
   const { rows: seconds, stats: gridStats } = buildAsOfSecondRows(args.ticks, {
     fromMs: args.dataFromMs,
     toMs: args.dataToMs
@@ -309,7 +348,9 @@ export async function runGoldHunterV11Pipeline(args: {
     opportunity,
     brokerOrders: 0 as const,
     evaluationBrokerRequests: 0 as const,
-    mutationSurface: "NONE" as const
+    mutationSurface: "NONE" as const,
+    gitSha,
+    holdoutLabel: null as V11PipelineResult["holdoutLabel"]
   };
 
   if (split.train.length < 500 || split.validation.length < 100) {
@@ -322,6 +363,7 @@ export async function runGoldHunterV11Pipeline(args: {
       frozenConfig: null,
       frozenConfigSha256: null,
       validation: null,
+      holdoutLabel: null,
       holdout: null,
       postHoldoutAudit: null,
       qualificationStatus: "BLOCKED",
@@ -445,6 +487,7 @@ export async function runGoldHunterV11Pipeline(args: {
       })
     );
   }
+  checkpoint("TRAIN_COMPLETE", { datasetHash });
 
   const stopCandidates = deriveProtectiveStopCandidatesFromTrain({
     trainMids: split.train.map((r) => (r.quote.bid + r.quote.ask) / 2),
@@ -895,6 +938,16 @@ export async function runGoldHunterV11Pipeline(args: {
     nearMissReject: opt.nearMiss?.eligibility.rejectReason ?? null,
     rejectHistogram
   });
+  checkpoint("OPTIMIZER_DONE", {
+    candidateCount: candidatePool.length,
+    selectedCandidate: opt.best
+      ? {
+          family: opt.best.family,
+          architecture: opt.best.policy.architecture,
+          rankQuantile: opt.best.policy.rankQuantile
+        }
+      : null
+  });
 
   const scoreFamilyRows = (
     family: V11ModelFamily,
@@ -994,6 +1047,9 @@ export async function runGoldHunterV11Pipeline(args: {
     policies: confirmPolicies.length,
     subsampleBest: opt.best?.policy.architecture ?? null
   });
+  checkpoint("FULL_VALIDATION_STARTED", {
+    candidateCount: candidatePool.length
+  });
 
   let fullValBest: Cand | null = null;
   let fullValBestFailed: Cand | null = null;
@@ -1043,6 +1099,18 @@ export async function runGoldHunterV11Pipeline(args: {
       failReject: fail?.eligibility.rejectReason ?? null,
       failExp: fail?.eligibility.stats.expectancy ?? null
     });
+    checkpoint("FULL_VALIDATION_COMPLETE", {
+      candidateCount: seenConfirm.size,
+      selectedCandidate: null,
+      notes: "no eligible full-validation winner"
+    });
+    const failActivity = fail
+      ? computeActivityMetrics({
+          trades: fail.trades,
+          windowFromMs: split.validationRange!.fromMs,
+          windowToMs: split.validationRange!.toMs
+        })
+      : null;
     const result: V11PipelineResult = {
       ...baseResult,
       v1Diagnostics,
@@ -1054,10 +1122,13 @@ export async function runGoldHunterV11Pipeline(args: {
       validation: fail
         ? {
             ...fail.eligibility.stats,
-            tradesPerDay: dailyStats(fail.trades).tradesPerDay,
-            daily: dailyStats(fail.trades)
+            tradesPerDay: failActivity!.overallTradesPerDay,
+            tradesPerHour: failActivity!.overallTradesPerHour,
+            daily: dailyStats(fail.trades),
+            activity: failActivity!
           }
         : null,
+      holdoutLabel: null,
       holdout: null,
       postHoldoutAudit: null,
       qualificationStatus: "NO_PREDICTIVE_EDGE",
@@ -1083,8 +1154,16 @@ export async function runGoldHunterV11Pipeline(args: {
     rq: best.policy.rankQuantile,
     maxHold: best.policy.maxHoldSec
   });
+  checkpoint("FULL_VALIDATION_COMPLETE", {
+    candidateCount: seenConfirm.size,
+    selectedCandidate: {
+      family: best.family,
+      architecture: best.policy.architecture,
+      rankQuantile: best.policy.rankQuantile
+    }
+  });
 
-  // ---- FREEZE ----
+  // ---- FREEZE (immediately after full-val winner; before any holdout) ----
   const trainRangeUtc = {
     from: utcIso(split.trainRange!.fromMs),
     to: utcIso(split.trainRange!.toMs)
@@ -1108,16 +1187,49 @@ export async function runGoldHunterV11Pipeline(args: {
     validationRangeUtc,
     holdoutRangeUtc
   });
+  if (args.persist && args.dataDir) {
+    mkdirSync(args.dataDir, { recursive: true });
+    writeFileSync(
+      join(args.dataDir, "frozen-v11-config.json"),
+      JSON.stringify({ config: frozenConfig, sha256: frozenConfigSha256 }, null, 2)
+    );
+  }
+  checkpoint("CONFIG_FROZEN", {
+    frozenSha256: frozenConfigSha256,
+    selectedCandidate: {
+      family: best.family,
+      architecture: best.policy.architecture,
+      rankQuantile: best.policy.rankQuantile
+    }
+  });
 
+  const valActivity = computeActivityMetrics({
+    trades: best.trades,
+    windowFromMs: split.validationRange!.fromMs,
+    windowToMs: split.validationRange!.toMs
+  });
   const valDaily = dailyStats(best.trades);
   const validation = {
     ...best.eligibility.stats,
-    tradesPerDay: valDaily.tradesPerDay,
-    daily: valDaily
+    tradesPerDay: valActivity.overallTradesPerDay,
+    tradesPerHour: valActivity.overallTradesPerHour,
+    daily: valDaily,
+    activity: valActivity
   };
+  log("validation_activity", {
+    tradesPerHour: valActivity.overallTradesPerHour,
+    band: valActivity.activityBand,
+    asia: valActivity.bySession.ASIA.tradesPerHour,
+    london: valActivity.bySession.LONDON.tradesPerHour,
+    ny: valActivity.bySession.NEW_YORK.tradesPerHour,
+    overlap: valActivity.bySession.OVERLAP.tradesPerHour
+  });
 
-  // ---- HOLDOUT (scores with frozen family only) ----
-  log("holdout_start");
+  // ---- RECOVERY DIAGNOSTIC HOLDOUT (frozen policy only; not sacred) ----
+  const holdoutLabel: V11PipelineResult["holdoutLabel"] = recoveryMode
+    ? "RECOVERY_DIAGNOSTIC_HOLDOUT"
+    : "SACRED_HOLDOUT";
+  log("holdout_start", { label: holdoutLabel });
   const holdRows = withArchScores(
     scoreFamilyRows(best.family, split.holdout, holdX),
     best.policy.architecture
@@ -1125,20 +1237,32 @@ export async function runGoldHunterV11Pipeline(args: {
   const holdTrades = runV11ShadowReplay(holdRows, best.policy);
   const holdBt = computePolicyBacktest(holdTrades);
   const holdDaily = dailyStats(holdTrades);
+  const holdActivity = computeActivityMetrics({
+    trades: holdTrades,
+    windowFromMs: split.holdoutRange!.fromMs,
+    windowToMs: split.holdoutRange!.toMs
+  });
   const holdout = {
     ...holdBt,
-    tradesPerDay: holdDaily.tradesPerDay,
+    tradesPerDay: holdActivity.overallTradesPerDay,
+    tradesPerHour: holdActivity.overallTradesPerHour,
     daily: holdDaily,
     robustness: robustness(holdTrades),
     maxLosingStreak: maxLosingStreak(holdTrades),
     holdBuckets: holdTimeBuckets(holdTrades),
     session: slicePerformance(holdTrades, (t) => t.session),
-    regime: slicePerformance(holdTrades, (t) => t.regime)
+    regime: slicePerformance(holdTrades, (t) => t.regime),
+    activity: holdActivity
   };
   log("holdout_done", {
+    label: holdoutLabel,
     trades: holdBt.tradeCount,
+    tradesPerHour: holdActivity.overallTradesPerHour,
     net: holdBt.netPnl,
     exp: holdBt.expectancy
+  });
+  checkpoint("RECOVERY_HOLDOUT_COMPLETE", {
+    frozenSha256: frozenConfigSha256
   });
 
   // ---- Post-holdout audit on Aug6-13 (frozen policy, no retune) ----
@@ -1148,7 +1272,9 @@ export async function runGoldHunterV11Pipeline(args: {
     args.postAuditFromMs != null &&
     args.postAuditToMs != null
   ) {
-    log("post_audit_start");
+    log("post_audit_start", {
+      label: "POST_HOLDOUT_FORWARD_AUDIT_KNOWN_PERIOD"
+    });
     const { rows: sec2 } = buildAsOfSecondRows(args.postAuditTicks, {
       fromMs: args.postAuditFromMs,
       toMs: args.postAuditToMs
@@ -1170,14 +1296,25 @@ export async function runGoldHunterV11Pipeline(args: {
     );
     const t2 = runV11ShadowReplay(rows2, best.policy);
     const bt2 = computePolicyBacktest(t2);
+    const auditActivity = computeActivityMetrics({
+      trades: t2,
+      windowFromMs: args.postAuditFromMs,
+      windowToMs: args.postAuditToMs
+    });
     postHoldoutAudit = {
+      label: "POST_HOLDOUT_FORWARD_AUDIT_KNOWN_PERIOD",
       trades: bt2.tradeCount,
+      tradesPerHour: auditActivity.overallTradesPerHour,
       netPnl: bt2.netPnl,
       profitFactor: bt2.profitFactor,
       expectancy: bt2.expectancy,
-      maxDrawdown: bt2.maxDrawdown
+      maxDrawdown: bt2.maxDrawdown,
+      activity: auditActivity
     };
     log("post_audit_done", postHoldoutAudit);
+    checkpoint("AUG6_13_AUDIT_COMPLETE", {
+      frozenSha256: frozenConfigSha256
+    });
   }
 
   let qualificationStatus: V11QualificationStatus;
@@ -1195,6 +1332,8 @@ export async function runGoldHunterV11Pipeline(args: {
     ) {
       qualificationStatus = "MIXED";
     } else {
+      // Research-positive only — Demo broker orders NOT approved.
+      // Fresh LIVE-SHADOW evaluation is still required.
       qualificationStatus = "POSITIVE";
     }
   } else if (holdBt.netPnl <= 0 || holdBt.expectancy <= 0) {
@@ -1212,6 +1351,7 @@ export async function runGoldHunterV11Pipeline(args: {
     frozenConfig,
     frozenConfigSha256,
     validation,
+    holdoutLabel,
     holdout,
     postHoldoutAudit,
     qualificationStatus,
@@ -1221,14 +1361,11 @@ export async function runGoldHunterV11Pipeline(args: {
   if (args.persist && args.dataDir) {
     mkdirSync(args.dataDir, { recursive: true });
     writeFileSync(
-      join(args.dataDir, "frozen-v11-config.json"),
-      JSON.stringify({ config: frozenConfig, sha256: frozenConfigSha256 }, null, 2)
-    );
-    writeFileSync(
       join(args.dataDir, "phase2b2-v11-report.json"),
       JSON.stringify(result, null, 2)
     );
   }
+  checkpoint("COMPLETE", { frozenSha256: frozenConfigSha256 });
   return result;
 }
 

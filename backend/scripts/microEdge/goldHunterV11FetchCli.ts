@@ -40,6 +40,8 @@ import {
   V1_REAL_7D_WINDOW_START_MS,
   V11_DEV_WINDOW_DAYS
 } from "../../src/services/microEdge/goldHunter/v11/versions";
+import { writeRecoveryState } from "../../src/services/microEdge/goldHunter/v11/recoveryState";
+import { execSync } from "node:child_process";
 
 function initFirebase(): void {
   if (getApps().length) return;
@@ -154,10 +156,65 @@ async function main(): Promise<void> {
       })
     );
 
+    // Incremental per-window checkpoints so a Cursor reset can resume.
+    const ckDir = join(outDir, "checkpoints");
+    mkdirSync(ckDir, { recursive: true });
+    const ckManifestPath = join(ckDir, "windows-manifest.json");
+    type CkManifest = {
+      fromUtc: string;
+      toUtc: string;
+      windows: Array<{
+        i: number;
+        fromMs: number;
+        toMs: number;
+        bidPath: string;
+        askPath: string;
+        bidCount: number;
+        askCount: number;
+        done: boolean;
+      }>;
+    };
+    let ckManifest: CkManifest = existsSync(ckManifestPath)
+      ? (JSON.parse(readFileSync(ckManifestPath, "utf8")) as CkManifest)
+      : {
+          fromUtc: new Date(fromMs).toISOString(),
+          toUtc: new Date(toMs).toISOString(),
+          windows: []
+        };
+
     const allBids: Array<{ timestampMs: number; price: number }> = [];
     const allAsks: Array<{ timestampMs: number; price: number }> = [];
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i]!;
+      const bidPath = join(ckDir, `window-${i}-bid.ndjson.gz`);
+      const askPath = join(ckDir, `window-${i}-ask.ndjson.gz`);
+      const prior = ckManifest.windows.find((x) => x.i === i && x.done);
+      if (
+        prior &&
+        existsSync(bidPath) &&
+        existsSync(askPath) &&
+        prior.fromMs === w.fromMs &&
+        prior.toMs === w.toMs
+      ) {
+        const bids = ndjsonGzToRows<{ timestampMs: number; price: number }>(
+          readFileSync(bidPath)
+        );
+        const asks = ndjsonGzToRows<{ timestampMs: number; price: number }>(
+          readFileSync(askPath)
+        );
+        allBids.push(...bids);
+        allAsks.push(...asks);
+        console.log(
+          JSON.stringify({
+            event: "gh_v11_window_resume",
+            i: i + 1,
+            bid: bids.length,
+            ask: asks.length
+          })
+        );
+        continue;
+      }
+
       console.log(
         JSON.stringify({
           event: "gh_v11_fetch_window",
@@ -167,7 +224,7 @@ async function main(): Promise<void> {
           from: new Date(w.fromMs).toISOString()
         })
       );
-      const bids = await fetchHistoricalTicksWindow({
+      const bidsRaw = await fetchHistoricalTicksWindow({
         transport,
         accountId: creds.accountId,
         symbolId: resolved.symbolId,
@@ -177,9 +234,13 @@ async function main(): Promise<void> {
         digits: resolved.digits ?? 2,
         pacer
       });
-      for (const t of bids) {
-        allBids.push({ timestampMs: t.brokerTimestampMs, price: t.price });
-      }
+      const bids = bidsRaw.map((t) => ({
+        timestampMs: t.brokerTimestampMs,
+        price: t.price
+      }));
+      allBids.push(...bids);
+      await writeFile(bidPath, rowsToNdjson(bids));
+
       console.log(
         JSON.stringify({
           event: "gh_v11_fetch_window",
@@ -188,7 +249,7 @@ async function main(): Promise<void> {
           side: "ASK"
         })
       );
-      const asks = await fetchHistoricalTicksWindow({
+      const asksRaw = await fetchHistoricalTicksWindow({
         transport,
         accountId: creds.accountId,
         symbolId: resolved.symbolId,
@@ -198,15 +259,34 @@ async function main(): Promise<void> {
         digits: resolved.digits ?? 2,
         pacer
       });
-      for (const t of asks) {
-        allAsks.push({ timestampMs: t.brokerTimestampMs, price: t.price });
-      }
+      const asks = asksRaw.map((t) => ({
+        timestampMs: t.brokerTimestampMs,
+        price: t.price
+      }));
+      allAsks.push(...asks);
+      await writeFile(askPath, rowsToNdjson(asks));
+
+      ckManifest.windows = [
+        ...ckManifest.windows.filter((x) => x.i !== i),
+        {
+          i,
+          fromMs: w.fromMs,
+          toMs: w.toMs,
+          bidPath,
+          askPath,
+          bidCount: bids.length,
+          askCount: asks.length,
+          done: true
+        }
+      ].sort((a, b) => a.i - b.i);
+      writeFileSync(ckManifestPath, JSON.stringify(ckManifest, null, 2));
       console.log(
         JSON.stringify({
           event: "gh_v11_window_done",
           i: i + 1,
           bid: bids.length,
-          ask: asks.length
+          ask: asks.length,
+          checkpointed: true
         })
       );
     }
@@ -293,6 +373,22 @@ async function main(): Promise<void> {
     };
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
     console.log(JSON.stringify({ event: "gh_v11_fetch_done", ...meta }));
+    let gitSha = "unknown";
+    try {
+      gitSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      /* ignore */
+    }
+    writeRecoveryState(outDir, {
+      runId: `GH_REAL_28D_PRE_V1_FETCH`,
+      gitSha,
+      stage: "DATA_READY",
+      datasetHash: null,
+      candidateCount: 0,
+      selectedCandidate: null,
+      frozenSha256: null,
+      notes: `bid=${meta.bidTicks} ask=${meta.askTicks}`
+    });
   } finally {
     await transport.disconnect();
   }

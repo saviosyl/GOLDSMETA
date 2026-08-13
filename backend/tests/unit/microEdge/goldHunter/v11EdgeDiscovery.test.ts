@@ -27,6 +27,15 @@ import {
 import { diagnoseHorizonScores } from "../../../../src/services/microEdge/goldHunter/v11/diagnostics";
 import type { GhLabel } from "../../../../src/services/microEdge/goldHunter/types";
 
+import {
+  activityBand,
+  computeActivityMetrics
+} from "../../../../src/services/microEdge/goldHunter/v11/activityMetrics";
+import { writeRecoveryState, readRecoveryState } from "../../../../src/services/microEdge/goldHunter/v11/recoveryState";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 describe("GOLD_HUNTER V1.1 identity", () => {
   it("preserves V1 real-7d run id and uses V1.1 strategy version", () => {
     expect(GOLD_HUNTER_V1_REAL_7D_RUN_ID).toBe("GH_REAL_7D_20260813_d1b08b82");
@@ -392,5 +401,92 @@ describe("rank signal diagnosis", () => {
       labels
     });
     expect(["USABLE_RANK_SIGNAL", "WEAK_RANK_SIGNAL"]).toContain(d.rankSignal);
+  });
+});
+
+
+describe("activity metrics + recovery checkpoints", () => {
+  it("activityBand classifies trades/hour ranges", () => {
+    expect(activityBand(0)).toBe("NO_TRADES");
+    expect(activityBand(2)).toBe("TOO_SLOW_FOR_GOLD_HUNTER");
+    expect(activityBand(4)).toBe("LOW_ACTIVITY");
+    expect(activityBand(7)).toBe("ACCEPTABLE_IF_HIGH_EDGE");
+    expect(activityBand(15)).toBe("TARGET_FAST_ACTIVITY_RANGE");
+    expect(activityBand(40)).toBe("HIGH_ACTIVITY_REVIEW_COSTS");
+  });
+
+  it("computeActivityMetrics reports session trades/hour", () => {
+    const from = Date.parse("2026-07-10T00:00:00.000Z");
+    const to = from + 24 * 3600 * 1000;
+    const mk = (hour: number, session: "ASIA" | "LONDON" | "OVERLAP" | "NEW_YORK") => ({
+      tradeId: `t${hour}`,
+      date: "2026-07-10",
+      strategyVersion: "t",
+      modelVersion: "t",
+      entryTimestampMs: from + hour * 3600 * 1000,
+      exitTimestampMs: from + hour * 3600 * 1000 + 5000,
+      durationSeconds: 5,
+      side: "BUY" as const,
+      entryBid: 1,
+      entryAsk: 1.1,
+      entryPrice: 1.1,
+      exitBid: 1.2,
+      exitAsk: 1.3,
+      exitPrice: 1.2,
+      entrySpread: 0.1,
+      grossMove: 0.1,
+      additionalFriction: 0,
+      netMove: 0.1,
+      mfe: 0.1,
+      mae: 0,
+      entryProbs: {} as never,
+      exitProbs: null,
+      entryReason: "t",
+      exitReason: "MAX_HOLD" as const,
+      session,
+      regime: "TREND" as const,
+      result: "WIN" as const
+    });
+    const trades = [
+      mk(2, "ASIA"),
+      mk(8, "LONDON"),
+      mk(13, "OVERLAP"),
+      mk(17, "NEW_YORK")
+    ];
+    const a = computeActivityMetrics({ trades, windowFromMs: from, windowToMs: to });
+    expect(a.overallTradesPerHour).toBeCloseTo(4 / 24, 5);
+    expect(a.bySession.ASIA.trades).toBe(1);
+    expect(a.bySession.LONDON.trades).toBe(1);
+  });
+
+  it("recovery state persists stage progression", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gh-v11-rec-"));
+    try {
+      writeRecoveryState(dir, {
+        runId: "r1",
+        gitSha: "abc",
+        stage: "OPTIMIZER_DONE",
+        datasetHash: "h",
+        candidateCount: 29,
+        selectedCandidate: {
+          family: "independent_binary",
+          architecture: "C_30s_primary",
+          rankQuantile: 0.995
+        },
+        frozenSha256: null
+      });
+      const s = readRecoveryState(dir);
+      expect(s?.stage).toBe("OPTIMIZER_DONE");
+      expect(s?.candidateCount).toBe(29);
+      writeRecoveryState(dir, {
+        runId: "r1",
+        gitSha: "abc",
+        stage: "CONFIG_FROZEN",
+        frozenSha256: "deadbeef"
+      });
+      expect(readRecoveryState(dir)?.frozenSha256).toBe("deadbeef");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -75,7 +75,8 @@ async function main(): Promise<void> {
     postAuditToMs: V1_REAL_7D_WINDOW_END_MS,
     persist: true,
     dataDir: dir,
-    trainStride: Number(process.env.GOLD_HUNTER_V11_TRAIN_STRIDE ?? 2)
+    trainStride: Number(process.env.GOLD_HUNTER_V11_TRAIN_STRIDE ?? 2),
+    recoveryMode: true
   });
 
   console.log(JSON.stringify(result, null, 2));
@@ -84,8 +85,11 @@ async function main(): Promise<void> {
       event: "gh_v11_research_done",
       qualificationStatus: result.qualificationStatus,
       frozen: result.frozenConfigSha256,
+      holdoutLabel: result.holdoutLabel,
       holdoutNet: result.holdout?.netPnl ?? null,
-      selectedFamily: result.selectedFamily
+      selectedFamily: result.selectedFamily,
+      validationTradesPerHour: result.validation?.tradesPerHour ?? null,
+      activityBand: result.validation?.activity.activityBand ?? null
     })
   );
 }
