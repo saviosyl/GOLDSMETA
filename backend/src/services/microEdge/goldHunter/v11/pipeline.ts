@@ -623,15 +623,28 @@ export async function runGoldHunterV11Pipeline(args: {
     eligibility: ReturnType<typeof evaluateCandidateEligibility>;
   };
 
-  let best: Cand | null = null;
-  /** Best non-eligible with positive net — for reporting + full-val promotion. */
-  let bestNearMiss: Cand | null = null;
+  // Boxed so nested assigns remain visible to later control-flow (TS narrows
+  // bare `let x: T | null = null` to null across closures).
+  const opt = {
+    best: null as Cand | null,
+    nearMiss: null as Cand | null
+  };
+  /** Pool of subsample winners / near-misses for full-validation confirmation. */
+  const candidatePool: Cand[] = [];
   const modelComparison: V11PipelineResult["modelComparison"] = [];
   const rejectHistogram: Record<string, number> = {};
 
   const noteReject = (reason: string | null): void => {
     const key = reason ?? "UNKNOWN";
     rejectHistogram[key] = (rejectHistogram[key] ?? 0) + 1;
+  };
+
+  const pushPool = (cand: Cand): void => {
+    const key = `${cand.family}|${JSON.stringify(cand.policy)}`;
+    if (candidatePool.some((c) => `${c.family}|${JSON.stringify(c.policy)}` === key)) {
+      return;
+    }
+    candidatePool.push(cand);
   };
 
   const consider = (
@@ -665,22 +678,26 @@ export async function runGoldHunterV11Pipeline(args: {
           familyBest.nearMiss = cand;
         }
         if (
-          !bestNearMiss ||
+          !opt.nearMiss ||
           eligibility.stats.expectancy >
-            bestNearMiss.eligibility.stats.expectancy
+            opt.nearMiss.eligibility.stats.expectancy
         ) {
-          bestNearMiss = cand;
+          opt.nearMiss = cand;
         }
+        pushPool(cand);
       }
       return;
     }
+    pushPool(cand);
     if (
       !familyBest.current ||
       eligibility.score > familyBest.current.eligibility.score
     ) {
       familyBest.current = cand;
     }
-    if (!best || eligibility.score > best.eligibility.score) best = cand;
+    if (!opt.best || eligibility.score > opt.best.eligibility.score) {
+      opt.best = cand;
+    }
   };
 
   log("optimizer_start");
@@ -763,7 +780,7 @@ export async function runGoldHunterV11Pipeline(args: {
   }
 
   // Stage 2: edge/rank thresholds around best family+arch (or near-miss seed)
-  const stageSeed = best ?? bestNearMiss;
+  const stageSeed: Cand | null = opt.best ?? opt.nearMiss;
   if (stageSeed) {
     const fam = families.find((f) => f.family === stageSeed.family)!;
     const arch =
@@ -773,8 +790,8 @@ export async function runGoldHunterV11Pipeline(args: {
     const buyScores = rows.map((r) => r.scores.buyScore);
     const sellScores = rows.map((r) => r.scores.sellScore);
     const familyBest: { current: Cand | null; nearMiss: Cand | null } = {
-      current: best,
-      nearMiss: bestNearMiss
+      current: opt.best,
+      nearMiss: opt.nearMiss
     };
     for (const rq of [null, 0.95, 0.99, 0.995] as const) {
       const buyFloor = rq == null ? 0 : quantile(buyScores, rq);
@@ -806,21 +823,21 @@ export async function runGoldHunterV11Pipeline(args: {
         }
       }
     }
-    best = familyBest.current ?? best;
-    bestNearMiss = familyBest.nearMiss ?? bestNearMiss;
+    opt.best = familyBest.current ?? opt.best;
+    opt.nearMiss = familyBest.nearMiss ?? opt.nearMiss;
   }
 
   // Stage 3: confirmation + context veto refine
-  if (best || bestNearMiss) {
-    const seed = best ?? bestNearMiss!;
+  if (opt.best || opt.nearMiss) {
+    const seed = (opt.best ?? opt.nearMiss)!;
     const fam = families.find((f) => f.family === seed.family)!;
     const arch =
       ARCHITECTURES.find((a) => a.id === seed.policy.architecture) ??
       ARCHITECTURES[1]!;
     const rows = withArchScores(fam.scoreRows, arch.id);
     const familyBest: { current: Cand | null; nearMiss: Cand | null } = {
-      current: best,
-      nearMiss: bestNearMiss
+      current: opt.best,
+      nearMiss: opt.nearMiss
     };
     for (const consecutiveEvals of [1, 2, 3]) {
       for (const opposeVetoScore of [999, 0.55, 0.45, seed.policy.opposeVetoScore]) {
@@ -836,21 +853,21 @@ export async function runGoldHunterV11Pipeline(args: {
         );
       }
     }
-    best = familyBest.current ?? best;
-    bestNearMiss = familyBest.nearMiss ?? bestNearMiss;
+    opt.best = familyBest.current ?? opt.best;
+    opt.nearMiss = familyBest.nearMiss ?? opt.nearMiss;
   }
 
   // Stage 4: exit / maxHold / stop
-  if (best || bestNearMiss) {
-    const seed = best ?? bestNearMiss!;
+  if (opt.best || opt.nearMiss) {
+    const seed = (opt.best ?? opt.nearMiss)!;
     const fam = families.find((f) => f.family === seed.family)!;
     const arch =
       ARCHITECTURES.find((a) => a.id === seed.policy.architecture) ??
       ARCHITECTURES[1]!;
     const rows = withArchScores(fam.scoreRows, arch.id);
     const familyBest: { current: Cand | null; nearMiss: Cand | null } = {
-      current: best,
-      nearMiss: bestNearMiss
+      current: opt.best,
+      nearMiss: opt.nearMiss
     };
     for (const maxHoldSec of [5, 10, 15, 20, 30, 45, 60]) {
       for (const protectiveStop of stopCandidates.slice(0, 4)) {
@@ -866,16 +883,16 @@ export async function runGoldHunterV11Pipeline(args: {
         );
       }
     }
-    best = familyBest.current ?? best;
-    bestNearMiss = familyBest.nearMiss ?? bestNearMiss;
+    opt.best = familyBest.current ?? opt.best;
+    opt.nearMiss = familyBest.nearMiss ?? opt.nearMiss;
   }
   log("optimizer_done", {
-    bestFamily: best?.family ?? null,
-    trades: best?.eligibility.stats.tradeCount ?? 0,
-    expectancy: best?.eligibility.stats.expectancy ?? 0,
-    nearMissFamily: bestNearMiss?.family ?? null,
-    nearMissExp: bestNearMiss?.eligibility.stats.expectancy ?? 0,
-    nearMissReject: bestNearMiss?.eligibility.rejectReason ?? null,
+    bestFamily: opt.best?.family ?? null,
+    trades: opt.best?.eligibility.stats.tradeCount ?? 0,
+    expectancy: opt.best?.eligibility.stats.expectancy ?? 0,
+    nearMissFamily: opt.nearMiss?.family ?? null,
+    nearMissExp: opt.nearMiss?.eligibility.stats.expectancy ?? 0,
+    nearMissReject: opt.nearMiss?.eligibility.rejectReason ?? null,
     rejectHistogram
   });
 
@@ -892,108 +909,155 @@ export async function runGoldHunterV11Pipeline(args: {
     return buildMultiScores(rows as typeof split.validation);
   };
 
-  // If subsample found no eligible winner, promote near-misses to FULL validation
-  // (outlier domination often dilutes with more trades / days).
-  if (!best && bestNearMiss) {
-    log("full_validation_promote_nearmiss", {
-      family: bestNearMiss.family,
-      reject: bestNearMiss.eligibility.rejectReason,
-      subsampleTrades: bestNearMiss.eligibility.stats.tradeCount,
-      subsampleExp: bestNearMiss.eligibility.stats.expectancy
-    });
-    const promotePolicies: V11PolicyConfig[] = [bestNearMiss.policy];
-    // Also try a few close variants on full val
-    for (const maxHoldSec of [5, 10, 15, 30]) {
-      promotePolicies.push({ ...bestNearMiss.policy, maxHoldSec });
-    }
-    for (const maxSpread of [spreadP75, spreadP90]) {
-      promotePolicies.push({ ...bestNearMiss.policy, maxSpread });
-    }
-    const seen = new Set<string>();
-    for (const policy of promotePolicies) {
-      const key = JSON.stringify(policy);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const fullRows = withArchScores(
-        scoreFamilyRows(bestNearMiss.family, split.validation, valX),
-        policy.architecture
+  // FULL validation confirmation: subsample can overfit a single architecture.
+  // Confirm a pool of candidates with floors re-derived on FULL validation only.
+  const fullScoreCache = new Map<string, V11ScoreRow[]>();
+  const fullRowsFor = (
+    family: V11ModelFamily,
+    arch: V11PolicyConfig["architecture"]
+  ): V11ScoreRow[] => {
+    const key = `${family}|${arch}`;
+    let rows = fullScoreCache.get(key);
+    if (!rows) {
+      rows = withArchScores(
+        scoreFamilyRows(family, split.validation, valX),
+        arch
       );
-      const trades = runV11ShadowReplay(fullRows, policy);
-      const elig = evaluateCandidateEligibility(trades);
-      if (elig.eligible && multiDay(trades)) {
-        best = {
-          family: bestNearMiss.family,
-          policy,
-          trades,
-          eligibility: elig
-        };
-        log("full_validation_promote_hit", {
-          trades: elig.stats.tradeCount,
-          exp: elig.stats.expectancy,
-          pf: elig.stats.profitFactor
-        });
-        break;
+      fullScoreCache.set(key, rows);
+    }
+    return rows;
+  };
+
+  const seeds: Cand[] = [...candidatePool];
+  if (opt.best) seeds.unshift(opt.best);
+  if (opt.nearMiss) seeds.push(opt.nearMiss);
+  // Expand with spread / hold variants for each unique seed policy
+  const confirmPolicies: Array<{ family: V11ModelFamily; policy: V11PolicyConfig }> =
+    [];
+  const seenPol = new Set<string>();
+  for (const s of seeds) {
+    const variants: V11PolicyConfig[] = [s.policy];
+    for (const maxHoldSec of [5, 10, 15, 30]) {
+      variants.push({ ...s.policy, maxHoldSec });
+    }
+    for (const maxSpread of [spreadP75, spreadP90, 0.14]) {
+      variants.push({ ...s.policy, maxSpread });
+    }
+    for (const opposeVetoScore of [0.55, 999]) {
+      variants.push({ ...s.policy, opposeVetoScore });
+    }
+    for (const policy of variants) {
+      const key = `${s.family}|${JSON.stringify(policy)}`;
+      if (seenPol.has(key)) continue;
+      seenPol.add(key);
+      confirmPolicies.push({ family: s.family, policy });
+    }
+  }
+
+  // Always include focus architectures that full-val probing found useful,
+  // even if subsample ranked another arch first.
+  for (const fam of families.filter((f) => f.family === "independent_binary")) {
+    for (const arch of ARCHITECTURES.filter((a) =>
+      ["E_5_15_ensemble", "B_15s_primary", "C_30s_primary", "F_15_30_ensemble"].includes(
+        a.id
+      )
+    )) {
+      for (const rq of [0.99, 0.995] as const) {
+        for (const maxHoldSec of [10, 30] as const) {
+          for (const maxSpread of [spreadP75, spreadP90, 0.14]) {
+            confirmPolicies.push({
+              family: fam.family,
+              policy: {
+                architecture: arch.id,
+                primaryHorizon: arch.primary,
+                contextHorizons: arch.context,
+                minEdge: 0,
+                rankQuantile: rq,
+                buyScoreFloor: 0, // replaced below from full-val quantiles
+                sellScoreFloor: 0,
+                maxSpread,
+                consecutiveEvals: 1,
+                maxHoldSec,
+                protectiveStop: stopCandidates[2] ?? 0.6,
+                opposeVetoScore: 0.55,
+                theta
+              }
+            });
+          }
+        }
       }
     }
   }
 
-  if (!best) {
-    const result: V11PipelineResult = {
-      ...baseResult,
-      v1Diagnostics,
-      modelComparison,
-      selectedFamily: bestNearMiss?.family ?? null,
-      selectedPolicy: bestNearMiss?.policy ?? null,
-      frozenConfig: null,
-      frozenConfigSha256: null,
-      validation: bestNearMiss
-        ? {
-            ...bestNearMiss.eligibility.stats,
-            tradesPerDay: dailyStats(bestNearMiss.trades).tradesPerDay,
-            daily: dailyStats(bestNearMiss.trades)
-          }
-        : null,
-      holdout: null,
-      postHoldoutAudit: null,
-      qualificationStatus: "NO_PREDICTIVE_EDGE",
-      featureDropped: droppedKeys
-    };
-    if (args.persist && args.dataDir) {
-      mkdirSync(args.dataDir, { recursive: true });
-      writeFileSync(
-        join(args.dataDir, "phase2b2-v11-report.json"),
-        JSON.stringify(
-          { ...result, rejectHistogram, nearMiss: bestNearMiss?.policy ?? null },
-          null,
-          2
+  log("full_validation_confirm_start", {
+    pool: candidatePool.length,
+    policies: confirmPolicies.length,
+    subsampleBest: opt.best?.policy.architecture ?? null
+  });
+
+  let fullValBest: Cand | null = null;
+  let fullValBestFailed: Cand | null = null;
+  const seenConfirm = new Set<string>();
+  for (const { family, policy: seedPolicy } of confirmPolicies) {
+    const rows = fullRowsFor(family, seedPolicy.architecture);
+    let policy = seedPolicy;
+    if (seedPolicy.rankQuantile != null) {
+      const rq = seedPolicy.rankQuantile;
+      policy = {
+        ...seedPolicy,
+        buyScoreFloor: quantile(
+          rows.map((r) => r.scores.buyScore),
+          rq
+        ),
+        sellScoreFloor: quantile(
+          rows.map((r) => r.scores.sellScore),
+          rq
         )
-      );
+      };
     }
-    return result;
+    const key = `${family}|${JSON.stringify(policy)}`;
+    if (seenConfirm.has(key)) continue;
+    seenConfirm.add(key);
+    const trades = runV11ShadowReplay(rows, policy);
+    const elig = evaluateCandidateEligibility(trades);
+    const cand: Cand = { family, policy, trades, eligibility: elig };
+    if (elig.eligible && multiDay(trades)) {
+      if (!fullValBest || elig.score > fullValBest.eligibility.score) {
+        fullValBest = cand;
+      }
+    } else if (
+      elig.stats.tradeCount >= 30 &&
+      elig.stats.expectancy > 0 &&
+      (!fullValBestFailed ||
+        elig.stats.expectancy >
+          fullValBestFailed.eligibility.stats.expectancy)
+    ) {
+      fullValBestFailed = cand;
+    }
   }
 
-  // Re-score selected policy on FULL validation before freeze
-  log("full_validation_rescore", { family: best.family });
-  const fullValRows = withArchScores(
-    scoreFamilyRows(best.family, split.validation, valX),
-    best.policy.architecture
-  );
-  const fullValTrades = runV11ShadowReplay(fullValRows, best.policy);
-  const fullValElig = evaluateCandidateEligibility(fullValTrades);
-  if (!(fullValElig.eligible && multiDay(fullValTrades))) {
+  if (!fullValBest) {
+    const fail = fullValBestFailed ?? opt.best ?? opt.nearMiss;
+    log("full_validation_confirm_none", {
+      tried: seenConfirm.size,
+      failReject: fail?.eligibility.rejectReason ?? null,
+      failExp: fail?.eligibility.stats.expectancy ?? null
+    });
     const result: V11PipelineResult = {
       ...baseResult,
       v1Diagnostics,
       modelComparison,
-      selectedFamily: best.family,
-      selectedPolicy: best.policy,
+      selectedFamily: fail?.family ?? null,
+      selectedPolicy: fail?.policy ?? null,
       frozenConfig: null,
       frozenConfigSha256: null,
-      validation: {
-        ...fullValElig.stats,
-        tradesPerDay: dailyStats(fullValTrades).tradesPerDay,
-        daily: dailyStats(fullValTrades)
-      },
+      validation: fail
+        ? {
+            ...fail.eligibility.stats,
+            tradesPerDay: dailyStats(fail.trades).tradesPerDay,
+            daily: dailyStats(fail.trades)
+          }
+        : null,
       holdout: null,
       postHoldoutAudit: null,
       qualificationStatus: "NO_PREDICTIVE_EDGE",
@@ -1008,65 +1072,17 @@ export async function runGoldHunterV11Pipeline(args: {
     }
     return result;
   }
-  // Re-derive rank floors on FULL validation (never holdout) before freeze
-  let freezePolicy = best.policy;
-  if (best.policy.rankQuantile != null) {
-    const rq = best.policy.rankQuantile;
-    freezePolicy = {
-      ...best.policy,
-      buyScoreFloor: quantile(
-        fullValRows.map((r) => r.scores.buyScore),
-        rq
-      ),
-      sellScoreFloor: quantile(
-        fullValRows.map((r) => r.scores.sellScore),
-        rq
-      )
-    };
-    const refitTrades = runV11ShadowReplay(fullValRows, freezePolicy);
-    const refitElig = evaluateCandidateEligibility(refitTrades);
-    if (!(refitElig.eligible && multiDay(refitTrades))) {
-      const result: V11PipelineResult = {
-        ...baseResult,
-        v1Diagnostics,
-        modelComparison,
-        selectedFamily: best.family,
-        selectedPolicy: freezePolicy,
-        frozenConfig: null,
-        frozenConfigSha256: null,
-        validation: {
-          ...refitElig.stats,
-          tradesPerDay: dailyStats(refitTrades).tradesPerDay,
-          daily: dailyStats(refitTrades)
-        },
-        holdout: null,
-        postHoldoutAudit: null,
-        qualificationStatus: "NO_PREDICTIVE_EDGE",
-        featureDropped: droppedKeys
-      };
-      if (args.persist && args.dataDir) {
-        mkdirSync(args.dataDir, { recursive: true });
-        writeFileSync(
-          join(args.dataDir, "phase2b2-v11-report.json"),
-          JSON.stringify({ ...result, rejectHistogram }, null, 2)
-        );
-      }
-      return result;
-    }
-    best = {
-      family: best.family,
-      policy: freezePolicy,
-      trades: refitTrades,
-      eligibility: refitElig
-    };
-  } else {
-    best = {
-      family: best.family,
-      policy: freezePolicy,
-      trades: fullValTrades,
-      eligibility: fullValElig
-    };
-  }
+
+  const best = fullValBest;
+  log("full_validation_confirm_hit", {
+    family: best.family,
+    arch: best.policy.architecture,
+    trades: best.eligibility.stats.tradeCount,
+    exp: best.eligibility.stats.expectancy,
+    pf: best.eligibility.stats.profitFactor,
+    rq: best.policy.rankQuantile,
+    maxHold: best.policy.maxHoldSec
+  });
 
   // ---- FREEZE ----
   const trainRangeUtc = {
