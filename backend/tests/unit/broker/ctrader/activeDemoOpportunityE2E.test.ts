@@ -942,6 +942,9 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
   });
 
   it("Asia session → effective risk 25 (50 * 0.5) with explicit risk-cap reason", async () => {
+    // Risk uses resolveTradingSessionBucket(Date) — pin Asia hours (UTC 00–07),
+    // not UTC 12–16 Overlap which would skip the Asia half-risk multiplier.
+    vi.useFakeTimers({ now: new Date("2026-08-13T03:00:00.000Z") });
     const sessionGuard = await import(
       "../../../../src/services/broker/ctrader/sessionGuard"
     );
@@ -951,46 +954,50 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
       current: "Asia",
       reason: null
     });
-    const store = {
-      getDecision: vi.fn(async () =>
-        decision({
-          decisionId: "dec_asia_a_plus",
-          setupScore: 95,
-          confidence: 95,
-          reasons: ["MTF_BULLISH", "MARKET_STRUCTURE"],
-          marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
-        })
-      ),
-      getActiveSessionPlan: vi.fn(async () => ({
-        lifecycleState: "ACTIVE",
-        confirmationState: "BREAKOUT_CONFIRMED",
-        direction: "BUY"
-      }))
-    };
-    await processDecisionForQualification({
-      uid: "u1",
-      decisionId: "dec_asia_a_plus",
-      store: store as never
-    });
-    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
-    const sizingArg = calculatePepperstoneXauUsdDemoVolume.mock.calls.at(-1)?.[0] as {
-      riskAmountDeposit?: number;
-    };
-    expect(sizingArg?.riskAmountDeposit).toBe(25); // Asia experimental half-risk
-    const journalArg = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
-      requestedRiskAmountDeposit?: number;
-      effectiveRiskAmountDeposit?: number;
-      riskCapReason?: string | null;
-    };
-    expect(journalArg?.requestedRiskAmountDeposit).toBe(50);
-    expect(journalArg?.effectiveRiskAmountDeposit).toBe(25);
-    expect(journalArg?.riskCapReason).toMatch(/ASIA_EXPERIMENTAL_RISK/);
-    vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("London");
-    vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
-      ok: true,
-      current: "London",
-      reason: null
-    });
+    try {
+      const store = {
+        getDecision: vi.fn(async () =>
+          decision({
+            decisionId: "dec_asia_a_plus",
+            setupScore: 95,
+            confidence: 95,
+            reasons: ["MTF_BULLISH", "MARKET_STRUCTURE"],
+            marketStructure: { confirmationClassification: "BREAKOUT_CONFIRMED" }
+          })
+        ),
+        getActiveSessionPlan: vi.fn(async () => ({
+          lifecycleState: "ACTIVE",
+          confirmationState: "BREAKOUT_CONFIRMED",
+          direction: "BUY"
+        }))
+      };
+      await processDecisionForQualification({
+        uid: "u1",
+        decisionId: "dec_asia_a_plus",
+        store: store as never
+      });
+      expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+      const sizingArg = calculatePepperstoneXauUsdDemoVolume.mock.calls.at(-1)?.[0] as {
+        riskAmountDeposit?: number;
+      };
+      expect(sizingArg?.riskAmountDeposit).toBe(25); // Asia experimental half-risk
+      const journalArg = createAutoTradeJournalEntry.mock.calls.at(-1)?.[0] as {
+        requestedRiskAmountDeposit?: number;
+        effectiveRiskAmountDeposit?: number;
+        riskCapReason?: string | null;
+      };
+      expect(journalArg?.requestedRiskAmountDeposit).toBe(50);
+      expect(journalArg?.effectiveRiskAmountDeposit).toBe(25);
+      expect(journalArg?.riskCapReason).toMatch(/ASIA_EXPERIMENTAL_RISK/);
+    } finally {
+      vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("London");
+      vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
+        ok: true,
+        current: "London",
+        reason: null
+      });
+      vi.useRealTimers();
+    }
   });
 
   it("A + confirmationCandleRequired=false still waits without 5M confirm", async () => {
