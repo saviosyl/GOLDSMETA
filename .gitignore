@@ -53,3 +53,6 @@ web/test-results/
 # Xcode / Swift
 xcuserdata/
 *.xcuserstate
+
+# GOLD_HUNTER local research artifacts
+backend/.gold-hunter-data/

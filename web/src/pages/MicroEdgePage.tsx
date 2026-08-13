@@ -81,11 +81,12 @@ type GhStatus = {
   accountBalance?: {
     balance: number | null;
     depositCurrency: string | null;
-    available: boolean;
+    available?: boolean;
   };
   pepperstoneDemoBalance?: {
     balance: number | null;
     depositCurrency: string | null;
+    available?: boolean;
   };
   marketData?: {
     symbol?: string;
@@ -147,6 +148,7 @@ export function MicroEdgePage() {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [oauthOk, setOauthOk] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -190,6 +192,11 @@ export function MicroEdgePage() {
     const id = window.setInterval(() => void reload(), 5000);
     return () => window.clearInterval(id);
   }, [reload]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const forecast = gh?.forecast ?? null;
   const huntState = gh?.huntState ?? "HUNTING";
@@ -401,7 +408,7 @@ export function MicroEdgePage() {
               <strong>
                 {Math.max(
                   0,
-                  Math.round((Date.now() - gh.openTrade.entryTimestampMs) / 1000)
+                  Math.round((nowMs - gh.openTrade.entryTimestampMs) / 1000)
                 )}
                 s
               </strong>
