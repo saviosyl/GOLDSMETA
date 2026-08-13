@@ -1,162 +1,217 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { MICRO_EDGE_OAUTH_SESSION_KEY } from "./MicroEdgeConnectCallbackPage";
 
-type HorizonKey = "1m" | "5m" | "15m";
-
-type HorizonForecast = {
-  horizon: HorizonKey;
+type HorizonProb = {
+  horizonSec: number;
   pUp: number;
   pDown: number;
   pNoEdge: number;
-  expectedSignedMove: number;
-  expectedAbsoluteMove: number;
-  estimatedFriction: number;
-  netEdgeUp: number;
-  netEdgeDown: number;
-  confidence: number;
-  decision: string;
-  eligibleOpportunity: boolean;
+  expectedNetBuy: number;
+  expectedNetSell: number;
 };
 
-type MicroPrediction = {
-  predictionId: string;
-  candleCloseTs: string;
+type GhForecast = {
+  timestampMs: number;
   bid: number;
   ask: number;
   mid: number;
   spread: number;
   quoteAgeMs: number;
-  dataFreshness: string;
   session: string;
   regime: string;
+  dataQuality: string;
   modelVersion: string;
-  costModelVersion: string;
-  strongestHorizon: HorizonKey;
-  overallMicroDecision: string;
-  forecastAgreementState: string;
-  topFactors: string[];
-  primaryResearchHorizon: HorizonKey;
-  horizons: Record<HorizonKey, HorizonForecast>;
-  shadowOnly: true;
-  brokerExecutionEnabled: false;
+  strategyVersion: string;
+  horizons: Record<string, HorizonProb>;
+  action: "BUY" | "SELL" | "WAIT";
 };
 
-type MarketDataStatus = {
-  connectionState?: string;
-  liveConnected?: boolean;
-  marketFeedStatus?: string;
-  symbol?: string;
-  symbolId?: string | null;
-  lastQuoteTs?: string | null;
-  quoteAgeMs?: number | null;
-  lastCompletedM1Ts?: string | null;
-  lastCompletedM5Ts?: string | null;
-  lastCompletedM15Ts?: string | null;
-  collectorHealthy?: boolean;
-  healthReasons?: string[];
-  historicalObservationCounts?: { M1?: number; M5?: number; M15?: number };
-  quoteSamplesStored?: number;
-  boundaryQuoteCount?: number;
-  labelReadyMinutes?: number;
-  backfillStatus?: Record<string, { status?: string } | null>;
-  dataCollectionActive?: boolean;
-};
-
-type OAuthStatus = {
-  status?: string;
-  configured?: boolean;
-  environment?: string | null;
-  selectedAccountIdMasked?: string | null;
-  authorizedAccountCount?: number;
-};
-
-type Status = {
-  shadowOnly: boolean;
-  brokerExecutionEnabled: boolean;
+type ShadowTrade = {
+  tradeId: string;
+  date: string;
+  strategyVersion: string;
   modelVersion: string;
-  featureVersion: string;
-  costModelVersion: string;
-  labelVersion: string;
-  lastCandleCloseTs: string | null;
-  disclaimer: string;
-  marketFeedConnected?: boolean;
-  marketFeedStatus?: string;
-  connectionState?: string;
-  interfaceReady?: boolean;
-  overallMicroDecision?: string;
-  dataUnavailable?: boolean;
-  degradedReason?: string | null;
-  dataCollectionActive?: boolean;
-  modelStatus?: string;
-  marketData?: MarketDataStatus;
-  collector?: {
-    healthy?: boolean;
-    reasons?: string[];
+  entryTimestampMs: number;
+  exitTimestampMs: number;
+  durationSeconds: number;
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  exitPrice: number;
+  entrySpread: number;
+  netMove: number;
+  mfe: number;
+  mae: number;
+  entryProbs: Record<string, HorizonProb>;
+  entryReason: string;
+  exitReason: string;
+  result: "WIN" | "LOSS" | "BREAKEVEN";
+};
+
+type DailySummary = {
+  date: string;
+  strategyVersion: string;
+  modelVersion: string;
+  netPnl: number;
+  returnPct: number;
+  tradeCount: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  buyPnl: number;
+  sellPnl: number;
+};
+
+type GhStatus = {
+  huntState?: string;
+  forecast?: GhForecast | null;
+  openTrade?: {
+    side: string;
+    entryPrice: number;
+    entryReason: string;
+    entryTimestampMs: number;
+  } | null;
+  openPnl?: number | null;
+  strategyVersion?: string;
+  modelVersion?: string;
+  qualificationStatus?: string;
+  researchModel?: boolean;
+  accountBalance?: {
+    balance: number | null;
+    depositCurrency: string | null;
+    available: boolean;
   };
-  oauth?: OAuthStatus;
-  oauthAppConfigured?: boolean;
-  authorizationStatus?: string;
-  realConnectionStatus?: string;
-  collectorHealthLabel?: string;
+  pepperstoneDemoBalance?: {
+    balance: number | null;
+    depositCurrency: string | null;
+  };
+  marketData?: {
+    symbol?: string;
+    liveConnected?: boolean;
+    marketFeedStatus?: string;
+    quoteAgeMs?: number | null;
+  };
+  banner?: string;
 };
 
-function pct(x: number | undefined): string {
+function pct(x: number | undefined | null): string {
   if (x == null || Number.isNaN(x)) return "—";
   return `${(x * 100).toFixed(1)}%`;
 }
 
-function num(x: number | undefined, d = 3): string {
+function num(x: number | undefined | null, d = 2): string {
   if (x == null || Number.isNaN(x)) return "—";
   return x.toFixed(d);
 }
 
+function signed(x: number | undefined | null, d = 3): string {
+  if (x == null || Number.isNaN(x)) return "—";
+  const s = x >= 0 ? "+" : "";
+  return `${s}${x.toFixed(d)}`;
+}
+
+function fmtTime(ms: number): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Dublin",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(new Date(ms));
+}
+
+function dublinToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Dublin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+
 export function MicroEdgePage() {
   const { api } = useAuth();
-  const [status, setStatus] = useState<Status | null>(null);
-  const [latest, setLatest] = useState<MicroPrediction | null>(null);
-  const [history, setHistory] = useState<MicroPrediction[]>([]);
+  const [gh, setGh] = useState<GhStatus | null>(null);
+  const [daily, setDaily] = useState<DailySummary | null>(null);
+  const [explanations, setExplanations] = useState<string[]>([]);
+  const [equityCurve, setEquityCurve] = useState<Array<{ t: number; equity: number }>>([]);
+  const [trades, setTrades] = useState<ShadowTrade[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [date, setDate] = useState(dublinToday());
+  const [modelInfo, setModelInfo] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [oauthOk, setOauthOk] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [s, l, h] = await Promise.all([
-        api.microEdgeStatus() as Promise<Status>,
-        api.microEdgeLatest() as Promise<{ prediction: MicroPrediction | null }>,
-        api.microEdgeHistory(30)
+      const [status, dailyRes, tradesRes, modelRes, microStatus] = await Promise.all([
+        api.goldHunterStatus() as Promise<GhStatus>,
+        api.goldHunterDaily(date) as Promise<{
+          summary: DailySummary;
+          explanations?: string[];
+          availableDates?: string[];
+          equityCurve?: Array<{ t: number; equity: number }>;
+        }>,
+        api.goldHunterTrades(date) as Promise<{ trades: ShadowTrade[] }>,
+        api.goldHunterModel() as Promise<Record<string, unknown>>,
+        api.microEdgeStatus() as Promise<{
+          authorizationStatus?: string;
+          oauth?: { configured?: boolean; status?: string };
+        }>
       ]);
-      setStatus(s);
-      setLatest(l.prediction);
-      setHistory((h.items ?? []) as unknown as MicroPrediction[]);
+      setGh(status);
+      setDaily(dailyRes.summary);
+      setExplanations(dailyRes.explanations ?? []);
+      setAvailableDates(dailyRes.availableDates ?? []);
+      setEquityCurve(dailyRes.equityCurve ?? []);
+      setTrades(tradesRes.trades ?? []);
+      setModelInfo(modelRes);
+      setOauthOk(
+        microStatus.authorizationStatus === "READ_ONLY_AUTHORIZED" ||
+          Boolean(microStatus.oauth?.configured && microStatus.oauth?.status === "CONNECTED")
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load Micro Edge");
+      setError(e instanceof Error ? e.message : "Failed to load GOLD_HUNTER");
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, date]);
 
   useEffect(() => {
     void reload();
+    const id = window.setInterval(() => void reload(), 5000);
+    return () => window.clearInterval(id);
   }, [reload]);
 
-  const md = status?.marketData;
-  const oauth = status?.oauth;
-  const authorized =
-    status?.authorizationStatus === "READ_ONLY_AUTHORIZED" ||
-    (Boolean(oauth?.configured) &&
-      oauth?.status === "CONNECTED");
-  const liveConnected = Boolean(status?.marketFeedConnected || md?.liveConnected);
-  const connectionState =
-    status?.connectionState ?? md?.connectionState ?? "LIVE_NOT_CONNECTED";
-  const isMock = connectionState === "MOCK_SEEDED";
-  const collectorLabel =
-    status?.collectorHealthLabel ??
-    (md?.collectorHealthy || status?.collector?.healthy ? "HEALTHY" : "OFFLINE");
+  const forecast = gh?.forecast ?? null;
+  const huntState = gh?.huntState ?? "HUNTING";
+  const balance = gh?.pepperstoneDemoBalance ?? gh?.accountBalance;
+  const researchModel = Boolean(gh?.researchModel);
+
+  const curvePath = useMemo(() => {
+    if (!equityCurve.length) return "";
+    const w = 320;
+    const h = 64;
+    const ys = equityCurve.map((p) => p.equity);
+    const min = Math.min(0, ...ys);
+    const max = Math.max(0, ...ys);
+    const span = max - min || 1;
+    return equityCurve
+      .map((p, i) => {
+        const x = (i / Math.max(1, equityCurve.length - 1)) * w;
+        const y = h - ((p.equity - min) / span) * (h - 4) - 2;
+        return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  }, [equityCurve]);
 
   async function onConfirmConnect() {
     setBusy(true);
@@ -174,7 +229,6 @@ export function MicroEdgePage() {
 
   async function onDisconnect() {
     setBusy(true);
-    setError(null);
     try {
       await api.microEdgeOAuthDisconnect();
       await reload();
@@ -185,98 +239,348 @@ export function MicroEdgePage() {
     }
   }
 
+  function shiftDate(delta: number) {
+    const d = new Date(`${date}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + delta);
+    setDate(d.toISOString().slice(0, 10));
+  }
+
   return (
-    <div className="gm-page gm-micro-edge-page" data-testid="micro-edge-page">
-      <header className="gm-page-header">
+    <div className="gm-page gm-gold-hunter-page" data-testid="gold-hunter-page">
+      <header className="gm-gh-header">
         <div>
-          <h1 className="gm-page-title">Micro Edge</h1>
-          <p className="gm-page-sub">
-            Isolated shadow research bot — not Core AutoTrade.
-          </p>
+          <h1 className="gm-gh-brand" data-testid="gold-hunter-brand">
+            GOLD_HUNTER
+          </h1>
+          <p className="gm-gh-subtitle">Continuous XAUUSD Opportunity Engine</p>
+          <p className="gm-gh-powered">Powered by Micro Edge Research</p>
         </div>
         <div className="gm-micro-badges">
-          <span className="gm-chip gm-chip-warn" data-testid="micro-shadow-badge">
-            SHADOW ONLY
+          <span className="gm-chip gm-chip-warn" data-testid="gh-shadow-badge">
+            SHADOW
           </span>
-          <span className="gm-chip" data-testid="micro-no-orders-badge">
+          <span className="gm-chip" data-testid="gh-no-orders-badge">
             NO BROKER ORDERS
           </span>
-          {liveConnected ? (
-            <span className="gm-chip" data-testid="micro-collection-badge">
-              DATA COLLECTION ACTIVE
-            </span>
-          ) : null}
-          {isMock ? (
-            <span className="gm-chip gm-chip-warn" data-testid="micro-test-data-badge">
-              TEST DATA
+          {researchModel ? (
+            <span className="gm-chip gm-chip-soft" data-testid="gh-research-model">
+              RESEARCH MODEL
             </span>
           ) : null}
         </div>
       </header>
 
-      {loading ? <p className="gm-muted">Loading Micro Edge…</p> : null}
+      {loading ? <p className="gm-muted">Loading GOLD_HUNTER…</p> : null}
       {error ? (
-        <div className="gm-banner gm-banner-danger" data-testid="micro-edge-error">
+        <div className="gm-banner gm-banner-danger" data-testid="gold-hunter-error">
           {error}
         </div>
       ) : null}
 
-      <section className="gm-card gm-micro-connection" data-testid="micro-edge-connection">
-        <h2>Connection</h2>
-        <p className="gm-muted" style={{ marginTop: 0 }}>
-          READ-ONLY CONNECTION — Micro Edge cannot place trades. Market/account-data access
-          only.
-        </p>
+      {/* Top daily summary */}
+      <section className="gm-gh-summary" data-testid="gh-daily-summary">
+        <div className="gm-gh-stat">
+          <span className="gm-label">Date</span>
+          <strong>{daily?.date ?? date}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Pepperstone DEMO Balance</span>
+          <strong data-testid="gh-broker-balance">
+            {balance?.available === false || balance?.balance == null
+              ? "—"
+              : `${num(balance.balance, 2)} ${balance.depositCurrency ?? ""}`.trim()}
+          </strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Today&apos;s SHADOW P/L</span>
+          <strong data-testid="gh-shadow-pnl">{signed(daily?.netPnl)}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Today&apos;s %</span>
+          <strong>{num(daily?.returnPct, 2)}%</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Open Shadow P/L</span>
+          <strong>{signed(gh?.openPnl)}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Trades</span>
+          <strong>{daily?.tradeCount ?? 0}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Wins / Losses</span>
+          <strong>
+            {daily?.wins ?? 0} / {daily?.losses ?? 0}
+          </strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Win Rate</span>
+          <strong>{pct(daily?.winRate)}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Profit Factor</span>
+          <strong>{num(daily?.profitFactor, 2)}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Max Drawdown</span>
+          <strong>{num(daily?.maxDrawdown, 3)}</strong>
+        </div>
+        <div className="gm-gh-stat">
+          <span className="gm-label">Strategy</span>
+          <strong className="gm-gh-version">{gh?.strategyVersion ?? "—"}</strong>
+        </div>
+      </section>
+      <p className="gm-muted gm-gh-balance-note">
+        SHADOW P/L is hypothetical research and does not change Pepperstone DEMO balance.
+      </p>
+
+      {/* Live strip */}
+      <section className="gm-gh-live" data-testid="gh-live-strip">
+        <div className="gm-gh-live-top">
+          <span className="gm-gh-state" data-testid="gh-hunt-state">
+            {huntState.replace(/_/g, " ")}
+          </span>
+          <span className="gm-gh-action" data-testid="gh-action">
+            {forecast?.action ?? "WAIT"}
+          </span>
+        </div>
+        <div className="gm-gh-quote">
+          <span>Bid {num(forecast?.bid, 2)}</span>
+          <span>Ask {num(forecast?.ask, 2)}</span>
+          <span>Mid {num(forecast?.mid, 2)}</span>
+          <span>Spread {num(forecast?.spread, 3)}</span>
+          <span>Age {forecast?.quoteAgeMs != null ? `${Math.round(forecast.quoteAgeMs)}ms` : "—"}</span>
+        </div>
+        <div className="gm-gh-horizons" data-testid="gh-horizons">
+          {[5, 15, 30, 60].map((h) => {
+            const hz = forecast?.horizons?.[String(h)] ?? forecast?.horizons?.[h as never];
+            return (
+              <div key={h} className="gm-gh-hz">
+                <div className="gm-gh-hz-title">{h}s</div>
+                <div>↑ {pct(hz?.pUp)}</div>
+                <div>↓ {pct(hz?.pDown)}</div>
+                <div className="gm-muted">∅ {pct(hz?.pNoEdge)}</div>
+                <div className="gm-gh-edge">
+                  Edge {signed(Math.max(hz?.expectedNetBuy ?? 0, hz?.expectedNetSell ?? 0))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="gm-gh-meta-row">
+          <span>Session {forecast?.session ?? "—"}</span>
+          <span>Regime {forecast?.regime ?? "—"}</span>
+          <span>Quality {forecast?.dataQuality ?? "—"}</span>
+          <span>Model {gh?.modelVersion ?? "—"}</span>
+        </div>
+      </section>
+
+      {/* Active shadow trade */}
+      {gh?.openTrade ? (
+        <section className="gm-gh-open" data-testid="gh-open-trade">
+          <h2>Active Shadow Trade</h2>
+          <div className="gm-gh-open-grid">
+            <div>
+              <span className="gm-label">Side</span>
+              <strong>{gh.openTrade.side}</strong>
+            </div>
+            <div>
+              <span className="gm-label">Entry</span>
+              <strong>{num(gh.openTrade.entryPrice, 2)}</strong>
+            </div>
+            <div>
+              <span className="gm-label">Current mid</span>
+              <strong>{num(forecast?.mid, 2)}</strong>
+            </div>
+            <div>
+              <span className="gm-label">P/L</span>
+              <strong>{signed(gh.openPnl)}</strong>
+            </div>
+            <div>
+              <span className="gm-label">Duration</span>
+              <strong>
+                {Math.max(
+                  0,
+                  Math.round((Date.now() - gh.openTrade.entryTimestampMs) / 1000)
+                )}
+                s
+              </strong>
+            </div>
+            <div>
+              <span className="gm-label">Entry reason</span>
+              <strong>{gh.openTrade.entryReason}</strong>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {/* Date nav */}
+      <section className="gm-gh-date-nav" data-testid="gh-date-nav">
+        <button type="button" className="gm-btn" onClick={() => shiftDate(-1)}>
+          Previous
+        </button>
+        <button type="button" className="gm-btn" onClick={() => setDate(dublinToday())}>
+          Today
+        </button>
+        <button
+          type="button"
+          className="gm-btn"
+          onClick={() => shiftDate(1)}
+          disabled={!availableDates.includes(
+            new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10)
+          )}
+        >
+          Next
+        </button>
+        <span className="gm-muted">{date} · Europe/Dublin</span>
+      </section>
+
+      {/* Equity curve */}
+      <section className="gm-gh-equity" data-testid="gh-equity-curve">
+        <h2>SHADOW Equity (day)</h2>
+        {curvePath ? (
+          <svg viewBox="0 0 320 64" className="gm-gh-equity-svg" role="img" aria-label="Shadow equity">
+            <path d={curvePath} fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        ) : (
+          <p className="gm-muted">No completed shadow trades for this day.</p>
+        )}
+      </section>
+
+      {/* Desktop trade table */}
+      <section className="gm-gh-trades-desktop" data-testid="gh-trades-desktop">
+        <h2>Daily Trade History</h2>
+        <table className="gm-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Duration</th>
+              <th>Result</th>
+              <th>P/L</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((t) => (
+              <tr key={t.tradeId}>
+                <td>{fmtTime(t.entryTimestampMs)}</td>
+                <td>{t.side}</td>
+                <td>{num(t.entryPrice, 2)}</td>
+                <td>{num(t.exitPrice, 2)}</td>
+                <td>{t.durationSeconds}s</td>
+                <td>{t.result}</td>
+                <td>{signed(t.netMove)}</td>
+                <td>{t.exitReason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!trades.length ? <p className="gm-muted">No shadow trades.</p> : null}
+      </section>
+
+      {/* Mobile trade rows — no horizontal scroll */}
+      <section className="gm-gh-trades-mobile" data-testid="gh-trades-mobile">
+        <h2>Daily Trade History</h2>
+        <div className="gm-gh-mobile-list">
+          {trades.map((t) => {
+            const open = expanded === t.tradeId;
+            return (
+              <button
+                type="button"
+                key={t.tradeId}
+                className="gm-gh-mobile-row"
+                data-testid="gh-mobile-trade-row"
+                onClick={() => setExpanded(open ? null : t.tradeId)}
+              >
+                <div className="gm-gh-mobile-main">
+                  <div>
+                    {t.side} · {fmtTime(t.entryTimestampMs)} · {t.durationSeconds}s
+                  </div>
+                  <div className={t.netMove >= 0 ? "gm-gh-pos" : "gm-gh-neg"}>
+                    {signed(t.netMove)}
+                  </div>
+                </div>
+                <div className="gm-gh-mobile-sub">
+                  <span>
+                    {num(t.entryPrice, 2)} → {num(t.exitPrice, 2)}
+                  </span>
+                  <span>{t.result}</span>
+                </div>
+                <div className="gm-gh-mobile-reason">{t.entryReason}</div>
+                {open ? (
+                  <div className="gm-gh-mobile-expand" data-testid="gh-mobile-expand">
+                    <div>
+                      In {fmtTime(t.entryTimestampMs)} · Out {fmtTime(t.exitTimestampMs)}
+                    </div>
+                    <div>
+                      5s {pct(t.entryProbs?.["5"]?.pUp)} / {pct(t.entryProbs?.["5"]?.pDown)}
+                    </div>
+                    <div>
+                      15s {pct(t.entryProbs?.["15"]?.pUp)} / {pct(t.entryProbs?.["15"]?.pDown)}
+                    </div>
+                    <div>
+                      30s {pct(t.entryProbs?.["30"]?.pUp)} / {pct(t.entryProbs?.["30"]?.pDown)}
+                    </div>
+                    <div>
+                      60s {pct(t.entryProbs?.["60"]?.pUp)} / {pct(t.entryProbs?.["60"]?.pDown)}
+                    </div>
+                    <div>
+                      Spread {num(t.entrySpread, 3)} · MFE {signed(t.mfe)} · MAE {signed(t.mae)}
+                    </div>
+                    <div>
+                      Exit {t.exitReason} · {t.modelVersion}
+                    </div>
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Explanations */}
+      {explanations.length ? (
+        <section className="gm-gh-explain" data-testid="gh-explanations">
+          <h2>Day notes</h2>
+          <ul>
+            {explanations.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* Model / data status */}
+      <section className="gm-gh-model" data-testid="gh-model-status">
+        <h2>Model / Data Status</h2>
         <div className="gm-micro-grid">
           <div>
-            <div className="gm-label">OAuth</div>
-            <div data-testid="micro-oauth-status">
-              {authorized ? "READ-ONLY AUTHORIZED" : "NOT AUTHORIZED"}
-            </div>
+            <div className="gm-label">Qualification</div>
+            <div>{String(modelInfo?.qualificationStatus ?? gh?.qualificationStatus ?? "NOT_TRAINED")}</div>
           </div>
           <div>
-            <div className="gm-label">Market feed</div>
-            <div data-testid="micro-connection-state">
-              {liveConnected ? "CONNECTED" : "NOT CONNECTED"}
-            </div>
+            <div className="gm-label">Model version</div>
+            <div>{gh?.modelVersion ?? "—"}</div>
           </div>
           <div>
-            <div className="gm-label">Data collector</div>
-            <div data-testid="micro-collector-label">{collectorLabel}</div>
-          </div>
-          <div>
-            <div className="gm-label">Broker</div>
-            <div>Pepperstone</div>
-          </div>
-          <div>
-            <div className="gm-label">Environment</div>
-            <div>{oauth?.environment ?? "DEMO"}</div>
-          </div>
-          <div>
-            <div className="gm-label">Account</div>
-            <div>{oauth?.selectedAccountIdMasked ?? "—"}</div>
-          </div>
-          <div>
-            <div className="gm-label">Symbol</div>
-            <div>{md?.symbol ?? "XAUUSD"}</div>
-          </div>
-          <div>
-            <div className="gm-label">Quote freshness</div>
-            <div>
-              {liveConnected && md?.quoteAgeMs != null
-                ? `${Math.round(md.quoteAgeMs)}ms`
-                : "—"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Last M1</div>
-            <div>{md?.lastCompletedM1Ts ?? "—"}</div>
+            <div className="gm-label">Live claim</div>
+            <div>NOT QUALIFIED FOR LIVE</div>
           </div>
         </div>
+      </section>
 
-        {!confirmOpen ? (
-          <div className="gm-micro-actions" style={{ marginTop: 14, display: "flex", gap: 10 }}>
-            {!authorized ? (
+      {/* OAuth connection (compact) */}
+      <section className="gm-card gm-micro-connection" data-testid="micro-edge-connection">
+        <h2>Read-only connection</h2>
+        <p className="gm-muted" style={{ marginTop: 0 }}>
+          OAuth scope=accounts · VIEW only · SHADOW engine never places orders.
+        </p>
+        <div className="gm-micro-actions" style={{ display: "flex", gap: 10 }}>
+          {!oauthOk ? (
+            !confirmOpen ? (
               <button
                 type="button"
                 className="gm-btn gm-btn-primary"
@@ -287,203 +591,31 @@ export function MicroEdgePage() {
                 Connect Micro Edge — Read Only
               </button>
             ) : (
-              <button
-                type="button"
-                className="gm-btn"
-                data-testid="micro-disconnect"
-                disabled={busy}
-                onClick={() => void onDisconnect()}
-              >
-                Disconnect Micro Edge
-              </button>
-            )}
-          </div>
-        ) : (
-          <div
-            className="gm-banner gm-banner-info"
-            data-testid="micro-oauth-confirm"
-            style={{ marginTop: 14 }}
-          >
-            <strong>Permission requested:</strong> VIEW-ONLY ACCOUNT ACCESS
-            <br />
-            <strong>Trading permission:</strong> NOT REQUESTED
-            <br />
-            <strong>Broker orders:</strong> IMPOSSIBLE FROM MICRO EDGE
-            <p className="gm-muted" style={{ marginBottom: 10 }}>
-              Technical guarantee: scope=accounts + Micro mutation-ban architecture.
-            </p>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                type="button"
-                className="gm-btn gm-btn-primary"
-                disabled={busy}
-                data-testid="micro-oauth-continue"
-                onClick={() => void onConfirmConnect()}
-              >
-                Continue
-              </button>
-              <button
-                type="button"
-                className="gm-btn"
-                disabled={busy}
-                onClick={() => setConfirmOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-        <p className="gm-muted" style={{ marginTop: 12 }}>
-          Market-data access only. Micro Edge cannot place broker orders.
-        </p>
-      </section>
-
-      <section className="gm-card gm-micro-status" data-testid="micro-edge-status">
-        <h2>Status</h2>
-        <div
-          className={`gm-banner ${liveConnected ? "gm-banner-info" : "gm-banner-danger"}`}
-          data-testid="micro-market-feed-status"
-        >
-          {status?.marketFeedStatus ?? md?.marketFeedStatus ?? "Market feed not connected"}
-          {connectionState ? ` · ${connectionState}` : ""}
-        </div>
-        <div className="gm-micro-grid">
-          <div>
-            <div className="gm-label">Collector health</div>
-            <div data-testid="micro-collector-health">
-              {md?.collectorHealthy || status?.collector?.healthy ? "Healthy" : "Unhealthy"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Observations</div>
-            <div>
-              M1 {md?.historicalObservationCounts?.M1 ?? 0} · quotes{" "}
-              {md?.quoteSamplesStored ?? 0}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Execution</div>
-            <div>Disabled (shadow)</div>
-          </div>
-        </div>
-        <p className="gm-muted gm-micro-disclaimer">
-          Shadow signal only — no broker order is submitted.
-        </p>
-      </section>
-
-      <section className="gm-card" data-testid="micro-edge-data-collection">
-        <h2>Data collection</h2>
-        <div className="gm-micro-grid">
-          <div>
-            <div className="gm-label">M1 observations</div>
-            <div>{md?.historicalObservationCounts?.M1 ?? 0}</div>
-          </div>
-          <div>
-            <div className="gm-label">M5 observations</div>
-            <div>{md?.historicalObservationCounts?.M5 ?? 0}</div>
-          </div>
-          <div>
-            <div className="gm-label">M15 observations</div>
-            <div>{md?.historicalObservationCounts?.M15 ?? 0}</div>
-          </div>
-          <div>
-            <div className="gm-label">Quote samples</div>
-            <div>{md?.quoteSamplesStored ?? 0}</div>
-          </div>
-          <div>
-            <div className="gm-label">Boundary quotes</div>
-            <div>{md?.boundaryQuoteCount ?? 0}</div>
-          </div>
-          <div>
-            <div className="gm-label">Label-ready minutes</div>
-            <div>{md?.labelReadyMinutes ?? 0}</div>
-          </div>
-        </div>
-        {(md?.healthReasons?.length || status?.collector?.reasons?.length) ? (
-          <p className="gm-muted" style={{ marginTop: 10 }}>
-            Reasons: {(md?.healthReasons ?? status?.collector?.reasons ?? []).join(", ")}
-          </p>
-        ) : null}
-      </section>
-
-      <section className="gm-card" data-testid="micro-edge-decision">
-        <h2>Micro decision</h2>
-        <p className="gm-micro-decision-value" data-testid="micro-overall-decision">
-          {!liveConnected ? "WAIT / DATA UNAVAILABLE" : "DATA COLLECTION"}
-        </p>
-        <p className="gm-muted">
-          Model status:{" "}
-          {status?.modelStatus ?? "DATA COLLECTION / NOT TRAINED ON REAL DATA"}
-        </p>
-        <p className="gm-micro-disclaimer">
-          Shadow signal only — no broker order is submitted.
-        </p>
-      </section>
-
-      {latest ? (
-        <section className="gm-card" data-testid="micro-edge-placeholder-model">
-          <h2>
-            Research placeholder{" "}
-            <span className="gm-chip gm-chip-warn">UNTRAINED PLACEHOLDER</span>{" "}
-            <span className="gm-chip gm-chip-warn">NOT FOR TRADING</span>
-          </h2>
-          <p className="gm-muted">
-            Probabilities below are not trained on live Micro observations and must not be
-            treated as trading signals.
-          </p>
-          <div className="gm-micro-horizon-row">
-            {(["1m", "5m", "15m"] as HorizonKey[]).map((h) => {
-              const hz = latest.horizons?.[h];
-              return (
-                <article key={h} className="gm-card gm-micro-horizon-card">
-                  <header>
-                    <strong>{h.toUpperCase()}</strong>
-                  </header>
-                  <div className="gm-micro-probs">
-                    <div>UP {pct(hz?.pUp)}</div>
-                    <div>DOWN {pct(hz?.pDown)}</div>
-                    <div>NO EDGE {pct(hz?.pNoEdge)}</div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="gm-card" data-testid="micro-edge-history">
-        <h2>Prediction history</h2>
-        <p className="gm-muted">
-          Empty until a trained research model is activated. Data collection does not create
-          tradeable forecasts.
-        </p>
-        <div className="gm-table-wrap">
-          <table className="gm-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Mid</th>
-                <th>5M decision</th>
-                <th>Model</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>No Micro predictions yet.</td>
-                </tr>
-              ) : (
-                history.map((row) => (
-                  <tr key={row.predictionId}>
-                    <td>{row.candleCloseTs}</td>
-                    <td>{num(row.mid, 2)}</td>
-                    <td>{row.horizons?.["5m"]?.decision ?? "—"}</td>
-                    <td className="gm-mono">{row.modelVersion}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+              <>
+                <button
+                  type="button"
+                  className="gm-btn gm-btn-primary"
+                  disabled={busy}
+                  onClick={() => void onConfirmConnect()}
+                >
+                  Confirm read-only connect
+                </button>
+                <button type="button" className="gm-btn" onClick={() => setConfirmOpen(false)}>
+                  Cancel
+                </button>
+              </>
+            )
+          ) : (
+            <button
+              type="button"
+              className="gm-btn"
+              data-testid="micro-disconnect"
+              disabled={busy}
+              onClick={() => void onDisconnect()}
+            >
+              Disconnect Micro Edge
+            </button>
+          )}
         </div>
       </section>
     </div>

@@ -514,6 +514,16 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
         hasMore: this.tickHasMore
       };
     }
+    if (command === "ProtoOATraderReq") {
+      return {
+        trader: {
+          balance: 100_000 * 100, // moneyDigits=2 → 100000.00
+          moneyDigits: 2,
+          depositAssetId: 15,
+          depositCurrency: "EUR"
+        }
+      };
+    }
     if (
       command === "ProtoOAApplicationAuthReq" ||
       command === "ProtoOAAccountAuthReq" ||
