@@ -18,7 +18,7 @@ export function defaultGhFastConfig(
       over.rearmFloorMs ?? GH_FAST_REARM_FLOOR_MS_DEFAULT
     )
   );
-  return {
+  const base: GhFastConfig = {
     rearmFloorMs: rearm,
     maxSpread: 0.35,
     sideFreshnessMs: 1500,
@@ -33,8 +33,7 @@ export function defaultGhFastConfig(
     minSetupQuality: 0.55,
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
-    pullbackRetraceMax: 0.45,
-    ...over,
-    rearmFloorMs: rearm
+    pullbackRetraceMax: 0.45
   };
+  return { ...base, ...over, rearmFloorMs: rearm };
 }
