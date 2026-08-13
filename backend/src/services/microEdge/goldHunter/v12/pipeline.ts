@@ -12,7 +12,11 @@ import { computePolicyBacktest } from "../metrics";
 import { ndjsonGzToRows } from "../compactStorage";
 import { activityBand, computeActivityMetrics } from "../v11/activityMetrics";
 import type { AdaptivePercentile, AdaptiveRankWindowSec } from "./adaptiveRank";
-import { buildV12ResearchRows, type V12ResearchRow } from "./datasetRows";
+import {
+  buildV12ResearchRows,
+  horizonNetCompact,
+  type V12ResearchRow
+} from "./datasetRows";
 import { deriveTrailParamsFromTrain, type V12ExitConfig } from "./exits";
 import { buildFrozenV12 } from "./frozenConfig";
 import {
@@ -76,11 +80,7 @@ function horizonNet(
   row: V12ResearchRow,
   h: number
 ): { long: number; short: number } {
-  const lab = row.labels[h] ?? row.labels[5] ?? row.labels[15];
-  return {
-    long: lab?.netLong ?? 0,
-    short: lab?.netShort ?? 0
-  };
+  return horizonNetCompact(row, h);
 }
 
 function pickHorizon(sec: number): 5 | 15 | 30 | 60 {
@@ -106,7 +106,7 @@ function trainFamily(
 ): FittedModels | null {
   const tr = strideRows(train, stride);
   if (tr.length < 400) return null;
-  const X = tr.map((r) => r.x);
+  const X = tr.map((r) => Array.from(r.x));
   const pH = pickHorizon(primaryH);
   const cH = pickHorizon(contextH);
   const pNets = tr.map((r) => horizonNet(r, pH));
@@ -198,10 +198,15 @@ function trainFamily(
   };
 }
 
+function rowX(row: V12ResearchRow): number[] {
+  return Array.from(row.x);
+}
+
 function scoreRow(models: FittedModels, row: V12ResearchRow): V12HorizonScores {
+  const x = rowX(row);
   if (models.family === "independent_binary") {
-    const p = predictBinarySides(models.primary as HorizonBinaryBundle, row.x);
-    const c = predictBinarySides(models.context as HorizonBinaryBundle, row.x);
+    const p = predictBinarySides(models.primary as HorizonBinaryBundle, x);
+    const c = predictBinarySides(models.context as HorizonBinaryBundle, x);
     return {
       buyPrimary: p.pBuy,
       sellPrimary: p.pSell,
@@ -215,8 +220,8 @@ function scoreRow(models: FittedModels, row: V12ResearchRow): V12HorizonScores {
     };
   }
   if (models.family === "two_stage_opportunity") {
-    const p = predictTwoStage(models.primary as TwoStageBundle, row.x);
-    const c = predictTwoStage(models.context as TwoStageBundle, row.x);
+    const p = predictTwoStage(models.primary as TwoStageBundle, x);
+    const c = predictTwoStage(models.context as TwoStageBundle, x);
     return {
       buyPrimary: p.buy,
       sellPrimary: p.sell,
@@ -226,8 +231,8 @@ function scoreRow(models: FittedModels, row: V12ResearchRow): V12HorizonScores {
       expectedAbsEdge: p.pOpportunity * Math.max(p.buy, p.sell)
     };
   }
-  const p = predictEdge(models.primary as HorizonEdgeBundle, row.x);
-  const c = predictEdge(models.context as HorizonEdgeBundle, row.x);
+  const p = predictEdge(models.primary as HorizonEdgeBundle, x);
+  const c = predictEdge(models.context as HorizonEdgeBundle, x);
   return {
     buyPrimary: edgeOverSpread(p.expectedNetLong, row.spread),
     sellPrimary: edgeOverSpread(p.expectedNetShort, row.spread),
@@ -349,16 +354,25 @@ export async function runGoldHunterV12Pipeline(args: {
     toMs: number;
   }>;
 }): Promise<V12PipelineResult> {
-  const stride = args.trainStride ?? Number(process.env.GOLD_HUNTER_V12_TRAIN_STRIDE ?? 6);
-  log("asof_start", { ticks: args.ticks.length, gitSha: gitSha() });
+  const stride = args.trainStride ?? Number(process.env.GOLD_HUNTER_V12_TRAIN_STRIDE ?? 8);
+  const sampleStride = Number(process.env.GOLD_HUNTER_V12_SAMPLE_STRIDE ?? 3);
+  log("asof_start", {
+    ticks: args.ticks.length,
+    gitSha: gitSha(),
+    sampleStride,
+    trainStride: stride
+  });
   const built = buildV12ResearchRows({
     ticks: args.ticks,
     m1Bars: args.m1Bars,
     m5Bars: args.m5Bars,
     m15Bars: args.m15Bars,
     fromMs: args.dataFromMs,
-    toMs: args.dataToMs
+    toMs: args.dataToMs,
+    sampleStride
   });
+  // Drop raw ticks ASAP — research rows are self-contained.
+  args.ticks.length = 0;
   log("asof_done", {
     rows: built.rows.length,
     coveragePct: built.gridStats.coveragePct,
@@ -381,7 +395,7 @@ export async function runGoldHunterV12Pipeline(args: {
     purged: plan.purgedCount
   });
 
-  // Compact but representative search (stability-first; runtime-feasible).
+  // Compact representative search (fits 56d walk-forward runtime/memory).
   const families: V12ModelFamily[] = [
     "independent_binary",
     "two_stage_opportunity",
@@ -404,9 +418,7 @@ export async function runGoldHunterV12Pipeline(args: {
   };
   const candidates: Cand[] = [];
 
-  const archs = V12_ARCHITECTURES.filter((a) =>
-    ["M5s_15s", "E_5_15"].includes(a.id)
-  );
+  const archs = V12_ARCHITECTURES.filter((a) => a.id === "E_5_15");
 
   for (const family of families) {
     for (const arch of archs) {
@@ -414,9 +426,14 @@ export async function runGoldHunterV12Pipeline(args: {
         for (const pct of percentiles) {
           for (const ex of exitArchs) {
             for (const mh of maxHolds) {
-              // 4×2×2×2×2×2 = 128 candidates × folds — still heavy; skip ridge@low rank.
-              if (family === "direct_edge_ridge" && pct === 0.9) continue;
-              if (family === "shallow_boost_edge" && ex === "FIXED_MAX_HOLD" && mh === 30) {
+              // Prefer hybrid exits for nonlinear; skip some low-priority cells.
+              if (family === "direct_edge_ridge" && (pct === 0.9 || mh === 30)) {
+                continue;
+              }
+              if (family === "shallow_boost_edge" && ex === "FIXED_MAX_HOLD") {
+                continue;
+              }
+              if (family === "independent_binary" && rw === 1800 && pct === 0.9) {
                 continue;
               }
               const foldResults: FoldResult[] = [];
@@ -682,32 +699,40 @@ export async function runGoldHunterV12Pipeline(args: {
   // Known stress replay — AFTER freeze, no retune
   const knownStressReplay: V12PipelineResult["knownStressReplay"] = [];
   for (const bundle of args.stressBundles ?? []) {
-    const stressBuilt = buildV12ResearchRows({
-      ticks: bundle.ticks,
-      m1Bars: bundle.m1,
-      m5Bars: bundle.m5,
-      m15Bars: bundle.m15,
-      fromMs: bundle.fromMs,
-      toMs: bundle.toMs,
-      keptIndices: built.keptIndices
-    });
-    const stressRows = stressBuilt.rows;
-    const trades = runV12ShadowReplay(
-      toScoreRows(finalModels, stressRows),
-      frozenPolicy
-    );
-    const bt = computePolicyBacktest(trades);
-    const hours = Math.max(1e-9, (bundle.toMs - bundle.fromMs) / 3_600_000);
-    knownStressReplay.push({
-      id: bundle.id,
-      label: "KNOWN_STRESS_REPLAY",
-      trades: bt.tradeCount,
-      netPnl: bt.netPnl,
-      expectancy: bt.expectancy,
-      profitFactor: bt.profitFactor,
-      tradesPerHour: bt.tradeCount / hours
-    });
-    log("stress_replay", { id: bundle.id, net: bt.netPnl, trades: bt.tradeCount });
+    try {
+      const stressBuilt = buildV12ResearchRows({
+        ticks: bundle.ticks,
+        m1Bars: bundle.m1,
+        m5Bars: bundle.m5,
+        m15Bars: bundle.m15,
+        fromMs: bundle.fromMs,
+        toMs: bundle.toMs,
+        keptIndices: built.keptIndices,
+        sampleStride: Math.max(sampleStride, 4)
+      });
+      bundle.ticks.length = 0;
+      const trades = runV12ShadowReplay(
+        toScoreRows(finalModels, stressBuilt.rows),
+        frozenPolicy
+      );
+      const bt = computePolicyBacktest(trades);
+      const hours = Math.max(1e-9, (bundle.toMs - bundle.fromMs) / 3_600_000);
+      knownStressReplay.push({
+        id: bundle.id,
+        label: "KNOWN_STRESS_REPLAY",
+        trades: bt.tradeCount,
+        netPnl: bt.netPnl,
+        expectancy: bt.expectancy,
+        profitFactor: bt.profitFactor,
+        tradesPerHour: bt.tradeCount / hours
+      });
+      log("stress_replay", { id: bundle.id, net: bt.netPnl, trades: bt.tradeCount });
+    } catch (e) {
+      log("stress_replay_skipped", {
+        id: bundle.id,
+        message: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)
+      });
+    }
   }
   void V12_KNOWN_STRESS_PERIODS;
 

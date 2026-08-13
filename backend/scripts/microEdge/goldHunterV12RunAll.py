@@ -18,8 +18,9 @@ def main() -> None:
     os.environ.setdefault("MICRO_DEPLOYED_RUNTIME", "true")
     os.environ.setdefault("MICRO_CTRADER_ENVIRONMENT", "DEMO")
     os.environ.setdefault("MICRO_HISTORICAL_MIN_INTERVAL_MS", "250")
-    os.environ.setdefault("NODE_OPTIONS", "--max-old-space-size=12288")
-    os.environ.setdefault("GOLD_HUNTER_V12_TRAIN_STRIDE", "6")
+    os.environ.setdefault("NODE_OPTIONS", "--max-old-space-size=14000")
+    os.environ.setdefault("GOLD_HUNTER_V12_TRAIN_STRIDE", "8")
+    os.environ.setdefault("GOLD_HUNTER_V12_SAMPLE_STRIDE", "3")
     # First fetch must not reuse empty dir.
     os.environ["GOLD_HUNTER_REUSE_LOCAL"] = os.environ.get(
         "GOLD_HUNTER_V12_FORCE_REUSE", "0"
