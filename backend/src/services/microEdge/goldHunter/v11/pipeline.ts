@@ -820,6 +820,55 @@ export async function runGoldHunterV11Pipeline(args: {
     return result;
   }
 
+  // Re-score selected policy on FULL validation before freeze
+  log("full_validation_rescore", { family: best.family });
+  let fullValRows: V11ScoreRow[];
+  if (best.family === "independent_binary") {
+    fullValRows = buildBinaryScores(split.validation, valX);
+  } else if (best.family === "direct_edge_ridge") {
+    fullValRows = buildEdgeScores(split.validation, valX, ridgeBundles);
+  } else if (best.family === "stump_boost_edge") {
+    fullValRows = buildEdgeScores(split.validation, valX, stumpBundles);
+  } else {
+    fullValRows = buildMultiScores(split.validation);
+  }
+  const fullValTrades = runV11ShadowReplay(fullValRows, best.policy);
+  const fullValElig = evaluateCandidateEligibility(fullValTrades);
+  if (!(fullValElig.eligible && multiDay(fullValTrades))) {
+    const result: V11PipelineResult = {
+      ...baseResult,
+      v1Diagnostics,
+      modelComparison,
+      selectedFamily: best.family,
+      selectedPolicy: best.policy,
+      frozenConfig: null,
+      frozenConfigSha256: null,
+      validation: {
+        ...fullValElig.stats,
+        tradesPerDay: dailyStats(fullValTrades).tradesPerDay,
+        daily: dailyStats(fullValTrades)
+      },
+      holdout: null,
+      postHoldoutAudit: null,
+      qualificationStatus: "NO_PREDICTIVE_EDGE",
+      featureDropped: droppedKeys
+    };
+    if (args.persist && args.dataDir) {
+      mkdirSync(args.dataDir, { recursive: true });
+      writeFileSync(
+        join(args.dataDir, "phase2b2-v11-report.json"),
+        JSON.stringify(result, null, 2)
+      );
+    }
+    return result;
+  }
+  best = {
+    family: best.family,
+    policy: best.policy,
+    trades: fullValTrades,
+    eligibility: fullValElig
+  };
+
   // ---- FREEZE ----
   const trainRangeUtc = {
     from: utcIso(split.trainRange!.fromMs),

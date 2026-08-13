@@ -201,31 +201,33 @@ export function trainStumpBoost(
   opts?: { stumps?: number; lr?: number; clipAbs?: number; maxFitRows?: number }
 ): StumpBoostModel {
   const clip = opts?.clipAbs ?? trainClipAbs(yRaw);
-  const y = yRaw.map((v) => Math.max(-clip, Math.min(clip, v)));
-  const base = trainRidgeRegression(X, y, { clipAbs: clip, l2: 1.5 });
-  const residual = y.map((yi, i) => yi - predictRidge(base, X[i]!));
+  const maxFit = opts?.maxFitRows ?? 30_000;
+  const stride = X.length > maxFit ? Math.ceil(X.length / maxFit) : 1;
+  const Xfit: number[][] = [];
+  const yFitRaw: number[] = [];
+  for (let i = 0; i < X.length; i += stride) {
+    Xfit.push(X[i]!);
+    yFitRaw.push(yRaw[i]!);
+  }
+  const y = yFitRaw.map((v) => Math.max(-clip, Math.min(clip, v)));
+  // Fit ridge + stumps entirely on the deterministic subsample for speed.
+  const base = trainRidgeRegression(Xfit, y, { clipAbs: clip, l2: 1.5 });
+  const residual = y.map((yi, i) => yi - predictRidge(base, Xfit[i]!));
   const stumps: Stump[] = [];
   const lr = opts?.lr ?? 0.35;
   const nStumps = opts?.stumps ?? 8;
-  const d = X[0]?.length ?? 0;
-  const maxFit = opts?.maxFitRows ?? 40_000;
-  const stride = X.length > maxFit ? Math.ceil(X.length / maxFit) : 1;
-  const fitIdx: number[] = [];
-  for (let i = 0; i < X.length; i += stride) fitIdx.push(i);
-  const Xfit = fitIdx.map((i) => X[i]!);
-  // Deterministic feature subsample per stump
+  const d = Xfit[0]?.length ?? 0;
   for (let t = 0; t < nStumps; t++) {
     const featureSample: number[] = [];
     for (let j = 0; j < d; j++) {
       if ((j + t * 7) % 3 === 0) featureSample.push(j);
     }
     if (!featureSample.length && d) featureSample.push(t % d);
-    const resFit = fitIdx.map((i) => residual[i]!);
-    const stump = bestStump(Xfit, resFit, featureSample);
+    const stump = bestStump(Xfit, residual, featureSample);
     stumps.push(stump);
-    for (let i = 0; i < X.length; i++) {
+    for (let i = 0; i < Xfit.length; i++) {
       const pred =
-        X[i]![stump.featureIndex]! <= stump.threshold
+        Xfit[i]![stump.featureIndex]! <= stump.threshold
           ? stump.leftValue
           : stump.rightValue;
       residual[i]! -= lr * pred;
