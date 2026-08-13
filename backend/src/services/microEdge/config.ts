@@ -37,6 +37,22 @@ export const MICRO_QUOTE_SAMPLE_INTERVAL_MS = Number(
   process.env.MICRO_QUOTE_SAMPLE_INTERVAL_MS ?? 5000
 );
 
+/** Historical Bid/Ask boundary backfill days (default 30). */
+export const MICRO_HISTORICAL_QUOTE_BACKFILL_DAYS = Number(
+  process.env.MICRO_HISTORICAL_QUOTE_BACKFILL_DAYS ?? 30
+);
+
+/** Max window for a single ProtoOAGetTickDataReq (7 days). */
+export const MICRO_HISTORICAL_TICK_MAX_WINDOW_MS = 604_800_000;
+
+/** Boundary quote side tolerance after minute T (ms). */
+export const MICRO_BOUNDARY_QUOTE_TOLERANCE_MS = 5_000;
+
+/** Conservative historical request pacing (~2 req/s). */
+export const MICRO_HISTORICAL_MIN_INTERVAL_MS = Number(
+  process.env.MICRO_HISTORICAL_MIN_INTERVAL_MS ?? 500
+);
+
 /** Minimum positive NET edge theta by horizon (USD/oz). Validation-selected, frozen for V1. */
 export const MICRO_THETA: Record<MicroHorizon, number> = {
   "1m": 0.05,

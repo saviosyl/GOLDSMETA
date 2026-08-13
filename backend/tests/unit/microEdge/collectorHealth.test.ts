@@ -87,6 +87,7 @@ describe("Micro Edge collector health (fail-closed)", () => {
     const states = client.capabilityStates();
     expect(states.M1_TRENDBARS).toBe("LIVE_NOT_CONNECTED");
     expect(states.DEPTH_OF_MARKET).toBe("FEATURE_GATED");
-    expect(states.HISTORICAL_TICKS).toBe("FEATURE_GATED");
+    // Historical ticks are DATA-ONLY activation support (INTERFACE_READY until live).
+    expect(states.HISTORICAL_TICKS).toBe("INTERFACE_READY");
   });
 });

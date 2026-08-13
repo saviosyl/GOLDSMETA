@@ -18,7 +18,9 @@ import {
 import {
   assertReadOnlyCommand,
   asFiniteNumber,
-  MICRO_TRENDBAR_PERIOD
+  MICRO_QUOTE_TYPE,
+  MICRO_TRENDBAR_PERIOD,
+  type MicroHistoricalQuoteSide
 } from "./microCTraderProtocol";
 import type { MicroTimeframe } from "./types";
 
@@ -52,6 +54,12 @@ export type MicroOpenApiTransport = {
   }): Promise<{ trendbar?: unknown }>;
   subscribeSpots(symbolId: string): Promise<void>;
   listSymbols(): Promise<Array<Record<string, unknown>>>;
+  getTickData(args: {
+    symbolId: string;
+    side: MicroHistoricalQuoteSide;
+    fromTimestamp: number;
+    toTimestamp: number;
+  }): Promise<{ tickData?: unknown; hasMore?: boolean }>;
   /** Test/observability: count of SubscribeSpots commands sent. */
   getSubscribeSpotsCallCount(): number;
 };
@@ -342,6 +350,21 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     if (res.symbol) return [res.symbol];
     return [];
   }
+
+  async getTickData(args: {
+    symbolId: string;
+    side: MicroHistoricalQuoteSide;
+    fromTimestamp: number;
+    toTimestamp: number;
+  }): Promise<{ tickData?: unknown; hasMore?: boolean }> {
+    return (await this.sendReadCommand("ProtoOAGetTickDataReq", {
+      ctidTraderAccountId: Number(this.credentials.accountId),
+      symbolId: Number(args.symbolId),
+      type: MICRO_QUOTE_TYPE[args.side],
+      fromTimestamp: args.fromTimestamp,
+      toTimestamp: args.toTimestamp
+    })) as { tickData?: unknown; hasMore?: boolean };
+  }
 }
 
 /**
@@ -370,10 +393,14 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     }
   ];
   trendbarsByTf = new Map<MicroTimeframe, unknown[]>();
+  /** Fake historical ticks keyed by side. */
+  tickDataBySide = new Map<MicroHistoricalQuoteSide, unknown[]>();
+  tickHasMore = false;
   private readonly handlers = new Map<string, Set<MicroTransportEventHandler>>();
   nextSpot: Record<string, unknown> | null = null;
   failConnectCode: string | null = null;
   rateLimitOnce = false;
+  getTickDataCallCount = 0;
 
   isConnected(): boolean {
     return this.connected;
@@ -466,6 +493,27 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       }
       return {};
     }
+    if (command === "ProtoOAGetTickDataReq") {
+      this.getTickDataCallCount += 1;
+      const type = asFiniteNumber(payload.type);
+      const side: MicroHistoricalQuoteSide | null =
+        type === MICRO_QUOTE_TYPE.BID
+          ? "BID"
+          : type === MICRO_QUOTE_TYPE.ASK
+            ? "ASK"
+            : null;
+      const fromTs = asFiniteNumber(payload.fromTimestamp) ?? 0;
+      const toTs = asFiniteNumber(payload.toTimestamp) ?? 0;
+      if (toTs - fromTs > 604_800_000) {
+        throw Object.assign(new Error("FAKE_TICK_WINDOW_TOO_LARGE"), {
+          code: "tick_window_too_large"
+        });
+      }
+      return {
+        tickData: side ? this.tickDataBySide.get(side) ?? [] : [],
+        hasMore: this.tickHasMore
+      };
+    }
     if (
       command === "ProtoOAApplicationAuthReq" ||
       command === "ProtoOAAccountAuthReq" ||
@@ -515,5 +563,19 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
 
   async listSymbols(): Promise<Array<Record<string, unknown>>> {
     return this.symbols;
+  }
+
+  async getTickData(args: {
+    symbolId: string;
+    side: MicroHistoricalQuoteSide;
+    fromTimestamp: number;
+    toTimestamp: number;
+  }): Promise<{ tickData?: unknown; hasMore?: boolean }> {
+    return (await this.sendReadCommand("ProtoOAGetTickDataReq", {
+      symbolId: Number(args.symbolId),
+      type: MICRO_QUOTE_TYPE[args.side],
+      fromTimestamp: args.fromTimestamp,
+      toTimestamp: args.toTimestamp
+    })) as { tickData?: unknown; hasMore?: boolean };
   }
 }

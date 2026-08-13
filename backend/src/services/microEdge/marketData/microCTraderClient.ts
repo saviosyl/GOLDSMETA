@@ -96,12 +96,19 @@ export class MicroCTraderReadOnlyClient {
         : live === "MOCK_SEEDED"
           ? "MOCK_SEEDED"
           : "LIVE_NOT_CONNECTED";
+    // Historical ticks are DATA-ONLY read support (activation layer) — not FEATURE_GATED.
+    const tickState =
+      live === "LIVE_CONNECTED"
+        ? "LIVE_CONNECTED"
+        : live === "MOCK_SEEDED"
+          ? "MOCK_SEEDED"
+          : "INTERFACE_READY";
     return {
       M1_TRENDBARS: barState,
       M5_TRENDBARS: barState,
       M15_TRENDBARS: barState,
       BID_ASK_SPOT: barState,
-      HISTORICAL_TICKS: "FEATURE_GATED",
+      HISTORICAL_TICKS: tickState,
       DEPTH_OF_MARKET: "FEATURE_GATED",
       LIVE_TRENDBAR_SUB: "FEATURE_GATED"
     };

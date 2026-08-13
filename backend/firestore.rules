@@ -199,6 +199,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Micro Edge — Admin/backend only. Client must never read OAuth material.
+    match /microEdge/{document=**} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

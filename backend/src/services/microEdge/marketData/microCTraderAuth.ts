@@ -25,11 +25,70 @@ export type MicroAuthLoadResult =
   | { ok: true; credentials: MicroCTraderCredentials }
   | { ok: false; reason: "oauth_missing"; missing: string[] };
 
+export type MicroCTraderAppConfig = {
+  clientId: string;
+  clientSecret: string;
+  environment: MicroCTraderEnvironment;
+  tokenUrl: string;
+  authUrl: string;
+  redirectUri: string;
+};
+
+export type MicroAppConfigLoadResult =
+  | { ok: true; config: MicroCTraderAppConfig }
+  | { ok: false; reason: "oauth_missing"; missing: string[] };
+
 export const MICRO_CTRADER_DEFAULT_TOKEN_URL =
   "https://openapi.ctrader.com/apps/token";
 export const MICRO_CTRADER_DEFAULT_AUTH_URL =
   "https://id.ctrader.com/my/settings/openapi/grantingaccess/";
 
+/**
+ * Application credentials for OAuth start (no access/refresh tokens).
+ * Dynamic tokens belong in the encrypted Micro vault after user authorization.
+ */
+export function loadMicroCTraderAppConfig(
+  env: NodeJS.ProcessEnv = process.env
+): MicroAppConfigLoadResult {
+  const clientId = (env.MICRO_CTRADER_CLIENT_ID ?? "").trim();
+  const clientSecret = (env.MICRO_CTRADER_CLIENT_SECRET ?? "").trim();
+  const environmentRaw = (env.MICRO_CTRADER_ENVIRONMENT ?? "DEMO")
+    .trim()
+    .toUpperCase();
+  const environment: MicroCTraderEnvironment =
+    environmentRaw === "LIVE" ? "LIVE" : "DEMO";
+  const tokenUrl = (
+    env.MICRO_CTRADER_TOKEN_URL ?? MICRO_CTRADER_DEFAULT_TOKEN_URL
+  ).trim();
+  const authUrl = (
+    env.MICRO_CTRADER_AUTH_URL ?? MICRO_CTRADER_DEFAULT_AUTH_URL
+  ).trim();
+  const redirectUri = (env.MICRO_CTRADER_REDIRECT_URI ?? "").trim();
+
+  const missing: string[] = [];
+  if (!clientId) missing.push("MICRO_CTRADER_CLIENT_ID");
+  if (!clientSecret) missing.push("MICRO_CTRADER_CLIENT_SECRET");
+  if (!redirectUri) missing.push("MICRO_CTRADER_REDIRECT_URI");
+  if (missing.length) return { ok: false, reason: "oauth_missing", missing };
+
+  return {
+    ok: true,
+    config: {
+      clientId,
+      clientSecret,
+      environment,
+      tokenUrl,
+      authUrl,
+      redirectUri
+    }
+  };
+}
+
+/**
+ * Optional env-based credentials for CLI/smoke (not the preferred OAuth vault path).
+ * Never reads Core CTRADER_ACCESS_TOKEN / CTRADER_REFRESH_TOKEN.
+ * Redirect URI is optional here (required only for interactive OAuth start).
+ */
 export function loadMicroCTraderCredentials(
   env: NodeJS.ProcessEnv = process.env
 ): MicroAuthLoadResult {
@@ -38,11 +97,17 @@ export function loadMicroCTraderCredentials(
   const accessToken = (env.MICRO_CTRADER_ACCESS_TOKEN ?? "").trim();
   const refreshToken = (env.MICRO_CTRADER_REFRESH_TOKEN ?? "").trim() || null;
   const accountId = (env.MICRO_CTRADER_ACCOUNT_ID ?? "").trim();
-  const environmentRaw = (env.MICRO_CTRADER_ENVIRONMENT ?? "DEMO").trim().toUpperCase();
+  const environmentRaw = (env.MICRO_CTRADER_ENVIRONMENT ?? "DEMO")
+    .trim()
+    .toUpperCase();
   const environment: MicroCTraderEnvironment =
     environmentRaw === "LIVE" ? "LIVE" : "DEMO";
-  const tokenUrl = (env.MICRO_CTRADER_TOKEN_URL ?? MICRO_CTRADER_DEFAULT_TOKEN_URL).trim();
-  const authUrl = (env.MICRO_CTRADER_AUTH_URL ?? MICRO_CTRADER_DEFAULT_AUTH_URL).trim();
+  const tokenUrl = (
+    env.MICRO_CTRADER_TOKEN_URL ?? MICRO_CTRADER_DEFAULT_TOKEN_URL
+  ).trim();
+  const authUrl = (
+    env.MICRO_CTRADER_AUTH_URL ?? MICRO_CTRADER_DEFAULT_AUTH_URL
+  ).trim();
   const redirectUri = (env.MICRO_CTRADER_REDIRECT_URI ?? "").trim() || null;
 
   const missing: string[] = [];

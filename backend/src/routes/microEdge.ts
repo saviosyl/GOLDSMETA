@@ -1,6 +1,7 @@
 /**
  * Micro Edge read-only API — SHADOW ONLY.
  * No order / live-enable / Demo execution / Core settings endpoints.
+ * OAuth is Micro-isolated (scope=accounts only).
  */
 import { Router } from "express";
 import { requireAuth, getAuthenticatedUserId } from "../middleware/auth";
@@ -23,6 +24,16 @@ import {
   buildMarketDataStatusPayload,
   getMicroMarketClient
 } from "../services/microEdge/marketData/marketDataService";
+import {
+  completeMicroOAuthCallback,
+  disconnectMicroOAuth,
+  getMicroOAuthStatus,
+  selectMicroOAuthAccount,
+  startMicroOAuth
+} from "../services/microEdge/marketData/oauthService";
+import { fetchMicroAuthorizedAccounts } from "../services/microEdge/marketData/fetchAuthorizedAccounts";
+import { computeLabelReadyDiagnostics } from "../services/microEdge/marketData/historicalTicks";
+import { getMicroMarketDataStore } from "../services/microEdge/marketData/marketDataService";
 
 /** Process-local shadow store for predictions until workers wire Firestore. */
 const memoryStore = new MemoryMicroEdgeStore();
@@ -40,9 +51,11 @@ export const buildMicroEdgeRouter = (): Router => {
   const router = Router();
   const gate = [requireAuth, ...approvedAccountGate];
 
-  router.get("/v1/micro-edge/status", ...gate, async (_req, res) => {
+  router.get("/v1/micro-edge/status", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
     const latest = await memoryStore.getLatestPrediction();
     const marketData = await buildMarketDataStatusPayload();
+    const oauth = await getMicroOAuthStatus(uid);
     const healthy = Boolean(marketData.collectorHealthy);
     res.json({
       shadowOnly: MICRO_SHADOW_ONLY,
@@ -64,21 +77,153 @@ export const buildMicroEdgeRouter = (): Router => {
       capabilityStates: marketData.capabilityStates,
       marketData,
       collector: marketData.collector,
+      oauth: oauth.oauth,
+      oauthAppConfigured: oauth.appConfigured,
       overallMicroDecision: healthy ? latest?.overallMicroDecision ?? "WAIT" : "WAIT",
       dataUnavailable: !healthy,
       degradedReason: healthy ? null : "DATA UNAVAILABLE",
       dataCollectionActive: marketData.dataCollectionActive,
-      modelStatus: "RESEARCH / NOT TRAINED ON LIVE DATA"
+      modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
+      realConnectionStatus: oauth.realConnectionStatus
+    });
+  });
+
+  router.get("/v1/micro-edge/oauth/status", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    const status = await getMicroOAuthStatus(uid);
+    res.json({
+      ...status,
+      disclaimer:
+        "READ-ONLY CONNECTION. Micro Edge cannot place trades. Market/account-data access only.",
+      accessToken: undefined,
+      refreshToken: undefined,
+      clientSecret: undefined
+    });
+  });
+
+  router.post("/v1/micro-edge/oauth/start", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    try {
+      const started = await startMicroOAuth(uid);
+      res.json({
+        ...started,
+        disclaimer:
+          "Permission requested: VIEW-ONLY ACCOUNT ACCESS. Trading permission: NOT REQUESTED. Broker orders: IMPOSSIBLE FROM MICRO EDGE."
+      });
+    } catch (e) {
+      res.status(400).json({
+        ok: false,
+        code: (e as { code?: string }).code ?? "oauth_start_failed",
+        message: (e as Error).message,
+        missing: (e as { missing?: string[] }).missing
+      });
+    }
+  });
+
+  /**
+   * OAuth callback — frontend lands on /micro-edge/connect/callback then POSTs here
+   * with { code, sessionId }. Authorization code is single-use.
+   */
+  router.post("/v1/micro-edge/oauth/callback", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    const body = (req.body ?? {}) as {
+      code?: unknown;
+      sessionId?: unknown;
+      accountId?: unknown;
+    };
+    const code = String(body.code ?? "").trim();
+    const sessionId = String(body.sessionId ?? "").trim();
+    const explicitAccountId =
+      body.accountId != null ? String(body.accountId).trim() : null;
+    if (!code || !sessionId) {
+      res.status(400).json({
+        ok: false,
+        code: "oauth_missing",
+        message: "code and sessionId are required"
+      });
+      return;
+    }
+    const result = await completeMicroOAuthCallback({
+      uid,
+      code,
+      sessionId,
+      explicitAccountId,
+      deps: {
+        fetchAuthorizedAccounts: async (a) =>
+          fetchMicroAuthorizedAccounts({
+            clientId: a.clientId,
+            clientSecret: a.clientSecret,
+            accessToken: a.accessToken,
+            environment: a.environment
+          })
+      }
+    });
+    if (!result.ok) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json({
+      ...result,
+      disclaimer: "READ-ONLY CONNECTION established locally. No broker orders possible.",
+      accessToken: undefined,
+      refreshToken: undefined
+    });
+  });
+
+  /** Public browser redirect target helper — exchanges via authenticated POST preferred. */
+  router.get("/v1/micro-edge/oauth/callback", ...gate, async (req, res) => {
+    // Prefer SPA route; this exists for redirect_uri registration flexibility.
+    const code = String(req.query.code ?? "").trim();
+    const sessionId = String(req.query.session_id ?? req.query.sessionId ?? "").trim();
+    res.json({
+      ok: Boolean(code),
+      codePresent: Boolean(code),
+      sessionIdPresent: Boolean(sessionId),
+      next: "POST /v1/micro-edge/oauth/callback with { code, sessionId } from authenticated SPA",
+      disclaimer: "Do not paste tokens. Complete via Micro Edge UI."
+    });
+  });
+
+  router.post("/v1/micro-edge/oauth/select-account", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    const body = (req.body ?? {}) as { accountId?: unknown };
+    const accountId = String(body.accountId ?? "").trim();
+    if (!accountId) {
+      res.status(400).json({ ok: false, code: "account_missing" });
+      return;
+    }
+    const result = await selectMicroOAuthAccount({ uid, accountId });
+    if (!result.ok) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post("/v1/micro-edge/oauth/disconnect", ...gate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    const result = await disconnectMicroOAuth(uid);
+    res.json({
+      ...result,
+      disclaimer: "Micro local token cleared. Core cTrader connection unaffected."
     });
   });
 
   router.get("/v1/micro-edge/market-data/diagnostics", ...gate, async (_req, res) => {
     const diagnostics = await buildMarketDataDiagnosticsPayload();
+    const store = getMicroMarketDataStore();
+    const boundaries = await store.listBoundaryQuotes(50_000);
+    const labelReady = computeLabelReadyDiagnostics(boundaries);
     res.json({
       ...diagnostics,
+      labelReady,
+      boundaryQuoteCount: await store.countBoundaryQuotes(),
       shadowOnly: true,
       brokerExecutionEnabled: false,
-      disclaimer: "Read-only diagnostics. No tokens. No trading endpoints."
+      disclaimer: "Read-only diagnostics. No tokens. No trading endpoints.",
+      accessToken: undefined,
+      refreshToken: undefined,
+      clientSecret: undefined
     });
   });
 
@@ -92,7 +237,7 @@ export const buildMicroEdgeRouter = (): Router => {
       marketFeedConnected: marketData.liveConnected,
       marketFeedStatus: marketData.marketFeedStatus,
       connectionState: marketData.connectionState,
-      modelStatus: "UNTRAINED PLACEHOLDER — NOT FOR TRADING"
+      modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA"
     });
   });
 
@@ -127,7 +272,7 @@ export const buildMicroEdgeRouter = (): Router => {
     res.json({
       champion: {
         ...logisticTrainingMeta,
-        status: "RESEARCH / NOT TRAINED ON LIVE DATA"
+        status: "DATA COLLECTION / NOT TRAINED ON REAL DATA"
       },
       baselines: ["baseline-always-no-edge-v1", "baseline-mom5-sign-v1"],
       challenger: { kind: "TREE_GBM_CHALLENGER", promoted: false },

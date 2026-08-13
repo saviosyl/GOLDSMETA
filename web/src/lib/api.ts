@@ -1469,4 +1469,47 @@ export class ApiClient {
   microEdgeMarketDataDiagnostics(): Promise<Record<string, unknown>> {
     return this.request("/v1/micro-edge/market-data/diagnostics");
   }
+
+  microEdgeOAuthStatus(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/oauth/status");
+  }
+
+  microEdgeOAuthStart(): Promise<{
+    authorizationUrl: string;
+    sessionId: string;
+    scope: "accounts";
+    tradingScopeRequested: false;
+    redirectUri: string;
+    confirmation: Record<string, string>;
+  }> {
+    return this.request("/v1/micro-edge/oauth/start", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  microEdgeOAuthCallback(body: {
+    code: string;
+    sessionId: string;
+    accountId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/oauth/callback", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+  }
+
+  microEdgeOAuthDisconnect(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/oauth/disconnect", {
+      method: "POST",
+      body: "{}"
+    });
+  }
+
+  microEdgeOAuthSelectAccount(accountId: string): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/oauth/select-account", {
+      method: "POST",
+      body: JSON.stringify({ accountId })
+    });
+  }
 }

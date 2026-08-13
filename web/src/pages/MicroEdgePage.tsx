@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
+import { MICRO_EDGE_OAUTH_SESSION_KEY } from "./MicroEdgeConnectCallbackPage";
 
 type HorizonKey = "1m" | "5m" | "15m";
 
@@ -56,8 +57,18 @@ type MarketDataStatus = {
   healthReasons?: string[];
   historicalObservationCounts?: { M1?: number; M5?: number; M15?: number };
   quoteSamplesStored?: number;
+  boundaryQuoteCount?: number;
+  labelReadyMinutes?: number;
   backfillStatus?: Record<string, { status?: string } | null>;
   dataCollectionActive?: boolean;
+};
+
+type OAuthStatus = {
+  status?: string;
+  configured?: boolean;
+  environment?: string | null;
+  selectedAccountIdMasked?: string | null;
+  authorizedAccountCount?: number;
 };
 
 type Status = {
@@ -83,6 +94,9 @@ type Status = {
     healthy?: boolean;
     reasons?: string[];
   };
+  oauth?: OAuthStatus;
+  oauthAppConfigured?: boolean;
+  realConnectionStatus?: string;
 };
 
 function pct(x: number | undefined): string {
@@ -102,39 +116,70 @@ export function MicroEdgePage() {
   const [history, setHistory] = useState<MicroPrediction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [s, l, h] = await Promise.all([
-          api.microEdgeStatus() as Promise<Status>,
-          api.microEdgeLatest() as Promise<{ prediction: MicroPrediction | null }>,
-          api.microEdgeHistory(30)
-        ]);
-        if (cancelled) return;
-        setStatus(s);
-        setLatest(l.prediction);
-        setHistory((h.items ?? []) as unknown as MicroPrediction[]);
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load Micro Edge");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [s, l, h] = await Promise.all([
+        api.microEdgeStatus() as Promise<Status>,
+        api.microEdgeLatest() as Promise<{ prediction: MicroPrediction | null }>,
+        api.microEdgeHistory(30)
+      ]);
+      setStatus(s);
+      setLatest(l.prediction);
+      setHistory((h.items ?? []) as unknown as MicroPrediction[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load Micro Edge");
+    } finally {
+      setLoading(false);
+    }
   }, [api]);
 
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
   const md = status?.marketData;
-  const connected = Boolean(status?.marketFeedConnected || md?.liveConnected);
-  const connectionState = status?.connectionState ?? md?.connectionState ?? "LIVE_NOT_CONNECTED";
+  const oauth = status?.oauth;
+  const tokenPresent =
+    Boolean(oauth?.configured) &&
+    oauth?.status !== "DISCONNECTED" &&
+    oauth?.status !== "AWAITING_USER_AUTHORIZATION";
+  const liveConnected = Boolean(status?.marketFeedConnected || md?.liveConnected);
+  const connectionState =
+    status?.connectionState ?? md?.connectionState ?? "LIVE_NOT_CONNECTED";
   const isMock = connectionState === "MOCK_SEEDED";
+  const readOnlyConnected = tokenPresent || liveConnected;
+
+  async function onConfirmConnect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const started = await api.microEdgeOAuthStart();
+      sessionStorage.setItem(MICRO_EDGE_OAUTH_SESSION_KEY, started.sessionId);
+      window.location.assign(started.authorizationUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start Micro OAuth");
+      setBusy(false);
+      setConfirmOpen(false);
+    }
+  }
+
+  async function onDisconnect() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.microEdgeOAuthDisconnect();
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Disconnect failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="gm-page gm-micro-edge-page" data-testid="micro-edge-page">
@@ -152,7 +197,7 @@ export function MicroEdgePage() {
           <span className="gm-chip" data-testid="micro-no-orders-badge">
             NO BROKER ORDERS
           </span>
-          {connected ? (
+          {liveConnected ? (
             <span className="gm-chip" data-testid="micro-collection-badge">
               DATA COLLECTION ACTIVE
             </span>
@@ -172,10 +217,118 @@ export function MicroEdgePage() {
         </div>
       ) : null}
 
+      <section className="gm-card gm-micro-connection" data-testid="micro-edge-connection">
+        <h2>Connection</h2>
+        <p className="gm-muted" style={{ marginTop: 0 }}>
+          READ-ONLY CONNECTION — Micro Edge cannot place trades. Market/account-data access
+          only.
+        </p>
+        <div
+          className={`gm-banner ${readOnlyConnected ? "gm-banner-info" : "gm-banner-danger"}`}
+          data-testid="micro-connection-state"
+        >
+          {readOnlyConnected ? "Read-only connected" : "Not connected"}
+          {oauth?.status ? ` · ${oauth.status}` : ""}
+        </div>
+        <div className="gm-micro-grid">
+          <div>
+            <div className="gm-label">Broker</div>
+            <div>Pepperstone</div>
+          </div>
+          <div>
+            <div className="gm-label">Environment</div>
+            <div>{oauth?.environment ?? "DEMO"}</div>
+          </div>
+          <div>
+            <div className="gm-label">Account</div>
+            <div>{oauth?.selectedAccountIdMasked ?? "—"}</div>
+          </div>
+          <div>
+            <div className="gm-label">Symbol</div>
+            <div>{md?.symbol ?? "XAUUSD"}</div>
+          </div>
+          <div>
+            <div className="gm-label">Quote freshness</div>
+            <div>
+              {liveConnected && md?.quoteAgeMs != null
+                ? `${Math.round(md.quoteAgeMs)}ms`
+                : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="gm-label">Last M1</div>
+            <div>{md?.lastCompletedM1Ts ?? "—"}</div>
+          </div>
+        </div>
+
+        {!confirmOpen ? (
+          <div className="gm-micro-actions" style={{ marginTop: 14, display: "flex", gap: 10 }}>
+            {!tokenPresent ? (
+              <button
+                type="button"
+                className="gm-btn gm-btn-primary"
+                data-testid="micro-connect-readonly"
+                disabled={busy}
+                onClick={() => setConfirmOpen(true)}
+              >
+                Connect Micro Edge — Read Only
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="gm-btn"
+                data-testid="micro-disconnect"
+                disabled={busy}
+                onClick={() => void onDisconnect()}
+              >
+                Disconnect Micro Edge
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            className="gm-banner gm-banner-info"
+            data-testid="micro-oauth-confirm"
+            style={{ marginTop: 14 }}
+          >
+            <strong>Permission requested:</strong> VIEW-ONLY ACCOUNT ACCESS
+            <br />
+            <strong>Trading permission:</strong> NOT REQUESTED
+            <br />
+            <strong>Broker orders:</strong> IMPOSSIBLE FROM MICRO EDGE
+            <p className="gm-muted" style={{ marginBottom: 10 }}>
+              Technical guarantee: scope=accounts + Micro mutation-ban architecture.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                className="gm-btn gm-btn-primary"
+                disabled={busy}
+                data-testid="micro-oauth-continue"
+                onClick={() => void onConfirmConnect()}
+              >
+                Continue
+              </button>
+              <button
+                type="button"
+                className="gm-btn"
+                disabled={busy}
+                onClick={() => setConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        <p className="gm-muted" style={{ marginTop: 12 }}>
+          Market-data access only. Micro Edge cannot place broker orders.
+        </p>
+      </section>
+
       <section className="gm-card gm-micro-status" data-testid="micro-edge-status">
         <h2>Status</h2>
         <div
-          className={`gm-banner ${connected ? "gm-banner-info" : "gm-banner-danger"}`}
+          className={`gm-banner ${liveConnected ? "gm-banner-info" : "gm-banner-danger"}`}
           data-testid="micro-market-feed-status"
         >
           {status?.marketFeedStatus ?? md?.marketFeedStatus ?? "Market feed not connected"}
@@ -183,29 +336,16 @@ export function MicroEdgePage() {
         </div>
         <div className="gm-micro-grid">
           <div>
-            <div className="gm-label">Symbol</div>
-            <div>{md?.symbol ?? "XAUUSD"}</div>
-          </div>
-          <div>
-            <div className="gm-label">cTrader connection</div>
-            <div>{connected ? "Connected (read-only)" : "Not connected"}</div>
-          </div>
-          <div>
-            <div className="gm-label">Quote freshness</div>
-            <div>
-              {connected && md?.quoteAgeMs != null
-                ? `${Math.round(md.quoteAgeMs)}ms`
-                : "DATA UNAVAILABLE"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Last completed M1</div>
-            <div>{md?.lastCompletedM1Ts ?? "—"}</div>
-          </div>
-          <div>
             <div className="gm-label">Collector health</div>
             <div data-testid="micro-collector-health">
               {md?.collectorHealthy || status?.collector?.healthy ? "Healthy" : "Unhealthy"}
+            </div>
+          </div>
+          <div>
+            <div className="gm-label">Observations</div>
+            <div>
+              M1 {md?.historicalObservationCounts?.M1 ?? 0} · quotes{" "}
+              {md?.quoteSamplesStored ?? 0}
             </div>
           </div>
           <div>
@@ -238,15 +378,12 @@ export function MicroEdgePage() {
             <div>{md?.quoteSamplesStored ?? 0}</div>
           </div>
           <div>
-            <div className="gm-label">Backfill M1</div>
-            <div>{md?.backfillStatus?.M1?.status ?? "IDLE"}</div>
+            <div className="gm-label">Boundary quotes</div>
+            <div>{md?.boundaryQuoteCount ?? 0}</div>
           </div>
           <div>
-            <div className="gm-label">Backfill M5 / M15</div>
-            <div>
-              {md?.backfillStatus?.M5?.status ?? "IDLE"} /{" "}
-              {md?.backfillStatus?.M15?.status ?? "IDLE"}
-            </div>
+            <div className="gm-label">Label-ready minutes</div>
+            <div>{md?.labelReadyMinutes ?? 0}</div>
           </div>
         </div>
         {(md?.healthReasons?.length || status?.collector?.reasons?.length) ? (
@@ -259,20 +396,17 @@ export function MicroEdgePage() {
       <section className="gm-card" data-testid="micro-edge-decision">
         <h2>Micro decision</h2>
         <p className="gm-micro-decision-value" data-testid="micro-overall-decision">
-          {status?.dataUnavailable || !connected
-            ? "WAIT / DATA UNAVAILABLE"
-            : "DATA COLLECTION"}
+          {!liveConnected ? "WAIT / DATA UNAVAILABLE" : "DATA COLLECTION"}
         </p>
         <p className="gm-muted">
-          Model status: {status?.modelStatus ?? "RESEARCH / NOT TRAINED ON LIVE DATA"}
+          Model status:{" "}
+          {status?.modelStatus ?? "DATA COLLECTION / NOT TRAINED ON REAL DATA"}
         </p>
         <p className="gm-micro-disclaimer">
           Shadow signal only — no broker order is submitted.
         </p>
       </section>
 
-      {/* Placeholder forecasts hidden until a live-trained model exists.
-          If a residual prediction document is present, badge it clearly. */}
       {latest ? (
         <section className="gm-card" data-testid="micro-edge-placeholder-model">
           <h2>

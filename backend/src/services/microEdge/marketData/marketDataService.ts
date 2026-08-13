@@ -7,6 +7,7 @@ import { MemoryMicroMarketDataStore } from "./marketDataStore";
 import { MicroCTraderReadOnlyClient } from "./microCTraderClient";
 import { getCollectorStatus } from "../runtime/collector";
 import { getMicroRetentionPolicy } from "./retention";
+import { computeLabelReadyDiagnostics } from "./historicalTicks";
 import type { MicroLiveMarketSession } from "./liveSession";
 
 const store = new MemoryMicroMarketDataStore();
@@ -117,10 +118,12 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
     collector,
     capabilityStates: client.capabilityStates(),
     interfaceReady: true,
-    historicalTicks: "FEATURE_GATED",
+    historicalTicks: client.capabilityStates().HISTORICAL_TICKS,
     depthOfMarket: "FEATURE_GATED",
-    modelNote: "RESEARCH / NOT TRAINED ON LIVE DATA",
-    dataCollectionActive: liveConnected
+    modelNote: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
+    dataCollectionActive: liveConnected,
+    boundaryQuoteCount: await store.countBoundaryQuotes(),
+    labelReadyMinutes: 0 // filled in diagnostics with full compute
   };
 }
 
@@ -128,6 +131,8 @@ export async function buildMarketDataDiagnosticsPayload(): Promise<Record<string
   const status = await buildMarketDataStatusPayload();
   const latestQuote = await store.latestQuote();
   const symbol = await store.getSymbolMetadata();
+  const boundaries = await store.listBoundaryQuotes(50_000);
+  const labelReady = computeLabelReadyDiagnostics(boundaries);
   return {
     ...status,
     symbolMetadata: symbol,
@@ -143,6 +148,8 @@ export async function buildMarketDataDiagnosticsPayload(): Promise<Record<string
           source: latestQuote.source
         }
       : null,
+    labelReady,
+    boundaryQuoteCount: boundaries.length,
     // Explicitly never include secrets
     accessToken: undefined,
     refreshToken: undefined,
