@@ -33,12 +33,12 @@ export type NormParams = {
 export function fitNormalization(rows: number[][]): NormParams {
   if (rows.length === 0) return { mean: [], std: [] };
   const d = rows[0]!.length;
-  const mean = new Array(d).fill(0);
+  const mean: number[] = Array.from({ length: d }, () => 0);
   for (const r of rows) {
     for (let j = 0; j < d; j++) mean[j]! += r[j]!;
   }
   for (let j = 0; j < d; j++) mean[j]! /= rows.length;
-  const std = new Array(d).fill(0);
+  const std: number[] = Array.from({ length: d }, () => 0);
   for (const r of rows) {
     for (let j = 0; j < d; j++) {
       const dlt = r[j]! - mean[j]!;
@@ -77,13 +77,17 @@ export function trainMultinomialLogReg(
   const lr = opts?.lr ?? 0.05;
   const n = X.length;
   const d = n > 0 ? X[0]!.length : 0;
-  const W = Array.from({ length: 3 }, () => new Array(d + 1).fill(0));
+  const W: number[][] = Array.from({ length: 3 }, () =>
+    Array.from({ length: d + 1 }, () => 0)
+  );
 
   for (let ep = 0; ep < epochs; ep++) {
-    const grad = Array.from({ length: 3 }, () => new Array(d + 1).fill(0));
+    const grad: number[][] = Array.from({ length: 3 }, () =>
+      Array.from({ length: d + 1 }, () => 0)
+    );
     for (let i = 0; i < n; i++) {
       const xi = X[i]!;
-      const logits = [0, 1, 2].map((c) => {
+      const logits: number[] = [0, 1, 2].map((c) => {
         let z = W[c]![d]!;
         for (let j = 0; j < d; j++) z += W[c]![j]! * xi[j]!;
         return z;

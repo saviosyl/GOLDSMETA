@@ -329,7 +329,6 @@ export async function runGoldHunterResearchPipeline(args: {
   let bestTheta = 0.1;
   let bestMaxHold = 60;
   let bestScore = -Infinity;
-  let bestBundles: HorizonModelBundle[] = [];
   let bestEntry = { ...DEFAULT_ENTRY_THRESHOLDS };
 
   for (const theta of GH_THETA_CANDIDATES) {
@@ -366,7 +365,6 @@ export async function runGoldHunterResearchPipeline(args: {
         bestScore = score;
         bestTheta = theta;
         bestMaxHold = maxHold;
-        bestBundles = bundles;
         bestEntry = { ...DEFAULT_ENTRY_THRESHOLDS };
       }
     }
