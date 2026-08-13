@@ -32,6 +32,11 @@ export const MICRO_QUOTE_MAX_AGE_MS = 30_000;
 /** Max age (ms) of last completed M1 close for collector health. */
 export const MICRO_M1_MAX_AGE_MS = 5 * 60_000;
 
+/** Default Bid/Ask sample persist interval (ms). */
+export const MICRO_QUOTE_SAMPLE_INTERVAL_MS = Number(
+  process.env.MICRO_QUOTE_SAMPLE_INTERVAL_MS ?? 5000
+);
+
 /** Minimum positive NET edge theta by horizon (USD/oz). Validation-selected, frozen for V1. */
 export const MICRO_THETA: Record<MicroHorizon, number> = {
   "1m": 0.05,

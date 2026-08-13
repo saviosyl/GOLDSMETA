@@ -22,7 +22,7 @@ describe("Micro Edge collector health (fail-closed)", () => {
     expect(status.connectionState).toBe("LIVE_NOT_CONNECTED");
     expect(status.degradedDecision).toBe("WAIT");
     expect(status.dataUnavailable).toBe(true);
-    expect(status.reasons).toContain("market_feed_not_connected");
+    expect(status.reasons).toEqual(expect.arrayContaining(["market_feed_not_connected"]));
   });
 
   it("reports MOCK_SEEDED when data is injected (still not live)", () => {

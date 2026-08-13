@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - cursor/production-connection
+      - cursor/micro-edge-v1
       - cursor/webhook-delivery-400-c2c2
       - cursor/phase3-stage3-live-forward-c2c2
       - cursor/goldmeta-v4-stage-b-c2c2

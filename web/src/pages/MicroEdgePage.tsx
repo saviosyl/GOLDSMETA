@@ -41,6 +41,25 @@ type MicroPrediction = {
   brokerExecutionEnabled: false;
 };
 
+type MarketDataStatus = {
+  connectionState?: string;
+  liveConnected?: boolean;
+  marketFeedStatus?: string;
+  symbol?: string;
+  symbolId?: string | null;
+  lastQuoteTs?: string | null;
+  quoteAgeMs?: number | null;
+  lastCompletedM1Ts?: string | null;
+  lastCompletedM5Ts?: string | null;
+  lastCompletedM15Ts?: string | null;
+  collectorHealthy?: boolean;
+  healthReasons?: string[];
+  historicalObservationCounts?: { M1?: number; M5?: number; M15?: number };
+  quoteSamplesStored?: number;
+  backfillStatus?: Record<string, { status?: string } | null>;
+  dataCollectionActive?: boolean;
+};
+
 type Status = {
   shadowOnly: boolean;
   brokerExecutionEnabled: boolean;
@@ -57,6 +76,9 @@ type Status = {
   overallMicroDecision?: string;
   dataUnavailable?: boolean;
   degradedReason?: string | null;
+  dataCollectionActive?: boolean;
+  modelStatus?: string;
+  marketData?: MarketDataStatus;
   collector?: {
     healthy?: boolean;
     reasons?: string[];
@@ -78,7 +100,6 @@ export function MicroEdgePage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [latest, setLatest] = useState<MicroPrediction | null>(null);
   const [history, setHistory] = useState<MicroPrediction[]>([]);
-  const [perf, setPerf] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -88,17 +109,15 @@ export function MicroEdgePage() {
       setLoading(true);
       setError(null);
       try {
-        const [s, l, h, p] = await Promise.all([
+        const [s, l, h] = await Promise.all([
           api.microEdgeStatus() as Promise<Status>,
           api.microEdgeLatest() as Promise<{ prediction: MicroPrediction | null }>,
-          api.microEdgeHistory(30),
-          api.microEdgePerformance()
+          api.microEdgeHistory(30)
         ]);
         if (cancelled) return;
         setStatus(s);
         setLatest(l.prediction);
         setHistory((h.items ?? []) as unknown as MicroPrediction[]);
-        setPerf(p.summary ?? null);
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load Micro Edge");
@@ -112,7 +131,10 @@ export function MicroEdgePage() {
     };
   }, [api]);
 
-  const horizons: HorizonKey[] = ["1m", "5m", "15m"];
+  const md = status?.marketData;
+  const connected = Boolean(status?.marketFeedConnected || md?.liveConnected);
+  const connectionState = status?.connectionState ?? md?.connectionState ?? "LIVE_NOT_CONNECTED";
+  const isMock = connectionState === "MOCK_SEEDED";
 
   return (
     <div className="gm-page gm-micro-edge-page" data-testid="micro-edge-page">
@@ -130,6 +152,16 @@ export function MicroEdgePage() {
           <span className="gm-chip" data-testid="micro-no-orders-badge">
             NO BROKER ORDERS
           </span>
+          {connected ? (
+            <span className="gm-chip" data-testid="micro-collection-badge">
+              DATA COLLECTION ACTIVE
+            </span>
+          ) : null}
+          {isMock ? (
+            <span className="gm-chip gm-chip-warn" data-testid="micro-test-data-badge">
+              TEST DATA
+            </span>
+          ) : null}
         </div>
       </header>
 
@@ -143,66 +175,37 @@ export function MicroEdgePage() {
       <section className="gm-card gm-micro-status" data-testid="micro-edge-status">
         <h2>Status</h2>
         <div
-          className={`gm-banner ${status?.marketFeedConnected ? "gm-banner-info" : "gm-banner-danger"}`}
+          className={`gm-banner ${connected ? "gm-banner-info" : "gm-banner-danger"}`}
           data-testid="micro-market-feed-status"
         >
-          {status?.marketFeedStatus ?? "Market feed not connected"}
-          {status?.connectionState ? ` · ${status.connectionState}` : ""}
+          {status?.marketFeedStatus ?? md?.marketFeedStatus ?? "Market feed not connected"}
+          {connectionState ? ` · ${connectionState}` : ""}
         </div>
         <div className="gm-micro-grid">
           <div>
             <div className="gm-label">Symbol</div>
-            <div>XAUUSD</div>
+            <div>{md?.symbol ?? "XAUUSD"}</div>
           </div>
           <div>
-            <div className="gm-label">Bid / Ask</div>
-            <div>
-              {status?.marketFeedConnected && latest
-                ? `${num(latest.bid, 2)} / ${num(latest.ask, 2)}`
-                : "—"}
-            </div>
+            <div className="gm-label">cTrader connection</div>
+            <div>{connected ? "Connected (read-only)" : "Not connected"}</div>
           </div>
           <div>
-            <div className="gm-label">Spread</div>
+            <div className="gm-label">Quote freshness</div>
             <div>
-              {status?.marketFeedConnected && latest ? num(latest.spread, 2) : "—"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Freshness</div>
-            <div>
-              {status?.marketFeedConnected && latest
-                ? `${latest.dataFreshness} · ${Math.round(latest.quoteAgeMs)}ms`
+              {connected && md?.quoteAgeMs != null
+                ? `${Math.round(md.quoteAgeMs)}ms`
                 : "DATA UNAVAILABLE"}
             </div>
           </div>
           <div>
-            <div className="gm-label">Session / Regime</div>
-            <div>
-              {status?.marketFeedConnected && latest
-                ? `${latest.session} / ${latest.regime}`
-                : "— / —"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Model / Cost</div>
-            <div className="gm-mono">
-              {status?.modelVersion ?? "—"}
-              <br />
-              {status?.costModelVersion ?? "—"}
-            </div>
-          </div>
-          <div>
-            <div className="gm-label">Last M1 evaluation</div>
-            <div>{latest?.candleCloseTs ?? status?.lastCandleCloseTs ?? "—"}</div>
+            <div className="gm-label">Last completed M1</div>
+            <div>{md?.lastCompletedM1Ts ?? "—"}</div>
           </div>
           <div>
             <div className="gm-label">Collector health</div>
             <div data-testid="micro-collector-health">
-              {status?.collector?.healthy ? "Healthy" : "Unhealthy"}
-              {status?.collector?.reasons?.length
-                ? ` · ${status.collector.reasons.join(", ")}`
-                : ""}
+              {md?.collectorHealthy || status?.collector?.healthy ? "Healthy" : "Unhealthy"}
             </div>
           </div>
           <div>
@@ -211,123 +214,102 @@ export function MicroEdgePage() {
           </div>
         </div>
         <p className="gm-muted gm-micro-disclaimer">
-          Shadow signal only — no broker order is submitted. cTrader OpenAPI ingestion is
-          not connected in V1 (interface scaffold only).
+          Shadow signal only — no broker order is submitted.
         </p>
       </section>
 
-      <section className="gm-micro-horizons" data-testid="micro-edge-horizons">
-        <h2>Next move forecasts</h2>
-        <div className="gm-micro-horizon-row">
-          {horizons.map((h) => {
-            const hz = latest?.horizons?.[h];
-            const primary = latest?.primaryResearchHorizon === h;
-            const strongest = latest?.strongestHorizon === h;
-            return (
-              <article
-                key={h}
-                className={`gm-card gm-micro-horizon-card${strongest ? " is-strongest" : ""}`}
-                data-testid={`micro-horizon-${h}`}
-              >
-                <header>
-                  <strong>{h.toUpperCase()}</strong>
-                  {primary ? (
-                    <span className="gm-chip gm-chip-soft">PRIMARY RESEARCH HORIZON</span>
-                  ) : null}
-                  {strongest ? <span className="gm-chip">Strongest now</span> : null}
-                </header>
-                <div className="gm-micro-probs">
-                  <div>UP {pct(hz?.pUp)}</div>
-                  <div>DOWN {pct(hz?.pDown)}</div>
-                  <div>NO EDGE {pct(hz?.pNoEdge)}</div>
-                </div>
-                <div className="gm-micro-meta">
-                  <div>E[signed] {num(hz?.expectedSignedMove)}</div>
-                  <div>E[abs] {num(hz?.expectedAbsoluteMove)}</div>
-                  <div>Friction {num(hz?.estimatedFriction)}</div>
-                  <div>
-                    Best NET {num(Math.max(hz?.netEdgeUp ?? -Infinity, hz?.netEdgeDown ?? -Infinity))}
-                  </div>
-                  <div>Decision {hz?.decision ?? "—"}</div>
-                </div>
-              </article>
-            );
-          })}
+      <section className="gm-card" data-testid="micro-edge-data-collection">
+        <h2>Data collection</h2>
+        <div className="gm-micro-grid">
+          <div>
+            <div className="gm-label">M1 observations</div>
+            <div>{md?.historicalObservationCounts?.M1 ?? 0}</div>
+          </div>
+          <div>
+            <div className="gm-label">M5 observations</div>
+            <div>{md?.historicalObservationCounts?.M5 ?? 0}</div>
+          </div>
+          <div>
+            <div className="gm-label">M15 observations</div>
+            <div>{md?.historicalObservationCounts?.M15 ?? 0}</div>
+          </div>
+          <div>
+            <div className="gm-label">Quote samples</div>
+            <div>{md?.quoteSamplesStored ?? 0}</div>
+          </div>
+          <div>
+            <div className="gm-label">Backfill M1</div>
+            <div>{md?.backfillStatus?.M1?.status ?? "IDLE"}</div>
+          </div>
+          <div>
+            <div className="gm-label">Backfill M5 / M15</div>
+            <div>
+              {md?.backfillStatus?.M5?.status ?? "IDLE"} /{" "}
+              {md?.backfillStatus?.M15?.status ?? "IDLE"}
+            </div>
+          </div>
         </div>
+        {(md?.healthReasons?.length || status?.collector?.reasons?.length) ? (
+          <p className="gm-muted" style={{ marginTop: 10 }}>
+            Reasons: {(md?.healthReasons ?? status?.collector?.reasons ?? []).join(", ")}
+          </p>
+        ) : null}
       </section>
 
       <section className="gm-card" data-testid="micro-edge-decision">
         <h2>Micro decision</h2>
         <p className="gm-micro-decision-value" data-testid="micro-overall-decision">
-          {status?.dataUnavailable || !status?.marketFeedConnected
+          {status?.dataUnavailable || !connected
             ? "WAIT / DATA UNAVAILABLE"
-            : latest?.overallMicroDecision ?? "WAIT"}
+            : "DATA COLLECTION"}
         </p>
-        <ul>
-          {(latest?.topFactors ?? ["Awaiting first completed M1 evaluation"]).map((f) => (
-            <li key={f}>{f}</li>
-          ))}
-        </ul>
         <p className="gm-muted">
-          Agreement: {latest?.forecastAgreementState ?? "—"} · Regime:{" "}
-          {latest?.regime ?? "—"}
+          Model status: {status?.modelStatus ?? "RESEARCH / NOT TRAINED ON LIVE DATA"}
         </p>
         <p className="gm-micro-disclaimer">
           Shadow signal only — no broker order is submitted.
         </p>
       </section>
 
-      <section className="gm-card" data-testid="micro-edge-performance">
-        <h2>Performance (hypothetical)</h2>
-        <p className="gm-muted">
-          Normalized in XAUUSD price units (USD/oz). Not an executable Pepperstone position.
-        </p>
-        {perf ? (
-          <div className="gm-micro-grid">
-            <div>
-              <div className="gm-label">Predictions</div>
-              <div>{String(perf.predictions ?? 0)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Eligible</div>
-              <div>{String(perf.eligible ?? 0)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Direction accuracy</div>
-              <div>{pct(perf.directionAccuracy as number | undefined)}</div>
-            </div>
-            <div>
-              <div className="gm-label">NET hypothetical</div>
-              <div>{num(perf.netHypotheticalPl as number | undefined)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Est. costs</div>
-              <div>{num(perf.estimatedCosts as number | undefined)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Win rate</div>
-              <div>{pct(perf.winRate as number | undefined)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Profit factor</div>
-              <div>{num(perf.profitFactor as number | undefined, 2)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Expectancy</div>
-              <div>{num(perf.expectancy as number | undefined)}</div>
-            </div>
-            <div>
-              <div className="gm-label">Max drawdown</div>
-              <div>{num(perf.maxDrawdown as number | undefined)}</div>
-            </div>
+      {/* Placeholder forecasts hidden until a live-trained model exists.
+          If a residual prediction document is present, badge it clearly. */}
+      {latest ? (
+        <section className="gm-card" data-testid="micro-edge-placeholder-model">
+          <h2>
+            Research placeholder{" "}
+            <span className="gm-chip gm-chip-warn">UNTRAINED PLACEHOLDER</span>{" "}
+            <span className="gm-chip gm-chip-warn">NOT FOR TRADING</span>
+          </h2>
+          <p className="gm-muted">
+            Probabilities below are not trained on live Micro observations and must not be
+            treated as trading signals.
+          </p>
+          <div className="gm-micro-horizon-row">
+            {(["1m", "5m", "15m"] as HorizonKey[]).map((h) => {
+              const hz = latest.horizons?.[h];
+              return (
+                <article key={h} className="gm-card gm-micro-horizon-card">
+                  <header>
+                    <strong>{h.toUpperCase()}</strong>
+                  </header>
+                  <div className="gm-micro-probs">
+                    <div>UP {pct(hz?.pUp)}</div>
+                    <div>DOWN {pct(hz?.pDown)}</div>
+                    <div>NO EDGE {pct(hz?.pNoEdge)}</div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        ) : (
-          <p className="gm-muted">No scored outcomes yet.</p>
-        )}
-      </section>
+        </section>
+      ) : null}
 
       <section className="gm-card" data-testid="micro-edge-history">
         <h2>Prediction history</h2>
+        <p className="gm-muted">
+          Empty until a trained research model is activated. Data collection does not create
+          tradeable forecasts.
+        </p>
         <div className="gm-table-wrap">
           <table className="gm-table">
             <thead>
@@ -335,31 +317,23 @@ export function MicroEdgePage() {
                 <th>Time</th>
                 <th>Mid</th>
                 <th>5M decision</th>
-                <th>Best NET</th>
-                <th>Regime</th>
                 <th>Model</th>
               </tr>
             </thead>
             <tbody>
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No Micro predictions yet.</td>
+                  <td colSpan={4}>No Micro predictions yet.</td>
                 </tr>
               ) : (
-                history.map((row) => {
-                  const hz = row.horizons?.["5m"];
-                  const best = Math.max(hz?.netEdgeUp ?? 0, hz?.netEdgeDown ?? 0);
-                  return (
-                    <tr key={row.predictionId}>
-                      <td>{row.candleCloseTs}</td>
-                      <td>{num(row.mid, 2)}</td>
-                      <td>{hz?.decision ?? "—"}</td>
-                      <td>{num(best)}</td>
-                      <td>{row.regime}</td>
-                      <td className="gm-mono">{row.modelVersion}</td>
-                    </tr>
-                  );
-                })
+                history.map((row) => (
+                  <tr key={row.predictionId}>
+                    <td>{row.candleCloseTs}</td>
+                    <td>{num(row.mid, 2)}</td>
+                    <td>{row.horizons?.["5m"]?.decision ?? "—"}</td>
+                    <td className="gm-mono">{row.modelVersion}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
