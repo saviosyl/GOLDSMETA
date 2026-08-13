@@ -418,10 +418,12 @@ async function main(): Promise<void> {
     trainRangeUtc: result.trainRangeUtc,
     validationRangeUtc: result.validationRangeUtc,
     holdoutRangeUtc: result.holdoutRangeUtc,
-    selectedTheta: result.selectedTheta,
-    selectedEntry: result.selectedEntry,
-    selectedMaxHoldSec: result.selectedMaxHoldSec,
-    protectiveStop: result.protectiveStop,
+    selectedTheta: result.optimizer?.best ? result.selectedTheta : null,
+    selectedEntry: result.optimizer?.best ? result.selectedEntry : null,
+    selectedMaxHoldSec: result.optimizer?.best
+      ? result.selectedMaxHoldSec
+      : null,
+    protectiveStop: result.optimizer?.best ? result.protectiveStop : null,
     frozenConfigSha256: result.frozenConfigSha256,
     optimizerBest: result.optimizer?.best
       ? {
@@ -432,6 +434,19 @@ async function main(): Promise<void> {
           lowSample: result.optimizer.best.lowSampleValidation
         }
       : null,
+    optimizerStages: result.optimizer?.stages ?? null,
+    optimizerRejectCounts: (() => {
+      const counts: Record<string, number> = {};
+      for (const row of result.optimizer?.searched ?? []) {
+        const reason = row.rejectReason ?? (row.eligible ? "ELIGIBLE" : "UNKNOWN");
+        counts[reason] = (counts[reason] ?? 0) + 1;
+      }
+      return counts;
+    })(),
+    optimizerMaxTrades: Math.max(
+      0,
+      ...(result.optimizer?.searched ?? []).map((s) => s.tradeCount)
+    ),
     stopReport: result.optimizer?.stopReport,
     horizonMetrics: result.horizonMetrics,
     holdoutBacktest: result.holdoutBacktest,

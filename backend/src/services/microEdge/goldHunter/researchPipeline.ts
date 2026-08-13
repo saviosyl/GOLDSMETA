@@ -525,6 +525,59 @@ export async function runGoldHunterResearchPipeline(args: {
   });
 
   if (!optimizer.best) {
+    // Holdout remains untouched for policy selection, but naive baselines may
+    // still be reported for market-context honesty (not used for tuning).
+    const holdoutQuotes = split.holdout.map((r) => r.quote);
+    const rejectCounts: Record<string, number> = {};
+    let maxTrades = 0;
+    let bestRejectedExpectancy = Number.NEGATIVE_INFINITY;
+    for (const row of optimizer.searched) {
+      const reason = row.rejectReason ?? "UNKNOWN";
+      rejectCounts[reason] = (rejectCounts[reason] ?? 0) + 1;
+      maxTrades = Math.max(maxTrades, row.tradeCount);
+      if (Number.isFinite(row.expectancy)) {
+        bestRejectedExpectancy = Math.max(bestRejectedExpectancy, row.expectancy);
+      }
+    }
+    log("insufficient_edge", {
+      searched: optimizer.searched.length,
+      rejectCounts,
+      maxTrades,
+      bestRejectedExpectancy
+    });
+    if (args.persist && args.dataDir) {
+      const { writeFileSync: wfs, mkdirSync: mks } = await import("node:fs");
+      mks(args.dataDir, { recursive: true });
+      wfs(
+        `${args.dataDir}/validation-search-report.json`,
+        JSON.stringify(
+          {
+            researchRunId,
+            insufficientEdge: true,
+            stages: optimizer.stages,
+            rejectCounts,
+            maxTrades,
+            bestRejectedExpectancy,
+            searched: optimizer.searched.map((s) => ({
+              stage: s.stage,
+              theta: s.candidate.theta,
+              entry: s.candidate.entry,
+              maxHoldSec: s.candidate.maxHoldSec,
+              protectiveStop: s.candidate.protectiveStop,
+              tradeCount: s.tradeCount,
+              buyCount: s.buyCount,
+              sellCount: s.sellCount,
+              expectancy: s.expectancy,
+              netPnl: s.netPnl,
+              rejectReason: s.rejectReason,
+              score: s.score
+            }))
+          },
+          null,
+          2
+        )
+      );
+    }
     return fail("INSUFFICIENT_EDGE", gridStats, {
       secondRows: labeled.totalSeconds,
       unscorableFeatureRows: labeled.unscorableFeatureRows,
@@ -543,6 +596,7 @@ export async function runGoldHunterResearchPipeline(args: {
       movement,
       spread,
       opportunities,
+      baselines: baselineComparisons(holdoutQuotes),
       datasetHash,
       lowSampleValidation: optimizer.lowSampleValidation
     });
