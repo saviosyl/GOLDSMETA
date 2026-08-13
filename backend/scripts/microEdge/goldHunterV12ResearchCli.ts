@@ -4,7 +4,10 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ndjsonGzToRows } from "../../src/services/microEdge/goldHunter/compactStorage";
+import {
+  ndjsonGzToRows,
+  readRowsNdjsonGz
+} from "../../src/services/microEdge/goldHunter/compactStorage";
 import type { RawTick } from "../../src/services/microEdge/goldHunter/asOfDataset";
 import type { GhBarCtx } from "../../src/services/microEdge/goldHunter/features";
 import {
@@ -34,8 +37,8 @@ async function main(): Promise<void> {
     fromUtc: string;
     toUtc: string;
   };
-  const ticks = ndjsonGzToRows<RawTick>(
-    readFileSync(join(dir, "ticks-bidask.ndjson.gz"))
+  const ticks = await readRowsNdjsonGz<RawTick>(
+    join(dir, "ticks-bidask.ndjson.gz")
   );
   const m1 = ndjsonGzToRows<GhBarCtx>(readFileSync(join(dir, "bars-m1.ndjson.gz")));
   const m5 = ndjsonGzToRows<GhBarCtx>(readFileSync(join(dir, "bars-m5.ndjson.gz")));

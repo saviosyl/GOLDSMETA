@@ -3,12 +3,13 @@
  * Uses compressed NDJSON chunks on local disk / optional GCS-like path.
  */
 import { createHash } from "node:crypto";
-import { createGzip, gunzipSync, gzipSync } from "node:zlib";
+import { createGzip, createGunzip, gunzipSync, gzipSync } from "node:zlib";
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { once } from "node:events";
 
 export type ChunkMeta = {
   chunkId: string;
@@ -29,16 +30,78 @@ export type DatasetManifest = {
 };
 
 export function rowsToNdjson(rows: unknown[]): Buffer {
-  const body = rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
-  return gzipSync(Buffer.from(body, "utf8"));
+  // Chunk joins to avoid V8 "Invalid string length" on multi-million-row sets.
+  const CHUNK = 50_000;
+  if (rows.length <= CHUNK) {
+    const body =
+      rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
+    return gzipSync(Buffer.from(body, "utf8"));
+  }
+  const parts: Buffer[] = [];
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    parts.push(Buffer.from(slice.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8"));
+  }
+  return gzipSync(Buffer.concat(parts));
 }
 
 export function ndjsonGzToRows<T>(buf: Buffer): T[] {
-  const text = gunzipSync(buf).toString("utf8");
-  return text
-    .split("\n")
-    .filter((l) => l.trim().length)
-    .map((l) => JSON.parse(l) as T);
+  const raw = gunzipSync(buf);
+  // Avoid one giant utf8 string when possible — decode in slices if huge.
+  if (raw.length < 200_000_000) {
+    const text = raw.toString("utf8");
+    return text
+      .split("\n")
+      .filter((l) => l.trim().length)
+      .map((l) => JSON.parse(l) as T);
+  }
+  const rows: T[] = [];
+  let start = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 0x0a) {
+      if (i > start) {
+        rows.push(JSON.parse(raw.subarray(start, i).toString("utf8")) as T);
+      }
+      start = i + 1;
+    }
+  }
+  if (start < raw.length) {
+    rows.push(JSON.parse(raw.subarray(start).toString("utf8")) as T);
+  }
+  return rows;
+}
+
+/** Stream-write rows to NDJSON.gz without building one giant string. */
+export async function writeRowsNdjsonGz(
+  filePath: string,
+  rows: unknown[]
+): Promise<void> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const gzip = createGzip();
+  const out = createWriteStream(filePath);
+  const done = pipeline(gzip, out);
+  const CHUNK = 20_000;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    const body = slice.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    if (!gzip.write(body)) {
+      await once(gzip, "drain");
+    }
+  }
+  gzip.end();
+  await done;
+}
+
+/** Stream-read NDJSON.gz via gunzip (safe for multi-GB uncompressed). */
+export async function readRowsNdjsonGz<T>(filePath: string): Promise<T[]> {
+  if (!existsSync(filePath)) return [];
+  const rows: T[] = [];
+  const input = createReadStream(filePath).pipe(createGunzip());
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (line.trim().length) rows.push(JSON.parse(line) as T);
+  }
+  return rows;
 }
 
 export function hashBuffer(buf: Buffer): string {

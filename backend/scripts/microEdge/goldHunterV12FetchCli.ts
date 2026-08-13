@@ -32,7 +32,8 @@ import type { RawTick } from "../../src/services/microEdge/goldHunter/asOfDatase
 import type { GhBarCtx } from "../../src/services/microEdge/goldHunter/features";
 import {
   ndjsonGzToRows,
-  rowsToNdjson
+  rowsToNdjson,
+  writeRowsNdjsonGz
 } from "../../src/services/microEdge/goldHunter/compactStorage";
 import { GH_HISTORICAL_MIN_INTERVAL_MS } from "../../src/services/microEdge/goldHunter/config";
 import { writeFile } from "node:fs/promises";
@@ -293,22 +294,34 @@ async function main(): Promise<void> {
     for (const t of allBids) {
       ticks.push({ timestampMs: t.timestampMs, side: "BID", price: t.price });
     }
+    // Release bid staging before ask merge to reduce peak memory.
+    allBids.length = 0;
     for (const t of allAsks) {
       ticks.push({ timestampMs: t.timestampMs, side: "ASK", price: t.price });
     }
+    allAsks.length = 0;
     ticks.sort((a, b) => a.timestampMs - b.timestampMs);
 
-    // dedupe
-    const seen = new Set<string>();
+    // Light dedupe (windows are non-overlapping; mostly boundary duplicates).
     const deduped: RawTick[] = [];
+    let prevKey = "";
     for (const t of ticks) {
       const k = `${t.side}_${t.timestampMs}_${t.price}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
+      if (k === prevKey) continue;
+      prevKey = k;
       deduped.push(t);
     }
+    ticks.length = 0;
     assertGoldPrices(deduped);
-    await writeFile(ticksPath, rowsToNdjson(deduped));
+    // Stream gzip write — avoids V8 Invalid string length on ~10M ticks.
+    await writeRowsNdjsonGz(ticksPath, deduped);
+    console.log(
+      JSON.stringify({
+        event: "gh_v12_ticks_written",
+        count: deduped.length,
+        path: ticksPath
+      })
+    );
 
     const fetchBars = async (tf: "M1" | "M5" | "M15"): Promise<GhBarCtx[]> => {
       const chunks = chunkHistoricalWindows({
