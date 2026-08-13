@@ -44,7 +44,6 @@ def main() -> None:
             }
         )
     )
-    os.environ.setdefault("GOLD_HUNTER_REUSE_LOCAL", "1")
     os.environ.setdefault("NODE_OPTIONS", "--max-old-space-size=12288")
     os.environ.setdefault("GOLD_HUNTER_V12_TRAIN_STRIDE", "6")
     os.environ["MICRO_BROKER_EXECUTION_ENABLED"] = "false"
@@ -55,15 +54,17 @@ def main() -> None:
         if r.returncode != 0:
             boot.die("RESEARCH_OR_FETCH_FAILED", label=label, exit=r.returncode)
 
-    # Force fetch if artifacts missing (reuse still honored by CLI).
-    run("fetch", ["npx", "--yes", "tsx", "scripts/microEdge/goldHunterV12FetchCli.ts"])
     data_dir = Path(
         os.environ.get(
             "GOLD_HUNTER_V12_DATA_DIR",
             str(BACKEND / ".gold-hunter-data" / "real-56d-pre-v11"),
         )
     )
-    if not (data_dir / "bars-meta.json").is_file():
+    meta = data_dir / "bars-meta.json"
+    # Only reuse when a complete meta artifact already exists.
+    os.environ["GOLD_HUNTER_REUSE_LOCAL"] = "1" if meta.is_file() else "0"
+    run("fetch", ["npx", "--yes", "tsx", "scripts/microEdge/goldHunterV12FetchCli.ts"])
+    if not meta.is_file():
         boot.die("RESEARCH_OR_FETCH_FAILED", detail="missing v12 meta")
     run(
         "research",
