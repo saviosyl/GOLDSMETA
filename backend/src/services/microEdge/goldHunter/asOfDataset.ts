@@ -204,6 +204,8 @@ export function buildLabeledResearchRows(args: {
   const rows: LabeledResearchRow[] = [];
   let unscorableFeatureRows = 0;
   let unscorableLabelRows = 0;
+  // Monotonic pointer into ascending allQuotes — O(n) labeling, not O(n²).
+  let quoteIdx = 0;
 
   for (const sec of args.seconds) {
     if (!sec.scorable) {
@@ -231,14 +233,20 @@ export function buildLabeledResearchRows(args: {
       continue;
     }
 
-    const futureQuotes = allQuotes.filter((q) => q.timestampMs > sec.timestampMs);
+    while (
+      quoteIdx < allQuotes.length &&
+      allQuotes[quoteIdx]!.timestampMs <= sec.timestampMs
+    ) {
+      quoteIdx += 1;
+    }
     const labels: Record<number, GhLabel> = {};
     let anyUnscorable = false;
     for (const h of GH_HORIZONS_SEC) {
       const lab = labelHorizon({
         horizonSec: h,
         entry: { timestampMs: sec.timestampMs, bid: sec.bid, ask: sec.ask },
-        futureQuotes,
+        futureQuotes: allQuotes,
+        fromIndex: quoteIdx,
         theta: args.theta
       });
       labels[h] = lab;

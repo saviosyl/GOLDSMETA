@@ -386,10 +386,19 @@ export async function runGoldHunterResearchPipeline(args: {
     });
   }
 
+  const log = (event: string, extra?: Record<string, unknown>) => {
+    console.log(JSON.stringify({ event: `gh_pipeline_${event}`, ...extra }));
+  };
+  log("asof_start", { tickCount: args.ticks.length });
   const { rows: seconds, stats: gridStats } = buildAsOfSecondRows(args.ticks, {
     fromMs: args.dataFromMs,
     toMs: args.dataToMs
   });
+  log("asof_done", {
+    totalSeconds: gridStats.totalSeconds,
+    validSeconds: gridStats.validSeconds
+  });
+  log("label_start");
   const labeled = buildLabeledResearchRows({
     seconds,
     theta: 0,
@@ -397,8 +406,18 @@ export async function runGoldHunterResearchPipeline(args: {
     m5Bars: args.m5Bars,
     m15Bars: args.m15Bars
   });
+  log("label_done", {
+    rows: labeled.rows.length,
+    unscorableFeatureRows: labeled.unscorableFeatureRows,
+    unscorableLabelRows: labeled.unscorableLabelRows
+  });
   const split = chronologicalSplit(labeled.rows);
   const datasetHash = hashDataset(labeled.rows);
+  log("split_done", {
+    train: split.train.length,
+    validation: split.validation.length,
+    holdout: split.holdout.length
+  });
 
   const quotes = labeled.rows.map((r) => r.quote);
   const movement = {
@@ -486,6 +505,10 @@ export async function runGoldHunterResearchPipeline(args: {
     return bundles;
   };
 
+  log("optimizer_start", {
+    validationRows: split.validation.length,
+    stopCandidates
+  });
   const optimizer = runStagedValidationOptimizer({
     validationRows: split.validation,
     stopCandidates,
@@ -495,6 +518,10 @@ export async function runGoldHunterResearchPipeline(args: {
       return (rows, entry, maxHold, stop) =>
         runShadowReplay(rows, bundles, entry, maxHold, stop);
     }
+  });
+  log("optimizer_done", {
+    bestScore: optimizer.best?.score ?? null,
+    tradeCount: optimizer.best?.tradeCount ?? 0
   });
 
   if (!optimizer.best) {
@@ -551,6 +578,7 @@ export async function runGoldHunterResearchPipeline(args: {
   );
 
   // ---- FREEZE before holdout ----
+  log("freeze_start", { theta: selected.theta, maxHold: selected.maxHoldSec });
   const { config: frozenConfig, sha256: frozenConfigSha256 } = buildFrozenConfig({
     researchRunId,
     dataSource: args.dataSource,

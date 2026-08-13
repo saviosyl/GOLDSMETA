@@ -83,10 +83,12 @@ export type GhQuoteAt = {
 export function firstQuoteAtOrAfter(
   quotes: GhQuoteAt[],
   targetMs: number,
-  toleranceMs = GH_TARGET_TOLERANCE_MS
+  toleranceMs = GH_TARGET_TOLERANCE_MS,
+  fromIndex = 0
 ): GhQuoteAt | null {
   let best: GhQuoteAt | null = null;
-  for (const q of quotes) {
+  for (let i = Math.max(0, fromIndex); i < quotes.length; i++) {
+    const q = quotes[i]!;
     if (q.timestampMs < targetMs) continue;
     if (q.timestampMs - targetMs > toleranceMs) break;
     if (!Number.isFinite(q.bid) || !Number.isFinite(q.ask)) continue;
@@ -101,6 +103,8 @@ export function labelHorizon(args: {
   horizonSec: GhHorizonSec;
   entry: GhQuoteAt;
   futureQuotes: GhQuoteAt[];
+  /** Inclusive start index into futureQuotes (monotonic scan optimization). */
+  fromIndex?: number;
   theta: number;
   friction?: GhFriction;
   toleranceMs?: number;
@@ -109,7 +113,8 @@ export function labelHorizon(args: {
   const target = firstQuoteAtOrAfter(
     args.futureQuotes,
     targetTimestampMs,
-    args.toleranceMs ?? GH_TARGET_TOLERANCE_MS
+    args.toleranceMs ?? GH_TARGET_TOLERANCE_MS,
+    args.fromIndex ?? 0
   );
   if (!target) {
     return {

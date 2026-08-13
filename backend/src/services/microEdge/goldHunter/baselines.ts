@@ -28,10 +28,18 @@ export function simulateAlwaysSide(args: {
   const holdMs = args.holdSec * 1000;
   const trades: GhShadowTrade[] = [];
   let i = 0;
+  let exitIdx = 0;
   while (i < args.quotes.length) {
     const entry = args.quotes[i]!;
     const exitTarget = entry.timestampMs + holdMs;
-    let exit = args.quotes.find((q) => q.timestampMs >= exitTarget);
+    if (exitIdx < i) exitIdx = i;
+    while (
+      exitIdx < args.quotes.length &&
+      args.quotes[exitIdx]!.timestampMs < exitTarget
+    ) {
+      exitIdx += 1;
+    }
+    const exit = exitIdx < args.quotes.length ? args.quotes[exitIdx]! : undefined;
     if (!exit) break;
     const entryPrice = args.side === "BUY" ? entry.ask : entry.bid;
     const exitPrice = args.side === "BUY" ? exit.bid : exit.ask;
@@ -111,6 +119,7 @@ export function simulatePrevSecondMomentum(args: {
   holdSec: number;
 }): GhShadowTrade[] {
   const trades: GhShadowTrade[] = [];
+  let exitIdx = 0;
   for (let i = 1; i < args.quotes.length; i++) {
     const prev = args.quotes[i - 1]!;
     const cur = args.quotes[i]!;
@@ -120,7 +129,14 @@ export function simulatePrevSecondMomentum(args: {
     const side = curMid > prevMid ? "BUY" : curMid < prevMid ? "SELL" : null;
     if (!side) continue;
     const exitTarget = cur.timestampMs + args.holdSec * 1000;
-    const exit = args.quotes.find((q) => q.timestampMs >= exitTarget);
+    if (exitIdx < i) exitIdx = i;
+    while (
+      exitIdx < args.quotes.length &&
+      args.quotes[exitIdx]!.timestampMs < exitTarget
+    ) {
+      exitIdx += 1;
+    }
+    const exit = exitIdx < args.quotes.length ? args.quotes[exitIdx]! : undefined;
     if (!exit) break;
     const entryPrice = side === "BUY" ? cur.ask : cur.bid;
     const exitPrice = side === "BUY" ? exit.bid : exit.ask;

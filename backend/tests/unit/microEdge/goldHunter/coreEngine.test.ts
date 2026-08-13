@@ -417,4 +417,29 @@ describe("labeled research rows", () => {
     expect(sample.labels[30]).toBeDefined();
     expect(sample.labels[60]).toBeDefined();
   });
+
+  it("labels ~20k seconds in linear time (not O(n²))", () => {
+    const ticks = [];
+    const n = 20_000;
+    for (let i = 0; i < n; i++) {
+      const t = 10_000_000 + i * 1000;
+      ticks.push({
+        timestampMs: t,
+        side: "BID" as const,
+        price: 4300 + Math.sin(i / 25) * 0.5
+      });
+      ticks.push({
+        timestampMs: t + 1,
+        side: "ASK" as const,
+        price: 4300.12 + Math.sin(i / 25) * 0.5
+      });
+    }
+    const { rows: seconds } = buildAsOfSecondRows(ticks);
+    const t0 = Date.now();
+    const { rows } = buildLabeledResearchRows({ seconds, theta: 0.05 });
+    const elapsed = Date.now() - t0;
+    expect(rows.length).toBeGreaterThan(n * 0.8);
+    // O(n²) would be minutes; linear path should be well under 15s here.
+    expect(elapsed).toBeLessThan(15_000);
+  });
 });

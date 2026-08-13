@@ -49,13 +49,22 @@ function stdev(series: number[]): number {
   return Math.sqrt(v);
 }
 
+/** Binary search: bars must be ascending by closeTimeMs. */
 function latestCompletedBar(bars: GhBarCtx[], asOfMs: number): GhBarCtx | null {
-  let best: GhBarCtx | null = null;
-  for (const b of bars) {
-    if (b.closeTimeMs > asOfMs) continue;
-    if (!best || b.closeTimeMs > best.closeTimeMs) best = b;
+  let lo = 0;
+  let hi = bars.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const b = bars[mid]!;
+    if (b.closeTimeMs <= asOfMs) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  return best;
+  return best >= 0 ? bars[best]! : null;
 }
 
 /**
