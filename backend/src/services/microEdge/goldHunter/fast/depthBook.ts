@@ -2,7 +2,8 @@
  * In-memory Level-II book from ProtoOADepthEvent newQuotes / deletedQuotes.
  * Deleted quotes = observed liquidity disappearance — NOT assumed executions.
  */
-import type { GhFastDepthEvent, GhFastDepthQuote } from "./types";
+import { normalizeQuoteId } from "./depthProtocol";
+import type { GhFastDepthEvent, GhFastDepthQuote, GhFastDeletedQuoteRef } from "./types";
 
 export type DepthSide = "BID" | "ASK";
 
@@ -18,6 +19,8 @@ export type DepthBookStats = {
   topAskDepth: number;
   bidDepthN: number;
   askDepthN: number;
+  bidLevels: number;
+  askLevels: number;
   depthRatio: number;
   depthImbalance: number;
   weightedImbalance: number;
@@ -32,6 +35,7 @@ export type DepthBookStats = {
   bestBid: number | null;
   bestAsk: number | null;
   spread: number | null;
+  crossed: boolean;
   lastUpdateMs: number | null;
 };
 
@@ -42,8 +46,19 @@ function sideOf(q: GhFastDepthQuote): DepthSide | null {
 }
 
 function levelId(q: GhFastDepthQuote, side: DepthSide): string {
-  if (q.id != null) return String(q.id);
+  const nid = normalizeQuoteId(q.id);
+  if (nid != null) return nid;
   return `${side}:${q.price}`;
+}
+
+function deletedIdOf(d: GhFastDeletedQuoteRef): string | null {
+  if (typeof d === "number" || typeof d === "string" || typeof d === "bigint") {
+    return normalizeQuoteId(d);
+  }
+  if (d != null && typeof d === "object") {
+    return normalizeQuoteId((d as { id?: unknown }).id);
+  }
+  return null;
 }
 
 export class InMemoryDepthBook {
@@ -56,6 +71,8 @@ export class InMemoryDepthBook {
   private removedBid = 0;
   private removedAsk = 0;
   private rateWindowStart = 0;
+  private deleteHits = 0;
+  private deleteMisses = 0;
 
   constructor(opts?: { rateWindowMs?: number }) {
     this.windowMs = opts?.rateWindowMs ?? 1000;
@@ -66,6 +83,13 @@ export class InMemoryDepthBook {
     this.asks.clear();
     this.lastUpdateMs = null;
     this.resetRates(0);
+    this.deleteHits = 0;
+    this.deleteMisses = 0;
+  }
+
+  deleteHitRate(): number {
+    const n = this.deleteHits + this.deleteMisses;
+    return n > 0 ? this.deleteHits / n : 0;
   }
 
   private resetRates(nowMs: number): void {
@@ -93,6 +117,9 @@ export class InMemoryDepthBook {
       if (!side || !(q.price > 0) || !(q.size >= 0)) continue;
       const id = levelId(q, side);
       const map = side === "BID" ? this.bids : this.asks;
+      // Remove from opposite side if id migrates (shouldn't, but safe).
+      const other = side === "BID" ? this.asks : this.bids;
+      if (other.has(id)) other.delete(id);
       const prev = map.get(id);
       const next: DepthLevel = { id, price: q.price, size: q.size };
       map.set(id, next);
@@ -110,31 +137,23 @@ export class InMemoryDepthBook {
     }
 
     for (const d of ev.deletedQuotes ?? []) {
-      if ("price" in d && typeof (d as GhFastDepthQuote).price === "number") {
-        const q = d as GhFastDepthQuote;
-        const side = sideOf(q);
-        if (!side) continue;
-        const id = levelId(q, side);
-        const map = side === "BID" ? this.bids : this.asks;
-        const prev = map.get(id);
-        if (prev) {
-          map.delete(id);
-          if (side === "BID") this.removedBid += prev.size;
-          else this.removedAsk += prev.size;
-        }
-      } else if ("id" in d && d.id != null) {
-        const id = String(d.id);
-        const b = this.bids.get(id);
-        const a = this.asks.get(id);
-        if (b) {
-          this.bids.delete(id);
-          this.removedBid += b.size;
-        }
-        if (a) {
-          this.asks.delete(id);
-          this.removedAsk += a.size;
-        }
+      const id = deletedIdOf(d);
+      if (id == null) continue;
+      const b = this.bids.get(id);
+      const a = this.asks.get(id);
+      let hit = false;
+      if (b) {
+        this.bids.delete(id);
+        this.removedBid += b.size;
+        hit = true;
       }
+      if (a) {
+        this.asks.delete(id);
+        this.removedAsk += a.size;
+        hit = true;
+      }
+      if (hit) this.deleteHits += 1;
+      else this.deleteMisses += 1;
     }
   }
 
@@ -165,13 +184,17 @@ export class InMemoryDepthBook {
     const weightedImbalance = wDen > 0 ? (wBid - wAsk) / wDen : 0;
     const bestBid = bids[0]?.price ?? null;
     const bestAsk = asks[0]?.price ?? null;
+    const crossed =
+      bestBid != null && bestAsk != null ? bestBid >= bestAsk : false;
     const elapsed = Math.max(1, this.windowMs);
     return {
-      available,
+      available: available && !crossed,
       topBidDepth: bids[0]?.size ?? 0,
       topAskDepth: asks[0]?.size ?? 0,
       bidDepthN,
       askDepthN,
+      bidLevels: bids.length,
+      askLevels: asks.length,
       depthRatio,
       depthImbalance,
       weightedImbalance,
@@ -187,6 +210,7 @@ export class InMemoryDepthBook {
       bestAsk,
       spread:
         bestBid != null && bestAsk != null ? bestAsk - bestBid : null,
+      crossed,
       lastUpdateMs: this.lastUpdateMs
     };
   }

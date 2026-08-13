@@ -29,6 +29,7 @@
     "gold-hunter:v11-research": "tsx scripts/microEdge/goldHunterV11ResearchCli.ts",
     "gold-hunter:v12-fetch": "tsx scripts/microEdge/goldHunterV12FetchCli.ts",
     "gold-hunter:v12-research": "tsx scripts/microEdge/goldHunterV12ResearchCli.ts",
+    "gold-hunter:fast-real-probe": "tsx scripts/microEdge/goldHunterFastRealProbeCli.ts",
 
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",

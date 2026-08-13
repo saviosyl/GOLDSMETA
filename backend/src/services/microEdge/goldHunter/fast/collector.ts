@@ -1,13 +1,11 @@
 /**
- * Durable read-only FAST event collector — compact append/chunk storage.
- * Persistence is OFF the decision hot path (call after engine.onMarketEvent).
- * Never stores secrets/tokens.
+ * FAST event collector — hot path only enqueues into durable async sink.
+ * Never calls gzipSync/writeFileSync/Firestore on the decision path.
  */
-import { mkdirSync, appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 import type { GhFastDecision, GhFastMarketEvent } from "./types";
 import type { GhFastEngineStatus } from "./engine";
+import { GhFastDurableSink } from "./durableSink";
 
 export type GhFastCollectorRecord = {
   t: number;
@@ -32,52 +30,49 @@ export type GhFastCollectorRecord = {
 };
 
 export class GhFastEventCollector {
-  private buf: GhFastCollectorRecord[] = [];
-  private chunkIdx = 0;
-  private readonly dir: string;
-  private readonly chunkRows: number;
+  readonly sink: GhFastDurableSink;
 
-  constructor(opts?: { dir?: string; chunkRows?: number }) {
-    this.dir =
-      opts?.dir ??
-      join(process.cwd(), ".gold-hunter-data", "fast-live-shadow");
-    this.chunkRows = opts?.chunkRows ?? 2000;
-    mkdirSync(this.dir, { recursive: true });
+  constructor(opts?: {
+    dir?: string;
+    chunkRows?: number;
+    runId?: string;
+    configHash?: string;
+    gcsBucket?: string | null;
+  }) {
+    this.sink = new GhFastDurableSink({
+      localDir:
+        opts?.dir ??
+        join(process.cwd(), ".gold-hunter-data", "fast-live-shadow"),
+      chunkRows: opts?.chunkRows ?? 500,
+      runId: opts?.runId,
+      configHash: opts?.configHash,
+      gcsBucket: opts?.gcsBucket
+    });
   }
 
-  /** Async-friendly: enqueue; flush when chunk full. */
+  /** Hot path: enqueue only. */
   record(rec: GhFastCollectorRecord): void {
-    this.buf.push(rec);
-    if (this.buf.length >= this.chunkRows) this.flush();
+    this.sink.enqueue(rec);
   }
 
+  /** Test/shutdown helper — not for hot path. */
   flush(): void {
-    if (!this.buf.length) return;
-    const path = join(
-      this.dir,
-      `chunk-${String(this.chunkIdx).padStart(5, "0")}.ndjson.gz`
-    );
-    const body =
-      this.buf.map((r) => JSON.stringify(r)).join("\n") + "\n";
-    writeFileSync(path, gzipSync(Buffer.from(body, "utf8")));
-    // Checkpoint pointer
-    appendFileSync(
-      join(this.dir, "checkpoint.jsonl"),
-      JSON.stringify({
-        chunk: this.chunkIdx,
-        rows: this.buf.length,
-        at: new Date().toISOString()
-      }) + "\n"
-    );
-    this.chunkIdx += 1;
-    this.buf = [];
+    this.sink.flush();
+  }
+
+  async flushAndWait(timeoutMs?: number): Promise<void> {
+    await this.sink.flushAndWait(timeoutMs);
   }
 
   path(): string {
-    return this.dir;
+    return this.sink.localPath();
   }
 
   hasData(): boolean {
-    return existsSync(this.dir);
+    return this.sink.stats().chunksWritten > 0 || this.sink.manifests.length > 0;
+  }
+
+  stats() {
+    return this.sink.stats();
   }
 }

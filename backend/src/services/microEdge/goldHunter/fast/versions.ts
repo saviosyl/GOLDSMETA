@@ -20,3 +20,10 @@ export const GH_FAST_MAX_OPEN_POSITIONS = 1 as const;
 export const GH_FAST_MUTATION_SURFACE = "NONE" as const;
 export const GH_FAST_SHADOW_ONLY = true as const;
 export const GH_FAST_BROKER_EXECUTION_ENABLED = false as const;
+
+/** Default false — collector must set GOLD_HUNTER_FAST_SHADOW_ENABLED=true. */
+export function isGoldHunterFastShadowEnabled(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return (env.GOLD_HUNTER_FAST_SHADOW_ENABLED ?? "false").toLowerCase() === "true";
+}

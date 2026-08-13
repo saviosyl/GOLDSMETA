@@ -1,5 +1,6 @@
 /**
- * Measure real event→decision latency for GOLD_HUNTER FAST (shadow-only).
+ * Measure real event→decision compute latency for GOLD_HUNTER FAST (shadow-only).
+ * This is LOCAL COMPUTE latency — not network or broker execution latency.
  */
 import {
   GoldHunterFastEngine,
@@ -18,8 +19,11 @@ async function main(): Promise<void> {
   const engine = new GoldHunterFastEngine({ config: cfg, adapter });
   const BASE = 2400;
   const t0 = 8_000_000;
+  let seq = 1;
   await engine.onMarketEvent({
     kind: "DEPTH",
+    receiveSeq: seq++,
+    eventId: "d0",
     receivedAtMs: t0,
     brokerTimestampMs: t0,
     newQuotes: [
@@ -30,16 +34,22 @@ async function main(): Promise<void> {
   for (let i = 0; i < 400; i++) {
     const t = t0 + i * 20;
     const mid = BASE + i * 0.03;
+    const s = seq++;
     await engine.onMarketEvent({
       kind: "SPOT",
+      receiveSeq: s,
+      eventId: `s${s}`,
       receivedAtMs: t,
       brokerTimestampMs: t,
       bid: mid - 0.05,
       ask: mid + 0.05
     });
     if (i % 4 === 0) {
+      const d = seq++;
       await engine.onMarketEvent({
         kind: "DEPTH",
+        receiveSeq: d,
+        eventId: `d${d}`,
         receivedAtMs: t + 1,
         brokerTimestampMs: t + 1,
         newQuotes: [
@@ -60,6 +70,7 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         event: "gh_fast_latency_probe",
+        latencyKind: "compute_only",
         latency: p,
         shadowOrders: adapter.orders.length,
         closed: engine.closed.length,

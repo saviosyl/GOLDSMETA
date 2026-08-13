@@ -39,10 +39,14 @@ import {
 } from "../../../../src/services/microEdge/marketData/microCTraderProtocol";
 
 const BASE = 2400;
+let seq = 1;
 
 function depthSeed(t: number, bid = BASE, ask = BASE + 0.12): GhFastMarketEvent {
+  const receiveSeq = seq++;
   return {
     kind: "DEPTH",
+    receiveSeq,
+    eventId: `DEPTH:test:${receiveSeq}`,
     receivedAtMs: t,
     brokerTimestampMs: t,
     newQuotes: [
@@ -57,8 +61,11 @@ function depthSeed(t: number, bid = BASE, ask = BASE + 0.12): GhFastMarketEvent 
 function spot(t: number, mid: number, spread = 0.12): GhFastMarketEvent {
   const bid = mid - spread / 2;
   const ask = mid + spread / 2;
+  const receiveSeq = seq++;
   return {
     kind: "SPOT",
+    receiveSeq,
+    eventId: `SPOT:test:${receiveSeq}`,
     receivedAtMs: t,
     brokerTimestampMs: t,
     bid,
@@ -158,8 +165,11 @@ async function feedRisingMomentum(engine: GoldHunterFastEngine, t0: number): Pro
     const mid = BASE + i * 0.04;
     await engine.onMarketEvent(spot(t, mid));
     if (i % 5 === 0) {
+      const dseq = seq++;
       await engine.onMarketEvent({
         kind: "DEPTH",
+        receiveSeq: dseq,
+        eventId: `DEPTH:feed:${dseq}`,
         receivedAtMs: t + 1,
         brokerTimestampMs: t + 1,
         newQuotes: [
@@ -191,6 +201,8 @@ describe("depth reconstruction", () => {
     const book = new InMemoryDepthBook();
     book.applyDepthEvent({
       kind: "DEPTH",
+      receiveSeq: 1,
+      eventId: "d1",
       receivedAtMs: 1000,
       brokerTimestampMs: 1000,
       newQuotes: [
@@ -204,6 +216,8 @@ describe("depth reconstruction", () => {
     expect(s.topAskDepth).toBe(40);
     book.applyDepthEvent({
       kind: "DEPTH",
+      receiveSeq: 2,
+      eventId: "d2",
       receivedAtMs: 1100,
       brokerTimestampMs: 1100,
       deletedQuotes: [{ id: "2" }],
@@ -220,6 +234,8 @@ describe("depth reconstruction", () => {
     const book = new InMemoryDepthBook();
     book.applyDepthEvent({
       kind: "DEPTH",
+      receiveSeq: 1,
+      eventId: "d3",
       receivedAtMs: 1,
       brokerTimestampMs: 1,
       newQuotes: [
@@ -430,15 +446,18 @@ describe("event-driven engine + latency", () => {
       const t = t0 + i * 40;
       const mid = BASE + i * 0.05;
       await engine.onMarketEvent(spot(t, mid, 0.1));
+      const dseq = seq++;
       await engine.onMarketEvent({
         kind: "DEPTH",
+        receiveSeq: dseq,
+        eventId: `DEPTH:enter:${dseq}`,
         receivedAtMs: t + 1,
         brokerTimestampMs: t + 1,
         newQuotes: [
           { id: "b1", type: "BID", price: mid - 0.05, size: 200 },
           { id: "a1", type: "ASK", price: mid + 0.05, size: 20 }
         ],
-        deletedQuotes: [{ id: "a2", type: "ASK", price: mid + 0.1, size: 0 }]
+        deletedQuotes: [{ id: "a2" }]
       });
     }
     const entered = adapter.orders.some((o) => o.kind === "ENTER");
@@ -503,7 +522,7 @@ describe("collector + features", () => {
           depthTop: engine.depth.snapshot(5)
         });
       }
-      collector.flush();
+      await collector.flushAndWait(5000);
       expect(collector.hasData()).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });

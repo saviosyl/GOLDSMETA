@@ -33,6 +33,9 @@ export type GhFastExitReason =
 
 export type GhFastSpotEvent = {
   kind: "SPOT";
+  /** Monotonic local receive sequence (preferred duplicate identity). */
+  receiveSeq: number;
+  eventId: string;
   receivedAtMs: number;
   brokerTimestampMs: number | null;
   bid: number | null;
@@ -48,13 +51,21 @@ export type GhFastDepthQuote = {
   size: number;
 };
 
+export type GhFastDeletedQuoteRef =
+  | { id: string | number }
+  | GhFastDepthQuote
+  | number
+  | string;
+
 export type GhFastDepthEvent = {
   kind: "DEPTH";
+  receiveSeq: number;
+  eventId: string;
   receivedAtMs: number;
   brokerTimestampMs: number | null;
   symbolId?: string | number;
   newQuotes?: GhFastDepthQuote[];
-  deletedQuotes?: Array<GhFastDepthQuote | { id: string | number }>;
+  deletedQuotes?: GhFastDeletedQuoteRef[];
 };
 
 export type GhFastMarketEvent = GhFastSpotEvent | GhFastDepthEvent;
@@ -64,6 +75,7 @@ export type GhFastLatencySample = {
   featuresCalculatedMs: number;
   decisionProducedMs: number;
   shadowOrderProducedMs: number | null;
+  /** Feature/decision compute latency only — not network or broker. */
   eventToDecisionMs: number;
 };
 

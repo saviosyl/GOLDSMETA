@@ -139,13 +139,14 @@ export class GoldHunterFastEngine {
   /** Hot path: process one market event. No DB/Firestore. */
   async onMarketEvent(ev: GhFastMarketEvent): Promise<GhFastDecision> {
     const t0 = LT.nowMs();
-    const eventKey = `${ev.kind}:${ev.receivedAtMs}:${
-      ev.kind === "SPOT" ? `${ev.bid}_${ev.ask}` : (ev.newQuotes?.length ?? 0)
-    }`;
-    if (eventKey === this.lastEventKey) {
+    // Prefer monotonic receiveSeq / explicit eventId — never collapse same-ms distinct events.
+    const eventKey =
+      ev.eventId ||
+      `${ev.kind}:seq=${ev.receiveSeq ?? "na"}`;
+    if (ev.receiveSeq != null && eventKey === this.lastEventKey) {
       return this.waitDecision(t0, t0, "duplicate_event");
     }
-    this.lastEventKey = eventKey;
+    if (ev.receiveSeq != null) this.lastEventKey = eventKey;
 
     if (ev.kind === "SPOT") {
       if (ev.bid != null && ev.bid > 0) {
