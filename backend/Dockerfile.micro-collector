@@ -1,0 +1,24 @@
+# Always-on Micro Edge read-only XAUUSD collector (Cloud Run).
+# Holds a persistent Spotware WebSocket — not a request-scoped Cloud Function.
+# SHADOW ONLY / mutationSurface=NONE / MICRO_BROKER_EXECUTION_ENABLED=false
+FROM node:20-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+# postinstall applies cTrader proto extensions — must exist before npm ci.
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
+RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts/microEdge/runLiveCollectorWorker.ts ./scripts/microEdge/runLiveCollectorWorker.ts
+COPY scripts/microEdge/phase2aHistoricalSmokeCli.ts ./scripts/microEdge/phase2aHistoricalSmokeCli.ts
+RUN npm install tsx@latest --no-save
+ENV PORT=8080
+ENV NODE_ENV=production
+ENV APP_ENV=production
+ENV MICRO_DEPLOYED_RUNTIME=true
+ENV MICRO_STORAGE_MODE=firestore
+ENV MICRO_BROKER_EXECUTION_ENABLED=false
+ENV MICRO_CTRADER_ENVIRONMENT=DEMO
+ENV MICRO_QUOTE_SAMPLE_INTERVAL_MS=1000
+EXPOSE 8080
+CMD ["npx", "tsx", "scripts/microEdge/runLiveCollectorWorker.ts"]

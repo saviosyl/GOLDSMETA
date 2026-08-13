@@ -61,6 +61,20 @@ describe("Micro historical ticks + boundary quotes", () => {
     expect(decoded[1]!.brokerTimestampMs).toBe(newest);
   });
 
+  it("skips non-positive tick prices without failing the page", () => {
+    const newest = 1_700_000_060_000;
+    const decoded = decodeHistoricalTickData(
+      [
+        { timestamp: newest, tick: 210_000_000 },
+        { timestamp: 1000, tick: 0 },
+        { timestamp: 1000, tick: 209_999_000 }
+      ],
+      "BID"
+    );
+    expect(decoded).toHaveLength(2);
+    expect(decoded.map((t) => t.price)).toEqual([2099.99, 2100]);
+  });
+
   it("relative price conversion uses /100000", () => {
     const decoded = decodeHistoricalTickData(
       [{ timestamp: 1000, tick: 234_567_890 }],

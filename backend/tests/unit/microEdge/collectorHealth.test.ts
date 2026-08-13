@@ -90,4 +90,35 @@ describe("Micro Edge collector health (fail-closed)", () => {
     // Historical ticks are DATA-ONLY activation support (INTERFACE_READY until live).
     expect(states.HISTORICAL_TICKS).toBe("INTERFACE_READY");
   });
+
+  it("authorized vault without collector is not oauth_missing", () => {
+    const now = Date.now();
+    const result = evaluateCollectorHealth({
+      quote: null,
+      lastM1: null,
+      nowMs: now,
+      marketFeedConnected: false,
+      credentialsConfigured: true
+    });
+    expect(result.healthy).toBe(false);
+    expect(result.reasons).not.toContain("oauth_missing");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        "market_feed_not_connected",
+        "quote_missing",
+        "m1_missing"
+      ])
+    );
+  });
+
+  it("credentialsConfigured false still reports oauth_missing", () => {
+    const result = evaluateCollectorHealth({
+      quote: null,
+      lastM1: null,
+      nowMs: Date.now(),
+      marketFeedConnected: false,
+      credentialsConfigured: false
+    });
+    expect(result.reasons).toContain("oauth_missing");
+  });
 });

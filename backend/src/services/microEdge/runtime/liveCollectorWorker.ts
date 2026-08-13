@@ -445,7 +445,10 @@ export class MicroLiveCollectorWorker {
 }
 
 export async function runMicroLiveCollectorWorkerMain(): Promise<void> {
-  const port = Number(process.env.MICRO_COLLECTOR_HEALTH_PORT ?? 8089);
+  // Cloud Run injects PORT; MICRO_COLLECTOR_HEALTH_PORT remains for local/dev.
+  const port = Number(
+    process.env.PORT ?? process.env.MICRO_COLLECTOR_HEALTH_PORT ?? 8080
+  );
   const vaultUid = (process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim() || undefined;
   const worker = new MicroLiveCollectorWorker({
     healthPort: port,
@@ -464,7 +467,8 @@ export async function runMicroLiveCollectorWorkerMain(): Promise<void> {
   microLog("MICRO_COLLECTOR_STARTED", {
     healthPort: port,
     mutationSurface: "NONE",
-    deployed: false,
-    storageMode: resolveMicroStorageMode()
+    deployed: isDeployedMicroRuntime(),
+    storageMode: resolveMicroStorageMode(),
+    quoteSampleIntervalMs: MICRO_QUOTE_SAMPLE_INTERVAL_MS
   });
 }

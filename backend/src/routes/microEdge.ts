@@ -70,8 +70,10 @@ export const buildMicroEdgeRouter = (): Router => {
   router.get("/v1/micro-edge/status", ...gate, async (req, res) => {
     const uid = getAuthenticatedUserId(req);
     const latest = await memoryStore.getLatestPrediction();
-    const marketData = await buildMarketDataStatusPayload();
     const oauth = await getMicroOAuthStatus(uid);
+    const marketData = await buildMarketDataStatusPayload(Date.now(), {
+      vaultOAuthConfigured: Boolean(oauth.oauth?.configured)
+    });
     const healthy = Boolean(marketData.collectorHealthy);
     res.json({
       shadowOnly: MICRO_SHADOW_ONLY,

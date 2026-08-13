@@ -22,6 +22,8 @@
     "micro-edge:backfill-boundary-quotes": "tsx scripts/microEdge/backfillBoundaryQuotesCli.ts",
     "micro-edge:diagnostics": "tsx scripts/microEdge/diagnosticsCli.ts",
     "micro-edge:collector": "tsx scripts/microEdge/runLiveCollectorWorker.ts",
+    "micro-edge:phase2a-smoke": "tsx scripts/microEdge/phase2aHistoricalSmokeCli.ts",
+
     "dev": "tsx watch src/index.ts",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "verify:owner-auth": "tsx scripts/verifyOwnerAuthIntegrity.ts",
