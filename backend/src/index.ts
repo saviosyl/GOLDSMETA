@@ -44,16 +44,17 @@ export const app = createApp();
  * stays hard-locked via flags.ts.
  * OAuth redirect URI continues to come from CTRADER_REDIRECT_URI (Secret Manager).
  */
-/** DEMO overnight overlay (entry cutoff + conservative caps). Never enables Live. */
+/**
+ * Demo opportunity mode remains ACTIVE_DEMO.
+ * Temporary overnight overlay (DEMO_OVERNIGHT_MODE) is OFF after morning handoff.
+ * Guard implementation in demoOvernightGuard.ts is retained for future controlled sessions.
+ * Never enables Live.
+ */
 function applyDemoOvernightRuntimeEnv(): void {
   process.env.DEMO_OPPORTUNITY_MODE =
     process.env.DEMO_OPPORTUNITY_MODE || "ACTIVE_DEMO";
-  process.env.DEMO_OVERNIGHT_MODE = "true";
-  process.env.DEMO_OVERNIGHT_RUN_ID =
-    process.env.DEMO_OVERNIGHT_RUN_ID || "overnight-demo-20260812";
-  // Europe/Dublin 07:00 on 13 Aug 2026 — hard entry cutoff for this unattended run.
-  process.env.DEMO_OVERNIGHT_RUN_UNTIL =
-    process.env.DEMO_OVERNIGHT_RUN_UNTIL || "2026-08-13T07:00:00+01:00";
+  // Morning handoff 2026-08-13: disable temporary overnight entry overlay.
+  process.env.DEMO_OVERNIGHT_MODE = "false";
 }
 
 function applyProductionCTraderRuntimeEnv(): void {
