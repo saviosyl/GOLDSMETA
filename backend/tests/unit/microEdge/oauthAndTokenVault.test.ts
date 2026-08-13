@@ -25,6 +25,41 @@ import {
   selectMicroAccount,
   parseAuthorizedAccounts
 } from "../../../src/services/microEdge/marketData/accountSelection";
+import type { MicroTokenRecord } from "../../../src/services/microEdge/marketData/tokenVault";
+
+function baseToken(partial: Partial<MicroTokenRecord> & Pick<MicroTokenRecord, "uid" | "accessToken" | "refreshToken" | "selectedAccountId" | "authorizedAccountIds">): MicroTokenRecord {
+  const now = new Date().toISOString();
+  return {
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    expiresIn: 3600,
+    environment: "DEMO",
+    authorizedAccounts: (partial.authorizedAccountIds ?? []).map((id) => ({
+      accountId: id,
+      isLive: false,
+      traderLoginMasked: null,
+      brokerTitleShort: "Pepperstone",
+      observedAt: now
+    })),
+    selectedAccountMeta: partial.selectedAccountId
+      ? {
+          accountId: partial.selectedAccountId,
+          isLive: false,
+          traderLoginMasked: null,
+          brokerTitleShort: "Pepperstone",
+          observedAt: now
+        }
+      : null,
+    permissionScope: "SCOPE_VIEW",
+    brokerVerified: true,
+    scope: "accounts",
+    createdAt: now,
+    updatedAt: now,
+    lastRefreshAt: null,
+    tokenVersion: 1,
+    status: "CONNECTED",
+    ...partial
+  };
+}
 
 describe("Micro OAuth + token vault", () => {
   beforeEach(() => {
@@ -124,22 +159,15 @@ describe("Micro OAuth + token vault", () => {
     const vault = new MemoryMicroCTraderTokenVault(
       new MicroTokenCrypto("cccccccccccccccccccccccccccccccc")
     );
-    await vault.saveTokens({
-      uid: "user-1",
-      accessToken: "access-plain",
-      refreshToken: "refresh-plain",
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      expiresIn: 3600,
-      environment: "DEMO",
-      authorizedAccountIds: ["111"],
-      selectedAccountId: "111",
-      scope: "accounts",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastRefreshAt: null,
-      tokenVersion: 1,
-      status: "CONNECTED"
-    });
+    await vault.saveTokens(
+      baseToken({
+        uid: "user-1",
+        accessToken: "access-plain",
+        refreshToken: "refresh-plain",
+        authorizedAccountIds: ["111"],
+        selectedAccountId: "111"
+      })
+    );
     const pub = vault.serializePublicOnly("user-1");
     const json = JSON.stringify(pub);
     expect(json).not.toContain("access-plain");
@@ -154,22 +182,17 @@ describe("Micro OAuth + token vault", () => {
 
   it("replaceAfterRefresh stores new refresh token atomically", async () => {
     const vault = new MemoryMicroCTraderTokenVault();
-    await vault.saveTokens({
-      uid: "user-2",
-      accessToken: "a1",
-      refreshToken: "r1",
-      expiresAt: new Date(Date.now() + 1000).toISOString(),
-      expiresIn: 1,
-      environment: "DEMO",
-      authorizedAccountIds: ["9"],
-      selectedAccountId: "9",
-      scope: "accounts",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastRefreshAt: null,
-      tokenVersion: 1,
-      status: "CONNECTED"
-    });
+    await vault.saveTokens(
+      baseToken({
+        uid: "user-2",
+        accessToken: "a1",
+        refreshToken: "r1",
+        expiresAt: new Date(Date.now() + 1000).toISOString(),
+        expiresIn: 1,
+        authorizedAccountIds: ["9"],
+        selectedAccountId: "9"
+      })
+    );
     const next = await vault.replaceAfterRefresh("user-2", {
       accessToken: "a2",
       refreshToken: "r2",
@@ -209,7 +232,12 @@ describe("Micro OAuth + token vault", () => {
         sessions,
         fetchImpl,
         fetchAuthorizedAccounts: async () => [
-          { accountId: "42", isLive: false, traderLogin: "1", brokerHint: "Pepperstone" }
+          {
+            accountId: "42",
+            isLive: false,
+            traderLogin: "1",
+            brokerHint: "Pepperstone"
+          }
         ]
       }
     });
@@ -228,8 +256,8 @@ describe("Micro OAuth + token vault", () => {
   it("multiple accounts require selection — no account[0] fallback", () => {
     const accounts = parseAuthorizedAccounts({
       ctidTraderAccount: [
-        { ctidTraderAccountId: 1, isLive: false },
-        { ctidTraderAccountId: 2, isLive: false }
+        { ctidTraderAccountId: 1, isLive: false, brokerName: "Pepperstone" },
+        { ctidTraderAccountId: 2, isLive: false, brokerName: "Pepperstone" }
       ]
     });
     const sel = selectMicroAccount({
@@ -242,26 +270,47 @@ describe("Micro OAuth + token vault", () => {
 
   it("single DEMO account may auto-select; LIVE cannot silently replace DEMO", () => {
     const demoOnly = selectMicroAccount({
-      accounts: [{ accountId: "7", isLive: false, traderLogin: null, brokerHint: null }],
+      accounts: [
+        {
+          accountId: "7",
+          isLive: false,
+          traderLogin: null,
+          brokerHint: "Pepperstone"
+        }
+      ],
       intendedEnvironment: "DEMO"
     });
     expect(demoOnly.ok).toBe(true);
 
     const liveOnly = selectMicroAccount({
-      accounts: [{ accountId: "8", isLive: true, traderLogin: null, brokerHint: null }],
+      accounts: [
+        {
+          accountId: "8",
+          isLive: true,
+          traderLogin: null,
+          brokerHint: "Pepperstone"
+        }
+      ],
       intendedEnvironment: "DEMO"
     });
     expect(liveOnly.ok).toBe(false);
     if (!liveOnly.ok) expect(liveOnly.reason).toBe("NO_DEMO_WHEN_DEMO_REQUIRED");
 
     const explicitLive = selectMicroAccount({
-      accounts: [{ accountId: "8", isLive: true, traderLogin: null, brokerHint: null }],
+      accounts: [
+        {
+          accountId: "8",
+          isLive: true,
+          traderLogin: null,
+          brokerHint: "Pepperstone"
+        }
+      ],
       intendedEnvironment: "DEMO",
       explicitAccountId: "8"
     });
     expect(explicitLive.ok).toBe(false);
     if (!explicitLive.ok) {
-      expect(explicitLive.reason).toBe("LIVE_FORBIDDEN_FOR_DEMO_ACTIVATION");
+      expect(explicitLive.reason).toBe("LIVE_ACCOUNT_NOT_ALLOWED");
     }
   });
 
@@ -288,7 +337,12 @@ describe("Micro OAuth + token vault", () => {
         sessions,
         fetchImpl,
         fetchAuthorizedAccounts: async () => [
-          { accountId: "1", isLive: false, traderLogin: null, brokerHint: null }
+          {
+            accountId: "1",
+            isLive: false,
+            traderLogin: null,
+            brokerHint: "Pepperstone"
+          }
         ]
       }
     });
@@ -305,7 +359,12 @@ describe("Micro OAuth + token vault", () => {
         sessions,
         fetchImpl,
         fetchAuthorizedAccounts: async () => [
-          { accountId: "55", isLive: false, traderLogin: null, brokerHint: null }
+          {
+            accountId: "55",
+            isLive: false,
+            traderLogin: null,
+            brokerHint: "Pepperstone"
+          }
         ]
       }
     });

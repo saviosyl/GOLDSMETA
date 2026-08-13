@@ -2,9 +2,12 @@
  * Micro DATA-ONLY historical Bid/Ask tick collector (ProtoOAGetTickDataReq).
  * READ ONLY — zero relation to broker execution.
  *
- * Tick decoding: first timestamp is absolute; subsequent entries are deltas
- * relative to the previous tick. Official responses may be newest-first;
- * we expand deltas then normalize to ascending absolute timestamps.
+ * Official cTrader semantics (newest-first):
+ * - first timestamp = absolute Unix ms (newest)
+ * - each subsequent timestamp = time difference between previous and current
+ * - reconstruction moves BACKWARD: currentAbsolute = previousAbsolute - |delta|
+ *
+ * After reconstruction we validate window invariants and normalize ascending.
  */
 import {
   MICRO_BOUNDARY_QUOTE_TOLERANCE_MS,
@@ -33,46 +36,108 @@ export type MicroRawTickDatum = {
   tick: number;
 };
 
+export type DecodeHistoricalTicksOptions = {
+  side: MicroHistoricalQuoteSide;
+  priceScale?: number;
+  /** Optional request window for invariant checks. */
+  fromMs?: number;
+  toMs?: number;
+  /** Symbol digits for price rounding when provided (not hardcoded). */
+  digits?: number | null;
+};
+
 /**
- * Expand compressed tick list into absolute timestamps + relative prices.
- * Does not assume ascending absolute timestamps in the wire payload.
+ * Expand newest-first compressed tick list into absolute timestamps + prices.
+ * Fail closed with HISTORICAL_TICK_TIMESTAMP_INVALID when invariants break.
  */
 export function decodeHistoricalTickData(
   tickData: unknown,
-  side: MicroHistoricalQuoteSide,
-  priceScale = MICRO_SPOT_PRICE_SCALE
+  sideOrOpts: MicroHistoricalQuoteSide | DecodeHistoricalTicksOptions,
+  priceScaleArg = MICRO_SPOT_PRICE_SCALE
 ): MicroHistoricalTick[] {
+  const opts: DecodeHistoricalTicksOptions =
+    typeof sideOrOpts === "string"
+      ? { side: sideOrOpts, priceScale: priceScaleArg }
+      : sideOrOpts;
+  const side = opts.side;
+  const priceScale = opts.priceScale ?? MICRO_SPOT_PRICE_SCALE;
   const list = Array.isArray(tickData) ? tickData : [];
   if (!list.length) return [];
 
-  const expanded: MicroHistoricalTick[] = [];
-  let absoluteTs: number | null = null;
+  const wireOrder: MicroHistoricalTick[] = [];
+  let previousAbsolute: number | null = null;
 
   for (let i = 0; i < list.length; i++) {
     const raw = (list[i] ?? {}) as Record<string, unknown>;
     const tsPart = asFiniteNumber(raw.timestamp);
     const tickRel = asFiniteNumber(raw.tick);
-    if (tsPart == null || tickRel == null) continue;
-
-    if (i === 0 || absoluteTs == null) {
-      absoluteTs = tsPart;
-    } else {
-      // Delta from previous — may be negative when newest-first.
-      absoluteTs = absoluteTs + tsPart;
+    if (tsPart == null || tickRel == null) {
+      throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+        code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+        reason: "malformed_tick"
+      });
     }
 
-    const price = tickRel / priceScale;
-    if (!(price > 0) || !Number.isFinite(absoluteTs)) continue;
-    expanded.push({
-      side,
-      price,
-      brokerTimestampMs: absoluteTs
-    });
+    let absoluteTs: number;
+    if (i === 0 || previousAbsolute == null) {
+      absoluteTs = tsPart;
+    } else {
+      // Newest-first: difference moves backward in time.
+      // Accept signed negative deltas by using absolute difference magnitude.
+      const delta = Math.abs(tsPart);
+      absoluteTs = previousAbsolute - delta;
+    }
+
+    if (!Number.isFinite(absoluteTs)) {
+      throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+        code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+        reason: "non_finite_timestamp"
+      });
+    }
+
+    // Non-increasing in wire (newest→older) except true same-ms ticks.
+    if (previousAbsolute != null && absoluteTs > previousAbsolute) {
+      throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+        code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+        reason: "not_newest_first"
+      });
+    }
+
+    let price = tickRel / priceScale;
+    if (opts.digits != null && Number.isFinite(opts.digits) && opts.digits >= 0) {
+      const f = 10 ** opts.digits;
+      price = Math.round(price * f) / f;
+    }
+    if (!(price > 0)) {
+      throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+        code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+        reason: "invalid_price"
+      });
+    }
+
+    wireOrder.push({ side, price, brokerTimestampMs: absoluteTs });
+    previousAbsolute = absoluteTs;
   }
 
-  // Normalize to ascending for boundary samplers.
-  expanded.sort((a, b) => a.brokerTimestampMs - b.brokerTimestampMs);
-  return expanded;
+  if (opts.fromMs != null || opts.toMs != null) {
+    for (const t of wireOrder) {
+      if (opts.fromMs != null && t.brokerTimestampMs < opts.fromMs) {
+        throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+          code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+          reason: "before_fromMs"
+        });
+      }
+      if (opts.toMs != null && t.brokerTimestampMs > opts.toMs) {
+        throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
+          code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
+          reason: "after_toMs"
+        });
+      }
+    }
+  }
+
+  // Normalize ascending for boundary samplers.
+  return [...wireOrder].sort((a, b) => a.brokerTimestampMs - b.brokerTimestampMs);
 }
 
 export function assertTickWindowWithinLimit(
@@ -107,6 +172,7 @@ export async function fetchHistoricalTicksWindow(args: {
   side: MicroHistoricalQuoteSide;
   fromMs: number;
   toMs: number;
+  digits?: number | null;
   pacer?: ReturnType<typeof createMicroPacer>;
 }): Promise<MicroHistoricalTick[]> {
   assertTickWindowWithinLimit(args.fromMs, args.toMs);
@@ -117,6 +183,7 @@ export async function fetchHistoricalTicksWindow(args: {
   const all: MicroHistoricalTick[] = [];
   let cursorTo = args.toMs;
   let guard = 0;
+  let lastOldest: number | null = null;
 
   while (cursorTo > args.fromMs && guard < 500) {
     guard += 1;
@@ -137,7 +204,6 @@ export async function fetchHistoricalTicksWindow(args: {
             toTimestamp
           });
         }
-        // Fallback via sendReadCommand
         const raw = (await args.transport.sendReadCommand(
           "ProtoOAGetTickDataReq",
           {
@@ -152,18 +218,32 @@ export async function fetchHistoricalTicksWindow(args: {
       }
     });
 
-    const decoded = decodeHistoricalTickData(res.tickData, args.side);
+    let decoded: MicroHistoricalTick[];
+    try {
+      decoded = decodeHistoricalTickData(res.tickData, {
+        side: args.side,
+        fromMs: fromTimestamp,
+        toMs: toTimestamp,
+        digits: args.digits
+      });
+    } catch (e) {
+      throw e;
+    }
     all.push(...decoded);
 
     if (!res.hasMore) break;
     if (!decoded.length) break;
-    // hasMore: move window end to oldest received tick (exclusive) and continue.
+    // Exclusive cursor: next page must be strictly older than oldest decoded tick.
     const oldest = decoded[0]!.brokerTimestampMs;
-    if (oldest >= cursorTo) break;
-    cursorTo = oldest;
+    const nextTo = oldest - 1;
+    if (lastOldest != null && oldest >= lastOldest) {
+      break; // prevent infinite repeated boundary
+    }
+    if (nextTo < args.fromMs || nextTo >= cursorTo) break;
+    lastOldest = oldest;
+    cursorTo = nextTo;
   }
 
-  // Deduplicate by timestamp+price
   const seen = new Set<string>();
   const deduped: MicroHistoricalTick[] = [];
   for (const t of all.sort(

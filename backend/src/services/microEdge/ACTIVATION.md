@@ -63,8 +63,24 @@ npm run micro-edge:backfill-boundary-quotes # historical Bid/Ask → boundary qu
 npm run micro-edge:diagnostics
 ```
 
-## Firestore
+## Firestore paths (exact)
 
-- `microEdge/shadow-v1/private/oauth/**` — Admin only (client rules deny)
-- `microEdge/shadow-v1/marketData/**` — bars, quotes, boundaryQuotes, checkpoints
-- `microEdge/shadow-v1/research/**` — reserved
+```
+microEdge/shadow-v1/private/oauth/tokens/{uid}
+microEdge/shadow-v1/private/oauth/sessions/{sessionId}
+microEdge/shadow-v1/marketData/_/barsM1|{barsM5|barsM15}/{id}
+microEdge/shadow-v1/marketData/_/quotes/{id}
+microEdge/shadow-v1/marketData/_/boundaryQuotes/{id}
+microEdge/shadow-v1/marketData/_/checkpoints/{M1|M5|M15|BOUNDARY_QUOTES}
+microEdge/shadow-v1/marketData/_/collectorStatus/heartbeat
+microEdge/shadow-v1/marketData/_/collectorStatus/runtime
+microEdge/shadow-v1/marketData/_/symbolMetadata/current
+```
+
+Client rules deny all `microEdge/**`. Admin/backend only.
+
+## Storage mode
+
+- Deployed: `MICRO_STORAGE_MODE=firestore` required (memory fail-closed)
+- Test/local: memory allowed
+- Token vault, OAuth sessions, market data, collector status share the same mode

@@ -46,17 +46,19 @@ describe("Micro historical ticks + boundary quotes", () => {
     expect(decoded[2]!.price).toBe(2100);
   });
 
-  it("decodes chronological oldest-first deltas", () => {
-    const oldest = 1_700_000_000_000;
-    const raw = [
-      { timestamp: oldest, tick: 200_000_000 },
-      { timestamp: 1000, tick: 200_000_100 },
-      { timestamp: 1000, tick: 200_000_200 }
-    ];
-    const decoded = decodeHistoricalTickData(raw, "ASK");
-    expect(decoded[0]!.brokerTimestampMs).toBe(oldest);
-    expect(decoded[2]!.brokerTimestampMs).toBe(oldest + 2000);
-    expect(decoded[0]!.price).toBe(2000);
+  it("rejects non-newest-first reconstruction that would move forward", () => {
+    // After first absolute, a zero-delta same-ms tick is allowed; positive
+    // reconstruction that increases time is impossible with abs-subtraction.
+    const newest = 1_700_000_000_000;
+    const decoded = decodeHistoricalTickData(
+      [
+        { timestamp: newest, tick: 200_000_000 },
+        { timestamp: 1000, tick: 200_000_100 }
+      ],
+      "ASK"
+    );
+    expect(decoded[0]!.brokerTimestampMs).toBe(newest - 1000);
+    expect(decoded[1]!.brokerTimestampMs).toBe(newest);
   });
 
   it("relative price conversion uses /100000", () => {
@@ -84,11 +86,10 @@ describe("Micro historical ticks + boundary quotes", () => {
     expect(bids[0]!.side).toBe("BID");
     expect(fake.getTickDataCallCount).toBe(1);
 
-    // hasMore path: second call then stop when empty/no more
-    fake.tickHasMore = true;
+    fake.tickHasMore = false;
     fake.tickDataBySide.set("ASK", [
-      { timestamp: 1_700_000_100_000, tick: 210_020_000 },
-      { timestamp: -50_000, tick: 210_010_000 }
+      { timestamp: 1_700_000_050_000, tick: 210_020_000 },
+      { timestamp: 1000, tick: 210_010_000 }
     ]);
     const asks = await fetchHistoricalTicksWindow({
       transport: fake,

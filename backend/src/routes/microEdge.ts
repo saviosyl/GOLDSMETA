@@ -35,6 +35,22 @@ import { fetchMicroAuthorizedAccounts } from "../services/microEdge/marketData/f
 import { computeLabelReadyDiagnostics } from "../services/microEdge/marketData/historicalTicks";
 import { getMicroMarketDataStore } from "../services/microEdge/marketData/marketDataService";
 
+function microFetchAuthorizedAccounts() {
+  return async (a: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    environment: "DEMO" | "LIVE";
+  }) =>
+    fetchMicroAuthorizedAccounts({
+      clientId: a.clientId,
+      clientSecret: a.clientSecret,
+      accessToken: a.accessToken,
+      environment: a.environment,
+      requireViewScope: true
+    });
+}
+
 /** Process-local shadow store for predictions until workers wire Firestore. */
 const memoryStore = new MemoryMicroEdgeStore();
 const marketClient = getMicroMarketClient();
@@ -79,12 +95,14 @@ export const buildMicroEdgeRouter = (): Router => {
       collector: marketData.collector,
       oauth: oauth.oauth,
       oauthAppConfigured: oauth.appConfigured,
+      authorizationStatus: oauth.authorizationStatus,
       overallMicroDecision: healthy ? latest?.overallMicroDecision ?? "WAIT" : "WAIT",
       dataUnavailable: !healthy,
       degradedReason: healthy ? null : "DATA UNAVAILABLE",
       dataCollectionActive: marketData.dataCollectionActive,
       modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
-      realConnectionStatus: oauth.realConnectionStatus
+      realConnectionStatus: oauth.realConnectionStatus,
+      collectorHealthLabel: healthy ? "HEALTHY" : "OFFLINE"
     });
   });
 
@@ -149,13 +167,7 @@ export const buildMicroEdgeRouter = (): Router => {
       sessionId,
       explicitAccountId,
       deps: {
-        fetchAuthorizedAccounts: async (a) =>
-          fetchMicroAuthorizedAccounts({
-            clientId: a.clientId,
-            clientSecret: a.clientSecret,
-            accessToken: a.accessToken,
-            environment: a.environment
-          })
+        fetchAuthorizedAccounts: microFetchAuthorizedAccounts()
       }
     });
     if (!result.ok) {
@@ -192,7 +204,12 @@ export const buildMicroEdgeRouter = (): Router => {
       res.status(400).json({ ok: false, code: "account_missing" });
       return;
     }
-    const result = await selectMicroOAuthAccount({ uid, accountId });
+    // Always revalidate against live cTrader account-list (authoritative isLive).
+    const result = await selectMicroOAuthAccount({
+      uid,
+      accountId,
+      deps: { fetchAuthorizedAccounts: microFetchAuthorizedAccounts() }
+    });
     if (!result.ok) {
       res.status(400).json(result);
       return;

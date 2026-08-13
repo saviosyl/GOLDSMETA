@@ -13,6 +13,11 @@ import type {
   MicroTimeframe
 } from "./types";
 import type { MicroBoundaryQuote } from "./historicalTicks";
+import {
+  assertMicroStorageModeAllowed,
+  resolveMicroStorageMode,
+  type MicroStorageMode
+} from "./storageMode";
 
 export type UpsertBarResult = "created" | "skipped_identical" | "conflict";
 
@@ -403,4 +408,35 @@ export function makeRawBar(args: {
     environment: args.environment,
     collectedAt: args.collectedAt ?? new Date().toISOString()
   };
+}
+
+let defaultMarketStore: MicroMarketDataStore | null = null;
+/** Shared memory singleton for cross-instance memory-mode tests. */
+let sharedMemoryMarketStore: MemoryMicroMarketDataStore | null = null;
+
+export function createMicroMarketDataStore(args?: {
+  mode?: MicroStorageMode;
+  sharedMemory?: MemoryMicroMarketDataStore;
+}): MicroMarketDataStore {
+  const mode = args?.mode ?? resolveMicroStorageMode();
+  assertMicroStorageModeAllowed(mode);
+  if (mode === "firestore") return new FirestoreMicroMarketDataStore();
+  if (args?.sharedMemory) return args.sharedMemory;
+  if (!sharedMemoryMarketStore) {
+    sharedMemoryMarketStore = new MemoryMicroMarketDataStore();
+  }
+  return sharedMemoryMarketStore;
+}
+
+export function getMicroMarketDataStore(): MicroMarketDataStore {
+  if (!defaultMarketStore) defaultMarketStore = createMicroMarketDataStore();
+  return defaultMarketStore;
+}
+
+export function resetMicroMarketDataStoreForTests(
+  shared?: MemoryMicroMarketDataStore
+): MemoryMicroMarketDataStore {
+  sharedMemoryMarketStore = shared ?? new MemoryMicroMarketDataStore();
+  defaultMarketStore = sharedMemoryMarketStore;
+  return sharedMemoryMarketStore;
 }

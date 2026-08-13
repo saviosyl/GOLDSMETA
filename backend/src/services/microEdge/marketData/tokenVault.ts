@@ -1,22 +1,30 @@
 /**
  * MicroCTraderTokenVault — server-side only encrypted token storage.
  * Never returned to web. Never logged. Never shared with Core.
- * Namespace: microEdge/shadow-v1/private/oauth/**
+ * Paths: microEdge/shadow-v1/private/oauth/tokens/{uid}
  */
 import { getFirestore } from "firebase-admin/firestore";
 import { MICRO_NAMESPACE } from "../config";
 import type { MicroCTraderEnvironment } from "./microCTraderAuth";
+import type { MicroStoredAccountMeta } from "./accountSelection";
 import {
   microTokenCrypto,
   type MicroEncryptedBlob,
   MicroTokenCrypto
 } from "./tokenCrypto";
+import {
+  assertMicroStorageModeAllowed,
+  isDeployedMicroRuntime,
+  resolveMicroStorageMode,
+  type MicroStorageMode
+} from "./storageMode";
 
 export type MicroOAuthStatus =
   | "DISCONNECTED"
   | "CONNECTED"
   | "TOKEN_REFRESH_REQUIRED"
   | "TOKEN_REFRESH_FAILED"
+  | "TOKEN_REFRESH_PERSIST_FAILED"
   | "AWAITING_USER_AUTHORIZATION";
 
 export type MicroTokenRecord = {
@@ -26,8 +34,14 @@ export type MicroTokenRecord = {
   expiresAt: string;
   expiresIn: number;
   environment: MicroCTraderEnvironment;
+  /** Legacy id list — audit only; selection must revalidate via cTrader. */
   authorizedAccountIds: string[];
+  /** Safe account metadata cache (not authorization authority). */
+  authorizedAccounts: MicroStoredAccountMeta[];
   selectedAccountId: string | null;
+  selectedAccountMeta: MicroStoredAccountMeta | null;
+  permissionScope: "SCOPE_VIEW";
+  brokerVerified: boolean | null;
   scope: "accounts";
   createdAt: string;
   updatedAt: string;
@@ -36,17 +50,18 @@ export type MicroTokenRecord = {
   status: MicroOAuthStatus;
 };
 
-/** Safe public view — never includes tokens/secrets. */
 export type MicroTokenPublicStatus = {
   status: MicroOAuthStatus;
   configured: boolean;
   scope: "accounts";
+  permissionScope: "SCOPE_VIEW" | null;
   environment: MicroCTraderEnvironment | null;
   selectedAccountIdMasked: string | null;
   authorizedAccountCount: number;
   expiresAt: string | null;
   lastRefreshAt: string | null;
   tokenVersion: number | null;
+  brokerVerified: boolean | null;
 };
 
 type StoredTokenDoc = {
@@ -57,7 +72,11 @@ type StoredTokenDoc = {
   expiresIn: number;
   environment: MicroCTraderEnvironment;
   authorizedAccountIds: string[];
+  authorizedAccounts: MicroStoredAccountMeta[];
   selectedAccountId: string | null;
+  selectedAccountMeta: MicroStoredAccountMeta | null;
+  permissionScope: "SCOPE_VIEW";
+  brokerVerified: boolean | null;
   scope: "accounts";
   createdAt: string;
   updatedAt: string;
@@ -80,54 +99,91 @@ function assertPrivateOauthPath(relative: string): void {
   }
 }
 
+function toStored(record: MicroTokenRecord, crypto: MicroTokenCrypto): StoredTokenDoc {
+  return {
+    uid: record.uid,
+    accessTokenEnc: crypto.encrypt(record.accessToken),
+    refreshTokenEnc: crypto.encrypt(record.refreshToken),
+    expiresAt: record.expiresAt,
+    expiresIn: record.expiresIn,
+    environment: record.environment,
+    authorizedAccountIds: [...record.authorizedAccountIds],
+    authorizedAccounts: [...(record.authorizedAccounts ?? [])],
+    selectedAccountId: record.selectedAccountId,
+    selectedAccountMeta: record.selectedAccountMeta,
+    permissionScope: "SCOPE_VIEW",
+    brokerVerified: record.brokerVerified ?? null,
+    scope: "accounts",
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    lastRefreshAt: record.lastRefreshAt,
+    tokenVersion: record.tokenVersion,
+    status: record.status
+  };
+}
+
+function fromStored(doc: StoredTokenDoc, crypto: MicroTokenCrypto): MicroTokenRecord {
+  return {
+    uid: doc.uid,
+    accessToken: crypto.decrypt(doc.accessTokenEnc),
+    refreshToken: crypto.decrypt(doc.refreshTokenEnc),
+    expiresAt: doc.expiresAt,
+    expiresIn: doc.expiresIn,
+    environment: doc.environment,
+    authorizedAccountIds: [...(doc.authorizedAccountIds ?? [])],
+    authorizedAccounts: [...(doc.authorizedAccounts ?? [])],
+    selectedAccountId: doc.selectedAccountId ?? null,
+    selectedAccountMeta: doc.selectedAccountMeta ?? null,
+    permissionScope: "SCOPE_VIEW",
+    brokerVerified: doc.brokerVerified ?? null,
+    scope: "accounts",
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    lastRefreshAt: doc.lastRefreshAt ?? null,
+    tokenVersion: doc.tokenVersion ?? 1,
+    status: doc.status
+  };
+}
+
 export interface MicroCTraderTokenVault {
+  readonly storageMode: MicroStorageMode;
   saveTokens(record: MicroTokenRecord): Promise<void>;
   getTokens(uid: string): Promise<MicroTokenRecord | null>;
   getPublicStatus(uid: string): Promise<MicroTokenPublicStatus>;
   clearTokens(uid: string): Promise<void>;
-  /** Persist refreshed tokens atomically; fail closed on persist error. */
   replaceAfterRefresh(
     uid: string,
-    next: {
-      accessToken: string;
-      refreshToken: string;
-      expiresIn: number;
-    }
+    next: { accessToken: string; refreshToken: string; expiresIn: number }
   ): Promise<MicroTokenRecord>;
   markStatus(uid: string, status: MicroOAuthStatus): Promise<void>;
 }
 
 export class MemoryMicroCTraderTokenVault implements MicroCTraderTokenVault {
-  private readonly docs = new Map<string, StoredTokenDoc>();
+  readonly storageMode = "memory" as const;
+  private readonly docs: Map<string, StoredTokenDoc>;
 
-  constructor(private readonly crypto: MicroTokenCrypto = microTokenCrypto) {}
+  constructor(
+    private readonly crypto: MicroTokenCrypto = microTokenCrypto,
+    sharedDocs?: Map<string, StoredTokenDoc>
+  ) {
+    this.docs = sharedDocs ?? new Map<string, StoredTokenDoc>();
+  }
+
+  /** Expose shared map for cross-instance tests. */
+  getSharedDocsForTests(): Map<string, StoredTokenDoc> {
+    return this.docs;
+  }
 
   async saveTokens(record: MicroTokenRecord): Promise<void> {
     assertPrivateOauthPath(record.uid);
-    const doc: StoredTokenDoc = {
-      uid: record.uid,
-      accessTokenEnc: this.crypto.encrypt(record.accessToken),
-      refreshTokenEnc: this.crypto.encrypt(record.refreshToken),
-      expiresAt: record.expiresAt,
-      expiresIn: record.expiresIn,
-      environment: record.environment,
-      authorizedAccountIds: [...record.authorizedAccountIds],
-      selectedAccountId: record.selectedAccountId,
-      scope: "accounts",
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-      lastRefreshAt: record.lastRefreshAt,
-      tokenVersion: record.tokenVersion,
-      status: record.status
-    };
-    this.docs.set(record.uid, doc);
+    this.docs.set(record.uid, toStored(record, this.crypto));
   }
 
   async getTokens(uid: string): Promise<MicroTokenRecord | null> {
     assertPrivateOauthPath(uid);
     const doc = this.docs.get(uid);
     if (!doc) return null;
-    return this.decryptDoc(doc);
+    return fromStored(doc, this.crypto);
   }
 
   async getPublicStatus(uid: string): Promise<MicroTokenPublicStatus> {
@@ -137,24 +193,29 @@ export class MemoryMicroCTraderTokenVault implements MicroCTraderTokenVault {
         status: "AWAITING_USER_AUTHORIZATION",
         configured: false,
         scope: "accounts",
+        permissionScope: null,
         environment: null,
         selectedAccountIdMasked: null,
         authorizedAccountCount: 0,
         expiresAt: null,
         lastRefreshAt: null,
-        tokenVersion: null
+        tokenVersion: null,
+        brokerVerified: null
       };
     }
     return {
       status: doc.status,
       configured: true,
       scope: "accounts",
+      permissionScope: "SCOPE_VIEW",
       environment: doc.environment,
       selectedAccountIdMasked: maskAccountId(doc.selectedAccountId),
-      authorizedAccountCount: doc.authorizedAccountIds.length,
+      authorizedAccountCount: (doc.authorizedAccounts?.length ||
+        doc.authorizedAccountIds.length) as number,
       expiresAt: doc.expiresAt,
       lastRefreshAt: doc.lastRefreshAt,
-      tokenVersion: doc.tokenVersion
+      tokenVersion: doc.tokenVersion,
+      brokerVerified: doc.brokerVerified ?? null
     };
   }
 
@@ -191,8 +252,9 @@ export class MemoryMicroCTraderTokenVault implements MicroCTraderTokenVault {
     try {
       await this.saveTokens(updated);
     } catch (e) {
+      await this.markStatus(uid, "TOKEN_REFRESH_PERSIST_FAILED");
       throw Object.assign(new Error("MICRO_TOKEN_PERSIST_FAILED"), {
-        code: "TOKEN_REFRESH_FAILED",
+        code: "TOKEN_REFRESH_PERSIST_FAILED",
         cause: e
       });
     }
@@ -206,46 +268,28 @@ export class MemoryMicroCTraderTokenVault implements MicroCTraderTokenVault {
     doc.updatedAt = new Date().toISOString();
   }
 
-  /** Test helper — proves API serialization cannot expose decrypted tokens. */
   serializePublicOnly(uid: string): Record<string, unknown> {
     const doc = this.docs.get(uid);
     if (!doc) return { status: "AWAITING_USER_AUTHORIZATION" };
     return {
       status: doc.status,
       scope: doc.scope,
+      permissionScope: doc.permissionScope,
       environment: doc.environment,
       selectedAccountIdMasked: maskAccountId(doc.selectedAccountId),
       authorizedAccountCount: doc.authorizedAccountIds.length,
       expiresAt: doc.expiresAt,
-      // Explicitly absent:
       accessToken: undefined,
       refreshToken: undefined,
       accessTokenEnc: undefined,
       refreshTokenEnc: undefined
     };
   }
-
-  private decryptDoc(doc: StoredTokenDoc): MicroTokenRecord {
-    return {
-      uid: doc.uid,
-      accessToken: this.crypto.decrypt(doc.accessTokenEnc),
-      refreshToken: this.crypto.decrypt(doc.refreshTokenEnc),
-      expiresAt: doc.expiresAt,
-      expiresIn: doc.expiresIn,
-      environment: doc.environment,
-      authorizedAccountIds: [...doc.authorizedAccountIds],
-      selectedAccountId: doc.selectedAccountId,
-      scope: "accounts",
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-      lastRefreshAt: doc.lastRefreshAt,
-      tokenVersion: doc.tokenVersion,
-      status: doc.status
-    };
-  }
 }
 
 export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
+  readonly storageMode = "firestore" as const;
+
   constructor(private readonly crypto: MicroTokenCrypto = microTokenCrypto) {}
 
   private docRef(uid: string) {
@@ -261,45 +305,15 @@ export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
   }
 
   async saveTokens(record: MicroTokenRecord): Promise<void> {
-    const stored: StoredTokenDoc = {
-      uid: record.uid,
-      accessTokenEnc: this.crypto.encrypt(record.accessToken),
-      refreshTokenEnc: this.crypto.encrypt(record.refreshToken),
-      expiresAt: record.expiresAt,
-      expiresIn: record.expiresIn,
-      environment: record.environment,
-      authorizedAccountIds: [...record.authorizedAccountIds],
-      selectedAccountId: record.selectedAccountId,
-      scope: "accounts",
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-      lastRefreshAt: record.lastRefreshAt,
-      tokenVersion: record.tokenVersion,
-      status: record.status
-    };
-    await this.docRef(record.uid).set(stored, { merge: false });
+    await this.docRef(record.uid).set(toStored(record, this.crypto), {
+      merge: false
+    });
   }
 
   async getTokens(uid: string): Promise<MicroTokenRecord | null> {
     const snap = await this.docRef(uid).get();
     if (!snap.exists) return null;
-    const doc = snap.data() as StoredTokenDoc;
-    return {
-      uid: doc.uid,
-      accessToken: this.crypto.decrypt(doc.accessTokenEnc),
-      refreshToken: this.crypto.decrypt(doc.refreshTokenEnc),
-      expiresAt: doc.expiresAt,
-      expiresIn: doc.expiresIn,
-      environment: doc.environment,
-      authorizedAccountIds: [...(doc.authorizedAccountIds ?? [])],
-      selectedAccountId: doc.selectedAccountId ?? null,
-      scope: "accounts",
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-      lastRefreshAt: doc.lastRefreshAt ?? null,
-      tokenVersion: doc.tokenVersion ?? 1,
-      status: doc.status
-    };
+    return fromStored(snap.data() as StoredTokenDoc, this.crypto);
   }
 
   async getPublicStatus(uid: string): Promise<MicroTokenPublicStatus> {
@@ -309,12 +323,14 @@ export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
         status: "AWAITING_USER_AUTHORIZATION",
         configured: false,
         scope: "accounts",
+        permissionScope: null,
         environment: null,
         selectedAccountIdMasked: null,
         authorizedAccountCount: 0,
         expiresAt: null,
         lastRefreshAt: null,
-        tokenVersion: null
+        tokenVersion: null,
+        brokerVerified: null
       };
     }
     const doc = snap.data() as StoredTokenDoc;
@@ -322,12 +338,16 @@ export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
       status: doc.status,
       configured: true,
       scope: "accounts",
+      permissionScope: "SCOPE_VIEW",
       environment: doc.environment,
       selectedAccountIdMasked: maskAccountId(doc.selectedAccountId),
-      authorizedAccountCount: (doc.authorizedAccountIds ?? []).length,
+      authorizedAccountCount: (doc.authorizedAccounts?.length ||
+        doc.authorizedAccountIds?.length ||
+        0) as number,
       expiresAt: doc.expiresAt,
       lastRefreshAt: doc.lastRefreshAt ?? null,
-      tokenVersion: doc.tokenVersion ?? null
+      tokenVersion: doc.tokenVersion ?? null,
+      brokerVerified: doc.brokerVerified ?? null
     };
   }
 
@@ -363,8 +383,9 @@ export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
     try {
       await this.saveTokens(updated);
     } catch (e) {
+      await this.markStatus(uid, "TOKEN_REFRESH_PERSIST_FAILED");
       throw Object.assign(new Error("MICRO_TOKEN_PERSIST_FAILED"), {
-        code: "TOKEN_REFRESH_FAILED",
+        code: "TOKEN_REFRESH_PERSIST_FAILED",
         cause: e
       });
     }
@@ -382,16 +403,46 @@ export class FirestoreMicroCTraderTokenVault implements MicroCTraderTokenVault {
   }
 }
 
-/** Process-local vault for API until Firestore is wired in deployment. */
-let defaultVault: MemoryMicroCTraderTokenVault | null = null;
+let defaultVault: MicroCTraderTokenVault | null = null;
+/** Shared memory docs for process-local memory mode (singleton). */
+let sharedMemoryDocs: Map<string, StoredTokenDoc> | null = null;
 
-export function getMicroTokenVault(): MemoryMicroCTraderTokenVault {
-  if (!defaultVault) defaultVault = new MemoryMicroCTraderTokenVault();
+export function createMicroTokenVault(args?: {
+  mode?: MicroStorageMode;
+  crypto?: MicroTokenCrypto;
+  sharedMemoryDocs?: Map<string, StoredTokenDoc>;
+}): MicroCTraderTokenVault {
+  const mode = args?.mode ?? resolveMicroStorageMode();
+  assertMicroStorageModeAllowed(mode);
+  const crypto = args?.crypto ?? microTokenCrypto;
+  if (mode === "firestore") {
+    if (!crypto.isConfiguredForDeployed() && isDeployedMicroRuntime()) {
+      throw Object.assign(new Error("MICRO_ENCRYPTION_KEY_MISSING"), {
+        code: "MICRO_ENCRYPTION_KEY_MISSING"
+      });
+    }
+    return new FirestoreMicroCTraderTokenVault(crypto);
+  }
+  const docs: Map<string, StoredTokenDoc> =
+    args?.sharedMemoryDocs ??
+    sharedMemoryDocs ??
+    new Map<string, StoredTokenDoc>();
+  if (!args?.sharedMemoryDocs && !sharedMemoryDocs) sharedMemoryDocs = docs;
+  return new MemoryMicroCTraderTokenVault(crypto, docs);
+}
+
+export function getMicroTokenVault(): MicroCTraderTokenVault {
+  if (!defaultVault) defaultVault = createMicroTokenVault();
   return defaultVault;
 }
 
-export function resetMicroTokenVaultForTests(): void {
-  defaultVault = new MemoryMicroCTraderTokenVault();
+export function resetMicroTokenVaultForTests(
+  shared?: Map<string, StoredTokenDoc>
+): MemoryMicroCTraderTokenVault {
+  sharedMemoryDocs = shared ?? new Map();
+  const vault = new MemoryMicroCTraderTokenVault(microTokenCrypto, sharedMemoryDocs);
+  defaultVault = vault;
+  return vault;
 }
 
 export { maskAccountId };

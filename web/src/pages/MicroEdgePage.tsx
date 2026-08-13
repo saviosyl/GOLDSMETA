@@ -96,7 +96,9 @@ type Status = {
   };
   oauth?: OAuthStatus;
   oauthAppConfigured?: boolean;
+  authorizationStatus?: string;
   realConnectionStatus?: string;
+  collectorHealthLabel?: string;
 };
 
 function pct(x: number | undefined): string {
@@ -144,15 +146,17 @@ export function MicroEdgePage() {
 
   const md = status?.marketData;
   const oauth = status?.oauth;
-  const tokenPresent =
-    Boolean(oauth?.configured) &&
-    oauth?.status !== "DISCONNECTED" &&
-    oauth?.status !== "AWAITING_USER_AUTHORIZATION";
+  const authorized =
+    status?.authorizationStatus === "READ_ONLY_AUTHORIZED" ||
+    (Boolean(oauth?.configured) &&
+      oauth?.status === "CONNECTED");
   const liveConnected = Boolean(status?.marketFeedConnected || md?.liveConnected);
   const connectionState =
     status?.connectionState ?? md?.connectionState ?? "LIVE_NOT_CONNECTED";
   const isMock = connectionState === "MOCK_SEEDED";
-  const readOnlyConnected = tokenPresent || liveConnected;
+  const collectorLabel =
+    status?.collectorHealthLabel ??
+    (md?.collectorHealthy || status?.collector?.healthy ? "HEALTHY" : "OFFLINE");
 
   async function onConfirmConnect() {
     setBusy(true);
@@ -223,14 +227,23 @@ export function MicroEdgePage() {
           READ-ONLY CONNECTION — Micro Edge cannot place trades. Market/account-data access
           only.
         </p>
-        <div
-          className={`gm-banner ${readOnlyConnected ? "gm-banner-info" : "gm-banner-danger"}`}
-          data-testid="micro-connection-state"
-        >
-          {readOnlyConnected ? "Read-only connected" : "Not connected"}
-          {oauth?.status ? ` · ${oauth.status}` : ""}
-        </div>
         <div className="gm-micro-grid">
+          <div>
+            <div className="gm-label">OAuth</div>
+            <div data-testid="micro-oauth-status">
+              {authorized ? "READ-ONLY AUTHORIZED" : "NOT AUTHORIZED"}
+            </div>
+          </div>
+          <div>
+            <div className="gm-label">Market feed</div>
+            <div data-testid="micro-connection-state">
+              {liveConnected ? "CONNECTED" : "NOT CONNECTED"}
+            </div>
+          </div>
+          <div>
+            <div className="gm-label">Data collector</div>
+            <div data-testid="micro-collector-label">{collectorLabel}</div>
+          </div>
           <div>
             <div className="gm-label">Broker</div>
             <div>Pepperstone</div>
@@ -263,7 +276,7 @@ export function MicroEdgePage() {
 
         {!confirmOpen ? (
           <div className="gm-micro-actions" style={{ marginTop: 14, display: "flex", gap: 10 }}>
-            {!tokenPresent ? (
+            {!authorized ? (
               <button
                 type="button"
                 className="gm-btn gm-btn-primary"

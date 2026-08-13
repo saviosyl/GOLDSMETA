@@ -1,22 +1,29 @@
 /**
- * Process-local Micro market-data service used by read-only API.
+ * Micro market-data service used by read-only API.
+ * Deployed mode: Firestore store + persistent collector status (cross-process).
  * Does not activate prediction worker. Does not deploy.
  */
 import { loadMicroCTraderCredentials, publicCredentialStatus } from "./microCTraderAuth";
-import { MemoryMicroMarketDataStore } from "./marketDataStore";
+import {
+  getMicroMarketDataStore,
+  resetMicroMarketDataStoreForTests,
+  type MicroMarketDataStore
+} from "./marketDataStore";
 import { MicroCTraderReadOnlyClient } from "./microCTraderClient";
 import { getCollectorStatus } from "../runtime/collector";
 import { getMicroRetentionPolicy } from "./retention";
 import { computeLabelReadyDiagnostics } from "./historicalTicks";
+import {
+  evaluatePersistentCollectorHealth,
+  getMicroCollectorStatusStore
+} from "./collectorStatusStore";
 import type { MicroLiveMarketSession } from "./liveSession";
 
-const store = new MemoryMicroMarketDataStore();
 const client = new MicroCTraderReadOnlyClient();
 let liveSession: MicroLiveMarketSession | null = null;
 
-export function getMicroMarketDataStore(): MemoryMicroMarketDataStore {
-  return store;
-}
+export { getMicroMarketDataStore, resetMicroMarketDataStoreForTests };
+export type { MicroMarketDataStore };
 
 export function getMicroMarketClient(): MicroCTraderReadOnlyClient {
   return client;
@@ -28,31 +35,75 @@ export function attachMicroLiveSession(session: MicroLiveMarketSession | null): 
 }
 
 export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<Record<string, unknown>> {
+  const store = getMicroMarketDataStore();
+  const statusStore = getMicroCollectorStatusStore();
+  const persistent = await statusStore.get();
+  const persistentHealth = evaluatePersistentCollectorHealth(persistent, nowMs);
+
   const creds = loadMicroCTraderCredentials();
   const pub = publicCredentialStatus(creds);
+  // In-process session is optional (same-process tests). Cross-process truth = Firestore.
   const liveState = liveSession ? await liveSession.getState() : null;
   const m1 = await store.latestBar("M1");
   const m5 = await store.latestBar("M5");
   const m15 = await store.latestBar("M15");
-  const latestQuote = liveState?.lastQuote ?? (await store.latestQuote());
-  const quoteForHealth = liveState?.lastQuote
-    ? liveState.lastQuote
-    : latestQuote
+  const latestQuote = await store.latestQuote();
+
+  const quoteBrokerTs =
+    persistent?.lastQuoteBrokerTimestamp ??
+    liveState?.lastQuoteTs ??
+    latestQuote?.brokerTimestamp ??
+    null;
+  const quoteAgeMs =
+    persistentHealth.quoteAgeMs ??
+    (quoteBrokerTs ? nowMs - Date.parse(quoteBrokerTs) : null);
+
+  const quoteForHealth =
+    persistent?.lastQuoteBid != null && persistent?.lastQuoteAsk != null && quoteBrokerTs
       ? {
-          bid: latestQuote.bid,
-          ask: latestQuote.ask,
-          mid: latestQuote.mid,
-          spread: latestQuote.spread,
-          brokerTimestamp: latestQuote.brokerTimestamp,
-          receivedAt: latestQuote.receivedAt,
-          ageMs: latestQuote.ageMs,
-          freshness: latestQuote.freshness as "LIVE"
+          bid: persistent.lastQuoteBid,
+          ask: persistent.lastQuoteAsk,
+          mid: (persistent.lastQuoteBid + persistent.lastQuoteAsk) / 2,
+          spread: persistent.lastQuoteAsk - persistent.lastQuoteBid,
+          brokerTimestamp: quoteBrokerTs,
+          receivedAt: persistent.updatedAt,
+          ageMs: quoteAgeMs ?? 0,
+          freshness: (quoteAgeMs != null && quoteAgeMs <= 30_000
+            ? "LIVE"
+            : "STALE") as "LIVE" | "STALE"
         }
-      : null;
+      : liveState?.lastQuote
+        ? liveState.lastQuote
+        : latestQuote
+          ? {
+              bid: latestQuote.bid,
+              ask: latestQuote.ask,
+              mid: latestQuote.mid,
+              spread: latestQuote.spread,
+              brokerTimestamp: latestQuote.brokerTimestamp,
+              receivedAt: latestQuote.receivedAt,
+              ageMs: quoteAgeMs ?? latestQuote.ageMs,
+              freshness: (quoteAgeMs != null && quoteAgeMs <= 30_000
+                ? "LIVE"
+                : "STALE") as "LIVE" | "STALE"
+            }
+          : null;
+
+  // Prefer persistent status when present (worker process).
+  const usePersistent = persistent != null;
+  const liveConnected = usePersistent
+    ? persistentHealth.liveConnected
+    : liveState?.connectionState === "LIVE_CONNECTED" ||
+      client.connectionState() === "LIVE_CONNECTED";
+  const connectionState = liveConnected
+    ? "LIVE_CONNECTED"
+    : ("LIVE_NOT_CONNECTED" as const);
 
   const collector = getCollectorStatus(client, {
-    lastQuoteTs: liveState?.lastQuoteTs ?? latestQuote?.brokerTimestamp ?? null,
-    lastM1CloseTs: m1 ? new Date(m1.closeTimeMs).toISOString() : null,
+    lastQuoteTs: quoteBrokerTs,
+    lastM1CloseTs:
+      persistent?.lastCompletedM1 ??
+      (m1 ? new Date(m1.closeTimeMs).toISOString() : null),
     quote: quoteForHealth,
     lastM1: m1
       ? {
@@ -67,24 +118,26 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
         }
       : null,
     nowMs,
-    transportConnected: liveSession
-      ? Boolean(liveState?.liveConnected || liveSession.isLiveConnected())
-      : undefined,
-    symbolResolved: liveSession
-      ? Boolean(liveState?.symbol ?? (await store.getSymbolMetadata()))
-      : undefined,
-    credentialsConfigured: liveState?.credentialsConfigured ?? pub.configured,
-    heartbeatAt: liveState?.collectorHeartbeatAt ?? null,
+    transportConnected: usePersistent ? persistentHealth.liveConnected : undefined,
+    symbolResolved: usePersistent
+      ? Boolean(persistent?.symbolId)
+      : liveSession
+        ? Boolean(liveState?.symbol ?? (await store.getSymbolMetadata()))
+        : undefined,
+    credentialsConfigured: usePersistent
+      ? Boolean(persistent?.oauthStatus && persistent.oauthStatus !== "AWAITING_USER_AUTHORIZATION")
+      : liveState?.credentialsConfigured ?? pub.configured,
+    heartbeatAt: persistent?.heartbeatAt ?? liveState?.collectorHeartbeatAt ?? null,
     lastConnectedAt: liveState?.lastConnectedAt,
     lastDisconnectedAt: liveState?.lastDisconnectedAt,
-    reconnectAttempts: liveState?.reconnectAttempts,
+    reconnectAttempts:
+      persistent?.reconnectAttempts ?? liveState?.reconnectAttempts,
     lastErrorCode: liveState?.lastErrorCode,
-    extraReasons: liveState?.healthReasons
+    extraReasons: usePersistent ? persistentHealth.reasons : liveState?.healthReasons
   });
 
-  // Honest: only LIVE_CONNECTED when session reports it — never infer from config alone.
-  const connectionState = liveState?.connectionState ?? client.connectionState();
-  const liveConnected = connectionState === "LIVE_CONNECTED";
+  const boundaries = await store.listBoundaryQuotes(50_000);
+  const labelReady = computeLabelReadyDiagnostics(boundaries);
 
   return {
     connectionState,
@@ -92,16 +145,29 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
     marketFeedStatus: liveConnected
       ? "Market feed connected"
       : "Market feed not connected",
-    symbol: liveState?.symbol?.symbolName ?? "XAUUSD",
-    symbolId: liveState?.symbol?.symbolId ?? null,
-    lastQuoteTs: liveState?.lastQuoteTs ?? latestQuote?.brokerTimestamp ?? null,
-    quoteAgeMs: liveState?.quoteAgeMs ?? null,
-    lastCompletedM1Ts: liveState?.lastCompletedM1Ts ?? (m1 ? new Date(m1.closeTimeMs).toISOString() : null),
-    lastCompletedM5Ts: liveState?.lastCompletedM5Ts ?? (m5 ? new Date(m5.closeTimeMs).toISOString() : null),
+    symbol: persistent?.symbolName ?? liveState?.symbol?.symbolName ?? "XAUUSD",
+    symbolId: persistent?.symbolId ?? liveState?.symbol?.symbolId ?? null,
+    broker: persistent?.broker ?? null,
+    brokerVerified: persistent?.brokerVerified ?? null,
+    lastQuoteTs: quoteBrokerTs,
+    quoteAgeMs,
+    heartbeatAgeMs: persistentHealth.heartbeatAgeMs,
+    lastCompletedM1Ts:
+      persistent?.lastCompletedM1 ??
+      liveState?.lastCompletedM1Ts ??
+      (m1 ? new Date(m1.closeTimeMs).toISOString() : null),
+    lastCompletedM5Ts:
+      persistent?.lastCompletedM5 ??
+      liveState?.lastCompletedM5Ts ??
+      (m5 ? new Date(m5.closeTimeMs).toISOString() : null),
     lastCompletedM15Ts:
-      liveState?.lastCompletedM15Ts ?? (m15 ? new Date(m15.closeTimeMs).toISOString() : null),
-    collectorHealthy: collector.healthy,
-    healthReasons: collector.reasons,
+      persistent?.lastCompletedM15 ??
+      liveState?.lastCompletedM15Ts ??
+      (m15 ? new Date(m15.closeTimeMs).toISOString() : null),
+    collectorHealthy: usePersistent
+      ? persistentHealth.collectorHealthy
+      : collector.healthy,
+    healthReasons: usePersistent ? persistentHealth.reasons : collector.reasons,
     backfillStatus: {
       M1: await store.getCheckpoint("M1"),
       M5: await store.getCheckpoint("M5"),
@@ -115,7 +181,12 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
     quoteSamplesStored: await store.countQuotes(),
     credentials: pub,
     retention: getMicroRetentionPolicy(),
-    collector,
+    collector: {
+      ...collector,
+      healthy: usePersistent ? persistentHealth.collectorHealthy : collector.healthy,
+      reasons: usePersistent ? persistentHealth.reasons : collector.reasons,
+      heartbeatAgeMs: persistentHealth.heartbeatAgeMs
+    },
     capabilityStates: client.capabilityStates(),
     interfaceReady: true,
     historicalTicks: client.capabilityStates().HISTORICAL_TICKS,
@@ -123,11 +194,20 @@ export async function buildMarketDataStatusPayload(nowMs = Date.now()): Promise<
     modelNote: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
     dataCollectionActive: liveConnected,
     boundaryQuoteCount: await store.countBoundaryQuotes(),
-    labelReadyMinutes: 0 // filled in diagnostics with full compute
+    labelReadyMinutes: labelReady.labelReadyMinutes,
+    persistentCollector: persistent
+      ? {
+          connectionState: persistent.connectionState,
+          oauthStatus: persistent.oauthStatus,
+          heartbeatAt: persistent.heartbeatAt,
+          collectorVersion: persistent.collectorVersion
+        }
+      : null
   };
 }
 
 export async function buildMarketDataDiagnosticsPayload(): Promise<Record<string, unknown>> {
+  const store = getMicroMarketDataStore();
   const status = await buildMarketDataStatusPayload();
   const latestQuote = await store.latestQuote();
   const symbol = await store.getSymbolMetadata();
@@ -143,14 +223,14 @@ export async function buildMarketDataDiagnosticsPayload(): Promise<Record<string
           mid: latestQuote.mid,
           spread: latestQuote.spread,
           brokerTimestamp: latestQuote.brokerTimestamp,
-          ageMs: latestQuote.ageMs,
+          // Recompute age — do not trust stored ageMs forever.
+          ageMs: Date.now() - Date.parse(latestQuote.brokerTimestamp),
           freshness: latestQuote.freshness,
           source: latestQuote.source
         }
       : null,
     labelReady,
     boundaryQuoteCount: boundaries.length,
-    // Explicitly never include secrets
     accessToken: undefined,
     refreshToken: undefined,
     clientSecret: undefined,

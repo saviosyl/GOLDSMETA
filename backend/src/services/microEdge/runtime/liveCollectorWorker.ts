@@ -1,21 +1,7 @@
 /**
  * Dedicated Micro Edge live market-data collector process.
- *
- * DO NOT run the persistent cTrader socket inside a normal API request.
- * This worker is designed for an isolated persistent service (e.g. Cloud Run).
- *
+ * Deployed mode uses Firestore vault + market store + status (shared with API).
  * NOT DEPLOYED by this PR — readiness + health only.
- *
- * Responsibilities:
- * - load Micro token (vault / env)
- * - refresh if needed
- * - connect → app auth → account-list → account auth
- * - resolve XAUUSD
- * - subscribe spots once
- * - sample quotes, poll completed bars
- * - reconnect fail-closed
- *
- * mutationSurface = NONE always.
  */
 import http from "node:http";
 import {
@@ -23,13 +9,10 @@ import {
   MICRO_QUOTE_SAMPLE_INTERVAL_MS,
   MICRO_SHADOW_ONLY
 } from "../config";
-import {
-  loadMicroCTraderCredentials,
-  type MicroCTraderCredentials
-} from "../marketData/microCTraderAuth";
+import type { MicroCTraderCredentials } from "../marketData/microCTraderAuth";
 import { MicroLiveMarketSession } from "../marketData/liveSession";
 import {
-  MemoryMicroMarketDataStore,
+  createMicroMarketDataStore,
   type MicroMarketDataStore
 } from "../marketData/marketDataStore";
 import { computeLabelReadyDiagnostics } from "../marketData/historicalTicks";
@@ -38,17 +21,27 @@ import {
   credentialsFromVault,
   refreshVaultTokensIfNeeded
 } from "../marketData/oauthService";
-import { getMicroTokenVault } from "../marketData/tokenVault";
+import { createMicroTokenVault, getMicroTokenVault } from "../marketData/tokenVault";
+import {
+  createMicroCollectorStatusStore,
+  MICRO_COLLECTOR_VERSION,
+  type MicroCollectorStatusStore,
+  type MicroPersistentCollectorStatus
+} from "../marketData/collectorStatusStore";
+import { assertMicroRuntimeReadyForPersistentCollection } from "../marketData/runtimeReady";
+import { isDeployedMicroRuntime, resolveMicroStorageMode } from "../marketData/storageMode";
 
 export type LiveCollectorWorkerOptions = {
   store?: MicroMarketDataStore;
+  statusStore?: MicroCollectorStatusStore;
   credentials?: MicroCTraderCredentials;
-  /** When set, load/refresh tokens from Micro vault for this uid. */
   vaultUid?: string;
   healthPort?: number;
   quoteSampleIntervalMs?: number;
   barPollIntervalMs?: number;
   nowMs?: () => number;
+  /** When true, skip deployed fail-closed checks (unit tests). */
+  allowLocalInjectedCredentials?: boolean;
 };
 
 export type LiveCollectorHealthPayload = {
@@ -76,23 +69,29 @@ export type LiveCollectorHealthPayload = {
   shadowOnly: true;
   brokerExecutionEnabled: false;
   modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA";
+  storageMode: string;
 };
 
 export class MicroLiveCollectorWorker {
   readonly mutationSurface = "NONE" as const;
   private session: MicroLiveMarketSession | null = null;
   private readonly store: MicroMarketDataStore;
+  private readonly statusStore: MicroCollectorStatusStore;
   private running = false;
   private stopping = false;
   private healthServer: http.Server | null = null;
   private barTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHealth: LiveCollectorHealthPayload | null = null;
   private readonly nowMs: () => number;
 
   constructor(private readonly opts: LiveCollectorWorkerOptions = {}) {
-    this.store = opts.store ?? new MemoryMicroMarketDataStore();
+    this.store = opts.store ?? createMicroMarketDataStore();
+    this.statusStore = opts.statusStore ?? createMicroCollectorStatusStore();
     this.nowMs = opts.nowMs ?? (() => Date.now());
+    // Ensure vault factory is initialized in same storage mode.
+    void createMicroTokenVault();
   }
 
   getSession(): MicroLiveMarketSession | null {
@@ -100,13 +99,21 @@ export class MicroLiveCollectorWorker {
   }
 
   async resolveCredentials(): Promise<MicroCTraderCredentials | null> {
-    if (this.opts.credentials) return this.opts.credentials;
-    if (this.opts.vaultUid) {
-      await refreshVaultTokensIfNeeded(this.opts.vaultUid);
-      return credentialsFromVault(this.opts.vaultUid);
+    if (this.opts.credentials && this.opts.allowLocalInjectedCredentials) {
+      return this.opts.credentials;
     }
-    const loaded = loadMicroCTraderCredentials();
-    return loaded.ok ? loaded.credentials : null;
+    const vaultUid =
+      this.opts.vaultUid ?? (process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim();
+    if (!vaultUid) {
+      if (isDeployedMicroRuntime()) {
+        throw Object.assign(new Error("MICRO_COLLECTOR_VAULT_UID_MISSING"), {
+          code: "MICRO_COLLECTOR_VAULT_UID_MISSING"
+        });
+      }
+      return null;
+    }
+    await refreshVaultTokensIfNeeded(vaultUid);
+    return credentialsFromVault(vaultUid);
   }
 
   async start(): Promise<void> {
@@ -116,20 +123,41 @@ export class MicroLiveCollectorWorker {
     if (!MICRO_SHADOW_ONLY) {
       throw new Error("MICRO_COLLECTOR_REFUSING_NON_SHADOW");
     }
+
+    const ready = assertMicroRuntimeReadyForPersistentCollection();
+    if (!ready.ok && isDeployedMicroRuntime()) {
+      throw Object.assign(new Error(ready.message), { code: ready.code });
+    }
+    if (isDeployedMicroRuntime() && !this.opts.vaultUid && !(process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim()) {
+      throw Object.assign(new Error("MICRO_COLLECTOR_VAULT_UID_MISSING"), {
+        code: "MICRO_COLLECTOR_VAULT_UID_MISSING"
+      });
+    }
+
     this.running = true;
     this.stopping = false;
     await this.connectLoop();
     this.startBarPolling();
+    this.startHeartbeatLoop();
     if (this.opts.healthPort != null) {
       await this.listenHealth(this.opts.healthPort);
     }
   }
 
   private async connectLoop(): Promise<void> {
-    const creds = await this.resolveCredentials();
+    let creds: MicroCTraderCredentials | null = null;
+    try {
+      creds = await this.resolveCredentials();
+    } catch (e) {
+      microLog("MICRO_COLLECTOR_OAUTH_MISSING", {
+        code: (e as { code?: string }).code ?? "oauth_missing"
+      });
+      await this.persistNotConnected("oauth_missing");
+      return;
+    }
     if (!creds) {
       microLog("MICRO_COLLECTOR_OAUTH_MISSING", {});
-      await this.refreshHealth();
+      await this.persistNotConnected("oauth_missing");
       return;
     }
     this.session = new MicroLiveMarketSession({
@@ -144,10 +172,14 @@ export class MicroLiveCollectorWorker {
       microLog("MICRO_COLLECTOR_CONNECTED", {
         environment: creds.environment
       });
+      await this.persistFromSession();
     } catch (e) {
       microLog("MICRO_COLLECTOR_CONNECT_FAILED", {
         code: (e as { code?: string }).code ?? "transport_disconnected"
       });
+      await this.persistNotConnected(
+        (e as { code?: string }).code ?? "transport_disconnected"
+      );
       this.scheduleReconnect();
     }
     await this.refreshHealth();
@@ -160,15 +192,19 @@ export class MicroLiveCollectorWorker {
     }, interval);
   }
 
+  private startHeartbeatLoop(): void {
+    this.heartbeatTimer = setInterval(() => {
+      void this.persistFromSession();
+    }, 10_000);
+  }
+
   private async pollBarsOnce(): Promise<void> {
     if (!this.session || this.stopping) return;
     try {
-      if (!this.session.isLiveConnected()) {
-        // Still try poll if socket up — getState is authoritative for health.
-      }
       await this.session.pollCompletedBars("M1", 5);
       await this.session.pollCompletedBars("M5", 3);
       await this.session.pollCompletedBars("M15", 2);
+      await this.persistFromSession();
       await this.refreshHealth();
     } catch (e) {
       microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
@@ -188,27 +224,115 @@ export class MicroLiveCollectorWorker {
   }
 
   private async reconnectFailClosed(): Promise<void> {
+    await this.persistNotConnected("transport_disconnected");
     if (!this.session) return;
-    // Immediately mark not connected before retry.
-    await this.refreshHealth();
     const ok = await this.session.boundedReconnect();
     if (!ok) {
       microLog("MICRO_COLLECTOR_RECONNECT_EXHAUSTED", {});
+      await this.persistNotConnected("transport_disconnected");
+    } else {
+      await this.persistFromSession();
     }
     await this.refreshHealth();
+  }
+
+  private async persistNotConnected(reason: string): Promise<void> {
+    const now = new Date(this.nowMs()).toISOString();
+    const status: MicroPersistentCollectorStatus = {
+      connectionState: "LIVE_NOT_CONNECTED",
+      oauthStatus: reason,
+      accountAuthorized: false,
+      environment: null,
+      broker: null,
+      brokerVerified: null,
+      symbolId: null,
+      symbolName: null,
+      spotSubscribed: false,
+      lastSpotEventAt: null,
+      lastValidQuoteAt: null,
+      lastQuoteBrokerTimestamp: null,
+      lastQuoteBid: null,
+      lastQuoteAsk: null,
+      lastCompletedM1: null,
+      lastCompletedM5: null,
+      lastCompletedM15: null,
+      heartbeatAt: now,
+      reconnectAttempts: this.session
+        ? (await this.session.getState()).reconnectAttempts
+        : 0,
+      collectorVersion: MICRO_COLLECTOR_VERSION,
+      permissionScope: null,
+      mutationSurface: "NONE",
+      updatedAt: now
+    };
+    await this.statusStore.save(status);
+  }
+
+  private async persistFromSession(): Promise<void> {
+    if (!this.session) return;
+    const state = await this.session.getState();
+    const vaultUid =
+      this.opts.vaultUid ?? (process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim();
+    const oauth = vaultUid
+      ? await getMicroTokenVault().getPublicStatus(vaultUid)
+      : null;
+    const now = new Date(this.nowMs()).toISOString();
+    const live = state.liveConnected;
+    const status: MicroPersistentCollectorStatus = {
+      connectionState: live ? "LIVE_CONNECTED" : "LIVE_NOT_CONNECTED",
+      oauthStatus: oauth?.status ?? (state.credentialsConfigured ? "CONNECTED" : "AWAITING_USER_AUTHORIZATION"),
+      accountAuthorized: state.configuredAccountAuthorized,
+      environment: state.symbol?.environment ?? oauth?.environment ?? null,
+      broker: "Pepperstone",
+      brokerVerified: oauth?.brokerVerified ?? null,
+      symbolId: state.symbol?.symbolId ?? null,
+      symbolName: state.symbol?.symbolName ?? null,
+      spotSubscribed: state.spotSubscribed,
+      lastSpotEventAt: state.lastSpotEventAt,
+      lastValidQuoteAt: state.lastQuoteTs,
+      lastQuoteBrokerTimestamp: state.lastQuote?.brokerTimestamp ?? null,
+      lastQuoteBid: state.lastQuote?.bid ?? null,
+      lastQuoteAsk: state.lastQuote?.ask ?? null,
+      lastCompletedM1: state.lastCompletedM1Ts,
+      lastCompletedM5: state.lastCompletedM5Ts,
+      lastCompletedM15: state.lastCompletedM15Ts,
+      heartbeatAt: now,
+      reconnectAttempts: state.reconnectAttempts,
+      collectorVersion: MICRO_COLLECTOR_VERSION,
+      permissionScope: "SCOPE_VIEW",
+      mutationSurface: "NONE",
+      updatedAt: now
+    };
+    // LIVE_CONNECTED only when session says so AND oauth healthy.
+    if (
+      status.connectionState === "LIVE_CONNECTED" &&
+      (oauth?.status === "TOKEN_REFRESH_FAILED" ||
+        oauth?.status === "TOKEN_REFRESH_PERSIST_FAILED" ||
+        oauth?.permissionScope !== "SCOPE_VIEW")
+    ) {
+      status.connectionState = "LIVE_NOT_CONNECTED";
+    }
+    await this.statusStore.save(status);
+    await this.store.saveCollectorHeartbeat(now, {
+      connectionState: status.connectionState,
+      symbolId: status.symbolId
+    });
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     this.running = false;
     if (this.barTimer) clearInterval(this.barTimer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.barTimer = null;
+    this.heartbeatTimer = null;
     this.reconnectTimer = null;
     if (this.session) {
       await this.session.disconnect();
       this.session = null;
     }
+    await this.persistNotConnected("stopped");
     if (this.healthServer) {
       await new Promise<void>((resolve) => this.healthServer!.close(() => resolve()));
       this.healthServer = null;
@@ -218,8 +342,11 @@ export class MicroLiveCollectorWorker {
 
   async buildHealth(): Promise<LiveCollectorHealthPayload> {
     const state = this.session ? await this.session.getState() : null;
-    const vaultStatus = this.opts.vaultUid
-      ? await getMicroTokenVault().getPublicStatus(this.opts.vaultUid)
+    const persistent = await this.statusStore.get();
+    const vaultUid =
+      this.opts.vaultUid ?? (process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim();
+    const vaultStatus = vaultUid
+      ? await getMicroTokenVault().getPublicStatus(vaultUid)
       : null;
     const m1 = await this.store.countBars("M1");
     const m5 = await this.store.countBars("M5");
@@ -233,24 +360,36 @@ export class MicroLiveCollectorWorker {
     const cpM15 = await this.store.getCheckpoint("M15");
     const cpBq = await this.store.getBoundaryCheckpoint();
 
-    const serviceHealthy = Boolean(state?.liveConnected);
+    const connectionState =
+      persistent?.connectionState ?? state?.connectionState ?? "LIVE_NOT_CONNECTED";
+    const serviceHealthy = connectionState === "LIVE_CONNECTED";
+    const quoteTs =
+      persistent?.lastQuoteBrokerTimestamp ?? state?.lastQuoteTs ?? null;
+    const quoteAgeMs = quoteTs ? this.nowMs() - Date.parse(quoteTs) : null;
 
     return {
       serviceHealthy,
-      connectionState: state?.connectionState ?? "LIVE_NOT_CONNECTED",
-      oauthStatus: vaultStatus?.status ?? (state?.credentialsConfigured ? "CONNECTED" : "AWAITING_USER_AUTHORIZATION"),
-      accountAuthorized: state?.configuredAccountAuthorized ?? null,
-      environment: state?.symbol?.environment ?? vaultStatus?.environment ?? null,
-      symbolResolved: Boolean(state?.symbol),
-      spotSubscribed: Boolean(state?.spotSubscribed),
-      lastSpotEventAt: state?.lastSpotEventAt ?? null,
-      lastValidQuoteAt: state?.lastQuoteTs ?? null,
-      quoteAgeMs: state?.quoteAgeMs ?? null,
-      lastCompletedM1: state?.lastCompletedM1Ts ?? null,
-      lastCompletedM5: state?.lastCompletedM5Ts ?? null,
-      lastCompletedM15: state?.lastCompletedM15Ts ?? null,
-      lastHeartbeat: state?.collectorHeartbeatAt ?? null,
-      reconnectAttempts: state?.reconnectAttempts ?? 0,
+      connectionState,
+      oauthStatus: vaultStatus?.status ?? persistent?.oauthStatus ?? "AWAITING_USER_AUTHORIZATION",
+      accountAuthorized:
+        persistent?.accountAuthorized ?? state?.configuredAccountAuthorized ?? null,
+      environment:
+        persistent?.environment ??
+        state?.symbol?.environment ??
+        vaultStatus?.environment ??
+        null,
+      symbolResolved: Boolean(persistent?.symbolId ?? state?.symbol),
+      spotSubscribed: Boolean(persistent?.spotSubscribed ?? state?.spotSubscribed),
+      lastSpotEventAt: persistent?.lastSpotEventAt ?? state?.lastSpotEventAt ?? null,
+      lastValidQuoteAt: quoteTs,
+      quoteAgeMs,
+      lastCompletedM1: persistent?.lastCompletedM1 ?? state?.lastCompletedM1Ts ?? null,
+      lastCompletedM5: persistent?.lastCompletedM5 ?? state?.lastCompletedM5Ts ?? null,
+      lastCompletedM15:
+        persistent?.lastCompletedM15 ?? state?.lastCompletedM15Ts ?? null,
+      lastHeartbeat: persistent?.heartbeatAt ?? state?.collectorHeartbeatAt ?? null,
+      reconnectAttempts:
+        persistent?.reconnectAttempts ?? state?.reconnectAttempts ?? 0,
       barObservationCounts: { M1: m1, M5: m5, M15: m15 },
       quoteSampleCount,
       boundaryQuoteCount,
@@ -264,7 +403,8 @@ export class MicroLiveCollectorWorker {
       mutationSurface: "NONE",
       shadowOnly: true,
       brokerExecutionEnabled: false,
-      modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA"
+      modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
+      storageMode: resolveMicroStorageMode()
     };
   }
 
@@ -278,10 +418,9 @@ export class MicroLiveCollectorWorker {
   }
 
   private async listenHealth(port: number): Promise<void> {
-    this.healthServer = http.createServer((req, res) => {
+    this.healthServer = http.createServer((_req, res) => {
       void (async () => {
         try {
-          void req;
           const health = await this.refreshHealth();
           const body = JSON.stringify(health);
           res.writeHead(health.serviceHealthy ? 200 : 503, {
@@ -305,7 +444,6 @@ export class MicroLiveCollectorWorker {
   }
 }
 
-/** Entrypoint helper for `tsx scripts/microEdge/runLiveCollectorWorker.ts`. */
 export async function runMicroLiveCollectorWorkerMain(): Promise<void> {
   const port = Number(process.env.MICRO_COLLECTOR_HEALTH_PORT ?? 8089);
   const vaultUid = (process.env.MICRO_COLLECTOR_VAULT_UID ?? "").trim() || undefined;
@@ -326,6 +464,7 @@ export async function runMicroLiveCollectorWorkerMain(): Promise<void> {
   microLog("MICRO_COLLECTOR_STARTED", {
     healthPort: port,
     mutationSurface: "NONE",
-    deployed: false
+    deployed: false,
+    storageMode: resolveMicroStorageMode()
   });
 }

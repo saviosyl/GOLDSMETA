@@ -1,6 +1,9 @@
 /**
  * Micro Edge OAuth service — scope=accounts only.
  * Isolated from Core cTrader OAuth routes/services.
+ *
+ * Replay protection: durable OAuth session consume is authoritative.
+ * usedCodeHashes is a local optimization only — NOT the security boundary.
  */
 import {
   buildMicroAccountsAuthorizationUrl,
@@ -22,14 +25,18 @@ import {
   type MicroTokenRecord
 } from "./tokenVault";
 import {
-  parseAuthorizedAccounts,
+  brokerMatchesAllowlist,
   selectMicroAccount,
   toSafeAccountMetadata,
+  toStoredAccountMeta,
   type MicroAuthorizedAccount
 } from "./accountSelection";
 import { microLog } from "./microLog";
 
-/** In-memory single-use authorization code hashes (process-local). */
+/**
+ * Process-local optimization only. Authoritative replay protection is the
+ * single-use durable OAuth session consume (Firestore in deployed mode).
+ */
 const usedCodeHashes = new Set<string>();
 
 export type MicroOAuthStartResult = {
@@ -52,6 +59,7 @@ export type MicroOAuthCallbackResult =
       environment: MicroCTraderEnvironment;
       selectedAccountIdMasked: string | null;
       accounts: ReturnType<typeof toSafeAccountMetadata>;
+      permissionScope: "SCOPE_VIEW";
     }
   | {
       ok: false;
@@ -63,7 +71,10 @@ export type MicroOAuthServiceDeps = {
   vault?: MicroCTraderTokenVault;
   sessions?: MicroOAuthSessionStore;
   fetchImpl?: typeof fetch;
-  /** Optional: fetch account list via transport factory after token exchange. */
+  /**
+   * Must return genuine cTrader account objects (with authoritative isLive).
+   * Must fail closed on SCOPE_TRADE.
+   */
   fetchAuthorizedAccounts?: (args: {
     accessToken: string;
     clientId: string;
@@ -81,6 +92,11 @@ function getDeps(deps?: MicroOAuthServiceDeps) {
   };
 }
 
+function maskSelected(id: string | null): string | null {
+  if (!id) return null;
+  return id.length <= 4 ? `****${id}` : `****${id.slice(-4)}`;
+}
+
 export async function getMicroOAuthStatus(
   uid: string,
   deps?: MicroOAuthServiceDeps
@@ -92,18 +108,34 @@ export async function getMicroOAuthStatus(
   scope: "accounts";
   tradingScope: "NOT_REQUESTED";
   mutationSurface: "NONE";
+  /** Token present ≠ market feed connected. */
+  authorizationStatus:
+    | "AWAITING_USER_AUTHORIZATION"
+    | "READ_ONLY_AUTHORIZED"
+    | "DISCONNECTED"
+    | "TOKEN_REFRESH_REQUIRED"
+    | "TOKEN_REFRESH_FAILED";
   realConnectionStatus: "AWAITING_USER_AUTHORIZATION" | "TOKEN_PRESENT" | "DISCONNECTED";
 }> {
   const { vault } = getDeps(deps);
   const app = loadMicroCTraderAppConfig();
   const oauth = await vault.getPublicStatus(uid);
-  let realConnectionStatus:
+  let authorizationStatus:
     | "AWAITING_USER_AUTHORIZATION"
-    | "TOKEN_PRESENT"
-    | "DISCONNECTED" = "AWAITING_USER_AUTHORIZATION";
-  if (oauth.status === "DISCONNECTED") realConnectionStatus = "DISCONNECTED";
-  else if (oauth.configured && oauth.status === "CONNECTED") {
-    realConnectionStatus = "TOKEN_PRESENT";
+    | "READ_ONLY_AUTHORIZED"
+    | "DISCONNECTED"
+    | "TOKEN_REFRESH_REQUIRED"
+    | "TOKEN_REFRESH_FAILED" = "AWAITING_USER_AUTHORIZATION";
+  if (oauth.status === "DISCONNECTED") authorizationStatus = "DISCONNECTED";
+  else if (oauth.status === "TOKEN_REFRESH_REQUIRED") {
+    authorizationStatus = "TOKEN_REFRESH_REQUIRED";
+  } else if (
+    oauth.status === "TOKEN_REFRESH_FAILED" ||
+    oauth.status === "TOKEN_REFRESH_PERSIST_FAILED"
+  ) {
+    authorizationStatus = "TOKEN_REFRESH_FAILED";
+  } else if (oauth.configured && oauth.status === "CONNECTED") {
+    authorizationStatus = "READ_ONLY_AUTHORIZED";
   }
   return {
     oauth,
@@ -113,7 +145,13 @@ export async function getMicroOAuthStatus(
     scope: "accounts",
     tradingScope: "NOT_REQUESTED",
     mutationSurface: "NONE",
-    realConnectionStatus
+    authorizationStatus,
+    realConnectionStatus:
+      authorizationStatus === "READ_ONLY_AUTHORIZED"
+        ? "TOKEN_PRESENT"
+        : authorizationStatus === "DISCONNECTED"
+          ? "DISCONNECTED"
+          : "AWAITING_USER_AUTHORIZATION"
   };
 }
 
@@ -133,8 +171,6 @@ export async function startMicroOAuth(
     uid,
     redirectUri: app.config.redirectUri
   });
-  // Pass sessionId as a path/query on OUR redirect only — not as undocumented cTrader param.
-  // Authorization URL uses only documented params.
   const authorizationUrl = buildMicroAccountsAuthorizationUrl({
     clientId: app.config.clientId,
     redirectUri: app.config.redirectUri,
@@ -155,10 +191,6 @@ export async function startMicroOAuth(
   };
 }
 
-/**
- * Complete OAuth callback. Code is single-use.
- * sessionId must be supplied by the frontend (stored before redirect).
- */
 export async function completeMicroOAuthCallback(args: {
   uid: string;
   code: string;
@@ -183,15 +215,7 @@ export async function completeMicroOAuthCallback(args: {
     return { ok: false, code: "oauth_missing", message: "Authorization code missing" };
   }
 
-  const codeHash = hashAuthorizationCode(code);
-  if (usedCodeHashes.has(codeHash)) {
-    return {
-      ok: false,
-      code: "oauth_code_reuse",
-      message: "Authorization code already used"
-    };
-  }
-
+  // Durable session consume is the security boundary (cross-instance safe).
   let session;
   try {
     session = await sessions.consume({
@@ -214,6 +238,16 @@ export async function completeMicroOAuthCallback(args: {
     };
   }
 
+  // Local optimization only — session already consumed.
+  const codeHash = hashAuthorizationCode(code);
+  if (usedCodeHashes.has(codeHash)) {
+    return {
+      ok: false,
+      code: "oauth_code_reuse",
+      message: "Authorization code already used"
+    };
+  }
+
   let tokens;
   try {
     tokens = await exchangeMicroAuthorizationCode({
@@ -233,22 +267,32 @@ export async function completeMicroOAuthCallback(args: {
   }
   usedCodeHashes.add(codeHash);
 
+  if (!fetchAuthorizedAccounts) {
+    return {
+      ok: false,
+      code: "account_list_required",
+      message: "Account list revalidation required — refuse to store unverified accounts"
+    };
+  }
+
   let accounts: MicroAuthorizedAccount[] = [];
-  if (fetchAuthorizedAccounts) {
-    try {
-      accounts = await fetchAuthorizedAccounts({
-        accessToken: tokens.accessToken,
-        clientId: app.config.clientId,
-        clientSecret: app.config.clientSecret,
-        environment: app.config.environment
-      });
-    } catch {
-      return {
-        ok: false,
-        code: "account_not_authorized",
-        message: "Failed to retrieve authorized account list"
-      };
-    }
+  try {
+    accounts = await fetchAuthorizedAccounts({
+      accessToken: tokens.accessToken,
+      clientId: app.config.clientId,
+      clientSecret: app.config.clientSecret,
+      environment: app.config.environment
+    });
+  } catch (e) {
+    const codeErr = (e as { code?: string }).code ?? "account_not_authorized";
+    return {
+      ok: false,
+      code: codeErr,
+      message:
+        codeErr === "MICRO_TRADING_SCOPE_REJECTED"
+          ? "MICRO_TRADING_SCOPE_REJECTED"
+          : "Failed to retrieve authorized account list"
+    };
   }
 
   const selection = selectMicroAccount({
@@ -261,10 +305,10 @@ export async function completeMicroOAuthCallback(args: {
   const expiresAt = new Date(
     Date.now() + Math.max(0, tokens.expiresIn) * 1000
   ).toISOString();
+  const storedMeta = toStoredAccountMeta(accounts);
 
   if (!selection.ok) {
     if (selection.reason === "MULTIPLE_COMPATIBLE_NEED_SELECTION") {
-      // Persist tokens without selected account — UI must choose.
       const record: MicroTokenRecord = {
         uid: args.uid,
         accessToken: tokens.accessToken,
@@ -273,7 +317,11 @@ export async function completeMicroOAuthCallback(args: {
         expiresIn: tokens.expiresIn,
         environment: app.config.environment,
         authorizedAccountIds: accounts.map((a) => a.accountId),
+        authorizedAccounts: storedMeta,
         selectedAccountId: null,
+        selectedAccountMeta: null,
+        permissionScope: "SCOPE_VIEW",
+        brokerVerified: null,
         scope: "accounts",
         createdAt: now,
         updatedAt: now,
@@ -287,16 +335,18 @@ export async function completeMicroOAuthCallback(args: {
         status: "ACCOUNT_SELECTION_REQUIRED",
         environment: app.config.environment,
         selectedAccountIdMasked: null,
-        accounts: toSafeAccountMetadata(accounts)
+        accounts: toSafeAccountMetadata(accounts, app.config.environment),
+        permissionScope: "SCOPE_VIEW"
       };
     }
     return {
       ok: false,
-      code: selection.reason.toLowerCase(),
+      code: selection.reason,
       message: selection.reason
     };
   }
 
+  const brokerCheck = brokerMatchesAllowlist(selection.selected.brokerHint);
   const record: MicroTokenRecord = {
     uid: args.uid,
     accessToken: tokens.accessToken,
@@ -305,7 +355,12 @@ export async function completeMicroOAuthCallback(args: {
     expiresIn: tokens.expiresIn,
     environment: app.config.environment,
     authorizedAccountIds: accounts.map((a) => a.accountId),
+    authorizedAccounts: storedMeta,
     selectedAccountId: selection.selectedAccountId,
+    selectedAccountMeta:
+      storedMeta.find((m) => m.accountId === selection.selectedAccountId) ?? null,
+    permissionScope: "SCOPE_VIEW",
+    brokerVerified: brokerCheck === "MATCH",
     scope: "accounts",
     createdAt: now,
     updatedAt: now,
@@ -316,28 +371,30 @@ export async function completeMicroOAuthCallback(args: {
   await vault.saveTokens(record);
   microLog("MICRO_OAUTH_CONNECTED", {
     environment: app.config.environment,
-    accountCount: accounts.length
+    accountCount: accounts.length,
+    brokerVerified: record.brokerVerified
   });
 
   return {
     ok: true,
     status: "CONNECTED",
     environment: app.config.environment,
-    selectedAccountIdMasked:
-      selection.selectedAccountId.length <= 4
-        ? `****${selection.selectedAccountId}`
-        : `****${selection.selectedAccountId.slice(-4)}`,
-    accounts: toSafeAccountMetadata(accounts)
+    selectedAccountIdMasked: maskSelected(selection.selectedAccountId),
+    accounts: toSafeAccountMetadata(accounts, app.config.environment),
+    permissionScope: "SCOPE_VIEW"
   };
 }
 
+/**
+ * Account selection MUST revalidate against cTrader account-list.
+ * Never reconstruct isLive from Micro environment or stored id strings.
+ */
 export async function selectMicroOAuthAccount(args: {
   uid: string;
   accountId: string;
-  authorizedAccounts?: MicroAuthorizedAccount[];
   deps?: MicroOAuthServiceDeps;
 }): Promise<MicroOAuthCallbackResult> {
-  const { vault } = getDeps(args.deps);
+  const { vault, fetchAuthorizedAccounts } = getDeps(args.deps);
   const existing = await vault.getTokens(args.uid);
   if (!existing) {
     return {
@@ -346,14 +403,43 @@ export async function selectMicroOAuthAccount(args: {
       message: "No Micro token — authorize first"
     };
   }
-  const accounts =
-    args.authorizedAccounts ??
-    existing.authorizedAccountIds.map((id) => ({
-      accountId: id,
-      isLive: existing.environment === "LIVE" ? true : false,
-      traderLogin: null,
-      brokerHint: null
-    }));
+  if (!fetchAuthorizedAccounts) {
+    return {
+      ok: false,
+      code: "account_list_required",
+      message: "Account selection requires live cTrader account-list revalidation"
+    };
+  }
+
+  const app = loadMicroCTraderAppConfig();
+  if (!app.ok) {
+    return {
+      ok: false,
+      code: "oauth_missing",
+      message: `Missing app config: ${app.missing.join(", ")}`
+    };
+  }
+
+  let accounts: MicroAuthorizedAccount[];
+  try {
+    accounts = await fetchAuthorizedAccounts({
+      accessToken: existing.accessToken,
+      clientId: app.config.clientId,
+      clientSecret: app.config.clientSecret,
+      environment: existing.environment
+    });
+  } catch (e) {
+    const codeErr = (e as { code?: string }).code ?? "account_not_authorized";
+    return {
+      ok: false,
+      code: codeErr,
+      message:
+        codeErr === "MICRO_TRADING_SCOPE_REJECTED"
+          ? "MICRO_TRADING_SCOPE_REJECTED"
+          : "Account-list revalidation failed"
+    };
+  }
+
   const selection = selectMicroAccount({
     accounts,
     intendedEnvironment: existing.environment,
@@ -362,13 +448,26 @@ export async function selectMicroOAuthAccount(args: {
   if (!selection.ok) {
     return {
       ok: false,
-      code: selection.reason.toLowerCase(),
+      code:
+        selection.reason === "LIVE_ACCOUNT_NOT_ALLOWED" ||
+        selection.reason === "LIVE_FORBIDDEN_FOR_DEMO_ACTIVATION"
+          ? "LIVE_ACCOUNT_NOT_ALLOWED"
+          : selection.reason,
       message: selection.reason
     };
   }
+
+  const storedMeta = toStoredAccountMeta(accounts);
+  const brokerCheck = brokerMatchesAllowlist(selection.selected.brokerHint);
   await vault.saveTokens({
     ...existing,
+    authorizedAccountIds: accounts.map((a) => a.accountId),
+    authorizedAccounts: storedMeta,
     selectedAccountId: selection.selectedAccountId,
+    selectedAccountMeta:
+      storedMeta.find((m) => m.accountId === selection.selectedAccountId) ?? null,
+    permissionScope: "SCOPE_VIEW",
+    brokerVerified: brokerCheck === "MATCH",
     updatedAt: new Date().toISOString(),
     status: "CONNECTED"
   });
@@ -376,11 +475,9 @@ export async function selectMicroOAuthAccount(args: {
     ok: true,
     status: "CONNECTED",
     environment: existing.environment,
-    selectedAccountIdMasked:
-      selection.selectedAccountId.length <= 4
-        ? `****${selection.selectedAccountId}`
-        : `****${selection.selectedAccountId.slice(-4)}`,
-    accounts: toSafeAccountMetadata(accounts)
+    selectedAccountIdMasked: maskSelected(selection.selectedAccountId),
+    accounts: toSafeAccountMetadata(accounts, existing.environment),
+    permissionScope: "SCOPE_VIEW"
   };
 }
 
@@ -404,10 +501,6 @@ export async function disconnectMicroOAuth(
   };
 }
 
-/**
- * Build runtime credentials from vault for collector.
- * Does NOT read Core CTRADER_ACCESS_TOKEN / CTRADER_REFRESH_TOKEN.
- */
 export async function credentialsFromVault(
   uid: string,
   deps?: MicroOAuthServiceDeps
@@ -417,9 +510,14 @@ export async function credentialsFromVault(
   if (!app.ok) return null;
   const tokens = await vault.getTokens(uid);
   if (!tokens || !tokens.selectedAccountId) return null;
-  if (tokens.status === "DISCONNECTED" || tokens.status === "TOKEN_REFRESH_FAILED") {
+  if (
+    tokens.status === "DISCONNECTED" ||
+    tokens.status === "TOKEN_REFRESH_FAILED" ||
+    tokens.status === "TOKEN_REFRESH_PERSIST_FAILED"
+  ) {
     return null;
   }
+  if (tokens.permissionScope !== "SCOPE_VIEW") return null;
   return {
     clientId: app.config.clientId,
     clientSecret: app.config.clientSecret,
@@ -442,6 +540,10 @@ export async function refreshVaultTokensIfNeeded(
   if (!app.ok) return null;
   const tokens = await vault.getTokens(uid);
   if (!tokens) return null;
+  if (tokens.status === "TOKEN_REFRESH_PERSIST_FAILED") {
+    // Do not retry with potentially invalidated refresh token.
+    return null;
+  }
   const expiresAt = Date.parse(tokens.expiresAt);
   const skewMs = 60_000;
   if (Number.isFinite(expiresAt) && expiresAt - Date.now() > skewMs) {
@@ -460,16 +562,18 @@ export async function refreshVaultTokensIfNeeded(
       fetchImpl
     });
     return await vault.replaceAfterRefresh(uid, next);
-  } catch {
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "TOKEN_REFRESH_PERSIST_FAILED") {
+      return null;
+    }
     await vault.markStatus(uid, "TOKEN_REFRESH_FAILED");
     return null;
   }
 }
 
-/** Test helper — clear used code hashes. */
 export function resetUsedOAuthCodesForTests(): void {
   usedCodeHashes.clear();
 }
 
-/** Re-export parse for account-list wiring without transport import cycles in tests. */
-export { parseAuthorizedAccounts };
+export { parseAuthorizedAccounts } from "./accountSelection";

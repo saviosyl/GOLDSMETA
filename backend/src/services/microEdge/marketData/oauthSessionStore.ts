@@ -6,6 +6,11 @@
 import { randomBytes, createHash } from "crypto";
 import { getFirestore } from "firebase-admin/firestore";
 import { MICRO_NAMESPACE } from "../config";
+import {
+  assertMicroStorageModeAllowed,
+  resolveMicroStorageMode,
+  type MicroStorageMode
+} from "./storageMode";
 
 export type MicroOAuthSession = {
   sessionId: string;
@@ -42,7 +47,16 @@ export interface MicroOAuthSessionStore {
 }
 
 export class MemoryMicroOAuthSessionStore implements MicroOAuthSessionStore {
-  private readonly sessions = new Map<string, MicroOAuthSession>();
+  readonly storageMode = "memory" as const;
+  private readonly sessions: Map<string, MicroOAuthSession>;
+
+  constructor(shared?: Map<string, MicroOAuthSession>) {
+    this.sessions = shared ?? new Map<string, MicroOAuthSession>();
+  }
+
+  getSharedSessionsForTests(): Map<string, MicroOAuthSession> {
+    return this.sessions;
+  }
 
   async create(args: {
     uid: string;
@@ -107,6 +121,8 @@ export class MemoryMicroOAuthSessionStore implements MicroOAuthSessionStore {
 }
 
 export class FirestoreMicroOAuthSessionStore implements MicroOAuthSessionStore {
+  readonly storageMode = "firestore" as const;
+
   private col() {
     const [root, docId] = MICRO_NAMESPACE.split("/");
     return getFirestore()
@@ -184,18 +200,42 @@ export class FirestoreMicroOAuthSessionStore implements MicroOAuthSessionStore {
   }
 }
 
-/** Hash authorization code for single-use tracking (never store raw code long-term). */
+/**
+ * Optional local optimization only — NOT the security boundary.
+ * Durable single-use OAuth session consume is authoritative replay protection.
+ */
 export function hashAuthorizationCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
 }
 
-let defaultSessionStore: MemoryMicroOAuthSessionStore | null = null;
+let defaultSessionStore: MicroOAuthSessionStore | null = null;
+let sharedMemorySessions: Map<string, MicroOAuthSession> | null = null;
 
-export function getMicroOAuthSessionStore(): MemoryMicroOAuthSessionStore {
-  if (!defaultSessionStore) defaultSessionStore = new MemoryMicroOAuthSessionStore();
+export function createMicroOAuthSessionStore(args?: {
+  mode?: MicroStorageMode;
+  sharedSessions?: Map<string, MicroOAuthSession>;
+}): MicroOAuthSessionStore {
+  const mode = args?.mode ?? resolveMicroStorageMode();
+  assertMicroStorageModeAllowed(mode);
+  if (mode === "firestore") return new FirestoreMicroOAuthSessionStore();
+  const sessions: Map<string, MicroOAuthSession> =
+    args?.sharedSessions ?? sharedMemorySessions ?? new Map<string, MicroOAuthSession>();
+  if (!args?.sharedSessions && !sharedMemorySessions) {
+    sharedMemorySessions = sessions;
+  }
+  return new MemoryMicroOAuthSessionStore(sessions);
+}
+
+export function getMicroOAuthSessionStore(): MicroOAuthSessionStore {
+  if (!defaultSessionStore) defaultSessionStore = createMicroOAuthSessionStore();
   return defaultSessionStore;
 }
 
-export function resetMicroOAuthSessionStoreForTests(): void {
-  defaultSessionStore = new MemoryMicroOAuthSessionStore();
+export function resetMicroOAuthSessionStoreForTests(
+  shared?: Map<string, MicroOAuthSession>
+): MemoryMicroOAuthSessionStore {
+  sharedMemorySessions = shared ?? new Map();
+  const store = new MemoryMicroOAuthSessionStore(sharedMemorySessions);
+  defaultSessionStore = store;
+  return store;
 }
