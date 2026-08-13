@@ -75,6 +75,19 @@ describe("Micro historical ticks + boundary quotes", () => {
     expect(decoded[decoded.length - 1]!.price).toBe(2100);
   });
 
+  it("decodes large newest-first pages without call-stack overflow", () => {
+    const newest = 1_700_000_000_000;
+    const raw: Array<{ timestamp: number; tick: number }> = [
+      { timestamp: newest, tick: 430_000_000 }
+    ];
+    for (let i = 0; i < 50_000; i++) {
+      raw.push({ timestamp: -1, tick: i % 2 === 0 ? -1 : 1 });
+    }
+    const decoded = decodeHistoricalTickData(raw, "BID");
+    expect(decoded.length).toBe(50_001);
+    expect(decoded[decoded.length - 1]!.brokerTimestampMs).toBe(newest);
+  });
+
   it("relative price conversion uses /100000 for absolute first tick", () => {
     const decoded = decodeHistoricalTickData(
       [{ timestamp: 1000, tick: 234_567_890 }],
