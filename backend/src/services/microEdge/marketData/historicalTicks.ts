@@ -48,6 +48,12 @@ export type DecodeHistoricalTicksOptions = {
 
 /**
  * Expand newest-first compressed tick list into absolute timestamps + prices.
+ *
+ * Official ProtoOATickData semantics (newest first):
+ * - first timestamp + tick are ABSOLUTE
+ * - each subsequent timestamp + tick are DELTAS from the previous absolute
+ *   (typically negative time deltas moving older; price deltas signed)
+ *
  * Fail closed with HISTORICAL_TICK_TIMESTAMP_INVALID when invariants break.
  */
 export function decodeHistoricalTickData(
@@ -66,6 +72,7 @@ export function decodeHistoricalTickData(
 
   const wireOrder: MicroHistoricalTick[] = [];
   let previousAbsolute: number | null = null;
+  let previousPrice: number | null = null;
 
   for (let i = 0; i < list.length; i++) {
     const raw = (list[i] ?? {}) as Record<string, unknown>;
@@ -82,10 +89,8 @@ export function decodeHistoricalTickData(
     if (i === 0 || previousAbsolute == null) {
       absoluteTs = tsPart;
     } else {
-      // Newest-first: difference moves backward in time.
-      // Accept signed negative deltas by using absolute difference magnitude.
-      const delta = Math.abs(tsPart);
-      absoluteTs = previousAbsolute - delta;
+      // Newest-first: subsequent timestamps are signed deltas from previous.
+      absoluteTs = previousAbsolute + tsPart;
     }
 
     if (!Number.isFinite(absoluteTs)) {
@@ -103,14 +108,22 @@ export function decodeHistoricalTickData(
       });
     }
 
-    let price = tickRel / priceScale;
+    let price: number;
+    if (i === 0 || previousPrice == null) {
+      price = tickRel / priceScale;
+    } else {
+      // Subsequent tick values are price deltas in the same 1/100000 units.
+      price = previousPrice + tickRel / priceScale;
+    }
     if (opts.digits != null && Number.isFinite(opts.digits) && opts.digits >= 0) {
       const f = 10 ** opts.digits;
       price = Math.round(price * f) / f;
     }
-    // Skip zero/negative prices (occasional broker placeholders) without
-    // aborting the whole page. Still advance the timestamp chain.
+    // Always advance the absolute chain (timestamp + price) so deltas remain
+    // coherent even when we skip emitting a placeholder tick.
     previousAbsolute = absoluteTs;
+    previousPrice = price;
+    // Skip zero/negative prices (occasional broker placeholders).
     if (!(price > 0)) {
       continue;
     }

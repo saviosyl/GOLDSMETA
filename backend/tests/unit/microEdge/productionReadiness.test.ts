@@ -369,12 +369,12 @@ describe("Micro production-readiness corrective", () => {
   });
 
   it("canonical newest-first historical tick decoder fixture", () => {
-    // 10:00:05.000 newest, then 1000ms older, then 2500ms older
+    // 10:00:05.000 newest; subsequent timestamp+tick are signed deltas
     const newest = Date.parse("2026-08-13T10:00:05.000Z");
     const raw = [
-      { timestamp: newest, tick: 210_000_000 },
-      { timestamp: 1000, tick: 209_999_000 },
-      { timestamp: 2500, tick: 209_998_000 }
+      { timestamp: newest, tick: 210_000_000 }, // 2100.00 absolute
+      { timestamp: -1000, tick: -1000 }, // → 10:00:04.000 @ 2099.99
+      { timestamp: -2500, tick: -1000 } // → 10:00:01.500 @ 2099.98
     ];
     const decoded = decodeHistoricalTickData(raw, {
       side: "BID",
@@ -386,6 +386,9 @@ describe("Micro production-readiness corrective", () => {
       newest - 1000, // 10:00:04.000
       newest // 10:00:05.000
     ]);
+    expect(decoded[0]!.price).toBeCloseTo(2099.98, 6);
+    expect(decoded[1]!.price).toBeCloseTo(2099.99, 6);
+    expect(decoded[2]!.price).toBe(2100);
     const ask = decodeHistoricalTickData(raw, {
       side: "ASK",
       fromMs: newest - 10_000,
@@ -408,16 +411,16 @@ describe("Micro production-readiness corrective", () => {
           hasMore: true,
           tickData: [
             { timestamp: t0, tick: 210_000_000 },
-            { timestamp: 1000, tick: 209_999_000 }
+            { timestamp: -1000, tick: -1000 } // Δt=-1000, Δp=-0.01
           ]
         };
       }
-      // Page 2 older
+      // Page 2 older (first of page absolute again)
       return {
         hasMore: false,
         tickData: [
           { timestamp: t0 - 2000, tick: 209_998_000 },
-          { timestamp: 500, tick: 209_997_000 }
+          { timestamp: -500, tick: -1000 }
         ]
       };
     };
@@ -445,12 +448,11 @@ describe("Micro production-readiness corrective", () => {
     const decoded = decodeHistoricalTickData(
       [
         { timestamp: newest + 5_000, tick: 210_000_000 }, // after toMs → drop
-        { timestamp: 1000, tick: 209_999_000 } // inside window after decode
+        { timestamp: -1000, tick: -1000 } // → newest+4000 still outside
       ],
       { side: "BID", fromMs: newest, toMs: newest + 1000 }
     );
-    // newest+5000 dropped; newest+5000-1000=newest+4000 still > toMs → also outside
-    // With newest-first: first absolute=newest+5000 (out), second=newest+4000 (out)
+    // newest+5000 dropped; newest+4000 still > toMs → also outside
     expect(decoded).toEqual([]);
     const inside = decodeHistoricalTickData(
       [{ timestamp: newest + 500, tick: 210_000_000 }],
