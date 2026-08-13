@@ -25,6 +25,7 @@ trap cleanup2 EXIT
 mkdir -p "$CONTEXT_DIR/scripts/microEdge"
 cp package.json package-lock.json tsconfig.json Dockerfile "$CONTEXT_DIR/"
 cp -R src "$CONTEXT_DIR/src"
+cp scripts/applyCTraderLayerProtoExtensions.mjs "$CONTEXT_DIR/scripts/"
 cp scripts/microEdge/runLiveCollectorWorker.ts "$CONTEXT_DIR/scripts/microEdge/"
 cp scripts/microEdge/phase2aHistoricalSmokeCli.ts "$CONTEXT_DIR/scripts/microEdge/"
 gcloud builds submit \
@@ -56,6 +57,9 @@ gcloud run deploy "$SERVICE" \
   --timeout=3600 \
   --concurrency=1 \
   --port=8080 \
+  --cpu-boost \
+  --no-cpu-throttling \
+  --execution-environment=gen2 \
   --service-account="$SA" \
   --set-env-vars="GCLOUD_PROJECT=${PROJECT},APP_ENV=production,MICRO_DEPLOYED_RUNTIME=true,MICRO_STORAGE_MODE=firestore,MICRO_BROKER_EXECUTION_ENABLED=false,MICRO_CTRADER_ENVIRONMENT=DEMO,MICRO_QUOTE_SAMPLE_INTERVAL_MS=1000,MICRO_CTRADER_REDIRECT_URI=https://goldmeta.metamechsolutions.com/micro-edge/connect/callback,MICRO_HISTORICAL_MIN_INTERVAL_MS=250" \
   --update-secrets="${SECRET_BINDS}"

@@ -108,15 +108,14 @@ export function decodeHistoricalTickData(
       const f = 10 ** opts.digits;
       price = Math.round(price * f) / f;
     }
+    // Skip zero/negative prices (occasional broker placeholders) without
+    // aborting the whole page. Still advance the timestamp chain.
+    previousAbsolute = absoluteTs;
     if (!(price > 0)) {
-      throw Object.assign(new Error("HISTORICAL_TICK_TIMESTAMP_INVALID"), {
-        code: "HISTORICAL_TICK_TIMESTAMP_INVALID",
-        reason: "invalid_price"
-      });
+      continue;
     }
 
     wireOrder.push({ side, price, brokerTimestampMs: absoluteTs });
-    previousAbsolute = absoluteTs;
   }
 
   // Broker pages may include edge ticks just outside the requested window.
