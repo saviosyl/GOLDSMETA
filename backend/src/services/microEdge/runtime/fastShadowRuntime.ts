@@ -252,24 +252,27 @@ export class GoldHunterFastShadowRuntime {
         service: "fast-shadow",
         code: (e as { code?: string }).code ?? "transport_disconnected"
       });
-      this.scheduleReconnect();
+      this.scheduleReconnect("transport_reconnect");
     }
   }
 
-  private scheduleReconnect(): void {
+  private pendingReconnectReason: string = "transport_reconnect";
+
+  private scheduleReconnect(reason: string = "transport_reconnect"): void {
     if (this.stopping || !this.running || this.reconnectTimer) return;
     const now = this.nowMs();
     // Minimum spacing between reconnect attempts (ops only).
     if (now - this.lastReconnectAttemptMs < 30_000 && this.lastReconnectAttemptMs > 0) {
       return;
     }
+    this.pendingReconnectReason = reason;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      void this.reconnect();
+      void this.reconnect(this.pendingReconnectReason);
     }, 2000);
   }
 
-  private async reconnect(): Promise<void> {
+  private async reconnect(reason: string = "transport_reconnect"): Promise<void> {
     if (this.resyncInFlight) return;
     this.resyncInFlight = true;
     this.lastReconnectAttemptMs = this.nowMs();
@@ -279,7 +282,7 @@ export class GoldHunterFastShadowRuntime {
       // Clear Level-II + rolling features BEFORE resubscribe so stale quote IDs
       // cannot contaminate the newly subscribed depth stream.
       if (this.bridge) {
-        await this.bridge.resetMarketDataForResync("transport_reconnect");
+        await this.bridge.resetMarketDataForResync(reason);
       }
       // Hold off stale/invalid watchdogs while the book rebuilds.
       this.resyncHoldoffUntilMs = this.nowMs() + 45_000;
@@ -306,7 +309,7 @@ export class GoldHunterFastShadowRuntime {
         await this.bridge.refreshSessionFlags(this.session);
         this.invalidBookTicks = 0;
       } else {
-        this.scheduleReconnect();
+        this.scheduleReconnect("timeout");
       }
     } finally {
       this.resyncInFlight = false;
@@ -337,19 +340,25 @@ export class GoldHunterFastShadowRuntime {
     if (fast?.warmingUp) return;
     const spotAge = fast?.spotAgeMs;
     const depthAge = fast?.depthAgeMs;
-    const stale =
-      spotAge == null ||
-      depthAge == null ||
-      spotAge > this.staleReconnectMs ||
-      depthAge > this.staleReconnectMs;
-    if (!stale) return;
+    let reason: string | null = null;
+    if (spotAge == null || depthAge == null) {
+      reason = "ages_null";
+    } else if (spotAge > this.staleReconnectMs && depthAge > this.staleReconnectMs) {
+      reason = "stale_spot_and_depth";
+    } else if (spotAge > this.staleReconnectMs) {
+      reason = "stale_spot";
+    } else if (depthAge > this.staleReconnectMs) {
+      reason = "stale_depth";
+    }
+    if (!reason) return;
     microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
       code: "FAST_FEED_STALE_RECONNECT",
+      reason,
       spotAgeMs: spotAge,
       depthAgeMs: depthAge,
       thresholdMs: this.staleReconnectMs
     });
-    this.scheduleReconnect();
+    this.scheduleReconnect(reason);
   }
 
   /**
@@ -402,9 +411,17 @@ export class GoldHunterFastShadowRuntime {
     }
     this.invalidBookTicks += 1;
     if (this.invalidBookTicks < this.invalidBookTicksBeforeResync) return;
+    const reason =
+      fast.depthUnavailableReason === "CROSSED_BOOK" || fast.depthCrossed
+        ? "invalid_crossed_book"
+        : fast.depthUnavailableReason === "NO_BIDS"
+          ? "invalid_no_bids"
+          : fast.depthUnavailableReason === "NO_ASKS"
+            ? "invalid_no_asks"
+            : "invalid_book";
     microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
       code: "FAST_INVALID_BOOK_RESYNC",
-      reason: fast.depthUnavailableReason,
+      reason,
       crossed: fast.depthCrossed,
       consecutiveInvalid: fast.consecutiveInvalidDepthSnapshots,
       bestDepthBid: fast.bestDepthBid,
@@ -412,7 +429,7 @@ export class GoldHunterFastShadowRuntime {
       ticks: this.invalidBookTicks
     });
     this.invalidBookTicks = 0;
-    this.scheduleReconnect();
+    this.scheduleReconnect(reason);
   }
 
   async runReplayCheck(): Promise<void> {

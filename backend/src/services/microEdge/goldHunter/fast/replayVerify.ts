@@ -1,5 +1,6 @@
 /**
  * Periodic LIVE vs REPLAY equivalence check against frozen soak config.
+ * Applies RESYNC markers so live force-closes / book resets stay in parity.
  */
 import { createGunzip } from "node:zlib";
 import { createReadStream, existsSync, readdirSync, readFileSync } from "node:fs";
@@ -8,7 +9,8 @@ import { createInterface } from "node:readline";
 import { GoldHunterFastEngine } from "./engine";
 import { ShadowExecutionAdapter } from "./executionAdapter";
 import type { GhFastCollectorRecord } from "./collector";
-import type { GhFastMarketEvent } from "./types";
+import { applyStreamEvent } from "./replay";
+import type { GhFastStreamEvent } from "./types";
 
 export type ReplayParityResult = {
   ok: boolean;
@@ -72,13 +74,23 @@ export async function verifyReplayParityFromLocalChunks(args: {
     const rows = await readNdjsonGz(join(args.chunkDir, file));
     for (const row of rows) {
       if (compared >= max) break;
-      const ev = row.event as GhFastMarketEvent;
+      // Skip synthetic RESYNC_EXIT companion rows — the RESYNC marker applies the close.
+      if (
+        row.event.kind !== "RESYNC" &&
+        typeof row.event.eventId === "string" &&
+        row.event.eventId.startsWith("RESYNC_EXIT:")
+      ) {
+        if (row.decision.action === "EXIT") liveExits += 1;
+        continue;
+      }
+
+      const ev = row.event as GhFastStreamEvent;
       const liveAction = row.decision.action;
       const liveSetup = row.decision.setup;
       if (liveAction === "ENTER_BUY" || liveAction === "ENTER_SELL") liveEntries += 1;
       if (liveAction === "EXIT") liveExits += 1;
 
-      const replayDec = await engine.onMarketEvent(ev);
+      const replayDec = await applyStreamEvent(engine, ev);
       compared += 1;
 
       if (replayDec.action !== liveAction && !firstDivergence) {
@@ -147,7 +159,7 @@ export async function verifyReplayParityFromLocalChunks(args: {
 
 /** Sync helper for tiny in-memory parity tests. */
 export async function verifyReplayParityFromEvents(
-  events: GhFastMarketEvent[]
+  events: GhFastStreamEvent[]
 ): Promise<ReplayParityResult> {
   const a = new ShadowExecutionAdapter();
   const b = new ShadowExecutionAdapter();
@@ -155,8 +167,8 @@ export async function verifyReplayParityFromEvents(
   const eb = new GoldHunterFastEngine({ adapter: b, useFrozenSoakConfig: true });
   let firstDivergence: ReplayParityResult["firstDivergence"] = null;
   for (let i = 0; i < events.length; i++) {
-    const da = await ea.onMarketEvent(events[i]!);
-    const db = await eb.onMarketEvent(events[i]!);
+    const da = await applyStreamEvent(ea, events[i]!);
+    const db = await applyStreamEvent(eb, events[i]!);
     if (da.action !== db.action || da.state !== db.state) {
       firstDivergence = {
         seq: events[i]!.receiveSeq ?? i,

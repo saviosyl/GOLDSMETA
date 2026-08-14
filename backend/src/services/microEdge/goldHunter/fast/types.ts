@@ -80,15 +80,59 @@ export type GhFastLatencySample = {
   eventToDecisionMs: number;
 };
 
+/** Ops / market-data resync trigger classification (not strategy). */
+export type GhFastResyncReason =
+  | "stale_spot"
+  | "stale_depth"
+  | "stale_spot_and_depth"
+  | "ages_null"
+  | "invalid_crossed_book"
+  | "invalid_no_bids"
+  | "invalid_no_asks"
+  | "invalid_book"
+  | "transport_reconnect"
+  | "timeout"
+  | "other"
+  | "test"
+  | "market_data_resync";
+
+/** Deterministic replay marker — occupies a receiveSeq slot. */
+export type GhFastResyncMarkerEvent = {
+  kind: "RESYNC";
+  receiveSeq: number;
+  eventId: string;
+  receivedAtMs: number;
+  reason: GhFastResyncReason | string;
+  bookGenerationAfter: number;
+  closedTradeIds: string[];
+};
+
+export type GhFastStreamEvent = GhFastMarketEvent | GhFastResyncMarkerEvent;
+
+/** Per-specialist raw evaluation (before best-of selection). */
+export type GhFastSpecialistRawEval = {
+  setup: GhFastSetupId;
+  eligible: boolean;
+  quality: number;
+  side: GhFastSide | null;
+  failedConditions: string[];
+  reasons: string[];
+};
+
 export type GhFastDecision = {
   state: GhFastHuntState;
-  action: "WAIT" | "ENTER_BUY" | "ENTER_SELL" | "HOLD" | "EXIT";
+  action: "WAIT" | "ENTER_BUY" | "ENTER_SELL" | "HOLD" | "EXIT" | "RESYNC";
   setup: GhFastSetupId | null;
   setupQuality: number;
   side: GhFastSide | null;
   exitReason: GhFastExitReason | null;
   latency: GhFastLatencySample;
   reasons: string[];
+  /** Raw A/B/C specialist scores for telemetry (Phase 0B). */
+  specialists?: GhFastSpecialistRawEval[];
+  /** Selected setup after best-of (may differ from raw eligibles). */
+  selectedSetup?: GhFastSetupId | null;
+  selectedQuality?: number;
 };
 
 export type GhFastShadowOrder = {
@@ -138,6 +182,11 @@ export type GhFastClosedTrade = GhFastOpenTrade & {
    * for analysis but excluded from the formal >=250 sample.
    */
   sampleTag?: "PRE_FIX_DIAGNOSTIC" | "QUALIFICATION" | null;
+  /** Present when force-closed by market-data resync (auditable EXIT). */
+  resyncReason?: GhFastResyncReason | string;
+  /** Receive / reset sequence at force-close. */
+  resetSequence?: number;
+  bookGeneration?: number;
 };
 
 export type GhFastConfig = {

@@ -25,6 +25,7 @@ import type {
   GhFastConfig,
   GhFastDecision,
   GhFastMarketEvent,
+  GhFastResyncReason,
   GhFastSetupId
 } from "./types";
 
@@ -74,6 +75,7 @@ export type GhFastLiveUi = {
   profitFactor: number | null;
   rejectionsTop: Record<string, number>;
   setupDetections: Record<string, number>;
+  setupRawEligible: Record<string, number>;
 };
 
 export type GhFastRuntimeHealth = {
@@ -104,6 +106,8 @@ export type GhFastRuntimeHealth = {
   consecutiveInvalidDepthSnapshots: number;
   bookGeneration: number;
   resyncCount: number;
+  /** Counts of classified resync triggers (ops integrity). */
+  resyncByReason: Record<string, number>;
   warmingUp: boolean;
   eventsReceived: number;
   spotEvents: number;
@@ -182,6 +186,8 @@ export class GoldHunterFastLiveBridge {
     invalid: 0,
     deletedIds: 0
   };
+  private resyncByReason: Record<string, number> = {};
+  private persistedExitViaCollector = 0;
   private staleMarked = false;
   private readonly enabled: boolean;
   private readonly soakFrozen: boolean;
@@ -271,18 +277,78 @@ export class GoldHunterFastLiveBridge {
 
   /**
    * Market-data reset used on transport reconnect / invalid-book resync.
-   * Does not recreate the bridge (avoids duplicate listeners when re-attached).
+   * Persists exactly one DATA_STALE EXIT per force-closed open trade, plus a
+   * deterministic RESYNC marker at a dedicated receiveSeq (Phase 0A).
    */
-  async resetMarketDataForResync(reason = "market_data_resync"): Promise<void> {
-    await this.engine.resetMarketDataForResync({
+  async resetMarketDataForResync(
+    reason: GhFastResyncReason | string = "market_data_resync"
+  ): Promise<{
+    closedOpen: boolean;
+    closedTrades: number;
+    resetSequence: number;
+  }> {
+    const receiveSeq = this.nextSeq();
+    const nowMs = Date.now();
+    const result = await this.engine.resetMarketDataForResync({
       reason,
-      nowMs: Date.now()
+      nowMs,
+      receiveSeq
     });
+    this.resyncByReason[String(reason)] =
+      (this.resyncByReason[String(reason)] ?? 0) + 1;
+
+    if (this.collector) {
+      const st = this.engine.status();
+      const statusSnap = {
+        state: st.state,
+        bid: st.bid,
+        ask: st.ask,
+        spread: st.spread,
+        depthImbalance: st.depthImbalance,
+        velocity: st.velocity,
+        acceleration: st.acceleration,
+        setup: st.setup,
+        setupQuality: st.setupQuality
+      };
+      for (let i = 0; i < result.closedTrades.length; i++) {
+        const trade = result.closedTrades[i]!;
+        const exitDec = result.exitDecisions[i]!;
+        this.collector.record({
+          t: nowMs,
+          event: {
+            kind: "SPOT",
+            receiveSeq,
+            eventId: `RESYNC_EXIT:${receiveSeq}:${trade.tradeId}`,
+            receivedAtMs: nowMs,
+            brokerTimestampMs: null,
+            bid: trade.exitBid,
+            ask: trade.exitAsk
+          },
+          decision: exitDec,
+          status: statusSnap,
+          tradeExit: trade
+        });
+        this.persistedExitViaCollector += 1;
+      }
+      this.collector.record({
+        t: nowMs,
+        event: result.resyncMarker,
+        decision: result.resyncDecision,
+        status: statusSnap,
+        resync: result.resyncMarker
+      });
+    }
+
+    this.lastAction = result.resyncDecision.action;
+    this.lastDecision = result.resyncDecision;
     // Keep last event timestamps during rebuild so ops watchdogs do not treat
     // a deliberate clear as an immediate "null age" reconnect storm.
-    this.lastAction = null;
-    this.lastDecision = null;
     this.staleMarked = false;
+    return {
+      closedOpen: result.closedOpen,
+      closedTrades: result.closedTrades.length,
+      resetSequence: receiveSeq
+    };
   }
 
   listenerCountForTests(): number {
@@ -392,6 +458,11 @@ export class GoldHunterFastLiveBridge {
     // Persistence enqueue only — never sync gzip/write on this path.
     if (this.collector) {
       const st = this.engine.status();
+      const tradeExit =
+        decision.action === "EXIT"
+          ? this.engine.closed[this.engine.closed.length - 1]
+          : undefined;
+      if (tradeExit) this.persistedExitViaCollector += 1;
       this.collector.record({
         t: ev.receivedAtMs,
         event: ev,
@@ -407,7 +478,8 @@ export class GoldHunterFastLiveBridge {
           setup: st.setup,
           setupQuality: st.setupQuality
         },
-        depthTop: this.engine.depth.snapshot(5)
+        depthTop: this.engine.depth.snapshot(5),
+        tradeExit
       });
     }
   }
@@ -493,6 +565,7 @@ export class GoldHunterFastLiveBridge {
       consecutiveInvalidDepthSnapshots: depth.consecutiveInvalidSnapshots,
       bookGeneration: depth.bookGeneration,
       resyncCount: depth.resyncCount,
+      resyncByReason: { ...this.resyncByReason },
       warmingUp,
       eventsReceived: this.spotEvents + this.depthEvents,
       spotEvents: this.spotEvents,
@@ -613,7 +686,8 @@ export class GoldHunterFastLiveBridge {
           ? allStats.profitFactor
           : null,
       rejectionsTop: topRej,
-      setupDetections: { ...this.engine.setupDetections }
+      setupDetections: { ...this.engine.setupDetections },
+      setupRawEligible: { ...this.engine.setupRawEligible }
     };
   }
 }
