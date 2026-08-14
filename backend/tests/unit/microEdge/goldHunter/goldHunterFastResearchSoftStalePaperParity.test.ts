@@ -296,6 +296,7 @@ describe("ResearchIngestBridge soft-stale paper parity", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 25_000,
       depthAgeMs: 25_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -323,17 +324,19 @@ describe("ResearchIngestBridge soft-stale paper parity", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 50_000,
       depthAgeMs: 50_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
     });
-    expect(hard.action).toBe("SCHEDULE_STALE_FEED_RECONNECT");
+    expect(hard.action).toBe("HARD_FEED_STALE");
 
     const mutex = decideResearchStaleReconnect({
       nowMs: 100_000,
       connectionState: "CONNECTED",
       spotAgeMs: 50_000,
       depthAgeMs: 50_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: true,
       lastStaleFeedReconnectAttemptMs: 90_000,
       staleFeedBackoffIndex: 0
@@ -345,11 +348,12 @@ describe("ResearchIngestBridge soft-stale paper parity", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 50_000,
       depthAgeMs: 50_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: 95_000,
       staleFeedBackoffIndex: 0
     });
-    expect(backoff.action).toBe("STALE_BACKOFF_WAIT");
+    expect(backoff.action).toBe("HARD_FEED_STALE");
   });
 
   it("8b. soft-stale specialist rows are marked derivedDataContaminated", async () => {

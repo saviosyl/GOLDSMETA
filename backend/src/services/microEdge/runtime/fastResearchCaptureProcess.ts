@@ -46,6 +46,9 @@ import {
   GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS,
   GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
   GH_FAST_RESEARCH_SOFT_STALE_MS,
+  GH_FAST_RESEARCH_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+  GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS,
+  GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON,
   staleFeedBackoffMs,
   type ResearchReconnectReason
 } from "../goldHunter/fast/research/researchStaleReconnectPolicy";
@@ -103,10 +106,24 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   disclaimer: string;
   /** Soft freshness boundary (feed stale / paper block) — not hard teardown. */
   softStaleMs: number;
-  /** Hard reconnect threshold for connected-but-silent feeds. */
+  /**
+   * Hard *feed* stale diagnostic threshold (Spot+Depth silence).
+   * Does NOT schedule full transport reconnect while HB liveness is healthy.
+   */
   hardStaleReconnectMs: number;
   hardStaleThresholdReason: string;
   feedSoftStale: boolean;
+  feedHardStale: boolean;
+  transportLivenessTimeoutMs: number;
+  transportLivenessReason: string;
+  transportLivenessHealthy: boolean | null;
+  transportHeartbeatSentCount: number | null;
+  lastTransportHeartbeatSentAt: string | null;
+  transportHeartbeatReceivedCount: number | null;
+  lastTransportHeartbeatReceivedAt: string | null;
+  lastTransportMessageAt: string | null;
+  transportHeartbeatAgeMs: number | null;
+  transportMessageAgeMs: number | null;
   reconnectInFlight: boolean;
   reconnectInFlightAgeMs: number | null;
   reconnectPhase: ResearchReconnectPhase;
@@ -120,7 +137,10 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   connectFailureBackoffIndex: number;
   /** Genuine transport / session disconnect recoveries. */
   transportReconnectCount: number;
-  /** Prolonged silence while transport claimed connected. */
+  /**
+   * Historical counter — full stale-feed reconnect is retired; remains for
+   * prior-run telemetry continuity (no longer increments on hard feed stale).
+   */
   staleFeedReconnectCount: number;
   sustainedCrossRecoveryCount: number;
   disconnectResyncCount: number;
@@ -223,6 +243,7 @@ export class GoldHunterFastResearchCaptureProcess {
   private lastStaleFeedReconnectAttemptMs: number | null = null;
   private staleFeedBackoffIndex = 0;
   private feedSoftStale = false;
+  private feedHardStale = false;
   private nextStaleReconnectEligibleAtMs: number | null = null;
   /** @internal test hook — simulate slow reconnect (stacked #4 scenario). */
   private reconnectHoldMsForTests = 0;
@@ -483,7 +504,12 @@ export class GoldHunterFastResearchCaptureProcess {
       store: this.store,
       credentials: creds,
       nowMs: this.nowMs,
-      resolveConnectLifecycle: () => this.buildConnectLifecycle(attemptId)
+      resolveConnectLifecycle: () => this.buildConnectLifecycle(attemptId),
+      enableResearchTransportHeartbeat: {
+        intervalMs: GH_FAST_RESEARCH_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+        livenessTimeoutMs: GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS,
+        nowMs: this.nowMs
+      }
     });
   }
 
@@ -707,10 +733,14 @@ export class GoldHunterFastResearchCaptureProcess {
           backoffMs,
           reconnectAttemptId: attemptId
         });
-      } else if (reason === "transport_disconnect") {
+      } else if (
+        reason === "transport_disconnect" ||
+        reason === "transport_liveness_lost"
+      ) {
         this.transportReconnectCount += 1;
         microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
           code: "RESEARCH_TRANSPORT_RECONNECT_START",
+          reason,
           transportReconnectCount: this.transportReconnectCount,
           reconnectAttemptId: attemptId
         });
@@ -974,7 +1004,8 @@ export class GoldHunterFastResearchCaptureProcess {
       delayMs ??
       (reason === "stale_feed"
         ? 0
-        : reason === "transport_disconnect"
+        : reason === "transport_disconnect" ||
+            reason === "transport_liveness_lost"
           ? 500
           : connectFailureBackoffMs(this.connectFailureBackoffIndex));
 
@@ -1007,6 +1038,18 @@ export class GoldHunterFastResearchCaptureProcess {
   private async checkStaleAndReconnect(): Promise<void> {
     if (this.stopping || !this.running || !this.runtime) return;
     const h = this.runtime.health();
+    const hbTel = this.session?.getResearchTransportHeartbeatTelemetry() ?? null;
+    // Without HB telemetry (tests / early boot), treat CONNECTED session as live
+    // unless connectionState already says otherwise — never equate Spot silence
+    // with transport death.
+    const transportLivenessHealthy =
+      h.connectionState === "DISCONNECTED" ||
+      h.connectionState === "RECONNECTING"
+        ? false
+        : hbTel != null
+          ? hbTel.transportLivenessHealthy
+          : true;
+
     const decision = decideResearchStaleReconnect({
       nowMs: this.nowMs(),
       connectionState: h.connectionState,
@@ -1015,42 +1058,60 @@ export class GoldHunterFastResearchCaptureProcess {
       softStaleMs: this.softStaleMs,
       hardStaleReconnectMs: this.hardStaleReconnectMs,
       reconnectInFlight: this.reconnectInFlight,
+      transportLivenessHealthy,
       lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
       staleFeedBackoffIndex: this.staleFeedBackoffIndex
     });
 
     this.feedSoftStale = decision.feedSoftStale;
-    if (decision.action === "STALE_BACKOFF_WAIT") {
-      this.nextStaleReconnectEligibleAtMs = decision.nextEligibleAtMs;
-    }
+    this.feedHardStale = decision.feedHardStale;
 
     if (decision.action === "NONE" && !decision.feedSoftStale) {
-      // Fresh Spot+Depth resumed — reset quiet-market stale-recovery episode.
-      this.staleFeedBackoffIndex = 0;
-      this.lastStaleFeedReconnectAttemptMs = null;
+      // Fresh Spot+Depth — clear soft/hard feed flags only. No stale-feed
+      // reconnect machinery to reset (retired after deadf271 loop forensic).
       this.nextStaleReconnectEligibleAtMs = null;
       return;
     }
 
-    if (decision.action === "SOFT_STALE_ONLY" || decision.action === "STALE_BACKOFF_WAIT") {
-      // Soft stale: FEED_STALE / paper blocked via freshness — transport left alone.
+    if (
+      decision.action === "SOFT_STALE_ONLY" ||
+      decision.action === "HARD_FEED_STALE" ||
+      decision.action === "STALE_BACKOFF_WAIT"
+    ) {
+      if (decision.action === "HARD_FEED_STALE") {
+        microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+          code: "RESEARCH_HARD_FEED_STALE",
+          spotAgeMs: h.spotAgeMs,
+          depthAgeMs: h.depthAgeMs,
+          softStaleMs: this.softStaleMs,
+          hardFeedStaleMs: this.hardStaleReconnectMs,
+          transportLivenessHealthy,
+          transportMessageAgeMs: hbTel?.transportMessageAgeMs ?? null,
+          note: "Spot/Depth silence with healthy transport — no full reconnect"
+        });
+      }
+      // Soft/hard feed stale: FEED_STALE / paper blocked — transport left alone.
       return;
     }
 
     if (decision.action === "SCHEDULE_TRANSPORT_RECONNECT") {
-      this.scheduleReconnect("transport_disconnect", 500);
+      this.scheduleReconnect(
+        decision.reason === "transport_liveness_lost"
+          ? "transport_liveness_lost"
+          : "transport_disconnect",
+        500
+      );
       return;
     }
 
+    // SCHEDULE_STALE_FEED_RECONNECT is retired — treat as hard feed stale.
     if (decision.action === "SCHEDULE_STALE_FEED_RECONNECT") {
       microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
-        code: "RESEARCH_FEED_HARD_STALE",
+        code: "RESEARCH_HARD_FEED_STALE",
         spotAgeMs: h.spotAgeMs,
         depthAgeMs: h.depthAgeMs,
-        softStaleMs: this.softStaleMs,
-        hardStaleReconnectMs: this.hardStaleReconnectMs
+        note: "stale_feed_reconnect_retired"
       });
-      this.scheduleReconnect("stale_feed", 0);
     }
   }
 
@@ -1178,6 +1239,7 @@ export class GoldHunterFastResearchCaptureProcess {
     lastStaleFeedReconnectAttemptMs: number | null;
     nextStaleReconnectEligibleAtMs: number | null;
     feedSoftStale: boolean;
+    feedHardStale: boolean;
     reconnectTimerPending: boolean;
     lastReconnectFailureCode: string | null;
     lastReconnectFailurePhase: ResearchReconnectPhase | null;
@@ -1194,6 +1256,7 @@ export class GoldHunterFastResearchCaptureProcess {
       lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
       nextStaleReconnectEligibleAtMs: this.nextStaleReconnectEligibleAtMs,
       feedSoftStale: this.feedSoftStale,
+      feedHardStale: this.feedHardStale,
       reconnectTimerPending: this.reconnectTimer != null,
       lastReconnectFailureCode: this.lastReconnectFailureCode,
       lastReconnectFailurePhase: this.lastReconnectFailurePhase,
@@ -1285,8 +1348,20 @@ export class GoldHunterFastResearchCaptureProcess {
     const softNow =
       (base.spotAgeMs == null || base.spotAgeMs > this.softStaleMs) &&
       (base.depthAgeMs == null || base.depthAgeMs > this.softStaleMs);
+    const hardNow =
+      base.spotAgeMs != null &&
+      base.depthAgeMs != null &&
+      base.spotAgeMs > this.hardStaleReconnectMs &&
+      base.depthAgeMs > this.hardStaleReconnectMs;
+    const hbTel = this.session?.getResearchTransportHeartbeatTelemetry() ?? null;
+    const feedState = hardNow
+      ? ("HARD_STALE" as const)
+      : softNow
+        ? ("STALE" as const)
+        : ("LIVE" as const);
     return {
       ...base,
+      feedState,
       researchConfigSha: base.researchConfigSha || this.researchConfigSha,
       runtimeSha: base.runtimeSha ?? this.runtimeSha,
       cloudRunService: this.cloudRunService,
@@ -1314,6 +1389,19 @@ export class GoldHunterFastResearchCaptureProcess {
       hardStaleReconnectMs: this.hardStaleReconnectMs,
       hardStaleThresholdReason: GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
       feedSoftStale: softNow,
+      feedHardStale: hardNow,
+      transportLivenessTimeoutMs: GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS,
+      transportLivenessReason: GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON,
+      transportLivenessHealthy: hbTel?.transportLivenessHealthy ?? null,
+      transportHeartbeatSentCount: hbTel?.transportHeartbeatSentCount ?? null,
+      lastTransportHeartbeatSentAt: hbTel?.lastTransportHeartbeatSentAt ?? null,
+      transportHeartbeatReceivedCount:
+        hbTel?.transportHeartbeatReceivedCount ?? null,
+      lastTransportHeartbeatReceivedAt:
+        hbTel?.lastTransportHeartbeatReceivedAt ?? null,
+      lastTransportMessageAt: hbTel?.lastTransportMessageAt ?? null,
+      transportHeartbeatAgeMs: hbTel?.transportHeartbeatAgeMs ?? null,
+      transportMessageAgeMs: hbTel?.transportMessageAgeMs ?? null,
       reconnectInFlight: this.reconnectInFlight,
       reconnectInFlightAgeMs:
         this.reconnectInFlight && this.reconnectInFlightStartedAtMs != null

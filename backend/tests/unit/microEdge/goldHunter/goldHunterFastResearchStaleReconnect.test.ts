@@ -63,10 +63,12 @@ function selectedBuyA(): ResearchSpecialistObservation[] {
 }
 
 describe("research stale reconnect policy (pure)", () => {
-  it("documents soft=20s and hard=45s above observed quiet gaps ~22–26.5s", () => {
+  it("documents soft=20s; hard=45s is feed diagnostic (not transport teardown)", () => {
     expect(GH_FAST_RESEARCH_SOFT_STALE_MS).toBe(20_000);
     expect(GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS).toBe(45_000);
-    expect(GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON).toMatch(/22–26\.5s/);
+    expect(GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON).toMatch(
+      /HARD_FEED_STALE/
+    );
     expect(GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS).toBeGreaterThan(26_500);
   });
 
@@ -76,6 +78,7 @@ describe("research stale reconnect policy (pure)", () => {
       connectionState: "CONNECTED",
       spotAgeMs: null,
       depthAgeMs: null,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -89,6 +92,7 @@ describe("research stale reconnect policy (pure)", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 25_000,
       depthAgeMs: 25_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -138,17 +142,19 @@ describe("research stale reconnect policy (pure)", () => {
     expect(paper.summary().paperEntriesBlockedDataNotOk).toBeGreaterThan(0);
   });
 
-  it("3. prolonged hard stale triggers at most one SCHEDULE_STALE_FEED_RECONNECT", () => {
+  it("3. prolonged hard stale with healthy transport → HARD_FEED_STALE (no reconnect)", () => {
     const d = decideResearchStaleReconnect({
       nowMs: 100_000,
       connectionState: "CONNECTED",
       spotAgeMs: 50_000,
       depthAgeMs: 50_000,
       reconnectInFlight: false,
+      transportLivenessHealthy: true,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
     });
-    expect(d.action).toBe("SCHEDULE_STALE_FEED_RECONNECT");
+    expect(d.action).toBe("HARD_FEED_STALE");
+    expect(d.feedHardStale).toBe(true);
   });
 
   it("4. reconnectInFlight prevents stacked stale reconnect decision", () => {
@@ -157,6 +163,7 @@ describe("research stale reconnect policy (pure)", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 60_000,
       depthAgeMs: 60_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: true,
       lastStaleFeedReconnectAttemptMs: 50_000,
       staleFeedBackoffIndex: 0
@@ -164,62 +171,65 @@ describe("research stale reconnect policy (pure)", () => {
     expect(d.action).toBe("SOFT_STALE_ONLY");
   });
 
-  it("5. successful fresh events reset to NONE (caller clears backoff)", () => {
+  it("5. successful fresh events → NONE (no stale-feed reconnect machinery)", () => {
     const d = decideResearchStaleReconnect({
       nowMs: 100_000,
       connectionState: "CONNECTED",
       spotAgeMs: 100,
       depthAgeMs: 100,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: 90_000,
       staleFeedBackoffIndex: 2
     });
-    expect(d).toEqual({ action: "NONE", feedSoftStale: false });
+    expect(d).toEqual({
+      action: "NONE",
+      feedSoftStale: false,
+      feedHardStale: false
+    });
   });
 
-  it("6. continued market-closed-like silence uses stepped backoff (no storm)", () => {
+  it("6. quiet market with healthy transport: HARD_FEED_STALE forever — zero reconnects", () => {
+    // Historical backoff constants retained for telemetry compatibility only.
     expect([...GH_FAST_RESEARCH_STALE_FEED_BACKOFF_MS]).toEqual([
       120_000, 300_000, 900_000
     ]);
-    const afterFirst = decideResearchStaleReconnect({
+    const d = decideResearchStaleReconnect({
       nowMs: 100_000,
       connectionState: "CONNECTED",
       spotAgeMs: 80_000,
       depthAgeMs: 80_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: 95_000,
       staleFeedBackoffIndex: 0
     });
-    expect(afterFirst.action).toBe("STALE_BACKOFF_WAIT");
-    if (afterFirst.action === "STALE_BACKOFF_WAIT") {
-      expect(afterFirst.backoffMs).toBe(120_000);
-      expect(afterFirst.nextEligibleAtMs).toBe(95_000 + 120_000);
-    }
+    expect(d.action).toBe("HARD_FEED_STALE");
 
-    const afterWaitElapsed = decideResearchStaleReconnect({
+    const later = decideResearchStaleReconnect({
       nowMs: 95_000 + 120_000 + 1,
       connectionState: "CONNECTED",
       spotAgeMs: 200_000,
       depthAgeMs: 200_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: 95_000,
       staleFeedBackoffIndex: 0
     });
-    expect(afterWaitElapsed.action).toBe("SCHEDULE_STALE_FEED_RECONNECT");
+    expect(later.action).toBe("HARD_FEED_STALE");
 
-    const midFiveMin = decideResearchStaleReconnect({
-      nowMs: 200_000 + 60_000,
+    const lost = decideResearchStaleReconnect({
+      nowMs: 200_000,
       connectionState: "CONNECTED",
       spotAgeMs: 200_000,
       depthAgeMs: 200_000,
-      reconnectInFlight: false,
-      lastStaleFeedReconnectAttemptMs: 200_000,
-      staleFeedBackoffIndex: 1
+      transportLivenessHealthy: false,
+      reconnectInFlight: false
     });
-    expect(midFiveMin.action).toBe("STALE_BACKOFF_WAIT");
-    if (midFiveMin.action === "STALE_BACKOFF_WAIT") {
-      expect(midFiveMin.backoffMs).toBe(300_000);
-    }
+    expect(lost.action).toBe("SCHEDULE_TRANSPORT_RECONNECT");
+    expect((lost as { reason?: string }).reason).toBe(
+      "transport_liveness_lost"
+    );
 
     expect(staleFeedBackoffMs(99)).toBe(900_000);
   });
@@ -230,6 +240,7 @@ describe("research stale reconnect policy (pure)", () => {
       connectionState: "DISCONNECTED",
       spotAgeMs: 100,
       depthAgeMs: 100,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -351,7 +362,7 @@ describe("process reconnectInFlight mutex (#4 scenario)", () => {
     const policy = proc.getStaleReconnectPolicy();
     expect(policy.softStaleMs).toBe(20_000);
     expect(policy.hardStaleReconnectMs).toBe(45_000);
-    expect(policy.hardStaleThresholdReason).toMatch(/ops integrity/);
+    expect(policy.hardStaleThresholdReason).toMatch(/HARD_FEED_STALE/);
     const h = proc.buildHealth();
     expect(h.runtimeSha).toBe("cccccccccccccccccccccccccccccccccccccccc");
     expect(h.softStaleMs).toBe(20_000);

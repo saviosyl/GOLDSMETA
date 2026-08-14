@@ -11,7 +11,9 @@ import {
   RealMicroCTraderTransport,
   type MicroOpenApiTransport,
   type MicroTransportConnectLifecycle,
-  type MicroTransportEventHandler
+  type MicroTransportEventHandler,
+  type MicroTransportResearchHeartbeatOptions,
+  type ResearchTransportHeartbeatTelemetry
 } from "./microCTraderTransport";
 import { resolveMicroXauUsd } from "./microCTraderSymbolResolver";
 import {
@@ -107,6 +109,11 @@ export type LiveSessionOptions = {
    * When set, preferred over static connectLifecycle at connect() time.
    */
   resolveConnectLifecycle?: () => MicroTransportConnectLifecycle | null | undefined;
+  /**
+   * Opt-in GOLD HUNTER FAST research ProtoHeartbeatEvent (~10s).
+   * Default/Core callers omit → no automatic heartbeat (unchanged).
+   */
+  enableResearchTransportHeartbeat?: boolean | MicroTransportResearchHeartbeatOptions;
 };
 
 export class MicroLiveMarketSession {
@@ -190,6 +197,13 @@ export class MicroLiveMarketSession {
       this.lastDisconnectedAt = new Date().toISOString();
       microLog("MICRO_CTRADER_DISCONNECTED", { code: this.lastErrorCode });
       throw e;
+    }
+    // Research-only: start ProtoHeartbeatEvent after auth succeeds.
+    const hbOpt = this.opts.enableResearchTransportHeartbeat;
+    if (hbOpt && this.transport.enableResearchTransportHeartbeat) {
+      this.transport.enableResearchTransportHeartbeat(
+        hbOpt === true ? undefined : hbOpt
+      );
     }
     this.lastConnectedAt = new Date().toISOString();
     this.reconnectAttempts = 0;
@@ -336,6 +350,13 @@ export class MicroLiveMarketSession {
       environment: this.credentials.environment
     });
     this.lastQuotePersistMs = now;
+  }
+
+  /**
+   * Research-only transport heartbeat telemetry (null when not enabled).
+   */
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry | null {
+    return this.transport?.getResearchTransportHeartbeatTelemetry?.() ?? null;
   }
 
   async disconnect(): Promise<void> {

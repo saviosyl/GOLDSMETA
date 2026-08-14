@@ -437,6 +437,7 @@ describe("safety zeros", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 25_000,
       depthAgeMs: 25_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0

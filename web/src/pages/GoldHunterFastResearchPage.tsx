@@ -3,6 +3,10 @@
  * Polls /health + /recent-candidates. No trading controls.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  formatResearchLocalTime,
+  formatResearchUtcTime
+} from "../lib/formatResearchLocalTime";
 
 type ResearchHealth = {
   captureHealthy?: boolean;
@@ -10,7 +14,7 @@ type ResearchHealth = {
   dataIntegrityStatus?: string;
   connectionState?: string;
   transportSessionState?: "CONNECTED" | "DISCONNECTED";
-  feedState?: "LIVE" | "STALE";
+  feedState?: "LIVE" | "STALE" | "HARD_STALE";
   strictLiveConnected?: boolean | null;
   spotSubscribed?: boolean;
   depthSubscribed?: boolean;
@@ -480,7 +484,11 @@ export function GoldHunterFastResearchPage() {
           SPREAD <strong>{fmtPx(health?.lastSpread)}</strong>
         </span>
         <span className={`gm-ghr-pill ${feedLive ? "is-ok" : "is-bad"}`}>
-          {health?.feedState === "LIVE" || feedLive ? "FEED LIVE" : "FEED STALE"}
+          {health?.feedState === "LIVE" || feedLive
+            ? "FEED LIVE"
+            : health?.feedState === "HARD_STALE"
+              ? "FEED HARD STALE"
+              : "FEED STALE"}
         </span>
         <span
           className={`gm-ghr-pill ${
@@ -511,7 +519,9 @@ export function GoldHunterFastResearchPage() {
               ? `DISCONNECTED — ${fetchError}`
               : health?.transportSessionState === "CONNECTED" ||
                   health?.connectionState === "CONNECTED"
-                ? "FEED STALE — TRANSPORT CONNECTED"
+                ? health?.feedState === "HARD_STALE"
+                  ? "FEED HARD STALE — TRANSPORT CONNECTED"
+                  : "FEED STALE — TRANSPORT CONNECTED"
                 : "FEED STALE / TRANSPORT DISCONNECTED"}
             {ageSec != null ? ` · last ok ${ageSec}s ago` : ""}
           </span>
@@ -838,7 +848,11 @@ export function GoldHunterFastResearchPage() {
                     {paper!.history!.map((t) => (
                       <tr key={t.referenceTradeId}>
                         <td>{t.referenceTradeId}</td>
-                        <td>{t.entryTsIso.slice(11, 19)}</td>
+                        <td
+                          title={formatResearchUtcTime(t.entryTsIso)}
+                        >
+                          {formatResearchLocalTime(t.entryTsIso)}
+                        </td>
                         <td>{t.setupName}</td>
                         <td>
                           <SideBadge side={t.side} />
@@ -972,7 +986,9 @@ export function GoldHunterFastResearchPage() {
                   {observations.map((o) => (
                     <tr key={o.observationId}>
                       <td>OBS {o.observationId}</td>
-                      <td>{o.tsIso.slice(11, 19)}</td>
+                      <td title={formatResearchUtcTime(o.tsIso)}>
+                        {formatResearchLocalTime(o.tsIso)}
+                      </td>
                       <td>
                         {o.setupName}
                         {o.selectedCandidate
@@ -1023,7 +1039,10 @@ export function GoldHunterFastResearchPage() {
                       <span>{o.side ?? "—"}</span>
                     </div>
                     <div className="gm-ghr-mobile-sub">
-                      {o.tsIso.slice(11, 19)} · {fmtPx(o.bid)}/{fmtPx(o.ask)} ·
+                      <span title={formatResearchUtcTime(o.tsIso)}>
+                        {formatResearchLocalTime(o.tsIso)}
+                      </span>{" "}
+                      · {fmtPx(o.bid)}/{fmtPx(o.ask)} ·
                       spr {fmtPx(o.spread)}
                     </div>
                     <div className="gm-ghr-obs-label">{o.label}</div>

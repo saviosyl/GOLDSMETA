@@ -1271,15 +1271,29 @@ export class ResearchIngestBridge {
       connectionState: this.connectionState,
       transportSessionState:
         this.connectionState === "CONNECTED" ? "CONNECTED" : "DISCONNECTED",
-      feedState:
-        spotAgeMs != null &&
-        depthAgeMs != null &&
-        spotAgeMs >= 0 &&
-        depthAgeMs >= 0 &&
-        spotAgeMs <= this.freshnessLimitMs &&
-        depthAgeMs <= this.freshnessLimitMs
-          ? "LIVE"
-          : "STALE",
+      feedState: (() => {
+        const soft = this.freshnessLimitMs;
+        const hard = 45_000;
+        if (
+          spotAgeMs != null &&
+          depthAgeMs != null &&
+          spotAgeMs >= 0 &&
+          depthAgeMs >= 0 &&
+          spotAgeMs <= soft &&
+          depthAgeMs <= soft
+        ) {
+          return "LIVE" as const;
+        }
+        if (
+          spotAgeMs != null &&
+          depthAgeMs != null &&
+          spotAgeMs > hard &&
+          depthAgeMs > hard
+        ) {
+          return "HARD_STALE" as const;
+        }
+        return "STALE" as const;
+      })(),
       strictLiveConnected: null,
       storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
       durableMode: sink.durableMode,

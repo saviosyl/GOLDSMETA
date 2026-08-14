@@ -229,6 +229,7 @@ describe("Gold Hunter syncSessionState classification", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 27_000,
       depthAgeMs: 27_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -241,6 +242,7 @@ describe("Gold Hunter syncSessionState classification", () => {
       connectionState: "CONNECTED",
       spotAgeMs: 44_999,
       depthAgeMs: 44_999,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
@@ -250,18 +252,19 @@ describe("Gold Hunter syncSessionState classification", () => {
     await rt.stop();
   });
 
-  it("10. >45s BOTH stale → SCHEDULE_STALE_FEED_RECONNECT (not transport)", () => {
+  it("10. >45s BOTH stale + healthy transport → HARD_FEED_STALE (no reconnect)", () => {
     const d = decideResearchStaleReconnect({
       nowMs: 1,
       connectionState: "CONNECTED",
       spotAgeMs: 45_001,
       depthAgeMs: 45_001,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0
     });
-    expect(d.action).toBe("SCHEDULE_STALE_FEED_RECONNECT");
-    expect(d.reason).toBe("stale_feed");
+    expect(d.action).toBe("HARD_FEED_STALE");
+    expect(d.feedHardStale).toBe(true);
     expect(GH_FAST_RESEARCH_SOFT_STALE_MS).toBe(20_000);
     expect(GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS).toBe(45_000);
   });
@@ -348,7 +351,7 @@ describe("Gold Hunter syncSessionState classification", () => {
     await rt.stop();
   });
 
-  it("13. 20-minute quiet market simulation: no ~30s reconnect storm", () => {
+  it("13. 20-minute quiet market simulation: no reconnect storm with healthy transport", () => {
     const soft = GH_FAST_RESEARCH_SOFT_STALE_MS;
     const hard = GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS;
     expect([...GH_FAST_RESEARCH_STALE_FEED_BACKOFF_MS]).toEqual([
@@ -356,43 +359,37 @@ describe("Gold Hunter syncSessionState classification", () => {
     ]);
 
     let now = 0;
-    let lastStaleAttempt: number | null = null;
-    let backoffIndex = 0;
     let staleSchedules = 0;
     let transportSchedules = 0;
+    let hardFeedStaleTicks = 0;
     const step = 5_000;
     const horizon = 20 * 60_000;
-    const spotAge = () => now; // silent from t=0
-    const depthAge = () => now;
 
     for (; now <= horizon; now += step) {
       const d = decideResearchStaleReconnect({
         nowMs: now,
-        connectionState: "CONNECTED", // transport stays up
-        spotAgeMs: spotAge() >= soft ? spotAge() : spotAge(),
-        depthAgeMs: depthAge() >= soft ? depthAge() : depthAge(),
+        connectionState: "CONNECTED",
+        spotAgeMs: now,
+        depthAgeMs: now,
         softStaleMs: soft,
         hardStaleReconnectMs: hard,
-        reconnectInFlight: false,
-        lastStaleFeedReconnectAttemptMs: lastStaleAttempt,
-        staleFeedBackoffIndex: backoffIndex
+        transportLivenessHealthy: true,
+        reconnectInFlight: false
       });
       if (d.action === "SCHEDULE_TRANSPORT_RECONNECT") {
         transportSchedules += 1;
       }
       if (d.action === "SCHEDULE_STALE_FEED_RECONNECT") {
         staleSchedules += 1;
-        lastStaleAttempt = now;
-        backoffIndex = Math.min(backoffIndex + 1, 2);
+      }
+      if (d.action === "HARD_FEED_STALE") {
+        hardFeedStaleTicks += 1;
       }
     }
 
     expect(transportSchedules).toBe(0);
-    // First at ~45s, then backoff 2m→5m→15m. Within 20m quiet: a few stale
-    // reconnects only — never a ~30s storm (20min/30s ≈ 40).
-    expect(staleSchedules).toBeGreaterThanOrEqual(2);
-    expect(staleSchedules).toBeLessThanOrEqual(4);
-    expect(staleSchedules).toBeLessThan(10);
+    expect(staleSchedules).toBe(0);
+    expect(hardFeedStaleTicks).toBeGreaterThan(100);
     expect(staleFeedBackoffMs(0)).toBe(120_000);
     expect(staleFeedBackoffMs(1)).toBe(300_000);
     expect(staleFeedBackoffMs(2)).toBe(900_000);
@@ -404,6 +401,7 @@ describe("Gold Hunter syncSessionState classification", () => {
       connectionState: "DISCONNECTED",
       spotAgeMs: 5_000,
       depthAgeMs: 5_000,
+      transportLivenessHealthy: true,
       reconnectInFlight: false,
       lastStaleFeedReconnectAttemptMs: null,
       staleFeedBackoffIndex: 0

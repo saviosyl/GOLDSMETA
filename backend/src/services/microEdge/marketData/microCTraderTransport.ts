@@ -24,6 +24,10 @@ import {
 } from "./microCTraderProtocol";
 import type { MicroTimeframe } from "./types";
 
+/** Defaults mirrored by GH FAST research policy (avoid marketData→goldHunter import). */
+const RESEARCH_HB_INTERVAL_DEFAULT_MS = 10_000;
+const RESEARCH_HB_LIVENESS_DEFAULT_MS = 40_000;
+
 export type MicroTransportEventHandler = (
   eventName: string,
   payload: Record<string, unknown>
@@ -44,6 +48,31 @@ export type MicroTransportConnectLifecycle = {
   nowMs?: () => number;
   /** When false, late resolution must not authenticate/connect. */
   isAttemptCurrent?: () => boolean;
+};
+
+/**
+ * Opt-in GOLD HUNTER FAST research transport heartbeat.
+ * @reiryoku/ctrader-layer does NOT auto-send ProtoHeartbeatEvent —
+ * README requires callers to invoke sendHeartbeat() periodically.
+ * Default Core/Micro consumers leave this disabled.
+ */
+export type MicroTransportResearchHeartbeatOptions = {
+  intervalMs?: number;
+  nowMs?: () => number;
+  livenessTimeoutMs?: number;
+};
+
+export type ResearchTransportHeartbeatTelemetry = {
+  researchHeartbeatEnabled: boolean;
+  transportHeartbeatSentCount: number;
+  lastTransportHeartbeatSentAt: string | null;
+  transportHeartbeatReceivedCount: number;
+  lastTransportHeartbeatReceivedAt: string | null;
+  lastTransportMessageAt: string | null;
+  transportHeartbeatAgeMs: number | null;
+  transportMessageAgeMs: number | null;
+  transportLivenessTimeoutMs: number;
+  transportLivenessHealthy: boolean;
 };
 
 export type MicroOpenApiTransport = {
@@ -80,12 +109,22 @@ export type MicroOpenApiTransport = {
   getSubscribeSpotsCallCount(): number;
   /** Test/observability: count of SubscribeDepthQuotes commands sent. */
   getSubscribeDepthCallCount(): number;
+  /** Opt-in research ProtoHeartbeatEvent lifecycle (GH FAST only). */
+  enableResearchTransportHeartbeat?(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void;
+  stopResearchTransportHeartbeat?(): void;
+  getResearchTransportHeartbeatTelemetry?(): ResearchTransportHeartbeatTelemetry;
 };
 
 type ConnLike = {
   open: () => Promise<unknown>;
   close: () => Promise<unknown> | void;
-  sendCommand: (cmd: string, payload: Record<string, unknown>) => Promise<unknown>;
+  sendCommand: (
+    cmd: string,
+    payload?: Record<string, unknown>
+  ) => Promise<unknown>;
+  sendHeartbeat?: () => void;
   on: (event: string, cb: (evt: unknown) => void) => void;
   removeListener?: (event: string, cb: (evt: unknown) => void) => void;
   off?: (event: string, cb: (evt: unknown) => void) => void;
@@ -128,6 +167,18 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   private subscribeDepthCallCount = 0;
   /** Bumped on disconnect/cancel so late open/auth cannot win. */
   private connectGeneration = 0;
+  /** GOLD HUNTER FAST research-only ProtoHeartbeatEvent lifecycle. */
+  private researchHeartbeatEnabled = false;
+  private researchHeartbeatIntervalMs = RESEARCH_HB_INTERVAL_DEFAULT_MS;
+  private researchHeartbeatLivenessMs = RESEARCH_HB_LIVENESS_DEFAULT_MS;
+  private researchHeartbeatNowMs: () => number = () => Date.now();
+  private researchHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private transportHeartbeatSentCount = 0;
+  private lastTransportHeartbeatSentAtMs: number | null = null;
+  private transportHeartbeatReceivedCount = 0;
+  private lastTransportHeartbeatReceivedAtMs: number | null = null;
+  private lastTransportMessageAtMs: number | null = null;
+  private inboundHeartbeatHandler: MicroTransportEventHandler | null = null;
 
   constructor(
     private readonly credentials: MicroCTraderCredentials,
@@ -301,6 +352,10 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
       assertCurrent();
       this.accountAuthenticated = true;
       this.connected = true;
+      this.noteInboundTransportMessage(nowMs());
+      if (this.researchHeartbeatEnabled) {
+        this.startResearchHeartbeatTimer();
+      }
     } catch (e) {
       if (this.pendingConn === conn) this.pendingConn = null;
       if (this.conn === conn && !this.connected) {
@@ -323,6 +378,7 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   }
 
   private async failClosedDisconnect(): Promise<void> {
+    this.stopResearchTransportHeartbeat();
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
@@ -352,6 +408,7 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   async disconnect(): Promise<void> {
     // Invalidate any in-flight connect so late open/auth cannot promote.
     this.connectGeneration += 1;
+    this.stopResearchTransportHeartbeat();
     this.connected = false;
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
@@ -375,6 +432,127 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
       } catch {
         /* ignore */
       }
+    }
+  }
+
+  /**
+   * GOLD HUNTER FAST research only — start ProtoHeartbeatEvent every ~10s.
+   * Not enabled for Core / other Micro consumers by default.
+   * Heartbeat is transport infrastructure (not a broker trade request).
+   */
+  enableResearchTransportHeartbeat(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void {
+    this.researchHeartbeatEnabled = true;
+    this.researchHeartbeatIntervalMs =
+      opts?.intervalMs ?? RESEARCH_HB_INTERVAL_DEFAULT_MS;
+    this.researchHeartbeatLivenessMs =
+      opts?.livenessTimeoutMs ?? RESEARCH_HB_LIVENESS_DEFAULT_MS;
+    if (opts?.nowMs) this.researchHeartbeatNowMs = opts.nowMs;
+    this.ensureInboundHeartbeatListener();
+    if (this.connected && this.conn) {
+      this.noteInboundTransportMessage(this.researchHeartbeatNowMs());
+      this.startResearchHeartbeatTimer();
+    }
+  }
+
+  stopResearchTransportHeartbeat(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    if (this.inboundHeartbeatHandler) {
+      this.off("ProtoHeartbeatEvent", this.inboundHeartbeatHandler);
+      this.inboundHeartbeatHandler = null;
+    }
+    // Keep counters for last telemetry snapshot; disable further sends.
+    this.researchHeartbeatEnabled = false;
+  }
+
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry {
+    const now = this.researchHeartbeatNowMs();
+    const hbAge =
+      this.lastTransportHeartbeatReceivedAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatReceivedAtMs)
+        : null;
+    const msgAge =
+      this.lastTransportMessageAtMs != null
+        ? Math.max(0, now - this.lastTransportMessageAtMs)
+        : null;
+    const healthy =
+      !this.researchHeartbeatEnabled || !this.connected
+        ? this.connected
+        : msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+    return {
+      researchHeartbeatEnabled: this.researchHeartbeatEnabled,
+      transportHeartbeatSentCount: this.transportHeartbeatSentCount,
+      lastTransportHeartbeatSentAt:
+        this.lastTransportHeartbeatSentAtMs != null
+          ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
+          : null,
+      transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
+      lastTransportHeartbeatReceivedAt:
+        this.lastTransportHeartbeatReceivedAtMs != null
+          ? new Date(this.lastTransportHeartbeatReceivedAtMs).toISOString()
+          : null,
+      lastTransportMessageAt:
+        this.lastTransportMessageAtMs != null
+          ? new Date(this.lastTransportMessageAtMs).toISOString()
+          : null,
+      transportHeartbeatAgeMs: hbAge,
+      transportMessageAgeMs: msgAge,
+      transportLivenessTimeoutMs: this.researchHeartbeatLivenessMs,
+      transportLivenessHealthy: healthy
+    };
+  }
+
+  private noteInboundTransportMessage(nowMs: number): void {
+    this.lastTransportMessageAtMs = nowMs;
+  }
+
+  private ensureInboundHeartbeatListener(): void {
+    if (this.inboundHeartbeatHandler) return;
+    this.inboundHeartbeatHandler = () => {
+      const now = this.researchHeartbeatNowMs();
+      this.transportHeartbeatReceivedCount += 1;
+      this.lastTransportHeartbeatReceivedAtMs = now;
+      this.noteInboundTransportMessage(now);
+    };
+    this.on("ProtoHeartbeatEvent", this.inboundHeartbeatHandler);
+  }
+
+  private startResearchHeartbeatTimer(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    if (!this.researchHeartbeatEnabled) return;
+    this.ensureInboundHeartbeatListener();
+    const tick = (): void => {
+      if (!this.researchHeartbeatEnabled || !this.connected || !this.conn) {
+        return;
+      }
+      try {
+        if (typeof this.conn.sendHeartbeat === "function") {
+          this.conn.sendHeartbeat();
+        } else {
+          void this.conn.sendCommand("ProtoHeartbeatEvent", {});
+        }
+        const now = this.researchHeartbeatNowMs();
+        this.transportHeartbeatSentCount += 1;
+        this.lastTransportHeartbeatSentAtMs = now;
+      } catch {
+        /* outbound HB failure is observed via liveness timeout */
+      }
+    };
+    // Immediate first tick so quiet feeds get an early liveness pulse.
+    tick();
+    this.researchHeartbeatTimer = setInterval(
+      tick,
+      this.researchHeartbeatIntervalMs
+    );
+    if (typeof this.researchHeartbeatTimer.unref === "function") {
+      this.researchHeartbeatTimer.unref();
     }
   }
 
@@ -415,6 +593,9 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     const map = this.nativeBindings.get(eventName)!;
     if (map.has(handler)) return; // no duplicate native registration
     const native = (evt: unknown) => {
+      if (this.researchHeartbeatEnabled) {
+        this.noteInboundTransportMessage(this.researchHeartbeatNowMs());
+      }
       handler(eventName, unwrapEvent(evt));
     };
     map.set(handler, native);
@@ -571,6 +752,16 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   failConnectCode: string | null = null;
   rateLimitOnce = false;
   getTickDataCallCount = 0;
+  private researchHeartbeatEnabled = false;
+  private researchHeartbeatIntervalMs = 10_000;
+  private researchHeartbeatLivenessMs = 40_000;
+  private researchHeartbeatNowMs: () => number = () => Date.now();
+  private researchHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private transportHeartbeatSentCount = 0;
+  private lastTransportHeartbeatSentAtMs: number | null = null;
+  private transportHeartbeatReceivedCount = 0;
+  private lastTransportHeartbeatReceivedAtMs: number | null = null;
+  private lastTransportMessageAtMs: number | null = null;
 
   isConnected(): boolean {
     return this.connected;
@@ -610,14 +801,102 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     });
     this.accountAuthenticated = true;
     this.connected = true;
+    this.lastTransportMessageAtMs = this.researchHeartbeatNowMs();
+    if (this.researchHeartbeatEnabled) {
+      this.enableResearchTransportHeartbeat({
+        intervalMs: this.researchHeartbeatIntervalMs,
+        livenessTimeoutMs: this.researchHeartbeatLivenessMs,
+        nowMs: this.researchHeartbeatNowMs
+      });
+    }
   }
 
   async disconnect(): Promise<void> {
+    this.stopResearchTransportHeartbeat();
     this.connected = false;
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
     this.handlers.clear();
+  }
+
+  enableResearchTransportHeartbeat(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void {
+    this.researchHeartbeatEnabled = true;
+    this.researchHeartbeatIntervalMs = opts?.intervalMs ?? 10_000;
+    this.researchHeartbeatLivenessMs = opts?.livenessTimeoutMs ?? 40_000;
+    if (opts?.nowMs) this.researchHeartbeatNowMs = opts.nowMs;
+    const now = this.researchHeartbeatNowMs();
+    this.lastTransportMessageAtMs = now;
+    if (this.researchHeartbeatTimer) clearInterval(this.researchHeartbeatTimer);
+    this.researchHeartbeatTimer = setInterval(() => {
+      if (!this.connected || !this.researchHeartbeatEnabled) return;
+      this.transportHeartbeatSentCount += 1;
+      this.lastTransportHeartbeatSentAtMs = this.researchHeartbeatNowMs();
+      // Fake echo: inbound heartbeat proves liveness in quiet-market tests.
+      this.transportHeartbeatReceivedCount += 1;
+      this.lastTransportHeartbeatReceivedAtMs = this.researchHeartbeatNowMs();
+      this.lastTransportMessageAtMs = this.researchHeartbeatNowMs();
+      for (const h of this.handlers.get("ProtoHeartbeatEvent") ?? []) {
+        h("ProtoHeartbeatEvent", {});
+      }
+    }, this.researchHeartbeatIntervalMs);
+    if (typeof this.researchHeartbeatTimer.unref === "function") {
+      this.researchHeartbeatTimer.unref();
+    }
+  }
+
+  stopResearchTransportHeartbeat(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    this.researchHeartbeatEnabled = false;
+  }
+
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry {
+    const now = this.researchHeartbeatNowMs();
+    const hbAge =
+      this.lastTransportHeartbeatReceivedAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatReceivedAtMs)
+        : null;
+    const msgAge =
+      this.lastTransportMessageAtMs != null
+        ? Math.max(0, now - this.lastTransportMessageAtMs)
+        : null;
+    return {
+      researchHeartbeatEnabled: this.researchHeartbeatEnabled,
+      transportHeartbeatSentCount: this.transportHeartbeatSentCount,
+      lastTransportHeartbeatSentAt:
+        this.lastTransportHeartbeatSentAtMs != null
+          ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
+          : null,
+      transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
+      lastTransportHeartbeatReceivedAt:
+        this.lastTransportHeartbeatReceivedAtMs != null
+          ? new Date(this.lastTransportHeartbeatReceivedAtMs).toISOString()
+          : null,
+      lastTransportMessageAt:
+        this.lastTransportMessageAtMs != null
+          ? new Date(this.lastTransportMessageAtMs).toISOString()
+          : null,
+      transportHeartbeatAgeMs: hbAge,
+      transportMessageAgeMs: msgAge,
+      transportLivenessTimeoutMs: this.researchHeartbeatLivenessMs,
+      transportLivenessHealthy:
+        !this.researchHeartbeatEnabled || !this.connected
+          ? this.connected
+          : msgAge != null && msgAge <= this.researchHeartbeatLivenessMs
+    };
+  }
+
+  /** Test helper — stop echoing heartbeats (simulate transport-message death). */
+  stopFakeHeartbeatEchoForTests(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
   }
 
   async sendReadCommand(

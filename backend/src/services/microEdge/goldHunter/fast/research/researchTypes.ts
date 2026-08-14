@@ -479,7 +479,7 @@ export type ResearchCaptureHealth = {
    * Market-data freshness relative to soft stale threshold.
    * LIVE = both Spot+Depth soft-fresh; STALE otherwise (including unknown ages).
    */
-  feedState: "LIVE" | "STALE";
+  feedState: "LIVE" | "STALE" | "HARD_STALE";
   /**
    * Strict Micro liveConnected (quote/M1/heartbeat). Diagnostic only —
    * must not drive research transport teardown.
