@@ -19,13 +19,19 @@ export {
   loadFastAutoTradeConfig
 } from "./config";
 export {
+  brokenStructureLevel,
+  buildFastGeometry,
+  candleKey,
   classifyFastRegime,
   determineFastBias,
   detectFastSetup,
   detectFastTrigger,
   evaluateFastAutoTrade,
   evaluateFastReentry,
-  hardSafetyVeto
+  forwardTradeBarrier,
+  hardSafetyVeto,
+  isExtended,
+  tradeSpaceOk
 } from "./engine";
 export { evaluateFastManagement } from "./management";
 export {
