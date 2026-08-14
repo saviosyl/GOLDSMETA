@@ -368,6 +368,10 @@ export type ResearchCaptureHealth = {
   lastBid: number | null;
   lastAsk: number | null;
   lastSpread: number | null;
+  /** Research diagnostics — cTrader ProtoOASpotEvent may be one-sided. */
+  spotBidOnlyEvents: number;
+  spotAskOnlyEvents: number;
+  spotTwoSidedEvents: number;
   marketDataNormalizationVersion: string;
   inputNormalizationVerified: boolean;
   captureStart: string | null;

@@ -103,6 +103,9 @@ export class ResearchIngestBridge {
   private lastBid: number | null = null;
   private lastAsk: number | null = null;
   private lastSpread: number | null = null;
+  private spotBidOnlyEvents = 0;
+  private spotAskOnlyEvents = 0;
+  private spotTwoSidedEvents = 0;
   /** Bounded ring of recent specialist rows for the read-only monitor UI. */
   private readonly recentCandidates: ResearchRecentCandidateObservation[] = [];
   private observationSeq = 0;
@@ -466,8 +469,12 @@ export class ResearchIngestBridge {
     } as const;
 
     if (item.kind === "RESYNC_MARKER") {
-      // Ordered boundary: clear book/features at this receiveSeq, then persist.
+      // Ordered boundary: clear book/features/sides at this receiveSeq, then persist.
       this.pipeline.clearForResync();
+      // Monitor SPOT strip must not show stale pre-resync sides.
+      this.lastBid = null;
+      this.lastAsk = null;
+      this.lastSpread = null;
       const rec: ResearchCaptureRecord = {
         ...base,
         eventKind: "RESYNC_MARKER",
@@ -537,9 +544,18 @@ export class ResearchIngestBridge {
       const bid = n.bid;
       const ask = n.ask;
       const brokerTimestampMs = n.brokerTimestampMs;
-      if (bid != null) this.lastBid = bid;
-      if (ask != null) this.lastAsk = ask;
-      if (n.spread != null) this.lastSpread = n.spread;
+      const hasBid = bid != null && bid > 0;
+      const hasAsk = ask != null && ask > 0;
+      if (hasBid && hasAsk) this.spotTwoSidedEvents += 1;
+      else if (hasBid) this.spotBidOnlyEvents += 1;
+      else if (hasAsk) this.spotAskOnlyEvents += 1;
+      // Monitor strip: last-known legitimate normalized sides (engine-parity).
+      if (hasBid) this.lastBid = bid;
+      if (hasAsk) this.lastAsk = ask;
+      this.lastSpread =
+        this.lastBid != null && this.lastAsk != null
+          ? this.lastAsk - this.lastBid
+          : null;
       const spotEv: GhFastSpotEvent = {
         kind: "SPOT",
         receiveSeq: item.receiveSeq,
@@ -565,7 +581,10 @@ export class ResearchIngestBridge {
           kind: "SPOT",
           bid,
           ask,
-          spread: n.spread,
+          spread:
+            this.lastBid != null && this.lastAsk != null
+              ? this.lastAsk - this.lastBid
+              : null,
           bidRelative: n.bidRelative,
           askRelative: n.askRelative,
           brokerTimestampMs,
@@ -819,6 +838,9 @@ export class ResearchIngestBridge {
       lastBid: this.lastBid,
       lastAsk: this.lastAsk,
       lastSpread: this.lastSpread,
+      spotBidOnlyEvents: this.spotBidOnlyEvents,
+      spotAskOnlyEvents: this.spotAskOnlyEvents,
+      spotTwoSidedEvents: this.spotTwoSidedEvents,
       marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
       inputNormalizationVerified: true,
       captureStart: this.captureStartIso,

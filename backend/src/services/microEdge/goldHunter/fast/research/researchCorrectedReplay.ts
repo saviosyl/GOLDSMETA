@@ -121,6 +121,9 @@ export async function replayResearchCaptureNormalized(opts: {
   rawRows: number;
   normalizedSpot: number;
   normalizedDepth: number;
+  partialBidOnlyCount: number;
+  partialAskOnlyCount: number;
+  twoSidedSpotCount: number;
   resyncMarkersProcessed: number;
   sessionTransitionsSkipped: number;
   heartbeatsSkipped: number;
@@ -169,7 +172,8 @@ export async function replayResearchCaptureNormalized(opts: {
         receiveSeq: r.receiveSeq,
         eventKind: "RESYNC_MARKER",
         reason: r.market?.reason ?? null,
-        cleared: true
+        cleared: true,
+        lastKnownSpotAfter: pipe.lastKnownSpot()
       });
       continue;
     }
@@ -233,7 +237,9 @@ export async function replayResearchCaptureNormalized(opts: {
         ask: n.ask,
         spread: n.spread,
         bidRelative: n.bidRelative,
-        askRelative: n.askRelative
+        askRelative: n.askRelative,
+        lastFeatureSpot: snap.lastFeatureSpot,
+        lastKnownSpot: pipe.lastKnownSpot()
       });
     } else if (r.eventKind === "DEPTH") {
       const m = r.market;
@@ -291,6 +297,7 @@ export async function replayResearchCaptureNormalized(opts: {
   }
 
   mkdirSync(opts.outDir, { recursive: true });
+  const spotPartials = pipe.spotPartialStats();
   const materialChange =
     before.A !== after.A ||
     before.B !== after.B ||
@@ -305,13 +312,16 @@ export async function replayResearchCaptureNormalized(opts: {
     runId,
     marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
     inputNormalizationVerified: true,
-    note: "Corrected offline replay — original capture files were NOT modified. One runId per stream.",
+    note: "Corrected offline replay — original capture files were NOT modified. One runId per stream. Partial Spot last-known-side semantics match GoldHunterFastEngine.",
     sessionTransitionBehavior:
       "SESSION_TRANSITION rows are skipped for market-state rebuild (telemetry only; no book/feature mutation).",
     heartbeatBehavior: "HEARTBEAT rows are skipped for market-state rebuild.",
     rawRows: all.length,
     normalizedSpot,
     normalizedDepth,
+    partialBidOnlyCount: spotPartials.spotBidOnlyEvents,
+    partialAskOnlyCount: spotPartials.spotAskOnlyEvents,
+    twoSidedSpotCount: spotPartials.spotTwoSidedEvents,
     resyncMarkersProcessed,
     sessionTransitionsSkipped,
     heartbeatsSkipped,
@@ -336,6 +346,9 @@ export async function replayResearchCaptureNormalized(opts: {
     rawRows: all.length,
     normalizedSpot,
     normalizedDepth,
+    partialBidOnlyCount: spotPartials.spotBidOnlyEvents,
+    partialAskOnlyCount: spotPartials.spotAskOnlyEvents,
+    twoSidedSpotCount: spotPartials.spotTwoSidedEvents,
     resyncMarkersProcessed,
     sessionTransitionsSkipped,
     heartbeatsSkipped,

@@ -1,6 +1,10 @@
 /**
  * Research feature + A/B/C observation pipeline.
  * Uses book + features + evaluateSetupsDetailed only — no trading engine.
+ *
+ * Spot side semantics match GoldHunterFastEngine.onMarketEvent(SPOT):
+ * ProtoOASpotEvent bid/ask are optional; maintain last-known sides and only
+ * call FastFeatureEngine when both sides are known.
  */
 import { InMemoryDepthBook } from "../depthBook";
 import { FastFeatureEngine } from "../features";
@@ -22,6 +26,11 @@ export type ResearchPipelineSnapshot = {
   depthAvailable: boolean;
   crossed: boolean;
   bookGeneration: number;
+  /** Last-known Spot sides after this event (engine-parity). */
+  lastSpotBid: number | null;
+  lastSpotAsk: number | null;
+  /** Complete pair last fed into FastFeatureEngine (null until both sides known). */
+  lastFeatureSpot: { bid: number; ask: number } | null;
 };
 
 export class ResearchFeaturePipeline {
@@ -30,6 +39,10 @@ export class ResearchFeaturePipeline {
   private readonly cfg = frozenGhFastSoakConfig();
   private lastBid: number | null = null;
   private lastAsk: number | null = null;
+  private lastFeatureSpot: { bid: number; ask: number } | null = null;
+  private spotBidOnlyEvents = 0;
+  private spotAskOnlyEvents = 0;
+  private spotTwoSidedEvents = 0;
 
   constructor(opts?: { _executionAdapterMustBeUndefined?: unknown }) {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
@@ -38,13 +51,45 @@ export class ResearchFeaturePipeline {
   clearForResync(): void {
     this.depth.clearForResync();
     this.features.clear();
+    // Match GoldHunterFastEngine.resetMarketDataForResync — drop stale sides.
+    this.lastBid = null;
+    this.lastAsk = null;
+    this.lastFeatureSpot = null;
+  }
+
+  spotPartialStats(): {
+    spotBidOnlyEvents: number;
+    spotAskOnlyEvents: number;
+    spotTwoSidedEvents: number;
+  } {
+    return {
+      spotBidOnlyEvents: this.spotBidOnlyEvents,
+      spotAskOnlyEvents: this.spotAskOnlyEvents,
+      spotTwoSidedEvents: this.spotTwoSidedEvents
+    };
+  }
+
+  lastKnownSpot(): { bid: number | null; ask: number | null } {
+    return { bid: this.lastBid, ask: this.lastAsk };
+  }
+
+  lastCompleteFeatureSpot(): { bid: number; ask: number } | null {
+    return this.lastFeatureSpot;
   }
 
   onSpot(ev: GhFastSpotEvent): ResearchPipelineSnapshot {
-    if (ev.bid != null && ev.ask != null && ev.bid > 0 && ev.ask > 0) {
-      this.features.onSpot(ev.receivedAtMs, ev.bid, ev.ask);
-      this.lastBid = ev.bid;
-      this.lastAsk = ev.ask;
+    const hasBid = ev.bid != null && ev.bid > 0;
+    const hasAsk = ev.ask != null && ev.ask > 0;
+    if (hasBid && hasAsk) this.spotTwoSidedEvents += 1;
+    else if (hasBid) this.spotBidOnlyEvents += 1;
+    else if (hasAsk) this.spotAskOnlyEvents += 1;
+
+    // Same last-known-side semantics as GoldHunterFastEngine.
+    if (hasBid) this.lastBid = ev.bid!;
+    if (hasAsk) this.lastAsk = ev.ask!;
+    if (this.lastBid != null && this.lastAsk != null) {
+      this.features.onSpot(ev.receivedAtMs, this.lastBid, this.lastAsk);
+      this.lastFeatureSpot = { bid: this.lastBid, ask: this.lastAsk };
     }
     return this.snapshot(ev.receivedAtMs);
   }
@@ -71,7 +116,10 @@ export class ResearchFeaturePipeline {
         spread,
         depthAvailable: depthStats.available,
         crossed: depthStats.crossed,
-        bookGeneration: depthStats.bookGeneration
+        bookGeneration: depthStats.bookGeneration,
+        lastSpotBid: this.lastBid,
+        lastSpotAsk: this.lastAsk,
+        lastFeatureSpot: this.lastFeatureSpot
       };
     }
 
@@ -125,7 +173,10 @@ export class ResearchFeaturePipeline {
       spread,
       depthAvailable: depthStats.available,
       crossed: depthStats.crossed,
-      bookGeneration: depthStats.bookGeneration
+      bookGeneration: depthStats.bookGeneration,
+      lastSpotBid: this.lastBid,
+      lastSpotAsk: this.lastAsk,
+      lastFeatureSpot: this.lastFeatureSpot
     };
   }
 }
