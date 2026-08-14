@@ -1,0 +1,26 @@
+# Dedicated GOLD_HUNTER FAST live-shadow soak service (Cloud Run).
+# Own process — does not share Core AutoTrade or quote-worker.
+# SHADOW ONLY / mutationSurface=NONE / MICRO_BROKER_EXECUTION_ENABLED=false
+# Frozen soak config. NO broker orders. Deploy only after explicit approval.
+FROM node:20-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
+RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts/microEdge/runFastShadowRuntime.ts ./scripts/microEdge/runFastShadowRuntime.ts
+# Pin to package-lock resolved version (devDependency tsx@4.23.1) for reproducible images.
+# npm ci --omit=dev excludes tsx; install the locked release explicitly — never @latest.
+RUN npm install tsx@4.23.1 --no-save
+ENV PORT=8080
+ENV NODE_ENV=production
+ENV APP_ENV=production
+ENV MICRO_DEPLOYED_RUNTIME=true
+ENV MICRO_STORAGE_MODE=firestore
+ENV MICRO_BROKER_EXECUTION_ENABLED=false
+ENV MICRO_CTRADER_ENVIRONMENT=DEMO
+ENV GOLD_HUNTER_FAST_SHADOW_ENABLED=true
+ENV GOLD_HUNTER_FAST_SOAK_TARGET_TRADES=250
+EXPOSE 8080
+CMD ["npx", "tsx", "scripts/microEdge/runFastShadowRuntime.ts"]

@@ -53,6 +53,8 @@ export type MicroOpenApiTransport = {
     count: number;
   }): Promise<{ trendbar?: unknown }>;
   subscribeSpots(symbolId: string): Promise<void>;
+  /** VIEW-only Level-II depth subscription (no trade scope). */
+  subscribeDepthQuotes(symbolId: string): Promise<void>;
   listSymbols(): Promise<Array<Record<string, unknown>>>;
   getTickData(args: {
     symbolId: string;
@@ -62,6 +64,8 @@ export type MicroOpenApiTransport = {
   }): Promise<{ tickData?: unknown; hasMore?: boolean }>;
   /** Test/observability: count of SubscribeSpots commands sent. */
   getSubscribeSpotsCallCount(): number;
+  /** Test/observability: count of SubscribeDepthQuotes commands sent. */
+  getSubscribeDepthCallCount(): number;
 };
 
 type ConnLike = {
@@ -105,6 +109,7 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   >();
   private readonly factory: MicroTransportFactory;
   private subscribeSpotsCallCount = 0;
+  private subscribeDepthCallCount = 0;
 
   constructor(
     private readonly credentials: MicroCTraderCredentials,
@@ -131,6 +136,10 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
 
   getSubscribeSpotsCallCount(): number {
     return this.subscribeSpotsCallCount;
+  }
+
+  getSubscribeDepthCallCount(): number {
+    return this.subscribeDepthCallCount;
   }
 
   async connect(): Promise<void> {
@@ -293,6 +302,9 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     if (command === "ProtoOASubscribeSpotsReq") {
       this.subscribeSpotsCallCount += 1;
     }
+    if (command === "ProtoOASubscribeDepthQuotesReq") {
+      this.subscribeDepthCallCount += 1;
+    }
     return this.conn.sendCommand(command, payload);
   }
 
@@ -341,6 +353,13 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     });
   }
 
+  async subscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOASubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.credentials.accountId),
+      symbolId: [Number(symbolId)]
+    });
+  }
+
   async listSymbols(): Promise<Array<Record<string, unknown>>> {
     const res = (await this.sendReadCommand("ProtoOASymbolsListReq", {
       ctidTraderAccountId: Number(this.credentials.accountId),
@@ -377,6 +396,7 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   private accountAuthenticated = false;
   private accountAuthMeta: MicroAccountAuthMeta | null = null;
   private subscribeSpotsCallCount = 0;
+  private subscribeDepthCallCount = 0;
   /** Authorized account ids returned by GetAccountList. */
   authorizedAccountIds: string[] = ["123"];
   configuredAccountId = "123";
@@ -416,6 +436,9 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   }
   getSubscribeSpotsCallCount(): number {
     return this.subscribeSpotsCallCount;
+  }
+  getSubscribeDepthCallCount(): number {
+    return this.subscribeDepthCallCount;
   }
 
   async connect(): Promise<void> {
@@ -493,6 +516,13 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       }
       return {};
     }
+    if (command === "ProtoOASubscribeDepthQuotesReq") {
+      this.subscribeDepthCallCount += 1;
+      return {};
+    }
+    if (command === "ProtoOAUnsubscribeDepthQuotesReq") {
+      return {};
+    }
     if (command === "ProtoOAGetTickDataReq") {
       this.getTickDataCallCount += 1;
       const type = asFiniteNumber(payload.type);
@@ -514,6 +544,16 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
         hasMore: this.tickHasMore
       };
     }
+    if (command === "ProtoOATraderReq") {
+      return {
+        trader: {
+          balance: 100_000 * 100, // moneyDigits=2 → 100000.00
+          moneyDigits: 2,
+          depositAssetId: 15,
+          depositCurrency: "EUR"
+        }
+      };
+    }
     if (
       command === "ProtoOAApplicationAuthReq" ||
       command === "ProtoOAAccountAuthReq" ||
@@ -527,6 +567,12 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   emitSpot(payload: Record<string, unknown>): void {
     for (const h of this.handlers.get("ProtoOASpotEvent") ?? []) {
       h("ProtoOASpotEvent", payload);
+    }
+  }
+
+  emitDepth(payload: Record<string, unknown>): void {
+    for (const h of this.handlers.get("ProtoOADepthEvent") ?? []) {
+      h("ProtoOADepthEvent", payload);
     }
   }
 
@@ -557,6 +603,13 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
 
   async subscribeSpots(symbolId: string): Promise<void> {
     await this.sendReadCommand("ProtoOASubscribeSpotsReq", {
+      symbolId: [Number(symbolId)]
+    });
+  }
+
+  async subscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOASubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.configuredAccountId),
       symbolId: [Number(symbolId)]
     });
   }

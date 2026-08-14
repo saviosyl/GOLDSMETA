@@ -1,0 +1,32 @@
+{
+  "label": "GOLD_HUNTER_FAST_V1_EARLY_QUALIFICATION_FAIL",
+  "engineVersion": "GH_FAST_EVENT_V1",
+  "runtimeSha": "69e8f629fae610c35543a72e249ba66e66578101",
+  "configSha256": "f47c7886f2b0dadddda779e993ba076b27de8b098bd4921d9c8278ee9efeceb4",
+  "cloudRunService": "gold-hunter-fast-shadow",
+  "cloudRunRevision": "gold-hunter-fast-shadow-00004-wqx",
+  "imageDigest": "sha256:072624e16b2db7dbc8402798914801dbffb2bed225d96485d10c8d1f667ac3b5",
+  "qualificationStartSequence": 18,
+  "qualificationStartTime": "2026-08-14T07:53:24.062Z",
+  "stopCaptureUtc": "2026-08-14T10:07:10Z",
+  "stopActionUtc": "2026-08-14T10:08:19Z",
+  "stopMethod": "gcloud run services delete gold-hunter-fast-shadow --region=us-central1 --quiet",
+  "finalFormalTradeCount": 210,
+  "preFixDiagnosticCount": 0,
+  "completedShadowTradesAtStop": 210,
+  "gcsRunId": "gh_fast_mssnh4uq_v488yc",
+  "gcsPrefixTemplate": "gs://{PROJECT}-gold-hunter-fast/gold-hunter-fast/live-shadow/gh_fast_mssnh4uq_v488yc/2026-08-14/",
+  "gcsBucketPurpose": "GOLD_HUNTER_FAST live-shadow event/trade persistence — DO NOT DELETE",
+  "artifactRegistryImageTag": "gold-hunter-fast-shadow:69e8f629fae610c35543a72e249ba66e66578101",
+  "pr": "https://github.com/saviosyl/GOLDSMETA/pull/119",
+  "branch": "cursor/gold-hunter-fast-edge-v1-ffd6",
+  "shutdownProof": {
+    "describeAfter": "Cannot find service [gold-hunter-fast-shadow]",
+    "healthHttpAfter": 404,
+    "preStopCompletedShadowTrades": 210,
+    "gcsObjectsRetained": true,
+    "otherServicesUntouched": true
+  },
+  "analysisNote": "Formal headline metrics from final health capture (210 trades). Detailed MFE/MAE/exit/reentry from GCS event reconstruction (176 trades with EXIT rows). ~34 additional closed trades were engine resync DATA_STALE exits not written as collector EXIT events; wins match (64).",
+  "notes": "Early termination — strategy materially negative. Preserve all chunks/images/secrets/PR. Formal sample excludes PRE_FIX_DIAGNOSTIC (0 on this runtime)."
+}

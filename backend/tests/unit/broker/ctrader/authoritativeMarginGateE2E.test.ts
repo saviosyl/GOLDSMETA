@@ -449,6 +449,8 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
   });
 
   it("Asia session half-risk → protocolVolume 800 with gate==submit invariant", async () => {
+    // Pin Asia hours so resolveTradingSessionBucket applies half-risk (not Overlap).
+    vi.useFakeTimers({ now: new Date("2026-08-13T03:00:00.000Z") });
     const sessionGuard = await import(
       "../../../../src/services/broker/ctrader/sessionGuard"
     );
@@ -459,57 +461,60 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
       reason: null
     });
 
-    assertDemoAuthoritativeMarginGate.mockResolvedValue({
-      ok: true,
-      freeMargin: 50_000,
-      expectedMargin: 1_200,
-      marginSnapshot: {
-        balance: 50_000,
-        unrealisedNetPnl: 0,
-        equity: 50_000,
-        usedMargin: 0,
+    try {
+      assertDemoAuthoritativeMarginGate.mockResolvedValue({
+        ok: true,
         freeMargin: 50_000,
-        moneyDigits: 2,
-        leverage: 30,
-        openPositionCount: 0,
-        source: "BROKER_FLAT",
-        capturedAt: new Date().toISOString()
-      },
-      marginAgeMs: 12,
-      marginCapturedAt: new Date().toISOString(),
-      marginSource: "BROKER_FLAT",
-      expectedMarginSource: "PROTO_OA_EXPECTED_MARGIN"
-    });
-    getArmedCandidate.mockResolvedValue(freshArmed());
+        expectedMargin: 1_200,
+        marginSnapshot: {
+          balance: 50_000,
+          unrealisedNetPnl: 0,
+          equity: 50_000,
+          usedMargin: 0,
+          freeMargin: 50_000,
+          moneyDigits: 2,
+          leverage: 30,
+          openPositionCount: 0,
+          source: "BROKER_FLAT",
+          capturedAt: new Date().toISOString()
+        },
+        marginAgeMs: 12,
+        marginCapturedAt: new Date().toISOString(),
+        marginSource: "BROKER_FLAT",
+        expectedMarginSource: "PROTO_OA_EXPECTED_MARGIN"
+      });
+      getArmedCandidate.mockResolvedValue(freshArmed());
 
-    await processDecisionForQualification({
-      uid: "u1",
-      decisionId: "04313529b31fa1f0f2769f0b",
-      store: {
-        getDecision: vi.fn(async () => decision()),
-        getActiveSessionPlan: vi.fn(async () => ({
-          lifecycleState: "ACTIVE",
-          confirmationState: "BREAKOUT_CONFIRMED",
-          direction: "BUY",
-          validUntil: new Date(Date.now() + 3600_000).toISOString()
-        }))
-      } as never
-    });
+      await processDecisionForQualification({
+        uid: "u1",
+        decisionId: "04313529b31fa1f0f2769f0b",
+        store: {
+          getDecision: vi.fn(async () => decision()),
+          getActiveSessionPlan: vi.fn(async () => ({
+            lifecycleState: "ACTIVE",
+            confirmationState: "BREAKOUT_CONFIRMED",
+            direction: "BUY",
+            validUntil: new Date(Date.now() + 3600_000).toISOString()
+          }))
+        } as never
+      });
 
-    expect(assertDemoAuthoritativeMarginGate).toHaveBeenCalledTimes(1);
-    const gateArgs = assertDemoAuthoritativeMarginGate.mock.calls[0]![0];
-    expect(gateArgs.protocolVolume).toBe(800); // 8 lots from €25 Asia risk
-    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
-    const submitArgs = submitDemoMarketOrder.mock.calls[0]![0];
-    expect(submitArgs.lots).toBe(8);
-    expect(submitArgs.lots * 100).toBe(gateArgs.protocolVolume);
-
-    // restore major-session pin for any later tests in-file
-    vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("London");
-    vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
-      ok: true,
-      current: "London",
-      reason: null
-    });
+      expect(assertDemoAuthoritativeMarginGate).toHaveBeenCalledTimes(1);
+      const gateArgs = assertDemoAuthoritativeMarginGate.mock.calls[0]![0];
+      expect(gateArgs.protocolVolume).toBe(800); // 8 lots from €25 Asia risk
+      expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+      const submitArgs = submitDemoMarketOrder.mock.calls[0]![0];
+      expect(submitArgs.lots).toBe(8);
+      expect(submitArgs.lots * 100).toBe(gateArgs.protocolVolume);
+    } finally {
+      // restore major-session pin for any later tests in-file
+      vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("London");
+      vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
+        ok: true,
+        current: "London",
+        reason: null
+      });
+      vi.useRealTimers();
+    }
   });
 });

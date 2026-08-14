@@ -30,6 +30,11 @@ import {
 } from "../marketData/collectorStatusStore";
 import { assertMicroRuntimeReadyForPersistentCollection } from "../marketData/runtimeReady";
 import { isDeployedMicroRuntime, resolveMicroStorageMode } from "../marketData/storageMode";
+import {
+  GoldHunterFastLiveBridge,
+  isGoldHunterFastShadowEnabled,
+  type GhFastRuntimeHealth
+} from "../goldHunter/fast";
 
 export type LiveCollectorWorkerOptions = {
   store?: MicroMarketDataStore;
@@ -70,6 +75,8 @@ export type LiveCollectorHealthPayload = {
   brokerExecutionEnabled: false;
   modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA";
   storageMode: string;
+  depthSubscribed?: boolean;
+  goldHunterFast?: GhFastRuntimeHealth | { fastEnabled: boolean };
 };
 
 export class MicroLiveCollectorWorker {
@@ -85,6 +92,8 @@ export class MicroLiveCollectorWorker {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHealth: LiveCollectorHealthPayload | null = null;
   private readonly nowMs: () => number;
+  private fastBridge: GoldHunterFastLiveBridge | null = null;
+  private fastAttachGeneration = 0;
 
   constructor(private readonly opts: LiveCollectorWorkerOptions = {}) {
     this.store = opts.store ?? createMicroMarketDataStore();
@@ -92,6 +101,34 @@ export class MicroLiveCollectorWorker {
     this.nowMs = opts.nowMs ?? (() => Date.now());
     // Ensure vault factory is initialized in same storage mode.
     void createMicroTokenVault();
+  }
+
+  getFastBridge(): GoldHunterFastLiveBridge | null {
+    return this.fastBridge;
+  }
+
+  private fastEnabled(): boolean {
+    return isGoldHunterFastShadowEnabled();
+  }
+
+  /** Attach FAST once per successful connect; detach first to avoid duplicate listeners. */
+  private attachFastBridge(): void {
+    if (!this.fastEnabled() || !this.session) return;
+    if (!this.fastBridge) {
+      this.fastBridge = new GoldHunterFastLiveBridge({
+        enabled: true,
+        enableCollector: true
+      });
+    }
+    this.fastBridge.attach(this.session);
+    this.fastAttachGeneration += 1;
+    void this.fastBridge.refreshSessionFlags(this.session);
+  }
+
+  private detachFastBridge(): void {
+    if (!this.fastBridge) return;
+    this.fastBridge.detach();
+    this.fastBridge.markStale();
   }
 
   getSession(): MicroLiveMarketSession | null {
@@ -172,8 +209,10 @@ export class MicroLiveCollectorWorker {
       microLog("MICRO_COLLECTOR_CONNECTED", {
         environment: creds.environment
       });
+      this.attachFastBridge();
       await this.persistFromSession();
     } catch (e) {
+      this.detachFastBridge();
       microLog("MICRO_COLLECTOR_CONNECT_FAILED", {
         code: (e as { code?: string }).code ?? "transport_disconnected"
       });
@@ -224,6 +263,7 @@ export class MicroLiveCollectorWorker {
   }
 
   private async reconnectFailClosed(): Promise<void> {
+    this.detachFastBridge();
     await this.persistNotConnected("transport_disconnected");
     if (!this.session) return;
     const ok = await this.session.boundedReconnect();
@@ -231,6 +271,8 @@ export class MicroLiveCollectorWorker {
       microLog("MICRO_COLLECTOR_RECONNECT_EXHAUSTED", {});
       await this.persistNotConnected("transport_disconnected");
     } else {
+      // Reattach exactly once after successful reconnect.
+      this.attachFastBridge();
       await this.persistFromSession();
     }
     await this.refreshHealth();
@@ -328,6 +370,7 @@ export class MicroLiveCollectorWorker {
     this.barTimer = null;
     this.heartbeatTimer = null;
     this.reconnectTimer = null;
+    this.detachFastBridge();
     if (this.session) {
       await this.session.disconnect();
       this.session = null;
@@ -404,7 +447,11 @@ export class MicroLiveCollectorWorker {
       shadowOnly: true,
       brokerExecutionEnabled: false,
       modelStatus: "DATA COLLECTION / NOT TRAINED ON REAL DATA",
-      storageMode: resolveMicroStorageMode()
+      storageMode: resolveMicroStorageMode(),
+      depthSubscribed: Boolean(state?.depthSubscribed),
+      goldHunterFast: this.fastBridge
+        ? this.fastBridge.health()
+        : { fastEnabled: this.fastEnabled() }
     };
   }
 

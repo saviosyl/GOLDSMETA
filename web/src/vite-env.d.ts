@@ -19,6 +19,10 @@ interface ImportMetaEnv {
   readonly VITE_GOLD_META_BUILD_STAMP?: string;
   readonly VITE_GOLD_META_COMMIT_SHA?: string;
   readonly VITE_BUILD_SHA?: string;
+  /** Isolated gold-hunter-fast-shadow Cloud Run health URL (preview only). */
+  readonly VITE_GOLD_HUNTER_FAST_HEALTH_URL?: string;
+  /** Set "true" for noindex/nofollow FAST live-shadow preview deploys. */
+  readonly VITE_GOLD_HUNTER_FAST_PREVIEW?: string;
 }
 
 interface ImportMeta {

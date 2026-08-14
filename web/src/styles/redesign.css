@@ -7388,3 +7388,279 @@ body.gm-drawer-open {
   margin-top: 12px;
   font-size: 0.82rem;
 }
+
+/* —— GOLD_HUNTER command centre —— */
+.gm-gold-hunter-page {
+  --gh-ink: #1c1812;
+  --gh-gold: #b8892c;
+  --gh-mist: #f3efe6;
+  --gh-deep: #0f2a24;
+  background:
+    radial-gradient(1200px 480px at 10% -10%, rgba(184, 137, 44, 0.18), transparent 55%),
+    linear-gradient(180deg, #f7f3ea 0%, #ebe4d6 48%, #e3dccf 100%);
+  color: var(--gh-ink);
+  padding-bottom: 48px;
+}
+
+.gm-gh-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.gm-gh-brand {
+  margin: 0;
+  font-family: "Cormorant Garamond", "Libre Baskerville", Georgia, serif;
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  letter-spacing: 0.04em;
+  color: var(--gh-deep);
+}
+
+.gm-gh-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.98rem;
+  color: color-mix(in srgb, var(--gh-ink) 78%, transparent);
+}
+
+.gm-gh-powered {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--gh-ink) 55%, transparent);
+}
+
+.gm-gh-soak-banner {
+  margin: 8px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--gh-gold) 45%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--gh-deep) 92%, #fff) 0%,
+    color-mix(in srgb, var(--gh-deep) 80%, #b8892c) 100%
+  );
+  color: #f4efe4;
+}
+
+.gm-gh-soak-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  margin-bottom: 8px;
+}
+
+.gm-gh-soak-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.84rem;
+}
+
+.gm-gh-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+
+.gm-gh-stat {
+  padding: 8px 10px;
+  background: color-mix(in srgb, white 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gh-gold) 28%, transparent);
+}
+
+.gm-gh-stat .gm-label {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.gm-gh-stat strong {
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.gm-gh-version {
+  font-size: 0.78rem !important;
+  word-break: break-all;
+}
+
+.gm-gh-balance-note {
+  font-size: 0.78rem;
+  margin: 0 0 14px;
+}
+
+.gm-gh-live {
+  padding: 12px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, rgba(15, 42, 36, 0.94), rgba(28, 24, 18, 0.92));
+  color: #f4efe4;
+}
+
+.gm-gh-live-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.gm-gh-state {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d8b56a;
+}
+
+.gm-gh-action {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.4rem;
+  letter-spacing: 0.06em;
+}
+
+.gm-gh-quote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 0.86rem;
+  margin-bottom: 10px;
+}
+
+.gm-gh-horizons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .gm-gh-horizons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.gm-gh-hz {
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.8rem;
+}
+
+.gm-gh-hz-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: #d8b56a;
+}
+
+.gm-gh-edge {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.gm-gh-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.gm-gh-open,
+.gm-gh-equity,
+.gm-gh-explain,
+.gm-gh-model,
+.gm-gh-trades-desktop,
+.gm-gh-trades-mobile {
+  margin-bottom: 16px;
+}
+
+.gm-gh-open-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.gm-gh-date-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.gm-gh-equity-svg {
+  width: 100%;
+  max-width: 420px;
+  height: 72px;
+  color: var(--gh-deep);
+}
+
+.gm-gh-trades-mobile {
+  display: none;
+}
+
+.gm-gh-mobile-list {
+  display: grid;
+  gap: 8px;
+}
+
+.gm-gh-mobile-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--gh-gold) 30%, transparent);
+  background: color-mix(in srgb, white 78%, transparent);
+  padding: 10px 12px;
+  color: inherit;
+  cursor: pointer;
+  overflow-x: hidden;
+}
+
+.gm-gh-mobile-main,
+.gm-gh-mobile-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.gm-gh-mobile-sub {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.gm-gh-mobile-reason {
+  margin-top: 4px;
+  font-size: 0.76rem;
+  opacity: 0.75;
+}
+
+.gm-gh-mobile-expand {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--gh-ink) 12%, transparent);
+  font-size: 0.78rem;
+  display: grid;
+  gap: 3px;
+}
+
+.gm-gh-pos { color: #1f6b45; }
+.gm-gh-neg { color: #8a2f2f; }
+
+@media (max-width: 860px) {
+  .gm-gh-trades-desktop {
+    display: none;
+  }
+  .gm-gh-trades-mobile {
+    display: block;
+  }
+  .gm-gold-hunter-page {
+    overflow-x: hidden;
+  }
+}

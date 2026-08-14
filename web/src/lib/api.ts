@@ -1447,6 +1447,28 @@ export class ApiClient {
     return this.request("/v1/micro-edge/status");
   }
 
+  goldHunterStatus(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/gold-hunter/status");
+  }
+
+  goldHunterForecast(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/gold-hunter/forecast");
+  }
+
+  goldHunterTrades(date?: string): Promise<Record<string, unknown>> {
+    const q = date ? `?date=${encodeURIComponent(date)}` : "";
+    return this.request(`/v1/micro-edge/gold-hunter/trades${q}`);
+  }
+
+  goldHunterDaily(date?: string): Promise<Record<string, unknown>> {
+    const q = date ? `?date=${encodeURIComponent(date)}` : "";
+    return this.request(`/v1/micro-edge/gold-hunter/daily${q}`);
+  }
+
+  goldHunterModel(): Promise<Record<string, unknown>> {
+    return this.request("/v1/micro-edge/gold-hunter/model");
+  }
+
   microEdgeLatest(): Promise<{ prediction: Record<string, unknown> | null }> {
     return this.request("/v1/micro-edge/latest");
   }

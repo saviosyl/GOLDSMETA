@@ -180,8 +180,38 @@ function PublicAuthRoutes() {
   );
 }
 
+/** Preview-only: FAST live-shadow dashboard without login (Cloudflare Pages preview builds). */
+function isGoldHunterFastPreviewMode(): boolean {
+  return (
+    (import.meta.env.VITE_GOLD_HUNTER_FAST_PREVIEW as string | undefined) ===
+    "true"
+  );
+}
+
+function FastPreviewApp() {
+  return (
+    <Routes>
+      <Route
+        path="/micro-edge"
+        element={
+          <LazyRoute label="Micro Edge">
+            <MicroEdgePage />
+          </LazyRoute>
+        }
+      />
+      <Route path="*" element={<Navigate to="/micro-edge" replace />} />
+    </Routes>
+  );
+}
+
 function ProtectedApp() {
   const { user, loading } = useAuth();
+
+  // Isolated FAST preview: show soak dashboard without auth/account gates.
+  // Production and normal preview builds keep the signed-in shell unchanged.
+  if (isGoldHunterFastPreviewMode()) {
+    return <FastPreviewApp />;
+  }
 
   if (loading) {
     return (

@@ -34,6 +34,9 @@ import {
 import { fetchMicroAuthorizedAccounts } from "../services/microEdge/marketData/fetchAuthorizedAccounts";
 import { computeLabelReadyDiagnostics } from "../services/microEdge/marketData/historicalTicks";
 import { getMicroMarketDataStore } from "../services/microEdge/marketData/marketDataService";
+import { getGoldHunterStore } from "../services/microEdge/goldHunter/goldHunterStore";
+import { buildDailySummary, buildDayExplanations, dublinDateKey } from "../services/microEdge/goldHunter/dailyPnL";
+import { GOLD_HUNTER_STRATEGY_VERSION } from "../services/microEdge/goldHunter/config";
 
 function microFetchAuthorizedAccounts() {
   return async (a: {
@@ -297,6 +300,112 @@ export const buildMicroEdgeRouter = (): Router => {
       challenger: { kind: "TREE_GBM_CHALLENGER", promoted: false },
       sequencePlaceholder: { implemented: false },
       shadowOnly: true
+    });
+  });
+
+  // ---------- GOLD_HUNTER (SHADOW ONLY — no broker orders) ----------
+  router.get("/v1/micro-edge/gold-hunter/status", ...gate, async (_req, res) => {
+    const store = getGoldHunterStore();
+    const status = store.getStatus();
+    const marketData = await buildMarketDataStatusPayload();
+    res.json({
+      ...status,
+      brand: "GOLD_HUNTER",
+      subtitle: "Continuous XAUUSD Opportunity Engine",
+      poweredBy: "Micro Edge Research",
+      banner: "SHADOW — NO BROKER ORDERS",
+      pepperstoneDemoBalance: status.accountBalance,
+      shadowPnlSeparateFromBrokerBalance: true,
+      marketData: {
+        symbol: marketData.symbol,
+        liveConnected: marketData.liveConnected,
+        marketFeedStatus: marketData.marketFeedStatus,
+        quoteAgeMs: marketData.quoteAgeMs
+      },
+      disclaimer:
+        "GOLD_HUNTER SHADOW P/L is hypothetical research. It does not change Pepperstone DEMO balance."
+    });
+  });
+
+  router.get("/v1/micro-edge/gold-hunter/forecast", ...gate, async (_req, res) => {
+    const store = getGoldHunterStore();
+    res.json({
+      forecast: store.getForecast(),
+      shadowOnly: true,
+      brokerExecutionEnabled: false,
+      mutationSurface: "NONE"
+    });
+  });
+
+  router.get("/v1/micro-edge/gold-hunter/trades", ...gate, async (req, res) => {
+    const store = getGoldHunterStore();
+    const date =
+      typeof req.query.date === "string" && req.query.date
+        ? req.query.date
+        : dublinDateKey(Date.now());
+    const strategyVersion =
+      typeof req.query.strategyVersion === "string" && req.query.strategyVersion
+        ? req.query.strategyVersion
+        : GOLD_HUNTER_STRATEGY_VERSION;
+    const trades = store.listTrades({ date, strategyVersion, limit: 500 });
+    res.json({
+      date,
+      strategyVersion,
+      trades,
+      shadowOnly: true,
+      disclaimer: "Hypothetical SHADOW trades only — no broker orders."
+    });
+  });
+
+  router.get("/v1/micro-edge/gold-hunter/daily", ...gate, async (req, res) => {
+    const store = getGoldHunterStore();
+    const date =
+      typeof req.query.date === "string" && req.query.date
+        ? req.query.date
+        : dublinDateKey(Date.now());
+    const strategyVersion =
+      typeof req.query.strategyVersion === "string" && req.query.strategyVersion
+        ? req.query.strategyVersion
+        : GOLD_HUNTER_STRATEGY_VERSION;
+    let summary = store.getDaily(date, strategyVersion);
+    if (!summary) {
+      const trades = store.listTrades({ date, strategyVersion });
+      summary = buildDailySummary(trades, { date, strategyVersion });
+      store.upsertDaily(summary);
+    }
+    const explanations = buildDayExplanations(summary);
+    const dates = store.listDailyDates(strategyVersion);
+    res.json({
+      summary,
+      explanations,
+      availableDates: dates,
+      equityCurve: store
+        .listTrades({ strategyVersion, limit: 2000 })
+        .filter((t) => t.date === date)
+        .sort((a, b) => a.entryTimestampMs - b.entryTimestampMs)
+        .reduce<Array<{ t: number; equity: number }>>((acc, t) => {
+          const prev = acc.length ? acc[acc.length - 1]!.equity : 0;
+          acc.push({ t: t.exitTimestampMs, equity: prev + t.netMove });
+          return acc;
+        }, []),
+      shadowOnly: true,
+      disclaimer:
+        "SHADOW equity curve is research P/L in price units — not broker account balance."
+    });
+  });
+
+  router.get("/v1/micro-edge/gold-hunter/model", ...gate, async (_req, res) => {
+    const store = getGoldHunterStore();
+    const artifact = store.getArtifact();
+    const dq = store.getDataQuality();
+    res.json({
+      artifact,
+      dataQuality: dq,
+      qualificationStatus: artifact?.qualificationStatus ?? "NOT_TRAINED",
+      neverQualifiedForLive: true,
+      shadowOnly: true,
+      brokerExecutionEnabled: false,
+      mutationSurface: "NONE"
     });
   });
 
