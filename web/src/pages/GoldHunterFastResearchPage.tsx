@@ -1,12 +1,10 @@
 /**
  * GOLD HUNTER FAST — live research capture monitor (READ-ONLY).
- * Polls the research collector /health (+ /recent-candidates).
- * No trading controls, no shadow/broker order actions.
+ * Polls /health + /recent-candidates. No trading controls.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ResearchHealth = {
-  processHealthy?: boolean;
   captureHealthy?: boolean;
   campaignValid?: boolean;
   dataIntegrityStatus?: string;
@@ -15,12 +13,25 @@ type ResearchHealth = {
   depthSubscribed?: boolean;
   spotAgeMs?: number | null;
   depthAgeMs?: number | null;
-  freshnessLimitMs?: number;
   eventsReceived?: number;
   eventsDropped?: number;
+  observationA?: number;
+  observationB?: number;
+  observationC?: number;
+  eligibleA?: number;
+  eligibleB?: number;
+  eligibleC?: number;
+  selectedA?: number;
+  selectedB?: number;
+  selectedC?: number;
   candidateA?: number;
   candidateB?: number;
   candidateC?: number;
+  lastBid?: number | null;
+  lastAsk?: number | null;
+  lastSpread?: number | null;
+  marketDataNormalizationVersion?: string;
+  inputNormalizationVerified?: boolean;
   heartbeatsPersisted?: number;
   chunksWritten?: number;
   chunksUploaded?: number;
@@ -39,9 +50,6 @@ type ResearchHealth = {
   captureDayIndex?: number | null;
   validatedIndependentDays?: number;
   captureDurationMs?: number;
-  campaignStartUtcDate?: string | null;
-  campaignStartedAt?: string | null;
-  currentCaptureUtcDate?: string | null;
   permissionScope?: string;
   executionAdapter?: string;
   mutationSurface?: string;
@@ -49,21 +57,13 @@ type ResearchHealth = {
   brokerOrders?: number;
   shadowOrders?: number;
   durableMode?: string;
-  runId?: string;
-  runtimeSha?: string;
-  campaignStatus?: string;
   scopeVerified?: boolean;
-  continuousOperation?: boolean;
-  autoStopAfterFiveDays?: boolean;
-  healthWarning?: string | null;
-  captureUnhealthyReasons?: string[];
 };
 
 type ResearchObservation = {
   observationId: number;
   label: string;
   kind: string;
-  setup: string;
   setupName: string;
   side: "BUY" | "SELL" | null;
   eligible: boolean;
@@ -76,17 +76,9 @@ type ResearchObservation = {
   imbalance: number | null;
   velocity1s: number | null;
   acceleration: number | null;
-  distHigh5s: number | null;
-  distLow5s: number | null;
-  upTouches5s: number | null;
-  downTouches5s: number | null;
 };
 
-type RecentCandidatesResponse = {
-  observations?: ResearchObservation[];
-  count?: number;
-  label?: string;
-};
+type FeedFilter = "SELECTED" | "ELIGIBLE" | "ALL";
 
 const POLL_MS = 2000;
 const STALE_AFTER_MS = 8000;
@@ -109,6 +101,11 @@ function fmtNum(n: number | null | undefined, digits = 0): string {
   });
 }
 
+function fmtPx(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return n.toFixed(2);
+}
+
 function fmtMs(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `${Math.round(n)}ms`;
@@ -120,14 +117,9 @@ function fmtDuration(ms: number | null | undefined): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const r = s % 60;
-  if (h > 0) return `${h}h ${m}m ${r}s`;
+  if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${r}s`;
   return `${r}s`;
-}
-
-function boolLabel(v: boolean | undefined, yes = "YES", no = "NO"): string {
-  if (v == null) return "—";
-  return v ? yes : no;
 }
 
 function Delta({
@@ -138,7 +130,11 @@ function Delta({
   previous: number | undefined;
 }) {
   if (current == null || previous == null || current <= previous) return null;
-  return <span className="gm-ghr-up" aria-hidden>↑</span>;
+  return (
+    <span className="gm-ghr-up" aria-hidden>
+      ↑
+    </span>
+  );
 }
 
 function Kpi({
@@ -148,7 +144,7 @@ function Kpi({
 }: {
   label: string;
   value: string;
-  tone?: "ok" | "warn" | "bad" | "neutral";
+  tone?: "ok" | "warn" | "bad";
 }) {
   return (
     <div className={`gm-ghr-kpi${tone ? ` is-${tone}` : ""}`}>
@@ -163,6 +159,7 @@ export function GoldHunterFastResearchPage() {
   const [health, setHealth] = useState<ResearchHealth | null>(null);
   const [prev, setPrev] = useState<ResearchHealth | null>(null);
   const [observations, setObservations] = useState<ResearchObservation[]>([]);
+  const [filter, setFilter] = useState<FeedFilter>("ELIGIBLE");
   const [feedAvailable, setFeedAvailable] = useState(false);
   const [lastOkAt, setLastOkAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(0);
@@ -183,7 +180,9 @@ export function GoldHunterFastResearchPage() {
       try {
         const [hRes, cRes] = await Promise.all([
           fetch(`${base}/health`, { cache: "no-store" }),
-          fetch(`${base}/recent-candidates?limit=40`, { cache: "no-store" })
+          fetch(`${base}/recent-candidates?limit=40&filter=${filter}`, {
+            cache: "no-store"
+          })
         ]);
         if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
         const h = (await hRes.json()) as ResearchHealth;
@@ -194,7 +193,9 @@ export function GoldHunterFastResearchPage() {
         setLastOkAt(Date.now());
         setFetchError(null);
         if (cRes.ok) {
-          const feed = (await cRes.json()) as RecentCandidatesResponse;
+          const feed = (await cRes.json()) as {
+            observations?: ResearchObservation[];
+          };
           setObservations(feed.observations ?? []);
           setFeedAvailable(true);
         } else {
@@ -211,13 +212,38 @@ export function GoldHunterFastResearchPage() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [base]);
+  }, [base, filter]);
+
+  useEffect(() => {
+    let meta = document.querySelector('meta[name="robots"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "robots");
+      document.head.appendChild(meta);
+    }
+    if (
+      (import.meta.env.VITE_GOLD_HUNTER_FAST_RESEARCH_PREVIEW as string) ===
+      "true"
+    ) {
+      meta.setAttribute("content", "noindex, nofollow");
+      document.title = "GOLD HUNTER FAST — Research Preview (noindex)";
+    }
+  }, []);
 
   const ageSec =
-    lastOkAt == null ? null : Math.max(0, Math.round((nowTick - lastOkAt) / 1000));
+    lastOkAt == null || nowTick === 0
+      ? null
+      : Math.max(0, Math.round((nowTick - lastOkAt) / 1000));
   const feedStale =
-    lastOkAt == null || nowTick - lastOkAt > STALE_AFTER_MS || Boolean(fetchError);
+    lastOkAt == null ||
+    nowTick === 0 ||
+    nowTick - lastOkAt > STALE_AFTER_MS ||
+    Boolean(fetchError);
   const live = !feedStale && Boolean(health?.captureHealthy);
+  const feedLive =
+    !feedStale &&
+    Boolean(health?.spotSubscribed) &&
+    (health?.spotAgeMs == null || health.spotAgeMs < 20_000);
   const unsafe =
     (health?.brokerRequests ?? 0) > 0 ||
     (health?.brokerOrders ?? 0) > 0 ||
@@ -227,6 +253,14 @@ export function GoldHunterFastResearchPage() {
     (health?.mutationSurface != null && health.mutationSurface !== "NONE") ||
     (health?.permissionScope != null &&
       health.permissionScope !== "SCOPE_VIEW");
+
+  const eligibleA = health?.eligibleA ?? health?.candidateA ?? 0;
+  const eligibleB = health?.eligibleB ?? health?.candidateB ?? 0;
+  const eligibleC = health?.eligibleC ?? health?.candidateC ?? 0;
+  const selectedTotal =
+    (health?.selectedA ?? 0) +
+    (health?.selectedB ?? 0) +
+    (health?.selectedC ?? 0);
 
   const statusTone = useMemo(() => {
     if (feedStale) return "bad";
@@ -258,7 +292,6 @@ export function GoldHunterFastResearchPage() {
           <span className={`gm-ghr-pill is-${statusTone}`}>
             {feedStale ? "FEED STALE" : live ? "CAPTURE LIVE" : "CAPTURE OFF"}
           </span>
-          <span className="gm-ghr-pill">XAUUSD</span>
           <span className="gm-ghr-pill">
             DAY {health?.captureDayIndex ?? "—"}
           </span>
@@ -269,21 +302,45 @@ export function GoldHunterFastResearchPage() {
         </div>
       </header>
 
+      <section className="gm-ghr-market" data-testid="gh-research-market">
+        <span className="gm-ghr-sym">XAUUSD</span>
+        <span>
+          BID <strong>{fmtPx(health?.lastBid)}</strong>
+        </span>
+        <span>
+          ASK <strong>{fmtPx(health?.lastAsk)}</strong>
+        </span>
+        <span>
+          SPREAD <strong>{fmtPx(health?.lastSpread)}</strong>
+        </span>
+        <span className={`gm-ghr-pill ${feedLive ? "is-ok" : "is-bad"}`}>
+          {feedLive ? "FEED LIVE" : "FEED OFF"}
+        </span>
+        <span className="gm-ghr-norm">
+          {health?.marketDataNormalizationVersion ?? "—"}
+          {health?.inputNormalizationVerified ? " · verified" : ""}
+        </span>
+      </section>
+
       <div className="gm-ghr-updated" data-testid="gh-research-updated">
         {feedStale ? (
           <span className="is-bad">
-            {fetchError ? `DISCONNECTED — ${fetchError}` : "FEED STALE / DISCONNECTED"}
+            {fetchError
+              ? `DISCONNECTED — ${fetchError}`
+              : "FEED STALE / DISCONNECTED"}
             {ageSec != null ? ` · last ok ${ageSec}s ago` : ""}
           </span>
         ) : (
-          <span>Last updated: {ageSec ?? 0}s ago · poll {POLL_MS / 1000}s</span>
+          <span>
+            Last updated: {ageSec ?? 0}s ago · poll {POLL_MS / 1000}s ·{" "}
+            {fmtDuration(health?.captureDurationMs)}
+          </span>
         )}
       </div>
 
       {unsafe ? (
         <div className="gm-ghr-unsafe" data-testid="gh-research-unsafe">
-          SAFETY BREACH — unexpected trading surface detected. RESEARCH ONLY
-          expected: SCOPE_VIEW / NONE / zeros.
+          SAFETY BREACH — unexpected trading surface detected.
         </div>
       ) : null}
 
@@ -291,7 +348,7 @@ export function GoldHunterFastResearchPage() {
         <div className="gm-ghr-section-title">LIVE ACTIVITY</div>
         <div className="gm-ghr-activity-grid">
           <div className="gm-ghr-activity-row">
-            <span>EVENTS CAPTURED</span>
+            <span>EVENTS</span>
             <strong>
               {fmtNum(health?.eventsReceived)}
               <Delta
@@ -301,119 +358,51 @@ export function GoldHunterFastResearchPage() {
             </strong>
           </div>
           <div className="gm-ghr-activity-row">
-            <span>A MOMENTUM IGNITION</span>
+            <span>A ELIGIBLE</span>
             <strong>
-              {fmtNum(health?.candidateA)}
-              <Delta current={health?.candidateA} previous={prev?.candidateA} />
+              {fmtNum(eligibleA)}
+              <Delta current={eligibleA} previous={prev?.eligibleA ?? prev?.candidateA} />
             </strong>
           </div>
           <div className="gm-ghr-activity-row">
-            <span>B FAST BREAKOUT</span>
+            <span>B ELIGIBLE</span>
             <strong>
-              {fmtNum(health?.candidateB)}
-              <Delta current={health?.candidateB} previous={prev?.candidateB} />
+              {fmtNum(eligibleB)}
+              <Delta current={eligibleB} previous={prev?.eligibleB ?? prev?.candidateB} />
             </strong>
           </div>
           <div className="gm-ghr-activity-row">
-            <span>C PULLBACK</span>
+            <span>C ELIGIBLE</span>
             <strong>
-              {fmtNum(health?.candidateC)}
-              <Delta current={health?.candidateC} previous={prev?.candidateC} />
+              {fmtNum(eligibleC)}
+              <Delta current={eligibleC} previous={prev?.eligibleC ?? prev?.candidateC} />
             </strong>
           </div>
           <div className="gm-ghr-activity-row">
-            <span>HEARTBEATS</span>
+            <span>SELECTED OPPORTUNITIES</span>
             <strong>
-              {fmtNum(health?.heartbeatsPersisted)}
+              {fmtNum(selectedTotal)}
               <Delta
-                current={health?.heartbeatsPersisted}
-                previous={prev?.heartbeatsPersisted}
-              />
-            </strong>
-          </div>
-          <div className="gm-ghr-activity-row">
-            <span>CHUNKS UPLOADED</span>
-            <strong>
-              {fmtNum(health?.chunksUploaded)}
-              <Delta
-                current={health?.chunksUploaded}
-                previous={prev?.chunksUploaded}
+                current={selectedTotal}
+                previous={
+                  (prev?.selectedA ?? 0) +
+                  (prev?.selectedB ?? 0) +
+                  (prev?.selectedC ?? 0)
+                }
               />
             </strong>
           </div>
         </div>
-      </section>
-
-      <section className="gm-ghr-kpis" data-testid="gh-research-kpis">
-        <Kpi
-          label="Capture Health"
-          value={boolLabel(health?.captureHealthy, "HEALTHY", "UNHEALTHY")}
-          tone={health?.captureHealthy ? "ok" : "warn"}
-        />
-        <Kpi
-          label="Campaign Valid"
-          value={boolLabel(health?.campaignValid)}
-          tone={health?.campaignValid ? "ok" : "warn"}
-        />
-        <Kpi
-          label="Data Integrity"
-          value={health?.dataIntegrityStatus ?? "—"}
-          tone={
-            health?.dataIntegrityStatus === "CLEAN"
-              ? "ok"
-              : health?.dataIntegrityStatus === "FAILED"
-                ? "bad"
-                : "warn"
-          }
-        />
-        <Kpi label="Connection" value={health?.connectionState ?? "—"} />
-        <Kpi
-          label="Spot subscribed"
-          value={boolLabel(health?.spotSubscribed)}
-        />
-        <Kpi label="Spot age" value={fmtMs(health?.spotAgeMs)} />
-        <Kpi
-          label="Depth subscribed"
-          value={boolLabel(health?.depthSubscribed)}
-        />
-        <Kpi label="Depth age" value={fmtMs(health?.depthAgeMs)} />
-        <Kpi label="Events Received" value={fmtNum(health?.eventsReceived)} />
-        <Kpi label="Events Dropped" value={fmtNum(health?.eventsDropped)} />
-        <Kpi label="Setup A" value={fmtNum(health?.candidateA)} />
-        <Kpi label="Setup B" value={fmtNum(health?.candidateB)} />
-        <Kpi label="Setup C" value={fmtNum(health?.candidateC)} />
-        <Kpi label="Heartbeats" value={fmtNum(health?.heartbeatsPersisted)} />
-        <Kpi label="Chunks Written" value={fmtNum(health?.chunksWritten)} />
-        <Kpi label="Chunks Uploaded" value={fmtNum(health?.chunksUploaded)} />
-        <Kpi
-          label="Persistence Drops"
-          value={`${fmtNum(health?.persistenceDroppedRows)} / ${fmtNum(health?.persistenceDroppedChunks)}`}
-        />
-        <Kpi
-          label="Queue Latency P50/P95/P99"
-          value={`${fmtMs(health?.queueLatencyP50)} / ${fmtMs(health?.queueLatencyP95)} / ${fmtMs(health?.queueLatencyP99)}`}
-        />
-        <Kpi
-          label="Event Loop Lag P50/P95/P99"
-          value={`${fmtMs(health?.eventLoopLagP50)} / ${fmtMs(health?.eventLoopLagP95)} / ${fmtMs(health?.eventLoopLagP99)}`}
-        />
-        <Kpi label="Feed Gaps" value={fmtNum(health?.feedGapCount)} />
-        <Kpi label="Reconnects" value={fmtNum(health?.reconnectCount)} />
-        <Kpi label="Resyncs" value={fmtNum(health?.resyncCount)} />
-        <Kpi label="Crossed Book" value={fmtNum(health?.bookCrossedCount)} />
-        <Kpi
-          label="captureDayIndex"
-          value={fmtNum(health?.captureDayIndex ?? undefined)}
-        />
-        <Kpi
-          label="validatedIndependentDays"
-          value={fmtNum(health?.validatedIndependentDays)}
-        />
-        <Kpi
-          label="captureDuration"
-          value={fmtDuration(health?.captureDurationMs)}
-        />
-        <Kpi label="Durable mode" value={health?.durableMode ?? "—"} />
+        <div className="gm-ghr-activity-secondary">
+          <span>
+            A OBS {fmtNum(health?.observationA)} · B OBS{" "}
+            {fmtNum(health?.observationB)} · C OBS {fmtNum(health?.observationC)}
+          </span>
+          <span>
+            HB {fmtNum(health?.heartbeatsPersisted)} · Chunks{" "}
+            {fmtNum(health?.chunksUploaded)}
+          </span>
+        </div>
       </section>
 
       <section
@@ -421,21 +410,28 @@ export function GoldHunterFastResearchPage() {
         data-testid="gh-research-candidate-feed"
       >
         <div className="gm-ghr-section-title">
-          LIVE CANDIDATE FEED
+          OPPORTUNITY FEED
           <span className="gm-ghr-feed-note">
-            {feedAvailable
-              ? "RESEARCH OBSERVATION — NOT A TRADE"
-              : "waiting for /recent-candidates"}
+            RESEARCH OBSERVATION — NOT A TRADE
           </span>
         </div>
+        <div className="gm-ghr-filters" data-testid="gh-research-filters">
+          {(["SELECTED", "ELIGIBLE", "ALL"] as FeedFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`gm-ghr-filter${filter === f ? " is-active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f === "ALL" ? "ALL OBSERVATIONS" : f}
+            </button>
+          ))}
+        </div>
         {!feedAvailable ? (
-          <p className="gm-ghr-empty">
-            Candidate list endpoint not available yet. KPI counters above still
-            update live.
-          </p>
+          <p className="gm-ghr-empty">Candidate feed unavailable.</p>
         ) : observations.length === 0 ? (
           <p className="gm-ghr-empty">
-            No specialist observations yet — waiting for A/B/C detections.
+            No rows for filter {filter}. Waiting for eligible/selected setups.
           </p>
         ) : (
           <>
@@ -445,15 +441,14 @@ export function GoldHunterFastResearchPage() {
                   <tr>
                     <th>#</th>
                     <th>Time</th>
-                    <th>Kind</th>
                     <th>Setup</th>
                     <th>Side</th>
-                    <th>Eligible</th>
                     <th>Quality</th>
+                    <th>Bid</th>
+                    <th>Ask</th>
                     <th>Spread</th>
-                    <th>Bid/Ask</th>
                     <th>Imbal</th>
-                    <th>Vel1s</th>
+                    <th>Vel</th>
                     <th>Accel</th>
                   </tr>
                 </thead>
@@ -462,21 +457,21 @@ export function GoldHunterFastResearchPage() {
                     <tr key={o.observationId}>
                       <td>OBS {o.observationId}</td>
                       <td>{o.tsIso.slice(11, 19)}</td>
-                      <td>{o.kind.replace("_", " ")}</td>
-                      <td>{o.setupName}</td>
+                      <td>
+                        {o.setupName}
+                        {o.selectedCandidate
+                          ? " · SEL"
+                          : o.eligible
+                            ? " · ELIG"
+                            : ""}
+                      </td>
                       <td>{o.side ?? "—"}</td>
-                      <td>{o.eligible ? "YES" : "NO"}</td>
                       <td>
                         {o.rawQuality != null ? o.rawQuality.toFixed(2) : "—"}
                       </td>
-                      <td>
-                        {o.spread != null ? o.spread.toFixed(2) : "—"}
-                      </td>
-                      <td>
-                        {o.bid != null && o.ask != null
-                          ? `${o.bid.toFixed(2)}/${o.ask.toFixed(2)}`
-                          : "—"}
-                      </td>
+                      <td>{fmtPx(o.bid)}</td>
+                      <td>{fmtPx(o.ask)}</td>
+                      <td>{fmtPx(o.spread)}</td>
                       <td>
                         {o.imbalance != null ? o.imbalance.toFixed(2) : "—"}
                       </td>
@@ -507,13 +502,13 @@ export function GoldHunterFastResearchPage() {
                   >
                     <div className="gm-ghr-mobile-main">
                       <span>
-                        OBSERVATION {o.observationId} · {o.kind.replace("_", " ")}
+                        OBS {o.observationId} · {o.setupName}
                       </span>
                       <span>{o.side ?? "—"}</span>
                     </div>
                     <div className="gm-ghr-mobile-sub">
-                      {o.setupName} · {o.tsIso.slice(11, 19)} ·{" "}
-                      {o.eligible ? "eligible" : "watch"}
+                      {o.tsIso.slice(11, 19)} · {fmtPx(o.bid)}/{fmtPx(o.ask)} ·
+                      spr {fmtPx(o.spread)}
                     </div>
                     <div className="gm-ghr-obs-label">{o.label}</div>
                     {open ? (
@@ -523,30 +518,14 @@ export function GoldHunterFastResearchPage() {
                           {o.rawQuality != null ? o.rawQuality.toFixed(2) : "—"}
                         </div>
                         <div>
-                          Spread {o.spread != null ? o.spread.toFixed(2) : "—"}
-                        </div>
-                        <div>
-                          Bid/Ask{" "}
-                          {o.bid != null && o.ask != null
-                            ? `${o.bid.toFixed(2)}/${o.ask.toFixed(2)}`
-                            : "—"}
-                        </div>
-                        <div>
-                          Imbalance{" "}
-                          {o.imbalance != null ? o.imbalance.toFixed(2) : "—"}
-                        </div>
-                        <div>
-                          Velocity {o.velocity1s != null ? o.velocity1s.toFixed(3) : "—"}{" "}
+                          Imbal{" "}
+                          {o.imbalance != null ? o.imbalance.toFixed(2) : "—"} ·
+                          Vel{" "}
+                          {o.velocity1s != null ? o.velocity1s.toFixed(3) : "—"}{" "}
                           · Accel{" "}
                           {o.acceleration != null
                             ? o.acceleration.toFixed(3)
                             : "—"}
-                        </div>
-                        <div>
-                          Dist H/L{" "}
-                          {o.distHigh5s != null ? o.distHigh5s.toFixed(2) : "—"}/
-                          {o.distLow5s != null ? o.distLow5s.toFixed(2) : "—"} ·
-                          Touches {o.upTouches5s ?? "—"}/{o.downTouches5s ?? "—"}
                         </div>
                       </div>
                     ) : null}
@@ -556,6 +535,53 @@ export function GoldHunterFastResearchPage() {
             </div>
           </>
         )}
+      </section>
+
+      <section className="gm-ghr-kpis" data-testid="gh-research-kpis">
+        <Kpi
+          label="Capture Health"
+          value={health?.captureHealthy ? "HEALTHY" : "UNHEALTHY"}
+          tone={health?.captureHealthy ? "ok" : "warn"}
+        />
+        <Kpi
+          label="Campaign Valid"
+          value={health?.campaignValid ? "YES" : "NO"}
+          tone={health?.campaignValid ? "ok" : "warn"}
+        />
+        <Kpi
+          label="Data Integrity"
+          value={health?.dataIntegrityStatus ?? "—"}
+          tone={
+            health?.dataIntegrityStatus === "CLEAN"
+              ? "ok"
+              : health?.dataIntegrityStatus === "FAILED"
+                ? "bad"
+                : "warn"
+          }
+        />
+        <Kpi label="Connection" value={health?.connectionState ?? "—"} />
+        <Kpi label="Spot age" value={fmtMs(health?.spotAgeMs)} />
+        <Kpi label="Depth age" value={fmtMs(health?.depthAgeMs)} />
+        <Kpi label="Events Dropped" value={fmtNum(health?.eventsDropped)} />
+        <Kpi
+          label="Persistence Drops"
+          value={`${fmtNum(health?.persistenceDroppedRows)}/${fmtNum(health?.persistenceDroppedChunks)}`}
+        />
+        <Kpi
+          label="Queue P50/P95/P99"
+          value={`${fmtMs(health?.queueLatencyP50)}/${fmtMs(health?.queueLatencyP95)}/${fmtMs(health?.queueLatencyP99)}`}
+        />
+        <Kpi
+          label="Lag P50/P95/P99"
+          value={`${fmtMs(health?.eventLoopLagP50)}/${fmtMs(health?.eventLoopLagP95)}/${fmtMs(health?.eventLoopLagP99)}`}
+        />
+        <Kpi label="Gaps/Reconn/Resync" value={`${fmtNum(health?.feedGapCount)}/${fmtNum(health?.reconnectCount)}/${fmtNum(health?.resyncCount)}`} />
+        <Kpi label="Crossed Book" value={fmtNum(health?.bookCrossedCount)} />
+        <Kpi
+          label="Day / Validated"
+          value={`${fmtNum(health?.captureDayIndex ?? undefined)} / ${fmtNum(health?.validatedIndependentDays)}`}
+        />
+        <Kpi label="Durable" value={health?.durableMode ?? "—"} />
       </section>
 
       <section
@@ -594,13 +620,9 @@ export function GoldHunterFastResearchPage() {
           </div>
           <div>
             <span>Scope verified</span>
-            <strong>{boolLabel(health?.scopeVerified)}</strong>
+            <strong>{health?.scopeVerified ? "YES" : "NO"}</strong>
           </div>
         </div>
-        <p className="gm-ghr-safety-foot">
-          Architecture is extendable for future FAST V2 Shadow ENTER/EXIT/P/L —
-          trading is not enabled on this page.
-        </p>
       </section>
     </div>
   );

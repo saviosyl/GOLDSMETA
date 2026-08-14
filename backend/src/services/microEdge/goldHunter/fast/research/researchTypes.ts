@@ -47,7 +47,16 @@ export type ResearchSpecialistObservation = {
 export type ResearchRecentCandidateObservation = {
   observationId: number;
   label: "RESEARCH OBSERVATION — NOT A TRADE";
-  kind: "A_CANDIDATE" | "B_CANDIDATE" | "C_CANDIDATE";
+  kind:
+    | "A_OBSERVATION"
+    | "B_OBSERVATION"
+    | "C_OBSERVATION"
+    | "A_CANDIDATE"
+    | "B_CANDIDATE"
+    | "C_CANDIDATE"
+    | "A_SELECTED"
+    | "B_SELECTED"
+    | "C_SELECTED";
   setup: GhFastSetupId;
   setupName: string;
   side: GhFastSide | null;
@@ -82,6 +91,7 @@ export type ResearchRecentCandidatesResponse = {
   runId: string | null;
   limit: number;
   count: number;
+  filter: "SELECTED" | "ELIGIBLE" | "ALL";
   observations: ResearchRecentCandidateObservation[];
   brokerRequests: 0;
   brokerOrders: 0;
@@ -89,6 +99,8 @@ export type ResearchRecentCandidatesResponse = {
   executionAdapter: "NONE";
   mutationSurface: "NONE";
   tradingButtons: [];
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
 };
 
 export type ResearchFeatureTelemetry = {
@@ -147,21 +159,33 @@ export const GH_FAST_RESEARCH_FRESHNESS_MS = 20_000;
 export type ResearchMarketPayload =
   | {
       kind: "SPOT";
+      /** Absolute price (cTrader relative ÷ 100000). */
       bid: number | null;
       ask: number | null;
       spread: number | null;
+      /** Raw cTrader relative integers preserved for forensic replay. */
+      bidRelative?: number | null;
+      askRelative?: number | null;
       brokerTimestampMs: number | null;
+      marketDataNormalizationVersion?: string;
+      inputNormalizationVerified?: boolean;
     }
   | {
       kind: "DEPTH";
+      /** Normalized quotes (absolute price + size units). */
       newQuotes?: unknown[];
       deletedQuotes?: unknown[];
+      /** Raw ProtoOA depth payload preserved for forensic replay. */
+      rawNewQuotes?: unknown[];
+      rawDeletedQuotes?: unknown;
       bestBid: number | null;
       bestAsk: number | null;
       depthAvailable: boolean;
       crossed: boolean;
       bookGeneration: number;
       brokerTimestampMs: number | null;
+      marketDataNormalizationVersion?: string;
+      inputNormalizationVerified?: boolean;
     }
   | {
       kind: "RESYNC_MARKER";
@@ -206,6 +230,9 @@ export type ResearchCaptureRecord = {
   market: ResearchMarketPayload;
   features: ResearchFeatureTelemetry | null;
   specialists: ResearchSpecialistObservation[] | null;
+  /** cTrader normalization identity for this record (SPOT/DEPTH). */
+  marketDataNormalizationVersion?: string | null;
+  inputNormalizationVerified?: boolean;
   /** Hard-coded safety counters — always zero. */
   safety: {
     brokerRequests: 0;
@@ -322,9 +349,27 @@ export type ResearchCaptureHealth = {
   reconnectCount: number;
   resyncCount: number;
   bookCrossedCount: number;
+  /**
+   * @deprecated Prefer eligibleA/B/C — historically mixed observations.
+   * Now equals eligibleA/B/C (true candidates only).
+   */
   candidateA: number;
   candidateB: number;
   candidateC: number;
+  observationA: number;
+  observationB: number;
+  observationC: number;
+  eligibleA: number;
+  eligibleB: number;
+  eligibleC: number;
+  selectedA: number;
+  selectedB: number;
+  selectedC: number;
+  lastBid: number | null;
+  lastAsk: number | null;
+  lastSpread: number | null;
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
   captureStart: string | null;
   captureDurationMs: number;
   runId: string;
@@ -370,6 +415,10 @@ export type ResearchStatusUiDesign = {
   queueLatencyP95: number | null;
   eventLoopLagP95: number | null;
   candidateObservations: { A: number; B: number; C: number };
+  eligibleObservations: { A: number; B: number; C: number };
+  selectedOpportunities: { A: number; B: number; C: number };
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
   safety: {
     shadowOrders: 0;
     brokerRequests: 0;

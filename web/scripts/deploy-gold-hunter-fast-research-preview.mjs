@@ -86,7 +86,7 @@ const deployArgs = [
   "--project-name",
   projectName,
   "--branch",
-  "preview-gold-hunter-fast-research",
+  "gh-fast-research",
   "--commit-dirty=true",
   "--commit-message",
   message
@@ -96,8 +96,6 @@ if (commit) deployArgs.push("--commit-hash", commit);
 const out = runCapture("npx", deployArgs, { env: process.env });
 const match =
   out.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/i) ||
-  out.match(
-    /https:\/\/preview-gold-hunter-fast-research\.[a-z0-9-]+\.pages\.dev/i
-  );
+  out.match(/https:\/\/gh-fast-research\.[a-z0-9-]+\.pages\.dev/i);
 console.log("PREVIEW_URL=" + (match?.[0] ?? "(see wrangler output)"));
 console.log("Research health host only:", new URL(healthUrl).host);

@@ -6,6 +6,11 @@ import { OrderedEventQueue } from "../eventQueue";
 import { LatencyTracker } from "../latency";
 import { hashGhFastConfig, frozenGhFastSoakConfig } from "../frozenConfig";
 import type { GhFastDepthEvent, GhFastSpotEvent } from "../types";
+import {
+  GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+  normalizeCTraderDepthPayload,
+  normalizeCTraderSpotPayload
+} from "../ctraderMarketNormalize";
 import { ResearchFeaturePipeline } from "./researchFeaturePipeline";
 import { ResearchEventCollector } from "./researchCollector";
 import { ResearchDurableSink } from "./researchDurableSink";
@@ -31,12 +36,15 @@ import {
 } from "./researchTypes";
 import { evaluateCaptureHealth } from "./researchCaptureHealth";
 
-const RECENT_CANDIDATE_LIMIT = 40;
+const RECENT_CANDIDATE_LIMIT = 80;
 
-const SETUP_DISPLAY: Record<string, { kind: ResearchRecentCandidateObservation["kind"]; name: string }> = {
-  A_MOMENTUM_IGNITION: { kind: "A_CANDIDATE", name: "A MOMENTUM IGNITION" },
-  B_FAST_BREAKOUT: { kind: "B_CANDIDATE", name: "B FAST BREAKOUT" },
-  C_PULLBACK_REACCEL: { kind: "C_CANDIDATE", name: "C PULLBACK REACCEL" }
+const SETUP_DISPLAY: Record<
+  string,
+  { letter: "A" | "B" | "C"; name: string }
+> = {
+  A_MOMENTUM_IGNITION: { letter: "A", name: "A MOMENTUM IGNITION" },
+  B_FAST_BREAKOUT: { letter: "B", name: "B FAST BREAKOUT" },
+  C_PULLBACK_REACCEL: { letter: "C", name: "C PULLBACK REACCEL" }
 };
 
 type QueuedIngress = {
@@ -83,10 +91,19 @@ export class ResearchIngestBridge {
   private reconnectCount = 0;
   private resyncCount = 0;
   private bookCrossedCount = 0;
-  private candidateA = 0;
-  private candidateB = 0;
-  private candidateC = 0;
-  /** Bounded ring of recent A/B/C observations for the read-only monitor UI. */
+  private observationA = 0;
+  private observationB = 0;
+  private observationC = 0;
+  private eligibleA = 0;
+  private eligibleB = 0;
+  private eligibleC = 0;
+  private selectedA = 0;
+  private selectedB = 0;
+  private selectedC = 0;
+  private lastBid: number | null = null;
+  private lastAsk: number | null = null;
+  private lastSpread: number | null = null;
+  /** Bounded ring of recent specialist rows for the read-only monitor UI. */
   private readonly recentCandidates: ResearchRecentCandidateObservation[] = [];
   private observationSeq = 0;
   private prevEventTs: number | null = null;
@@ -485,11 +502,13 @@ export class ResearchIngestBridge {
     }
 
     if (item.kind === "SPOT") {
-      const bid = num(item.payload.bid);
-      const ask = num(item.payload.ask);
-      const brokerTimestampMs = num(
-        item.payload.brokerTimestampMs ?? item.payload.timestamp
-      );
+      const n = normalizeCTraderSpotPayload(item.payload);
+      const bid = n.bid;
+      const ask = n.ask;
+      const brokerTimestampMs = n.brokerTimestampMs;
+      if (bid != null) this.lastBid = bid;
+      if (ask != null) this.lastAsk = ask;
+      if (n.spread != null) this.lastSpread = n.spread;
       const spotEv: GhFastSpotEvent = {
         kind: "SPOT",
         receiveSeq: item.receiveSeq,
@@ -515,26 +534,27 @@ export class ResearchIngestBridge {
           kind: "SPOT",
           bid,
           ask,
-          spread: bid != null && ask != null ? ask - bid : null,
-          brokerTimestampMs
+          spread: n.spread,
+          bidRelative: n.bidRelative,
+          askRelative: n.askRelative,
+          brokerTimestampMs,
+          marketDataNormalizationVersion: n.normalizationVersion,
+          inputNormalizationVerified: true
         },
         features: snap.features,
-        specialists: snap.specialists
+        specialists: snap.specialists,
+        marketDataNormalizationVersion: n.normalizationVersion,
+        inputNormalizationVerified: true
       };
       this.collector.record(rec);
       return;
     }
 
-    // DEPTH
-    const brokerTimestampMs = num(
-      item.payload.brokerTimestampMs ?? item.payload.timestamp
-    );
-    const newQuotes = Array.isArray(item.payload.newQuotes)
-      ? (item.payload.newQuotes as GhFastDepthEvent["newQuotes"])
-      : undefined;
-    const deletedQuotes = Array.isArray(item.payload.deletedQuotes)
-      ? (item.payload.deletedQuotes as GhFastDepthEvent["deletedQuotes"])
-      : undefined;
+    // DEPTH — shared parseProtoOADepthEventPayload path
+    const n = normalizeCTraderDepthPayload(item.payload);
+    const brokerTimestampMs = n.brokerTimestampMs;
+    const newQuotes = n.newQuotes;
+    const deletedQuotes = n.deletedQuotes;
     const depthEv: GhFastDepthEvent = {
       kind: "DEPTH",
       receiveSeq: item.receiveSeq,
@@ -553,22 +573,33 @@ export class ResearchIngestBridge {
       item.rawCallbackArrivalMs
     );
     if (snap.crossed) this.bookCrossedCount += 1;
+    if (snap.bestBid != null) this.lastBid = snap.bestBid;
+    if (snap.bestAsk != null) this.lastAsk = snap.bestAsk;
+    if (snap.bestBid != null && snap.bestAsk != null) {
+      this.lastSpread = snap.bestAsk - snap.bestBid;
+    }
     const rec: ResearchCaptureRecord = {
       ...base,
       eventKind: "DEPTH",
       market: {
         kind: "DEPTH",
-        newQuotes: newQuotes as unknown[] | undefined,
-        deletedQuotes: deletedQuotes as unknown[] | undefined,
+        newQuotes: newQuotes as unknown[],
+        deletedQuotes: deletedQuotes as unknown[],
+        rawNewQuotes: n.rawNewQuotes,
+        rawDeletedQuotes: n.rawDeletedQuotes,
         bestBid: snap.bestBid,
         bestAsk: snap.bestAsk,
         depthAvailable: snap.depthAvailable,
         crossed: snap.crossed,
         bookGeneration: snap.bookGeneration,
-        brokerTimestampMs
+        brokerTimestampMs,
+        marketDataNormalizationVersion: n.normalizationVersion,
+        inputNormalizationVerified: true
       },
       features: snap.features,
-      specialists: snap.specialists
+      specialists: snap.specialists,
+      marketDataNormalizationVersion: n.normalizationVersion,
+      inputNormalizationVerified: true
     };
     this.collector.record(rec);
   }
@@ -582,10 +613,21 @@ export class ResearchIngestBridge {
   ): void {
     if (!specialists) return;
     for (const s of specialists) {
+      // Count every evaluated specialist as an observation when any signal exists.
       if (!s.eligible && s.rawQuality == null && !s.selectedCandidate) continue;
-      if (s.setup === "A_MOMENTUM_IGNITION") this.candidateA += 1;
-      else if (s.setup === "B_FAST_BREAKOUT") this.candidateB += 1;
-      else if (s.setup === "C_PULLBACK_REACCEL") this.candidateC += 1;
+      if (s.setup === "A_MOMENTUM_IGNITION") {
+        this.observationA += 1;
+        if (s.eligible) this.eligibleA += 1;
+        if (s.selectedCandidate) this.selectedA += 1;
+      } else if (s.setup === "B_FAST_BREAKOUT") {
+        this.observationB += 1;
+        if (s.eligible) this.eligibleB += 1;
+        if (s.selectedCandidate) this.selectedB += 1;
+      } else if (s.setup === "C_PULLBACK_REACCEL") {
+        this.observationC += 1;
+        if (s.eligible) this.eligibleC += 1;
+        if (s.selectedCandidate) this.selectedC += 1;
+      }
       this.pushRecentCandidate(s, features, receiveSeq, eventKind, tsMs);
     }
   }
@@ -600,10 +642,15 @@ export class ResearchIngestBridge {
     const meta = SETUP_DISPLAY[s.setup];
     if (!meta) return;
     this.observationSeq += 1;
+    const letter = meta.letter;
+    let kind: ResearchRecentCandidateObservation["kind"];
+    if (s.selectedCandidate) kind = `${letter}_SELECTED` as ResearchRecentCandidateObservation["kind"];
+    else if (s.eligible) kind = `${letter}_CANDIDATE` as ResearchRecentCandidateObservation["kind"];
+    else kind = `${letter}_OBSERVATION` as ResearchRecentCandidateObservation["kind"];
     const row: ResearchRecentCandidateObservation = {
       observationId: this.observationSeq,
       label: "RESEARCH OBSERVATION — NOT A TRADE",
-      kind: meta.kind,
+      kind,
       setup: s.setup,
       setupName: meta.name,
       side: s.candidateSide,
@@ -615,9 +662,9 @@ export class ResearchIngestBridge {
       eventKind,
       tsMs,
       tsIso: new Date(tsMs).toISOString(),
-      bid: features?.bid ?? null,
-      ask: features?.ask ?? null,
-      spread: features?.spread ?? null,
+      bid: features?.bid ?? this.lastBid,
+      ask: features?.ask ?? this.lastAsk,
+      spread: features?.spread ?? this.lastSpread,
       mid: features?.mid ?? null,
       imbalance: features?.depthImbalance ?? features?.signedImbalance1s ?? null,
       velocity1s: features?.midVel1s ?? null,
@@ -638,22 +685,37 @@ export class ResearchIngestBridge {
   }
 
   /** Read-only bounded feed for the research monitor UI. */
-  recentCandidatesResponse(limit = RECENT_CANDIDATE_LIMIT): ResearchRecentCandidatesResponse {
-    const capped = Math.max(1, Math.min(RECENT_CANDIDATE_LIMIT, Math.floor(limit) || RECENT_CANDIDATE_LIMIT));
-    const observations = this.recentCandidates.slice(-capped).reverse();
+  recentCandidatesResponse(
+    limit = RECENT_CANDIDATE_LIMIT,
+    filter: "SELECTED" | "ELIGIBLE" | "ALL" = "ELIGIBLE"
+  ): ResearchRecentCandidatesResponse {
+    const capped = Math.max(
+      1,
+      Math.min(RECENT_CANDIDATE_LIMIT, Math.floor(limit) || RECENT_CANDIDATE_LIMIT)
+    );
+    let rows = this.recentCandidates;
+    if (filter === "SELECTED") {
+      rows = rows.filter((r) => r.selectedCandidate);
+    } else if (filter === "ELIGIBLE") {
+      rows = rows.filter((r) => r.eligible || r.selectedCandidate);
+    }
+    const observations = rows.slice(-capped).reverse();
     return {
       mode: GH_FAST_RESEARCH_MODE,
       label: "RESEARCH OBSERVATION FEED — NOT TRADES",
       runId: this.runId,
       limit: capped,
       count: observations.length,
+      filter,
       observations,
       brokerRequests: 0,
       brokerOrders: 0,
       shadowOrders: 0,
       executionAdapter: "NONE",
       mutationSurface: "NONE",
-      tradingButtons: []
+      tradingButtons: [],
+      marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+      inputNormalizationVerified: true
     };
   }
 
@@ -714,9 +776,23 @@ export class ResearchIngestBridge {
       reconnectCount: this.reconnectCount,
       resyncCount: this.resyncCount,
       bookCrossedCount: this.bookCrossedCount,
-      candidateA: this.candidateA,
-      candidateB: this.candidateB,
-      candidateC: this.candidateC,
+      candidateA: this.eligibleA,
+      candidateB: this.eligibleB,
+      candidateC: this.eligibleC,
+      observationA: this.observationA,
+      observationB: this.observationB,
+      observationC: this.observationC,
+      eligibleA: this.eligibleA,
+      eligibleB: this.eligibleB,
+      eligibleC: this.eligibleC,
+      selectedA: this.selectedA,
+      selectedB: this.selectedB,
+      selectedC: this.selectedC,
+      lastBid: this.lastBid,
+      lastAsk: this.lastAsk,
+      lastSpread: this.lastSpread,
+      marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+      inputNormalizationVerified: true,
       captureStart: this.captureStartIso,
       captureDurationMs: Math.max(0, nowMs - this.captureStartMs),
       runId: this.runId,
@@ -776,10 +852,22 @@ export class ResearchIngestBridge {
       queueLatencyP95: h.queueLatencyP95,
       eventLoopLagP95: h.eventLoopLagP95,
       candidateObservations: {
-        A: h.candidateA,
-        B: h.candidateB,
-        C: h.candidateC
+        A: h.observationA,
+        B: h.observationB,
+        C: h.observationC
       },
+      eligibleObservations: {
+        A: h.eligibleA,
+        B: h.eligibleB,
+        C: h.eligibleC
+      },
+      selectedOpportunities: {
+        A: h.selectedA,
+        B: h.selectedB,
+        C: h.selectedC
+      },
+      marketDataNormalizationVersion: h.marketDataNormalizationVersion,
+      inputNormalizationVerified: h.inputNormalizationVerified,
       safety: {
         shadowOrders: 0,
         brokerRequests: 0,

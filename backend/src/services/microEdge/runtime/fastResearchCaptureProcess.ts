@@ -616,20 +616,28 @@ export class GoldHunterFastResearchCaptureProcess {
           ) {
             const q = new URL(req.url ?? "/", "http://localhost").searchParams;
             const limit = Number(q.get("limit") ?? 40);
+            const filterRaw = (q.get("filter") ?? "ELIGIBLE").toUpperCase();
+            const filter =
+              filterRaw === "SELECTED" || filterRaw === "ALL"
+                ? filterRaw
+                : "ELIGIBLE";
             const feed =
-              this.runtime?.getBridge()?.recentCandidatesResponse(limit) ?? {
+              this.runtime?.getBridge()?.recentCandidatesResponse(limit, filter) ?? {
                 mode: "RESEARCH_CAPTURE_ONLY" as const,
                 label: "RESEARCH OBSERVATION FEED — NOT TRADES" as const,
                 runId: null,
                 limit: 40,
                 count: 0,
+                filter: "ELIGIBLE" as const,
                 observations: [],
                 brokerRequests: 0 as const,
                 brokerOrders: 0 as const,
                 shadowOrders: 0 as const,
                 executionAdapter: "NONE" as const,
                 mutationSurface: "NONE" as const,
-                tradingButtons: [] as []
+                tradingButtons: [] as [],
+                marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
+                inputNormalizationVerified: true
               };
             res.writeHead(200, {
               "Content-Type": "application/json",

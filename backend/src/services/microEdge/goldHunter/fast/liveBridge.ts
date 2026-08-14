@@ -2,13 +2,15 @@
  * Optional bridge: Micro live session spot/depth → GOLD_HUNTER FAST engine.
  * Shadow-only. Ordered single-consumer queue. Async persistence off hot path.
  */
-import { spotPriceFromRelative } from "../../marketData/microCTraderProtocol";
 import type { MicroLiveMarketSession } from "../../marketData/liveSession";
 import { GoldHunterFastEngine } from "./engine";
 import { GhFastEventCollector } from "./collector";
 import { ShadowExecutionAdapter } from "./executionAdapter";
 import { OrderedEventQueue } from "./eventQueue";
-import { parseProtoOADepthEventPayload } from "./depthProtocol";
+import {
+  normalizeCTraderDepthPayload,
+  normalizeCTraderSpotPayload
+} from "./ctraderMarketNormalize";
 import { depthUnavailableReason } from "./depthDiagnostics";
 import { defaultGhFastConfig } from "./defaults";
 import {
@@ -459,45 +461,36 @@ export class GoldHunterFastLiveBridge {
   private async processOrdered(raw: RawIngress): Promise<void> {
     let ev: GhFastMarketEvent;
     if (raw.kind === "SPOT") {
-      const bid =
-        raw.payload.bid != null ? spotPriceFromRelative(raw.payload.bid) : null;
-      const ask =
-        raw.payload.ask != null ? spotPriceFromRelative(raw.payload.ask) : null;
-      const brokerTs =
-        typeof raw.payload.timestamp === "number"
-          ? raw.payload.timestamp
-          : null;
+      const n = normalizeCTraderSpotPayload(raw.payload);
+      const brokerTs = n.brokerTimestampMs;
       ev = {
         kind: "SPOT",
         receiveSeq: raw.receiveSeq,
-        eventId: `SPOT:${raw.receiveSeq}:${brokerTs ?? ""}:${bid ?? ""}:${ask ?? ""}`,
+        eventId: `SPOT:${raw.receiveSeq}:${brokerTs ?? ""}:${n.bid ?? ""}:${n.ask ?? ""}`,
         receivedAtMs: raw.receivedAtMs,
         brokerTimestampMs: brokerTs,
-        bid,
-        ask,
-        symbolId: raw.payload.symbolId as string | number | undefined
+        bid: n.bid,
+        ask: n.ask,
+        symbolId: n.symbolId
       };
     } else {
-      const parsed = parseProtoOADepthEventPayload(raw.payload);
-      this.parseStats.decodedBid += parsed.stats.decodedBid;
-      this.parseStats.decodedAsk += parsed.stats.decodedAsk;
-      this.parseStats.invalid += parsed.stats.invalid;
-      this.parseStats.deletedIds += parsed.stats.deletedIds;
-      const brokerTs =
-        typeof raw.payload.timestamp === "number"
-          ? raw.payload.timestamp
-          : null;
-      const ids = parsed.newQuotes.map((q) => String(q.id ?? "")).join(",");
-      const dels = parsed.deletedQuotes.map((d) => d.id).join(",");
+      const n = normalizeCTraderDepthPayload(raw.payload);
+      this.parseStats.decodedBid += n.stats.decodedBid;
+      this.parseStats.decodedAsk += n.stats.decodedAsk;
+      this.parseStats.invalid += n.stats.invalid;
+      this.parseStats.deletedIds += n.stats.deletedIds;
+      const brokerTs = n.brokerTimestampMs;
+      const ids = n.newQuotes.map((q) => String(q.id ?? "")).join(",");
+      const dels = n.deletedQuotes.map((d) => d.id).join(",");
       ev = {
         kind: "DEPTH",
         receiveSeq: raw.receiveSeq,
         eventId: `DEPTH:${raw.receiveSeq}:${brokerTs ?? ""}:${ids}:${dels}`,
         receivedAtMs: raw.receivedAtMs,
         brokerTimestampMs: brokerTs,
-        symbolId: raw.payload.symbolId as string | number | undefined,
-        newQuotes: parsed.newQuotes,
-        deletedQuotes: parsed.deletedQuotes
+        symbolId: n.symbolId,
+        newQuotes: n.newQuotes,
+        deletedQuotes: n.deletedQuotes
       };
     }
 

@@ -282,6 +282,20 @@ export class GoldHunterFastResearchCaptureRuntime {
         candidateA: 0,
         candidateB: 0,
         candidateC: 0,
+        observationA: 0,
+        observationB: 0,
+        observationC: 0,
+        eligibleA: 0,
+        eligibleB: 0,
+        eligibleC: 0,
+        selectedA: 0,
+        selectedB: 0,
+        selectedC: 0,
+        lastBid: null,
+        lastAsk: null,
+        lastSpread: null,
+        marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
+        inputNormalizationVerified: true,
         captureStart: null,
         captureDurationMs: 0,
         runId: "not_started",
@@ -459,22 +473,30 @@ export class GoldHunterFastResearchCaptureRuntime {
         ) {
           const q = new URL(req.url ?? "/", "http://localhost").searchParams;
           const limit = Number(q.get("limit") ?? 40);
+          const filterRaw = (q.get("filter") ?? "ELIGIBLE").toUpperCase();
+          const filter =
+            filterRaw === "SELECTED" || filterRaw === "ALL"
+              ? filterRaw
+              : "ELIGIBLE";
           res.writeHead(200, { "content-type": "application/json", ...cors });
           res.end(
             JSON.stringify(
-              this.bridge?.recentCandidatesResponse(limit) ?? {
+              this.bridge?.recentCandidatesResponse(limit, filter) ?? {
                 mode: "RESEARCH_CAPTURE_ONLY",
                 label: "RESEARCH OBSERVATION FEED — NOT TRADES",
                 runId: null,
                 limit: 40,
                 count: 0,
+                filter: "ELIGIBLE",
                 observations: [],
                 brokerRequests: 0,
                 brokerOrders: 0,
                 shadowOrders: 0,
                 executionAdapter: "NONE",
                 mutationSurface: "NONE",
-                tradingButtons: []
+                tradingButtons: [],
+                marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
+                inputNormalizationVerified: true
               },
               null,
               2
