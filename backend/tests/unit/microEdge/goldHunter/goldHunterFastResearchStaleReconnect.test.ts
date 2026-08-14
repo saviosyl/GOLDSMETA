@@ -70,6 +70,19 @@ describe("research stale reconnect policy (pure)", () => {
     expect(GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS).toBeGreaterThan(26_500);
   });
 
+  it("null ages while CONNECTED do NOT hard reconnect (startup/post-reconnect)", () => {
+    const d = decideResearchStaleReconnect({
+      nowMs: 100_000,
+      connectionState: "CONNECTED",
+      spotAgeMs: null,
+      depthAgeMs: null,
+      reconnectInFlight: false,
+      lastStaleFeedReconnectAttemptMs: null,
+      staleFeedBackoffIndex: 0
+    });
+    expect(d.action).toBe("SOFT_STALE_ONLY");
+  });
+
   it("1. 25s simultaneous Spot/Depth silence while CONNECTED does NOT full reconnect", () => {
     const d = decideResearchStaleReconnect({
       nowMs: 100_000,

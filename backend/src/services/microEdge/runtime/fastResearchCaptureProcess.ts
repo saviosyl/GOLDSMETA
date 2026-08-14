@@ -815,6 +815,10 @@ export class GoldHunterFastResearchCaptureProcess {
 
     const gate = evaluateLiveCaptureStartupGate(base, this.brokerPermissionProof);
     const bridge = this.runtime?.getBridge();
+    // Derive soft-stale from current ages so health does not lag a watchdog tick.
+    const softNow =
+      (base.spotAgeMs == null || base.spotAgeMs > this.softStaleMs) &&
+      (base.depthAgeMs == null || base.depthAgeMs > this.softStaleMs);
     return {
       ...base,
       researchConfigSha: base.researchConfigSha || this.researchConfigSha,
@@ -843,7 +847,7 @@ export class GoldHunterFastResearchCaptureProcess {
       softStaleMs: this.softStaleMs,
       hardStaleReconnectMs: this.hardStaleReconnectMs,
       hardStaleThresholdReason: GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
-      feedSoftStale: this.feedSoftStale,
+      feedSoftStale: softNow,
       reconnectInFlight: this.reconnectInFlight,
       transportReconnectCount: this.transportReconnectCount,
       staleFeedReconnectCount: this.staleFeedReconnectCount,

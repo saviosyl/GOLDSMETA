@@ -65,6 +65,36 @@ export function ageExceeds(
   return ageMs == null || ageMs > thresholdMs;
 }
 
+/**
+ * Soft stale: missing ages OR ages older than soft threshold.
+ * Used for FEED_STALE / paper block — does not tear down transport.
+ */
+export function bothFeedsSoftStale(
+  spotAgeMs: number | null | undefined,
+  depthAgeMs: number | null | undefined,
+  softStaleMs: number
+): boolean {
+  return bothFeedsExceed(spotAgeMs, depthAgeMs, softStaleMs);
+}
+
+/**
+ * Hard stale reconnect requires *known* ages past the hard threshold.
+ * Null ages (startup / post-reconnect before first Spot+Depth) must NOT
+ * trigger a full-session teardown — that created reconnect storms.
+ */
+export function bothFeedsHardStale(
+  spotAgeMs: number | null | undefined,
+  depthAgeMs: number | null | undefined,
+  hardStaleReconnectMs: number
+): boolean {
+  return (
+    spotAgeMs != null &&
+    depthAgeMs != null &&
+    spotAgeMs > hardStaleReconnectMs &&
+    depthAgeMs > hardStaleReconnectMs
+  );
+}
+
 export function bothFeedsExceed(
   spotAgeMs: number | null | undefined,
   depthAgeMs: number | null | undefined,
@@ -121,12 +151,20 @@ export function decideResearchStaleReconnect(input: {
     };
   }
 
-  const softStale = bothFeedsExceed(input.spotAgeMs, input.depthAgeMs, soft);
+  const softStale = bothFeedsSoftStale(
+    input.spotAgeMs,
+    input.depthAgeMs,
+    soft
+  );
   if (!softStale) {
     return { action: "NONE", feedSoftStale: false };
   }
 
-  const hardStale = bothFeedsExceed(input.spotAgeMs, input.depthAgeMs, hard);
+  const hardStale = bothFeedsHardStale(
+    input.spotAgeMs,
+    input.depthAgeMs,
+    hard
+  );
   if (!hardStale) {
     return { action: "SOFT_STALE_ONLY", feedSoftStale: true };
   }
