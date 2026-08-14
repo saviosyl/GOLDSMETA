@@ -65,12 +65,13 @@
     },
     {
       "t": "NEVER",
-      "phase": "transport.connect hang \u2014 no MICRO_CTRADER_CONNECTED"
+      "phase": "transport.connect stage hang — no MICRO_CTRADER_CONNECTED"
     }
   ],
   "stallPhase": "CONNECTING_SESSION / await transport.connect() after MICRO_CTRADER_CONNECTING",
-  "rootCauseClass": "A transport.open hung",
-  "evidence": "No MICRO_CTRADER_CONNECTED/XAUUSD/DEPTH_SUBSCRIBED after 18:44:46.240 CONNECTING; health kept serving; reconnectInFlight never cleared",
+  "rootCauseClass": "transport.connect stage hung; open vs auth sub-phase not separable from available logs",
+  "rootCauseNote": "Logs prove stall inside transport.connect() after MICRO_CTRADER_CONNECTING. Available evidence does NOT distinguish conn.open vs application authentication vs account-list authentication vs account authentication.",
+  "evidence": "No MICRO_CTRADER_CONNECTED/XAUUSD/DEPTH_SUBSCRIBED after 18:44:46.240 CONNECTING; health kept serving; reconnectInFlight never cleared on 63f53bc",
   "initialConnectDurationMs": 11000,
   "recommendedReconnectTimeoutMs": 30000
 }

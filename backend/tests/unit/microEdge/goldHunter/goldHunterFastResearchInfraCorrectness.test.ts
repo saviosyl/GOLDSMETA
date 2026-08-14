@@ -380,9 +380,19 @@ describe("failed reconnect lifecycle + process timeout", () => {
     );
     const proc = new GoldHunterFastResearchCaptureProcess({
       gcsBucket: "test-gh-fast-research",
-      runtimeSha: "ffffffffffffffffffffffffffffffffffffffff"
+      runtimeSha: "ffffffffffffffffffffffffffffffffffffffff",
+      credentials: {
+        clientId: "c",
+        clientSecret: "s",
+        accessToken: "a",
+        refreshToken: "r",
+        accountId: "1",
+        environment: "DEMO"
+      },
+      allowLocalInjectedCredentials: true
     });
     proc.markRunningForTests();
+    proc.setBypassBrokerScopeForTests(true);
     proc.setReconnectAttemptTimeoutMsForTests(80);
     proc.setHangConnectOnceForTests(true);
 

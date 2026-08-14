@@ -10,6 +10,7 @@ import {
   FakeMicroCTraderTransport,
   RealMicroCTraderTransport,
   type MicroOpenApiTransport,
+  type MicroTransportConnectLifecycle,
   type MicroTransportEventHandler
 } from "./microCTraderTransport";
 import { resolveMicroXauUsd } from "./microCTraderSymbolResolver";
@@ -75,6 +76,16 @@ export type LiveSessionOptions = {
   credentials?: MicroCTraderCredentials;
   quoteSampleIntervalMs?: number;
   nowMs?: () => number;
+  /**
+   * Opt-in for GOLD HUNTER FAST research: bound transport open/auth.
+   * Omitted → default unbounded connect (unchanged for other callers).
+   */
+  connectLifecycle?: MicroTransportConnectLifecycle | null;
+  /**
+   * Dynamic lifecycle resolver (research process remaining budget).
+   * When set, preferred over static connectLifecycle at connect() time.
+   */
+  resolveConnectLifecycle?: () => MicroTransportConnectLifecycle | null | undefined;
 };
 
 export class MicroLiveMarketSession {
@@ -146,8 +157,12 @@ export class MicroLiveMarketSession {
     if (this.transport.mutationSurface !== "NONE") {
       throw new Error("MICRO_MUTATION_SURFACE_UNEXPECTED");
     }
+    const lifecycle =
+      this.opts.resolveConnectLifecycle?.() ??
+      this.opts.connectLifecycle ??
+      undefined;
     try {
-      await this.transport.connect();
+      await this.transport.connect(lifecycle ?? undefined);
     } catch (e) {
       this.lastErrorCode =
         (e as { code?: string }).code ?? "transport_disconnected";

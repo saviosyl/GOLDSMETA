@@ -34,9 +34,21 @@ export type MicroAccountAuthMeta = {
   configuredAccountAuthorized: boolean;
 };
 
+/**
+ * Opt-in connection lifecycle for GOLD HUNTER FAST research only.
+ * Default callers omit this → unbounded connect (unchanged Core/Micro behaviour).
+ */
+export type MicroTransportConnectLifecycle = {
+  /** Absolute wall deadline for open + auth command phases. */
+  deadlineAtMs: number;
+  nowMs?: () => number;
+  /** When false, late resolution must not authenticate/connect. */
+  isAttemptCurrent?: () => boolean;
+};
+
 export type MicroOpenApiTransport = {
   readonly mutationSurface: "NONE";
-  connect(): Promise<void>;
+  connect(lifecycle?: MicroTransportConnectLifecycle): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;
   isApplicationAuthenticated(): boolean;
@@ -99,6 +111,8 @@ function unwrapEvent(evt: unknown): Record<string, unknown> {
 export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   readonly mutationSurface = "NONE" as const;
   private conn: ConnLike | null = null;
+  /** Conn created but not yet promoted — closeable during hung open/auth. */
+  private pendingConn: ConnLike | null = null;
   private connected = false;
   private applicationAuthenticated = false;
   private accountAuthenticated = false;
@@ -112,12 +126,23 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   private readonly factory: MicroTransportFactory;
   private subscribeSpotsCallCount = 0;
   private subscribeDepthCallCount = 0;
+  /** Bumped on disconnect/cancel so late open/auth cannot win. */
+  private connectGeneration = 0;
 
   constructor(
     private readonly credentials: MicroCTraderCredentials,
     factory?: MicroTransportFactory
   ) {
     this.factory = factory ?? defaultFactory;
+  }
+
+  /** Test/observability: in-flight pending socket before connect completes. */
+  hasPendingConnectionForTests(): boolean {
+    return this.pendingConn != null;
+  }
+
+  getConnectGenerationForTests(): number {
+    return this.connectGeneration;
   }
 
   isConnected(): boolean {
@@ -144,63 +169,157 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     return this.subscribeDepthCallCount;
   }
 
-  async connect(): Promise<void> {
+  async connect(lifecycle?: MicroTransportConnectLifecycle): Promise<void> {
     if (this.connected && this.conn) return;
     await this.disconnect();
+    const gen = ++this.connectGeneration;
+    const nowMs = lifecycle?.nowMs ?? (() => Date.now());
     const host =
       this.credentials.environment === "LIVE" ? LIVE_HOST : DEMO_HOST;
     const conn = this.factory(host, PORT);
-    await conn.open();
-    this.conn = conn;
-    // Attach any handlers registered before connect.
-    this.attachAllHandlersToConnection(conn);
+    this.pendingConn = conn;
 
-    await conn.sendCommand("ProtoOAApplicationAuthReq", {
-      clientId: this.credentials.clientId,
-      clientSecret: this.credentials.clientSecret
-    });
-    this.applicationAuthenticated = true;
+    const assertCurrent = (): void => {
+      if (gen !== this.connectGeneration) {
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_CANCELLED"), {
+          code: "transport_connect_cancelled"
+        });
+      }
+      if (lifecycle?.isAttemptCurrent && !lifecycle.isAttemptCurrent()) {
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_OBSOLETE"), {
+          code: "transport_connect_obsolete"
+        });
+      }
+    };
 
-    let accountListRes: unknown;
+    const bound = async <T>(work: Promise<T>): Promise<T> => {
+      assertCurrent();
+      if (!lifecycle) return work;
+      const rem = Math.max(0, lifecycle.deadlineAtMs - nowMs());
+      if (rem <= 0) {
+        await this.closeConnBestEffort(conn);
+        if (this.pendingConn === conn) this.pendingConn = null;
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_TIMEOUT"), {
+          code: "transport_connect_timeout"
+        });
+      }
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race([
+          work.then((v) => {
+            assertCurrent();
+            return v;
+          }),
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              void this.closeConnBestEffort(conn).finally(() => {
+                if (this.pendingConn === conn) this.pendingConn = null;
+                // Invalidate this generation so a late open cannot promote.
+                if (gen === this.connectGeneration) this.connectGeneration += 1;
+                reject(
+                  Object.assign(new Error("MICRO_TRANSPORT_CONNECT_TIMEOUT"), {
+                    code: "transport_connect_timeout"
+                  })
+                );
+              });
+            }, rem);
+            if (typeof (timer as { unref?: () => void }).unref === "function") {
+              (timer as { unref: () => void }).unref();
+            }
+          })
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
     try {
-      accountListRes = await conn.sendCommand(
-        "ProtoOAGetAccountListByAccessTokenReq",
-        { accessToken: this.credentials.accessToken }
+      await bound(Promise.resolve(conn.open()).then(() => undefined));
+      assertCurrent();
+      this.conn = conn;
+      this.pendingConn = null;
+      // Attach any handlers registered before connect.
+      this.attachAllHandlersToConnection(conn);
+
+      await bound(
+        conn.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: this.credentials.clientId,
+          clientSecret: this.credentials.clientSecret
+        })
       );
-    } catch (e) {
-      await this.failClosedDisconnect();
-      throw Object.assign(new Error("MICRO_ACCOUNT_LIST_FAILED"), {
-        code: "account_not_authorized",
-        cause: e
-      });
-    }
+      assertCurrent();
+      this.applicationAuthenticated = true;
 
-    const authorizedIds = extractAuthorizedAccountIds(accountListRes);
-    try {
-      this.accountAuthMeta = assertConfiguredAccountAuthorized({
-        configuredAccountId: this.credentials.accountId,
-        authorizedAccountIds: authorizedIds
-      });
+      let accountListRes: unknown;
+      try {
+        accountListRes = await bound(
+          conn.sendCommand("ProtoOAGetAccountListByAccessTokenReq", {
+            accessToken: this.credentials.accessToken
+          })
+        );
+      } catch (e) {
+        await this.failClosedDisconnect();
+        if ((e as { code?: string }).code === "transport_connect_timeout") {
+          throw e;
+        }
+        throw Object.assign(new Error("MICRO_ACCOUNT_LIST_FAILED"), {
+          code: "account_not_authorized",
+          cause: e
+        });
+      }
+
+      assertCurrent();
+      const authorizedIds = extractAuthorizedAccountIds(accountListRes);
+      try {
+        this.accountAuthMeta = assertConfiguredAccountAuthorized({
+          configuredAccountId: this.credentials.accountId,
+          authorizedAccountIds: authorizedIds
+        });
+      } catch (e) {
+        await this.failClosedDisconnect();
+        throw e;
+      }
+
+      try {
+        await bound(
+          conn.sendCommand("ProtoOAAccountAuthReq", {
+            accessToken: this.credentials.accessToken,
+            ctidTraderAccountId: Number(this.credentials.accountId)
+          })
+        );
+      } catch (e) {
+        await this.failClosedDisconnect();
+        if ((e as { code?: string }).code === "transport_connect_timeout") {
+          throw e;
+        }
+        throw Object.assign(new Error("MICRO_CTRADER_ACCOUNT_AUTH_FAILED"), {
+          code: "account_not_authorized",
+          cause: e
+        });
+      }
+
+      assertCurrent();
+      this.accountAuthenticated = true;
+      this.connected = true;
     } catch (e) {
-      await this.failClosedDisconnect();
+      if (this.pendingConn === conn) this.pendingConn = null;
+      if (this.conn === conn && !this.connected) {
+        await this.failClosedDisconnect();
+      } else if (!this.connected) {
+        await this.closeConnBestEffort(conn);
+      }
       throw e;
     }
+  }
 
+  private async closeConnBestEffort(c: ConnLike | null): Promise<void> {
+    if (!c) return;
+    this.detachAllNative(c);
     try {
-      await conn.sendCommand("ProtoOAAccountAuthReq", {
-        accessToken: this.credentials.accessToken,
-        ctidTraderAccountId: Number(this.credentials.accountId)
-      });
-    } catch (e) {
-      await this.failClosedDisconnect();
-      throw Object.assign(new Error("MICRO_CTRADER_ACCOUNT_AUTH_FAILED"), {
-        code: "account_not_authorized",
-        cause: e
-      });
+      await c.close();
+    } catch {
+      /* ignore */
     }
-
-    this.accountAuthenticated = true;
-    this.connected = true;
   }
 
   private async failClosedDisconnect(): Promise<void> {
@@ -208,9 +327,12 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
     this.connected = false;
+    const pending = this.pendingConn;
+    this.pendingConn = null;
     const c = this.conn;
     this.conn = null;
     this.detachAllNative(c);
+    this.detachAllNative(pending);
     if (c) {
       try {
         await c.close();
@@ -218,19 +340,38 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
         /* ignore */
       }
     }
+    if (pending && pending !== c) {
+      try {
+        await pending.close();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   async disconnect(): Promise<void> {
+    // Invalidate any in-flight connect so late open/auth cannot promote.
+    this.connectGeneration += 1;
     this.connected = false;
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
+    const pending = this.pendingConn;
+    this.pendingConn = null;
     const c = this.conn;
     this.conn = null;
     this.detachAllNative(c);
+    this.detachAllNative(pending);
     if (c) {
       try {
         await c.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (pending && pending !== c) {
+      try {
+        await pending.close();
       } catch {
         /* ignore */
       }
@@ -450,7 +591,7 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     return this.subscribeDepthCallCount;
   }
 
-  async connect(): Promise<void> {
+  async connect(_lifecycle?: MicroTransportConnectLifecycle): Promise<void> {
     if (this.failConnectCode) {
       throw Object.assign(new Error("FAKE_CONNECT_FAILED"), {
         code: this.failConnectCode

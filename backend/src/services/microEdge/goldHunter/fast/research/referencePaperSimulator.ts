@@ -383,6 +383,7 @@ export class ReferencePaperSimulator {
   private startedAtMs: number | null = null;
   private lastTickTs = 0;
   private readonly historyLimit: number;
+  private readonly nowMs: () => number;
 
   // Cumulative run statistics (never rolled by historyLimit)
   private totalClosedTrades = 0;
@@ -404,8 +405,9 @@ export class ReferencePaperSimulator {
   private paperDataStaleExits = 0;
   private paperResyncExits = 0;
 
-  constructor(opts?: { historyLimit?: number }) {
+  constructor(opts?: { historyLimit?: number; nowMs?: () => number }) {
     this.historyLimit = opts?.historyLimit ?? 80;
+    this.nowMs = opts?.nowMs ?? (() => Date.now());
   }
 
   /**
@@ -522,7 +524,7 @@ export class ReferencePaperSimulator {
     // Wall-clock runtime rate — includes disconnected/stale wall time so the
     // metric cannot inflate when the feed freezes lastTickTs.
     let tradesPerHour: number | null = null;
-    const wallNowMs = Date.now();
+    const wallNowMs = this.nowMs();
     if (this.startedAtMs != null && closedN > 0) {
       const hours = Math.max(
         1 / 3600,

@@ -52,12 +52,15 @@ import {
 import {
   GH_FAST_RESEARCH_RECONNECT_ATTEMPT_TIMEOUT_MS,
   GH_FAST_RESEARCH_RECONNECT_TIMEOUT_REASON,
+  GH_FAST_RESEARCH_STOP_DISCONNECT_TIMEOUT_MS,
   connectFailureBackoffMs,
-  raceReconnectAttempt,
+  raceUntilDeadline,
+  remainingBudgetMs,
   ResearchReconnectTimeoutError,
   ResearchReconnectObsoleteError,
   type ResearchReconnectPhase
 } from "../goldHunter/fast/research/researchReconnectOrchestrator";
+import type { MicroTransportConnectLifecycle } from "../marketData/microCTraderTransport";
 
 export type ResearchBrokerPermissionProof = {
   permissionScope: "SCOPE_VIEW";
@@ -228,6 +231,19 @@ export class GoldHunterFastResearchCaptureProcess {
   private skipSessionConnectForTests = false;
   /** @internal test hook — hang connectOnce forever during reconnect (timeout test). */
   private hangConnectOnceForTests = false;
+  /** @internal — inject session factory (fake hang/late-resolve tests). */
+  private sessionFactoryForTests:
+    | ((creds: MicroCTraderCredentials) => MicroLiveMarketSession)
+    | null = null;
+  /** @internal — skip real broker scope REST; use synthetic SCOPE_VIEW proof. */
+  private bypassBrokerScopeForTests = false;
+  /** @internal — force verifyLiveBrokerScope to throw with a code. */
+  private scopeVerifyFailCodeForTests: string | null = null;
+  /** @internal — track candidate sessions created (leak tests). */
+  private candidateSessionsCreatedForTests = 0;
+  private candidateSession: MicroLiveMarketSession | null = null;
+  /** Absolute deadline for the current connect/reconnect attempt (all phases). */
+  private attemptDeadlineAtMs: number | null = null;
   private brokerPermissionProof: ResearchBrokerPermissionProof | null = null;
   private lastBrokerAuthRaw: unknown = null;
   private campaignStatus: ResearchCampaignStatus = "STARTING";
@@ -362,10 +378,13 @@ export class GoldHunterFastResearchCaptureProcess {
     const port =
       this.opts.healthPort ??
       Number(process.env.PORT ?? process.env.GOLD_HUNTER_FAST_HEALTH_PORT ?? 8080);
+    // Health must listen before the first cTrader connect so a hung open
+    // cannot block the Cloud Run health surface indefinitely.
     await this.listenHealth(port);
-
-    await this.connectOnce();
     this.startStaleWatchdog();
+
+    // Bounded first connection — never await forever on startup.
+    await this.runBoundedConnectionAttempt({ kind: "startup" });
 
     microLog("MICRO_COLLECTOR_STARTED", {
       service: this.cloudRunService,
@@ -398,6 +417,30 @@ export class GoldHunterFastResearchCaptureProcess {
   private async verifyLiveBrokerScope(
     creds: MicroCTraderCredentials
   ): Promise<{ proof: ResearchBrokerPermissionProof; raw: unknown }> {
+    if (this.scopeVerifyFailCodeForTests) {
+      throw Object.assign(new Error("SCOPE_VERIFY_TEST_FAIL"), {
+        code: this.scopeVerifyFailCodeForTests
+      });
+    }
+    if (this.bypassBrokerScopeForTests) {
+      const proof: ResearchBrokerPermissionProof = {
+        permissionScope: "SCOPE_VIEW",
+        source: "broker_authorization_response",
+        verifiedAt: new Date(this.nowMs()).toISOString(),
+        accountCount: 1,
+        environment: creds.environment,
+        selectedAccountIdPresent: Boolean(creds.accountId)
+      };
+      return {
+        proof,
+        raw: {
+          permissionScope: "SCOPE_VIEW",
+          ctidTraderAccount: [
+            { ctidTraderAccountId: Number(creds.accountId || 1) }
+          ]
+        }
+      };
+    }
     const list = await fetchMicroAccountList({
       clientId: creds.clientId,
       clientSecret: creds.clientSecret,
@@ -418,27 +461,100 @@ export class GoldHunterFastResearchCaptureProcess {
     return { proof, raw: list.raw };
   }
 
+  private buildConnectLifecycle(
+    attemptId: number
+  ): MicroTransportConnectLifecycle | null {
+    if (this.attemptDeadlineAtMs == null) return null;
+    return {
+      deadlineAtMs: this.attemptDeadlineAtMs,
+      nowMs: this.nowMs,
+      isAttemptCurrent: () => attemptId === this.reconnectAttemptId
+    };
+  }
+
+  private createCandidateSession(
+    creds: MicroCTraderCredentials,
+    attemptId: number
+  ): MicroLiveMarketSession {
+    this.candidateSessionsCreatedForTests += 1;
+    if (this.sessionFactoryForTests) {
+      return this.sessionFactoryForTests(creds);
+    }
+    return new MicroLiveMarketSession({
+      store: this.store,
+      credentials: creds,
+      nowMs: this.nowMs,
+      resolveConnectLifecycle: () => this.buildConnectLifecycle(attemptId)
+    });
+  }
+
+  private async awaitPhase<T>(
+    phase: ResearchReconnectPhase,
+    body: Promise<T>,
+    attemptId: number,
+    onTimeout?: () => void | Promise<void>
+  ): Promise<T> {
+    this.reconnectPhase = phase;
+    const deadline =
+      this.attemptDeadlineAtMs ??
+      this.nowMs() + this.reconnectAttemptTimeoutMs;
+    return raceUntilDeadline({
+      body,
+      deadlineAtMs: deadline,
+      attemptId,
+      getPhase: () => phase,
+      nowMs: this.nowMs,
+      onTimeout
+    });
+  }
+
+  private async bestEffortDisconnectSession(
+    session: MicroLiveMarketSession | null,
+    timeoutMs = GH_FAST_RESEARCH_STOP_DISCONNECT_TIMEOUT_MS
+  ): Promise<void> {
+    if (!session) return;
+    try {
+      await raceUntilDeadline({
+        body: session.disconnect(),
+        deadlineAtMs: this.nowMs() + timeoutMs,
+        attemptId: this.reconnectAttemptId,
+        getPhase: () => this.reconnectPhase,
+        nowMs: this.nowMs,
+        onTimeout: () => {
+          /* abandon wait; disconnect may still complete later */
+        }
+      });
+    } catch {
+      /* best effort — including timeout */
+    }
+  }
+
+  private async cleanupCandidate(
+    candidate: MicroLiveMarketSession | null,
+    attemptId: number
+  ): Promise<void> {
+    if (!candidate) return;
+    if (this.session === candidate) this.session = null;
+    if (this.candidateSession === candidate) this.candidateSession = null;
+    // Invalidate so a late connect resolution cannot attach or finish.
+    if (attemptId === this.reconnectAttemptId) {
+      this.reconnectAttemptId += 1;
+    }
+    await this.bestEffortDisconnectSession(candidate);
+  }
+
   private async connectOnce(opts?: {
     fromReconnect?: boolean;
     attemptId?: number;
   }): Promise<void> {
     const fromReconnect = opts?.fromReconnect === true;
-    const attemptId = opts?.attemptId;
+    const attemptId = opts?.attemptId ?? this.reconnectAttemptId;
     const assertCurrentAttempt = (): void => {
-      if (
-        fromReconnect &&
-        attemptId != null &&
-        attemptId !== this.reconnectAttemptId
-      ) {
+      if (attemptId !== this.reconnectAttemptId) {
         throw new ResearchReconnectObsoleteError(attemptId);
       }
     };
-    const setPhase = (phase: ResearchReconnectPhase): void => {
-      if (fromReconnect) this.reconnectPhase = phase;
-    };
     const scheduleIfNeeded = (reason: ResearchReconnectReason) => {
-      // When called inside reconnect(), scheduleReconnect refuses in-flight and
-      // records pending for finally — or we throw so reconnect catch retries.
       if (fromReconnect) {
         this.pendingReconnectReason = reason;
         return;
@@ -453,16 +569,27 @@ export class GoldHunterFastResearchCaptureProcess {
         service: this.cloudRunService
       });
       scheduleIfNeeded("oauth_missing");
-      if (fromReconnect) throw new Error("RESEARCH_OAUTH_MISSING");
-      return;
+      throw Object.assign(new Error("RESEARCH_OAUTH_MISSING"), {
+        code: "oauth_missing"
+      });
     }
 
     try {
-      setPhase("VERIFYING_SCOPE");
-      const { proof, raw } = await this.verifyLiveBrokerScope(creds);
-      this.brokerPermissionProof = proof;
-      this.lastBrokerAuthRaw = raw;
+      const scoped = await this.awaitPhase(
+        "VERIFYING_SCOPE",
+        this.verifyLiveBrokerScope(creds),
+        attemptId
+      );
+      assertCurrentAttempt();
+      this.brokerPermissionProof = scoped.proof;
+      this.lastBrokerAuthRaw = scoped.raw;
     } catch (e) {
+      if (
+        e instanceof ResearchReconnectTimeoutError ||
+        e instanceof ResearchReconnectObsoleteError
+      ) {
+        throw e;
+      }
       this.campaignStatus = "SCOPE_REFUSED";
       this.brokerPermissionProof = null;
       microLog("MICRO_COLLECTOR_CONNECT_FAILED", {
@@ -471,28 +598,37 @@ export class GoldHunterFastResearchCaptureProcess {
         message: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)
       });
       scheduleIfNeeded("connect_failed");
-      if (fromReconnect) throw e instanceof Error ? e : new Error(String(e));
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+
+    if (this.hangConnectOnceForTests) {
+      // Handled by runBoundedConnectionAttempt before connectOnce.
+    }
+
+    if (this.skipSessionConnectForTests) {
+      this.reconnectPhase = "WAITING_FOR_FRESH_DATA";
       return;
     }
 
-    setPhase("CONNECTING_SESSION");
-    const candidateSession = new MicroLiveMarketSession({
-      store: this.store,
-      credentials: creds,
-      nowMs: this.nowMs
-    });
+    const candidateSession = this.createCandidateSession(creds, attemptId);
+    this.candidateSession = candidateSession;
 
     try {
-      if (this.hangConnectOnceForTests && fromReconnect) {
-        await new Promise<void>(() => {
-          /* hang forever for timeout test */
-        });
-      }
-      await candidateSession.connect();
+      await this.awaitPhase(
+        "CONNECTING_SESSION",
+        candidateSession.connect(),
+        attemptId,
+        () => {
+          void this.cleanupCandidate(candidateSession, attemptId);
+        }
+      );
       assertCurrentAttempt();
       if (!this.runtime) throw new Error("RESEARCH_CAPTURE_NOT_STARTED");
-      setPhase("ATTACHING");
+
+      this.reconnectPhase = "ATTACHING";
+      assertCurrentAttempt();
       this.session = candidateSession;
+      this.candidateSession = null;
       this.runtime.attachSession(this.session, this.lastBrokerAuthRaw);
       microLog("MICRO_COLLECTOR_CONNECTED", {
         service: this.cloudRunService,
@@ -501,41 +637,284 @@ export class GoldHunterFastResearchCaptureProcess {
         storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
         durableMode: "GCS"
       });
+      // Transport restored; feeds may still be absent (quiet/closed market).
+      this.reconnectPhase = "WAITING_FOR_FRESH_DATA";
       this.maybeActivateCampaign();
+      this.refreshFeedRestorePhase();
     } catch (e) {
       if (e instanceof ResearchReconnectObsoleteError) {
-        try {
-          await candidateSession.disconnect();
-        } catch {
-          /* best effort */
-        }
-        if (this.session === candidateSession) this.session = null;
+        await this.cleanupCandidate(candidateSession, attemptId);
         throw e;
       }
-      try {
-        await candidateSession.disconnect();
-      } catch {
-        /* best effort */
+      if (e instanceof ResearchReconnectTimeoutError) {
+        await this.cleanupCandidate(candidateSession, attemptId);
+        throw e;
       }
-      if (this.session === candidateSession) this.session = null;
+      await this.cleanupCandidate(candidateSession, attemptId);
       microLog("MICRO_COLLECTOR_CONNECT_FAILED", {
         service: this.cloudRunService,
         code: (e as { code?: string }).code ?? "transport_disconnected",
         message: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)
       });
       scheduleIfNeeded("connect_failed");
-      if (fromReconnect) throw e instanceof Error ? e : new Error(String(e));
+      throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
-  private async bestEffortDisconnectSession(): Promise<void> {
-    if (!this.session) return;
-    try {
-      await this.session.disconnect();
-    } catch {
-      /* best effort */
+  /**
+   * Shared bounded connection path for initial startup and reconnect.
+   * Always clears reconnectInFlight in finally; never awaits forever.
+   */
+  private async runBoundedConnectionAttempt(args: {
+    kind: "startup" | "reconnect";
+    reason?: ResearchReconnectReason;
+  }): Promise<boolean> {
+    if (this.stopping || !this.running) return false;
+    if (this.reconnectInFlight) return false;
+
+    const reason = args.reason ?? "connect_failed";
+    this.reconnectInFlight = true;
+    this.reconnectInFlightStartedAtMs = this.nowMs();
+    this.reconnectAttemptId += 1;
+    const attemptId = this.reconnectAttemptId;
+    this.reconnectEpoch += 1;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
-    this.session = null;
+    this.lastReconnectAttemptMs = this.nowMs();
+    this.pendingReconnectReason =
+      args.kind === "reconnect" ? reason : this.pendingReconnectReason;
+    this.attemptDeadlineAtMs =
+      this.nowMs() + this.reconnectAttemptTimeoutMs;
+    this.reconnectPhase =
+      args.kind === "reconnect" ? "DETACHING" : "VERIFYING_SCOPE";
+    this.lastReconnectStartedAtMs = this.nowMs();
+
+    if (args.kind === "reconnect") {
+      if (reason === "stale_feed") {
+        this.staleFeedReconnectCount += 1;
+        this.lastStaleFeedReconnectAttemptMs = this.nowMs();
+        const backoffMs = staleFeedBackoffMs(this.staleFeedBackoffIndex);
+        this.nextStaleReconnectEligibleAtMs =
+          this.lastStaleFeedReconnectAttemptMs + backoffMs;
+        microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+          code: "RESEARCH_STALE_FEED_RECONNECT_START",
+          spotAgeMs: this.runtime?.health().spotAgeMs ?? null,
+          depthAgeMs: this.runtime?.health().depthAgeMs ?? null,
+          hardStaleReconnectMs: this.hardStaleReconnectMs,
+          staleFeedReconnectCount: this.staleFeedReconnectCount,
+          staleFeedBackoffIndex: this.staleFeedBackoffIndex,
+          backoffMs,
+          reconnectAttemptId: attemptId
+        });
+      } else if (reason === "transport_disconnect") {
+        this.transportReconnectCount += 1;
+        microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+          code: "RESEARCH_TRANSPORT_RECONNECT_START",
+          transportReconnectCount: this.transportReconnectCount,
+          reconnectAttemptId: attemptId
+        });
+      }
+    }
+
+    let succeeded = false;
+    let scheduleFailureBackoff = false;
+    let obsoleteAttempt = false;
+    /** Phase where failure/timeout actually occurred (before FAILED/TIMED_OUT). */
+    let failurePhase: ResearchReconnectPhase = this.reconnectPhase;
+
+    try {
+      if (args.kind === "reconnect") {
+        this.runtime?.getBridge()?.noteReconnectStart(this.nowMs(), reason);
+        this.runtime?.detachSession();
+        const oldSession = this.session;
+        this.session = null;
+        if (oldSession) {
+          try {
+            await this.awaitPhase(
+              "DISCONNECTING_OLD_SESSION",
+              oldSession.disconnect(),
+              attemptId
+            );
+          } catch (e) {
+            // Hung disconnect: abandon old session. Continue only if budget remains.
+            if (
+              e instanceof ResearchReconnectTimeoutError &&
+              this.attemptDeadlineAtMs != null &&
+              remainingBudgetMs(this.attemptDeadlineAtMs, this.nowMs) > 0
+            ) {
+              microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+                code: "RESEARCH_OLD_SESSION_DISCONNECT_ABANDONED",
+                phase: e.phase,
+                reconnectAttemptId: attemptId
+              });
+            } else {
+              throw e;
+            }
+          }
+        }
+      }
+
+      if (this.reconnectHoldMsForTests > 0) {
+        await this.awaitPhase(
+          this.reconnectPhase,
+          new Promise<void>((r) =>
+            setTimeout(r, this.reconnectHoldMsForTests)
+          ),
+          attemptId
+        );
+      }
+      if (this.stopping) return false;
+
+      if (this.hangConnectOnceForTests) {
+        await this.awaitPhase(
+          "CONNECTING_SESSION",
+          new Promise<void>(() => {
+            /* hang forever for timeout test */
+          }),
+          attemptId,
+          () => {
+            void this.cleanupCandidate(this.candidateSession, attemptId);
+          }
+        );
+      }
+
+      await this.connectOnce({
+        fromReconnect: args.kind === "reconnect",
+        attemptId
+      });
+
+      // Genuine attach completed — not a failure path.
+      if (args.kind === "reconnect") {
+        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
+      }
+      this.lastReconnectFinishedAtMs = this.nowMs();
+      this.connectFailureBackoffIndex = 0;
+      succeeded = true;
+      this.refreshFeedRestorePhase();
+
+      if (args.kind === "reconnect" && reason === "stale_feed") {
+        this.staleFeedBackoffIndex = Math.min(
+          this.staleFeedBackoffIndex + 1,
+          2
+        );
+        this.nextStaleReconnectEligibleAtMs =
+          this.nowMs() + staleFeedBackoffMs(this.staleFeedBackoffIndex);
+      }
+    } catch (e) {
+      failurePhase = this.reconnectPhase;
+      if (e instanceof ResearchReconnectTimeoutError) {
+        failurePhase = e.phase;
+        this.reconnectPhase = "TIMED_OUT";
+        this.lastReconnectFailureAtMs = this.nowMs();
+        this.lastReconnectFailureCode = e.code;
+        this.lastReconnectFailurePhase = failurePhase;
+        await this.cleanupCandidate(this.candidateSession, attemptId);
+        await this.bestEffortDisconnectSession(this.session);
+        this.session = null;
+        try {
+          this.runtime
+            ?.getBridge()
+            ?.noteReconnectFailed(this.nowMs(), e.code, failurePhase);
+        } catch {
+          /* ignore */
+        }
+        this.connectFailureBackoffIndex += 1;
+        scheduleFailureBackoff = true;
+      } else if (e instanceof ResearchReconnectObsoleteError) {
+        obsoleteAttempt = true;
+        await this.cleanupCandidate(this.candidateSession, attemptId);
+      } else {
+        // Capture actual phase BEFORE flipping to FAILED.
+        this.lastReconnectFailureAtMs = this.nowMs();
+        this.lastReconnectFailureCode =
+          (e as { code?: string }).code ??
+          (e instanceof Error ? e.message.slice(0, 80) : "connect_failed");
+        this.lastReconnectFailurePhase = failurePhase;
+        this.reconnectPhase = "FAILED";
+        await this.cleanupCandidate(this.candidateSession, attemptId);
+        try {
+          this.runtime
+            ?.getBridge()
+            ?.noteReconnectFailed(
+              this.nowMs(),
+              this.lastReconnectFailureCode,
+              failurePhase
+            );
+        } catch {
+          /* ignore */
+        }
+        this.connectFailureBackoffIndex += 1;
+        scheduleFailureBackoff = true;
+      }
+    } finally {
+      this.reconnectInFlight = false;
+      this.reconnectInFlightStartedAtMs = null;
+      this.attemptDeadlineAtMs = null;
+      if (succeeded) {
+        // Prefer WAITING_FOR_FRESH_DATA until both feeds soft-fresh; else IDLE.
+        this.refreshFeedRestorePhase();
+        const phaseAfter = this.reconnectPhase as ResearchReconnectPhase;
+        if (
+          phaseAfter !== "WAITING_FOR_FRESH_DATA" &&
+          phaseAfter !== "IDLE"
+        ) {
+          this.reconnectPhase = "IDLE";
+        }
+      }
+      const pending = this.pendingReconnectReason;
+      this.pendingReconnectReason = null;
+      if (!this.stopping && this.running) {
+        if (scheduleFailureBackoff && !obsoleteAttempt) {
+          this.scheduleReconnect("connect_failed");
+        } else if (
+          succeeded &&
+          args.kind === "reconnect" &&
+          pending != null &&
+          pending !== "stale_feed" &&
+          pending !== reason
+        ) {
+          this.scheduleReconnect(pending, 500);
+        }
+      }
+    }
+    return succeeded;
+  }
+
+  /**
+   * After attach: WAITING_FOR_FRESH_DATA until both Spot+Depth soft-fresh,
+   * then IDLE. Does not hold reconnectInFlight (market may be closed).
+   */
+  private refreshFeedRestorePhase(): void {
+    if (
+      this.reconnectPhase !== "WAITING_FOR_FRESH_DATA" &&
+      this.reconnectPhase !== "COMPLETE" &&
+      this.reconnectPhase !== "IDLE" &&
+      this.reconnectPhase !== "ATTACHING"
+    ) {
+      return;
+    }
+    if (this.reconnectInFlight) return;
+    const h = this.runtime?.health();
+    if (!h || h.connectionState !== "CONNECTED") {
+      if (!this.reconnectInFlight && this.session == null) return;
+      this.reconnectPhase = "WAITING_FOR_FRESH_DATA";
+      return;
+    }
+    const spotOk =
+      h.spotAgeMs != null &&
+      h.spotAgeMs >= 0 &&
+      h.spotAgeMs <= this.softStaleMs;
+    const depthOk =
+      h.depthAgeMs != null &&
+      h.depthAgeMs >= 0 &&
+      h.depthAgeMs <= this.softStaleMs;
+    if (spotOk && depthOk) {
+      this.reconnectPhase = "IDLE";
+    } else {
+      this.reconnectPhase = "WAITING_FOR_FRESH_DATA";
+    }
   }
 
   private maybeActivateCampaign(): void {
@@ -627,168 +1006,13 @@ export class GoldHunterFastResearchCaptureProcess {
   private async reconnect(
     reason: ResearchReconnectReason = "connect_failed"
   ): Promise<void> {
-    if (this.stopping || !this.running) return;
-    if (this.reconnectInFlight) return;
-    this.reconnectInFlight = true;
-    this.reconnectInFlightStartedAtMs = this.nowMs();
-    this.reconnectAttemptId += 1;
-    const attemptId = this.reconnectAttemptId;
-    this.reconnectEpoch += 1;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.lastReconnectAttemptMs = this.nowMs();
-    this.pendingReconnectReason = reason;
-    this.reconnectPhase = "DETACHING";
-    this.lastReconnectStartedAtMs = this.nowMs();
-
-    if (reason === "stale_feed") {
-      this.staleFeedReconnectCount += 1;
-      this.lastStaleFeedReconnectAttemptMs = this.nowMs();
-      const backoffMs = staleFeedBackoffMs(this.staleFeedBackoffIndex);
-      this.nextStaleReconnectEligibleAtMs =
-        this.lastStaleFeedReconnectAttemptMs + backoffMs;
-      microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
-        code: "RESEARCH_STALE_FEED_RECONNECT_START",
-        spotAgeMs: this.runtime?.health().spotAgeMs ?? null,
-        depthAgeMs: this.runtime?.health().depthAgeMs ?? null,
-        hardStaleReconnectMs: this.hardStaleReconnectMs,
-        staleFeedReconnectCount: this.staleFeedReconnectCount,
-        staleFeedBackoffIndex: this.staleFeedBackoffIndex,
-        backoffMs,
-        reconnectAttemptId: attemptId
-      });
-    } else if (reason === "transport_disconnect") {
-      this.transportReconnectCount += 1;
-      microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
-        code: "RESEARCH_TRANSPORT_RECONNECT_START",
-        transportReconnectCount: this.transportReconnectCount,
-        reconnectAttemptId: attemptId
-      });
-    }
-
-    let succeeded = false;
-    let scheduleFailureBackoff = false;
-    let obsoleteAttempt = false;
-    try {
-      this.runtime?.getBridge()?.noteReconnectStart(this.nowMs(), reason);
-
-      this.runtime?.detachSession();
-      this.reconnectPhase = "DISCONNECTING_OLD_SESSION";
-      if (this.session) {
-        try {
-          await this.session.disconnect();
-        } catch {
-          /* best effort */
-        }
-      }
-      this.session = null;
-
-      if (this.reconnectHoldMsForTests > 0) {
-        await new Promise((r) => setTimeout(r, this.reconnectHoldMsForTests));
-      }
-      if (this.stopping) return;
-
-      await raceReconnectAttempt({
-        body: (async () => {
-          if (this.hangConnectOnceForTests) {
-            this.reconnectPhase = "CONNECTING_SESSION";
-            await new Promise<void>(() => {
-              /* hang forever for timeout test */
-            });
-          }
-          if (this.skipSessionConnectForTests) return;
-          await this.connectOnce({ fromReconnect: true, attemptId });
-        })(),
-        timeoutMs: this.reconnectAttemptTimeoutMs,
-        attemptId,
-        getPhase: () => this.reconnectPhase,
-        nowMs: () => this.nowMs()
-      });
-
-      this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
-      this.reconnectPhase = "COMPLETE";
-      this.lastReconnectFinishedAtMs = this.nowMs();
-      this.connectFailureBackoffIndex = 0;
-      succeeded = true;
-
-      if (reason === "stale_feed") {
-        // Next quiet/market-closed episode waits longer until fresh data resets.
-        this.staleFeedBackoffIndex = Math.min(
-          this.staleFeedBackoffIndex + 1,
-          2
-        );
-        this.nextStaleReconnectEligibleAtMs =
-          this.nowMs() + staleFeedBackoffMs(this.staleFeedBackoffIndex);
-      }
-    } catch (e) {
-      if (e instanceof ResearchReconnectTimeoutError) {
-        this.reconnectPhase = "TIMED_OUT";
-        this.reconnectAttemptId += 1;
-        this.lastReconnectFailureAtMs = this.nowMs();
-        this.lastReconnectFailureCode = e.code;
-        this.lastReconnectFailurePhase = e.phase;
-        await this.bestEffortDisconnectSession();
-        try {
-          this.runtime
-            ?.getBridge()
-            ?.noteReconnectFailed(this.nowMs(), e.code, e.phase);
-        } catch {
-          /* ignore */
-        }
-        this.connectFailureBackoffIndex += 1;
-        scheduleFailureBackoff = true;
-      } else if (e instanceof ResearchReconnectObsoleteError) {
-        obsoleteAttempt = true;
-        await this.bestEffortDisconnectSession();
-      } else {
-        this.reconnectPhase = "FAILED";
-        this.lastReconnectFailureAtMs = this.nowMs();
-        this.lastReconnectFailureCode =
-          (e as { code?: string }).code ??
-          (e instanceof Error ? e.message.slice(0, 80) : "connect_failed");
-        this.lastReconnectFailurePhase = this.reconnectPhase;
-        try {
-          this.runtime
-            ?.getBridge()
-            ?.noteReconnectFailed(
-              this.nowMs(),
-              this.lastReconnectFailureCode,
-              this.reconnectPhase
-            );
-        } catch {
-          /* ignore */
-        }
-        this.connectFailureBackoffIndex += 1;
-        scheduleFailureBackoff = true;
-      }
-    } finally {
-      this.reconnectInFlight = false;
-      this.reconnectInFlightStartedAtMs = null;
-      if (this.reconnectPhase === "COMPLETE") {
-        this.reconnectPhase = "IDLE";
-      }
-      const pending = this.pendingReconnectReason;
-      this.pendingReconnectReason = null;
-      if (this.stopping || !this.running) return;
-      if (scheduleFailureBackoff && !obsoleteAttempt) {
-        this.scheduleReconnect("connect_failed");
-      } else if (
-        succeeded &&
-        pending != null &&
-        pending !== "stale_feed" &&
-        pending !== reason
-      ) {
-        // Genuine transport disconnect requested while a reconnect was in flight.
-        this.scheduleReconnect(pending, 500);
-      }
-    }
+    await this.runBoundedConnectionAttempt({ kind: "reconnect", reason });
   }
 
   private startStaleWatchdog(): void {
     this.staleTimer = setInterval(() => {
       void this.checkStaleAndReconnect();
+      this.refreshFeedRestorePhase();
       this.maybeActivateCampaign();
     }, 5_000);
     if (typeof this.staleTimer.unref === "function") this.staleTimer.unref();
@@ -864,6 +1088,61 @@ export class GoldHunterFastResearchCaptureProcess {
     this.hangConnectOnceForTests = hang;
   }
 
+  /** @internal — inject MicroLiveMarketSession factory for hang/late-resolve tests. */
+  setSessionFactoryForTests(
+    factory:
+      | ((creds: MicroCTraderCredentials) => MicroLiveMarketSession)
+      | null
+  ): void {
+    this.sessionFactoryForTests = factory;
+  }
+
+  /** @internal — synthetic SCOPE_VIEW without REST. */
+  setBypassBrokerScopeForTests(bypass: boolean): void {
+    this.bypassBrokerScopeForTests = bypass;
+  }
+
+  /** @internal — force scope verify failure code. */
+  setScopeVerifyFailCodeForTests(code: string | null): void {
+    this.scopeVerifyFailCodeForTests = code;
+  }
+
+  /** @internal — install a fake active session (disconnect hang tests). */
+  setActiveSessionForTests(session: MicroLiveMarketSession | null): void {
+    this.session = session;
+  }
+
+  getCandidateSessionsCreatedForTests(): number {
+    return this.candidateSessionsCreatedForTests;
+  }
+
+  getActiveSessionForTests(): MicroLiveMarketSession | null {
+    return this.session;
+  }
+
+  getReconnectAttemptIdForTests(): number {
+    return this.reconnectAttemptId;
+  }
+
+  /** @internal — run bounded startup/reconnect attempt directly. */
+  runBoundedConnectionAttemptForTests(args: {
+    kind: "startup" | "reconnect";
+    reason?: ResearchReconnectReason;
+  }): Promise<boolean> {
+    this.running = true;
+    this.stopping = false;
+    return this.runBoundedConnectionAttempt(args);
+  }
+
+  /** @internal — drive WAITING_FOR_FRESH_DATA → IDLE. */
+  refreshFeedRestorePhaseForTests(): void {
+    this.refreshFeedRestorePhase();
+  }
+
+  setReconnectPhaseForTests(phase: ResearchReconnectPhase): void {
+    this.reconnectPhase = phase;
+  }
+
   /** @internal — shorten reconnect attempt deadline for unit tests. */
   setReconnectAttemptTimeoutMsForTests(ms: number): void {
     this.reconnectAttemptTimeoutMs = Math.max(1, ms);
@@ -885,6 +1164,23 @@ export class GoldHunterFastResearchCaptureProcess {
     this.stopping = false;
   }
 
+  /** @internal — start research runtime without broker connect (lifecycle tests). */
+  async prepareRuntimeForTests(collectDir: string): Promise<void> {
+    this.running = true;
+    this.stopping = false;
+    this.runtime = new GoldHunterFastResearchCaptureRuntime({
+      healthPort: undefined,
+      collectDir,
+      gcsBucket: this.gcsBucket,
+      runtimeSha: this.runtimeSha,
+      campaignMode: true,
+      heartbeatEveryMs: 60_000,
+      sessionPollEveryMs: 60_000,
+      campaignStartUtcDate: this.campaignStartUtcDate
+    });
+    await this.runtime.start();
+  }
+
   getReconnectTelemetryForTests(): {
     reconnectInFlight: boolean;
     reconnectPhase: ResearchReconnectPhase;
@@ -897,6 +1193,9 @@ export class GoldHunterFastResearchCaptureProcess {
     nextStaleReconnectEligibleAtMs: number | null;
     feedSoftStale: boolean;
     reconnectTimerPending: boolean;
+    lastReconnectFailureCode: string | null;
+    lastReconnectFailurePhase: ResearchReconnectPhase | null;
+    candidateSessionsCreated: number;
   } {
     return {
       reconnectInFlight: this.reconnectInFlight,
@@ -909,7 +1208,10 @@ export class GoldHunterFastResearchCaptureProcess {
       lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
       nextStaleReconnectEligibleAtMs: this.nextStaleReconnectEligibleAtMs,
       feedSoftStale: this.feedSoftStale,
-      reconnectTimerPending: this.reconnectTimer != null
+      reconnectTimerPending: this.reconnectTimer != null,
+      lastReconnectFailureCode: this.lastReconnectFailureCode,
+      lastReconnectFailurePhase: this.lastReconnectFailurePhase,
+      candidateSessionsCreated: this.candidateSessionsCreatedForTests
     };
   }
 
@@ -1222,14 +1524,18 @@ export class GoldHunterFastResearchCaptureProcess {
       await new Promise((r) => setTimeout(r, 50));
     }
     this.runtime?.detachSession();
-    if (this.session) {
-      try {
-        await this.session.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
+    const sess = this.session;
     this.session = null;
+    const cand = this.candidateSession;
+    this.candidateSession = null;
+    await this.bestEffortDisconnectSession(
+      sess,
+      GH_FAST_RESEARCH_STOP_DISCONNECT_TIMEOUT_MS
+    );
+    await this.bestEffortDisconnectSession(
+      cand,
+      GH_FAST_RESEARCH_STOP_DISCONNECT_TIMEOUT_MS
+    );
     if (this.runtime) await this.runtime.stop();
     this.runtime = null;
     if (this.healthServer) {
