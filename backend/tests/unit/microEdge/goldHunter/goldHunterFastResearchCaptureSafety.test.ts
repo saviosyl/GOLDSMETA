@@ -34,16 +34,28 @@ import type { MicroLiveMarketSession } from "../../../../src/services/microEdge/
 import type { MicroLiveSessionState } from "../../../../src/services/microEdge/marketData/liveSession";
 
 async function readGzJsonl(dir: string): Promise<unknown[]> {
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".ndjson.gz"))
-    .sort();
   const rows: unknown[] = [];
-  for (const file of files) {
-    const stream = createReadStream(join(dir, file)).pipe(createGunzip());
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      rows.push(JSON.parse(line));
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (!existsSync(cur)) continue;
+    for (const name of readdirSync(cur)) {
+      const p = join(cur, name);
+      if (name.endsWith(".ndjson.gz")) {
+        const stream = createReadStream(p).pipe(createGunzip());
+        const rl = createInterface({ input: stream, crlfDelay: Infinity });
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+          rows.push(JSON.parse(line));
+        }
+      } else {
+        try {
+          const st = await import("node:fs").then((m) => m.statSync(p));
+          if (st.isDirectory()) stack.push(p);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
   return rows;
@@ -383,9 +395,11 @@ describe("research ingest bridge + durable sink", () => {
     expect(sinkStats.gcsPrefix).not.toContain(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX);
     expect(sinkStats.localDir).toContain("research");
     expect(sinkStats.localDir).not.toContain("live-shadow");
-    expect(existsSync(join(dir, "chunk-00000.ndjson.gz.manifest.json"))).toBe(
-      true
-    );
+    const dateDirs = readdirSync(dir).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    expect(dateDirs.length).toBeGreaterThan(0);
+    expect(
+      existsSync(join(dir, dateDirs[0]!, "chunk-00000.ndjson.gz.manifest.json"))
+    ).toBe(true);
   });
 
   it("resync clears book without fabricating trades", async () => {
@@ -557,7 +571,11 @@ describe("research ingest bridge + durable sink", () => {
     expect(st.healthWarning).toMatch(/DATA_INTEGRITY_FAILED/);
     // Already-written evidence retained
     expect(st.chunksWritten).toBeGreaterThan(0);
-    expect(existsSync(join(dir, "chunk-00000.ndjson.gz"))).toBe(true);
+    const dateDirs = readdirSync(dir).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    expect(dateDirs.length).toBeGreaterThan(0);
+    expect(existsSync(join(dir, dateDirs[0]!, "chunk-00000.ndjson.gz"))).toBe(
+      true
+    );
 
     const bridge = new ResearchIngestBridge({
       localDir: join(dir, "bridge"),
@@ -1001,5 +1019,129 @@ describe("Phase 2B research process startup gate", () => {
       ).ok
     ).toBe(false);
     expect(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX).toContain("live-shadow");
+  });
+});
+
+describe("UTC date rollover + captureDayIndex", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "gh-rollover-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("captureDayIndexFromDates advances by calendar day", async () => {
+    const { captureDayIndexFromDates, utcDateFromMs } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-14")).toBe(1);
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-15")).toBe(2);
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-16")).toBe(3);
+    expect(utcDateFromMs(Date.parse("2026-08-14T23:59:59.000Z"))).toBe(
+      "2026-08-14"
+    );
+    expect(utcDateFromMs(Date.parse("2026-08-15T00:00:01.000Z"))).toBe(
+      "2026-08-15"
+    );
+  });
+
+  it("does not split a chunk across UTC dates and writes per-day summaries", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const observed: Array<{ date: string; dayIndex: number }> = [];
+    const sink = new ResearchDurableSink({
+      runId: "rollover_test",
+      datasetId: "ds_rollover",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 10,
+      maxQueue: 50,
+      campaignMode: false,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      onCaptureDateObserved: (date, dayIndex) => {
+        observed.push({ date, dayIndex });
+      }
+    });
+
+    const tDay1 = Date.parse("2026-08-14T22:00:00.000Z");
+    const tDay2 = Date.parse("2026-08-15T01:00:00.000Z");
+    for (let i = 0; i < 3; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = tDay1 + i * 1000;
+      r.eventKind = "SPOT";
+      r.market = {
+        kind: "SPOT",
+        bid: 1,
+        ask: 1.1,
+        spread: 0.1,
+        brokerTimestampMs: null
+      };
+      sink.enqueue(r);
+    }
+    // Cross UTC midnight — must seal day1 before accepting day2 in same chunk.
+    for (let i = 0; i < 3; i++) {
+      const r = fakeRecord(100 + i);
+      r.t = tDay2 + i * 1000;
+      r.eventKind = "DEPTH";
+      r.market = {
+        kind: "DEPTH",
+        bestBid: 1,
+        bestAsk: 1.1,
+        depthAvailable: true,
+        crossed: false,
+        bookGeneration: 1,
+        brokerTimestampMs: null
+      };
+      sink.enqueue(r);
+    }
+    await sink.finalizeCurrentDay();
+
+    expect(observed.map((o) => o.date)).toEqual(["2026-08-14", "2026-08-15"]);
+    expect(observed.map((o) => o.dayIndex)).toEqual([1, 2]);
+    expect(existsSync(join(dir, "2026-08-14"))).toBe(true);
+    expect(existsSync(join(dir, "2026-08-15"))).toBe(true);
+    expect(existsSync(join(dir, "2026-08-14", "CAPTURE_DAY_SUMMARY.json"))).toBe(
+      true
+    );
+    expect(existsSync(join(dir, "2026-08-15", "CAPTURE_DAY_SUMMARY.json"))).toBe(
+      true
+    );
+
+    const sum1 = JSON.parse(
+      readFileSync(join(dir, "2026-08-14", "CAPTURE_DAY_SUMMARY.json"), "utf8")
+    );
+    const sum2 = JSON.parse(
+      readFileSync(join(dir, "2026-08-15", "CAPTURE_DAY_SUMMARY.json"), "utf8")
+    );
+    expect(sum1.captureDayIndex).toBe(1);
+    expect(sum2.captureDayIndex).toBe(2);
+    expect(sum1.spotEventCount).toBe(3);
+    expect(sum2.depthEventCount).toBe(3);
+    expect(sum1.validatedIndependentDays).toBe(0);
+    expect(sum2.validatedIndependentDays).toBe(0);
+    expect(typeof sum1.campaignDayEligibleForLaterValidation).toBe("boolean");
+    expect(sum1.brokerOrders).toBe(0);
+    expect(sum1.shadowOrders).toBe(0);
+    expect(sum1.executionAdapter).toBe("NONE");
+
+    // No chunk mixes dates
+    for (const m of sink.manifests) {
+      const dates = new Set(
+        // reconstruct from start/end only — same UTC date required
+        [m.startTs, m.endTs].map((t) =>
+          new Date(t).toISOString().slice(0, 10)
+        )
+      );
+      expect(dates.size).toBe(1);
+      expect(m.captureUtcDate).toBe([...dates][0]);
+    }
+    expect(sink.stats().gcsPrefix).toContain("/2026-08-15");
+    expect(sink.stats().gcsPrefix).not.toContain("live-shadow");
   });
 });

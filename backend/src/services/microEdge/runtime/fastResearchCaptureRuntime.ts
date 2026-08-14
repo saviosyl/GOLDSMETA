@@ -53,6 +53,9 @@ export type FastResearchCaptureRuntimeOptions = {
   freshnessLimitMs?: number;
   /** Campaign mode requires GCS durable persistence for campaignValid. */
   campaignMode?: boolean;
+  /** UTC YYYY-MM-DD when the continuous campaign started (Day 1). */
+  campaignStartUtcDate?: string;
+  onCaptureDateObserved?: (date: string, dayIndex: number) => void;
 };
 
 export class GoldHunterFastResearchCaptureRuntime {
@@ -132,7 +135,9 @@ export class GoldHunterFastResearchCaptureRuntime {
       freshnessLimitMs:
         this.opts.freshnessLimitMs ?? GH_FAST_RESEARCH_FRESHNESS_MS,
       campaignMode,
-      scopeVerified: false
+      scopeVerified: false,
+      campaignStartUtcDate: this.opts.campaignStartUtcDate,
+      onCaptureDateObserved: this.opts.onCaptureDateObserved
     });
     this.bridge.setConnectionState("DISCONNECTED", "runtime_start");
     this.startHeartbeat();

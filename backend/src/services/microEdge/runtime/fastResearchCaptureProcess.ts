@@ -37,6 +37,10 @@ import {
   type ResearchCaptureHealth
 } from "../goldHunter/fast/research/researchTypes";
 import { hashGhFastConfig, frozenGhFastSoakConfig } from "../goldHunter/fast/frozenConfig";
+import {
+  captureDayIndexFromDates,
+  utcDateFromMs
+} from "../goldHunter/fast/research/researchDurableSink";
 
 export type ResearchBrokerPermissionProof = {
   permissionScope: "SCOPE_VIEW";
@@ -60,6 +64,10 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   campaignMode: true;
   campaignStatus: ResearchCampaignStatus;
   captureDayIndex: number | null;
+  /** Offline qualification count — not advanced by calendar rollover alone. */
+  validatedIndependentDays: number;
+  campaignStartUtcDate: string | null;
+  currentCaptureUtcDate: string | null;
   day1StartedAt: string | null;
   liveCaptureReady: boolean;
   brokerPermissionProof: ResearchBrokerPermissionProof | null;
@@ -156,6 +164,9 @@ export class GoldHunterFastResearchCaptureProcess {
   private campaignStatus: ResearchCampaignStatus = "STARTING";
   private day1StartedAt: string | null = null;
   private captureDayIndex: number | null = null;
+  private validatedIndependentDays = 0;
+  private campaignStartUtcDate: string;
+  private currentCaptureUtcDate: string | null = null;
   private readonly gcsBucket: string;
   private readonly researchConfigSha: string;
   private readonly runtimeSha: string | null;
@@ -190,6 +201,9 @@ export class GoldHunterFastResearchCaptureProcess {
     this.staleReconnectMs = Number(
       process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ?? 20_000
     );
+    this.campaignStartUtcDate =
+      (process.env.GOLD_HUNTER_FAST_CAMPAIGN_START_DATE ?? "").trim() ||
+      utcDateFromMs(this.nowMs());
     void createMicroTokenVault();
   }
 
@@ -218,7 +232,13 @@ export class GoldHunterFastResearchCaptureProcess {
       runtimeSha: this.runtimeSha,
       campaignMode: true,
       heartbeatEveryMs: 1000,
-      sessionPollEveryMs: 1000
+      sessionPollEveryMs: 1000,
+      campaignStartUtcDate: this.campaignStartUtcDate,
+      onCaptureDateObserved: (date, dayIndex) => {
+        this.currentCaptureUtcDate = date;
+        this.captureDayIndex = dayIndex;
+        // validatedIndependentDays is NOT advanced here — offline qualification only.
+      }
     });
     await this.runtime.start();
 
@@ -340,19 +360,43 @@ export class GoldHunterFastResearchCaptureProcess {
     if (!this.runtime) return;
     const h = this.runtime.health();
     const gate = evaluateLiveCaptureStartupGate(h, this.brokerPermissionProof);
+    const today = utcDateFromMs(this.nowMs());
+    // Keep day index aligned with calendar even before first persisted row.
+    if (this.captureDayIndex == null) {
+      this.captureDayIndex = captureDayIndexFromDates(
+        this.campaignStartUtcDate,
+        today
+      );
+      this.currentCaptureUtcDate = today;
+    }
     if (gate.ok) {
       if (this.campaignStatus !== "CAPTURE_CAMPAIGN_ACTIVE") {
         this.campaignStatus = "CAPTURE_CAMPAIGN_ACTIVE";
-        this.captureDayIndex = 1;
-        this.day1StartedAt = new Date(this.nowMs()).toISOString();
+        this.captureDayIndex = captureDayIndexFromDates(
+          this.campaignStartUtcDate,
+          this.currentCaptureUtcDate ?? today
+        );
+        this.day1StartedAt =
+          this.day1StartedAt ??
+          `${this.campaignStartUtcDate}T00:00:00.000Z`;
         microLog("MICRO_COLLECTOR_CONNECTED", {
           code: "CAPTURE_CAMPAIGN_ACTIVE",
-          day: 1,
+          day: this.captureDayIndex,
+          campaignStartUtcDate: this.campaignStartUtcDate,
+          currentCaptureUtcDate: this.currentCaptureUtcDate ?? today,
           day1StartedAt: this.day1StartedAt,
+          validatedIndependentDays: this.validatedIndependentDays,
           runId: h.runId,
           datasetId: h.datasetId,
-          note: "Day 1 started — not yet a validated independent research day"
+          note: "captureDayIndex is calendar progression — not validatedIndependentDays"
         });
+      } else {
+        this.captureDayIndex = captureDayIndexFromDates(
+          this.campaignStartUtcDate,
+          this.currentCaptureUtcDate ??
+            this.runtime.getBridge()?.getCurrentCaptureUtcDate() ??
+            today
+        );
       }
     } else if (h.durableMode !== "GCS") {
       this.campaignStatus = "GCS_REQUIRED";
@@ -495,6 +539,12 @@ export class GoldHunterFastResearchCaptureProcess {
       campaignMode: true,
       campaignStatus: this.campaignStatus,
       captureDayIndex: this.captureDayIndex,
+      validatedIndependentDays: this.validatedIndependentDays,
+      campaignStartUtcDate: this.campaignStartUtcDate,
+      currentCaptureUtcDate:
+        this.currentCaptureUtcDate ??
+        this.runtime?.getBridge()?.getCurrentCaptureUtcDate() ??
+        null,
       day1StartedAt: this.day1StartedAt,
       liveCaptureReady: gate.ok,
       brokerPermissionProof: this.brokerPermissionProof,
@@ -504,7 +554,7 @@ export class GoldHunterFastResearchCaptureProcess {
       earliestAnalysisCheckpointDays: 5,
       preferredCaptureDays: "10+",
       disclaimer:
-        "RESEARCH CAPTURE ONLY — continuous market observation. No trading, no shadow orders, no broker orders. Day N active ≠ validated independent research day."
+        "RESEARCH CAPTURE ONLY — continuous market observation. No trading, no shadow orders, no broker orders. captureDayIndex ≠ validatedIndependentDays."
     };
   }
 
