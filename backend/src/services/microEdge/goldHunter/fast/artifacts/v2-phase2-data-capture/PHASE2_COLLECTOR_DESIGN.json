@@ -1,0 +1,185 @@
+{
+  "title": "GOLD_HUNTER FAST — Phase 2 Data-Capture-Only Collector Design",
+  "status": "DESIGN_ONLY_NOT_DEPLOYED",
+  "deployed": false,
+  "tradingLogicCreated": false,
+  "identity": {
+    "permissionScope": "SCOPE_VIEW",
+    "brokerOrders": 0,
+    "brokerRequests": 0,
+    "shadowOrders": 0,
+    "mutationSurface": "NONE",
+    "executionAdapter": null,
+    "openShadowTrade": false,
+    "forbidEnterExitPnl": true
+  },
+  "purpose": "Collect independent clean Spot+Depth+candidate telemetry periods for genuine OOS entry-edge research",
+  "architecture": {
+    "serviceNameProposed": "gold-hunter-fast-research-collector",
+    "separateFrom": [
+      "gold-hunter-fast-shadow",
+      "Core AutoTrade",
+      "quote-worker"
+    ],
+    "mustNotReuseAsIs": [
+      "GoldHunterFastLiveBridge (constructs ShadowExecutionAdapter / shadow trades)",
+      "GhFastEngine trading state machine that opens positions",
+      "ShadowExecutionAdapter"
+    ],
+    "reuseReadOnly": [
+      "InMemoryDepthBook",
+      "FastFeatureEngine",
+      "evaluateSetupsDetailed",
+      "frozenGhFastSoakConfig",
+      "eventQueue patterns",
+      "durableSink patterns (new GCS prefix)",
+      "SCOPE_VIEW token/account helpers"
+    ],
+    "proposedFiles": [
+      "backend/src/services/microEdge/goldHunter/fast/research/researchTypes.ts",
+      "backend/src/services/microEdge/goldHunter/fast/research/nullExecutionGuard.ts",
+      "backend/src/services/microEdge/goldHunter/fast/research/researchFeaturePipeline.ts",
+      "backend/src/services/microEdge/goldHunter/fast/research/researchIngestBridge.ts",
+      "backend/src/services/microEdge/goldHunter/fast/research/researchCollector.ts",
+      "backend/src/services/microEdge/goldHunter/fast/research/researchDurableSink.ts",
+      "backend/src/services/microEdge/runtime/fastResearchCaptureRuntime.ts",
+      "backend/Dockerfile.gold-hunter-fast-research",
+      "backend/tests/unit/microEdge/goldHunter/goldHunterFastResearchCaptureSafety.test.ts"
+    ]
+  },
+  "captureFields": {
+    "transport": [
+      "receiveSeq",
+      "brokerTimestampMs",
+      "rawCallbackArrivalMs",
+      "bridgeEnqueueMs",
+      "engineProcessMs"
+    ],
+    "subscriptionSession": [
+      "spotSubscribed",
+      "depthSubscribed",
+      "wsConnectionState",
+      "disconnectTs",
+      "reconnectStartTs",
+      "reconnectEndTs",
+      "resubscribeState"
+    ],
+    "queueLag": ["queueDepth", "enqueueToProcessLatencyMs", "eventLoopLagMs"],
+    "market": [
+      "SPOT",
+      "DEPTH",
+      "bid",
+      "ask",
+      "spread",
+      "depthAvailability",
+      "crossed",
+      "bookGeneration"
+    ],
+    "specialists": [
+      "eligible",
+      "candidateSide",
+      "rawQuality",
+      "failedConditions",
+      "selected"
+    ],
+    "features": [
+      "midVel250",
+      "midVel500",
+      "midVel1s",
+      "midVel2s",
+      "midVel3s",
+      "acceleration",
+      "efficiency1s",
+      "efficiency3s",
+      "signedImbalance1s",
+      "depthImbalance",
+      "weightedImbalance",
+      "addRemoveRates",
+      "updateRate1s",
+      "touches",
+      "distHighLow"
+    ],
+    "forbidden": [
+      "openShadowTrade",
+      "ENTER",
+      "EXIT",
+      "tradeExit",
+      "brokerRequestId",
+      "brokerOrderId",
+      "pnl"
+    ]
+  },
+  "healthFields": [
+    "serviceHealthy",
+    "spotSubscribed",
+    "depthSubscribed",
+    "spotAgeMs",
+    "depthAgeMs",
+    "eventsReceived",
+    "eventsDropped",
+    "queueDepth",
+    "queueLatencyP95",
+    "eventLoopLagP95",
+    "feedGapCount",
+    "reconnectCount",
+    "resyncCount",
+    "bookCrossedCount",
+    "candidateA",
+    "candidateB",
+    "candidateC",
+    "brokerRequests",
+    "brokerOrders",
+    "shadowOrders",
+    "captureStart",
+    "captureDuration",
+    "runId",
+    "configSha256",
+    "runtimeSha",
+    "schemaVersion"
+  ],
+  "campaign": {
+    "minSeparateTradingDays": 5,
+    "preferSeparateTradingDays": 10,
+    "cover": [
+      "London morning",
+      "London/NY overlap",
+      "NY session",
+      "quiet periods",
+      "volatile periods"
+    ],
+    "noTuningDuringCollection": true,
+    "freezeTelemetrySchema": true
+  },
+  "storage": {
+    "local": ".gold-hunter-data/fast-research-capture/<runId>/",
+    "gcsPrefix": "gold-hunter-fast/research-capture/<runId>/<YYYY-MM-DD>/",
+    "doNotWriteTo": "gold-hunter-fast/live-shadow/",
+    "estimatedCompressedPerDayMiB": [40, 80],
+    "estimatedTenDayGiB": [0.4, 2.0],
+    "retentionDaysHot": 90
+  },
+  "safetyProofPlan": [
+    "no import/construction of ShadowExecutionAdapter",
+    "boot asserts SCOPE_VIEW + mutationSurface NONE + brokerExecutionEnabled false",
+    "health always brokerRequests/Orders/shadowOrders = 0",
+    "chunks contain zero ENTER/EXIT/tradeExit",
+    "unit tests refuse trading adapter injection"
+  ],
+  "testsRequired": [
+    "researchCaptureSafety.test.ts",
+    "health zeros",
+    "SCOPE_VIEW fail-closed",
+    "chunk schema round-trip",
+    "resync/gap without trades",
+    "A/B/C raw telemetry always",
+    "timestamp monotonicity",
+    "no ENTER/EXIT emission"
+  ],
+  "confirmation": {
+    "collectorDeployed": false,
+    "cloudRunStarted": false,
+    "shadowOrdersPlaced": false,
+    "brokerOrdersPlaced": false,
+    "strategyRetuned": false
+  }
+}
