@@ -120,10 +120,16 @@ import {
 } from "./armedCandidateStore";
 import { isFastAutoTradeV1Enabled, loadFastAutoTradeConfig } from "./fastAutoTrade/config";
 import { evaluateFastAutoTrade } from "./fastAutoTrade/engine";
-import { mapDecisionToFastInput } from "./fastAutoTrade/fromDecision";
+import { buildFastAutoTradeInput } from "./fastAutoTrade/qualificationInput";
 import { evaluateFastAutoTradeDemoLock } from "./fastAutoTrade/demoLock";
 import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
 import type { FastAutoTradeDecision } from "./fastAutoTrade/types";
+import { setupIdentityKey } from "./fastAutoTrade/stateMachine";
+import {
+  persistFastReentryEntry,
+  persistFastReentryExit
+} from "./fastAutoTrade/reentryStateStore";
+import { getPositionLifecycle } from "./positionLifecycleStore";
 
 function buildSha(): string | null {
   return (process.env.GOLD_META_COMMIT_SHA || process.env.VITE_GOLD_META_COMMIT_SHA || "").trim() || null;
@@ -778,6 +784,7 @@ export async function processDecisionForQualification(args: {
 
   // --- Internal armed-candidate lifecycle (order states only; no UI) ---
   let armedTrade: ArmedCandidate | null = null;
+  let fastDecision: FastAutoTradeDecision | null = null;
   if (orderStates) {
     const existingArmed = await getArmedCandidate(uid).catch(() => null);
     const alreadyCountedArmed = existingArmed
@@ -788,9 +795,9 @@ export async function processDecisionForQualification(args: {
     const oppConfig = loadDemoOpportunityConfig();
     const fastEnabled = isFastAutoTradeV1Enabled();
     const fastCfg = fastEnabled ? loadFastAutoTradeConfig() : null;
-    let fastDecision: FastAutoTradeDecision | null = null;
     if (fastEnabled && fastCfg) {
-      const fastInput = mapDecisionToFastInput({
+      const fastInput = await buildFastAutoTradeInput({
+        uid,
         decision: d,
         nowMs: Date.now(),
         bid: quote?.bid ?? null,
@@ -2169,6 +2176,15 @@ export async function processDecisionForQualification(args: {
         logger.info("AutoTrade order rejected", { uid, signalId, direction });
         return { handled: true, message: "order_rejected" };
       }
+      if (fastSubmitCfg && fastDecision?.identity && (fastDecision.action === "BUY" || fastDecision.action === "SELL")) {
+        await persistFastReentryEntry(uid, {
+          lastSetup: fastDecision.identity,
+          lastSignalKey: setupIdentityKey(fastDecision.identity),
+          currentCandleKey: fastDecision.identity.triggerCandle,
+          lastAction: fastDecision.action,
+          lastActionAtMs: Date.now()
+        }).catch(() => undefined);
+      }
 
       if (armedTrade) {
         await saveArmedCandidate(
@@ -2477,6 +2493,7 @@ export async function markQualificationTradeClosed(args: {
   brokerPositionId?: string | null;
   brokerOrderId?: string | null;
   closedAt?: string | null;
+  strategyId?: string | null;
 }): Promise<QualificationPublicView> {
   const setup = await loadSetupSnapshot(args.uid);
   if (!setup.accountId) throw Object.assign(new Error("NO_ACCOUNT"), { code: "NO_ACCOUNT" });
@@ -2562,15 +2579,31 @@ export async function markQualificationTradeClosed(args: {
   if (closed && closed.status === "CLOSED") {
     // markTradeClosed is idempotent via countedTradeIds — safe on repair.
     if (!alreadyFullyCounted || prior?.pnl == null) {
+      let strategyId = args.strategyId ?? null;
+      if (!strategyId) {
+        try {
+          const life = await getPositionLifecycle(args.uid, args.correlationId);
+          strategyId = life?.strategyId ?? null;
+        } catch {
+          strategyId = null;
+        }
+      }
       try {
         await markTradeClosed({
           uid: args.uid,
           environment: "demo",
           tradeId: args.correlationId,
-          pnl: confirmedPnl
+          pnl: confirmedPnl,
+          strategyId
         });
       } catch {
         /* ignore */
+      }
+      if (strategyId === FAST_AUTOTRADE_STRATEGY_ID) {
+        const exitAt = Date.parse(now);
+        await persistFastReentryExit(args.uid, {
+          lastExitAtMs: Number.isFinite(exitAt) ? exitAt : Date.now()
+        }).catch(() => undefined);
       }
     }
     try {

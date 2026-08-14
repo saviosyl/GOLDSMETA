@@ -1,6 +1,7 @@
 /**
  * Periodic FAST_AUTOTRADE_V1 scan so evaluation is not limited to 15m decisions.
- * Reuses processDecisionForQualification with the latest stored decision + live quote.
+ * Latest 3m/5m/15m DecisionRecord is context only. processDecisionForQualification
+ * overlays the freshest completed 1m candle (+ prior 1m when available).
  */
 
 import { createStore } from "../../../storage/createStore";

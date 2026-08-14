@@ -535,7 +535,8 @@ async function closeLifecycleConfirmed(args: {
       closePrice: args.closePrice,
       closeReason: reason,
       brokerDealId: args.brokerDealId,
-      closedAt
+      closedAt,
+      strategyId: doc.strategyId ?? null
     });
   } catch {
     /* qualification close best-effort */

@@ -72,13 +72,19 @@ export function mapDecisionToFastInput(args: {
   riskLimitBreached?: boolean;
   sessionPlanState?: string | null;
   reentry?: FastReentryContext;
+  /** Override decision OHLC with a completed 1m candle when available. */
+  ohlcv?: FastOhlc | null;
+  priorOhlcv?: FastOhlc | null;
+  timeframe?: string | null;
 }): FastAutoTradeInput {
   const d = args.decision;
   const ms = d.marketStructure;
+  const mappedOhlcv = args.ohlcv !== undefined ? args.ohlcv : ohlcFrom(d);
   const price =
     args.bid != null && args.ask != null
       ? (args.bid + args.ask) / 2
-      : d.lastKnownPrice ??
+      : mappedOhlcv?.close ??
+        d.lastKnownPrice ??
         d.ohlcv?.close ??
         d.entry?.price ??
         0;
@@ -92,9 +98,9 @@ export function mapDecisionToFastInput(args: {
     quoteAgeSeconds: args.quoteAgeSeconds ?? null,
     quoteStale: Boolean(args.quoteStale),
     marketStatus: args.marketStatus ?? null,
-    timeframe: d.timeframe ?? null,
-    ohlcv: ohlcFrom(d),
-    priorOhlcv: null,
+    timeframe: args.timeframe !== undefined ? args.timeframe : (d.timeframe ?? null),
+    ohlcv: mappedOhlcv,
+    priorOhlcv: args.priorOhlcv !== undefined ? args.priorOhlcv : null,
     trendDirection: asBias(ms?.trend ?? d.higherTimeframeBias),
     trendStrength: ms?.trendStrength ?? null,
     htfBias: asBias(d.higherTimeframeBias),

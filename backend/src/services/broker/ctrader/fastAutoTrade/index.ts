@@ -35,6 +35,25 @@ export {
 } from "./demoLock";
 export { mapDecisionToFastInput } from "./fromDecision";
 export {
+  buildFastAutoTradeInput,
+  loadFastOneMinuteMarket,
+  ohlcFromTrendbar,
+  oneMinuteMarketFromBars
+} from "./qualificationInput";
+export {
+  filterCompletedM1Bars,
+  loadCompletedM1BarsForFastAutoTrade,
+  useCompletedM1LoaderForTests
+} from "./completedM1Candles";
+export {
+  loadFastReentryState,
+  persistFastReentryEntry,
+  persistFastReentryExit,
+  resetFastReentryMemoryStore,
+  saveFastReentryState,
+  useFastReentryMemoryStore
+} from "./reentryStateStore";
+export {
   isPendingStateStuck,
   nextLifecycleState,
   setupIdentityKey

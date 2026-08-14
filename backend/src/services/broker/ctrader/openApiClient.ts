@@ -213,6 +213,7 @@ export type TrendbarCandle = {
 
 /** ProtoOATrendbarPeriod numeric values used by Spotware. */
 export const TRENDBAR_PERIOD = {
+  M1: 1,
   M5: 5,
   M15: 7,
   H1: 9,
@@ -1559,13 +1560,15 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
       const count = Math.min(Math.max(args.count ?? 120, 1), 300);
       const toTimestamp = Date.now();
       const periodMs =
-        args.period === "M5"
-          ? 5 * 60_000
-          : args.period === "M15"
-            ? 15 * 60_000
-            : args.period === "H1"
-              ? 60 * 60_000
-              : 4 * 60 * 60_000;
+        args.period === "M1"
+          ? 60_000
+          : args.period === "M5"
+            ? 5 * 60_000
+            : args.period === "M15"
+              ? 15 * 60_000
+              : args.period === "H1"
+                ? 60 * 60_000
+                : 4 * 60 * 60_000;
       // Tight window: enough bars + small buffer, still inside Spotware limits.
       const windowMs = Math.min(
         periodMs * (count + 20),
@@ -1977,13 +1980,15 @@ export function createMockOpenApiClient(opts?: {
     async fetchTrendbars(args) {
       const count = Math.min(Math.max(args.count ?? 40, 1), 200);
       const stepSec =
-        args.period === "M5"
-          ? 300
-          : args.period === "M15"
-            ? 900
-            : args.period === "H1"
-              ? 3600
-              : 14400;
+        args.period === "M1"
+          ? 60
+          : args.period === "M5"
+            ? 300
+            : args.period === "M15"
+              ? 900
+              : args.period === "H1"
+                ? 3600
+                : 14400;
       const now = Math.floor(Date.now() / 1000);
       const base = 2350;
       const bars: TrendbarCandle[] = [];
