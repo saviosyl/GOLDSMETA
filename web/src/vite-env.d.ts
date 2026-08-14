@@ -23,6 +23,10 @@ interface ImportMetaEnv {
   readonly VITE_GOLD_HUNTER_FAST_HEALTH_URL?: string;
   /** Set "true" for noindex/nofollow FAST live-shadow preview deploys. */
   readonly VITE_GOLD_HUNTER_FAST_PREVIEW?: string;
+  /** Isolated gold-hunter-fast-research-collector health URL. */
+  readonly VITE_GOLD_HUNTER_FAST_RESEARCH_HEALTH_URL?: string;
+  /** Set "true" for noindex research-monitor preview deploys. */
+  readonly VITE_GOLD_HUNTER_FAST_RESEARCH_PREVIEW?: string;
 }
 
 interface ImportMeta {

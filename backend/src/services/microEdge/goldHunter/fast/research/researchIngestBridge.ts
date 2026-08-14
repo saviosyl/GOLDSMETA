@@ -21,11 +21,23 @@ import {
   type ResearchCaptureHealth,
   type ResearchCaptureRecord,
   type ResearchConnectionState,
+  type ResearchFeatureTelemetry,
+  type ResearchRecentCandidateObservation,
+  type ResearchRecentCandidatesResponse,
   type ResearchResubscribeState,
+  type ResearchSpecialistObservation,
   type ResearchStatusUiDesign,
   type ResearchSubscriptionState
 } from "./researchTypes";
 import { evaluateCaptureHealth } from "./researchCaptureHealth";
+
+const RECENT_CANDIDATE_LIMIT = 40;
+
+const SETUP_DISPLAY: Record<string, { kind: ResearchRecentCandidateObservation["kind"]; name: string }> = {
+  A_MOMENTUM_IGNITION: { kind: "A_CANDIDATE", name: "A MOMENTUM IGNITION" },
+  B_FAST_BREAKOUT: { kind: "B_CANDIDATE", name: "B FAST BREAKOUT" },
+  C_PULLBACK_REACCEL: { kind: "C_CANDIDATE", name: "C PULLBACK REACCEL" }
+};
 
 type QueuedIngress = {
   kind: "SPOT" | "DEPTH" | "RESYNC_MARKER" | "HEARTBEAT" | "SESSION_TRANSITION";
@@ -74,6 +86,9 @@ export class ResearchIngestBridge {
   private candidateA = 0;
   private candidateB = 0;
   private candidateC = 0;
+  /** Bounded ring of recent A/B/C observations for the read-only monitor UI. */
+  private readonly recentCandidates: ResearchRecentCandidateObservation[] = [];
+  private observationSeq = 0;
   private prevEventTs: number | null = null;
   private spotSubscribed = false;
   private depthSubscribed = false;
@@ -485,7 +500,13 @@ export class ResearchIngestBridge {
         ask
       };
       const snap = this.pipeline.onSpot(spotEv);
-      this.tallyCandidates(snap.specialists);
+      this.tallyCandidates(
+        snap.specialists,
+        snap.features,
+        item.receiveSeq,
+        "SPOT",
+        item.rawCallbackArrivalMs
+      );
       if (snap.crossed) this.bookCrossedCount += 1;
       const rec: ResearchCaptureRecord = {
         ...base,
@@ -524,7 +545,13 @@ export class ResearchIngestBridge {
       deletedQuotes
     };
     const snap = this.pipeline.onDepth(depthEv);
-    this.tallyCandidates(snap.specialists);
+    this.tallyCandidates(
+      snap.specialists,
+      snap.features,
+      item.receiveSeq,
+      "DEPTH",
+      item.rawCallbackArrivalMs
+    );
     if (snap.crossed) this.bookCrossedCount += 1;
     const rec: ResearchCaptureRecord = {
       ...base,
@@ -547,7 +574,11 @@ export class ResearchIngestBridge {
   }
 
   private tallyCandidates(
-    specialists: ResearchCaptureRecord["specialists"]
+    specialists: ResearchCaptureRecord["specialists"],
+    features: ResearchFeatureTelemetry | null = null,
+    receiveSeq = 0,
+    eventKind: "SPOT" | "DEPTH" = "SPOT",
+    tsMs = Date.now()
   ): void {
     if (!specialists) return;
     for (const s of specialists) {
@@ -555,7 +586,75 @@ export class ResearchIngestBridge {
       if (s.setup === "A_MOMENTUM_IGNITION") this.candidateA += 1;
       else if (s.setup === "B_FAST_BREAKOUT") this.candidateB += 1;
       else if (s.setup === "C_PULLBACK_REACCEL") this.candidateC += 1;
+      this.pushRecentCandidate(s, features, receiveSeq, eventKind, tsMs);
     }
+  }
+
+  private pushRecentCandidate(
+    s: ResearchSpecialistObservation,
+    features: ResearchFeatureTelemetry | null,
+    receiveSeq: number,
+    eventKind: "SPOT" | "DEPTH",
+    tsMs: number
+  ): void {
+    const meta = SETUP_DISPLAY[s.setup];
+    if (!meta) return;
+    this.observationSeq += 1;
+    const row: ResearchRecentCandidateObservation = {
+      observationId: this.observationSeq,
+      label: "RESEARCH OBSERVATION — NOT A TRADE",
+      kind: meta.kind,
+      setup: s.setup,
+      setupName: meta.name,
+      side: s.candidateSide,
+      eligible: s.eligible,
+      rawQuality: s.rawQuality,
+      selectedCandidate: s.selectedCandidate,
+      failedConditions: [...s.failedConditions],
+      receiveSeq,
+      eventKind,
+      tsMs,
+      tsIso: new Date(tsMs).toISOString(),
+      bid: features?.bid ?? null,
+      ask: features?.ask ?? null,
+      spread: features?.spread ?? null,
+      mid: features?.mid ?? null,
+      imbalance: features?.depthImbalance ?? features?.signedImbalance1s ?? null,
+      velocity1s: features?.midVel1s ?? null,
+      acceleration: features?.acceleration ?? null,
+      distHigh5s: features?.distHigh5s ?? null,
+      distLow5s: features?.distLow5s ?? null,
+      upTouches5s: features?.upTouches5s ?? null,
+      downTouches5s: features?.downTouches5s ?? null,
+      brokerRequests: 0,
+      brokerOrders: 0,
+      shadowOrders: 0,
+      executionAdapter: "NONE"
+    };
+    this.recentCandidates.push(row);
+    while (this.recentCandidates.length > RECENT_CANDIDATE_LIMIT) {
+      this.recentCandidates.shift();
+    }
+  }
+
+  /** Read-only bounded feed for the research monitor UI. */
+  recentCandidatesResponse(limit = RECENT_CANDIDATE_LIMIT): ResearchRecentCandidatesResponse {
+    const capped = Math.max(1, Math.min(RECENT_CANDIDATE_LIMIT, Math.floor(limit) || RECENT_CANDIDATE_LIMIT));
+    const observations = this.recentCandidates.slice(-capped).reverse();
+    return {
+      mode: GH_FAST_RESEARCH_MODE,
+      label: "RESEARCH OBSERVATION FEED — NOT TRADES",
+      runId: this.runId,
+      limit: capped,
+      count: observations.length,
+      observations,
+      brokerRequests: 0,
+      brokerOrders: 0,
+      shadowOrders: 0,
+      executionAdapter: "NONE",
+      mutationSurface: "NONE",
+      tradingButtons: []
+    };
   }
 
   health(nowMs = Date.now()): ResearchCaptureHealth {

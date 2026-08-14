@@ -63,6 +63,11 @@ const AutoTradePage = lazy(() =>
 const MicroEdgePage = lazy(() =>
   import("./pages/MicroEdgePage").then((m) => ({ default: m.MicroEdgePage }))
 );
+const GoldHunterFastResearchPage = lazy(() =>
+  import("./pages/GoldHunterFastResearchPage").then((m) => ({
+    default: m.GoldHunterFastResearchPage
+  }))
+);
 const MicroEdgeConnectCallbackPage = lazy(() =>
   import("./pages/MicroEdgeConnectCallbackPage").then((m) => ({
     default: m.MicroEdgeConnectCallbackPage
@@ -188,6 +193,15 @@ function isGoldHunterFastPreviewMode(): boolean {
   );
 }
 
+/** Preview-only: research capture monitor without login. */
+function isGoldHunterFastResearchPreviewMode(): boolean {
+  return (
+    (import.meta.env.VITE_GOLD_HUNTER_FAST_RESEARCH_PREVIEW as
+      | string
+      | undefined) === "true"
+  );
+}
+
 function FastPreviewApp() {
   return (
     <Routes>
@@ -204,6 +218,25 @@ function FastPreviewApp() {
   );
 }
 
+function FastResearchPreviewApp() {
+  return (
+    <Routes>
+      <Route
+        path="/gold-hunter/fast/research"
+        element={
+          <LazyRoute label="GOLD HUNTER FAST Research">
+            <GoldHunterFastResearchPage />
+          </LazyRoute>
+        }
+      />
+      <Route
+        path="*"
+        element={<Navigate to="/gold-hunter/fast/research" replace />}
+      />
+    </Routes>
+  );
+}
+
 function ProtectedApp() {
   const { user, loading } = useAuth();
 
@@ -211,6 +244,9 @@ function ProtectedApp() {
   // Production and normal preview builds keep the signed-in shell unchanged.
   if (isGoldHunterFastPreviewMode()) {
     return <FastPreviewApp />;
+  }
+  if (isGoldHunterFastResearchPreviewMode()) {
+    return <FastResearchPreviewApp />;
   }
 
   if (loading) {
@@ -321,6 +357,14 @@ function ProtectedApp() {
             element={
               <LazyRoute label="Micro Edge">
                 <MicroEdgePage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/gold-hunter/fast/research"
+            element={
+              <LazyRoute label="GOLD HUNTER FAST Research">
+                <GoldHunterFastResearchPage />
               </LazyRoute>
             }
           />

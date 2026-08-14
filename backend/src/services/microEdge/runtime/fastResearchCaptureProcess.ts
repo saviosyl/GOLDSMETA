@@ -584,7 +584,13 @@ export class GoldHunterFastResearchCaptureProcess {
           return;
         }
         const path = req.url?.split("?")[0] ?? "/";
-        if (path !== "/health" && path !== "/" && path !== "/ui-design") {
+        if (
+          path !== "/health" &&
+          path !== "/" &&
+          path !== "/ui-design" &&
+          path !== "/recent-candidates" &&
+          path !== "/research/recent-candidates"
+        ) {
           res.writeHead(404, cors);
           res.end("not found");
           return;
@@ -602,6 +608,35 @@ export class GoldHunterFastResearchCaptureProcess {
               ...cors
             });
             res.end(JSON.stringify(ui, null, 2));
+            return;
+          }
+          if (
+            path === "/recent-candidates" ||
+            path === "/research/recent-candidates"
+          ) {
+            const q = new URL(req.url ?? "/", "http://localhost").searchParams;
+            const limit = Number(q.get("limit") ?? 40);
+            const feed =
+              this.runtime?.getBridge()?.recentCandidatesResponse(limit) ?? {
+                mode: "RESEARCH_CAPTURE_ONLY" as const,
+                label: "RESEARCH OBSERVATION FEED — NOT TRADES" as const,
+                runId: null,
+                limit: 40,
+                count: 0,
+                observations: [],
+                brokerRequests: 0 as const,
+                brokerOrders: 0 as const,
+                shadowOrders: 0 as const,
+                executionAdapter: "NONE" as const,
+                mutationSurface: "NONE" as const,
+                tradingButtons: [] as []
+              };
+            res.writeHead(200, {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-store",
+              ...cors
+            });
+            res.end(JSON.stringify(feed, null, 2));
             return;
           }
           const health = this.buildHealth();

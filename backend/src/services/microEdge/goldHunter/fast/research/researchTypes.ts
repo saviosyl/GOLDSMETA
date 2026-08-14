@@ -40,6 +40,57 @@ export type ResearchSpecialistObservation = {
   selectedCandidate: boolean;
 };
 
+/**
+ * Bounded recent-candidate row for the research monitor UI.
+ * RESEARCH OBSERVATION ONLY — never a trade / P/L / WIN-LOSS.
+ */
+export type ResearchRecentCandidateObservation = {
+  observationId: number;
+  label: "RESEARCH OBSERVATION — NOT A TRADE";
+  kind: "A_CANDIDATE" | "B_CANDIDATE" | "C_CANDIDATE";
+  setup: GhFastSetupId;
+  setupName: string;
+  side: GhFastSide | null;
+  eligible: boolean;
+  rawQuality: number | null;
+  selectedCandidate: boolean;
+  failedConditions: string[];
+  receiveSeq: number;
+  eventKind: "SPOT" | "DEPTH";
+  tsMs: number;
+  tsIso: string;
+  bid: number | null;
+  ask: number | null;
+  spread: number | null;
+  mid: number | null;
+  imbalance: number | null;
+  velocity1s: number | null;
+  acceleration: number | null;
+  distHigh5s: number | null;
+  distLow5s: number | null;
+  upTouches5s: number | null;
+  downTouches5s: number | null;
+  brokerRequests: 0;
+  brokerOrders: 0;
+  shadowOrders: 0;
+  executionAdapter: "NONE";
+};
+
+export type ResearchRecentCandidatesResponse = {
+  mode: typeof GH_FAST_RESEARCH_MODE;
+  label: "RESEARCH OBSERVATION FEED — NOT TRADES";
+  runId: string | null;
+  limit: number;
+  count: number;
+  observations: ResearchRecentCandidateObservation[];
+  brokerRequests: 0;
+  brokerOrders: 0;
+  shadowOrders: 0;
+  executionAdapter: "NONE";
+  mutationSurface: "NONE";
+  tradingButtons: [];
+};
+
 export type ResearchFeatureTelemetry = {
   midVel250: number;
   midVel500: number;

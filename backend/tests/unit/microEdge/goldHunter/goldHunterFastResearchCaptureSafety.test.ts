@@ -568,6 +568,59 @@ describe("research ingest bridge + durable sink", () => {
     expect(bridge.health().reconnectCount).toBe(1);
   });
 
+  it("exposes bounded recent-candidates feed (research observation only)", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 100,
+      runId: "test_recent_candidates",
+      gcsBucket: null,
+      scopeVerified: true
+    });
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    const t0 = Date.now();
+    for (let i = 0; i < 80; i++) {
+      bridge.ingestSpot(
+        { bid: 2400 + i * 0.01, ask: 2400.08 + i * 0.01 },
+        t0 + i * 20
+      );
+      if (i % 2 === 0) {
+        bridge.ingestDepth(
+          {
+            newQuotes: [
+              { id: i, type: "BID", price: 2400 + i * 0.01, size: 1.2 },
+              { id: 1000 + i, type: "ASK", price: 2400.08 + i * 0.01, size: 1.1 }
+            ]
+          },
+          t0 + i * 20 + 1
+        );
+      }
+    }
+    await bridge.drainForTests();
+    const feed = bridge.recentCandidatesResponse(40);
+    expect(feed.mode).toBe(GH_FAST_RESEARCH_MODE);
+    expect(feed.label).toMatch(/NOT TRADES/);
+    expect(feed.brokerOrders).toBe(0);
+    expect(feed.shadowOrders).toBe(0);
+    expect(feed.executionAdapter).toBe("NONE");
+    expect(feed.tradingButtons).toEqual([]);
+    expect(feed.observations.length).toBeLessThanOrEqual(40);
+    for (const o of feed.observations) {
+      expect(o.label).toBe("RESEARCH OBSERVATION — NOT A TRADE");
+      expect(o.brokerOrders).toBe(0);
+      expect(o.shadowOrders).toBe(0);
+      expect(o.executionAdapter).toBe("NONE");
+      expect(["A_CANDIDATE", "B_CANDIDATE", "C_CANDIDATE"]).toContain(o.kind);
+      expect(o).not.toHaveProperty("pnl");
+      expect(o).not.toHaveProperty("win");
+      expect(o).not.toHaveProperty("loss");
+    }
+    const h = bridge.health();
+    expect(h.candidateA + h.candidateB + h.candidateC).toBeGreaterThanOrEqual(
+      feed.count
+    );
+  });
+
   it("persistence backpressure fails loudly — no silent chunk loss", async () => {
     const sink = new ResearchDurableSink({
       runId: "bp",

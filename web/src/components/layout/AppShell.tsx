@@ -71,6 +71,12 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     items: [
       { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
       { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
+      {
+        to: "/gold-hunter/fast/research",
+        label: "GH Research",
+        staffOnly: true,
+        icon: Activity
+      },
       { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   },
@@ -128,6 +134,12 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
     items: [
       { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
       { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
+      {
+        to: "/gold-hunter/fast/research",
+        label: "GH Research",
+        staffOnly: true,
+        icon: Activity
+      },
       { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
     ]
   },

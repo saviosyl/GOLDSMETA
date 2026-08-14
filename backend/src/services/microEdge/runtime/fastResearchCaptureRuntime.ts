@@ -419,33 +419,70 @@ export class GoldHunterFastResearchCaptureRuntime {
   private startHealthServer(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.healthServer = http.createServer((req, res) => {
-        if (req.url === "/health" || req.url === "/") {
-          const body = JSON.stringify(this.health(), null, 2);
-          res.writeHead(200, {
-            "content-type": "application/json",
-            "cache-control": "no-store"
-          });
-          res.end(body);
+        const origin = req.headers.origin ?? "*";
+        const cors = {
+          "Access-Control-Allow-Origin": origin === "null" ? "*" : origin,
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Cache-Control": "no-store",
+          Vary: "Origin"
+        };
+        if (req.method === "OPTIONS") {
+          res.writeHead(204, cors);
+          res.end();
           return;
         }
-        if (req.url === "/ui-design") {
-          const body = JSON.stringify(
-            this.bridge?.uiDesign(this.nowMs()) ?? {
-              title: "GOLD_HUNTER FAST",
-              subtitle: "RESEARCH CAPTURE — NO TRADING",
-              tradingButtons: []
-            },
-            null,
-            2
+        const path = (req.url ?? "/").split("?")[0];
+        if (path === "/health" || path === "/") {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(JSON.stringify(this.health(), null, 2));
+          return;
+        }
+        if (path === "/ui-design") {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.uiDesign(this.nowMs()) ?? {
+                title: "GOLD_HUNTER FAST",
+                subtitle: "RESEARCH CAPTURE — NO TRADING",
+                tradingButtons: []
+              },
+              null,
+              2
+            )
           );
-          res.writeHead(200, {
-            "content-type": "application/json",
-            "cache-control": "no-store"
-          });
-          res.end(body);
           return;
         }
-        res.writeHead(404);
+        if (
+          path === "/recent-candidates" ||
+          path === "/research/recent-candidates"
+        ) {
+          const q = new URL(req.url ?? "/", "http://localhost").searchParams;
+          const limit = Number(q.get("limit") ?? 40);
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.recentCandidatesResponse(limit) ?? {
+                mode: "RESEARCH_CAPTURE_ONLY",
+                label: "RESEARCH OBSERVATION FEED — NOT TRADES",
+                runId: null,
+                limit: 40,
+                count: 0,
+                observations: [],
+                brokerRequests: 0,
+                brokerOrders: 0,
+                shadowOrders: 0,
+                executionAdapter: "NONE",
+                mutationSurface: "NONE",
+                tradingButtons: []
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+        res.writeHead(404, cors);
         res.end("not found");
       });
       this.healthServer.once("error", reject);
