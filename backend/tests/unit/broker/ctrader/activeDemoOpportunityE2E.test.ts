@@ -221,6 +221,17 @@ vi.mock("../../../../src/services/broker/ctrader/sessionGuard", async () => {
   };
 });
 
+vi.mock("../../../../src/services/broker/ctrader/demoOpportunityEngine", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../src/services/broker/ctrader/demoOpportunityEngine")
+  >("../../../../src/services/broker/ctrader/demoOpportunityEngine");
+  return {
+    ...actual,
+    // Overlap (12–16 UTC) bypasses currentSessionUtc — pin the bucket used for risk.
+    resolveTradingSessionBucket: vi.fn(() => "London")
+  };
+});
+
 vi.mock("../../../../src/services/broker/ctrader/quoteToDepositFx", () => ({
   resolveQuoteToDepositFx: vi.fn(async () => ({
     ok: true,
@@ -945,12 +956,16 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     const sessionGuard = await import(
       "../../../../src/services/broker/ctrader/sessionGuard"
     );
+    const opportunity = await import(
+      "../../../../src/services/broker/ctrader/demoOpportunityEngine"
+    );
     vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("Asia");
     vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
       ok: true,
       current: "Asia",
       reason: null
     });
+    vi.mocked(opportunity.resolveTradingSessionBucket).mockReturnValue("Asia");
     const store = {
       getDecision: vi.fn(async () =>
         decision({
@@ -991,6 +1006,7 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
       current: "London",
       reason: null
     });
+    vi.mocked(opportunity.resolveTradingSessionBucket).mockReturnValue("London");
   });
 
   it("A + confirmationCandleRequired=false still waits without 5M confirm", async () => {

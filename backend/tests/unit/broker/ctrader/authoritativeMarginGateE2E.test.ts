@@ -223,6 +223,16 @@ vi.mock("../../../../src/services/broker/ctrader/sessionGuard", async () => {
   };
 });
 
+vi.mock("../../../../src/services/broker/ctrader/demoOpportunityEngine", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../src/services/broker/ctrader/demoOpportunityEngine")
+  >("../../../../src/services/broker/ctrader/demoOpportunityEngine");
+  return {
+    ...actual,
+    resolveTradingSessionBucket: vi.fn(() => "London")
+  };
+});
+
 vi.mock("../../../../src/services/broker/ctrader/quoteToDepositFx", () => ({
   resolveQuoteToDepositFx: vi.fn(async () => ({
     ok: true,
@@ -452,12 +462,16 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
     const sessionGuard = await import(
       "../../../../src/services/broker/ctrader/sessionGuard"
     );
+    const opportunity = await import(
+      "../../../../src/services/broker/ctrader/demoOpportunityEngine"
+    );
     vi.mocked(sessionGuard.currentSessionUtc).mockReturnValue("Asia");
     vi.mocked(sessionGuard.sessionAllowed).mockReturnValue({
       ok: true,
       current: "Asia",
       reason: null
     });
+    vi.mocked(opportunity.resolveTradingSessionBucket).mockReturnValue("Asia");
 
     assertDemoAuthoritativeMarginGate.mockResolvedValue({
       ok: true,
@@ -511,5 +525,6 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
       current: "London",
       reason: null
     });
+    vi.mocked(opportunity.resolveTradingSessionBucket).mockReturnValue("London");
   });
 });
