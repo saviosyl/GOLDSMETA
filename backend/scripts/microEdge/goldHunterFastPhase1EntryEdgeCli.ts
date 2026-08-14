@@ -1321,8 +1321,10 @@ async function main(): Promise<void> {
       positiveEdgeStatement: anyPositive
         ? "POSITIVE_PROSPECTIVE_ENTRY_EDGE_CANDIDATE (still not shippable without independent OOS)"
         : "NO POSITIVE PROSPECTIVE ENTRY EDGE FOUND",
-      conclusionChangedVsPriorPhase1Pass:
-        "Re-derived after clock + future-window + unique-event corrections; see labelClockCorrectionAudit and evidenceAfterFriction."
+      // Compared to first Phase 1 pass (9dda65c): top-level OOS + edge verdicts unchanged.
+      conclusionChangedVsPriorPhase1Pass: false,
+      conclusionChangeNote:
+        "Re-derived after clock + future-window + unique-event corrections. Top-level verdict unchanged; label numerics and effective n changed — see labelClockCorrectionAudit."
     },
     overfittingWarnings: [
       "Only one independent London morning with substantial Level-II coverage.",
