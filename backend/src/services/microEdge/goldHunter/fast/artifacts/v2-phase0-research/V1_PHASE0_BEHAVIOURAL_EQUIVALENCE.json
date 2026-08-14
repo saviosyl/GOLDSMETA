@@ -1,0 +1,16 @@
+{
+  "v1ArchiveSha": "8451fd8d65d0c36603ca019f8438d5a41558568b",
+  "comparedAtPhase0Parent": "be9861b4d9b66abcc70c21a985ee9f4a0ae66921",
+  "fixtureOrdinarySpotDepthEvents": 59,
+  "digestSha256": "d1af407eff9ebaa8703972035c85a8cfee286303532030b73560ed6b7d882341",
+  "match": true,
+  "fields": [
+    "action",
+    "setup",
+    "side",
+    "setupQuality",
+    "exitReason",
+    "state"
+  ],
+  "note": "Zero behavioural differences on ordinary SPOT/DEPTH (no RESYNC) between V1 archive and Phase 0 telemetry refactor."
+}

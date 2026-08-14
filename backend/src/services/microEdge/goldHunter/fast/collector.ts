@@ -7,6 +7,7 @@ import type {
   GhFastClosedTrade,
   GhFastDecision,
   GhFastMarketEvent,
+  GhFastResyncExitAuditEvent,
   GhFastResyncMarkerEvent,
   GhFastStreamEvent
 } from "./types";
@@ -15,6 +16,10 @@ import { GhFastDurableSink } from "./durableSink";
 
 export type GhFastCollectorRecord = {
   t: number;
+  /**
+   * Stream payload. May be a market event, RESYNC marker, or RESYNC_EXIT_AUDIT.
+   * AUDIT rows are never market ticks.
+   */
   event: GhFastStreamEvent;
   decision: GhFastDecision;
   status: Pick<
@@ -37,6 +42,8 @@ export type GhFastCollectorRecord = {
   tradeExit?: GhFastClosedTrade;
   /** Present on RESYNC marker rows. */
   resync?: GhFastResyncMarkerEvent;
+  /** Explicit non-market record type for tooling that ignores event.kind. */
+  recordType?: "MARKET" | "RESYNC" | "AUDIT_EXIT";
 };
 
 export class GhFastEventCollector {
@@ -64,8 +71,14 @@ export class GhFastEventCollector {
 
   /** Hot path: enqueue only. */
   record(rec: GhFastCollectorRecord): void {
-    if (rec.decision.action === "EXIT") this.exitRecords += 1;
-    if (rec.decision.action === "RESYNC" || rec.event.kind === "RESYNC") {
+    if (rec.decision.action === "EXIT" || rec.recordType === "AUDIT_EXIT") {
+      this.exitRecords += 1;
+    }
+    if (
+      rec.decision.action === "RESYNC" ||
+      rec.event.kind === "RESYNC" ||
+      rec.recordType === "RESYNC"
+    ) {
       this.resyncRecords += 1;
     }
     this.sink.enqueue(rec);
@@ -101,9 +114,22 @@ export class GhFastEventCollector {
   }
 }
 
-/** Type guard for market events in mixed stream. */
+/** Type guard for market events in mixed stream (SPOT/DEPTH only). */
 export function isGhFastMarketEvent(
-  ev: GhFastStreamEvent
+  ev: GhFastStreamEvent | { kind?: string }
 ): ev is GhFastMarketEvent {
   return ev.kind === "SPOT" || ev.kind === "DEPTH";
+}
+
+export function isResyncExitAuditEvent(
+  ev: GhFastStreamEvent | { kind?: string }
+): ev is GhFastResyncExitAuditEvent {
+  return ev.kind === "RESYNC_EXIT_AUDIT";
+}
+
+/** Events that may be applied to the engine during replay. */
+export function isReplayableStreamEvent(
+  ev: GhFastStreamEvent
+): ev is GhFastMarketEvent | GhFastResyncMarkerEvent {
+  return ev.kind === "SPOT" || ev.kind === "DEPTH" || ev.kind === "RESYNC";
 }

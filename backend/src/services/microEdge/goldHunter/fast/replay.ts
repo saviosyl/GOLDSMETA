@@ -1,6 +1,7 @@
 /**
  * Offline replay — SAME engine core as LIVE (no separate magical backtester).
  * Applies RESYNC markers at the same receiveSeq as live (Phase 0A).
+ * RESYNC_EXIT_AUDIT rows are never applied as market ticks.
  */
 import { GoldHunterFastEngine } from "./engine";
 import type {
@@ -9,7 +10,7 @@ import type {
   GhFastStreamEvent
 } from "./types";
 import { ShadowExecutionAdapter } from "./executionAdapter";
-import { isGhFastMarketEvent } from "./collector";
+import { isGhFastMarketEvent, isReplayableStreamEvent } from "./collector";
 
 export type ReplayResult = {
   decisions: number;
@@ -25,6 +26,26 @@ export async function applyStreamEvent(
   engine: GoldHunterFastEngine,
   ev: GhFastStreamEvent
 ): Promise<ReturnType<GoldHunterFastEngine["onMarketEvent"]>> {
+  if (ev.kind === "RESYNC_EXIT_AUDIT") {
+    // Non-market audit — never touches freshness/features/book.
+    const now = ev.receivedAtMs;
+    return {
+      state: engine.status().state,
+      action: "WAIT",
+      setup: null,
+      setupQuality: 0,
+      side: null,
+      exitReason: null,
+      latency: {
+        marketEventReceivedMs: now,
+        featuresCalculatedMs: now,
+        decisionProducedMs: now,
+        shadowOrderProducedMs: null,
+        eventToDecisionMs: 0
+      },
+      reasons: ["resync_exit_audit_skipped"]
+    };
+  }
   if (ev.kind === "RESYNC") {
     const result = await engine.resetMarketDataForResync({
       reason: ev.reason,
@@ -46,6 +67,9 @@ export async function replayGhFastEvents(args: {
     adapter
   });
   for (const ev of args.events) {
+    if (!isReplayableStreamEvent(ev) && ev.kind === "RESYNC_EXIT_AUDIT") {
+      continue;
+    }
     await applyStreamEvent(engine, ev);
   }
   const netPnl = engine.closed.reduce((s, t) => s + t.netMove, 0);

@@ -102,19 +102,43 @@ export type GhFastResyncMarkerEvent = {
   receiveSeq: number;
   eventId: string;
   receivedAtMs: number;
-  reason: GhFastResyncReason | string;
+  reason: GhFastResyncReason;
   bookGenerationAfter: number;
   closedTradeIds: string[];
 };
 
-export type GhFastStreamEvent = GhFastMarketEvent | GhFastResyncMarkerEvent;
+/**
+ * Non-market audit row for a force-closed trade.
+ * NEVER a GhFastMarketEvent — must not affect spot freshness, features, or replay ticks.
+ */
+export type GhFastResyncExitAuditEvent = {
+  kind: "RESYNC_EXIT_AUDIT";
+  receiveSeq: number;
+  eventId: string;
+  receivedAtMs: number;
+  tradeId: string;
+  reason: GhFastResyncReason;
+};
+
+export type GhFastStreamEvent =
+  | GhFastMarketEvent
+  | GhFastResyncMarkerEvent
+  | GhFastResyncExitAuditEvent;
 
 /** Per-specialist raw evaluation (before best-of selection). */
 export type GhFastSpecialistRawEval = {
   setup: GhFastSetupId;
   eligible: boolean;
-  quality: number;
-  side: GhFastSide | null;
+  /** True only for the selected best-of hit (at most one). */
+  selected: boolean;
+  /** Side when determinable from structural gates / hit. */
+  candidateSide: GhFastSide | null;
+  /**
+   * Candidate quality when calculable.
+   * null when structural gates failed so quality was never computed.
+   * May be below minSetupQuality with eligible=false + quality_below_min.
+   */
+  rawQuality: number | null;
   failedConditions: string[];
   reasons: string[];
 };
@@ -183,7 +207,7 @@ export type GhFastClosedTrade = GhFastOpenTrade & {
    */
   sampleTag?: "PRE_FIX_DIAGNOSTIC" | "QUALIFICATION" | null;
   /** Present when force-closed by market-data resync (auditable EXIT). */
-  resyncReason?: GhFastResyncReason | string;
+  resyncReason?: GhFastResyncReason;
   /** Receive / reset sequence at force-close. */
   resetSequence?: number;
   bookGeneration?: number;

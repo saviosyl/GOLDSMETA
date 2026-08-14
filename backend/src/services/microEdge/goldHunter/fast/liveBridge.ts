@@ -281,7 +281,7 @@ export class GoldHunterFastLiveBridge {
    * deterministic RESYNC marker at a dedicated receiveSeq (Phase 0A).
    */
   async resetMarketDataForResync(
-    reason: GhFastResyncReason | string = "market_data_resync"
+    reason: GhFastResyncReason = "market_data_resync"
   ): Promise<{
     closedOpen: boolean;
     closedTrades: number;
@@ -316,17 +316,17 @@ export class GoldHunterFastLiveBridge {
         this.collector.record({
           t: nowMs,
           event: {
-            kind: "SPOT",
+            kind: "RESYNC_EXIT_AUDIT",
             receiveSeq,
-            eventId: `RESYNC_EXIT:${receiveSeq}:${trade.tradeId}`,
+            eventId: `RESYNC_EXIT_AUDIT:${receiveSeq}:${trade.tradeId}`,
             receivedAtMs: nowMs,
-            brokerTimestampMs: null,
-            bid: trade.exitBid,
-            ask: trade.exitAsk
+            tradeId: trade.tradeId,
+            reason
           },
           decision: exitDec,
           status: statusSnap,
-          tradeExit: trade
+          tradeExit: trade,
+          recordType: "AUDIT_EXIT"
         });
         this.persistedExitViaCollector += 1;
       }
@@ -335,7 +335,8 @@ export class GoldHunterFastLiveBridge {
         event: result.resyncMarker,
         decision: result.resyncDecision,
         status: statusSnap,
-        resync: result.resyncMarker
+        resync: result.resyncMarker,
+        recordType: "RESYNC"
       });
     }
 
@@ -398,6 +399,61 @@ export class GoldHunterFastLiveBridge {
   async drainForTests(): Promise<void> {
     await this.queue.drain();
     if (this.collector) await this.collector.flushAndWait(2000);
+  }
+
+  /**
+   * Test helper: apply a typed market event through the same persist path as
+   * ordered ingress (engine → collector), without Spotware relative encoding.
+   */
+  async processMarketEventForTests(
+    ev: GhFastMarketEvent
+  ): Promise<GhFastDecision> {
+    // Align receiveSeq cursor so subsequent resync markers stay ordered.
+    if (ev.receiveSeq > this.receiveSeq) this.receiveSeq = ev.receiveSeq;
+    const decision = await this.engine.onMarketEvent(ev);
+    this.lastAction = decision.action;
+    this.lastDecision = decision;
+    if (
+      (decision.action === "ENTER_BUY" || decision.action === "ENTER_SELL") &&
+      decision.setup
+    ) {
+      this.setupCounts[decision.setup as GhFastSetupId] += 1;
+    }
+    if (ev.kind === "SPOT") {
+      this.spotEvents += 1;
+      this.lastSpotAt = ev.receivedAtMs;
+    } else {
+      this.depthEvents += 1;
+      this.lastDepthAt = ev.receivedAtMs;
+    }
+    if (this.collector) {
+      const st = this.engine.status();
+      const tradeExit =
+        decision.action === "EXIT"
+          ? this.engine.closed[this.engine.closed.length - 1]
+          : undefined;
+      if (tradeExit) this.persistedExitViaCollector += 1;
+      this.collector.record({
+        t: ev.receivedAtMs,
+        event: ev,
+        decision,
+        status: {
+          state: st.state,
+          bid: st.bid,
+          ask: st.ask,
+          spread: st.spread,
+          depthImbalance: st.depthImbalance,
+          velocity: st.velocity,
+          acceleration: st.acceleration,
+          setup: st.setup,
+          setupQuality: st.setupQuality
+        },
+        depthTop: this.engine.depth.snapshot(5),
+        tradeExit,
+        recordType: "MARKET"
+      });
+    }
+    return decision;
   }
 
   private async processOrdered(raw: RawIngress): Promise<void> {

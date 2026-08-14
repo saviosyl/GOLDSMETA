@@ -29,14 +29,18 @@ function clamp01(x: number): number {
 function rawFromHit(
   setup: GhFastSetupId,
   hit: SetupHit | null,
-  failedConditions: string[]
+  failedConditions: string[],
+  softQuality: number | null,
+  candidateSide: GhFastSide | null,
+  selected: boolean
 ): GhFastSpecialistRawEval {
   if (hit) {
     return {
       setup,
       eligible: true,
-      quality: hit.quality,
-      side: hit.side,
+      selected,
+      candidateSide: hit.side,
+      rawQuality: hit.quality,
       failedConditions: [],
       reasons: hit.reasons
     };
@@ -44,12 +48,20 @@ function rawFromHit(
   return {
     setup,
     eligible: false,
-    quality: 0,
-    side: null,
+    selected: false,
+    candidateSide,
+    rawQuality: softQuality,
     failedConditions,
     reasons: []
   };
 }
+
+type SpecialistEvalInternal = {
+  hit: SetupHit | null;
+  failed: string[];
+  softQuality: number | null;
+  candidateSide: GhFastSide | null;
+};
 
 /** A — Momentum ignition */
 export function scoreMomentumIgnition(
@@ -62,7 +74,7 @@ export function scoreMomentumIgnition(
 function evaluateMomentumIgnition(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
-): { hit: SetupHit | null; failed: string[]; softQuality: number } {
+): SpecialistEvalInternal {
   const failed: string[] = [];
   const buyPressure =
     f.midVel250 > 0 &&
@@ -78,6 +90,11 @@ function evaluateMomentumIgnition(
     f.signedImbalance1s < -0.15 &&
     f.depth.removeRateBid >= f.depth.removeRateAsk &&
     f.depth.depthImbalance <= 0.15;
+  const candidateSide: GhFastSide | null = buyPressure
+    ? "BUY"
+    : sellPressure
+      ? "SELL"
+      : null;
 
   if (!(buyPressure || sellPressure)) {
     if (!(f.midVel250 > 0 && f.midVel500 > 0) && !(f.midVel250 < 0 && f.midVel500 < 0)) {
@@ -120,11 +137,12 @@ function evaluateMomentumIgnition(
           reasons: ["mom_ignition_buy", "ask_liquidity_consumed"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "BUY"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
   }
   if (sellPressure && Math.abs(f.midVel1s) >= cfg.momentumVelMin) {
     const quality = clamp01(
@@ -145,16 +163,22 @@ function evaluateMomentumIgnition(
           reasons: ["mom_ignition_sell", "bid_liquidity_consumed"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "SELL"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
   }
   if (buyPressure || sellPressure) {
     failed.push("velocity_1s_below_min");
   }
-  return { hit: null, failed: failed.length ? failed : ["no_momentum_pressure"], softQuality: 0 };
+  return {
+    hit: null,
+    failed: failed.length ? failed : ["no_momentum_pressure"],
+    softQuality: null,
+    candidateSide
+  };
 }
 
 /** B — Fast breakout pressure */
@@ -168,12 +192,14 @@ export function scoreFastBreakout(
 function evaluateFastBreakout(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
-): { hit: SetupHit | null; failed: string[]; softQuality: number } {
+): SpecialistEvalInternal {
   const failed: string[] = [];
   const nearHigh = f.distHigh5s <= f.spread * 1.5;
   const nearLow = f.distLow5s <= f.spread * 1.5;
   const brokeHigh = f.mid >= f.high5s - 1e-9 && f.midVel250 > 0;
   const brokeLow = f.mid <= f.low5s + 1e-9 && f.midVel250 < 0;
+  const candidateSide: GhFastSide | null =
+    nearHigh && brokeHigh ? "BUY" : nearLow && brokeLow ? "SELL" : null;
 
   if (!nearHigh && !nearLow) failed.push("not_near_5s_extreme");
   if ((nearHigh || nearLow) && !(brokeHigh || brokeLow)) {
@@ -203,11 +229,12 @@ function evaluateFastBreakout(
           reasons: ["breakout_high", "repeated_up_attacks"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "BUY"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
   }
   if (
     nearLow &&
@@ -231,11 +258,12 @@ function evaluateFastBreakout(
           reasons: ["breakout_low", "repeated_down_attacks"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "SELL"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
   }
   if (brokeHigh && f.upTouches5s < cfg.breakoutTouchCount) {
     failed.push("up_touches_insufficient");
@@ -252,7 +280,8 @@ function evaluateFastBreakout(
   return {
     hit: null,
     failed: failed.length ? [...new Set(failed)] : ["no_breakout_pressure"],
-    softQuality: 0
+    softQuality: null,
+    candidateSide
   };
 }
 
@@ -267,7 +296,7 @@ export function scorePullbackReaccel(
 function evaluatePullbackReaccel(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
-): { hit: SetupHit | null; failed: string[]; softQuality: number } {
+): SpecialistEvalInternal {
   const failed: string[] = [];
   const impulseUp =
     f.midVel3s > cfg.momentumVelMin * 1.5 && f.efficiency3s > 0.35;
@@ -276,6 +305,11 @@ function evaluatePullbackReaccel(
   const range5 = Math.max(1e-9, f.high5s - f.low5s);
   const pullbackFromHigh = (f.high5s - f.mid) / range5;
   const pullbackFromLow = (f.mid - f.low5s) / range5;
+  const candidateSide: GhFastSide | null = impulseUp
+    ? "BUY"
+    : impulseDown
+      ? "SELL"
+      : null;
 
   if (!impulseUp && !impulseDown) {
     if (Math.abs(f.midVel3s) <= cfg.momentumVelMin * 1.5) {
@@ -308,11 +342,12 @@ function evaluatePullbackReaccel(
           reasons: ["pullback_buy_reaccel"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "BUY"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
   }
   if (
     impulseDown &&
@@ -338,11 +373,12 @@ function evaluatePullbackReaccel(
           reasons: ["pullback_sell_reaccel"]
         },
         failed: [],
-        softQuality: quality
+        softQuality: quality,
+        candidateSide: "SELL"
       };
     }
     failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality };
+    return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
   }
 
   if (impulseUp || impulseDown) {
@@ -373,7 +409,8 @@ function evaluatePullbackReaccel(
   return {
     hit: null,
     failed: failed.length ? [...new Set(failed)] : ["no_pullback_impulse"],
-    softQuality: 0
+    softQuality: null,
+    candidateSide
   };
 }
 
@@ -385,15 +422,36 @@ export function evaluateSetupsDetailed(
   const a = evaluateMomentumIgnition(f, cfg);
   const b = evaluateFastBreakout(f, cfg);
   const c = evaluatePullbackReaccel(f, cfg);
-  const specialists: GhFastSpecialistRawEval[] = [
-    rawFromHit("A_MOMENTUM_IGNITION", a.hit, a.failed),
-    rawFromHit("B_FAST_BREAKOUT", b.hit, b.failed),
-    rawFromHit("C_PULLBACK_REACCEL", c.hit, c.failed)
-  ];
   const hits = [a.hit, b.hit, c.hit].filter((x): x is SetupHit => x != null);
-  if (!hits.length) return { selected: null, specialists };
   hits.sort((x, y) => y.quality - x.quality);
-  return { selected: hits[0]!, specialists };
+  const selected = hits.length ? hits[0]! : null;
+  const specialists: GhFastSpecialistRawEval[] = [
+    rawFromHit(
+      "A_MOMENTUM_IGNITION",
+      a.hit,
+      a.failed,
+      a.softQuality,
+      a.candidateSide,
+      selected?.setup === "A_MOMENTUM_IGNITION"
+    ),
+    rawFromHit(
+      "B_FAST_BREAKOUT",
+      b.hit,
+      b.failed,
+      b.softQuality,
+      b.candidateSide,
+      selected?.setup === "B_FAST_BREAKOUT"
+    ),
+    rawFromHit(
+      "C_PULLBACK_REACCEL",
+      c.hit,
+      c.failed,
+      c.softQuality,
+      c.candidateSide,
+      selected?.setup === "C_PULLBACK_REACCEL"
+    )
+  ];
+  return { selected, specialists };
 }
 
 /** Pick best of A/B/C (exactly three specialists). */

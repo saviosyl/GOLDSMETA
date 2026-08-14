@@ -42,10 +42,230 @@
     "staleReconnectThresholdMs": 20000,
     "resyncHoldoffMs": 45000,
     "missingExitAfterEnterBeforeRebuild": 32,
-    "rootCause": "Periodic Spotware/transport feed stalls (~27s median silence) tripped the 20s stale-feed watchdog. Reconnect+reset ran on an ~87s cadence (75\u201390s dominant). Invalid/crossed-book reasons were 0 in the decision stream; ~32 open trades were force-closed without collector EXIT rows. Instrumentation labeled all resets transport_reconnect, hiding stale vs invalid classification.",
+    "rootCause": "Observed market-data input silence of ~27s median immediately before stale watchdog reconnects (seq advances by 1 across the wall-clock gap).",
     "collectorExits": 176,
     "collectorEnters": 208,
-    "healthFormalClosed": 210
+    "healthFormalClosed": 210,
+    "ROOT_CAUSE_LAYER": "UNRESOLVED",
+    "feedGapDiagnosis": {
+      "defensibleFinding": "Observed market-data input silence of ~27s median immediately before stale watchdog reconnects (seq advances by 1 across the wall-clock gap).",
+      "notClaimed": "Do NOT claim Spotware itself caused the gaps without direct transport evidence.",
+      "ROOT_CAUSE_LAYER": "UNRESOLVED",
+      "whyUnresolved": "Persisted V1 chunks contain only post-bridge collector records (event receiveSeq, decision, status). They do not include raw transport/callback timestamps, WS disconnect frames, subscription flag changes, bridge queue wait during the silent interval, or event-loop stall probes. Therefore upstream cTrader silence vs transport disconnect vs subscription loss vs process stall cannot be proven from this dataset.",
+      "representativeGaps": [
+        {
+          "rebuildSeq": 181,
+          "prevSeq": 180,
+          "seqGap": 1,
+          "wallGapMs": 25506,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "bid_liquidity_not_consumed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25507,
+          "lastDepthAgeAtRebuildMs": 25506,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 2199,
+          "prevSeq": 2198,
+          "seqGap": 1,
+          "wallGapMs": 25965,
+          "prevKind": "DEPTH",
+          "prevState": "STRIKE_SELL",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 25966,
+          "lastDepthAgeAtRebuildMs": 25965,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 4155,
+          "prevSeq": 4154,
+          "seqGap": 1,
+          "wallGapMs": 25641,
+          "prevKind": "DEPTH",
+          "prevState": "STRIKE_BUY",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 25643,
+          "lastDepthAgeAtRebuildMs": 25641,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 6208,
+          "prevSeq": 6207,
+          "seqGap": 1,
+          "wallGapMs": 25650,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25655,
+          "lastDepthAgeAtRebuildMs": 25650,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 7905,
+          "prevSeq": 7904,
+          "seqGap": 1,
+          "wallGapMs": 23734,
+          "prevKind": "DEPTH",
+          "prevState": "HUNTING",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "hunting",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 24740,
+          "lastDepthAgeAtRebuildMs": 23734,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 9655,
+          "prevSeq": 9654,
+          "seqGap": 1,
+          "wallGapMs": 25483,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25489,
+          "lastDepthAgeAtRebuildMs": 25483,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 11508,
+          "prevSeq": 11507,
+          "seqGap": 1,
+          "wallGapMs": 25181,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25188,
+          "lastDepthAgeAtRebuildMs": 25181,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 13397,
+          "prevSeq": 13396,
+          "seqGap": 1,
+          "wallGapMs": 27301,
+          "prevKind": "DEPTH",
+          "prevState": "RUNNER",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 27310,
+          "lastDepthAgeAtRebuildMs": 27301,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        }
+      ],
+      "telemetryRequiredNextRun": [
+        "raw Spotware/onSpot/onDepth callback timestamps (pre-queue)",
+        "bridge lastSpotAt/lastDepthAt at watchdog fire",
+        "WS disconnect/reconnect/boundedReconnect start/end timestamps",
+        "session spotSubscribed/depthSubscribed flips",
+        "ordered queue depth + enqueue\u2192process latency",
+        "event-loop lag / heartbeat (process hang detector)",
+        "classified resync reason counters (already patched in Phase 0 code)"
+      ]
+    }
   },
   "2_deterministicReplayFix": {
     "design": [
@@ -113,7 +333,7 @@
         "losses": 0,
         "winRate": 1.0,
         "netMove": 21.050000000000328,
-        "PF": Infinity,
+        "PF": null,
         "expectancy": 0.3289062500000051,
         "maxDD": 0,
         "avgMfe": 0.5293750000000159,
@@ -1156,7 +1376,7 @@
           "losses": 0,
           "winRate": 1.0,
           "netMove": 0.990000000000473,
-          "PF": Infinity,
+          "PF": null,
           "expectancy": 0.24750000000011824,
           "maxDD": 0,
           "avgMfe": 0.4125000000001364,
@@ -1390,7 +1610,7 @@
           "losses": 0,
           "winRate": 1.0,
           "netMove": 0.20000000000021828,
-          "PF": Infinity,
+          "PF": null,
           "expectancy": 0.20000000000021828,
           "maxDD": 0,
           "avgMfe": 0.3000000000001819,
@@ -1505,635 +1725,99 @@
     ]
   },
   "9_earlyFailureCounterfactual": {
-    "method": "Only trades with continuous post-entry quotes (no >2s gap) are scored; resync-interrupted paths are skipped to avoid confounding.",
-    "byHorizonContinuous": {
-      "250": {
-        "wins": {
-          "n": 59,
-          "skippedFeedGap": 5,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.0,
-          "frac_accelReversal": 0.0,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          }
-        },
-        "dead_mfe_lt_0.05": {
-          "n": 77,
-          "skippedFeedGap": 8,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.0,
-          "frac_accelReversal": 0.0,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          }
-        },
-        "hard_protection": {
-          "n": 48,
-          "skippedFeedGap": 4,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.0,
-          "frac_accelReversal": 0.0,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.11000000000058208,
-            "0.75": -0.1000000000003638
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.11000000000058208,
-            "0.75": -0.1000000000003638
-          }
-        },
-        "harvest_fade": {
-          "n": 26,
-          "skippedFeedGap": 3,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.0,
-          "frac_accelReversal": 0.0,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.10999999999967258,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.10999999999967258,
-            "0.75": -0.09000000000014552
-          }
-        }
-      },
-      "500": {
-        "wins": {
-          "n": 63,
-          "skippedFeedGap": 1,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.06349206349206349,
-          "frac_accelReversal": 0.031746031746031744,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          }
-        },
-        "dead_mfe_lt_0.05": {
-          "n": 84,
-          "skippedFeedGap": 1,
-          "frac_noFavourableMove": 0.9880952380952381,
-          "frac_velDecay": 0.10714285714285714,
-          "frac_accelReversal": 0.05952380952380952,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.023809523809523808,
-          "signedMove": {
-            "0.25": -0.12000000000080036,
-            "0.5": -0.10999999999967258,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.09000000000014552
-          }
-        },
-        "hard_protection": {
-          "n": 51,
-          "skippedFeedGap": 1,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.09803921568627451,
-          "frac_accelReversal": 0.058823529411764705,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0196078431372549,
-          "signedMove": {
-            "0.25": -0.14000000000032742,
-            "0.5": -0.11999999999989086,
-            "0.75": -0.1000000000003638
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.11000000000058208,
-            "0.75": -0.1000000000003638
-          }
-        },
-        "harvest_fade": {
-          "n": 29,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.9655172413793104,
-          "frac_velDecay": 0.0,
-          "frac_accelReversal": 0.0,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.0,
-          "signedMove": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.09000000000014552,
-            "0.75": -0.08000000000083674
-          },
-          "mfe": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.09000000000014552,
-            "0.75": -0.08000000000083674
-          }
-        }
-      },
-      "1000": {
-        "wins": {
-          "n": 64,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.84375,
-          "frac_velDecay": 0.453125,
-          "frac_accelReversal": 0.390625,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.078125,
-          "signedMove": {
-            "0.25": -0.17000000000007276,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.03999999999996362
-          },
-          "mfe": {
-            "0.25": -0.10999999999967258,
-            "0.5": -0.09000000000014552,
-            "0.75": -0.03999999999996362
-          }
-        },
-        "dead_mfe_lt_0.05": {
-          "n": 85,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.9882352941176471,
-          "frac_velDecay": 0.5058823529411764,
-          "frac_accelReversal": 0.3764705882352941,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.10588235294117647,
-          "signedMove": {
-            "0.25": -0.22999999999956344,
-            "0.5": -0.11999999999989086,
-            "0.75": -0.0999999999994543
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.07999999999992724
-          }
-        },
-        "hard_protection": {
-          "n": 52,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.5,
-          "frac_accelReversal": 0.36538461538461536,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.057692307692307696,
-          "signedMove": {
-            "0.25": -0.27999999999974534,
-            "0.5": -0.15999999999985448,
-            "0.75": -0.1000000000003638
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.10999999999967258,
-            "0.75": -0.0999999999994543
-          }
-        },
-        "harvest_fade": {
-          "n": 29,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.8275862068965517,
-          "frac_velDecay": 0.5517241379310345,
-          "frac_accelReversal": 0.4827586206896552,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.10344827586206896,
-          "signedMove": {
-            "0.25": -0.14000000000032742,
-            "0.5": -0.09000000000014552,
-            "0.75": -0.03999999999996362
-          },
-          "mfe": {
-            "0.25": -0.1000000000003638,
-            "0.5": -0.07999999999992724,
-            "0.75": -0.03999999999996362
-          }
-        }
-      },
-      "2000": {
-        "wins": {
-          "n": 64,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.671875,
-          "frac_velDecay": 0.78125,
-          "frac_accelReversal": 0.828125,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.125,
-          "signedMove": {
-            "0.25": -0.17000000000007276,
-            "0.5": -0.07000000000061846,
-            "0.75": 0.03999999999996362
-          },
-          "mfe": {
-            "0.25": -0.09000000000014552,
-            "0.5": -0.0500000000001819,
-            "0.75": 0.03999999999996362
-          }
-        },
-        "dead_mfe_lt_0.05": {
-          "n": 85,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.9764705882352941,
-          "frac_velDecay": 0.6705882352941176,
-          "frac_accelReversal": 0.6941176470588235,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.09411764705882353,
-          "signedMove": {
-            "0.25": -0.3400000000001455,
-            "0.5": -0.17000000000007276,
-            "0.75": -0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.0999999999994543,
-            "0.75": -0.07999999999992724
-          }
-        },
-        "hard_protection": {
-          "n": 52,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 1.0,
-          "frac_velDecay": 0.6538461538461539,
-          "frac_accelReversal": 0.7115384615384616,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.09615384615384616,
-          "signedMove": {
-            "0.25": -0.3599999999996726,
-            "0.5": -0.22000000000025466,
-            "0.75": -0.13999999999941792
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.10999999999967258,
-            "0.75": -0.07999999999992724
-          }
-        },
-        "harvest_fade": {
-          "n": 29,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.6896551724137931,
-          "frac_velDecay": 0.7586206896551724,
-          "frac_accelReversal": 0.7586206896551724,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.1724137931034483,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.07000000000061846,
-            "0.75": 0.02999999999974534
-          },
-          "mfe": {
-            "0.25": -0.08000000000083674,
-            "0.5": -0.0500000000001819,
-            "0.75": 0.02999999999974534
-          }
-        }
-      },
-      "3000": {
-        "wins": {
-          "n": 64,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.484375,
-          "frac_velDecay": 0.78125,
-          "frac_accelReversal": 0.609375,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.125,
-          "signedMove": {
-            "0.25": -0.13000000000010914,
-            "0.5": -0.020000000000436557,
-            "0.75": 0.10999999999967258
-          },
-          "mfe": {
-            "0.25": -0.08000000000083674,
-            "0.5": 0.020000000000436557,
-            "0.75": 0.1499999999996362
-          }
-        },
-        "dead_mfe_lt_0.05": {
-          "n": 83,
-          "skippedFeedGap": 2,
-          "frac_noFavourableMove": 0.9759036144578314,
-          "frac_velDecay": 0.7349397590361446,
-          "frac_accelReversal": 0.6867469879518072,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.13253012048192772,
-          "signedMove": {
-            "0.25": -0.4400000000005093,
-            "0.5": -0.2600000000002183,
-            "0.75": -0.11000000000058208
-          },
-          "mfe": {
-            "0.25": -0.11000000000058208,
-            "0.5": -0.09000000000014552,
-            "0.75": -0.06000000000040018
-          }
-        },
-        "hard_protection": {
-          "n": 52,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.9807692307692307,
-          "frac_velDecay": 0.7115384615384616,
-          "frac_accelReversal": 0.6730769230769231,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.07692307692307693,
-          "signedMove": {
-            "0.25": -0.4499999999998181,
-            "0.5": -0.32999999999992724,
-            "0.75": -0.15999999999985448
-          },
-          "mfe": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.1000000000003638,
-            "0.75": -0.07999999999992724
-          }
-        },
-        "harvest_fade": {
-          "n": 29,
-          "skippedFeedGap": 0,
-          "frac_noFavourableMove": 0.5517241379310345,
-          "frac_velDecay": 0.9310344827586207,
-          "frac_accelReversal": 0.7241379310344828,
-          "frac_imbAgainst": 0.0,
-          "frac_spreadExpansion": 0.1724137931034483,
-          "signedMove": {
-            "0.25": -0.11999999999989086,
-            "0.5": -0.049999999999272404,
-            "0.75": 0.09000000000014552
-          },
-          "mfe": {
-            "0.25": -0.07000000000061846,
-            "0.5": -0.03999999999996362,
-            "0.75": 0.09000000000014552
-          }
-        }
-      }
+    "correction": "Withdrawn impossible engine-MFE<0 rules. Replaced with A\u2013D live-implementable variants.",
+    "definitions": {
+      "engineMFE": "Live engine: openTrade.mfe initializes at 0; updateOpenTrade does mfe = Math.max(mfe, unrealizedSignedExecutable). Therefore engine MFE is always >= 0. MFE < 0 and MFE < -0.05 are impossible in the real engine.",
+      "engineMAE": "Live engine: mae initializes at 0; mae = Math.min(mae, unrealizedSignedExecutable). MAE tracks the most adverse signed executable move (typically <= 0).",
+      "signedExecutableMove": "At time t for an open trade: BUY => bid_t - entryPrice; SELL => entryPrice - ask_t. This is current mark-to-market vs entry (can be negative immediately due to spread).",
+      "priorOfflineBug": "The withdrawn rule `mfe<-0.05 AND alignedVel<=0 by 3000ms` did NOT use engine MFE. Offline path used max(signedExecutableMove over horizon) but incorrectly treated that series as if negative values were valid \"MFE\". In practice the offline variable was max_t signedExecutableMove(t) over [0, horizon], which is often still negative in the first seconds because of spread \u2014 i.e. peak signed P/L so far, NOT engine MFE (which would clamp that peak via Math.max with 0). Renaming alone is insufficient; CFs below use explicitly named live-implementable quantities."
     },
-    "liveAbortSimulations": [
+    "variantsAt3s": [
       {
-        "rule": "alignedVel<0 by 1000ms => abort",
-        "horizonMs": 1000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 11,
-        "abortedOriginalLosses": 21,
-        "netMoveChange": -5.769999999999527,
+        "label": "A: engineMFE < +0.05 AND alignedVel <= 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 76,
+        "originalWinnersAffected": 14,
+        "originalLosersAffected": 62,
+        "winDestructionRate": 0.21875,
+        "netDelta": 10.070000000001528,
+        "resultingNet": -26.379999999996983,
+        "PF": 0.4219982471516521,
+        "expectancy": -0.1498863636363465,
+        "maxDD": 28.879999999999068,
+        "skippedFeedGap": 2,
         "simulated": {
           "n": 176,
-          "wins": 53,
-          "losses": 123,
-          "winRate": 0.30113636363636365,
-          "netMove": -42.21999999999804,
-          "PF": 0.26279029160120243,
-          "expectancy": -0.2398863636363525,
-          "maxDD": 42.80999999999856
-        },
-        "winDestructionRate": 0.171875
+          "wins": 50,
+          "losses": 126,
+          "winRate": 0.2840909090909091,
+          "netMove": -26.379999999996983,
+          "PF": 0.4219982471516521,
+          "expectancy": -0.1498863636363465,
+          "maxDD": 28.879999999999068
+        }
       },
       {
-        "rule": "signedMove<-0.20 by 1000ms => abort",
-        "horizonMs": 1000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 9,
-        "abortedOriginalLosses": 26,
-        "netMoveChange": -0.8699999999980719,
+        "label": "B: signedExecutableMove < -0.05 AND alignedVel <= 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 70,
+        "originalWinnersAffected": 10,
+        "originalLosersAffected": 60,
+        "winDestructionRate": 0.15625,
+        "netDelta": 10.37000000000171,
+        "resultingNet": -26.0799999999968,
+        "PF": 0.42844619767700787,
+        "expectancy": -0.1481818181818,
+        "maxDD": 28.45999999999809,
+        "skippedFeedGap": 2,
         "simulated": {
           "n": 176,
-          "wins": 55,
-          "losses": 121,
-          "winRate": 0.3125,
-          "netMove": -37.31999999999658,
-          "PF": 0.3322597960279418,
-          "expectancy": -0.21204545454543514,
-          "maxDD": 37.8499999999969
-        },
-        "winDestructionRate": 0.140625
+          "wins": 54,
+          "losses": 122,
+          "winRate": 0.3068181818181818,
+          "netMove": -26.0799999999968,
+          "PF": 0.42844619767700787,
+          "expectancy": -0.1481818181818,
+          "maxDD": 28.45999999999809
+        }
       },
       {
-        "rule": "signed<-0.15 AND alignedVel<0 by 1000ms => abort",
-        "horizonMs": 1000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 7,
-        "abortedOriginalLosses": 18,
-        "netMoveChange": -1.0099999999983993,
+        "label": "C: signedExecutableMove < -0.10 AND alignedVel < 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 60,
+        "originalWinnersAffected": 7,
+        "originalLosersAffected": 53,
+        "winDestructionRate": 0.109375,
+        "netDelta": 8.74000000000251,
+        "resultingNet": -27.709999999996,
+        "PF": 0.4201715840134381,
+        "expectancy": -0.15744318181815908,
+        "maxDD": 30.089999999997282,
+        "skippedFeedGap": 2,
         "simulated": {
           "n": 176,
           "wins": 57,
           "losses": 119,
           "winRate": 0.32386363636363635,
-          "netMove": -37.45999999999691,
-          "PF": 0.33967918209062903,
-          "expectancy": -0.21284090909089154,
-          "maxDD": 38.169999999997245
-        },
-        "winDestructionRate": 0.109375
+          "netMove": -27.709999999996,
+          "PF": 0.4201715840134381,
+          "expectancy": -0.15744318181815908,
+          "maxDD": 30.089999999997282
+        }
       },
       {
-        "rule": "mfe<0 AND alignedVel<0 by 1000ms => abort",
-        "horizonMs": 1000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 11,
-        "abortedOriginalLosses": 21,
-        "netMoveChange": -5.769999999999527,
-        "simulated": {
-          "n": 176,
-          "wins": 53,
-          "losses": 123,
-          "winRate": 0.30113636363636365,
-          "netMove": -42.21999999999804,
-          "PF": 0.26279029160120243,
-          "expectancy": -0.2398863636363525,
-          "maxDD": 42.80999999999856
-        },
-        "winDestructionRate": 0.171875
-      },
-      {
-        "rule": "mfe<-0.05 AND alignedVel<=0 by 1000ms => abort",
-        "horizonMs": 1000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 12,
-        "abortedOriginalLosses": 22,
-        "netMoveChange": -5.869999999999891,
-        "simulated": {
-          "n": 176,
-          "wins": 52,
-          "losses": 124,
-          "winRate": 0.29545454545454547,
-          "netMove": -42.3199999999984,
-          "PF": 0.25780427920028404,
-          "expectancy": -0.24045454545453637,
-          "maxDD": 42.909999999998924
-        },
-        "winDestructionRate": 0.1875
-      },
-      {
-        "rule": "alignedVel<0 by 2000ms => abort",
-        "horizonMs": 2000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 25,
-        "abortedOriginalLosses": 60,
-        "netMoveChange": 2.2899999999999636,
-        "simulated": {
-          "n": 176,
-          "wins": 42,
-          "losses": 134,
-          "winRate": 0.23863636363636365,
-          "netMove": -34.15999999999855,
-          "PF": 0.2521891418564444,
-          "expectancy": -0.19409090909090085,
-          "maxDD": 35.13999999999933
-        },
-        "winDestructionRate": 0.390625
-      },
-      {
-        "rule": "signedMove<-0.20 by 2000ms => abort",
-        "horizonMs": 2000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 11,
-        "abortedOriginalLosses": 43,
-        "netMoveChange": 4.580000000000837,
-        "simulated": {
-          "n": 176,
-          "wins": 53,
-          "losses": 123,
-          "winRate": 0.30113636363636365,
-          "netMove": -31.869999999997674,
-          "PF": 0.3622173303982874,
-          "expectancy": -0.18107954545453223,
-          "maxDD": 33.649999999998585
-        },
-        "winDestructionRate": 0.171875
-      },
-      {
-        "rule": "signed<-0.15 AND alignedVel<0 by 2000ms => abort",
-        "horizonMs": 2000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 18,
-        "abortedOriginalLosses": 44,
-        "netMoveChange": -1.4000000000032742,
-        "simulated": {
-          "n": 176,
-          "wins": 46,
-          "losses": 130,
-          "winRate": 0.26136363636363635,
-          "netMove": -37.850000000001785,
-          "PF": 0.2629016553067387,
-          "expectancy": -0.2150568181818283,
-          "maxDD": 38.83000000000259
-        },
-        "winDestructionRate": 0.28125
-      },
-      {
-        "rule": "mfe<0 AND alignedVel<0 by 2000ms => abort",
-        "horizonMs": 2000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 20,
-        "abortedOriginalLosses": 56,
-        "netMoveChange": 2.4399999999996,
-        "simulated": {
-          "n": 176,
-          "wins": 44,
-          "losses": 132,
-          "winRate": 0.25,
-          "netMove": -34.00999999999891,
-          "PF": 0.2693877551020945,
-          "expectancy": -0.19323863636363017,
-          "maxDD": 34.98999999999969
-        },
-        "winDestructionRate": 0.3125
-      },
-      {
-        "rule": "mfe<-0.05 AND alignedVel<=0 by 2000ms => abort",
-        "horizonMs": 2000,
-        "skippedFeedGap": 0,
-        "abortedOriginalWins": 21,
-        "abortedOriginalLosses": 55,
-        "netMoveChange": 0.8299999999999272,
-        "simulated": {
-          "n": 176,
-          "wins": 43,
-          "losses": 133,
-          "winRate": 0.24431818181818182,
-          "netMove": -35.61999999999858,
-          "PF": 0.2569879015436404,
-          "expectancy": -0.2023863636363556,
-          "maxDD": 36.47999999999949
-        },
-        "winDestructionRate": 0.328125
-      },
-      {
-        "rule": "alignedVel<0 by 3000ms => abort",
+        "label": "D: signedExecutableMove < -0.15 AND alignedVel < 0 at 3s",
         "horizonMs": 3000,
+        "tradesAffected": 53,
+        "originalWinnersAffected": 6,
+        "originalLosersAffected": 47,
+        "winDestructionRate": 0.09375,
+        "netDelta": 7.630000000002838,
+        "resultingNet": -28.819999999995673,
+        "PF": 0.41171667687287405,
+        "expectancy": -0.16374999999997542,
+        "maxDD": 31.199999999996948,
         "skippedFeedGap": 2,
-        "abortedOriginalWins": 16,
-        "abortedOriginalLosses": 62,
-        "netMoveChange": 9.910000000003492,
-        "simulated": {
-          "n": 176,
-          "wins": 51,
-          "losses": 125,
-          "winRate": 0.2897727272727273,
-          "netMove": -26.53999999999502,
-          "PF": 0.4203974666958359,
-          "expectancy": -0.15079545454542623,
-          "maxDD": 28.9199999999963
-        },
-        "winDestructionRate": 0.25
-      },
-      {
-        "rule": "signedMove<-0.20 by 3000ms => abort",
-        "horizonMs": 3000,
-        "skippedFeedGap": 2,
-        "abortedOriginalWins": 8,
-        "abortedOriginalLosses": 52,
-        "netMoveChange": 6.630000000006476,
-        "simulated": {
-          "n": 176,
-          "wins": 56,
-          "losses": 120,
-          "winRate": 0.3181818181818182,
-          "netMove": -29.819999999992035,
-          "PF": 0.38767967145797766,
-          "expectancy": -0.16943181818177291,
-          "maxDD": 31.56999999999411
-        },
-        "winDestructionRate": 0.125
-      },
-      {
-        "rule": "signed<-0.15 AND alignedVel<0 by 3000ms => abort",
-        "horizonMs": 3000,
-        "skippedFeedGap": 2,
-        "abortedOriginalWins": 6,
-        "abortedOriginalLosses": 47,
-        "netMoveChange": 7.630000000002838,
         "simulated": {
           "n": 176,
           "wins": 58,
@@ -2143,137 +1827,20 @@
           "PF": 0.41171667687287405,
           "expectancy": -0.16374999999997542,
           "maxDD": 31.199999999996948
-        },
-        "winDestructionRate": 0.09375
-      },
-      {
-        "rule": "mfe<0 AND alignedVel<0 by 3000ms => abort",
-        "horizonMs": 3000,
-        "skippedFeedGap": 2,
-        "abortedOriginalWins": 10,
-        "abortedOriginalLosses": 52,
-        "netMoveChange": 9.380000000001928,
-        "simulated": {
-          "n": 176,
-          "wins": 54,
-          "losses": 122,
-          "winRate": 0.3068181818181818,
-          "netMove": -27.069999999996583,
-          "PF": 0.41934791934796095,
-          "expectancy": -0.15380681818179875,
-          "maxDD": 29.449999999997864
-        },
-        "winDestructionRate": 0.15625
-      },
-      {
-        "rule": "mfe<-0.05 AND alignedVel<=0 by 3000ms => abort",
-        "horizonMs": 3000,
-        "skippedFeedGap": 2,
-        "abortedOriginalWins": 7,
-        "abortedOriginalLosses": 51,
-        "netMoveChange": 9.390000000001237,
-        "simulated": {
-          "n": 176,
-          "wins": 57,
-          "losses": 119,
-          "winRate": 0.32386363636363635,
-          "netMove": -27.059999999997274,
-          "PF": 0.4253557018475595,
-          "expectancy": -0.1537499999999845,
-          "maxDD": 29.439999999998555
-        },
-        "winDestructionRate": 0.109375
+        }
       }
     ],
-    "interpretation": "First 250\u2013500ms is dominated by spread crossing (almost all trades underwater); raw noFavourableMove is not discriminative that early. Separation emerges by 2\u20133s: winners recover MFE / keep side-aligned velocity; dead/HARD_PROTECTION deepen adverse signed move and lose aligned velocity. Best viable CF (win destruction \u226425%): `alignedVel<0 by 3000ms => abort` net\u0394=9.91 abortOrig W/L=16/62 => PF=0.420 exp=-0.151. RESEARCH_ONLY \u2014 needs multi-period validation.",
-    "bestLiveAbort": {
-      "rule": "continuous-path only: if MFE<0.05 by 500ms abort at mark-friction",
-      "horizonMs": 500,
-      "favThresh": 0.05,
-      "skippedFeedGap": 2,
-      "abortedOriginalWins": 63,
-      "abortedOriginalLosses": 111,
-      "netMoveChange": 5.019999999995893,
-      "simulated": {
-        "n": 176,
-        "wins": 1,
-        "losses": 175,
-        "winRate": 0.005681818181818182,
-        "netMove": -31.430000000002618,
-        "PF": 0.018425983760137245,
-        "expectancy": -0.17857954545456034,
-        "maxDD": 31.430000000002526
-      }
-    },
-    "bestViableLiveAbort": {
-      "rule": "mfe<-0.05 AND alignedVel<=0 by 3000ms => abort",
-      "horizonMs": 3000,
-      "skippedFeedGap": 2,
-      "abortedOriginalWins": 7,
-      "abortedOriginalLosses": 51,
-      "netMoveChange": 9.390000000001237,
-      "simulated": {
-        "n": 176,
-        "wins": 57,
-        "losses": 119,
-        "winRate": 0.32386363636363635,
-        "netMove": -27.059999999997274,
-        "PF": 0.4253557018475595,
-        "expectancy": -0.1537499999999845,
-        "maxDD": 29.439999999998555
-      },
-      "winDestructionRate": 0.109375
-    },
-    "keyFinding": "First 250\u2013500ms is dominated by spread crossing (almost all trades underwater); raw noFavourableMove is not discriminative that early. Separation emerges by 2\u20133s: winners recover MFE / keep side-aligned velocity; dead/HARD_PROTECTION deepen adverse signed move and lose aligned velocity."
+    "interpretation": "Even after correcting MFE semantics, 3s abort variants remain unprofitable (PF<<1). They reduce some losses but do not produce a positive-edge V2 rule. RESEARCH_ONLY; do not ship."
   },
   "10_proposedV2EntryRules": {
     "doNotSimplyRaiseMinSetupQuality": true,
-    "candidates": [
-      {
-        "id": "E1_early_pressure_3s",
-        "rule": "At ~3s after entry: if MFE still <-0.05 and side-aligned velocity \u22640, flatten. (Alternative: signedMove<-0.15 AND alignedVel<0.) Not a 250\u2013500ms MFE gate.",
-        "evidence": "mfe<-0.05 AND alignedVel<=0 by 3000ms => abort",
-        "status": "RESEARCH_ONLY",
-        "counterfactual": {
-          "rule": "mfe<-0.05 AND alignedVel<=0 by 3000ms => abort",
-          "horizonMs": 3000,
-          "skippedFeedGap": 2,
-          "abortedOriginalWins": 7,
-          "abortedOriginalLosses": 51,
-          "netMoveChange": 9.390000000001237,
-          "simulated": {
-            "n": 176,
-            "wins": 57,
-            "losses": 119,
-            "winRate": 0.32386363636363635,
-            "netMove": -27.059999999997274,
-            "PF": 0.4253557018475595,
-            "expectancy": -0.1537499999999845,
-            "maxDD": 29.439999999998555
-          },
-          "winDestructionRate": 0.109375
-        }
-      },
-      {
-        "id": "E2_spread_cap_tight",
-        "rule": "Skip arm when spread > 0.10 (research band; freeze current maxSpread in prod until multi-period confirm).",
-        "evidence": "entry filter spread<=0.10",
-        "status": "RESEARCH_ONLY"
-      },
-      {
-        "id": "E3_reentry_after_hard_5s",
-        "rule": "Suppress same side+setup re-entry for 5s after HARD_PROTECTION or RAPID_ABORT.",
-        "evidence": "re-entry CF table",
-        "status": "RESEARCH_ONLY"
-      },
-      {
-        "id": "E4_keep_harvest_exits",
-        "rule": "Do not broaden exit changes; HARVEST_FADE net positive in V1.",
-        "evidence": "byExit HARVEST_FADE",
-        "status": "PRESERVE"
-      }
-    ],
-    "sessionFilter": "Do NOT hard-code Dublin/London hour filters from this single morning sample."
+    "doNotImplementYet": true,
+    "candidates": "WITHHELD pending genuine positive-edge evidence",
+    "conclusion": {
+      "phase0HasProfitableV2RuleSet": false,
+      "explicit": "Phase 0 has NOT demonstrated a profitable V2 rule set. Individual counterfactuals remain negative expectancy / PF<1 (spread<=0.10 PF~0.62; corrected 3s aborts still PF<<1; re-entry cooldown PF still far below 1). Need genuine entry-edge improvement, not merely reduced losses. Do not combine many same-sample rules and call that validation. Any combination tests are IN-SAMPLE RESEARCH only; reserve independent periods for OOS.",
+      "doNotImplementE1E2E3Yet": true
+    }
   },
   "11_proposedLaterExitExperiments": {
     "deferUntilEntryFiltersValidated": true,
@@ -2295,5 +1862,354 @@
     "backend/tests/unit/microEdge/goldHunter/goldHunterFastPhase0Integrity.test.ts",
     "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase0-research/PHASE0_REPORT.json",
     "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase0-research/PHASE0_REPORT.md"
-  ]
+  ],
+  "reviewCorrections": {
+    "mfeDefinitions": {
+      "engineMFE": "Live engine: openTrade.mfe initializes at 0; updateOpenTrade does mfe = Math.max(mfe, unrealizedSignedExecutable). Therefore engine MFE is always >= 0. MFE < 0 and MFE < -0.05 are impossible in the real engine.",
+      "engineMAE": "Live engine: mae initializes at 0; mae = Math.min(mae, unrealizedSignedExecutable). MAE tracks the most adverse signed executable move (typically <= 0).",
+      "signedExecutableMove": "At time t for an open trade: BUY => bid_t - entryPrice; SELL => entryPrice - ask_t. This is current mark-to-market vs entry (can be negative immediately due to spread).",
+      "priorOfflineBug": "The withdrawn rule `mfe<-0.05 AND alignedVel<=0 by 3000ms` did NOT use engine MFE. Offline path used max(signedExecutableMove over horizon) but incorrectly treated that series as if negative values were valid \"MFE\". In practice the offline variable was max_t signedExecutableMove(t) over [0, horizon], which is often still negative in the first seconds because of spread \u2014 i.e. peak signed P/L so far, NOT engine MFE (which would clamp that peak via Math.max with 0). Renaming alone is insufficient; CFs below use explicitly named live-implementable quantities."
+    },
+    "correctedEarlyFailureTable": [
+      {
+        "label": "A: engineMFE < +0.05 AND alignedVel <= 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 76,
+        "originalWinnersAffected": 14,
+        "originalLosersAffected": 62,
+        "winDestructionRate": 0.21875,
+        "netDelta": 10.070000000001528,
+        "resultingNet": -26.379999999996983,
+        "PF": 0.4219982471516521,
+        "expectancy": -0.1498863636363465,
+        "maxDD": 28.879999999999068,
+        "skippedFeedGap": 2,
+        "simulated": {
+          "n": 176,
+          "wins": 50,
+          "losses": 126,
+          "winRate": 0.2840909090909091,
+          "netMove": -26.379999999996983,
+          "PF": 0.4219982471516521,
+          "expectancy": -0.1498863636363465,
+          "maxDD": 28.879999999999068
+        }
+      },
+      {
+        "label": "B: signedExecutableMove < -0.05 AND alignedVel <= 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 70,
+        "originalWinnersAffected": 10,
+        "originalLosersAffected": 60,
+        "winDestructionRate": 0.15625,
+        "netDelta": 10.37000000000171,
+        "resultingNet": -26.0799999999968,
+        "PF": 0.42844619767700787,
+        "expectancy": -0.1481818181818,
+        "maxDD": 28.45999999999809,
+        "skippedFeedGap": 2,
+        "simulated": {
+          "n": 176,
+          "wins": 54,
+          "losses": 122,
+          "winRate": 0.3068181818181818,
+          "netMove": -26.0799999999968,
+          "PF": 0.42844619767700787,
+          "expectancy": -0.1481818181818,
+          "maxDD": 28.45999999999809
+        }
+      },
+      {
+        "label": "C: signedExecutableMove < -0.10 AND alignedVel < 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 60,
+        "originalWinnersAffected": 7,
+        "originalLosersAffected": 53,
+        "winDestructionRate": 0.109375,
+        "netDelta": 8.74000000000251,
+        "resultingNet": -27.709999999996,
+        "PF": 0.4201715840134381,
+        "expectancy": -0.15744318181815908,
+        "maxDD": 30.089999999997282,
+        "skippedFeedGap": 2,
+        "simulated": {
+          "n": 176,
+          "wins": 57,
+          "losses": 119,
+          "winRate": 0.32386363636363635,
+          "netMove": -27.709999999996,
+          "PF": 0.4201715840134381,
+          "expectancy": -0.15744318181815908,
+          "maxDD": 30.089999999997282
+        }
+      },
+      {
+        "label": "D: signedExecutableMove < -0.15 AND alignedVel < 0 at 3s",
+        "horizonMs": 3000,
+        "tradesAffected": 53,
+        "originalWinnersAffected": 6,
+        "originalLosersAffected": 47,
+        "winDestructionRate": 0.09375,
+        "netDelta": 7.630000000002838,
+        "resultingNet": -28.819999999995673,
+        "PF": 0.41171667687287405,
+        "expectancy": -0.16374999999997542,
+        "maxDD": 31.199999999996948,
+        "skippedFeedGap": 2,
+        "simulated": {
+          "n": 176,
+          "wins": 58,
+          "losses": 118,
+          "winRate": 0.32954545454545453,
+          "netMove": -28.819999999995673,
+          "PF": 0.41171667687287405,
+          "expectancy": -0.16374999999997542,
+          "maxDD": 31.199999999996948
+        }
+      }
+    ],
+    "feedGapRootCause": {
+      "defensibleFinding": "Observed market-data input silence of ~27s median immediately before stale watchdog reconnects (seq advances by 1 across the wall-clock gap).",
+      "notClaimed": "Do NOT claim Spotware itself caused the gaps without direct transport evidence.",
+      "ROOT_CAUSE_LAYER": "UNRESOLVED",
+      "whyUnresolved": "Persisted V1 chunks contain only post-bridge collector records (event receiveSeq, decision, status). They do not include raw transport/callback timestamps, WS disconnect frames, subscription flag changes, bridge queue wait during the silent interval, or event-loop stall probes. Therefore upstream cTrader silence vs transport disconnect vs subscription loss vs process stall cannot be proven from this dataset.",
+      "representativeGaps": [
+        {
+          "rebuildSeq": 181,
+          "prevSeq": 180,
+          "seqGap": 1,
+          "wallGapMs": 25506,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "bid_liquidity_not_consumed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25507,
+          "lastDepthAgeAtRebuildMs": 25506,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 2199,
+          "prevSeq": 2198,
+          "seqGap": 1,
+          "wallGapMs": 25965,
+          "prevKind": "DEPTH",
+          "prevState": "STRIKE_SELL",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 25966,
+          "lastDepthAgeAtRebuildMs": 25965,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 4155,
+          "prevSeq": 4154,
+          "seqGap": 1,
+          "wallGapMs": 25641,
+          "prevKind": "DEPTH",
+          "prevState": "STRIKE_BUY",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 25643,
+          "lastDepthAgeAtRebuildMs": 25641,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 6208,
+          "prevSeq": 6207,
+          "seqGap": 1,
+          "wallGapMs": 25650,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25655,
+          "lastDepthAgeAtRebuildMs": 25650,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 7905,
+          "prevSeq": 7904,
+          "seqGap": 1,
+          "wallGapMs": 23734,
+          "prevKind": "DEPTH",
+          "prevState": "HUNTING",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "hunting",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 24740,
+          "lastDepthAgeAtRebuildMs": 23734,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 9655,
+          "prevSeq": 9654,
+          "seqGap": 1,
+          "wallGapMs": 25483,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25489,
+          "lastDepthAgeAtRebuildMs": 25483,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 11508,
+          "prevSeq": 11507,
+          "seqGap": 1,
+          "wallGapMs": 25181,
+          "prevKind": "DEPTH",
+          "prevState": "PRESSURE_DETECTED",
+          "prevAction": "WAIT",
+          "prevReasons": [
+            "pressure_detected",
+            "velocity_insufficient",
+            "acceleration_insufficient",
+            "depth_imbalance_insufficient",
+            "breakout_not_confirmed",
+            "update_rate_insufficient"
+          ],
+          "lastSpotAgeAtRebuildMs": 25188,
+          "lastDepthAgeAtRebuildMs": 25181,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        },
+        {
+          "rebuildSeq": 13397,
+          "prevSeq": 13396,
+          "seqGap": 1,
+          "wallGapMs": 27301,
+          "prevKind": "DEPTH",
+          "prevState": "RUNNER",
+          "prevAction": "HOLD",
+          "prevReasons": [
+            "holding",
+            "existing_open_position"
+          ],
+          "lastSpotAgeAtRebuildMs": 27310,
+          "lastDepthAgeAtRebuildMs": 27301,
+          "availableInChunks": {
+            "collectorDecisionStream": true,
+            "rawTransportCallbackTimestamps": false,
+            "disconnectReconnectEvents": false,
+            "subscriptionFlagsTimeSeries": false,
+            "eventLoopStallMetrics": false,
+            "bridgeQueueDelayMetrics": false
+          }
+        }
+      ],
+      "telemetryRequiredNextRun": [
+        "raw Spotware/onSpot/onDepth callback timestamps (pre-queue)",
+        "bridge lastSpotAt/lastDepthAt at watchdog fire",
+        "WS disconnect/reconnect/boundedReconnect start/end timestamps",
+        "session spotSubscribed/depthSubscribed flips",
+        "ordered queue depth + enqueue\u2192process latency",
+        "event-loop lag / heartbeat (process hang detector)",
+        "classified resync reason counters (already patched in Phase 0 code)"
+      ]
+    },
+    "strategyResearchConclusion": {
+      "phase0HasProfitableV2RuleSet": false,
+      "explicit": "Phase 0 has NOT demonstrated a profitable V2 rule set. Individual counterfactuals remain negative expectancy / PF<1 (spread<=0.10 PF~0.62; corrected 3s aborts still PF<<1; re-entry cooldown PF still far below 1). Need genuine entry-edge improvement, not merely reduced losses. Do not combine many same-sample rules and call that validation. Any combination tests are IN-SAMPLE RESEARCH only; reserve independent periods for OOS.",
+      "doNotImplementE1E2E3Yet": true
+    },
+    "v1BehaviouralEquivalence": {
+      "v1ArchiveSha": "8451fd8d65d0c36603ca019f8438d5a41558568b",
+      "phase0ShaAtCompare": "be9861b4d9b66abcc70c21a985ee9f4a0ae66921",
+      "fixtureEvents": 59,
+      "digestSha256": "d1af407eff9ebaa8703972035c85a8cfee286303532030b73560ed6b7d882341",
+      "match": true,
+      "comparedFields": [
+        "action",
+        "setup",
+        "side",
+        "setupQuality",
+        "exitReason",
+        "state"
+      ],
+      "note": "Ordinary SPOT/DEPTH path (no RESYNC) \u2014 telemetry refactor did not change decisions."
+    },
+    "configThresholdsUnchanged": true,
+    "deployment": false,
+    "brokerOrders": 0
+  }
 }

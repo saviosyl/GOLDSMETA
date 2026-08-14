@@ -38,7 +38,8 @@ import {
   categorizeTrades,
   groupTradesBySession,
   verifyReplayParityFromLocalChunks,
-  type GhFastRuntimeHealth
+  type GhFastRuntimeHealth,
+  type GhFastResyncReason
 } from "../goldHunter/fast";
 
 export type FastShadowRuntimeOptions = {
@@ -256,9 +257,9 @@ export class GoldHunterFastShadowRuntime {
     }
   }
 
-  private pendingReconnectReason: string = "transport_reconnect";
+  private pendingReconnectReason: GhFastResyncReason = "transport_reconnect";
 
-  private scheduleReconnect(reason: string = "transport_reconnect"): void {
+  private scheduleReconnect(reason: GhFastResyncReason = "transport_reconnect"): void {
     if (this.stopping || !this.running || this.reconnectTimer) return;
     const now = this.nowMs();
     // Minimum spacing between reconnect attempts (ops only).
@@ -272,7 +273,7 @@ export class GoldHunterFastShadowRuntime {
     }, 2000);
   }
 
-  private async reconnect(reason: string = "transport_reconnect"): Promise<void> {
+  private async reconnect(reason: GhFastResyncReason = "transport_reconnect"): Promise<void> {
     if (this.resyncInFlight) return;
     this.resyncInFlight = true;
     this.lastReconnectAttemptMs = this.nowMs();
@@ -340,7 +341,7 @@ export class GoldHunterFastShadowRuntime {
     if (fast?.warmingUp) return;
     const spotAge = fast?.spotAgeMs;
     const depthAge = fast?.depthAgeMs;
-    let reason: string | null = null;
+    let reason: GhFastResyncReason | null = null;
     if (spotAge == null || depthAge == null) {
       reason = "ages_null";
     } else if (spotAge > this.staleReconnectMs && depthAge > this.staleReconnectMs) {
@@ -411,7 +412,7 @@ export class GoldHunterFastShadowRuntime {
     }
     this.invalidBookTicks += 1;
     if (this.invalidBookTicks < this.invalidBookTicksBeforeResync) return;
-    const reason =
+    const reason: GhFastResyncReason =
       fast.depthUnavailableReason === "CROSSED_BOOK" || fast.depthCrossed
         ? "invalid_crossed_book"
         : fast.depthUnavailableReason === "NO_BIDS"

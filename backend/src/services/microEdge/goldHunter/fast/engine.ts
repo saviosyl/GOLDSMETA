@@ -227,7 +227,7 @@ export class GoldHunterFastEngine {
    * exactly one auditable EXIT evidence row (Phase 0A).
    */
   async resetMarketDataForResync(args?: {
-    reason?: GhFastResyncReason | string;
+    reason?: GhFastResyncReason;
     nowMs?: number;
     receiveSeq?: number;
   }): Promise<{
