@@ -79,6 +79,9 @@ function makeFakeSession(
       return {
         connectionState: self.closed ? "DISCONNECTED" : "CONNECTED",
         liveConnected: !self.closed,
+        transportConnected: !self.closed,
+        transportAuthenticated: !self.closed,
+        researchSessionConnected: !self.closed,
         credentialsConfigured: true,
         applicationAuthenticated: !self.closed,
         accountAuthenticated: !self.closed,

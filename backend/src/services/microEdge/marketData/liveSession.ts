@@ -39,7 +39,28 @@ import type { MicroQuote } from "../types";
 
 export type MicroLiveSessionState = {
   connectionState: MicroMarketDataConnectionState;
+  /**
+   * Strict LIVE_CONNECTED: transport/auth/symbol/spot + fresh quote + M1 + heartbeat.
+   * Semantics UNCHANGED for existing Micro/Core consumers.
+   */
   liveConnected: boolean;
+  /**
+   * Additive — physical transport socket connected.
+   * Independent of quote/M1/heartbeat freshness.
+   */
+  transportConnected: boolean;
+  /**
+   * Additive — application + account authenticated (and account authorized when known).
+   * Independent of quote/M1/heartbeat freshness.
+   */
+  transportAuthenticated: boolean;
+  /**
+   * Additive — GOLD HUNTER FAST research transport/session cohort:
+   * transport connected + app/account auth + account authorized + symbol resolved +
+   * Spot subscribed + Depth subscribed.
+   * Does NOT require fresh quote, fresh M1, or fresh collector heartbeat.
+   */
+  researchSessionConnected: boolean;
   credentialsConfigured: boolean;
   applicationAuthenticated: boolean;
   accountAuthenticated: boolean;
@@ -489,6 +510,22 @@ export class MicroLiveMarketSession {
     }
   }
 
+  /**
+   * Research transport/session cohort — connected/auth/subscribed without
+   * requiring fresh quote/M1/heartbeat. Used by GOLD HUNTER FAST only.
+   */
+  isResearchSessionConnected(): boolean {
+    if (!this.transport?.isConnected()) return false;
+    if (!this.transport.isApplicationAuthenticated()) return false;
+    if (!this.transport.isAccountAuthenticated()) return false;
+    const authMeta = this.transport.getAccountAuthMeta();
+    if (authMeta && !authMeta.configuredAccountAuthorized) return false;
+    if (!this.symbol) return false;
+    if (!this.spotSubscribed) return false;
+    if (!this.depthSubscribed) return false;
+    return true;
+  }
+
   async getState(): Promise<MicroLiveSessionState> {
     const store = this.opts.store;
     const m1 = await store.latestBar("M1");
@@ -538,10 +575,23 @@ export class MicroLiveMarketSession {
     if (this.lastErrorCode) reasons.push(this.lastErrorCode);
 
     const unique = [...new Set(reasons)];
+    // Strict liveConnected semantics UNCHANGED — still requires fresh quote/M1/hb.
     const liveConnected = unique.length === 0;
     const connectionState: MicroMarketDataConnectionState = liveConnected
       ? "LIVE_CONNECTED"
       : "LIVE_NOT_CONNECTED";
+
+    const transportConnected = Boolean(this.transport?.isConnected());
+    const applicationAuthenticated =
+      this.transport?.isApplicationAuthenticated() ?? false;
+    const accountAuthenticated =
+      this.transport?.isAccountAuthenticated() ?? false;
+    const transportAuthenticated =
+      transportConnected &&
+      applicationAuthenticated &&
+      accountAuthenticated &&
+      (authMeta == null || authMeta.configuredAccountAuthorized);
+    const researchSessionConnected = this.isResearchSessionConnected();
 
     const quoteAgeMs = this.lastQuote
       ? now - Date.parse(this.lastQuote.brokerTimestamp)
@@ -550,9 +600,12 @@ export class MicroLiveMarketSession {
     return {
       connectionState,
       liveConnected,
+      transportConnected,
+      transportAuthenticated,
+      researchSessionConnected,
       credentialsConfigured: credsConfigured,
-      applicationAuthenticated: this.transport?.isApplicationAuthenticated() ?? false,
-      accountAuthenticated: this.transport?.isAccountAuthenticated() ?? false,
+      applicationAuthenticated,
+      accountAuthenticated,
       configuredAccountAuthorized: authMeta?.configuredAccountAuthorized ?? null,
       authorizedAccountCount: authMeta?.authorizedAccountCount ?? null,
       symbol: this.symbol,

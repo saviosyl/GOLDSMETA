@@ -76,7 +76,10 @@ export class GoldHunterFastResearchCaptureRuntime {
   private running = false;
   private scopeVerified = false;
   private lastSessionSnap: {
+    /** Strict liveConnected — retained for diagnostics only. */
     liveConnected: boolean;
+    /** Research transport/session cohort — drives disconnect classification. */
+    researchSessionConnected: boolean;
     spotSubscribed: boolean;
     depthSubscribed: boolean;
     connectionMapped: ResearchConnectionState;
@@ -176,6 +179,15 @@ export class GoldHunterFastResearchCaptureRuntime {
     this.detachSession();
     this.session = session;
     this.bridge.setConnectionState("CONNECTED", "session_attached");
+    // Optimistic research-session snap so a quiet feed cannot race a poll into
+    // a false "was connected → now disconnected" transition on attach.
+    this.lastSessionSnap = {
+      liveConnected: false,
+      researchSessionConnected: true,
+      spotSubscribed: true,
+      depthSubscribed: true,
+      connectionMapped: "CONNECTED"
+    };
     this.unsubs.push(
       session.onSpotForFast((payload) => {
         this.bridge?.ingestSpot(payload, this.nowMs());
@@ -206,7 +218,14 @@ export class GoldHunterFastResearchCaptureRuntime {
       this.bridge?.noteDisconnect("session_detached");
     }
     this.session = null;
-    this.lastSessionSnap = null;
+    // Prevent session_poll from emitting a duplicate RESYNC for the same detach.
+    this.lastSessionSnap = {
+      liveConnected: false,
+      researchSessionConnected: false,
+      spotSubscribed: false,
+      depthSubscribed: false,
+      connectionMapped: "DISCONNECTED"
+    };
   }
 
   ingestSpotForTests(payload: Record<string, unknown>): void {
@@ -368,6 +387,9 @@ export class GoldHunterFastResearchCaptureRuntime {
         executionAdapter: identity.executionAdapter,
         openShadowTrade: identity.openShadowTrade,
         connectionState: "DISCONNECTED",
+        transportSessionState: "DISCONNECTED",
+        feedState: "STALE",
+        strictLiveConnected: null,
         storagePrefix: "gold-hunter-fast/research-capture",
         durableMode: "LOCAL_BUFFER_ONLY",
         persistenceQueueDepth: 0,
@@ -385,7 +407,16 @@ export class GoldHunterFastResearchCaptureRuntime {
           "RESEARCH CAPTURE ONLY — no trading, no shadow orders, no broker orders"
       };
     }
-    return this.bridge.health(this.nowMs());
+    const base = this.bridge.health(this.nowMs());
+    return {
+      ...base,
+      strictLiveConnected: this.lastSessionSnap?.liveConnected ?? null,
+      transportSessionState:
+        this.lastSessionSnap?.researchSessionConnected === true ||
+        base.connectionState === "CONNECTED"
+          ? "CONNECTED"
+          : "DISCONNECTED"
+    };
   }
 
   async stop(): Promise<void> {
@@ -413,10 +444,14 @@ export class GoldHunterFastResearchCaptureRuntime {
     this.healthServer = null;
   }
 
+  /**
+   * Map GOLD HUNTER research connection from transport/session cohort —
+   * NOT strict liveConnected (quote/M1/heartbeat freshness).
+   */
   private mapSessionConnection(
     st: MicroLiveSessionState
   ): ResearchConnectionState {
-    if (st.liveConnected) return "CONNECTED";
+    if (st.researchSessionConnected) return "CONNECTED";
     if (st.reconnectAttempts > 0 && st.lastDisconnectedAt) return "RECONNECTING";
     return "DISCONNECTED";
   }
@@ -424,26 +459,36 @@ export class GoldHunterFastResearchCaptureRuntime {
   private async syncSessionState(reason: string): Promise<void> {
     if (!this.session || !this.bridge) return;
     const st = await this.session.getState();
+    const researchConnected = st.researchSessionConnected;
     const mapped = this.mapSessionConnection(st);
     const prev = this.lastSessionSnap;
 
-    if (!st.liveConnected && prev?.liveConnected) {
+    // Physical/auth/subscription loss only — quote_stale / m1_stale /
+    // collector_heartbeat_stale must NOT tear down the research session.
+    if (!researchConnected && prev?.researchSessionConnected) {
       this.bridge.noteDisconnect(
         st.lastErrorCode ?? reason ?? "session_disconnected"
       );
     } else if (
-      !st.liveConnected &&
+      !researchConnected &&
       st.reconnectAttempts > 0 &&
       prev &&
-      prev.connectionMapped !== "RECONNECTING"
+      prev.connectionMapped !== "RECONNECTING" &&
+      this.bridge.health().connectionState !== "DISCONNECTED"
     ) {
       this.bridge.noteReconnectStart(
         this.nowMs(),
         st.lastErrorCode ?? "session_reconnecting"
       );
-    } else if (st.liveConnected && prev && !prev.liveConnected) {
-      this.bridge.noteReconnectFinish(this.nowMs());
-    } else if (st.liveConnected && mapped !== this.bridge.health().connectionState) {
+    } else if (researchConnected && prev && !prev.researchSessionConnected) {
+      // Genuine session restored (process reconnect may also note finish).
+      if (this.bridge.health().connectionState !== "CONNECTED") {
+        this.bridge.noteReconnectFinish(this.nowMs());
+      }
+    } else if (
+      researchConnected &&
+      mapped !== this.bridge.health().connectionState
+    ) {
       this.bridge.setConnectionState(mapped, reason);
     }
 
@@ -455,10 +500,16 @@ export class GoldHunterFastResearchCaptureRuntime {
 
     this.lastSessionSnap = {
       liveConnected: st.liveConnected,
+      researchSessionConnected: researchConnected,
       spotSubscribed: st.spotSubscribed,
       depthSubscribed: st.depthSubscribed,
       connectionMapped: mapped
     };
+  }
+
+  /** @internal — drive session poll classification in unit tests. */
+  async syncSessionStateForTests(reason = "session_poll"): Promise<void> {
+    await this.syncSessionState(reason);
   }
 
   private startHeartbeat(): void {

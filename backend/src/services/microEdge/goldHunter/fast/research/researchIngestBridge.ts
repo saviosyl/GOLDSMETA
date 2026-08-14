@@ -271,6 +271,13 @@ export class ResearchIngestBridge {
   }
 
   noteDisconnect(reason: string, ts = Date.now()): void {
+    // Cohort ownership: while already DISCONNECTED, do not emit a second
+    // ordered RESYNC for the same physical outage (detachSession + session poll).
+    if (this.connectionState === "DISCONNECTED") {
+      this.spotSubscribed = false;
+      this.depthSubscribed = false;
+      return;
+    }
     this.disconnectTs = ts;
     this.reconnectReason = reason;
     this.spotSubscribed = false;
@@ -1262,6 +1269,18 @@ export class ResearchIngestBridge {
       executionAdapter: identity.executionAdapter,
       openShadowTrade: identity.openShadowTrade,
       connectionState: this.connectionState,
+      transportSessionState:
+        this.connectionState === "CONNECTED" ? "CONNECTED" : "DISCONNECTED",
+      feedState:
+        spotAgeMs != null &&
+        depthAgeMs != null &&
+        spotAgeMs >= 0 &&
+        depthAgeMs >= 0 &&
+        spotAgeMs <= this.freshnessLimitMs &&
+        depthAgeMs <= this.freshnessLimitMs
+          ? "LIVE"
+          : "STALE",
+      strictLiveConnected: null,
       storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
       durableMode: sink.durableMode,
       persistenceQueueDepth: sink.persistenceQueueDepth,

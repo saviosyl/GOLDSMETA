@@ -9,6 +9,9 @@ type ResearchHealth = {
   campaignValid?: boolean;
   dataIntegrityStatus?: string;
   connectionState?: string;
+  transportSessionState?: "CONNECTED" | "DISCONNECTED";
+  feedState?: "LIVE" | "STALE";
+  strictLiveConnected?: boolean | null;
   spotSubscribed?: boolean;
   depthSubscribed?: boolean;
   spotAgeMs?: number | null;
@@ -477,7 +480,23 @@ export function GoldHunterFastResearchPage() {
           SPREAD <strong>{fmtPx(health?.lastSpread)}</strong>
         </span>
         <span className={`gm-ghr-pill ${feedLive ? "is-ok" : "is-bad"}`}>
-          {feedLive ? "FEED LIVE" : "FEED OFF"}
+          {health?.feedState === "LIVE" || feedLive ? "FEED LIVE" : "FEED STALE"}
+        </span>
+        <span
+          className={`gm-ghr-pill ${
+            health?.transportSessionState === "CONNECTED" ||
+            health?.connectionState === "CONNECTED"
+              ? "is-ok"
+              : "is-bad"
+          }`}
+          data-testid="gh-research-transport-session"
+          title="cTrader transport/auth/subscription cohort — independent of quote age"
+        >
+          TRANSPORT{" "}
+          {health?.transportSessionState === "CONNECTED" ||
+          health?.connectionState === "CONNECTED"
+            ? "CONNECTED"
+            : "DISCONNECTED"}
         </span>
         <span className="gm-ghr-norm">
           {health?.marketDataNormalizationVersion ?? "—"}
@@ -490,7 +509,10 @@ export function GoldHunterFastResearchPage() {
           <span className="is-bad">
             {fetchError
               ? `DISCONNECTED — ${fetchError}`
-              : "FEED STALE / DISCONNECTED"}
+              : health?.transportSessionState === "CONNECTED" ||
+                  health?.connectionState === "CONNECTED"
+                ? "FEED STALE — TRANSPORT CONNECTED"
+                : "FEED STALE / TRANSPORT DISCONNECTED"}
             {ageSec != null ? ` · last ok ${ageSec}s ago` : ""}
           </span>
         ) : (
@@ -1053,6 +1075,16 @@ export function GoldHunterFastResearchPage() {
                 : "warn"
           }
         />
+        <Kpi
+          label="Transport Session"
+          value={
+            health?.transportSessionState ??
+            (health?.connectionState === "CONNECTED"
+              ? "CONNECTED"
+              : "DISCONNECTED")
+          }
+        />
+        <Kpi label="Feed" value={health?.feedState ?? (feedLive ? "LIVE" : "STALE")} />
         <Kpi label="Connection" value={health?.connectionState ?? "—"} />
         <Kpi label="Spot age" value={fmtMs(health?.spotAgeMs)} />
         <Kpi label="Depth age" value={fmtMs(health?.depthAgeMs)} />

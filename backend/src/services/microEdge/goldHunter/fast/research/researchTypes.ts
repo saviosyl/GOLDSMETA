@@ -470,6 +470,21 @@ export type ResearchCaptureHealth = {
   executionAdapter: "NONE";
   openShadowTrade: false;
   connectionState: ResearchConnectionState;
+  /**
+   * Physical/auth/subscription cohort for the research session.
+   * CONNECTED means cTrader transport cohort is up — independent of quote age.
+   */
+  transportSessionState: "CONNECTED" | "DISCONNECTED";
+  /**
+   * Market-data freshness relative to soft stale threshold.
+   * LIVE = both Spot+Depth soft-fresh; STALE otherwise (including unknown ages).
+   */
+  feedState: "LIVE" | "STALE";
+  /**
+   * Strict Micro liveConnected (quote/M1/heartbeat). Diagnostic only —
+   * must not drive research transport teardown.
+   */
+  strictLiveConnected: boolean | null;
   storagePrefix: typeof GH_FAST_RESEARCH_GCS_PREFIX_ROOT;
   durableMode: "GCS" | "LOCAL_BUFFER_ONLY";
   persistenceQueueDepth: number;
