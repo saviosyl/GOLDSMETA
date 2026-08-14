@@ -315,6 +315,11 @@ export class GoldHunterFastResearchCaptureRuntime {
           paperEntriesBlockedDataNotOk: 0,
           paperDataStaleExits: 0,
           paperResyncExits: 0,
+          referencePositionValueEur: 500,
+          marginRequirementPct: 50,
+          referenceMarginUsedEur: 250,
+          hypotheticalEurPnlSum: 0,
+          hypotheticalEurPnlLabel: "HYPOTHETICAL € P/L — REFERENCE ONLY",
           brokerRequests: 0,
           brokerOrders: 0,
           executionAdapter: "NONE"

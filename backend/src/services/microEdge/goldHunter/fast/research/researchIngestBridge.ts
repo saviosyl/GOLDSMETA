@@ -928,6 +928,11 @@ export class ResearchIngestBridge {
           paperEntriesBlockedDataNotOk: s.paperEntriesBlockedDataNotOk,
           paperDataStaleExits: s.paperDataStaleExits,
           paperResyncExits: s.paperResyncExits,
+          referencePositionValueEur: s.referencePositionValueEur,
+          marginRequirementPct: s.marginRequirementPct,
+          referenceMarginUsedEur: s.referenceMarginUsedEur,
+          hypotheticalEurPnlSum: s.hypotheticalEurPnlSum,
+          hypotheticalEurPnlLabel: s.hypotheticalEurPnlLabel,
           brokerRequests: 0 as const,
           brokerOrders: 0 as const,
           executionAdapter: "NONE" as const

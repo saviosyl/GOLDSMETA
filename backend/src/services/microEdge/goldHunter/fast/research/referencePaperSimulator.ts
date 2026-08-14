@@ -74,6 +74,15 @@ export const REFERENCE_PAPER_POLICY = {
     units: "XAUUSD price movement (points), not account currency",
     summary: "Cumulative since simulator start; UI history capped separately"
   },
+  /** Display-only approximate EUR conversion — not broker CFD P/L. */
+  hypotheticalEurDisplay: {
+    referencePositionValueEur: 500,
+    marginRequirementPct: 50,
+    referenceMarginUsedEur: 250,
+    formula: "hypotheticalEurPnl = (netMove / entryPrice) * 500",
+    label: "HYPOTHETICAL € P/L — REFERENCE ONLY · NOT A BROKER ACCOUNT P/L",
+    note: "Approximate reference conversion only. Not broker-accurate CFD P/L, fills, or account balance."
+  },
   mfeMae: {
     BUY: "unrealized = execBid - entryAsk; MFE=max, MAE=min",
     SELL: "unrealized = entryBid - execAsk; MFE=max, MAE=min"
@@ -86,6 +95,31 @@ export const REFERENCE_PAPER_POLICY = {
     mutationSurface: "NONE"
   }
 } as const;
+
+/** Fixed display-only reference exposure (€). Not margin used. */
+export const REFERENCE_POSITION_VALUE_EUR = 500 as const;
+export const REFERENCE_MARGIN_REQUIREMENT_PCT = 50 as const;
+export const REFERENCE_MARGIN_USED_EUR = 250 as const;
+
+/**
+ * Approximate hypothetical EUR P/L for display.
+ * percentageReturn = netMove / entryPrice; EUR = percentageReturn * 500.
+ * Not broker-accurate CFD P/L.
+ */
+export function hypotheticalEurPnlFromNetMove(
+  netMove: number,
+  entryPrice: number,
+  positionValueEur: number = REFERENCE_POSITION_VALUE_EUR
+): number | null {
+  if (
+    !Number.isFinite(netMove) ||
+    !Number.isFinite(entryPrice) ||
+    entryPrice <= 0
+  ) {
+    return null;
+  }
+  return (netMove / entryPrice) * positionValueEur;
+}
 
 export type ReferencePaperResult = "WIN" | "LOSS" | "BREAKEVEN" | "OPEN";
 
@@ -110,6 +144,8 @@ export type ReferencePaperClosedTrade = {
   grossMove: number;
   referenceFriction: number;
   netMove: number;
+  /** Display-only: (netMove/entryPrice)*500 */
+  hypotheticalEurPnl: number | null;
   result: "WIN" | "LOSS" | "BREAKEVEN";
   exitReason: GhFastExitReason;
   sourceReceiveSeq: number;
@@ -132,6 +168,8 @@ export type ReferencePaperOpenTrade = {
   grossMove: number;
   referenceFriction: number;
   netMove: number;
+  /** Display-only live mark: (netMove/entryPrice)*500 */
+  hypotheticalEurPnl: number | null;
   mfe: number;
   mae: number;
   durationMs: number;
@@ -165,6 +203,13 @@ export type ReferencePaperSummary = {
   paperEntriesBlockedDataNotOk: number;
   paperDataStaleExits: number;
   paperResyncExits: number;
+  /** Display-only fixed assumptions */
+  referencePositionValueEur: typeof REFERENCE_POSITION_VALUE_EUR;
+  marginRequirementPct: typeof REFERENCE_MARGIN_REQUIREMENT_PCT;
+  referenceMarginUsedEur: typeof REFERENCE_MARGIN_USED_EUR;
+  /** Sum of per-trade (netMove/entryPrice)*500 for closed trades */
+  hypotheticalEurPnlSum: number;
+  hypotheticalEurPnlLabel: "HYPOTHETICAL € P/L — REFERENCE ONLY";
   brokerRequests: 0;
   brokerOrders: 0;
   shadowOrders: 0;
@@ -329,6 +374,7 @@ export class ReferencePaperSimulator {
   private cumulativeGrossMove = 0;
   private cumulativeFriction = 0;
   private cumulativeNetMove = 0;
+  private cumulativeHypotheticalEurPnl = 0;
   private lastClosedResult: "WIN" | "LOSS" | "BREAKEVEN" | null = null;
   private currentStreak = 0;
   private streakKind: "WIN" | "LOSS" | "NONE" = "NONE";
@@ -485,6 +531,11 @@ export class ReferencePaperSimulator {
       paperEntriesBlockedDataNotOk: this.paperEntriesBlockedDataNotOk,
       paperDataStaleExits: this.paperDataStaleExits,
       paperResyncExits: this.paperResyncExits,
+      referencePositionValueEur: REFERENCE_POSITION_VALUE_EUR,
+      marginRequirementPct: REFERENCE_MARGIN_REQUIREMENT_PCT,
+      referenceMarginUsedEur: REFERENCE_MARGIN_USED_EUR,
+      hypotheticalEurPnlSum: this.cumulativeHypotheticalEurPnl,
+      hypotheticalEurPnlLabel: "HYPOTHETICAL € P/L — REFERENCE ONLY",
       brokerRequests: 0,
       brokerOrders: 0,
       shadowOrders: 0,
@@ -538,6 +589,7 @@ export class ReferencePaperSimulator {
     const friction = this.cfg.friction;
     const net = gross - friction;
     const result = resultFromNet(net);
+    const eur = hypotheticalEurPnlFromNetMove(net, o.entryPrice);
     const closed: ReferencePaperClosedTrade = {
       referenceTradeId: o.tradeId,
       setup: o.setup,
@@ -559,6 +611,7 @@ export class ReferencePaperSimulator {
       grossMove: gross,
       referenceFriction: friction,
       netMove: net,
+      hypotheticalEurPnl: eur,
       result,
       exitReason: reason,
       sourceReceiveSeq: this.open.sourceReceiveSeq,
@@ -570,6 +623,7 @@ export class ReferencePaperSimulator {
     this.cumulativeGrossMove += gross;
     this.cumulativeFriction += friction;
     this.cumulativeNetMove += net;
+    if (eur != null) this.cumulativeHypotheticalEurPnl += eur;
     if (result === "WIN") {
       this.totalWins += 1;
       this.cumulativeWinNet += net;
@@ -610,6 +664,7 @@ export class ReferencePaperSimulator {
       o.side === "BUY" ? exec - o.entryPrice : o.entryPrice - exec;
     const friction = this.cfg.friction;
     const now = this.lastTickTs || o.entryTs;
+    const net = gross - friction;
     return {
       referenceTradeId: o.tradeId,
       setup: o.setup,
@@ -625,7 +680,8 @@ export class ReferencePaperSimulator {
       executableExitPrice: exec,
       grossMove: gross,
       referenceFriction: friction,
-      netMove: gross - friction,
+      netMove: net,
+      hypotheticalEurPnl: hypotheticalEurPnlFromNetMove(net, o.entryPrice),
       mfe: o.mfe,
       mae: o.mae,
       durationMs: Math.max(0, now - o.entryTs),

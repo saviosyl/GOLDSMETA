@@ -391,6 +391,11 @@ export type ResearchCaptureHealth = {
     paperEntriesBlockedDataNotOk: number;
     paperDataStaleExits: number;
     paperResyncExits: number;
+    referencePositionValueEur: 500;
+    marginRequirementPct: 50;
+    referenceMarginUsedEur: 250;
+    hypotheticalEurPnlSum: number;
+    hypotheticalEurPnlLabel: "HYPOTHETICAL € P/L — REFERENCE ONLY";
     brokerRequests: 0;
     brokerOrders: 0;
     executionAdapter: "NONE";

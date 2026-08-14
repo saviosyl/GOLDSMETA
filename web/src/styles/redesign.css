@@ -7898,6 +7898,18 @@ body.gm-drawer-open {
   line-height: 1.35;
 }
 
+.gm-ghr-paper-eur-label {
+  margin: -4px 0 10px;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--ghr-warn);
+  line-height: 1.35;
+}
+
+.gm-ghr-paper-kpi-eur {
+  border-color: color-mix(in srgb, var(--ghr-gold) 40%, transparent);
+}
+
 .gm-ghr-paper-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));

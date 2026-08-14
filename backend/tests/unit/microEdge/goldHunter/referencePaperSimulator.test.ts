@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   REFERENCE_PAPER_MODE,
   REFERENCE_PAPER_POLICY,
-  ReferencePaperSimulator
+  REFERENCE_POSITION_VALUE_EUR,
+  ReferencePaperSimulator,
+  hypotheticalEurPnlFromNetMove
 } from "../../../../src/services/microEdge/goldHunter/fast/research/referencePaperSimulator";
 import { frozenGhFastSoakConfig } from "../../../../src/services/microEdge/goldHunter/fast/frozenConfig";
 import type { ResearchFeatureTelemetry } from "../../../../src/services/microEdge/goldHunter/fast/research/researchTypes";
@@ -408,6 +410,41 @@ describe("ReferencePaperSimulator", () => {
     expect(s.losses).toBe(4);
     expect(s.netMoveSum).toBeCloseTo(win1 - 4 * lossEach, 8);
     expect(s.profitFactor).toBeCloseTo(win1 / (4 * lossEach), 5);
+  });
+
+  it("hypothetical EUR P/L is display-only (netMove/entryPrice)*500", () => {
+    expect(REFERENCE_POSITION_VALUE_EUR).toBe(500);
+    const eur = hypotheticalEurPnlFromNetMove(0.4, 4390);
+    expect(eur).toBeCloseTo((0.4 / 4390) * 500, 8);
+
+    const sim = new ReferencePaperSimulator();
+    sim.onMarketTick({
+      bid: 4390.0,
+      ask: 4390.1,
+      tsMs: 1000,
+      receiveSeq: 1,
+      specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+      features: feat(),
+      dataOk: true
+    });
+    sim.onMarketTick({
+      bid: 4390.4,
+      ask: 4390.5,
+      tsMs: 1100,
+      receiveSeq: 2,
+      specialists: [],
+      features: feat(),
+      dataOk: true
+    });
+    sim.onResync({ tsMs: 1200, receiveSeq: 3 });
+    const closed = sim.snapshot().history[0]!;
+    const expected = (closed.netMove / closed.entryPrice) * 500;
+    expect(closed.hypotheticalEurPnl).toBeCloseTo(expected, 8);
+    expect(sim.summary().hypotheticalEurPnlSum).toBeCloseTo(expected, 8);
+    expect(sim.summary().referencePositionValueEur).toBe(500);
+    expect(sim.summary().referenceMarginUsedEur).toBe(250);
+    expect(sim.summary().marginRequirementPct).toBe(50);
+    expect(sim.summary().hypotheticalEurPnlLabel).toContain("HYPOTHETICAL");
   });
 
   it("has zero broker mutation surface and documented policy", () => {

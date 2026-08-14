@@ -87,6 +87,7 @@ type ReferencePaperOpen = {
   entryPrice: number;
   executableExitPrice: number;
   netMove: number;
+  hypotheticalEurPnl?: number | null;
   mfe: number;
   mae: number;
   durationMs: number;
@@ -106,6 +107,7 @@ type ReferencePaperClosed = {
   grossMove: number;
   referenceFriction: number;
   netMove: number;
+  hypotheticalEurPnl?: number | null;
   result: "WIN" | "LOSS" | "BREAKEVEN";
   exitReason: string;
 };
@@ -132,6 +134,11 @@ type ReferencePaperSummary = {
   paperEntriesBlockedDataNotOk?: number;
   paperDataStaleExits?: number;
   paperResyncExits?: number;
+  referencePositionValueEur?: number;
+  marginRequirementPct?: number;
+  referenceMarginUsedEur?: number;
+  hypotheticalEurPnlSum?: number;
+  hypotheticalEurPnlLabel?: string;
   friction?: number;
 };
 
@@ -187,6 +194,18 @@ function fmtNum(n: number | null | undefined, digits = 0): string {
 function fmtPx(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return n.toFixed(2);
+}
+
+function fmtEur(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `€ ${sign}${Math.abs(n).toFixed(2)}`;
+}
+
+function fmtSignedPts(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${Math.abs(n).toFixed(2)}`;
 }
 
 function fmtMs(n: number | null | undefined): string {
@@ -505,9 +524,12 @@ export function GoldHunterFastResearchPage() {
         </div>
         <p className="gm-ghr-paper-disclaimer" data-testid="gh-research-paper-disclaimer">
           REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE. ONE POSITION
-          MAX · EVENT DEDUPE WHILE OPEN (not selected-event count; not proven
-          unique opportunities). Executable-side pricing only. No account EUR/$
-          P/L.
+          MAX · EVENT DEDUPE WHILE OPEN. Executable-side pricing only.
+        </p>
+        <p className="gm-ghr-paper-eur-label" data-testid="gh-research-paper-eur-label">
+          HYPOTHETICAL € P/L — REFERENCE ONLY · NOT A BROKER ACCOUNT P/L ·
+          approx. (netMove / entryPrice) × €500 exposure (margin used €250 is
+          not position value)
         </p>
         <div className="gm-ghr-paper-summary" data-testid="gh-research-paper-summary">
           <div className="gm-ghr-paper-kpi">
@@ -559,6 +581,24 @@ export function GoldHunterFastResearchPage() {
           <div className="gm-ghr-paper-kpi">
             <span>Net move</span>
             <strong>{fmtPx(paper?.summary?.netMoveSum)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>REFERENCE POSITION</span>
+            <strong>
+              €{paper?.summary?.referencePositionValueEur ?? 500}
+            </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>MARGIN</span>
+            <strong>{paper?.summary?.marginRequirementPct ?? 50}%</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>MARGIN USED</span>
+            <strong>€{paper?.summary?.referenceMarginUsedEur ?? 250}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-eur">
+            <span>HYPOTHETICAL EUR P/L</span>
+            <strong>{fmtEur(paper?.summary?.hypotheticalEurPnlSum)}</strong>
           </div>
           <div className="gm-ghr-paper-kpi">
             <span>Current streak</span>
@@ -616,6 +656,10 @@ export function GoldHunterFastResearchPage() {
                 Live net move <strong>{fmtPx(paper.openTrade.netMove)}</strong>
               </span>
               <span>
+                Live € P/L{" "}
+                <strong>{fmtEur(paper.openTrade.hypotheticalEurPnl)}</strong>
+              </span>
+              <span>
                 MFE <strong>{fmtPx(paper.openTrade.mfe)}</strong>
               </span>
               <span>
@@ -655,7 +699,8 @@ export function GoldHunterFastResearchPage() {
                     <th>MAE</th>
                     <th>Gross</th>
                     <th>Friction</th>
-                    <th>Net</th>
+                    <th>NET PTS</th>
+                    <th>P/L €</th>
                     <th>Result</th>
                     <th>Exit reason</th>
                   </tr>
@@ -678,7 +723,8 @@ export function GoldHunterFastResearchPage() {
                       <td>{fmtPx(t.mae)}</td>
                       <td>{fmtPx(t.grossMove)}</td>
                       <td>{fmtPx(t.referenceFriction)}</td>
-                      <td>{fmtPx(t.netMove)}</td>
+                      <td>{fmtSignedPts(t.netMove)}</td>
+                      <td>{fmtEur(t.hypotheticalEurPnl)}</td>
                       <td>{t.result ?? "—"}</td>
                       <td>{t.exitReason ?? "—"}</td>
                     </tr>
