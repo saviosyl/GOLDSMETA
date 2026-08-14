@@ -44,7 +44,7 @@ export const GH_FAST_RESEARCH_TRANSPORT_HEARTBEAT_INTERVAL_MS = 10_000;
 export const GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS = 40_000;
 
 export const GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON =
-  "ProtoHeartbeatEvent cadence 10s (official Open API / research opt-in). 40s (~4 missed intervals) declares transport-message liveness lost and may schedule one bounded transport reconnect — independent of Spot/Depth market silence." as const;
+  "ProtoHeartbeatEvent outbound cadence 10s (research opt-in keep-alive). Remote liveness requires recent INBOUND ProtoHeartbeatEvent or other inbound platform message within 40s. Live quiet-market sample on f697b1f / gh_research_mstfgzl3_2lsmyp: inbound HB intervals ≈30.000s (min/median/p95/max). 40s retains ~10s margin above observed healthy inbound gaps. Successful local sendHeartbeat() is attempt telemetry only — not remote proof." as const;
 
 /**
  * @deprecated Retained for telemetry compatibility with prior runs.

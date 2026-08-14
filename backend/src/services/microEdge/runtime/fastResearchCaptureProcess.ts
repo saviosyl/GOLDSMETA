@@ -119,6 +119,7 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   transportLivenessHealthy: boolean | null;
   transportHeartbeatSentCount: number | null;
   lastTransportHeartbeatSentAt: string | null;
+  lastHeartbeatSendOk: boolean | null;
   transportHeartbeatReceivedCount: number | null;
   lastTransportHeartbeatReceivedAt: string | null;
   lastTransportMessageAt: string | null;
@@ -1395,6 +1396,7 @@ export class GoldHunterFastResearchCaptureProcess {
       transportLivenessHealthy: hbTel?.transportLivenessHealthy ?? null,
       transportHeartbeatSentCount: hbTel?.transportHeartbeatSentCount ?? null,
       lastTransportHeartbeatSentAt: hbTel?.lastTransportHeartbeatSentAt ?? null,
+      lastHeartbeatSendOk: hbTel?.lastHeartbeatSendOk ?? null,
       transportHeartbeatReceivedCount:
         hbTel?.transportHeartbeatReceivedCount ?? null,
       lastTransportHeartbeatReceivedAt:

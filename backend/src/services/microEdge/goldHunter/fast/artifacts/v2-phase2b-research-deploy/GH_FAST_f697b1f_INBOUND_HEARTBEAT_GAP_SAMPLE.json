@@ -1,0 +1,22 @@
+{
+  "runtimeSha": "f697b1f20eefc9726a3f7606a113669203103d58",
+  "runId": "gh_research_mstfgzl3_2lsmyp",
+  "sampleDurationSeconds": 86.6,
+  "spotAgeMs": null,
+  "depthAgeMs": null,
+  "feedState": "STALE",
+  "inboundHeartbeatReceivedStart": 71,
+  "inboundHeartbeatReceivedEnd": 74,
+  "inboundHeartbeatDelta": 3,
+  "observedInboundMessageIntervalsMs": [
+    30000.0,
+    30000.0,
+    30001.0
+  ],
+  "minMs": 30000.0,
+  "medianMs": 30000.0,
+  "p95Ms": 30001.0,
+  "maxMs": 30001.0,
+  "conclusion": "Quiet-market inbound ProtoHeartbeatEvent cadence \u224830s. Retain TRANSPORT_LIVENESS_MS=40000 (~10s margin). Outbound-only sendHeartbeat must NOT prove remote liveness.",
+  "ctraderLayerCloseFinding": "CTraderConnection.#onClose is empty ('Silence is golden') and does not notifyListeners \u2014 no reliable app-facing socket close/error event to wire."
+}

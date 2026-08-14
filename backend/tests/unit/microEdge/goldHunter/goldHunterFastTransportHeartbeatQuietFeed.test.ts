@@ -1,32 +1,27 @@
 /**
- * GOLD HUNTER FAST — transport heartbeat + quiet-feed correction.
+ * GOLD HUNTER FAST — inbound transport liveness correction.
  *
- * Proves Spot/Depth silence with healthy ProtoHeartbeatEvent does NOT
- * full-detach / RESYNC / transport-reconnect (deadf271 loop forensic).
+ * Catches f697b1f bug: successful local sendHeartbeat() must NOT keep
+ * transportLivenessHealthy=true without recent inbound evidence.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import {
   decideResearchStaleReconnect,
   GH_FAST_RESEARCH_HARD_FEED_STALE_MS,
   GH_FAST_RESEARCH_SOFT_STALE_MS,
   GH_FAST_RESEARCH_TRANSPORT_HEARTBEAT_INTERVAL_MS,
-  GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS
+  GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS,
+  GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON
 } from "../../../../src/services/microEdge/goldHunter/fast/research/researchStaleReconnectPolicy";
 import { FakeMicroCTraderTransport } from "../../../../src/services/microEdge/marketData/microCTraderTransport";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import type { MicroLiveMarketSession } from "../../../../src/services/microEdge/marketData/liveSession";
 
-describe("ctrader-layer heartbeat baseline", () => {
-  it("6. package does NOT auto-send heartbeat — callers must use sendHeartbeat()", () => {
-    const readme = readFileSync(
-      join(
-        process.cwd(),
-        "node_modules/@reiryoku/ctrader-layer/README.md"
-      ),
-      "utf8"
-    );
-    expect(readme).toMatch(/sendHeartbeat/);
-    expect(readme).toMatch(/25 seconds|heartbeat/i);
+describe("ctrader-layer close/error + heartbeat baseline", () => {
+  it("CTraderConnection.#onClose is a no-op — no app-facing close event", () => {
     const src = readFileSync(
       join(
         process.cwd(),
@@ -34,22 +29,162 @@ describe("ctrader-layer heartbeat baseline", () => {
       ),
       "utf8"
     );
+    expect(src).toMatch(/#onClose \(\): void \{\s*\/\/ Silence is golden\./);
     expect(src).toMatch(/public sendHeartbeat/);
-    // No setInterval heartbeat inside the connection class itself.
-    expect(src).not.toMatch(/setInterval\s*\(\s*\(\)\s*=>\s*this\.sendHeartbeat/);
+    // No emitter notify on close — cannot wire a public close event name.
+    expect(src).not.toMatch(/#onClose[\s\S]{0,80}notifyListeners/);
   });
 
-  it("heartbeat cadence constants", () => {
+  it("liveness timeout retained at 40s above live inbound ~30s gaps", () => {
     expect(GH_FAST_RESEARCH_TRANSPORT_HEARTBEAT_INTERVAL_MS).toBe(10_000);
     expect(GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS).toBe(40_000);
+    expect(GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON).toMatch(/INBOUND/);
+    expect(GH_FAST_RESEARCH_TRANSPORT_LIVENESS_REASON).toMatch(/30\.000s/);
     expect(GH_FAST_RESEARCH_HARD_FEED_STALE_MS).toBe(45_000);
     expect(GH_FAST_RESEARCH_SOFT_STALE_MS).toBe(20_000);
   });
 });
 
-describe("quiet market with healthy transport heartbeat", () => {
-  it("12+13. 20-minute silence + healthy HB → ZERO transport reconnect / RESYNC", () => {
+describe("CRITICAL: outbound-only must NOT keep transport healthy", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("outbound sendHeartbeat succeeds every 10s with ZERO inbound → unhealthy after 40s", () => {
+    const t = new FakeMicroCTraderTransport();
+    void t.connect();
+    let now = 1_000_000;
+    t.setResearchHeartbeatInboundEchoForTests(false);
+    t.enableResearchTransportHeartbeat({
+      intervalMs: 10_000,
+      livenessTimeoutMs: 40_000,
+      nowMs: () => now
+    });
+    t.clearInboundTransportLivenessForTests();
+
+    // Immediate outbound tick still succeeds; inbound clocks wiped.
+    expect(t.getResearchTransportHeartbeatTelemetry().lastHeartbeatSendOk).toBe(
+      true
+    );
+    expect(
+      t.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy
+    ).toBe(false);
+
+    // Advance well past 40s while outbound keep-alive continues.
+    for (let i = 0; i < 6; i++) {
+      now += 10_000;
+      vi.advanceTimersByTime(10_000);
+    }
+    const tel = t.getResearchTransportHeartbeatTelemetry();
+    expect(tel.transportHeartbeatSentCount).toBeGreaterThanOrEqual(6);
+    expect(tel.lastHeartbeatSendOk).toBe(true);
+    expect(tel.transportHeartbeatReceivedCount).toBe(0);
+    expect(tel.lastTransportMessageAt).toBeNull();
+    expect(tel.transportLivenessHealthy).toBe(false);
+
+    const d = decideResearchStaleReconnect({
+      nowMs: now,
+      connectionState: "CONNECTED",
+      spotAgeMs: 120_000,
+      depthAgeMs: 120_000,
+      transportLivenessHealthy: tel.transportLivenessHealthy,
+      reconnectInFlight: false
+    });
+    expect(d.action).toBe("SCHEDULE_TRANSPORT_RECONNECT");
+    expect((d as { reason?: string }).reason).toBe("transport_liveness_lost");
+    t.disconnect();
+  });
+
+  it("watchdog schedules ONE transport_liveness_lost reconnect", async () => {
+    vi.useRealTimers();
+    const prevBucket = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = "test-gh-fast-research";
+    const dir = await mkdtemp(join(tmpdir(), "gh-inbound-live-"));
+    try {
+      const { GoldHunterFastResearchCaptureProcess } = await import(
+        "../../../../src/services/microEdge/runtime/fastResearchCaptureProcess"
+      );
+      const proc = new GoldHunterFastResearchCaptureProcess({
+        gcsBucket: "test-gh-fast-research",
+        runtimeSha: "dddddddddddddddddddddddddddddddddddddddd",
+        softStaleMs: 20_000,
+        hardStaleReconnectMs: 45_000
+      });
+      await proc.prepareRuntimeForTests(dir);
+      const bridge = proc.getRuntime()!.getBridge()!;
+      bridge.setConnectionState("CONNECTED", "test");
+      bridge.setSubscriptionFlags(true, true);
+
+      const fake = new FakeMicroCTraderTransport();
+      await fake.connect();
+      fake.setResearchHeartbeatInboundEchoForTests(false);
+      fake.enableResearchTransportHeartbeat({
+        intervalMs: 10_000,
+        livenessTimeoutMs: 40_000
+      });
+      fake.clearInboundTransportLivenessForTests();
+      expect(fake.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy).toBe(
+        false
+      );
+
+      const session = {
+        getResearchTransportHeartbeatTelemetry: () =>
+          fake.getResearchTransportHeartbeatTelemetry(),
+        disconnect: async () => {
+          await fake.disconnect();
+        }
+      };
+      proc.setActiveSessionForTests(session as unknown as MicroLiveMarketSession);
+      proc.setSkipSessionConnectForTests(true);
+
+      await proc.checkStaleAndReconnectForTests();
+      // scheduleReconnect uses 500ms delay for transport_liveness_lost
+      expect(proc.getReconnectTelemetryForTests().reconnectTimerPending).toBe(
+        true
+      );
+      await new Promise((r) => setTimeout(r, 700));
+      const tel = proc.getReconnectTelemetryForTests();
+      expect(tel.transportReconnectCount).toBe(1);
+      expect(tel.staleFeedReconnectCount).toBe(0);
+      // Second watchdog while reconnect in-flight / after must not storm.
+      await proc.checkStaleAndReconnectForTests();
+      expect(proc.getReconnectTelemetryForTests().transportReconnectCount).toBe(
+        1
+      );
+      await proc.stop();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      if (prevBucket == null) {
+        delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+      } else {
+        process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prevBucket;
+      }
+    }
+  });
+});
+
+describe("healthy quiet-market with inbound heartbeat", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("20-minute Spot/Depth silence + inbound HB → ZERO transport reconnect", () => {
+    const t = new FakeMicroCTraderTransport();
+    void t.connect();
     let now = 0;
+    t.setResearchHeartbeatInboundEchoForTests(true);
+    t.enableResearchTransportHeartbeat({
+      intervalMs: 10_000,
+      livenessTimeoutMs: 40_000,
+      nowMs: () => now
+    });
+
     let transportSchedules = 0;
     let staleSchedules = 0;
     let hardFeed = 0;
@@ -57,18 +192,20 @@ describe("quiet market with healthy transport heartbeat", () => {
     const horizon = 20 * 60_000;
 
     for (; now <= horizon; now += step) {
-      // Heartbeat every 10s keeps transportMessageAge under 40s.
-      const sinceHb = now % 10_000;
-      const transportMessageAgeMs = sinceHb;
+      vi.advanceTimersByTime(step);
+      const tel = t.getResearchTransportHeartbeatTelemetry();
+      expect(tel.transportLivenessHealthy).toBe(true);
+      expect(tel.lastHeartbeatSendOk).toBe(true);
+      expect(tel.transportHeartbeatReceivedCount).toBeGreaterThan(0);
+
       const d = decideResearchStaleReconnect({
         nowMs: now,
         connectionState: "CONNECTED",
-        spotAgeMs: now, // zero Spot events
-        depthAgeMs: now, // zero Depth events
+        spotAgeMs: now,
+        depthAgeMs: now,
         softStaleMs: GH_FAST_RESEARCH_SOFT_STALE_MS,
         hardStaleReconnectMs: GH_FAST_RESEARCH_HARD_FEED_STALE_MS,
-        transportLivenessHealthy:
-          transportMessageAgeMs <= GH_FAST_RESEARCH_TRANSPORT_LIVENESS_MS,
+        transportLivenessHealthy: tel.transportLivenessHealthy,
         reconnectInFlight: false
       });
       if (d.action === "SCHEDULE_TRANSPORT_RECONNECT") transportSchedules += 1;
@@ -79,35 +216,11 @@ describe("quiet market with healthy transport heartbeat", () => {
     expect(transportSchedules).toBe(0);
     expect(staleSchedules).toBe(0);
     expect(hardFeed).toBeGreaterThan(100);
-  });
-
-  it("14+15. stop heartbeats → one transport_liveness_lost reconnect", () => {
-    const healthy = decideResearchStaleReconnect({
-      nowMs: 100_000,
-      connectionState: "CONNECTED",
-      spotAgeMs: 120_000,
-      depthAgeMs: 120_000,
-      transportLivenessHealthy: true,
-      reconnectInFlight: false
-    });
-    expect(healthy.action).toBe("HARD_FEED_STALE");
-
-    const lost = decideResearchStaleReconnect({
-      nowMs: 100_000,
-      connectionState: "CONNECTED",
-      spotAgeMs: 120_000,
-      depthAgeMs: 120_000,
-      transportLivenessHealthy: false,
-      reconnectInFlight: false
-    });
-    expect(lost.action).toBe("SCHEDULE_TRANSPORT_RECONNECT");
-    expect((lost as { reason?: string }).reason).toBe(
-      "transport_liveness_lost"
-    );
+    t.disconnect();
   });
 });
 
-describe("FakeMicroCTraderTransport research heartbeat", () => {
+describe("inbound loss then recovery", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -115,45 +228,49 @@ describe("FakeMicroCTraderTransport research heartbeat", () => {
     vi.useRealTimers();
   });
 
-  it("7-9. opt-in heartbeat ticks ~10s and exposes telemetry", () => {
-    const t = new FakeMicroCTraderTransport();
-    void t.connect();
-    t.enableResearchTransportHeartbeat({
-      intervalMs: 10_000,
-      livenessTimeoutMs: 40_000,
-      nowMs: () => Date.now()
-    });
-    const before = t.getResearchTransportHeartbeatTelemetry();
-    expect(before.researchHeartbeatEnabled).toBe(true);
-    vi.advanceTimersByTime(10_000);
-    const mid = t.getResearchTransportHeartbeatTelemetry();
-    expect(mid.transportHeartbeatSentCount).toBeGreaterThanOrEqual(1);
-    expect(mid.transportLivenessHealthy).toBe(true);
-    expect(mid.lastTransportHeartbeatSentAt).not.toBeNull();
-    t.disconnect();
-    expect(
-      t.getResearchTransportHeartbeatTelemetry().researchHeartbeatEnabled
-    ).toBe(false);
-  });
-
-  it("outbound heartbeat alone keeps liveness during market silence", () => {
+  it("healthy inbound → stop inbound (outbound continues) → unhealthy → resume inbound", () => {
     const t = new FakeMicroCTraderTransport();
     void t.connect();
     let now = 1_000_000;
+    t.setResearchHeartbeatInboundEchoForTests(true);
     t.enableResearchTransportHeartbeat({
       intervalMs: 10_000,
       livenessTimeoutMs: 40_000,
       nowMs: () => now
     });
-    now += 60_000;
-    vi.advanceTimersByTime(60_000);
     expect(t.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy).toBe(
       true
     );
-    t.stopFakeHeartbeatEchoForTests();
-    now += 50_000;
+
+    // Stop ALL inbound; keep outbound succeeding.
+    t.setResearchHeartbeatInboundEchoForTests(false);
+    t.clearInboundTransportLivenessForTests();
+    for (let i = 0; i < 5; i++) {
+      now += 10_000;
+      vi.advanceTimersByTime(10_000);
+    }
+    const lost = t.getResearchTransportHeartbeatTelemetry();
+    expect(lost.lastHeartbeatSendOk).toBe(true);
+    expect(lost.transportHeartbeatSentCount).toBeGreaterThan(0);
+    expect(lost.transportLivenessHealthy).toBe(false);
+
+    const decision = decideResearchStaleReconnect({
+      nowMs: now,
+      connectionState: "CONNECTED",
+      spotAgeMs: 90_000,
+      depthAgeMs: 90_000,
+      transportLivenessHealthy: false,
+      reconnectInFlight: false
+    });
+    expect(decision.action).toBe("SCHEDULE_TRANSPORT_RECONNECT");
+    expect((decision as { reason?: string }).reason).toBe(
+      "transport_liveness_lost"
+    );
+
+    // Resume inbound cohort.
+    t.emitFakeInboundHeartbeatForTests();
     expect(t.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy).toBe(
-      false
+      true
     );
     t.disconnect();
   });

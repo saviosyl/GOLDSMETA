@@ -66,6 +66,8 @@ export type ResearchTransportHeartbeatTelemetry = {
   researchHeartbeatEnabled: boolean;
   transportHeartbeatSentCount: number;
   lastTransportHeartbeatSentAt: string | null;
+  /** True if the most recent outbound sendHeartbeat() call did not throw. */
+  lastHeartbeatSendOk: boolean;
   transportHeartbeatReceivedCount: number;
   lastTransportHeartbeatReceivedAt: string | null;
   lastTransportMessageAt: string | null;
@@ -480,24 +482,16 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
       this.lastTransportMessageAtMs != null
         ? Math.max(0, now - this.lastTransportMessageAtMs)
         : null;
-    const sentAge =
-      this.lastTransportHeartbeatSentAtMs != null
-        ? Math.max(0, now - this.lastTransportHeartbeatSentAtMs)
-        : null;
-    // cTrader may not echo ProtoHeartbeatEvent while quiet; successful outbound
-    // keep-alive (plus socket still connected) is sufficient transport liveness.
-    // Inbound market/HB messages also prove liveness. Spot/Depth silence alone
-    // must NOT declare the transport dead.
+    // Remote transport health requires recent INBOUND evidence only:
+    // ProtoHeartbeatEvent from Open API proxy OR any other inbound platform
+    // message. Successful local sendHeartbeat() is keep-alive ATTEMPT telemetry
+    // only — it must NOT indefinitely prove remote proxy liveness (f697b1f bug).
     const inboundOk =
       msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
-    const outboundOk =
-      this.lastHeartbeatSendOk &&
-      sentAge != null &&
-      sentAge <= this.researchHeartbeatLivenessMs;
     const healthy =
       !this.researchHeartbeatEnabled || !this.connected
         ? this.connected
-        : inboundOk || outboundOk;
+        : inboundOk;
     return {
       researchHeartbeatEnabled: this.researchHeartbeatEnabled,
       transportHeartbeatSentCount: this.transportHeartbeatSentCount,
@@ -505,6 +499,7 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
         this.lastTransportHeartbeatSentAtMs != null
           ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
           : null,
+      lastHeartbeatSendOk: this.lastHeartbeatSendOk,
       transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
       lastTransportHeartbeatReceivedAt:
         this.lastTransportHeartbeatReceivedAtMs != null
@@ -779,6 +774,9 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   private transportHeartbeatReceivedCount = 0;
   private lastTransportHeartbeatReceivedAtMs: number | null = null;
   private lastTransportMessageAtMs: number | null = null;
+  private lastHeartbeatSendOk = true;
+  /** When true, fake outbound tick also synthesizes inbound ProtoHeartbeatEvent. */
+  private fakeInboundHeartbeatEcho = true;
 
   isConnected(): boolean {
     return this.connected;
@@ -844,21 +842,21 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     this.researchHeartbeatIntervalMs = opts?.intervalMs ?? 10_000;
     this.researchHeartbeatLivenessMs = opts?.livenessTimeoutMs ?? 40_000;
     if (opts?.nowMs) this.researchHeartbeatNowMs = opts.nowMs;
-    const now = this.researchHeartbeatNowMs();
-    this.lastTransportMessageAtMs = now;
     if (this.researchHeartbeatTimer) clearInterval(this.researchHeartbeatTimer);
-    this.researchHeartbeatTimer = setInterval(() => {
+    const tick = (): void => {
       if (!this.connected || !this.researchHeartbeatEnabled) return;
       this.transportHeartbeatSentCount += 1;
       this.lastTransportHeartbeatSentAtMs = this.researchHeartbeatNowMs();
-      // Fake echo: inbound heartbeat proves liveness in quiet-market tests.
-      this.transportHeartbeatReceivedCount += 1;
-      this.lastTransportHeartbeatReceivedAtMs = this.researchHeartbeatNowMs();
-      this.lastTransportMessageAtMs = this.researchHeartbeatNowMs();
-      for (const h of this.handlers.get("ProtoHeartbeatEvent") ?? []) {
-        h("ProtoHeartbeatEvent", {});
+      this.lastHeartbeatSendOk = true;
+      if (this.fakeInboundHeartbeatEcho) {
+        this.emitFakeInboundHeartbeatForTests();
       }
-    }, this.researchHeartbeatIntervalMs);
+    };
+    tick();
+    this.researchHeartbeatTimer = setInterval(
+      tick,
+      this.researchHeartbeatIntervalMs
+    );
     if (typeof this.researchHeartbeatTimer.unref === "function") {
       this.researchHeartbeatTimer.unref();
     }
@@ -882,14 +880,8 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       this.lastTransportMessageAtMs != null
         ? Math.max(0, now - this.lastTransportMessageAtMs)
         : null;
-    const sentAge =
-      this.lastTransportHeartbeatSentAtMs != null
-        ? Math.max(0, now - this.lastTransportHeartbeatSentAtMs)
-        : null;
     const inboundOk =
       msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
-    const outboundOk =
-      sentAge != null && sentAge <= this.researchHeartbeatLivenessMs;
     return {
       researchHeartbeatEnabled: this.researchHeartbeatEnabled,
       transportHeartbeatSentCount: this.transportHeartbeatSentCount,
@@ -897,6 +889,7 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
         this.lastTransportHeartbeatSentAtMs != null
           ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
           : null,
+      lastHeartbeatSendOk: this.lastHeartbeatSendOk,
       transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
       lastTransportHeartbeatReceivedAt:
         this.lastTransportHeartbeatReceivedAtMs != null
@@ -909,19 +902,46 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       transportHeartbeatAgeMs: hbAge,
       transportMessageAgeMs: msgAge,
       transportLivenessTimeoutMs: this.researchHeartbeatLivenessMs,
+      // Inbound-only remote liveness (matches RealMicroCTraderTransport).
       transportLivenessHealthy:
         !this.researchHeartbeatEnabled || !this.connected
           ? this.connected
-          : inboundOk || outboundOk
+          : inboundOk
     };
   }
 
-  /** Test helper — stop echoing heartbeats (simulate transport-message death). */
+  /** Test helper — stop outbound timer (and any echo). */
   stopFakeHeartbeatEchoForTests(): void {
     if (this.researchHeartbeatTimer) {
       clearInterval(this.researchHeartbeatTimer);
       this.researchHeartbeatTimer = null;
     }
+  }
+
+  /**
+   * Test helper — when false, outbound sendHeartbeat succeeds without any
+   * inbound ProtoHeartbeatEvent / transport message (f697b1f masking bug).
+   */
+  setResearchHeartbeatInboundEchoForTests(enabled: boolean): void {
+    this.fakeInboundHeartbeatEcho = enabled;
+  }
+
+  /** Test helper — synthesize one inbound ProtoHeartbeatEvent. */
+  emitFakeInboundHeartbeatForTests(): void {
+    const now = this.researchHeartbeatNowMs();
+    this.transportHeartbeatReceivedCount += 1;
+    this.lastTransportHeartbeatReceivedAtMs = now;
+    this.lastTransportMessageAtMs = now;
+    for (const h of this.handlers.get("ProtoHeartbeatEvent") ?? []) {
+      h("ProtoHeartbeatEvent", {});
+    }
+  }
+
+  /** Test helper — wipe inbound liveness clocks while leaving outbound ticking. */
+  clearInboundTransportLivenessForTests(): void {
+    this.lastTransportHeartbeatReceivedAtMs = null;
+    this.lastTransportMessageAtMs = null;
+    // Keep received count as historical telemetry.
   }
 
   async sendReadCommand(
