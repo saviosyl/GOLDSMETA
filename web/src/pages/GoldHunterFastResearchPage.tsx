@@ -165,12 +165,13 @@ export function GoldHunterFastResearchPage() {
   const [observations, setObservations] = useState<ResearchObservation[]>([]);
   const [feedAvailable, setFeedAvailable] = useState(false);
   const [lastOkAt, setLastOkAt] = useState<number | null>(null);
-  const [nowTick, setNowTick] = useState(Date.now());
+  const [nowTick, setNowTick] = useState(0);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const prevHealthRef = useRef<ResearchHealth | null>(null);
 
   useEffect(() => {
+    setNowTick(Date.now());
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
