@@ -1,0 +1,25 @@
+# Dedicated GOLD_HUNTER FAST continuous research capture service (Cloud Run).
+# Own process — does NOT share Core AutoTrade, quote-worker, or gold-hunter-fast-shadow.
+# RESEARCH CAPTURE ONLY / mutationSurface=NONE / MICRO_BROKER_EXECUTION_ENABLED=false
+# campaignMode=true / SCOPE_VIEW / NO broker orders / NO shadow trades
+# Storage: gold-hunter-fast/research-capture/  (NEVER live-shadow)
+FROM node:20-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
+RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts/microEdge/runFastResearchCaptureRuntime.ts ./scripts/microEdge/runFastResearchCaptureRuntime.ts
+# Pin to package-lock resolved version (devDependency tsx@4.23.1) for reproducible images.
+RUN npm install tsx@4.23.1 --no-save
+ENV PORT=8080
+ENV NODE_ENV=production
+ENV APP_ENV=production
+ENV MICRO_DEPLOYED_RUNTIME=true
+ENV MICRO_STORAGE_MODE=firestore
+ENV MICRO_BROKER_EXECUTION_ENABLED=false
+ENV MICRO_CTRADER_ENVIRONMENT=DEMO
+ENV GOLD_HUNTER_FAST_SHADOW_ENABLED=false
+EXPOSE 8080
+CMD ["npx", "tsx", "scripts/microEdge/runFastResearchCaptureRuntime.ts"]

@@ -14,12 +14,15 @@ const root = join(__dirname, "../..");
 
 const RESEARCH_DIRS = [
   join(root, "src/services/microEdge/goldHunter/fast/research"),
-  join(root, "src/services/microEdge/runtime")
+  join(root, "src/services/microEdge/runtime"),
+  join(root, "scripts/microEdge")
 ];
 
 const RESEARCH_FILE_FILTER = (rel) =>
   rel.includes("/goldHunter/fast/research/") ||
-  rel.endsWith("/runtime/fastResearchCaptureRuntime.ts");
+  rel.endsWith("/runtime/fastResearchCaptureRuntime.ts") ||
+  rel.endsWith("/runtime/fastResearchCaptureProcess.ts") ||
+  rel.endsWith("/scripts/microEdge/runFastResearchCaptureRuntime.ts");
 
 /** Import path / symbol constructions that must not appear. */
 const FORBIDDEN_IMPORT_PATTERNS = [

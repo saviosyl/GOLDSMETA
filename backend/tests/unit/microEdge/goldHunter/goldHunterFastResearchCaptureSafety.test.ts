@@ -868,16 +868,138 @@ describe("research module source hygiene (static sample)", () => {
       expect(text).not.toMatch(/import\s*\{[^}]*\bGoldHunterFastLiveBridge\b/);
       expect(text).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
     }
-    const runtime = readFileSync(
-      join(
-        process.cwd(),
-        "src/services/microEdge/runtime/fastResearchCaptureRuntime.ts"
-      ),
-      "utf8"
+    for (const rel of [
+      "src/services/microEdge/runtime/fastResearchCaptureRuntime.ts",
+      "src/services/microEdge/runtime/fastResearchCaptureProcess.ts",
+      "scripts/microEdge/runFastResearchCaptureRuntime.ts"
+    ]) {
+      const raw = readFileSync(join(process.cwd(), rel), "utf8");
+      const text = raw
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      expect(text).not.toMatch(/from\s+["'][^"']*executionAdapter["']/);
+      expect(text).not.toMatch(/new\s+ShadowExecutionAdapter/);
+      expect(text).not.toMatch(/from\s+["'][^"']*\/engine["']/);
+      expect(text).not.toMatch(/from\s+["'][^"']*\/liveBridge["']/);
+      expect(text).not.toMatch(
+        /import\s*\{[^}]*\b(GoldHunterFastLiveBridge|GoldHunterFastEngine)\b/
+      );
+      expect(text).not.toMatch(
+        /new\s+(GoldHunterFastLiveBridge|GoldHunterFastEngine)\b/
+      );
+      expect(text).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
+    }
+  });
+});
+
+describe("Phase 2B research process startup gate", () => {
+  it("refuses construction without explicit research GCS bucket", async () => {
+    const prev = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    const { GoldHunterFastResearchCaptureProcess } = await import(
+      "../../../../src/services/microEdge/runtime/fastResearchCaptureProcess"
     );
-    expect(runtime).not.toMatch(/from\s+["'][^"']*executionAdapter["']/);
-    expect(runtime).not.toMatch(/new\s+ShadowExecutionAdapter/);
-    expect(runtime).not.toMatch(/from\s+["'][^"']*\/engine["']/);
-    expect(runtime).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
+    expect(
+      () =>
+        new GoldHunterFastResearchCaptureProcess({
+          healthPort: 0
+        })
+    ).toThrow(/MISSING_GCS_BUCKET/);
+    if (prev != null) process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prev;
+  });
+
+  it("liveCaptureStartupGate requires SCOPE_VIEW + GCS + fresh feeds + heartbeats", async () => {
+    const { evaluateLiveCaptureStartupGate } = await import(
+      "../../../../src/services/microEdge/runtime/fastResearchCaptureProcess"
+    );
+    const proof = {
+      permissionScope: "SCOPE_VIEW" as const,
+      source: "broker_authorization_response" as const,
+      verifiedAt: new Date().toISOString(),
+      accountCount: 1,
+      environment: "DEMO",
+      selectedAccountIdPresent: true
+    };
+    const healthy = evaluateCaptureHealth(
+      baseHealthInput({
+        campaignMode: true,
+        durableMode: "GCS",
+        heartbeatsPersisted: 5,
+        sessionTransitionsPersisted: 2,
+        scopeVerified: true
+      })
+    );
+    // synthesize a ResearchCaptureHealth-like object for the gate
+    const h = {
+      mode: GH_FAST_RESEARCH_MODE,
+      service: "gold-hunter-fast-research-capture" as const,
+      processHealthy: true,
+      captureHealthy: healthy.captureHealthy,
+      serviceHealthy: healthy.serviceHealthy,
+      dataIntegrityStatus: healthy.dataIntegrityStatus,
+      campaignValid: healthy.campaignValid,
+      scopeVerified: true,
+      spotSubscribed: true,
+      depthSubscribed: true,
+      spotAgeMs: 100,
+      depthAgeMs: 100,
+      freshnessLimitMs: 20_000,
+      eventsReceived: 10,
+      eventsDropped: 0,
+      queueDepth: 0,
+      queueLatencyP50: 1,
+      queueLatencyP95: 2,
+      queueLatencyP99: 3,
+      eventLoopLagP50: 1,
+      eventLoopLagP95: 2,
+      eventLoopLagP99: 3,
+      feedGapCount: 0,
+      reconnectCount: 0,
+      resyncCount: 0,
+      bookCrossedCount: 0,
+      candidateA: 0,
+      candidateB: 0,
+      candidateC: 0,
+      captureStart: new Date().toISOString(),
+      captureDurationMs: 1000,
+      runId: "r",
+      datasetId: "d",
+      schemaVersion: GH_FAST_RESEARCH_SCHEMA_VERSION,
+      researchConfigSha: "sha",
+      runtimeSha: null,
+      brokerRequests: 0 as const,
+      brokerOrders: 0 as const,
+      shadowOrders: 0 as const,
+      permissionScope: "SCOPE_VIEW" as const,
+      mutationSurface: "NONE" as const,
+      executionAdapter: "NONE" as const,
+      openShadowTrade: false as const,
+      connectionState: "CONNECTED" as const,
+      storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
+      durableMode: "GCS" as const,
+      persistenceQueueDepth: 0,
+      persistenceDroppedChunks: 0,
+      persistenceDroppedRows: 0,
+      chunksWritten: 1,
+      chunksUploaded: 1,
+      writeErrors: 0,
+      uploadErrors: 0,
+      healthWarning: null,
+      captureUnhealthyReasons: [] as string[],
+      heartbeatsPersisted: 5,
+      sessionTransitionsPersisted: 2,
+      disclaimer: "x"
+    };
+    expect(evaluateLiveCaptureStartupGate(h, proof).ok).toBe(true);
+    expect(
+      evaluateLiveCaptureStartupGate(h, null).ok
+    ).toBe(false);
+    expect(
+      evaluateLiveCaptureStartupGate(
+        { ...h, durableMode: "LOCAL_BUFFER_ONLY", campaignValid: false },
+        proof
+      ).ok
+    ).toBe(false);
+    expect(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX).toContain("live-shadow");
   });
 });
