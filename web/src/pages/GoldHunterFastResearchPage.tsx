@@ -70,6 +70,12 @@ type ResearchHealth = {
     profitFactor?: number | null;
     netMoveSum?: number;
     tradesPerHour?: number | null;
+    tradesPerHourLabel?: string;
+    totalClosedTrades?: number;
+    historyRows?: number;
+    paperEntriesBlockedDataNotOk?: number;
+    paperDataStaleExits?: number;
+    paperResyncExits?: number;
   };
 };
 
@@ -120,6 +126,12 @@ type ReferencePaperSummary = {
   currentStreak?: number;
   streakKind?: "WIN" | "LOSS" | "NONE";
   tradesPerHour?: number | null;
+  tradesPerHourLabel?: string;
+  totalClosedTrades?: number;
+  historyRows?: number;
+  paperEntriesBlockedDataNotOk?: number;
+  paperDataStaleExits?: number;
+  paperResyncExits?: number;
   friction?: number;
 };
 
@@ -492,9 +504,10 @@ export function GoldHunterFastResearchPage() {
           <span className="gm-ghr-feed-note">HYPOTHETICAL REFERENCE ONLY</span>
         </div>
         <p className="gm-ghr-paper-disclaimer" data-testid="gh-research-paper-disclaimer">
-          REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE. Deduplicated
-          opportunity episodes (not selected-event count). Executable-side
-          pricing only. No account EUR/$ P/L.
+          REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE. ONE POSITION
+          MAX · EVENT DEDUPE WHILE OPEN (not selected-event count; not proven
+          unique opportunities). Executable-side pricing only. No account EUR/$
+          P/L.
         </p>
         <div className="gm-ghr-paper-summary" data-testid="gh-research-paper-summary">
           <div className="gm-ghr-paper-kpi">
@@ -558,12 +571,28 @@ export function GoldHunterFastResearchPage() {
             </strong>
           </div>
           <div className="gm-ghr-paper-kpi">
-            <span>Trades/hour</span>
+            <span title="Cumulative closed trades / elapsed simulator runtime — not validated FAST V2 frequency">
+              PAPER TRADES / HOUR — CURRENT RUNTIME
+            </span>
             <strong>
               {paper?.summary?.tradesPerHour == null
                 ? "—"
                 : paper.summary.tradesPerHour.toFixed(2)}
             </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Blocked !dataOk</span>
+            <strong>
+              {fmtNum(paper?.summary?.paperEntriesBlockedDataNotOk)}
+            </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>DATA_STALE exits</span>
+            <strong>{fmtNum(paper?.summary?.paperDataStaleExits)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>RESYNC exits</span>
+            <strong>{fmtNum(paper?.summary?.paperResyncExits)}</strong>
           </div>
         </div>
 

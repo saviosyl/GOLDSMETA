@@ -160,6 +160,9 @@ describe("GoldHunterFastResearchPage", () => {
       "REFERENCE PAPER TRADES"
     );
     expect(screen.getByTestId("gh-research-paper-disclaimer")).toHaveTextContent(
+      "ONE POSITION MAX"
+    );
+    expect(screen.getByTestId("gh-research-paper-disclaimer")).toHaveTextContent(
       "HYPOTHETICAL, NOT A BROKER TRADE"
     );
     expect(screen.getByTestId("gh-research-paper-summary")).toHaveTextContent(

@@ -309,6 +309,12 @@ export class GoldHunterFastResearchCaptureRuntime {
           profitFactor: null,
           netMoveSum: 0,
           tradesPerHour: null,
+          tradesPerHourLabel: "PAPER TRADES / HOUR — CURRENT RUNTIME",
+          totalClosedTrades: 0,
+          historyRows: 0,
+          paperEntriesBlockedDataNotOk: 0,
+          paperDataStaleExits: 0,
+          paperResyncExits: 0,
           brokerRequests: 0,
           brokerOrders: 0,
           executionAdapter: "NONE"

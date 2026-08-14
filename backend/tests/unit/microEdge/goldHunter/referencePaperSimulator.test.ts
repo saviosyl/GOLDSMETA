@@ -73,7 +73,8 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1000,
       receiveSeq: 1,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim.snapshot().openTrade?.entryPrice).toBeCloseTo(4390.1, 5);
     expect(sim.snapshot().openTrade?.entryAsk).toBeCloseTo(4390.1, 5);
@@ -86,7 +87,8 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1000,
       receiveSeq: 1,
       specialists: [selected("B_FAST_BREAKOUT", "SELL")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim2.snapshot().openTrade?.entryPrice).toBeCloseTo(4390.0, 5);
     expect(sim2.snapshot().openTrade?.executableExitPrice).toBeCloseTo(4390.1, 5);
@@ -101,13 +103,94 @@ describe("ReferencePaperSimulator", () => {
         tsMs: 1000 + i,
         receiveSeq: i + 1,
         specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-        features: feat()
+        features: feat(),
+        dataOk: true
       });
     }
     const s = sim.summary();
     expect(s.open).toBe(1);
     expect(s.paperTrades).toBe(1);
     expect(sim.snapshot().history).toHaveLength(0);
+  });
+
+  it("dataOk=false cannot open paper trade; dataOk=true may open later", () => {
+    const sim = new ReferencePaperSimulator();
+    sim.onMarketTick({
+      bid: 4390.0,
+      ask: 4390.1,
+      tsMs: 1000,
+      receiveSeq: 1,
+      specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+      features: feat(),
+      dataOk: false
+    });
+    expect(sim.summary().paperTrades).toBe(0);
+    expect(sim.summary().open).toBe(0);
+    expect(sim.summary().paperEntriesBlockedDataNotOk).toBe(1);
+
+    sim.onMarketTick({
+      bid: 4390.0,
+      ask: 4390.1,
+      tsMs: 1100,
+      receiveSeq: 2,
+      specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+      features: feat(),
+      dataOk: true
+    });
+    expect(sim.summary().open).toBe(1);
+    expect(sim.summary().paperTrades).toBe(1);
+  });
+
+  it("DATA_STALE close cannot immediately reopen while dataOk=false", () => {
+    const sim = new ReferencePaperSimulator();
+    sim.onMarketTick({
+      bid: 4390.0,
+      ask: 4390.1,
+      tsMs: 1000,
+      receiveSeq: 1,
+      specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+      features: feat(),
+      dataOk: true
+    });
+    expect(sim.summary().open).toBe(1);
+
+    // Force DATA_STALE via dataOk=false while open
+    sim.onMarketTick({
+      bid: 4390.0,
+      ask: 4390.1,
+      tsMs: 1100,
+      receiveSeq: 2,
+      specialists: [],
+      features: feat(),
+      dataOk: false
+    });
+    expect(sim.summary().open).toBe(0);
+    expect(sim.summary().paperDataStaleExits).toBe(1);
+    expect(sim.snapshot().history[0]?.exitReason).toBe("DATA_STALE");
+
+    // After rearm, selected + dataOk=false still blocked
+    sim.onMarketTick({
+      bid: 4391.0,
+      ask: 4391.1,
+      tsMs: 1100 + rearm + 10,
+      receiveSeq: 3,
+      specialists: [selected("B_FAST_BREAKOUT", "SELL")],
+      features: feat(),
+      dataOk: false
+    });
+    expect(sim.summary().open).toBe(0);
+    expect(sim.summary().paperEntriesBlockedDataNotOk).toBeGreaterThanOrEqual(1);
+
+    sim.onMarketTick({
+      bid: 4391.0,
+      ask: 4391.1,
+      tsMs: 1100 + rearm + 20,
+      receiveSeq: 4,
+      specialists: [selected("B_FAST_BREAKOUT", "SELL")],
+      features: feat(),
+      dataOk: true
+    });
+    expect(sim.summary().open).toBe(1);
   });
 
   it("P/L, friction, MFE/MAE math", () => {
@@ -118,16 +201,17 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1000,
       receiveSeq: 1,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
-    // Favorable move for BUY — bid rises
     sim.onMarketTick({
       bid: 4390.4,
       ask: 4390.5,
       tsMs: 1100,
       receiveSeq: 2,
       specialists: [],
-      features: feat({ acceleration: 0, signedImbalance1s: 0 })
+      features: feat({ acceleration: 0, signedImbalance1s: 0 }),
+      dataOk: true
     });
     const open = sim.snapshot().openTrade!;
     expect(open.mfe).toBeGreaterThan(0);
@@ -135,17 +219,15 @@ describe("ReferencePaperSimulator", () => {
     expect(open.referenceFriction).toBeCloseTo(friction, 8);
     expect(open.netMove).toBeCloseTo(open.grossMove - friction, 8);
 
-    // Force DATA_STALE close
     sim.onResync({ tsMs: 1200, receiveSeq: 3 });
     const closed = sim.snapshot().history[0]!;
     expect(closed.exitReason).toBe("DATA_STALE");
-    expect(closed.exitPrice).toBeCloseTo(4390.4, 5); // BUY exits at bid
+    expect(closed.exitPrice).toBeCloseTo(4390.4, 5);
     expect(closed.grossMove).toBeCloseTo(4390.4 - 4390.1, 5);
     expect(closed.referenceFriction).toBeCloseTo(friction, 8);
     expect(closed.netMove).toBeCloseTo(closed.grossMove - friction, 8);
-    expect(closed.result).toBe(
-      closed.netMove > 0 ? "WIN" : closed.netMove < 0 ? "LOSS" : "BREAKEVEN"
-    );
+    expect(sim.summary().paperResyncExits).toBe(1);
+    expect(sim.summary().paperDataStaleExits).toBe(1);
   });
 
   it("after exit + rearm, a new independent opportunity may open", () => {
@@ -156,20 +238,21 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1000,
       receiveSeq: 1,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     sim.onResync({ tsMs: 1100, receiveSeq: 2 });
     expect(sim.summary().open).toBe(0);
     expect(sim.summary().paperTrades).toBe(1);
 
-    // Within rearm — ignored
     sim.onMarketTick({
       bid: 4391.0,
       ask: 4391.1,
       tsMs: 1100 + rearm - 1,
       receiveSeq: 3,
       specialists: [selected("B_FAST_BREAKOUT", "SELL")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim.summary().open).toBe(0);
 
@@ -179,7 +262,8 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1100 + rearm + 1,
       receiveSeq: 4,
       specialists: [selected("B_FAST_BREAKOUT", "SELL")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim.summary().open).toBe(1);
     expect(sim.snapshot().openTrade?.side).toBe("SELL");
@@ -194,17 +278,18 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1000,
       receiveSeq: 1,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     sim.onResync({ tsMs: 1100, receiveSeq: 2 });
-    // Bid-only after resync must not open with old ask
     sim.onMarketTick({
       bid: 4395.0,
       ask: null,
       tsMs: 1100 + rearm + 10,
       receiveSeq: 3,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim.summary().open).toBe(0);
     sim.onMarketTick({
@@ -213,9 +298,116 @@ describe("ReferencePaperSimulator", () => {
       tsMs: 1100 + rearm + 20,
       receiveSeq: 4,
       specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
-      features: feat()
+      features: feat(),
+      dataOk: true
     });
     expect(sim.snapshot().openTrade?.entryPrice).toBeCloseTo(4395.1, 5);
+  });
+
+  it(">80 closed trades retain cumulative totals; history capped at 80", () => {
+    const sim = new ReferencePaperSimulator({ historyLimit: 80 });
+    let ts = 1000;
+    let seq = 0;
+    // Force closes via DATA_STALE so we can accumulate many trades quickly
+    for (let i = 0; i < 95; i++) {
+      seq += 1;
+      ts += rearm + 5;
+      sim.onMarketTick({
+        bid: 4390.0 + i * 0.01,
+        ask: 4390.1 + i * 0.01,
+        tsMs: ts,
+        receiveSeq: seq,
+        specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+        features: feat(),
+        dataOk: true
+      });
+      expect(sim.summary().open).toBe(1);
+      seq += 1;
+      ts += 10;
+      // Favorable then stale-close so nets are deterministic-ish
+      sim.onMarketTick({
+        bid: 4390.0 + i * 0.01 + 0.2,
+        ask: 4390.1 + i * 0.01 + 0.2,
+        tsMs: ts,
+        receiveSeq: seq,
+        specialists: [],
+        features: feat(),
+        dataOk: true
+      });
+      sim.onResync({ tsMs: ts + 1, receiveSeq: seq + 1 });
+      seq += 1;
+      ts += 1;
+    }
+
+    const s = sim.summary();
+    expect(s.totalClosedTrades).toBe(95);
+    expect(s.paperTrades).toBe(95);
+    expect(s.historyRows).toBe(80);
+    expect(sim.snapshot().history).toHaveLength(80);
+    expect(s.wins + s.losses + s.breakeven).toBe(95);
+    expect(s.netMoveSum).toBeCloseTo(s.grossMoveSum - s.frictionSum, 8);
+    expect(s.frictionSum).toBeCloseTo(95 * friction, 8);
+    // PF from cumulative, not history window
+    const histNet = sim
+      .snapshot()
+      .history.reduce((a, t) => a + t.netMove, 0);
+    // history is only last 80 — cumulative net must differ if early trades existed
+    expect(s.netMoveSum).not.toBeCloseTo(histNet, 5);
+    expect(s.profitFactor).not.toBeNull();
+    expect(s.tradesPerHour).not.toBeNull();
+    expect(s.tradesPerHourLabel).toBe("PAPER TRADES / HOUR — CURRENT RUNTIME");
+    expect(s.paperResyncExits).toBe(95);
+    expect(s.paperDataStaleExits).toBe(95);
+  });
+
+  it("PF and cumulative net use all closed trades, not only history window", () => {
+    const sim = new ReferencePaperSimulator({ historyLimit: 3 });
+    // Trade 1: big win via resync after favorable move
+    sim.onMarketTick({
+      bid: 4390,
+      ask: 4390.1,
+      tsMs: 1000,
+      receiveSeq: 1,
+      specialists: [selected("A_MOMENTUM_IGNITION", "BUY")],
+      features: feat(),
+      dataOk: true
+    });
+    sim.onMarketTick({
+      bid: 4391.0,
+      ask: 4391.1,
+      tsMs: 1100,
+      receiveSeq: 2,
+      specialists: [],
+      features: feat(),
+      dataOk: true
+    });
+    sim.onResync({ tsMs: 1200, receiveSeq: 3 });
+    const win1 = 4391.0 - 4390.1 - friction;
+
+    // Trades 2-5: small losses (exit near entry via DATA_STALE immediately after open path)
+    for (let i = 0; i < 4; i++) {
+      const t0 = 2000 + i * (rearm + 50);
+      sim.onMarketTick({
+        bid: 4400,
+        ask: 4400.1,
+        tsMs: t0,
+        receiveSeq: 10 + i * 2,
+        specialists: [selected("B_FAST_BREAKOUT", "BUY")],
+        features: feat(),
+        dataOk: true
+      });
+      // Exit at same bid → gross = bid - ask = -0.1, net = -0.1 - 0.06
+      sim.onResync({ tsMs: t0 + 5, receiveSeq: 11 + i * 2 });
+    }
+    const lossEach = Math.abs(4400 - 4400.1 - friction);
+    const s = sim.summary();
+    expect(s.totalClosedTrades).toBe(5);
+    expect(s.historyRows).toBe(3);
+    expect(sim.snapshot().history).toHaveLength(3);
+    expect(s.wins).toBe(1);
+    expect(s.losses).toBe(4);
+    expect(s.netMoveSum).toBeCloseTo(win1 - 4 * lossEach, 8);
+    expect(s.profitFactor).toBeCloseTo(win1 / (4 * lossEach), 5);
   });
 
   it("has zero broker mutation surface and documented policy", () => {
@@ -228,6 +420,7 @@ describe("ReferencePaperSimulator", () => {
     expect(s.mutationSurface).toBe("NONE");
     expect(REFERENCE_PAPER_POLICY.friction.value).toBe(friction);
     expect(REFERENCE_PAPER_POLICY.exit.reasons).toContain("DATA_STALE");
+    expect(REFERENCE_PAPER_POLICY.entry.invalidData).toMatch(/dataOk/);
   });
 
   it("reference paper module does not import broker/execution adapters", () => {

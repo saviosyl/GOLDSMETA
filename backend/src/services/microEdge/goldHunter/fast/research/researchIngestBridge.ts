@@ -610,6 +610,13 @@ export class ResearchIngestBridge {
         inputNormalizationVerified: true
       };
       this.collector.record(rec);
+      // Reference paper only — block entries when Spot quote incomplete/crossed
+      // (parity with engine dataOk entry gate). Does not change research capture.
+      const spotQuoteOk =
+        this.lastBid != null &&
+        this.lastAsk != null &&
+        this.lastAsk >= this.lastBid &&
+        !snap.crossed;
       this.driveReferencePaper({
         bid: this.lastBid,
         ask: this.lastAsk,
@@ -617,7 +624,7 @@ export class ResearchIngestBridge {
         receiveSeq: item.receiveSeq,
         specialists: snap.specialists,
         features: snap.features,
-        dataOk: true
+        dataOk: spotQuoteOk
       });
       return;
     }
@@ -915,6 +922,12 @@ export class ResearchIngestBridge {
           profitFactor: s.profitFactor,
           netMoveSum: s.netMoveSum,
           tradesPerHour: s.tradesPerHour,
+          tradesPerHourLabel: s.tradesPerHourLabel,
+          totalClosedTrades: s.totalClosedTrades,
+          historyRows: s.historyRows,
+          paperEntriesBlockedDataNotOk: s.paperEntriesBlockedDataNotOk,
+          paperDataStaleExits: s.paperDataStaleExits,
+          paperResyncExits: s.paperResyncExits,
           brokerRequests: 0 as const,
           brokerOrders: 0 as const,
           executionAdapter: "NONE" as const
