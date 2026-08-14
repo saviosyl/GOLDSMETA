@@ -108,6 +108,7 @@ type ReferencePaperClosed = {
   referenceFriction: number;
   netMove: number;
   hypotheticalEurPnl?: number | null;
+  balanceAfterEur?: number;
   result: "WIN" | "LOSS" | "BREAKEVEN";
   exitReason: string;
 };
@@ -134,6 +135,10 @@ type ReferencePaperSummary = {
   paperEntriesBlockedDataNotOk?: number;
   paperDataStaleExits?: number;
   paperResyncExits?: number;
+  startingBalanceEur?: number;
+  currentBalanceEur?: number;
+  totalReturnPct?: number;
+  referenceMarketExposureEur?: number;
   referencePositionValueEur?: number;
   marginRequirementPct?: number;
   referenceMarginUsedEur?: number;
@@ -199,13 +204,45 @@ function fmtPx(n: number | null | undefined): string {
 function fmtEur(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-  return `€ ${sign}${Math.abs(n).toFixed(2)}`;
+  return `€${sign}${Math.abs(n).toFixed(2)}`;
+}
+
+function fmtEurAbs(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `€${n.toFixed(2)}`;
 }
 
 function fmtSignedPts(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${Math.abs(n).toFixed(2)}`;
+}
+
+function SideBadge({ side }: { side: "BUY" | "SELL" }) {
+  return (
+    <span
+      className={`gm-ghr-side-badge is-${side.toLowerCase()}`}
+      data-testid={`gh-side-${side.toLowerCase()}`}
+    >
+      {side}
+    </span>
+  );
+}
+
+function ResultBadge({
+  result
+}: {
+  result: "WIN" | "LOSS" | "BREAKEVEN" | "OPEN" | string;
+}) {
+  const tone =
+    result === "WIN"
+      ? "win"
+      : result === "LOSS"
+        ? "loss"
+        : result === "OPEN"
+          ? "open"
+          : "be";
+  return <span className={`gm-ghr-result-badge is-${tone}`}>{result}</span>;
 }
 
 function fmtMs(n: number | null | undefined): string {
@@ -520,17 +557,76 @@ export function GoldHunterFastResearchPage() {
       <section className="gm-ghr-paper" data-testid="gh-research-paper">
         <div className="gm-ghr-section-title">
           REFERENCE PAPER TRADES
-          <span className="gm-ghr-feed-note">HYPOTHETICAL REFERENCE ONLY</span>
+          <span className="gm-ghr-feed-note">HYPOTHETICAL PAPER ACCOUNT</span>
         </div>
-        <p className="gm-ghr-paper-disclaimer" data-testid="gh-research-paper-disclaimer">
-          REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE. ONE POSITION
-          MAX · EVENT DEDUPE WHILE OPEN. Executable-side pricing only.
-        </p>
         <p className="gm-ghr-paper-eur-label" data-testid="gh-research-paper-eur-label">
-          HYPOTHETICAL € P/L — REFERENCE ONLY · NOT A BROKER ACCOUNT P/L ·
-          approx. (netMove / entryPrice) × €500 exposure (margin used €250 is
-          not position value)
+          HYPOTHETICAL PAPER ACCOUNT · NOT A BROKER ACCOUNT P/L · approx.
+          (netMove / entryPrice) × €1,000 exposure · €500 margin @ 50% · no
+          compounding
         </p>
+
+        <div className="gm-ghr-paper-account" data-testid="gh-research-paper-account">
+          <div className="gm-ghr-paper-account-hero">
+            <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-hero">
+              <span>PAPER ACCOUNT</span>
+              <strong>
+                {fmtEurAbs(paper?.summary?.startingBalanceEur ?? 500)}
+              </strong>
+            </div>
+            <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-hero">
+              <span>CURRENT BALANCE</span>
+              <strong>
+                {fmtEurAbs(
+                  paper?.summary?.currentBalanceEur ??
+                    paper?.summary?.startingBalanceEur ??
+                    500
+                )}
+              </strong>
+            </div>
+            <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-eur gm-ghr-paper-kpi-hero">
+              <span>TOTAL P/L</span>
+              <strong>{fmtEur(paper?.summary?.hypotheticalEurPnlSum)}</strong>
+            </div>
+            <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-hero">
+              <span>TOTAL RETURN %</span>
+              <strong>
+                {paper?.summary?.totalReturnPct == null
+                  ? "—"
+                  : `${paper.summary.totalReturnPct >= 0 ? "+" : ""}${paper.summary.totalReturnPct.toFixed(3)}%`}
+              </strong>
+            </div>
+          </div>
+          <div className="gm-ghr-paper-account-meta">
+            <div className="gm-ghr-paper-kpi">
+              <span>REFERENCE EXPOSURE</span>
+              <strong>
+                €
+                {(
+                  paper?.summary?.referenceMarketExposureEur ??
+                  paper?.summary?.referencePositionValueEur ??
+                  1000
+                ).toLocaleString()}
+              </strong>
+            </div>
+            <div className="gm-ghr-paper-kpi">
+              <span>MARGIN</span>
+              <strong>{paper?.summary?.marginRequirementPct ?? 50}%</strong>
+            </div>
+            <div className="gm-ghr-paper-kpi">
+              <span>MARGIN USED</span>
+              <strong>
+                €{paper?.summary?.referenceMarginUsedEur ?? 500}
+              </strong>
+            </div>
+            <div className="gm-ghr-paper-kpi">
+              <span>STARTING BALANCE</span>
+              <strong>
+                {fmtEurAbs(paper?.summary?.startingBalanceEur ?? 500)}
+              </strong>
+            </div>
+          </div>
+        </div>
+
         <div className="gm-ghr-paper-summary" data-testid="gh-research-paper-summary">
           <div className="gm-ghr-paper-kpi">
             <span>Paper trades</span>
@@ -571,34 +667,8 @@ export function GoldHunterFastResearchPage() {
             </strong>
           </div>
           <div className="gm-ghr-paper-kpi">
-            <span>Gross move</span>
-            <strong>{fmtPx(paper?.summary?.grossMoveSum)}</strong>
-          </div>
-          <div className="gm-ghr-paper-kpi">
-            <span>Friction</span>
-            <strong>{fmtPx(paper?.summary?.frictionSum)}</strong>
-          </div>
-          <div className="gm-ghr-paper-kpi">
             <span>Net move</span>
             <strong>{fmtPx(paper?.summary?.netMoveSum)}</strong>
-          </div>
-          <div className="gm-ghr-paper-kpi">
-            <span>REFERENCE POSITION</span>
-            <strong>
-              €{paper?.summary?.referencePositionValueEur ?? 500}
-            </strong>
-          </div>
-          <div className="gm-ghr-paper-kpi">
-            <span>MARGIN</span>
-            <strong>{paper?.summary?.marginRequirementPct ?? 50}%</strong>
-          </div>
-          <div className="gm-ghr-paper-kpi">
-            <span>MARGIN USED</span>
-            <strong>€{paper?.summary?.referenceMarginUsedEur ?? 250}</strong>
-          </div>
-          <div className="gm-ghr-paper-kpi gm-ghr-paper-kpi-eur">
-            <span>HYPOTHETICAL EUR P/L</span>
-            <strong>{fmtEur(paper?.summary?.hypotheticalEurPnlSum)}</strong>
           </div>
           <div className="gm-ghr-paper-kpi">
             <span>Current streak</span>
@@ -612,7 +682,7 @@ export function GoldHunterFastResearchPage() {
           </div>
           <div className="gm-ghr-paper-kpi">
             <span title="Cumulative closed trades / elapsed simulator runtime — not validated FAST V2 frequency">
-              PAPER TRADES / HOUR — CURRENT RUNTIME
+              PAPER TRADES / HOUR
             </span>
             <strong>
               {paper?.summary?.tradesPerHour == null
@@ -620,6 +690,9 @@ export function GoldHunterFastResearchPage() {
                 : paper.summary.tradesPerHour.toFixed(2)}
             </strong>
           </div>
+        </div>
+
+        <div className="gm-ghr-paper-diag" data-testid="gh-research-paper-diag">
           <div className="gm-ghr-paper-kpi">
             <span>Blocked !dataOk</span>
             <strong>
@@ -637,41 +710,57 @@ export function GoldHunterFastResearchPage() {
         </div>
 
         {paper?.openTrade ? (
-          <div className="gm-ghr-paper-open" data-testid="gh-research-paper-open">
-            <div className="gm-ghr-paper-open-head">
-              <strong>{paper.openTrade.referenceTradeId}</strong>
-              <span>{paper.openTrade.setupName}</span>
-              <span>{paper.openTrade.side}</span>
-              <span className="gm-ghr-paper-hyp">OPEN · HYPOTHETICAL</span>
+          <div
+            className={`gm-ghr-paper-live is-${paper.openTrade.side.toLowerCase()}`}
+            data-testid="gh-research-paper-open"
+          >
+            <div className="gm-ghr-paper-live-head">
+              <div>
+                <div className="gm-ghr-paper-live-kicker">LIVE PAPER TRADE</div>
+                <strong className="gm-ghr-paper-live-id">
+                  {paper.openTrade.referenceTradeId}
+                </strong>
+              </div>
+              <div className="gm-ghr-paper-live-side">
+                <SideBadge side={paper.openTrade.side} />
+                <ResultBadge result="OPEN" />
+              </div>
             </div>
-            <div className="gm-ghr-paper-open-grid">
+            <div className="gm-ghr-paper-live-setup">
+              {paper.openTrade.setupName}
+            </div>
+            <div className="gm-ghr-paper-live-grid">
               <span>
-                Entry <strong>{fmtPx(paper.openTrade.entryPrice)}</strong>
+                ENTRY <strong>{fmtPx(paper.openTrade.entryPrice)}</strong>
               </span>
               <span>
-                Current executable exit{" "}
+                CURRENT EXIT{" "}
                 <strong>{fmtPx(paper.openTrade.executableExitPrice)}</strong>
               </span>
               <span>
-                Live net move <strong>{fmtPx(paper.openTrade.netMove)}</strong>
+                NET MOVE{" "}
+                <strong>{fmtSignedPts(paper.openTrade.netMove)} pts</strong>
               </span>
               <span>
-                Live € P/L{" "}
+                LIVE P/L{" "}
                 <strong>{fmtEur(paper.openTrade.hypotheticalEurPnl)}</strong>
               </span>
               <span>
-                MFE <strong>{fmtPx(paper.openTrade.mfe)}</strong>
+                MFE <strong>{fmtSignedPts(paper.openTrade.mfe)}</strong>
               </span>
               <span>
-                MAE <strong>{fmtPx(paper.openTrade.mae)}</strong>
+                MAE <strong>{fmtSignedPts(paper.openTrade.mae)}</strong>
               </span>
               <span>
-                Duration{" "}
+                DURATION{" "}
                 <strong>
                   {paper.openTrade.durationMs != null
                     ? `${Math.round(paper.openTrade.durationMs / 1000)}s`
                     : "—"}
                 </strong>
+              </span>
+              <span>
+                STATUS <strong>OPEN</strong>
               </span>
             </div>
           </div>
@@ -684,54 +773,112 @@ export function GoldHunterFastResearchPage() {
           {(paper?.history?.length ?? 0) === 0 ? (
             <p className="gm-ghr-empty">No closed reference paper trades yet.</p>
           ) : (
-            <div className="gm-ghr-feed-desktop">
-              <table className="gm-ghr-table gm-ghr-paper-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Time</th>
-                    <th>Setup</th>
-                    <th>Side</th>
-                    <th>Entry</th>
-                    <th>Exit</th>
-                    <th>Duration</th>
-                    <th>MFE</th>
-                    <th>MAE</th>
-                    <th>Gross</th>
-                    <th>Friction</th>
-                    <th>NET PTS</th>
-                    <th>P/L €</th>
-                    <th>Result</th>
-                    <th>Exit reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paper!.history!.map((t) => (
-                    <tr key={t.referenceTradeId}>
-                      <td>{t.referenceTradeId}</td>
-                      <td>{t.entryTsIso.slice(11, 19)}</td>
-                      <td>{t.setupName}</td>
-                      <td>{t.side}</td>
-                      <td>{fmtPx(t.entryPrice)}</td>
-                      <td>{fmtPx(t.exitPrice)}</td>
-                      <td>
+            <>
+              <div className="gm-ghr-feed-desktop">
+                <table className="gm-ghr-table gm-ghr-paper-table">
+                  <thead>
+                    <tr>
+                      <th>TRADE ID</th>
+                      <th>Time</th>
+                      <th>Setup</th>
+                      <th>Side</th>
+                      <th>Entry</th>
+                      <th>Exit</th>
+                      <th>Duration</th>
+                      <th>MFE</th>
+                      <th>MAE</th>
+                      <th>Gross</th>
+                      <th>Friction</th>
+                      <th>NET PTS</th>
+                      <th>P/L €</th>
+                      <th>Result</th>
+                      <th>Exit reason</th>
+                      <th>Balance after</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paper!.history!.map((t) => (
+                      <tr key={t.referenceTradeId}>
+                        <td>{t.referenceTradeId}</td>
+                        <td>{t.entryTsIso.slice(11, 19)}</td>
+                        <td>{t.setupName}</td>
+                        <td>
+                          <SideBadge side={t.side} />
+                        </td>
+                        <td>{fmtPx(t.entryPrice)}</td>
+                        <td>{fmtPx(t.exitPrice)}</td>
+                        <td>
+                          {t.durationMs != null
+                            ? `${Math.round(t.durationMs / 1000)}s`
+                            : "—"}
+                        </td>
+                        <td>{fmtSignedPts(t.mfe)}</td>
+                        <td>{fmtSignedPts(t.mae)}</td>
+                        <td>{fmtPx(t.grossMove)}</td>
+                        <td>{fmtPx(t.referenceFriction)}</td>
+                        <td>{fmtSignedPts(t.netMove)}</td>
+                        <td>{fmtEur(t.hypotheticalEurPnl)}</td>
+                        <td>
+                          <ResultBadge result={t.result} />
+                        </td>
+                        <td>{t.exitReason ?? "—"}</td>
+                        <td>{fmtEurAbs(t.balanceAfterEur)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div
+                className="gm-ghr-paper-mobile"
+                data-testid="gh-research-paper-mobile"
+              >
+                {paper!.history!.map((t) => (
+                  <article
+                    key={`m-${t.referenceTradeId}`}
+                    className={`gm-ghr-paper-card is-${t.side.toLowerCase()}`}
+                  >
+                    <header className="gm-ghr-paper-card-head">
+                      <strong>{t.referenceTradeId}</strong>
+                      <SideBadge side={t.side} />
+                    </header>
+                    <div className="gm-ghr-paper-card-setup">{t.setupName}</div>
+                    <div className="gm-ghr-paper-card-grid">
+                      <span>
+                        Entry <strong>{fmtPx(t.entryPrice)}</strong>
+                      </span>
+                      <span>
+                        Exit <strong>{fmtPx(t.exitPrice)}</strong>
+                      </span>
+                      <span>
+                        Net{" "}
+                        <strong>{fmtSignedPts(t.netMove)} pts</strong>
+                      </span>
+                      <span>
+                        P/L <strong>{fmtEur(t.hypotheticalEurPnl)}</strong>
+                      </span>
+                      <span>
+                        MFE <strong>{fmtSignedPts(t.mfe)}</strong>
+                      </span>
+                      <span>
+                        MAE <strong>{fmtSignedPts(t.mae)}</strong>
+                      </span>
+                      <span>
                         {t.durationMs != null
                           ? `${Math.round(t.durationMs / 1000)}s`
                           : "—"}
-                      </td>
-                      <td>{fmtPx(t.mfe)}</td>
-                      <td>{fmtPx(t.mae)}</td>
-                      <td>{fmtPx(t.grossMove)}</td>
-                      <td>{fmtPx(t.referenceFriction)}</td>
-                      <td>{fmtSignedPts(t.netMove)}</td>
-                      <td>{fmtEur(t.hypotheticalEurPnl)}</td>
-                      <td>{t.result ?? "—"}</td>
-                      <td>{t.exitReason ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </span>
+                      <span>
+                        <ResultBadge result={t.result} />
+                      </span>
+                    </div>
+                    <footer className="gm-ghr-paper-card-foot">
+                      Balance after {fmtEurAbs(t.balanceAfterEur)} ·{" "}
+                      {t.exitReason}
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </section>

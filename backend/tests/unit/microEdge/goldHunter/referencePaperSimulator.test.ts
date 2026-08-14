@@ -412,10 +412,10 @@ describe("ReferencePaperSimulator", () => {
     expect(s.profitFactor).toBeCloseTo(win1 / (4 * lossEach), 5);
   });
 
-  it("hypothetical EUR P/L is display-only (netMove/entryPrice)*500", () => {
-    expect(REFERENCE_POSITION_VALUE_EUR).toBe(500);
+  it("hypothetical EUR P/L is display-only (netMove/entryPrice)*1000 with €500 paper balance", () => {
+    expect(REFERENCE_POSITION_VALUE_EUR).toBe(1000);
     const eur = hypotheticalEurPnlFromNetMove(0.4, 4390);
-    expect(eur).toBeCloseTo((0.4 / 4390) * 500, 8);
+    expect(eur).toBeCloseTo((0.4 / 4390) * 1000, 8);
 
     const sim = new ReferencePaperSimulator();
     sim.onMarketTick({
@@ -438,13 +438,16 @@ describe("ReferencePaperSimulator", () => {
     });
     sim.onResync({ tsMs: 1200, receiveSeq: 3 });
     const closed = sim.snapshot().history[0]!;
-    const expected = (closed.netMove / closed.entryPrice) * 500;
+    const expected = (closed.netMove / closed.entryPrice) * 1000;
     expect(closed.hypotheticalEurPnl).toBeCloseTo(expected, 8);
+    expect(closed.balanceAfterEur).toBeCloseTo(500 + expected, 8);
     expect(sim.summary().hypotheticalEurPnlSum).toBeCloseTo(expected, 8);
-    expect(sim.summary().referencePositionValueEur).toBe(500);
-    expect(sim.summary().referenceMarginUsedEur).toBe(250);
+    expect(sim.summary().startingBalanceEur).toBe(500);
+    expect(sim.summary().currentBalanceEur).toBeCloseTo(500 + expected, 8);
+    expect(sim.summary().referenceMarketExposureEur).toBe(1000);
+    expect(sim.summary().referenceMarginUsedEur).toBe(500);
     expect(sim.summary().marginRequirementPct).toBe(50);
-    expect(sim.summary().hypotheticalEurPnlLabel).toContain("HYPOTHETICAL");
+    expect(sim.summary().hypotheticalEurPnlLabel).toContain("PAPER ACCOUNT");
   });
 
   it("has zero broker mutation surface and documented policy", () => {

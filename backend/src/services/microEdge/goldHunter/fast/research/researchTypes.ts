@@ -391,11 +391,15 @@ export type ResearchCaptureHealth = {
     paperEntriesBlockedDataNotOk: number;
     paperDataStaleExits: number;
     paperResyncExits: number;
-    referencePositionValueEur: 500;
+    startingBalanceEur: 500;
+    currentBalanceEur: number;
+    totalReturnPct: number;
+    referenceMarketExposureEur: 1000;
+    referencePositionValueEur: 1000;
     marginRequirementPct: 50;
-    referenceMarginUsedEur: 250;
+    referenceMarginUsedEur: 500;
     hypotheticalEurPnlSum: number;
-    hypotheticalEurPnlLabel: "HYPOTHETICAL € P/L — REFERENCE ONLY";
+    hypotheticalEurPnlLabel: "HYPOTHETICAL PAPER ACCOUNT · NOT A BROKER ACCOUNT P/L";
     brokerRequests: 0;
     brokerOrders: 0;
     executionAdapter: "NONE";

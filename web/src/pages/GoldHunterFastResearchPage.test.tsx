@@ -159,23 +159,20 @@ describe("GoldHunterFastResearchPage", () => {
     expect(screen.getByTestId("gh-research-paper")).toHaveTextContent(
       "REFERENCE PAPER TRADES"
     );
-    expect(screen.getByTestId("gh-research-paper-disclaimer")).toHaveTextContent(
-      "ONE POSITION MAX"
-    );
-    expect(screen.getByTestId("gh-research-paper-disclaimer")).toHaveTextContent(
-      "HYPOTHETICAL, NOT A BROKER TRADE"
-    );
     expect(screen.getByTestId("gh-research-paper-eur-label")).toHaveTextContent(
-      "HYPOTHETICAL € P/L — REFERENCE ONLY"
+      "HYPOTHETICAL PAPER ACCOUNT"
     );
     expect(screen.getByTestId("gh-research-paper-eur-label")).toHaveTextContent(
       "NOT A BROKER ACCOUNT P/L"
     );
-    expect(screen.getByTestId("gh-research-paper-summary")).toHaveTextContent(
-      "REFERENCE POSITION"
+    expect(screen.getByTestId("gh-research-paper-account")).toHaveTextContent(
+      "PAPER ACCOUNT"
+    );
+    expect(screen.getByTestId("gh-research-paper-account")).toHaveTextContent(
+      "CURRENT BALANCE"
     );
     expect(screen.getByTestId("gh-research-paper-summary")).toHaveTextContent(
-      "HYPOTHETICAL EUR P/L"
+      "Paper trades"
     );
     expect(screen.getByTestId("gh-research-candidate-feed")).toHaveTextContent(
       "RESEARCH OBSERVATION — NOT A TRADE"
