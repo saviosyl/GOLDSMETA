@@ -50,6 +50,9 @@ jobs:
       - name: Micro Edge — import boundary + broker mutation ban
         run: npm run gate:micro-edge-imports && npm run gate:micro-edge-mutations
 
+      - name: GOLD_HUNTER FAST — research capture safety gate
+        run: npm run gate:gold-hunter-research-capture
+
       - name: Micro Edge — protected Core unchanged vs PR base
         if: github.event_name == 'pull_request'
         run: npm run gate:micro-edge-core

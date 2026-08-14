@@ -1,0 +1,24 @@
+{
+  "title": "GOLD_HUNTER FAST",
+  "subtitle": "RESEARCH CAPTURE — NO TRADING",
+  "data": "LIVE",
+  "spot": "LIVE",
+  "depth": "LIVE",
+  "captureDayLabel": "Day 2026-08-14",
+  "eventsCaptured": 45,
+  "feedGaps": 0,
+  "reconnects": 0,
+  "queueLatencyP95": 5,
+  "eventLoopLagP95": 5,
+  "candidateObservations": {
+    "A": 0,
+    "B": 0,
+    "C": 0
+  },
+  "safety": {
+    "shadowOrders": 0,
+    "brokerRequests": 0,
+    "brokerOrders": 0
+  },
+  "tradingButtons": []
+}

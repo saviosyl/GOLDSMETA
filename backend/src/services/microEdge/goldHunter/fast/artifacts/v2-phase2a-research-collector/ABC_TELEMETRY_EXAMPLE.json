@@ -1,0 +1,34 @@
+[
+  {
+    "setup": "A_MOMENTUM_IGNITION",
+    "eligible": false,
+    "candidateSide": null,
+    "rawQuality": null,
+    "failedConditions": [
+      "velocity_not_aligned",
+      "acceleration_not_aligned"
+    ],
+    "selectedCandidate": false
+  },
+  {
+    "setup": "B_FAST_BREAKOUT",
+    "eligible": false,
+    "candidateSide": null,
+    "rawQuality": null,
+    "failedConditions": [
+      "breakout_not_confirmed",
+      "update_rate_insufficient"
+    ],
+    "selectedCandidate": false
+  },
+  {
+    "setup": "C_PULLBACK_REACCEL",
+    "eligible": false,
+    "candidateSide": null,
+    "rawQuality": null,
+    "failedConditions": [
+      "impulse_vel3s_too_weak"
+    ],
+    "selectedCandidate": false
+  }
+]
