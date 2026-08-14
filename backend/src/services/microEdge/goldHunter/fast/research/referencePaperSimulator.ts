@@ -202,9 +202,16 @@ export type ReferencePaperSummary = {
   netMoveSum: number;
   currentStreak: number;
   streakKind: "WIN" | "LOSS" | "NONE";
-  /** PAPER TRADES / HOUR — CURRENT RUNTIME (cumulative closed / elapsed) */
+  /** Closed trades / elapsed wall-clock hours since simulator start. */
   tradesPerHour: number | null;
-  tradesPerHourLabel: "PAPER TRADES / HOUR — CURRENT RUNTIME";
+  tradesPerHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
+  /**
+   * Alias of tradesPerHour — wall-clock runtime rate (not last-tick based).
+   * Disconnected/stale wall time is included so the rate cannot inflate when
+   * the feed goes OFF.
+   */
+  paperTradesPerRuntimeHour: number | null;
+  paperTradesPerRuntimeHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
   historyLimit: number;
   historyRows: number;
   totalClosedTrades: number;
@@ -512,11 +519,14 @@ export class ReferencePaperSimulator {
       profitFactor = Number.POSITIVE_INFINITY;
     }
 
+    // Wall-clock runtime rate — includes disconnected/stale wall time so the
+    // metric cannot inflate when the feed freezes lastTickTs.
     let tradesPerHour: number | null = null;
-    if (this.startedAtMs != null && closedN > 0 && this.lastTickTs > 0) {
+    const wallNowMs = Date.now();
+    if (this.startedAtMs != null && closedN > 0) {
       const hours = Math.max(
         1 / 3600,
-        (this.lastTickTs - this.startedAtMs) / 3_600_000
+        (wallNowMs - this.startedAtMs) / 3_600_000
       );
       tradesPerHour = closedN / hours;
     }
@@ -537,7 +547,9 @@ export class ReferencePaperSimulator {
       currentStreak: this.currentStreak,
       streakKind: this.streakKind,
       tradesPerHour,
-      tradesPerHourLabel: "PAPER TRADES / HOUR — CURRENT RUNTIME",
+      tradesPerHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR",
+      paperTradesPerRuntimeHour: tradesPerHour,
+      paperTradesPerRuntimeHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR",
       historyLimit: this.historyLimit,
       historyRows: this.history.length,
       totalClosedTrades: this.totalClosedTrades,

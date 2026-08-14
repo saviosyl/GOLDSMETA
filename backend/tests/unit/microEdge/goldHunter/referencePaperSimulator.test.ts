@@ -359,7 +359,8 @@ describe("ReferencePaperSimulator", () => {
     expect(s.netMoveSum).not.toBeCloseTo(histNet, 5);
     expect(s.profitFactor).not.toBeNull();
     expect(s.tradesPerHour).not.toBeNull();
-    expect(s.tradesPerHourLabel).toBe("PAPER TRADES / HOUR — CURRENT RUNTIME");
+    expect(s.tradesPerHourLabel).toBe("PAPER TRADES / WALL-CLOCK RUNTIME HOUR");
+    expect(s.paperTradesPerRuntimeHour).toBe(s.tradesPerHour);
     expect(s.paperResyncExits).toBe(95);
     expect(s.paperDataStaleExits).toBe(95);
   });

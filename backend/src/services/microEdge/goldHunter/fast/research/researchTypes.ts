@@ -432,7 +432,9 @@ export type ResearchCaptureHealth = {
     profitFactor: number | null;
     netMoveSum: number;
     tradesPerHour: number | null;
-    tradesPerHourLabel: "PAPER TRADES / HOUR — CURRENT RUNTIME";
+    tradesPerHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
+    paperTradesPerRuntimeHour: number | null;
+    paperTradesPerRuntimeHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
     totalClosedTrades: number;
     historyRows: number;
     paperEntriesBlockedDataNotOk: number;

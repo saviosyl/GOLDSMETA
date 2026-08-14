@@ -100,8 +100,18 @@ export class ResearchIngestBridge {
   private readonly captureStartMs: number;
   private receiveSeq = 0;
   private eventsReceived = 0;
-  private lastSpotAt: number | null = null;
-  private lastDepthAt: number | null = null;
+  /**
+   * LIVE/INGRESS timestamps — updated at transport enqueue for health/watchdog only.
+   * Must never qualify ordered specialist/paper decisions.
+   */
+  private lastIngressSpotAtMs: number | null = null;
+  private lastIngressDepthAtMs: number | null = null;
+  /**
+   * ORDERED/PROCESSED timestamps — updated at processOrdered for the exact
+   * receiveSeq being evaluated (paper + qualification freshness).
+   */
+  private lastProcessedSpotAtMs: number | null = null;
+  private lastProcessedDepthAtMs: number | null = null;
   private feedGapCount = 0;
   private reconnectCount = 0;
   private resyncCount = 0;
@@ -438,7 +448,7 @@ export class ResearchIngestBridge {
     // Enqueue time is never before the raw callback arrival (monotonic transport).
     const bridgeEnqueueMs = Math.max(Date.now(), rawCallbackArrivalMs);
     this.eventsReceived += 1;
-    this.lastSpotAt = rawCallbackArrivalMs;
+    this.lastIngressSpotAtMs = rawCallbackArrivalMs;
     this.queue.enqueue(receiveSeq, {
       kind: "SPOT",
       receiveSeq,
@@ -452,7 +462,7 @@ export class ResearchIngestBridge {
     const receiveSeq = this.nextSeq();
     const bridgeEnqueueMs = Math.max(Date.now(), rawCallbackArrivalMs);
     this.eventsReceived += 1;
-    this.lastDepthAt = rawCallbackArrivalMs;
+    this.lastIngressDepthAtMs = rawCallbackArrivalMs;
     this.queue.enqueue(receiveSeq, {
       kind: "DEPTH",
       receiveSeq,
@@ -554,6 +564,10 @@ export class ResearchIngestBridge {
       this.lastBid = null;
       this.lastAsk = null;
       this.lastSpread = null;
+      // Ordered freshness must not carry pre-resync timestamps into post-resync
+      // specialist/paper qualification.
+      this.lastProcessedSpotAtMs = null;
+      this.lastProcessedDepthAtMs = null;
       // Reference paper: force-close with DATA_STALE; clear side state.
       this.referencePaper.onResync({
         tsMs: item.rawCallbackArrivalMs,
@@ -589,8 +603,14 @@ export class ResearchIngestBridge {
           connectionState: this.connectionState,
           spotSubscribed: this.spotSubscribed,
           depthSubscribed: this.depthSubscribed,
-          spotAgeMs: this.lastSpotAt != null ? now - this.lastSpotAt : null,
-          depthAgeMs: this.lastDepthAt != null ? now - this.lastDepthAt : null,
+          spotAgeMs:
+            this.lastIngressSpotAtMs != null
+              ? now - this.lastIngressSpotAtMs
+              : null,
+          depthAgeMs:
+            this.lastIngressDepthAtMs != null
+              ? now - this.lastIngressDepthAtMs
+              : null,
           queueDepth: qStats.depth,
           persistenceQueueDepth: sinkStats.persistenceQueueDepth
         },
@@ -651,6 +671,8 @@ export class ResearchIngestBridge {
         ask
       };
       const snap = this.pipeline.onSpot(spotEv);
+      // Ordered freshness: stamp this receiveSeq before qualification/paper.
+      this.lastProcessedSpotAtMs = item.rawCallbackArrivalMs;
       const specialists = this.annotateSpecialistsForSoftFreshness(
         snap.specialists,
         item.rawCallbackArrivalMs
@@ -721,6 +743,8 @@ export class ResearchIngestBridge {
     };
     const snap = this.pipeline.onDepth(depthEv);
     this.depthEventCount += 1;
+    // Ordered freshness: stamp this receiveSeq before qualification/paper.
+    this.lastProcessedDepthAtMs = item.rawCallbackArrivalMs;
     const specialists = this.annotateSpecialistsForSoftFreshness(
       snap.specialists,
       item.rawCallbackArrivalMs
@@ -823,8 +847,8 @@ export class ResearchIngestBridge {
   ): boolean {
     const dataOk = computeResearchReferencePaperDataOk({
       nowMs,
-      lastSpotAtMs: this.lastSpotAt,
-      lastDepthAtMs: this.lastDepthAt,
+      lastSpotAtMs: this.lastProcessedSpotAtMs,
+      lastDepthAtMs: this.lastProcessedDepthAtMs,
       freshnessLimitMs: this.freshnessLimitMs,
       lastBid: this.lastBid,
       lastAsk: this.lastAsk,
@@ -840,6 +864,7 @@ export class ResearchIngestBridge {
   /**
    * Soft-stale Spot or Depth → mark specialist rows contaminated for
    * qualification. Raw capture rows are retained.
+   * Uses ORDERED/processed timestamps only (no ingress look-ahead).
    */
   private annotateSpecialistsForSoftFreshness(
     specialists: ResearchCaptureRecord["specialists"],
@@ -849,8 +874,8 @@ export class ResearchIngestBridge {
     if (
       feedsSoftFreshForQualification({
         nowMs,
-        lastSpotAtMs: this.lastSpotAt,
-        lastDepthAtMs: this.lastDepthAt,
+        lastSpotAtMs: this.lastProcessedSpotAtMs,
+        lastDepthAtMs: this.lastProcessedDepthAtMs,
         freshnessLimitMs: this.freshnessLimitMs
       })
     ) {
@@ -867,16 +892,43 @@ export class ResearchIngestBridge {
     return this.lastReferenceDataOk;
   }
 
-  /** @internal test hook — Spot/Depth ages at soft boundary. */
+  /** @internal — operational ingress ages for health/watchdog. */
   getFeedAgesMs(nowMs = Date.now()): {
     spotAgeMs: number | null;
     depthAgeMs: number | null;
     freshnessLimitMs: number;
   } {
     return {
-      spotAgeMs: this.lastSpotAt != null ? nowMs - this.lastSpotAt : null,
-      depthAgeMs: this.lastDepthAt != null ? nowMs - this.lastDepthAt : null,
+      spotAgeMs:
+        this.lastIngressSpotAtMs != null
+          ? nowMs - this.lastIngressSpotAtMs
+          : null,
+      depthAgeMs:
+        this.lastIngressDepthAtMs != null
+          ? nowMs - this.lastIngressDepthAtMs
+          : null,
       freshnessLimitMs: this.freshnessLimitMs
+    };
+  }
+
+  /** @internal — ordered/processed ages for paper/qualification tests. */
+  getProcessedFeedAgesMs(nowMs = Date.now()): {
+    spotAgeMs: number | null;
+    depthAgeMs: number | null;
+    lastProcessedSpotAtMs: number | null;
+    lastProcessedDepthAtMs: number | null;
+  } {
+    return {
+      spotAgeMs:
+        this.lastProcessedSpotAtMs != null
+          ? nowMs - this.lastProcessedSpotAtMs
+          : null,
+      depthAgeMs:
+        this.lastProcessedDepthAtMs != null
+          ? nowMs - this.lastProcessedDepthAtMs
+          : null,
+      lastProcessedSpotAtMs: this.lastProcessedSpotAtMs,
+      lastProcessedDepthAtMs: this.lastProcessedDepthAtMs
     };
   }
 
@@ -915,7 +967,9 @@ export class ResearchIngestBridge {
     }
     const snap = this.pipeline.currentDepthStats();
     const depthAgeMs =
-      this.lastDepthAt != null ? nowMs - this.lastDepthAt : null;
+      this.lastIngressDepthAtMs != null
+        ? nowMs - this.lastIngressDepthAtMs
+        : null;
     if (snap.crossed) return "DEPTH_CROSSED";
     if (!snap.available) return "DEPTH_UNAVAILABLE";
     if (depthAgeMs == null || depthAgeMs > this.freshnessLimitMs) {
@@ -1018,11 +1072,24 @@ export class ResearchIngestBridge {
     );
     let rows = this.recentCandidates;
     if (filter === "SELECTED") {
-      rows = rows.filter((r) => r.selectedCandidate);
+      rows = rows.filter(
+        (r) => r.selectedCandidate && r.derivedDataContaminated !== true
+      );
     } else if (filter === "ELIGIBLE") {
-      rows = rows.filter((r) => r.eligible || r.selectedCandidate);
+      rows = rows.filter(
+        (r) =>
+          (r.eligible || r.selectedCandidate) &&
+          r.derivedDataContaminated !== true
+      );
     }
-    const observations = rows.slice(-capped).reverse();
+    const observations = rows.slice(-capped).reverse().map((r) => {
+      if (r.derivedDataContaminated !== true) return r;
+      return {
+        ...r,
+        // Compact forensic label — not a clean opportunity.
+        setupName: `${r.setupName} · STALE / INVALID FOR QUALIFICATION`
+      };
+    });
     return {
       mode: GH_FAST_RESEARCH_MODE,
       label: "RESEARCH OBSERVATION FEED — NOT TRADES",
@@ -1048,9 +1115,14 @@ export class ResearchIngestBridge {
     const ql = this.queueLat.percentiles();
     const el = this.lagLat.percentiles();
     const identity = researchSafetyIdentity();
-    const spotAgeMs = this.lastSpotAt != null ? nowMs - this.lastSpotAt : null;
+    const spotAgeMs =
+      this.lastIngressSpotAtMs != null
+        ? nowMs - this.lastIngressSpotAtMs
+        : null;
     const depthAgeMs =
-      this.lastDepthAt != null ? nowMs - this.lastDepthAt : null;
+      this.lastIngressDepthAtMs != null
+        ? nowMs - this.lastIngressDepthAtMs
+        : null;
     const evaluated = evaluateCaptureHealth({
       processHealthy: true,
       connectionState: this.connectionState,
@@ -1152,6 +1224,8 @@ export class ResearchIngestBridge {
           netMoveSum: s.netMoveSum,
           tradesPerHour: s.tradesPerHour,
           tradesPerHourLabel: s.tradesPerHourLabel,
+          paperTradesPerRuntimeHour: s.paperTradesPerRuntimeHour,
+          paperTradesPerRuntimeHourLabel: s.paperTradesPerRuntimeHourLabel,
           totalClosedTrades: s.totalClosedTrades,
           historyRows: s.historyRows,
           paperEntriesBlockedDataNotOk: s.paperEntriesBlockedDataNotOk,

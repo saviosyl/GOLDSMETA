@@ -697,8 +697,8 @@ export function GoldHunterFastResearchPage() {
             </strong>
           </div>
           <div className="gm-ghr-paper-kpi">
-            <span title="Cumulative closed trades / elapsed simulator runtime — not validated FAST V2 frequency">
-              PAPER TRADES / HOUR
+            <span title="Cumulative closed trades / wall-clock hours since paper simulator start — includes disconnected/stale wall time">
+              PAPER TRADES / WALL-CLOCK RUNTIME HOUR
             </span>
             <strong>
               {paper?.summary?.tradesPerHour == null

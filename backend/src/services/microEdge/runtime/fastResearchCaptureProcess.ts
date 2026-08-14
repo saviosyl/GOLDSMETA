@@ -246,7 +246,7 @@ export class GoldHunterFastResearchCaptureProcess {
   private readonly staleReconnectMs: number;
   private readonly softStaleMs: number;
   private readonly hardStaleReconnectMs: number;
-  private readonly reconnectAttemptTimeoutMs: number;
+  private reconnectAttemptTimeoutMs: number;
 
   constructor(
     private readonly opts: {
@@ -692,6 +692,12 @@ export class GoldHunterFastResearchCaptureProcess {
 
       await raceReconnectAttempt({
         body: (async () => {
+          if (this.hangConnectOnceForTests) {
+            this.reconnectPhase = "CONNECTING_SESSION";
+            await new Promise<void>(() => {
+              /* hang forever for timeout test */
+            });
+          }
           if (this.skipSessionConnectForTests) return;
           await this.connectOnce({ fromReconnect: true, attemptId });
         })(),
@@ -856,6 +862,11 @@ export class GoldHunterFastResearchCaptureProcess {
   /** @internal test hook — hang connectOnce during reconnect (timeout test). */
   setHangConnectOnceForTests(hang: boolean): void {
     this.hangConnectOnceForTests = hang;
+  }
+
+  /** @internal — shorten reconnect attempt deadline for unit tests. */
+  setReconnectAttemptTimeoutMsForTests(ms: number): void {
+    this.reconnectAttemptTimeoutMs = Math.max(1, ms);
   }
 
   /** @internal test hook — schedule reconnect with explicit reason. */
