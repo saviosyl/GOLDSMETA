@@ -1,6 +1,7 @@
 export * from "./versions";
 export * from "./types";
 export * from "./defaults";
+export * from "./depthDiagnostics";
 export * from "./depthBook";
 export * from "./depthProtocol";
 export * from "./eventQueue";

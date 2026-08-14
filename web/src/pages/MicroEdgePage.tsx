@@ -162,6 +162,24 @@ type FastSoakHealth = {
     spotAgeMs?: number | null;
     depthAgeMs?: number | null;
     depthBookAvailable?: boolean;
+    depthCrossed?: boolean;
+    depthUnavailableReason?: string | null;
+    depthBidLevels?: number;
+    depthAskLevels?: number;
+    bestDepthBid?: number | null;
+    bestDepthAsk?: number | null;
+    depthSpread?: number | null;
+    spotBid?: number | null;
+    spotAsk?: number | null;
+    spotSpread?: number | null;
+    depthVsSpotDifference?: number | null;
+    deleteHitRate?: number;
+    deleteMissCount?: number;
+    lastValidBookAt?: string | null;
+    consecutiveInvalidDepthSnapshots?: number;
+    bookGeneration?: number;
+    resyncCount?: number;
+    warmingUp?: boolean;
     queueDepth?: number;
     eventsDropped?: number;
     eventToDecision?: { p50: number | null; p95: number | null; p99: number | null };
@@ -254,6 +272,7 @@ function formatGhState(state: string): string {
     ABORT: "ABORT",
     REHUNT: "REHUNT",
     DATA_STALE: "DATA STALE",
+    BOOK_REBUILDING: "BOOK REBUILDING",
     SPREAD_BLOCKED: "SPREAD BLOCKED",
     TARGET_FOUND: "TARGET FOUND",
     SHADOW_BUY: "SHADOW BUY",
@@ -637,7 +656,54 @@ export function MicroEdgePage() {
           </div>
           <div className="gm-gh-stat">
             <span className="gm-label">Depth book</span>
-            <strong>{soak.fast?.depthBookAvailable ? "OK" : "NO"}</strong>
+            <strong>
+              {soak.fast?.warmingUp
+                ? "REBUILDING"
+                : soak.fast?.depthBookAvailable
+                  ? "OK"
+                  : "NO"}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Book reason</span>
+            <strong>{soak.fast?.depthUnavailableReason ?? (soak.fast?.depthBookAvailable ? "OK" : "—")}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Crossed</span>
+            <strong>{soak.fast?.depthCrossed ? "YES" : "NO"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Depth levels</span>
+            <strong>
+              {soak.fast?.depthBidLevels ?? 0}/{soak.fast?.depthAskLevels ?? 0}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Best depth</span>
+            <strong>
+              {soak.fast?.bestDepthBid != null && soak.fast?.bestDepthAsk != null
+                ? `${soak.fast.bestDepthBid.toFixed(2)}/${soak.fast.bestDepthAsk.toFixed(2)}`
+                : "—"}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Delete miss</span>
+            <strong>
+              {soak.fast?.deleteMissCount ?? 0}
+              {soak.fast?.deleteHitRate != null
+                ? ` (${(soak.fast.deleteHitRate * 100).toFixed(0)}% hit)`
+                : ""}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Book gen / resync</span>
+            <strong>
+              {soak.fast?.bookGeneration ?? 0} / {soak.fast?.resyncCount ?? 0}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Invalid streak</span>
+            <strong>{soak.fast?.consecutiveInvalidDepthSnapshots ?? 0}</strong>
           </div>
           <div className="gm-gh-stat">
             <span className="gm-label">Queue / dropped</span>

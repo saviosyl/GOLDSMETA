@@ -9,6 +9,7 @@ import { GhFastEventCollector } from "./collector";
 import { ShadowExecutionAdapter } from "./executionAdapter";
 import { OrderedEventQueue } from "./eventQueue";
 import { parseProtoOADepthEventPayload } from "./depthProtocol";
+import { depthUnavailableReason } from "./depthDiagnostics";
 import { defaultGhFastConfig } from "./defaults";
 import {
   getFrozenGhFastIdentity,
@@ -86,13 +87,24 @@ export type GhFastRuntimeHealth = {
   spotAgeMs: number | null;
   depthAgeMs: number | null;
   depthBookAvailable: boolean;
+  depthCrossed: boolean;
+  depthUnavailableReason: string | null;
   depthBidLevels: number;
   depthAskLevels: number;
   bestDepthBid: number | null;
   bestDepthAsk: number | null;
+  depthSpread: number | null;
   spotBid: number | null;
   spotAsk: number | null;
+  spotSpread: number | null;
   depthVsSpotDifference: number | null;
+  deleteHitRate: number;
+  deleteMissCount: number;
+  lastValidBookAt: string | null;
+  consecutiveInvalidDepthSnapshots: number;
+  bookGeneration: number;
+  resyncCount: number;
+  warmingUp: boolean;
   eventsReceived: number;
   spotEvents: number;
   depthEvents: number;
@@ -257,6 +269,26 @@ export class GoldHunterFastLiveBridge {
     this.sessionDepthSub = false;
   }
 
+  /**
+   * Market-data reset used on transport reconnect / invalid-book resync.
+   * Does not recreate the bridge (avoids duplicate listeners when re-attached).
+   */
+  async resetMarketDataForResync(reason = "market_data_resync"): Promise<void> {
+    await this.engine.resetMarketDataForResync({
+      reason,
+      nowMs: Date.now()
+    });
+    this.lastSpotAt = null;
+    this.lastDepthAt = null;
+    this.lastAction = null;
+    this.lastDecision = null;
+    this.staleMarked = false;
+  }
+
+  listenerCountForTests(): number {
+    return this.unsubs.length;
+  }
+
   private nextSeq(): number {
     this.receiveSeq += 1;
     return this.receiveSeq;
@@ -395,10 +427,18 @@ export class GoldHunterFastLiveBridge {
     const lat = st.latency;
     const depthFresh =
       this.lastDepthAt != null && now - this.lastDepthAt < 2000;
+    const warmingUp = this.engine.isWarmingUp();
+    const unavailable = depthUnavailableReason({
+      stats: depth,
+      depthAgeMs: this.lastDepthAt != null ? now - this.lastDepthAt : null,
+      depthFreshnessMs: 2000,
+      warmingUp
+    });
     const ready =
       this.enabled &&
       this.attached &&
       !this.staleMarked &&
+      !warmingUp &&
       this.sessionSpotSub &&
       this.sessionDepthSub &&
       depth.available &&
@@ -433,14 +473,27 @@ export class GoldHunterFastLiveBridge {
       spotAgeMs: this.lastSpotAt != null ? now - this.lastSpotAt : null,
       depthAgeMs: this.lastDepthAt != null ? now - this.lastDepthAt : null,
       depthBookAvailable: depth.available,
+      depthCrossed: depth.crossed,
+      depthUnavailableReason: unavailable,
       depthBidLevels: depth.bidLevels,
       depthAskLevels: depth.askLevels,
       bestDepthBid: depth.bestBid,
       bestDepthAsk: depth.bestAsk,
+      depthSpread: depth.spread,
       spotBid: st.bid,
       spotAsk: st.ask,
+      spotSpread: st.spread,
       depthVsSpotDifference:
         spotMid != null && depthMid != null ? depthMid - spotMid : null,
+      deleteHitRate: depth.deleteHitRate,
+      deleteMissCount: depth.deleteMisses,
+      lastValidBookAt: depth.lastValidBookMs
+        ? new Date(depth.lastValidBookMs).toISOString()
+        : null,
+      consecutiveInvalidDepthSnapshots: depth.consecutiveInvalidSnapshots,
+      bookGeneration: depth.bookGeneration,
+      resyncCount: depth.resyncCount,
+      warmingUp,
       eventsReceived: this.spotEvents + this.depthEvents,
       spotEvents: this.spotEvents,
       depthEvents: this.depthEvents,
@@ -488,6 +541,7 @@ export class GoldHunterFastLiveBridge {
     const depth = this.engine.depth.stats(5);
     const open = st.openTrade;
     const now = Date.now();
+    const warmingUi = this.engine.isWarmingUp();
     let openUi: GhFastLiveUi["open"] = null;
     if (open && st.bid != null && st.ask != null) {
       const exec = open.side === "BUY" ? st.bid : st.ask;
@@ -520,7 +574,11 @@ export class GoldHunterFastLiveBridge {
     for (const [k, v] of Object.entries(rej).slice(0, 8)) topRej[k] = v;
     const frozen = getFrozenGhFastIdentity();
     return {
-      state: this.staleMarked ? "DATA_STALE" : st.state,
+      state: this.staleMarked
+        ? "DATA_STALE"
+        : warmingUi
+          ? "BOOK_REBUILDING"
+          : st.state,
       bid: st.bid,
       ask: st.ask,
       spread: st.spread,

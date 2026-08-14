@@ -85,6 +85,7 @@ export type FastShadowSoakHealth = {
     mae: number;
     result: string;
     exitReason: string;
+    sampleTag?: string | null;
   }>;
   todaySummary: {
     netMove: number;
@@ -111,6 +112,15 @@ export type FastShadowSoakHealth = {
   } | null;
   targetCompletedTrades: number;
   completedShadowTrades: number;
+  /** Formal sample excludes PRE_FIX_DIAGNOSTIC trades. */
+  formalQualificationTrades: number;
+  preFixDiagnosticTrades: number;
+  qualification: {
+    startSequence: number | null;
+    startTime: string | null;
+    runtimeSha: string | null;
+    configSha: string;
+  };
   openShadowTrade: ReturnType<GoldHunterFastLiveBridge["uiStatus"]>["open"];
   approvedGitSha: string | null;
   deployGitSha: string | null;
@@ -138,6 +148,14 @@ export class GoldHunterFastShadowRuntime {
   private readonly replayEveryMs: number;
   /** Spot/depth older than this triggers reconnect (ops only — not strategy). */
   private readonly staleReconnectMs: number;
+  /**
+   * Consecutive watchdog ticks with fresh depth events but invalid book
+   * before forcing market-data resync (ops only — not strategy).
+   */
+  private readonly invalidBookTicksBeforeResync: number;
+  private invalidBookTicks = 0;
+  private resyncInFlight = false;
+  private qualificationStarted = false;
 
   constructor(private readonly opts: FastShadowRuntimeOptions = {}) {
     // Always isolate FAST from the shared Micro collector Firestore write path.
@@ -148,6 +166,9 @@ export class GoldHunterFastShadowRuntime {
       join(process.cwd(), ".gold-hunter-data", "fast-soak", this.frozen.configSha256.slice(0, 12));
     this.replayEveryMs = opts.replayVerifyEveryMs ?? 15 * 60_000;
     this.staleReconnectMs = Number(process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ?? 20_000);
+    this.invalidBookTicksBeforeResync = Number(
+      process.env.GOLD_HUNTER_FAST_INVALID_BOOK_TICKS ?? 3
+    );
     void createMicroTokenVault();
   }
 
@@ -241,26 +262,38 @@ export class GoldHunterFastShadowRuntime {
   }
 
   private async reconnect(): Promise<void> {
-    this.bridge?.detach();
-    this.bridge?.markStale();
-    if (!this.session) {
-      await this.connectOnce();
-      return;
-    }
-    const ok = await this.session.boundedReconnect();
-    if (ok) {
-      if (!this.bridge) {
-        this.bridge = new GoldHunterFastLiveBridge({
-          enabled: true,
-          enableCollector: true,
-          collectDir: this.collectDir,
-          useFrozenSoakConfig: true
-        });
+    if (this.resyncInFlight) return;
+    this.resyncInFlight = true;
+    try {
+      this.bridge?.detach();
+      this.bridge?.markStale();
+      // Clear Level-II + rolling features BEFORE resubscribe so stale quote IDs
+      // cannot contaminate the newly subscribed depth stream.
+      if (this.bridge) {
+        await this.bridge.resetMarketDataForResync("transport_reconnect");
       }
-      this.bridge.attach(this.session);
-      await this.bridge.refreshSessionFlags(this.session);
-    } else {
-      this.scheduleReconnect();
+      if (!this.session) {
+        await this.connectOnce();
+        return;
+      }
+      const ok = await this.session.boundedReconnect();
+      if (ok) {
+        if (!this.bridge) {
+          this.bridge = new GoldHunterFastLiveBridge({
+            enabled: true,
+            enableCollector: true,
+            collectDir: this.collectDir,
+            useFrozenSoakConfig: true
+          });
+        }
+        this.bridge.attach(this.session);
+        await this.bridge.refreshSessionFlags(this.session);
+        this.invalidBookTicks = 0;
+      } else {
+        this.scheduleReconnect();
+      }
+    } finally {
+      this.resyncInFlight = false;
     }
   }
 
@@ -275,6 +308,7 @@ export class GoldHunterFastShadowRuntime {
   private startStaleWatchdog(): void {
     this.watchdogTimer = setInterval(() => {
       void this.checkStaleAndReconnect();
+      void this.checkInvalidBookAndResync();
     }, 5_000);
   }
 
@@ -295,6 +329,63 @@ export class GoldHunterFastShadowRuntime {
       depthAgeMs: depthAge,
       thresholdMs: this.staleReconnectMs
     });
+    this.scheduleReconnect();
+  }
+
+  /**
+   * Ops watchdog: fresh depth events continuing while the book stays invalid
+   * (especially CROSSED_BOOK) must force a clean market-data resync.
+   * One transient invalid snapshot does not reconnect.
+   */
+  private async checkInvalidBookAndResync(): Promise<void> {
+    if (this.stopping || !this.running || this.resyncInFlight) return;
+    const fast = this.bridge?.health() ?? null;
+    if (!fast?.fastAttached) return;
+    const depthFresh =
+      fast.depthAgeMs != null && fast.depthAgeMs <= this.staleReconnectMs;
+    const invalid =
+      depthFresh &&
+      fast.depthBookAvailable === false &&
+      (fast.depthCrossed === true ||
+        fast.depthUnavailableReason === "CROSSED_BOOK" ||
+        fast.depthUnavailableReason === "NO_BIDS" ||
+        fast.depthUnavailableReason === "NO_ASKS" ||
+        (fast.consecutiveInvalidDepthSnapshots ?? 0) > 0);
+    if (!invalid) {
+      this.invalidBookTicks = 0;
+      // Once book is sane after fix path, open formal qualification window once.
+      if (
+        !this.qualificationStarted &&
+        fast.depthBookAvailable &&
+        !fast.warmingUp &&
+        this.bridge?.engine
+      ) {
+        this.bridge.engine.beginQualificationSample({
+          receiveSeq: fast.eventsReceived,
+          atMs: this.nowMs()
+        });
+        this.qualificationStarted = true;
+        microLog("MICRO_COLLECTOR_CONNECTED", {
+          code: "QUALIFICATION_START",
+          receiveSeq: fast.eventsReceived,
+          configSha256: this.frozen.configSha256,
+          deployGitSha: process.env.GOLD_HUNTER_FAST_DEPLOY_GIT_SHA ?? null
+        });
+      }
+      return;
+    }
+    this.invalidBookTicks += 1;
+    if (this.invalidBookTicks < this.invalidBookTicksBeforeResync) return;
+    microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+      code: "FAST_INVALID_BOOK_RESYNC",
+      reason: fast.depthUnavailableReason,
+      crossed: fast.depthCrossed,
+      consecutiveInvalid: fast.consecutiveInvalidDepthSnapshots,
+      bestDepthBid: fast.bestDepthBid,
+      bestDepthAsk: fast.bestDepthAsk,
+      ticks: this.invalidBookTicks
+    });
+    this.invalidBookTicks = 0;
     this.scheduleReconnect();
   }
 
@@ -390,13 +481,15 @@ export class GoldHunterFastShadowRuntime {
       fast?.spotAgeMs != null && fast.spotAgeMs <= this.staleReconnectMs;
     const depthAgeOk =
       fast?.depthAgeMs != null && fast.depthAgeMs <= this.staleReconnectMs;
-    // FAST soak health is feed-freshness based (not M1/heartbeat collector health).
+    const bookOk = Boolean(fast?.depthBookAvailable) && !fast?.warmingUp;
+    // FAST soak health is feed-freshness + sane depth book (ops integrity).
     const healthy =
       Boolean(fast?.fastAttached) &&
       Boolean(state?.spotSubscribed) &&
       Boolean(state?.depthSubscribed) &&
       spotAgeOk &&
       depthAgeOk &&
+      bookOk &&
       (this.lastReplay?.code !== "LIVE_REPLAY_DIVERGENCE");
 
     const allStats =
@@ -416,8 +509,15 @@ export class GoldHunterFastShadowRuntime {
       mfe: t.mfe,
       mae: t.mae,
       result: t.result,
-      exitReason: t.exitReason
+      exitReason: t.exitReason,
+      sampleTag: t.sampleTag ?? null
     }));
+    const formal = engine?.formalQualificationTrades() ?? [];
+    const preFix = engine?.preFixDiagnosticTrades() ?? [];
+    const qMark = engine?.qualificationMarker() ?? {
+      startSequence: null,
+      startTimeMs: null
+    };
 
     return {
       service: "gold-hunter-fast-shadow",
@@ -462,6 +562,18 @@ export class GoldHunterFastShadowRuntime {
         process.env.GOLD_HUNTER_FAST_SOAK_TARGET_TRADES ?? 250
       ),
       completedShadowTrades: closed.length,
+      formalQualificationTrades: formal.length,
+      preFixDiagnosticTrades: preFix.length,
+      qualification: {
+        startSequence: qMark.startSequence,
+        startTime:
+          qMark.startTimeMs != null
+            ? new Date(qMark.startTimeMs).toISOString()
+            : null,
+        runtimeSha:
+          (process.env.GOLD_HUNTER_FAST_DEPLOY_GIT_SHA ?? "").trim() || null,
+        configSha: this.frozen.configSha256
+      },
       openShadowTrade: ui?.open ?? null,
       approvedGitSha: (process.env.GOLD_HUNTER_FAST_APPROVED_GIT_SHA ?? "").trim() || null,
       deployGitSha: (process.env.GOLD_HUNTER_FAST_DEPLOY_GIT_SHA ?? "").trim() || null,

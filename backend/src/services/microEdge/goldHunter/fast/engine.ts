@@ -94,6 +94,12 @@ export class GoldHunterFastEngine {
   private lastEventKey = "";
   private tradeSeq = 0;
   private brokerRequests = 0;
+  /** After market-data reset — block entries until book + features warm. */
+  private warmingUp = false;
+  private sampleTagMode: "PRE_FIX_DIAGNOSTIC" | "QUALIFICATION" =
+    "PRE_FIX_DIAGNOSTIC";
+  private qualificationStartSequence: number | null = null;
+  private qualificationStartTimeMs: number | null = null;
 
   constructor(opts?: {
     config?: Partial<GhFastConfig>;
@@ -161,6 +167,114 @@ export class GoldHunterFastEngine {
       : [];
   }
 
+  isWarmingUp(): boolean {
+    return this.warmingUp;
+  }
+
+  qualificationMarker(): {
+    startSequence: number | null;
+    startTimeMs: number | null;
+  } {
+    return {
+      startSequence: this.qualificationStartSequence,
+      startTimeMs: this.qualificationStartTimeMs
+    };
+  }
+
+  /**
+   * Begin formal qualification sample. Prior closed trades are tagged
+   * PRE_FIX_DIAGNOSTIC and excluded from the formal count.
+   */
+  beginQualificationSample(args: {
+    receiveSeq: number;
+    atMs: number;
+  }): void {
+    for (const t of this.closed) {
+      if (!t.sampleTag || t.sampleTag === "QUALIFICATION") {
+        t.sampleTag = "PRE_FIX_DIAGNOSTIC";
+      }
+    }
+    this.qualificationStartSequence = args.receiveSeq;
+    this.qualificationStartTimeMs = args.atMs;
+    this.sampleTagMode = "QUALIFICATION";
+  }
+
+  formalQualificationTrades(): GhFastClosedTrade[] {
+    return this.closed.filter((t) => t.sampleTag !== "PRE_FIX_DIAGNOSTIC");
+  }
+
+  preFixDiagnosticTrades(): GhFastClosedTrade[] {
+    return this.closed.filter((t) => t.sampleTag === "PRE_FIX_DIAGNOSTIC");
+  }
+
+  /**
+   * Explicit MARKET DATA RESET / RESYNC.
+   * Clears Level-II + rolling features + side timestamps.
+   * Preserves closed shadow history, soak counters, and frozen config.
+   * Safely exits any open shadow trade under DATA_STALE policy.
+   */
+  async resetMarketDataForResync(args?: {
+    reason?: string;
+    nowMs?: number;
+  }): Promise<{ closedOpen: boolean }> {
+    const now = args?.nowMs ?? LT.nowMs();
+    let closedOpen = false;
+    if (this.open) {
+      const bid = this.lastBid ?? this.open.entryBid;
+      const ask = this.lastAsk ?? this.open.entryAsk;
+      const exitPrice = this.open.side === "BUY" ? bid : ask;
+      await this.adapter.submit({
+        kind: "EXIT",
+        side: this.open.side,
+        price: exitPrice,
+        timestampMs: now,
+        setup: this.open.setup,
+        exitReason: "DATA_STALE"
+      });
+      const gross =
+        this.open.side === "BUY"
+          ? exitPrice - this.open.entryPrice
+          : this.open.entryPrice - exitPrice;
+      const net = gross - this.cfg.friction;
+      this.closed.push({
+        ...this.open,
+        exitTs: now,
+        exitBid: bid,
+        exitAsk: ask,
+        exitPrice,
+        grossMove: gross,
+        additionalFriction: this.cfg.friction,
+        netMove: net,
+        durationMs: now - this.open.entryTs,
+        exitReason: "DATA_STALE",
+        result: net > 0 ? "WIN" : net < 0 ? "LOSS" : "BREAKEVEN",
+        sampleTag:
+          this.sampleTagMode === "QUALIFICATION"
+            ? "QUALIFICATION"
+            : "PRE_FIX_DIAGNOSTIC"
+      });
+      this.open = null;
+      closedOpen = true;
+    }
+    this.depth.clearForResync();
+    this.features.clear();
+    this.lastBid = null;
+    this.lastAsk = null;
+    this.lastBidTs = 0;
+    this.lastAskTs = 0;
+    this.lastDepthTs = 0;
+    this.lastSetup = null;
+    this.lastQuality = 0;
+    this.lastVel = 0;
+    this.lastAccel = 0;
+    this.lastFeatEventRate = 0;
+    this.rearmUntil = 0;
+    this.lastEventKey = "";
+    this.warmingUp = true;
+    this.state = "BOOK_REBUILDING";
+    return { closedOpen };
+  }
+
   /** Hot path: process one market event. No DB/Firestore. */
   async onMarketEvent(ev: GhFastMarketEvent): Promise<GhFastDecision> {
     const t0 = LT.nowMs();
@@ -197,17 +311,19 @@ export class GoldHunterFastEngine {
     const t1 = LT.nowMs();
 
     if (!feat || this.lastBid == null || this.lastAsk == null) {
-      this.state = "DATA_STALE";
+      this.state = this.warmingUp ? "BOOK_REBUILDING" : "DATA_STALE";
       return this.finishDecision({
         t0,
         t1,
-        state: "DATA_STALE",
+        state: this.state,
         action: "WAIT",
         setup: null,
         quality: 0,
         side: null,
         exitReason: null,
-        reasons: ["insufficient_features"]
+        reasons: this.warmingUp
+          ? ["book_warming_up", "insufficient_features"]
+          : ["insufficient_features"]
       });
     }
 
@@ -282,7 +398,11 @@ export class GoldHunterFastEngine {
           netMove: net,
           durationMs: now - this.open.entryTs,
           exitReason,
-          result: net > 0 ? "WIN" : net < 0 ? "LOSS" : "BREAKEVEN"
+          result: net > 0 ? "WIN" : net < 0 ? "LOSS" : "BREAKEVEN",
+          sampleTag:
+            this.sampleTagMode === "QUALIFICATION"
+              ? "QUALIFICATION"
+              : "PRE_FIX_DIAGNOSTIC"
         });
         this.open = null;
         this.state =
@@ -329,6 +449,22 @@ export class GoldHunterFastEngine {
     }
 
     if (!dataOk) {
+      const crossed = depthStats.crossed;
+      if (this.warmingUp) {
+        this.state = "BOOK_REBUILDING";
+        this.rejections.record("book_warming_up");
+        return this.finishDecision({
+          t0,
+          t1,
+          state: "BOOK_REBUILDING",
+          action: "WAIT",
+          setup: null,
+          quality: 0,
+          side: null,
+          exitReason: null,
+          reasons: ["book_warming_up", ...(crossed ? ["crossed_book"] : [])]
+        });
+      }
       this.state = "DATA_STALE";
       const staleReasons: string[] = [];
       if (!bidFresh || !askFresh) {
@@ -336,8 +472,13 @@ export class GoldHunterFastEngine {
         this.rejections.record("spot_stale");
       }
       if (!depthPresent) {
-        staleReasons.push("depth_unavailable");
-        this.rejections.record("depth_unavailable");
+        if (crossed) {
+          staleReasons.push("crossed_book");
+          this.rejections.record("crossed_book");
+        } else {
+          staleReasons.push("depth_unavailable");
+          this.rejections.record("depth_unavailable");
+        }
       } else if (!depthFresh) {
         staleReasons.push("depth_stale");
         this.rejections.record("depth_stale");
@@ -357,6 +498,33 @@ export class GoldHunterFastEngine {
         exitReason: null,
         reasons: staleReasons
       });
+    }
+
+    // Warm-up complete only with sane book + enough feature history.
+    if (this.warmingUp) {
+      const warmOk =
+        depthStats.available &&
+        depthStats.bidLevels > 0 &&
+        depthStats.askLevels > 0 &&
+        !depthStats.crossed &&
+        this.features.hasWarmHistory(now, 3000);
+      if (!warmOk) {
+        this.state = "BOOK_REBUILDING";
+        this.rejections.record("book_warming_up");
+        return this.finishDecision({
+          t0,
+          t1,
+          state: "BOOK_REBUILDING",
+          action: "WAIT",
+          setup: null,
+          quality: 0,
+          side: null,
+          exitReason: null,
+          reasons: ["book_warming_up", "insufficient_feature_history"]
+        });
+      }
+      this.warmingUp = false;
+      this.state = "HUNTING";
     }
 
     if (now < this.rearmUntil) {

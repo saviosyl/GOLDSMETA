@@ -13,6 +13,7 @@ export type GhFastHuntState =
   | "ABORT"
   | "REHUNT"
   | "DATA_STALE"
+  | "BOOK_REBUILDING"
   | "SPREAD_BLOCKED";
 
 export type GhFastSetupId =
@@ -132,6 +133,11 @@ export type GhFastClosedTrade = GhFastOpenTrade & {
   durationMs: number;
   exitReason: GhFastExitReason;
   result: "WIN" | "LOSS" | "BREAKEVEN";
+  /**
+   * Qualification integrity tag. PRE_FIX_DIAGNOSTIC trades are preserved
+   * for analysis but excluded from the formal >=250 sample.
+   */
+  sampleTag?: "PRE_FIX_DIAGNOSTIC" | "QUALIFICATION" | null;
 };
 
 export type GhFastConfig = {

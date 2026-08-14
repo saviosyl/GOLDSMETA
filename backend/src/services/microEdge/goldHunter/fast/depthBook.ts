@@ -37,6 +37,15 @@ export type DepthBookStats = {
   spread: number | null;
   crossed: boolean;
   lastUpdateMs: number | null;
+  /** Last time stats() saw a non-crossed two-sided book. */
+  lastValidBookMs: number | null;
+  /** Consecutive applyDepthEvent cycles where available remained false. */
+  consecutiveInvalidSnapshots: number;
+  bookGeneration: number;
+  resyncCount: number;
+  deleteHits: number;
+  deleteMisses: number;
+  deleteHitRate: number;
 };
 
 function sideOf(q: GhFastDepthQuote): DepthSide | null {
@@ -65,6 +74,10 @@ export class InMemoryDepthBook {
   private bids = new Map<string, DepthLevel>();
   private asks = new Map<string, DepthLevel>();
   private lastUpdateMs: number | null = null;
+  private lastValidBookMs: number | null = null;
+  private consecutiveInvalidSnapshots = 0;
+  private bookGeneration = 0;
+  private resyncCount = 0;
   private windowMs = 1000;
   private addedBid = 0;
   private addedAsk = 0;
@@ -78,18 +91,52 @@ export class InMemoryDepthBook {
     this.windowMs = opts?.rateWindowMs ?? 1000;
   }
 
+  /**
+   * Hard market-data reset for transport reconnect / book resync.
+   * Drops all quote IDs so a stale pre-reconnect Level-II book cannot
+   * contaminate a newly subscribed depth stream.
+   */
+  clearForResync(): void {
+    this.clearMaps();
+    this.bookGeneration += 1;
+    this.resyncCount += 1;
+  }
+
   clear(): void {
+    this.clearMaps();
+    this.bookGeneration += 1;
+  }
+
+  private clearMaps(): void {
     this.bids.clear();
     this.asks.clear();
     this.lastUpdateMs = null;
+    this.lastValidBookMs = null;
+    this.consecutiveInvalidSnapshots = 0;
     this.resetRates(0);
     this.deleteHits = 0;
     this.deleteMisses = 0;
   }
 
+  generation(): number {
+    return this.bookGeneration;
+  }
+
+  resyncs(): number {
+    return this.resyncCount;
+  }
+
+  hasQuoteId(id: string): boolean {
+    return this.bids.has(id) || this.asks.has(id);
+  }
+
   deleteHitRate(): number {
     const n = this.deleteHits + this.deleteMisses;
     return n > 0 ? this.deleteHits / n : 0;
+  }
+
+  deleteMissCount(): number {
+    return this.deleteMisses;
   }
 
   private resetRates(nowMs: number): void {
@@ -155,6 +202,21 @@ export class InMemoryDepthBook {
       if (hit) this.deleteHits += 1;
       else this.deleteMisses += 1;
     }
+
+    // Track sustained invalid books while events keep arriving.
+    const bids = this.sortedBids();
+    const asks = this.sortedAsks();
+    const bestBid = bids[0]?.price ?? null;
+    const bestAsk = asks[0]?.price ?? null;
+    const crossed =
+      bestBid != null && bestAsk != null ? bestBid >= bestAsk : false;
+    const available = bids.length > 0 && asks.length > 0 && !crossed;
+    if (available) {
+      this.lastValidBookMs = now;
+      this.consecutiveInvalidSnapshots = 0;
+    } else {
+      this.consecutiveInvalidSnapshots += 1;
+    }
   }
 
   private sortedBids(): DepthLevel[] {
@@ -187,8 +249,12 @@ export class InMemoryDepthBook {
     const crossed =
       bestBid != null && bestAsk != null ? bestBid >= bestAsk : false;
     const elapsed = Math.max(1, this.windowMs);
+    const bookAvailable = available && !crossed;
+    if (bookAvailable && this.lastUpdateMs != null) {
+      this.lastValidBookMs = this.lastUpdateMs;
+    }
     return {
-      available: available && !crossed,
+      available: bookAvailable,
       topBidDepth: bids[0]?.size ?? 0,
       topAskDepth: asks[0]?.size ?? 0,
       bidDepthN,
@@ -211,7 +277,14 @@ export class InMemoryDepthBook {
       spread:
         bestBid != null && bestAsk != null ? bestAsk - bestBid : null,
       crossed,
-      lastUpdateMs: this.lastUpdateMs
+      lastUpdateMs: this.lastUpdateMs,
+      lastValidBookMs: this.lastValidBookMs,
+      consecutiveInvalidSnapshots: this.consecutiveInvalidSnapshots,
+      bookGeneration: this.bookGeneration,
+      resyncCount: this.resyncCount,
+      deleteHits: this.deleteHits,
+      deleteMisses: this.deleteMisses,
+      deleteHitRate: this.deleteHitRate()
     };
   }
 

@@ -103,6 +103,28 @@ export class FastFeatureEngine {
     }
   }
 
+  /** Reset rolling market features after depth/spot resync (preserve nothing). */
+  clear(): void {
+    this.samples = [];
+    this.upTouches = 0;
+    this.downTouches = 0;
+    this.lastHigh5 = Number.NEGATIVE_INFINITY;
+    this.lastLow5 = Number.POSITIVE_INFINITY;
+    this.touchWindowStart = 0;
+  }
+
+  sampleCount(): number {
+    return this.samples.length;
+  }
+
+  /** True when enough past-only history exists for FAST feature velocities. */
+  hasWarmHistory(nowMs: number, minSpanMs = 3000): boolean {
+    if (this.samples.length < 4) return false;
+    const first = this.samples[0]!;
+    const last = this.samples[this.samples.length - 1]!;
+    return last.t - first.t >= minSpanMs && nowMs - last.t <= 2000;
+  }
+
   private hl(windowMs: number, now: number): { hi: number; lo: number } {
     let hi = Number.NEGATIVE_INFINITY;
     let lo = Number.POSITIVE_INFINITY;
