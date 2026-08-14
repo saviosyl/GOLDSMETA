@@ -93,6 +93,7 @@ function decision(over: Partial<DecisionRecord> = {}): DecisionRecord {
     dataSourceLabel: "TEST",
     environment: "TEST",
     isTestDecision: true,
+    optionalIndicators: { atr: 2.4 },
     ...over
   } as DecisionRecord;
 }
