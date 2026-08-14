@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "gh-fast-research-capture-v1.0.0",
+  "mode": "RESEARCH_CAPTURE_ONLY",
+  "eventKind": "SESSION_TRANSITION",
+  "timeline": [
+    {
+      "fromState": "CONNECTED",
+      "toState": "DISCONNECTED",
+      "reason": "TEST_DISCONNECT",
+      "spotSubscribed": false,
+      "depthSubscribed": false
+    },
+    {
+      "fromState": "DISCONNECTED",
+      "toState": "RECONNECTING",
+      "reason": "TEST_RECONNECTING",
+      "reconnectAttempts": 1
+    },
+    {
+      "fromState": "RECONNECTING",
+      "toState": "CONNECTED",
+      "reason": "reconnect_complete",
+      "spotSubscribed": true,
+      "depthSubscribed": true
+    },
+    {
+      "fromState": "CONNECTED",
+      "toState": "CONNECTED",
+      "reason": "subscription spot true->false depth true->false"
+    },
+    {
+      "fromState": "CONNECTED",
+      "toState": "CONNECTED",
+      "reason": "subscription spot false->true depth false->true"
+    }
+  ],
+  "safety": {
+    "brokerRequests": 0,
+    "brokerOrders": 0,
+    "shadowOrders": 0,
+    "executionAdapter": "NONE"
+  },
+  "note": "Observed from MicroLiveMarketSession.getState() — research-only, no broker mutation."
+}

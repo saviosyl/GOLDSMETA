@@ -1,0 +1,29 @@
+{
+  "title": "GOLD_HUNTER FAST — Research Capture Status UI (design only)",
+  "wiredIntoProductionTradingUi": false,
+  "deployed": false,
+  "view": {
+    "title": "GOLD_HUNTER FAST",
+    "subtitle": "RESEARCH CAPTURE — NO TRADING",
+    "data": "LIVE | OFFLINE",
+    "spot": "LIVE | OFFLINE",
+    "depth": "LIVE | OFFLINE",
+    "capture": "Day YYYY-MM-DD",
+    "metrics": [
+      "Events captured",
+      "Feed gaps",
+      "Reconnects",
+      "Queue latency P95",
+      "Event-loop lag P95"
+    ],
+    "candidateObservations": { "A": 0, "B": 0, "C": 0 },
+    "safety": {
+      "shadowOrders": 0,
+      "brokerRequests": 0,
+      "brokerOrders": 0
+    },
+    "tradingButtons": []
+  },
+  "endpointPreview": "/ui-design",
+  "note": "Isolated preview later — do not modify production trading UI in Phase 2A."
+}

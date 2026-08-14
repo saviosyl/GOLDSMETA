@@ -1,0 +1,32 @@
+{
+  "mode": "RESEARCH_CAPTURE_ONLY",
+  "service": "gold-hunter-fast-research-capture",
+  "processHealthy": true,
+  "captureHealthy": false,
+  "serviceHealthy": false,
+  "dataIntegrityStatus": "CLEAN",
+  "campaignValid": false,
+  "scopeVerified": true,
+  "connectionState": "DISCONNECTED",
+  "spotSubscribed": false,
+  "depthSubscribed": false,
+  "spotAgeMs": null,
+  "depthAgeMs": null,
+  "eventsReceived": 0,
+  "eventsDropped": 0,
+  "persistenceDroppedChunks": 0,
+  "persistenceDroppedRows": 0,
+  "brokerRequests": 0,
+  "brokerOrders": 0,
+  "shadowOrders": 0,
+  "executionAdapter": "NONE",
+  "captureUnhealthyReasons": [
+    "connection_not_connected",
+    "spot_not_subscribed",
+    "depth_not_subscribed",
+    "spot_age_missing",
+    "depth_age_missing",
+    "capture_unhealthy"
+  ],
+  "disclaimer": "RESEARCH CAPTURE ONLY — no trading, no shadow orders, no broker orders"
+}

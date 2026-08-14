@@ -1,0 +1,24 @@
+{
+  "dataIntegrityStatus": "FAILED",
+  "trigger": "PERSISTENCE_QUEUE_BACKPRESSURE",
+  "behaviour": [
+    "Do NOT silently shift()/discard oldest pending chunk",
+    "failIntegrity(reason) → accepting=false",
+    "persistenceDroppedChunks / persistenceDroppedRows incremented",
+    "captureHealthy=false",
+    "campaignValid=false / contaminated=true on day summary",
+    "Already-written chunks retained as evidence"
+  ],
+  "counters": {
+    "persistenceQueueDepth": 1,
+    "persistenceDroppedChunks": 3,
+    "persistenceDroppedRows": 15,
+    "chunksWritten": 2,
+    "chunksUploaded": 0,
+    "writeErrors": 0,
+    "uploadErrors": 0,
+    "fatalPersistenceError": true,
+    "accepting": false
+  },
+  "healthWarning": "DATA_INTEGRITY_FAILED: PERSISTENCE_QUEUE_BACKPRESSURE"
+}
