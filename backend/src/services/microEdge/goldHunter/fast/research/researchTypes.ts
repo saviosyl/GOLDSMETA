@@ -384,6 +384,10 @@ export type ResearchCaptureHealth = {
   crossedDurationMs: number;
   /** Sustained-cross / disconnect ordered resync recoveries. */
   depthResyncCount: number;
+  /** Ordered RESYNCs from session detach / genuine disconnect ghost-clear. */
+  disconnectResyncCount: number;
+  /** Sustained-cross recovery resyncs (10s policy — unchanged). */
+  sustainedCrossRecoveryCount: number;
   deleteHits: number;
   deleteMisses: number;
   /**

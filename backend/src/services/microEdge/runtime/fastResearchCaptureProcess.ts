@@ -41,6 +41,14 @@ import {
   captureDayIndexFromDates,
   utcDateFromMs
 } from "../goldHunter/fast/research/researchDurableSink";
+import {
+  decideResearchStaleReconnect,
+  GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS,
+  GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
+  GH_FAST_RESEARCH_SOFT_STALE_MS,
+  staleFeedBackoffMs,
+  type ResearchReconnectReason
+} from "../goldHunter/fast/research/researchStaleReconnectPolicy";
 
 export type ResearchBrokerPermissionProof = {
   permissionScope: "SCOPE_VIEW";
@@ -82,6 +90,20 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   earliestAnalysisCheckpointDays: 5;
   preferredCaptureDays: "10+";
   disclaimer: string;
+  /** Soft freshness boundary (feed stale / paper block) — not hard teardown. */
+  softStaleMs: number;
+  /** Hard reconnect threshold for connected-but-silent feeds. */
+  hardStaleReconnectMs: number;
+  hardStaleThresholdReason: string;
+  feedSoftStale: boolean;
+  reconnectInFlight: boolean;
+  /** Genuine transport / session disconnect recoveries. */
+  transportReconnectCount: number;
+  /** Prolonged silence while transport claimed connected. */
+  staleFeedReconnectCount: number;
+  sustainedCrossRecoveryCount: number;
+  disconnectResyncCount: number;
+  nextStaleReconnectEligibleAtMs: number | null;
 };
 
 function requireExplicitResearchGcsBucket(): string {
@@ -161,6 +183,21 @@ export class GoldHunterFastResearchCaptureProcess {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private staleTimer: ReturnType<typeof setInterval> | null = null;
   private lastReconnectAttemptMs = 0;
+  /** Mutex: only one process reconnect may execute at a time. */
+  private reconnectInFlight = false;
+  /** Invalidates reconnect timers scheduled before the current attempt. */
+  private reconnectEpoch = 0;
+  private pendingReconnectReason: ResearchReconnectReason | null = null;
+  private transportReconnectCount = 0;
+  private staleFeedReconnectCount = 0;
+  private lastStaleFeedReconnectAttemptMs: number | null = null;
+  private staleFeedBackoffIndex = 0;
+  private feedSoftStale = false;
+  private nextStaleReconnectEligibleAtMs: number | null = null;
+  /** @internal test hook — simulate slow reconnect (stacked #4 scenario). */
+  private reconnectHoldMsForTests = 0;
+  /** @internal test hook — skip live session connect (mutex / backoff unit tests). */
+  private skipSessionConnectForTests = false;
   private brokerPermissionProof: ResearchBrokerPermissionProof | null = null;
   private lastBrokerAuthRaw: unknown = null;
   private campaignStatus: ResearchCampaignStatus = "STARTING";
@@ -175,7 +212,10 @@ export class GoldHunterFastResearchCaptureProcess {
   private readonly runtimeSha: string | null;
   private readonly store = new MemoryMicroMarketDataStore();
   private readonly nowMs: () => number;
+  /** @deprecated Prefer softStaleMs / hardStaleReconnectMs split. */
   private readonly staleReconnectMs: number;
+  private readonly softStaleMs: number;
+  private readonly hardStaleReconnectMs: number;
 
   constructor(
     private readonly opts: {
@@ -187,6 +227,8 @@ export class GoldHunterFastResearchCaptureProcess {
       credentials?: MicroCTraderCredentials;
       gcsBucket?: string;
       runtimeSha?: string | null;
+      softStaleMs?: number;
+      hardStaleReconnectMs?: number;
     } = {}
   ) {
     if (MICRO_BROKER_EXECUTION_ENABLED !== false) {
@@ -201,8 +243,20 @@ export class GoldHunterFastResearchCaptureProcess {
       opts.runtimeSha ??
       ((process.env.GOLD_HUNTER_FAST_DEPLOY_GIT_SHA ?? "").trim() || null);
     this.researchConfigSha = hashGhFastConfig(frozenGhFastSoakConfig());
+    this.softStaleMs = Number(
+      opts.softStaleMs ??
+        process.env.GOLD_HUNTER_FAST_SOFT_STALE_MS ??
+        GH_FAST_RESEARCH_SOFT_STALE_MS
+    );
+    this.hardStaleReconnectMs = Number(
+      opts.hardStaleReconnectMs ??
+        process.env.GOLD_HUNTER_FAST_HARD_STALE_RECONNECT_MS ??
+        GH_FAST_RESEARCH_HARD_STALE_RECONNECT_MS
+    );
+    // Legacy env kept as alias of hard threshold for ops familiarity.
     this.staleReconnectMs = Number(
-      process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ?? 20_000
+      process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ??
+        this.hardStaleReconnectMs
     );
     this.campaignStartUtcDate =
       (process.env.GOLD_HUNTER_FAST_CAMPAIGN_START_DATE ?? "").trim() ||
@@ -213,7 +267,25 @@ export class GoldHunterFastResearchCaptureProcess {
       // use this process activation time (never force midnight).
       new Date(this.nowMs()).toISOString();
     this.day1StartedAt = this.campaignStartedAt;
-    void createMicroTokenVault();
+    // Token vault is created lazily on start()/connect — not in the constructor —
+    // so unit tests can construct the process without deploy encryption secrets.
+  }
+
+  /** Test/observability: whether a process reconnect is executing. */
+  isReconnectInFlight(): boolean {
+    return this.reconnectInFlight;
+  }
+
+  getStaleReconnectPolicy(): {
+    softStaleMs: number;
+    hardStaleReconnectMs: number;
+    hardStaleThresholdReason: string;
+  } {
+    return {
+      softStaleMs: this.softStaleMs,
+      hardStaleReconnectMs: this.hardStaleReconnectMs,
+      hardStaleThresholdReason: GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON
+    };
   }
 
   getRuntime(): GoldHunterFastResearchCaptureRuntime | null {
@@ -229,6 +301,7 @@ export class GoldHunterFastResearchCaptureProcess {
     this.running = true;
     this.stopping = false;
     this.campaignStatus = "STARTING";
+    void createMicroTokenVault();
 
     const collectDir =
       this.opts.collectDir ??
@@ -310,14 +383,26 @@ export class GoldHunterFastResearchCaptureProcess {
     return { proof, raw: list.raw };
   }
 
-  private async connectOnce(): Promise<void> {
+  private async connectOnce(opts?: { fromReconnect?: boolean }): Promise<void> {
+    const fromReconnect = opts?.fromReconnect === true;
+    const scheduleIfNeeded = (reason: ResearchReconnectReason) => {
+      // When called inside reconnect(), scheduleReconnect refuses in-flight and
+      // records pending for finally — or we throw so reconnect catch retries.
+      if (fromReconnect) {
+        this.pendingReconnectReason = reason;
+        return;
+      }
+      this.scheduleReconnect(reason);
+    };
+
     const creds = await this.resolveCredentials();
     if (!creds) {
       this.campaignStatus = "NOT_LIVE";
       microLog("MICRO_COLLECTOR_OAUTH_MISSING", {
         service: this.cloudRunService
       });
-      this.scheduleReconnect();
+      scheduleIfNeeded("oauth_missing");
+      if (fromReconnect) throw new Error("RESEARCH_OAUTH_MISSING");
       return;
     }
 
@@ -333,7 +418,8 @@ export class GoldHunterFastResearchCaptureProcess {
         code: (e as { code?: string }).code ?? "SCOPE_VERIFY_FAILED",
         message: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)
       });
-      this.scheduleReconnect();
+      scheduleIfNeeded("connect_failed");
+      if (fromReconnect) throw e instanceof Error ? e : new Error(String(e));
       return;
     }
 
@@ -361,7 +447,8 @@ export class GoldHunterFastResearchCaptureProcess {
         code: (e as { code?: string }).code ?? "transport_disconnected",
         message: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)
       });
-      this.scheduleReconnect();
+      scheduleIfNeeded("connect_failed");
+      if (fromReconnect) throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
@@ -413,21 +500,77 @@ export class GoldHunterFastResearchCaptureProcess {
     }
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopping || !this.running || this.reconnectTimer) return;
-    const now = this.nowMs();
-    if (now - this.lastReconnectAttemptMs < 30_000 && this.lastReconnectAttemptMs > 0) {
-      return;
+  /**
+   * Schedule a process reconnect. Refuses while reconnectInFlight (mutex).
+   * Stale-feed callers must not queue a second reconnect while one runs.
+   * Transport/connect failures may set pendingReconnectReason for after finally.
+   */
+  private scheduleReconnect(
+    reason: ResearchReconnectReason = "connect_failed",
+    delayMs = 2500
+  ): boolean {
+    if (this.stopping || !this.running) return false;
+    if (this.reconnectInFlight) {
+      // Never stack a second execution. Non-stale may retry after current finishes.
+      if (reason !== "stale_feed") {
+        this.pendingReconnectReason = reason;
+      }
+      return false;
     }
+    if (this.reconnectTimer) return false;
+    const epoch = this.reconnectEpoch;
+    this.pendingReconnectReason = reason;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      void this.reconnect();
-    }, 2500);
+      if (this.stopping || this.reconnectInFlight) return;
+      if (epoch !== this.reconnectEpoch) return;
+      void this.reconnect(reason);
+    }, delayMs);
+    return true;
   }
 
-  private async reconnect(): Promise<void> {
+  private async reconnect(
+    reason: ResearchReconnectReason = "connect_failed"
+  ): Promise<void> {
+    if (this.stopping || !this.running) return;
+    if (this.reconnectInFlight) return;
+    this.reconnectInFlight = true;
+    this.reconnectEpoch += 1;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.lastReconnectAttemptMs = this.nowMs();
+    this.pendingReconnectReason = reason;
+
+    if (reason === "stale_feed") {
+      this.staleFeedReconnectCount += 1;
+      this.lastStaleFeedReconnectAttemptMs = this.nowMs();
+      const backoffMs = staleFeedBackoffMs(this.staleFeedBackoffIndex);
+      this.nextStaleReconnectEligibleAtMs =
+        this.lastStaleFeedReconnectAttemptMs + backoffMs;
+      microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+        code: "RESEARCH_STALE_FEED_RECONNECT_START",
+        spotAgeMs: this.runtime?.health().spotAgeMs ?? null,
+        depthAgeMs: this.runtime?.health().depthAgeMs ?? null,
+        hardStaleReconnectMs: this.hardStaleReconnectMs,
+        staleFeedReconnectCount: this.staleFeedReconnectCount,
+        staleFeedBackoffIndex: this.staleFeedBackoffIndex,
+        backoffMs
+      });
+    } else if (reason === "transport_disconnect") {
+      this.transportReconnectCount += 1;
+      microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+        code: "RESEARCH_TRANSPORT_RECONNECT_START",
+        transportReconnectCount: this.transportReconnectCount
+      });
+    }
+
+    let connectFailed = false;
     try {
+      // Telemetry: process-driven reconnect must record lifecycle (was RECONN=0).
+      this.runtime?.getBridge()?.noteReconnectStart(this.nowMs(), reason);
+
       this.runtime?.detachSession();
       if (this.session) {
         try {
@@ -437,9 +580,50 @@ export class GoldHunterFastResearchCaptureProcess {
         }
       }
       this.session = null;
-      await this.connectOnce();
+
+      if (this.reconnectHoldMsForTests > 0) {
+        await new Promise((r) => setTimeout(r, this.reconnectHoldMsForTests));
+      }
+      if (this.stopping) return;
+
+      if (this.skipSessionConnectForTests) {
+        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
+      } else {
+        await this.connectOnce({ fromReconnect: true });
+        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
+      }
+
+      if (reason === "stale_feed") {
+        // Next quiet/market-closed episode waits longer until fresh data resets.
+        this.staleFeedBackoffIndex = Math.min(
+          this.staleFeedBackoffIndex + 1,
+          2
+        );
+        this.nextStaleReconnectEligibleAtMs =
+          this.nowMs() + staleFeedBackoffMs(this.staleFeedBackoffIndex);
+      }
     } catch {
-      this.scheduleReconnect();
+      connectFailed = true;
+      try {
+        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      this.reconnectInFlight = false;
+      const pending = this.pendingReconnectReason;
+      this.pendingReconnectReason = null;
+      if (this.stopping || !this.running) return;
+      if (connectFailed) {
+        this.scheduleReconnect("connect_failed", 2500);
+      } else if (
+        pending != null &&
+        pending !== "stale_feed" &&
+        pending !== reason
+      ) {
+        // Genuine transport disconnect requested while a reconnect was in flight.
+        this.scheduleReconnect(pending, 500);
+      }
     }
   }
 
@@ -454,23 +638,104 @@ export class GoldHunterFastResearchCaptureProcess {
   private async checkStaleAndReconnect(): Promise<void> {
     if (this.stopping || !this.running || !this.runtime) return;
     const h = this.runtime.health();
-    if (h.connectionState === "DISCONNECTED" || h.connectionState === "RECONNECTING") {
-      this.scheduleReconnect();
+    const decision = decideResearchStaleReconnect({
+      nowMs: this.nowMs(),
+      connectionState: h.connectionState,
+      spotAgeMs: h.spotAgeMs,
+      depthAgeMs: h.depthAgeMs,
+      softStaleMs: this.softStaleMs,
+      hardStaleReconnectMs: this.hardStaleReconnectMs,
+      reconnectInFlight: this.reconnectInFlight,
+      lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
+      staleFeedBackoffIndex: this.staleFeedBackoffIndex
+    });
+
+    this.feedSoftStale = decision.feedSoftStale;
+    if (decision.action === "STALE_BACKOFF_WAIT") {
+      this.nextStaleReconnectEligibleAtMs = decision.nextEligibleAtMs;
+    }
+
+    if (decision.action === "NONE" && !decision.feedSoftStale) {
+      // Fresh Spot+Depth resumed — reset quiet-market stale-recovery episode.
+      this.staleFeedBackoffIndex = 0;
+      this.lastStaleFeedReconnectAttemptMs = null;
+      this.nextStaleReconnectEligibleAtMs = null;
       return;
     }
-    const spotStale =
-      h.spotAgeMs == null || h.spotAgeMs > this.staleReconnectMs;
-    const depthStale =
-      h.depthAgeMs == null || h.depthAgeMs > this.staleReconnectMs;
-    if (spotStale && depthStale) {
+
+    if (decision.action === "SOFT_STALE_ONLY" || decision.action === "STALE_BACKOFF_WAIT") {
+      // Soft stale: FEED_STALE / paper blocked via freshness — transport left alone.
+      return;
+    }
+
+    if (decision.action === "SCHEDULE_TRANSPORT_RECONNECT") {
+      this.scheduleReconnect("transport_disconnect", 500);
+      return;
+    }
+
+    if (decision.action === "SCHEDULE_STALE_FEED_RECONNECT") {
       microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
-        code: "RESEARCH_FEED_STALE_RECONNECT",
+        code: "RESEARCH_FEED_HARD_STALE",
         spotAgeMs: h.spotAgeMs,
         depthAgeMs: h.depthAgeMs,
-        thresholdMs: this.staleReconnectMs
+        softStaleMs: this.softStaleMs,
+        hardStaleReconnectMs: this.hardStaleReconnectMs
       });
-      this.scheduleReconnect();
+      this.scheduleReconnect("stale_feed", 0);
     }
+  }
+
+  /** @internal test hook — run stale watchdog once. */
+  async checkStaleAndReconnectForTests(): Promise<void> {
+    await this.checkStaleAndReconnect();
+  }
+
+  /** @internal test hook — hold reconnect body to simulate slow reconnect (#4). */
+  setReconnectHoldMsForTests(ms: number): void {
+    this.reconnectHoldMsForTests = Math.max(0, ms);
+  }
+
+  /** @internal test hook — skip broker connect during reconnect body. */
+  setSkipSessionConnectForTests(skip: boolean): void {
+    this.skipSessionConnectForTests = skip;
+  }
+
+  /** @internal test hook — schedule reconnect with explicit reason. */
+  scheduleReconnectForTests(
+    reason: ResearchReconnectReason,
+    delayMs = 0
+  ): boolean {
+    this.running = true;
+    this.stopping = false;
+    return this.scheduleReconnect(reason, delayMs);
+  }
+
+  /** @internal test hook — mark process running without live connect. */
+  markRunningForTests(): void {
+    this.running = true;
+    this.stopping = false;
+  }
+
+  getReconnectTelemetryForTests(): {
+    reconnectInFlight: boolean;
+    transportReconnectCount: number;
+    staleFeedReconnectCount: number;
+    staleFeedBackoffIndex: number;
+    lastStaleFeedReconnectAttemptMs: number | null;
+    nextStaleReconnectEligibleAtMs: number | null;
+    feedSoftStale: boolean;
+    reconnectTimerPending: boolean;
+  } {
+    return {
+      reconnectInFlight: this.reconnectInFlight,
+      transportReconnectCount: this.transportReconnectCount,
+      staleFeedReconnectCount: this.staleFeedReconnectCount,
+      staleFeedBackoffIndex: this.staleFeedBackoffIndex,
+      lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
+      nextStaleReconnectEligibleAtMs: this.nextStaleReconnectEligibleAtMs,
+      feedSoftStale: this.feedSoftStale,
+      reconnectTimerPending: this.reconnectTimer != null
+    };
   }
 
   buildHealth(): ResearchProcessHealth {
@@ -509,6 +774,8 @@ export class GoldHunterFastResearchCaptureProcess {
         currentDepthState: "DEPTH_UNAVAILABLE",
         crossedDurationMs: 0,
         depthResyncCount: 0,
+        disconnectResyncCount: 0,
+        sustainedCrossRecoveryCount: 0,
         deleteHits: 0,
         deleteMisses: 0,
         candidateA: 0,
@@ -547,6 +814,7 @@ export class GoldHunterFastResearchCaptureProcess {
       } as ResearchCaptureHealth);
 
     const gate = evaluateLiveCaptureStartupGate(base, this.brokerPermissionProof);
+    const bridge = this.runtime?.getBridge();
     return {
       ...base,
       researchConfigSha: base.researchConfigSha || this.researchConfigSha,
@@ -560,7 +828,7 @@ export class GoldHunterFastResearchCaptureProcess {
       campaignStartedAt: this.campaignStartedAt,
       currentCaptureUtcDate:
         this.currentCaptureUtcDate ??
-        this.runtime?.getBridge()?.getCurrentCaptureUtcDate() ??
+        bridge?.getCurrentCaptureUtcDate() ??
         null,
       day1StartedAt: this.day1StartedAt ?? this.campaignStartedAt,
       liveCaptureReady: gate.ok,
@@ -571,7 +839,17 @@ export class GoldHunterFastResearchCaptureProcess {
       earliestAnalysisCheckpointDays: 5,
       preferredCaptureDays: "10+",
       disclaimer:
-        "RESEARCH CAPTURE ONLY — continuous market observation. No trading, no shadow orders, no broker orders. captureDayIndex ≠ validatedIndependentDays."
+        "RESEARCH CAPTURE ONLY — continuous market observation. No trading, no shadow orders, no broker orders. captureDayIndex ≠ validatedIndependentDays.",
+      softStaleMs: this.softStaleMs,
+      hardStaleReconnectMs: this.hardStaleReconnectMs,
+      hardStaleThresholdReason: GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
+      feedSoftStale: this.feedSoftStale,
+      reconnectInFlight: this.reconnectInFlight,
+      transportReconnectCount: this.transportReconnectCount,
+      staleFeedReconnectCount: this.staleFeedReconnectCount,
+      sustainedCrossRecoveryCount: bridge?.getSustainedCrossRecoveryCount() ?? 0,
+      disconnectResyncCount: bridge?.getDisconnectResyncCount() ?? 0,
+      nextStaleReconnectEligibleAtMs: this.nextStaleReconnectEligibleAtMs
     };
   }
 
@@ -729,8 +1007,19 @@ export class GoldHunterFastResearchCaptureProcess {
   async stop(): Promise<void> {
     this.stopping = true;
     this.running = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.staleTimer) clearInterval(this.staleTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.staleTimer) {
+      clearInterval(this.staleTimer);
+      this.staleTimer = null;
+    }
+    // Do not race a reconnect: wait briefly for in-flight to observe stopping.
+    const deadline = this.nowMs() + 15_000;
+    while (this.reconnectInFlight && this.nowMs() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     this.runtime?.detachSession();
     if (this.session) {
       try {

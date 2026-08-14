@@ -289,6 +289,22 @@ export class ResearchIngestBridge {
     this.setConnectionState("CONNECTED", "reconnect_complete");
   }
 
+  getDisconnectResyncCount(): number {
+    return this.disconnectResyncCount;
+  }
+
+  getSustainedCrossRecoveryCount(): number {
+    return this.sustainedCrossRecoveryCount;
+  }
+
+  getReconnectCount(): number {
+    return this.reconnectCount;
+  }
+
+  getResyncCount(): number {
+    return this.resyncCount;
+  }
+
   noteSubscriptionChange(spot: boolean, depth: boolean, reason: string | null = null): void {
     const prevSpot = this.spotSubscribed;
     const prevDepth = this.depthSubscribed;
@@ -994,8 +1010,13 @@ export class ResearchIngestBridge {
         this.crossedSinceMs != null
           ? Math.max(0, nowMs - this.crossedSinceMs)
           : 0,
+      /** Sustained-cross / disconnect ordered resync recoveries. */
       depthResyncCount:
         this.disconnectResyncCount + this.sustainedCrossRecoveryCount,
+      /** Session detach / transport disconnect ordered RESYNC count. */
+      disconnectResyncCount: this.disconnectResyncCount,
+      /** Sustained-cross ≥10s recovery resync count (unchanged policy). */
+      sustainedCrossRecoveryCount: this.sustainedCrossRecoveryCount,
       deleteHits: this.pipeline.currentDepthStats().deleteHits,
       deleteMisses: this.pipeline.currentDepthStats().deleteMisses,
       candidateA: this.eligibleA,

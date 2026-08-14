@@ -46,6 +46,14 @@ type ResearchHealth = {
   feedGapCount?: number;
   reconnectCount?: number;
   resyncCount?: number;
+  transportReconnectCount?: number;
+  staleFeedReconnectCount?: number;
+  disconnectResyncCount?: number;
+  sustainedCrossRecoveryCount?: number;
+  reconnectInFlight?: boolean;
+  feedSoftStale?: boolean;
+  softStaleMs?: number;
+  hardStaleReconnectMs?: number;
   bookCrossedCount?: number;
   depthEventCount?: number;
   depthCrossedEventCount?: number;
@@ -1061,7 +1069,14 @@ export function GoldHunterFastResearchPage() {
           label="Lag P50/P95/P99"
           value={`${fmtMs(health?.eventLoopLagP50)}/${fmtMs(health?.eventLoopLagP95)}/${fmtMs(health?.eventLoopLagP99)}`}
         />
-        <Kpi label="Gaps/Reconn/Resync" value={`${fmtNum(health?.feedGapCount)}/${fmtNum(health?.reconnectCount)}/${fmtNum(health?.resyncCount)}`} />
+        <Kpi
+          label="Gaps / Transport Reconn / Stale Reconn"
+          value={`${fmtNum(health?.feedGapCount)}/${fmtNum(health?.transportReconnectCount)}/${fmtNum(health?.staleFeedReconnectCount)}`}
+        />
+        <Kpi
+          label="Bridge Reconn / Resync"
+          value={`${fmtNum(health?.reconnectCount)}/${fmtNum(health?.resyncCount)}`}
+        />
         <Kpi label="DEPTH Events" value={fmtNum(health?.depthEventCount)} />
         <Kpi
           label="DEPTH Crossed"
@@ -1073,6 +1088,10 @@ export function GoldHunterFastResearchPage() {
         />
         <Kpi label="DEPTH State" value={health?.currentDepthState ?? "—"} />
         <Kpi label="Crossed Dur" value={fmtMs(health?.crossedDurationMs)} />
+        <Kpi
+          label="Disconnect / Sustained Resyncs"
+          value={`${fmtNum(health?.disconnectResyncCount)}/${fmtNum(health?.sustainedCrossRecoveryCount)}`}
+        />
         <Kpi label="DEPTH Resyncs" value={fmtNum(health?.depthResyncCount)} />
         <Kpi
           label="Delete Hit/Miss"

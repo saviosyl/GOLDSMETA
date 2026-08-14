@@ -295,6 +295,8 @@ export class GoldHunterFastResearchCaptureRuntime {
         currentDepthState: "DEPTH_UNAVAILABLE",
         crossedDurationMs: 0,
         depthResyncCount: 0,
+        disconnectResyncCount: 0,
+        sustainedCrossRecoveryCount: 0,
         deleteHits: 0,
         deleteMisses: 0,
         candidateA: 0,
