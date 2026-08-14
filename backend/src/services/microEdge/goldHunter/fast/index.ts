@@ -14,3 +14,7 @@ export * from "./collector";
 export * from "./durableSink";
 export * from "./replay";
 export * from "./liveBridge";
+export * from "./frozenConfig";
+export * from "./rejectionDiagnostics";
+export * from "./soakMetrics";
+export * from "./replayVerify";

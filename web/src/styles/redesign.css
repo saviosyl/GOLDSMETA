@@ -7432,6 +7432,33 @@ body.gm-drawer-open {
   color: color-mix(in srgb, var(--gh-ink) 55%, transparent);
 }
 
+.gm-gh-soak-banner {
+  margin: 8px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--gh-gold) 45%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--gh-deep) 92%, #fff) 0%,
+    color-mix(in srgb, var(--gh-deep) 80%, #b8892c) 100%
+  );
+  color: #f4efe4;
+}
+
+.gm-gh-soak-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  margin-bottom: 8px;
+}
+
+.gm-gh-soak-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.84rem;
+}
+
 .gm-gh-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

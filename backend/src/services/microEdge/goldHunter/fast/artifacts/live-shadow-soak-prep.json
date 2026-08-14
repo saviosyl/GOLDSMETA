@@ -1,0 +1,45 @@
+{
+  "classification": "GOLD_HUNTER_FAST_LIVE_SHADOW_SOAK_PREP_READY",
+  "soakLabel": "LIVE_SHADOW_SOAK_V1",
+  "engineVersion": "GH_FAST_EVENT_V1",
+  "configSha256": "f47c7886f2b0dadddda779e993ba076b27de8b098bd4921d9c8278ee9efeceb4",
+  "tuningAllowed": false,
+  "shadowOnly": true,
+  "brokerExecutionEnabled": false,
+  "mutationSurface": "NONE",
+  "permissionScope": "SCOPE_VIEW",
+  "maxOpenPositions": 1,
+  "dedicatedRuntime": {
+    "service": "gold-hunter-fast-shadow",
+    "entrypoint": "npm run gold-hunter:fast-shadow",
+    "dockerfile": "backend/Dockerfile.gold-hunter-fast-shadow",
+    "script": "backend/scripts/microEdge/runFastShadowRuntime.ts",
+    "isolatesFromCore": true,
+    "isolatesFromNormalMicroCollector": true
+  },
+  "gcs": {
+    "envBucket": "GOLD_HUNTER_FAST_GCS_BUCKET",
+    "prefixPattern": "gold-hunter-fast/live-shadow/<runId>/<date>/",
+    "ready": true,
+    "note": "Set GOLD_HUNTER_FAST_GCS_BUCKET at deploy time; otherwise LOCAL_BUFFER_ONLY with health warning"
+  },
+  "replay": {
+    "periodicVerify": true,
+    "codes": ["LIVE_REPLAY_OK", "LIVE_REPLAY_DIVERGENCE", "LIVE_REPLAY_NO_DATA"],
+    "frozenConfigRequired": true
+  },
+  "targetCompletedShadowTrades": {
+    "preferredMin": 250,
+    "betterMin": 500,
+    "doNotForceTrades": true,
+    "doNotRetuneDuringCollection": true
+  },
+  "safety": {
+    "MICRO_BROKER_EXECUTION_ENABLED": false,
+    "GOLD_HUNTER_FAST_SHADOW_ENABLED_default": false,
+    "brokerOrders": 0,
+    "noMerge": true,
+    "noDeployUntilExplicitApproval": true
+  },
+  "preparedAt": "2026-08-14T05:26:00.000Z"
+}

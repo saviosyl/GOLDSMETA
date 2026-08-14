@@ -91,6 +91,21 @@ type GhFastLive = {
     trail?: number | null;
     exitPressure?: string | null;
   } | null;
+  realMarketData?: boolean;
+  pepperstoneDemo?: boolean;
+  soakLabel?: string | null;
+  engineVersion?: string | null;
+  configSha256?: string | null;
+  tuningAllowed?: boolean;
+  completedShadowTrades?: number;
+  todayNetMove?: number;
+  wins?: number;
+  losses?: number;
+  profitFactor?: number | null;
+  rejectionsTop?: Record<string, number>;
+  setupDetections?: Record<string, number>;
+  brokerOrders?: number;
+  shadowOnly?: boolean;
 };
 
 type GhStatus = {
@@ -320,10 +335,16 @@ export function MicroEdgePage() {
         </div>
         <div className="gm-micro-badges">
           <span className="gm-chip gm-chip-warn" data-testid="gh-shadow-badge">
-            SHADOW
+            SHADOW ONLY
           </span>
           <span className="gm-chip" data-testid="gh-no-orders-badge">
-            NO BROKER ORDERS
+            BROKER ORDERS 0
+          </span>
+          <span className="gm-chip gm-chip-soft" data-testid="gh-real-market-badge">
+            REAL MARKET DATA
+          </span>
+          <span className="gm-chip gm-chip-soft" data-testid="gh-pepperstone-demo-badge">
+            PEPPERSTONE DEMO
           </span>
           <span className="gm-chip gm-chip-soft" data-testid="gh-fast-badge">
             GOLD_HUNTER FAST
@@ -342,6 +363,42 @@ export function MicroEdgePage() {
           {error}
         </div>
       ) : null}
+
+      <section className="gm-gh-soak-banner" data-testid="gh-live-shadow-soak">
+        <div className="gm-gh-soak-title">LIVE-SHADOW OBSERVATION</div>
+        <div className="gm-gh-soak-grid">
+          <span>Mode SHADOW ONLY</span>
+          <span>Broker orders {fast?.brokerOrders ?? 0}</span>
+          <span>Engine {fast?.engineVersion ?? "—"}</span>
+          <span>
+            Config{" "}
+            {fast?.configSha256
+              ? `${fast.configSha256.slice(0, 12)}…`
+              : "—"}
+          </span>
+          <span>Soak {fast?.soakLabel ?? "standby"}</span>
+          <span>Tuning {fast?.tuningAllowed === false ? "FROZEN" : "—"}</span>
+          <span>Shadow trades {fast?.completedShadowTrades ?? 0}</span>
+          <span>Net move {signed(fast?.todayNetMove)}</span>
+          <span>
+            W/L {(fast?.wins ?? 0)}/{(fast?.losses ?? 0)}
+          </span>
+          <span>PF {num(fast?.profitFactor, 2)}</span>
+          <span>
+            Setup A {fast?.setupDetections?.A_MOMENTUM_IGNITION ?? 0}
+          </span>
+          <span>
+            Setup B {fast?.setupDetections?.B_FAST_BREAKOUT ?? 0}
+          </span>
+          <span>
+            Setup C {fast?.setupDetections?.C_PULLBACK_REACCEL ?? 0}
+          </span>
+        </div>
+        <p className="gm-muted gm-gh-balance-note">
+          Shadow executable movement is research observation only — not Pepperstone
+          account P/L. No Demo or Live broker orders are placed by FAST.
+        </p>
+      </section>
 
       {/* Top daily summary */}
       <section className="gm-gh-summary" data-testid="gh-daily-summary">

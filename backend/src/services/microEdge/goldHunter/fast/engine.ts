@@ -14,6 +14,11 @@ import { evaluateOpenExit, openTrade, updateOpenTrade } from "./exits";
 import { FastFeatureEngine } from "./features";
 import { buildLatencySample, LatencyTracker, LatencyTracker as LT } from "./latency";
 import { evaluateSetups } from "./setups";
+import {
+  diagnoseSetupNearMisses,
+  GhFastRejectionCounter,
+  mapDecisionReasonsToRejections
+} from "./rejectionDiagnostics";
 import type {
   GhFastClosedTrade,
   GhFastConfig,
@@ -21,7 +26,8 @@ import type {
   GhFastHuntState,
   GhFastMarketEvent,
   GhFastOpenTrade,
-  GhFastShadowOrder
+  GhFastShadowOrder,
+  GhFastSetupId
 } from "./types";
 import {
   GH_FAST_BROKER_EXECUTION_ENABLED,
@@ -29,6 +35,7 @@ import {
   GH_FAST_MUTATION_SURFACE,
   GH_FAST_SHADOW_ONLY
 } from "./versions";
+import { getFrozenGhFastIdentity } from "./frozenConfig";
 
 // Ensure forbidden adapter cannot be silently imported for wiring mistakes in tests.
 void ForbiddenLiveExecutionAdapter;
@@ -61,8 +68,16 @@ export class GoldHunterFastEngine {
   readonly adapter: GhFastExecutionAdapter;
   readonly closed: GhFastClosedTrade[] = [];
   readonly decisions: GhFastDecision[] = [];
+  readonly rejections = new GhFastRejectionCounter();
+  readonly setupDetections: Record<GhFastSetupId, number> = {
+    A_MOMENTUM_IGNITION: 0,
+    B_FAST_BREAKOUT: 0,
+    C_PULLBACK_REACCEL: 0
+  };
+  readonly entryTimestampsMs: number[] = [];
 
   private cfg: GhFastConfig;
+  private frozenIdentity = getFrozenGhFastIdentity();
   private state: GhFastHuntState = "HUNTING";
   private open: GhFastOpenTrade | null = null;
   private lastBid: number | null = null;
@@ -83,8 +98,14 @@ export class GoldHunterFastEngine {
   constructor(opts?: {
     config?: Partial<GhFastConfig>;
     adapter?: GhFastExecutionAdapter;
+    /** When true (soak), force frozen config and ignore overrides. */
+    useFrozenSoakConfig?: boolean;
   }) {
-    this.cfg = defaultGhFastConfig(opts?.config);
+    if (opts?.useFrozenSoakConfig) {
+      this.cfg = { ...this.frozenIdentity.config };
+    } else {
+      this.cfg = defaultGhFastConfig(opts?.config);
+    }
     this.adapter = opts?.adapter ?? new ShadowExecutionAdapter();
     if (GH_FAST_BROKER_EXECUTION_ENABLED !== false) {
       throw new Error("REFUSING: GH_FAST_BROKER_EXECUTION_ENABLED must be false");
@@ -95,6 +116,10 @@ export class GoldHunterFastEngine {
     if (this.adapter.shadowOnly !== GH_FAST_SHADOW_ONLY) {
       throw new Error("REFUSING: adapter must be shadowOnly");
     }
+  }
+
+  frozen(): ReturnType<typeof getFrozenGhFastIdentity> {
+    return this.frozenIdentity;
   }
 
   getConfig(): GhFastConfig {
@@ -144,6 +169,7 @@ export class GoldHunterFastEngine {
       ev.eventId ||
       `${ev.kind}:seq=${ev.receiveSeq ?? "na"}`;
     if (ev.receiveSeq != null && eventKey === this.lastEventKey) {
+      this.rejections.record("duplicate_event");
       return this.waitDecision(t0, t0, "duplicate_event");
     }
     if (ev.receiveSeq != null) this.lastEventKey = eventKey;
@@ -191,10 +217,9 @@ export class GoldHunterFastEngine {
 
     const bidFresh = now - this.lastBidTs <= this.cfg.sideFreshnessMs;
     const askFresh = now - this.lastAskTs <= this.cfg.sideFreshnessMs;
+    const depthPresent = this.lastDepthTs > 0 && depthStats.available;
     const depthFresh =
-      this.lastDepthTs > 0 &&
-      now - this.lastDepthTs <= this.cfg.depthFreshnessMs &&
-      depthStats.available;
+      depthPresent && now - this.lastDepthTs <= this.cfg.depthFreshnessMs;
     const dataOk = bidFresh && askFresh && depthFresh && feat.spread > 0;
 
     if (feat.spread > this.cfg.maxSpread) {
@@ -202,6 +227,7 @@ export class GoldHunterFastEngine {
       if (this.open) {
         // Still manage open trade on spread block
       } else {
+        this.rejections.record("spread_too_high");
         return this.finishDecision({
           t0,
           t1,
@@ -211,7 +237,7 @@ export class GoldHunterFastEngine {
           quality: 0,
           side: null,
           exitReason: null,
-          reasons: ["spread_blocked"]
+          reasons: ["spread_blocked", "spread_too_high"]
         });
       }
     }
@@ -288,6 +314,7 @@ export class GoldHunterFastEngine {
             ? "STRIKE_BUY"
             : "STRIKE_SELL";
       this.state = holdState;
+      this.rejections.record("existing_open_position");
       return this.finishDecision({
         t0,
         t1,
@@ -297,12 +324,28 @@ export class GoldHunterFastEngine {
         quality: this.lastQuality,
         side: this.open.side,
         exitReason: null,
-        reasons: ["holding"]
+        reasons: ["holding", "existing_open_position"]
       });
     }
 
     if (!dataOk) {
       this.state = "DATA_STALE";
+      const staleReasons: string[] = [];
+      if (!bidFresh || !askFresh) {
+        staleReasons.push("spot_stale");
+        this.rejections.record("spot_stale");
+      }
+      if (!depthPresent) {
+        staleReasons.push("depth_unavailable");
+        this.rejections.record("depth_unavailable");
+      } else if (!depthFresh) {
+        staleReasons.push("depth_stale");
+        this.rejections.record("depth_stale");
+      }
+      if (!staleReasons.length) {
+        staleReasons.push("data_stale");
+        this.rejections.record("data_stale");
+      }
       return this.finishDecision({
         t0,
         t1,
@@ -312,12 +355,13 @@ export class GoldHunterFastEngine {
         quality: 0,
         side: null,
         exitReason: null,
-        reasons: ["stale_bid_ask"]
+        reasons: staleReasons
       });
     }
 
     if (now < this.rearmUntil) {
       this.state = "REHUNT";
+      this.rejections.record("rearm_floor");
       return this.finishDecision({
         t0,
         t1,
@@ -334,6 +378,8 @@ export class GoldHunterFastEngine {
     // Pressure / arm / strike
     const hit = evaluateSetups(feat, this.cfg);
     if (!hit) {
+      const near = diagnoseSetupNearMisses(feat, this.cfg);
+      this.rejections.recordMany(near);
       const pressure =
         Math.abs(feat.signedImbalance1s) > 0.25 ||
         Math.abs(feat.depth.depthImbalance) > 0.3;
@@ -349,10 +395,13 @@ export class GoldHunterFastEngine {
         quality: 0,
         side: null,
         exitReason: null,
-        reasons: pressure ? ["pressure_detected"] : ["hunting"]
+        reasons: pressure
+          ? ["pressure_detected", ...near]
+          : ["hunting", ...near]
       });
     }
 
+    this.setupDetections[hit.setup] += 1;
     this.lastSetup = hit.setup;
     this.lastQuality = hit.quality;
     this.state = "ARMED";
@@ -360,6 +409,7 @@ export class GoldHunterFastEngine {
     const expectedMove = Math.abs(feat.midVel1s) * feat.mid;
     const need = this.cfg.friction + this.cfg.safetyBuffer;
     if (expectedMove < need && hit.quality < this.cfg.minSetupQuality + 0.15) {
+      this.rejections.record("expected_move_below_friction");
       return this.finishDecision({
         t0,
         t1,
@@ -369,7 +419,7 @@ export class GoldHunterFastEngine {
         quality: hit.quality,
         side: hit.side,
         exitReason: null,
-        reasons: ["edge_below_friction_buffer", ...hit.reasons]
+        reasons: ["edge_below_friction_buffer", "expected_move_below_friction", ...hit.reasons]
       });
     }
 
@@ -388,6 +438,7 @@ export class GoldHunterFastEngine {
     });
     const tShadow = LT.nowMs();
     this.tradeSeq += 1;
+    this.entryTimestampsMs.push(now);
     this.open = openTrade({
       tradeId: `gh_fast_${this.tradeSeq}_${now}`,
       side: hit.side,
@@ -400,6 +451,7 @@ export class GoldHunterFastEngine {
     this.state = hit.side === "BUY" ? "STRIKE_BUY" : "STRIKE_SELL";
     void order;
     void this.brokerRequests; // always 0 — hot path never hits broker
+    void mapDecisionReasonsToRejections;
     return this.finishDecision({
       t0,
       t1,

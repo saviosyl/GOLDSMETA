@@ -2,7 +2,6 @@
  * Optional bridge: Micro live session spot/depth → GOLD_HUNTER FAST engine.
  * Shadow-only. Ordered single-consumer queue. Async persistence off hot path.
  */
-import { createHash } from "node:crypto";
 import { spotPriceFromRelative } from "../../marketData/microCTraderProtocol";
 import type { MicroLiveMarketSession } from "../../marketData/liveSession";
 import { GoldHunterFastEngine } from "./engine";
@@ -11,6 +10,11 @@ import { ShadowExecutionAdapter } from "./executionAdapter";
 import { OrderedEventQueue } from "./eventQueue";
 import { parseProtoOADepthEventPayload } from "./depthProtocol";
 import { defaultGhFastConfig } from "./defaults";
+import {
+  getFrozenGhFastIdentity,
+  hashGhFastConfig
+} from "./frozenConfig";
+import { computeSetupStats } from "./soakMetrics";
 import {
   GH_FAST_BROKER_EXECUTION_ENABLED,
   GH_FAST_MUTATION_SURFACE,
@@ -55,6 +59,20 @@ export type GhFastLiveUi = {
   brokerOrders: 0;
   mutationSurface: "NONE";
   shadowOnly: true;
+  /** Live-shadow soak identity (frozen config). */
+  realMarketData: true;
+  pepperstoneDemo: true;
+  soakLabel: "LIVE_SHADOW_SOAK_V1" | null;
+  engineVersion: string | null;
+  configSha256: string | null;
+  tuningAllowed: false;
+  completedShadowTrades: number;
+  todayNetMove: number;
+  wins: number;
+  losses: number;
+  profitFactor: number | null;
+  rejectionsTop: Record<string, number>;
+  setupDetections: Record<string, number>;
 };
 
 export type GhFastRuntimeHealth = {
@@ -113,6 +131,10 @@ export type GhFastRuntimeHealth = {
   mutationSurface: "NONE";
   shadowOnly: true;
   brokerExecutionEnabled: false;
+  soakLabel: "LIVE_SHADOW_SOAK_V1" | null;
+  engineVersion: string | null;
+  configSha256: string | null;
+  tuningAllowed: false;
 };
 
 type RawIngress = {
@@ -121,10 +143,6 @@ type RawIngress = {
   receivedAtMs: number;
   payload: Record<string, unknown>;
 };
-
-function configHash(cfg: GhFastConfig): string {
-  return createHash("sha256").update(JSON.stringify(cfg)).digest("hex").slice(0, 16);
-}
 
 export class GoldHunterFastLiveBridge {
   readonly engine: GoldHunterFastEngine;
@@ -154,6 +172,8 @@ export class GoldHunterFastLiveBridge {
   };
   private staleMarked = false;
   private readonly enabled: boolean;
+  private readonly soakFrozen: boolean;
+  private readonly configSha256: string;
 
   constructor(opts?: {
     config?: Partial<GhFastConfig>;
@@ -161,20 +181,33 @@ export class GoldHunterFastLiveBridge {
     enableCollector?: boolean;
     enabled?: boolean;
     gcsBucket?: string | null;
+    /** Soak path: freeze defaults; ignore threshold overrides. */
+    useFrozenSoakConfig?: boolean;
   }) {
     this.enabled = opts?.enabled ?? isGoldHunterFastShadowEnabled();
+    this.soakFrozen = opts?.useFrozenSoakConfig === true;
     if (GH_FAST_BROKER_EXECUTION_ENABLED !== false) {
       throw new Error("REFUSING: FAST broker execution must be false");
     }
     const adapter = new ShadowExecutionAdapter();
-    const cfg = defaultGhFastConfig(opts?.config);
-    this.engine = new GoldHunterFastEngine({ config: cfg, adapter });
+    const frozen = getFrozenGhFastIdentity();
+    const cfg = this.soakFrozen
+      ? frozen.config
+      : defaultGhFastConfig(opts?.config);
+    this.configSha256 = this.soakFrozen
+      ? frozen.configSha256
+      : hashGhFastConfig(cfg);
+    this.engine = new GoldHunterFastEngine({
+      config: cfg,
+      adapter,
+      useFrozenSoakConfig: this.soakFrozen
+    });
     this.collector =
       opts?.enableCollector === false
         ? null
         : new GhFastEventCollector({
             dir: opts?.collectDir,
-            configHash: configHash(cfg),
+            configHash: this.configSha256.slice(0, 16),
             gcsBucket: opts?.gcsBucket
           });
     this.queue.setHandler(async (item) => {
@@ -440,7 +473,13 @@ export class GoldHunterFastLiveBridge {
       brokerOrders: 0,
       mutationSurface: GH_FAST_MUTATION_SURFACE,
       shadowOnly: true,
-      brokerExecutionEnabled: false
+      brokerExecutionEnabled: false,
+      soakLabel: this.soakFrozen ? "LIVE_SHADOW_SOAK_V1" : null,
+      engineVersion: this.soakFrozen
+        ? getFrozenGhFastIdentity().engineVersion
+        : this.engine.frozen().engineVersion,
+      configSha256: this.configSha256,
+      tuningAllowed: false
     };
   }
 
@@ -467,6 +506,19 @@ export class GoldHunterFastLiveBridge {
         exitPressure: open.harvestRunner ? "RUNNER" : null
       };
     }
+    const closed = this.engine.closed;
+    const allStats = computeSetupStats(
+      "ALL",
+      closed,
+      this.engine.setupDetections.A_MOMENTUM_IGNITION +
+        this.engine.setupDetections.B_FAST_BREAKOUT +
+        this.engine.setupDetections.C_PULLBACK_REACCEL,
+      this.engine.entryTimestampsMs.length
+    );
+    const rej = this.engine.rejections.snapshot();
+    const topRej: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rej).slice(0, 8)) topRej[k] = v;
+    const frozen = getFrozenGhFastIdentity();
     return {
       state: this.staleMarked ? "DATA_STALE" : st.state,
       bid: st.bid,
@@ -487,7 +539,23 @@ export class GoldHunterFastLiveBridge {
       brokerRequests: 0,
       brokerOrders: 0,
       mutationSurface: "NONE",
-      shadowOnly: true
+      shadowOnly: true,
+      realMarketData: true,
+      pepperstoneDemo: true,
+      soakLabel: this.soakFrozen ? "LIVE_SHADOW_SOAK_V1" : null,
+      engineVersion: frozen.engineVersion,
+      configSha256: this.configSha256,
+      tuningAllowed: false,
+      completedShadowTrades: closed.length,
+      todayNetMove: allStats.netMove,
+      wins: allStats.wins,
+      losses: allStats.losses,
+      profitFactor:
+        allStats.profitFactor != null && Number.isFinite(allStats.profitFactor)
+          ? allStats.profitFactor
+          : null,
+      rejectionsTop: topRej,
+      setupDetections: { ...this.engine.setupDetections }
     };
   }
 }
