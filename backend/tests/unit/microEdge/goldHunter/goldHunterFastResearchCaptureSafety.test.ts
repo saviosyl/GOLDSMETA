@@ -34,16 +34,28 @@ import type { MicroLiveMarketSession } from "../../../../src/services/microEdge/
 import type { MicroLiveSessionState } from "../../../../src/services/microEdge/marketData/liveSession";
 
 async function readGzJsonl(dir: string): Promise<unknown[]> {
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".ndjson.gz"))
-    .sort();
   const rows: unknown[] = [];
-  for (const file of files) {
-    const stream = createReadStream(join(dir, file)).pipe(createGunzip());
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      rows.push(JSON.parse(line));
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (!existsSync(cur)) continue;
+    for (const name of readdirSync(cur)) {
+      const p = join(cur, name);
+      if (name.endsWith(".ndjson.gz")) {
+        const stream = createReadStream(p).pipe(createGunzip());
+        const rl = createInterface({ input: stream, crlfDelay: Infinity });
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+          rows.push(JSON.parse(line));
+        }
+      } else {
+        try {
+          const st = await import("node:fs").then((m) => m.statSync(p));
+          if (st.isDirectory()) stack.push(p);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
   return rows;
@@ -309,13 +321,30 @@ describe("research feature pipeline observation", () => {
 
 describe("research ingest bridge + durable sink", () => {
   let dir: string;
+  let prevResearchGcs: string | undefined;
+  let prevFastGcs: string | undefined;
 
   beforeEach(async () => {
+    // Unit tests must not inherit a live deploy GCS bucket from the agent env.
+    prevResearchGcs = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    prevFastGcs = process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
     dir = await mkdtemp(join(tmpdir(), "gh-research-"));
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+    if (prevResearchGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prevResearchGcs;
+    }
+    if (prevFastGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_GCS_BUCKET = prevFastGcs;
+    }
   });
 
   it("round-trips Spot/Depth gzip chunks and keeps A/B/C telemetry", async () => {
@@ -323,7 +352,8 @@ describe("research ingest bridge + durable sink", () => {
       localDir: dir,
       chunkRows: 10,
       runId: "test_research_roundtrip",
-      datasetId: "ds_test"
+      datasetId: "ds_test",
+      gcsBucket: null
     });
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
@@ -383,9 +413,11 @@ describe("research ingest bridge + durable sink", () => {
     expect(sinkStats.gcsPrefix).not.toContain(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX);
     expect(sinkStats.localDir).toContain("research");
     expect(sinkStats.localDir).not.toContain("live-shadow");
-    expect(existsSync(join(dir, "chunk-00000.ndjson.gz.manifest.json"))).toBe(
-      true
-    );
+    const dateDirs = readdirSync(dir).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    expect(dateDirs.length).toBeGreaterThan(0);
+    expect(
+      existsSync(join(dir, dateDirs[0]!, "chunk-00000.ndjson.gz.manifest.json"))
+    ).toBe(true);
   });
 
   it("resync clears book without fabricating trades", async () => {
@@ -434,7 +466,8 @@ describe("research ingest bridge + durable sink", () => {
       localDir: dir,
       chunkRows: 100,
       runId: "test_disc_health",
-      scopeVerified: true
+      scopeVerified: true,
+      gcsBucket: null
     });
     // default DISCONNECTED — process up, capture not healthy
     const h0 = bridge.health();
@@ -460,7 +493,8 @@ describe("research ingest bridge + durable sink", () => {
       chunkRows: 100,
       runId: "test_stale",
       freshnessLimitMs: 500,
-      scopeVerified: true
+      scopeVerified: true,
+      gcsBucket: null
     });
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
@@ -542,7 +576,8 @@ describe("research ingest bridge + durable sink", () => {
       captureStart: new Date().toISOString(),
       localDir: dir,
       chunkRows: 1,
-      maxQueue: 1
+      maxQueue: 1,
+      gcsBucket: null
     });
     // Flood synchronously so pending fills before drain finishes writing.
     for (let i = 0; i < 40; i++) {
@@ -557,7 +592,11 @@ describe("research ingest bridge + durable sink", () => {
     expect(st.healthWarning).toMatch(/DATA_INTEGRITY_FAILED/);
     // Already-written evidence retained
     expect(st.chunksWritten).toBeGreaterThan(0);
-    expect(existsSync(join(dir, "chunk-00000.ndjson.gz"))).toBe(true);
+    const dateDirs = readdirSync(dir).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    expect(dateDirs.length).toBeGreaterThan(0);
+    expect(existsSync(join(dir, dateDirs[0]!, "chunk-00000.ndjson.gz"))).toBe(
+      true
+    );
 
     const bridge = new ResearchIngestBridge({
       localDir: join(dir, "bridge"),
@@ -868,16 +907,476 @@ describe("research module source hygiene (static sample)", () => {
       expect(text).not.toMatch(/import\s*\{[^}]*\bGoldHunterFastLiveBridge\b/);
       expect(text).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
     }
-    const runtime = readFileSync(
+    for (const rel of [
+      "src/services/microEdge/runtime/fastResearchCaptureRuntime.ts",
+      "src/services/microEdge/runtime/fastResearchCaptureProcess.ts",
+      "scripts/microEdge/runFastResearchCaptureRuntime.ts"
+    ]) {
+      const raw = readFileSync(join(process.cwd(), rel), "utf8");
+      const text = raw
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      expect(text).not.toMatch(/from\s+["'][^"']*executionAdapter["']/);
+      expect(text).not.toMatch(/new\s+ShadowExecutionAdapter/);
+      expect(text).not.toMatch(/from\s+["'][^"']*\/engine["']/);
+      expect(text).not.toMatch(/from\s+["'][^"']*\/liveBridge["']/);
+      expect(text).not.toMatch(
+        /import\s*\{[^}]*\b(GoldHunterFastLiveBridge|GoldHunterFastEngine)\b/
+      );
+      expect(text).not.toMatch(
+        /new\s+(GoldHunterFastLiveBridge|GoldHunterFastEngine)\b/
+      );
+      expect(text).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
+    }
+  });
+});
+
+describe("Phase 2B research process startup gate", () => {
+  it("refuses construction without explicit research GCS bucket", async () => {
+    const prev = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    const { GoldHunterFastResearchCaptureProcess } = await import(
+      "../../../../src/services/microEdge/runtime/fastResearchCaptureProcess"
+    );
+    expect(
+      () =>
+        new GoldHunterFastResearchCaptureProcess({
+          healthPort: 0
+        })
+    ).toThrow(/MISSING_GCS_BUCKET/);
+    if (prev != null) process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prev;
+  });
+
+  it("liveCaptureStartupGate requires SCOPE_VIEW + GCS + fresh feeds + heartbeats", async () => {
+    const { evaluateLiveCaptureStartupGate } = await import(
+      "../../../../src/services/microEdge/runtime/fastResearchCaptureProcess"
+    );
+    const proof = {
+      permissionScope: "SCOPE_VIEW" as const,
+      source: "broker_authorization_response" as const,
+      verifiedAt: new Date().toISOString(),
+      accountCount: 1,
+      environment: "DEMO",
+      selectedAccountIdPresent: true
+    };
+    const healthy = evaluateCaptureHealth(
+      baseHealthInput({
+        campaignMode: true,
+        durableMode: "GCS",
+        heartbeatsPersisted: 5,
+        sessionTransitionsPersisted: 2,
+        scopeVerified: true
+      })
+    );
+    // synthesize a ResearchCaptureHealth-like object for the gate
+    const h = {
+      mode: GH_FAST_RESEARCH_MODE,
+      service: "gold-hunter-fast-research-capture" as const,
+      processHealthy: true,
+      captureHealthy: healthy.captureHealthy,
+      serviceHealthy: healthy.serviceHealthy,
+      dataIntegrityStatus: healthy.dataIntegrityStatus,
+      campaignValid: healthy.campaignValid,
+      scopeVerified: true,
+      spotSubscribed: true,
+      depthSubscribed: true,
+      spotAgeMs: 100,
+      depthAgeMs: 100,
+      freshnessLimitMs: 20_000,
+      eventsReceived: 10,
+      eventsDropped: 0,
+      queueDepth: 0,
+      queueLatencyP50: 1,
+      queueLatencyP95: 2,
+      queueLatencyP99: 3,
+      eventLoopLagP50: 1,
+      eventLoopLagP95: 2,
+      eventLoopLagP99: 3,
+      feedGapCount: 0,
+      reconnectCount: 0,
+      resyncCount: 0,
+      bookCrossedCount: 0,
+      candidateA: 0,
+      candidateB: 0,
+      candidateC: 0,
+      captureStart: new Date().toISOString(),
+      captureDurationMs: 1000,
+      runId: "r",
+      datasetId: "d",
+      schemaVersion: GH_FAST_RESEARCH_SCHEMA_VERSION,
+      researchConfigSha: "sha",
+      runtimeSha: null,
+      brokerRequests: 0 as const,
+      brokerOrders: 0 as const,
+      shadowOrders: 0 as const,
+      permissionScope: "SCOPE_VIEW" as const,
+      mutationSurface: "NONE" as const,
+      executionAdapter: "NONE" as const,
+      openShadowTrade: false as const,
+      connectionState: "CONNECTED" as const,
+      storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
+      durableMode: "GCS" as const,
+      persistenceQueueDepth: 0,
+      persistenceDroppedChunks: 0,
+      persistenceDroppedRows: 0,
+      chunksWritten: 1,
+      chunksUploaded: 1,
+      writeErrors: 0,
+      uploadErrors: 0,
+      healthWarning: null,
+      captureUnhealthyReasons: [] as string[],
+      heartbeatsPersisted: 5,
+      sessionTransitionsPersisted: 2,
+      disclaimer: "x"
+    };
+    expect(evaluateLiveCaptureStartupGate(h, proof).ok).toBe(true);
+    expect(
+      evaluateLiveCaptureStartupGate(h, null).ok
+    ).toBe(false);
+    expect(
+      evaluateLiveCaptureStartupGate(
+        { ...h, durableMode: "LOCAL_BUFFER_ONLY", campaignValid: false },
+        proof
+      ).ok
+    ).toBe(false);
+    expect(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX).toContain("live-shadow");
+  });
+});
+
+describe("UTC date rollover + captureDayIndex", () => {
+  let dir: string;
+  let prevResearchGcs: string | undefined;
+  let prevFastGcs: string | undefined;
+
+  beforeEach(async () => {
+    prevResearchGcs = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    prevFastGcs = process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    dir = await mkdtemp(join(tmpdir(), "gh-rollover-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+    if (prevResearchGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prevResearchGcs;
+    }
+    if (prevFastGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_GCS_BUCKET = prevFastGcs;
+    }
+  });
+
+  it("captureDayIndexFromDates advances by calendar day", async () => {
+    const { captureDayIndexFromDates, utcDateFromMs } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-14")).toBe(1);
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-15")).toBe(2);
+    expect(captureDayIndexFromDates("2026-08-14", "2026-08-16")).toBe(3);
+    expect(utcDateFromMs(Date.parse("2026-08-14T23:59:59.000Z"))).toBe(
+      "2026-08-14"
+    );
+    expect(utcDateFromMs(Date.parse("2026-08-15T00:00:01.000Z"))).toBe(
+      "2026-08-15"
+    );
+  });
+
+  it("allocates chunkIndex at seal time per UTC date (not at async write)", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const sink = new ResearchDurableSink({
+      runId: "seal_idx",
+      datasetId: "ds_seal",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 2,
+      maxQueue: 50,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      writeDelayMs: 30
+    });
+    const t1 = Date.parse("2026-08-14T12:00:00.000Z");
+    const t2 = Date.parse("2026-08-15T00:00:01.000Z");
+    for (let i = 0; i < 4; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = t1 + i;
+      sink.enqueue(r);
+    }
+    const d2 = fakeRecord(50);
+    d2.t = t2;
+    sink.enqueue(d2);
+    await sink.flushAndWait(5000);
+    const idxByDate = new Map<string, number[]>();
+    for (const m of sink.manifests) {
+      const list = idxByDate.get(m.captureUtcDate!) ?? [];
+      list.push(m.chunkIndex);
+      idxByDate.set(m.captureUtcDate!, list);
+    }
+    expect(idxByDate.get("2026-08-14")).toEqual([0, 1]);
+    expect(idxByDate.get("2026-08-15")).toEqual([0]);
+  });
+
+  it("refuses local overwrite of an existing chunk (create-only)", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const dayDir = join(dir, "2026-08-14");
+    await mkdir(dayDir, { recursive: true });
+    await writeFile(join(dayDir, "chunk-00000.ndjson.gz"), Buffer.from("occupied"));
+    const sink = new ResearchDurableSink({
+      runId: "local_collision",
+      datasetId: "ds_col",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 1,
+      maxQueue: 10,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14"
+    });
+    const r = fakeRecord(1);
+    r.t = Date.parse("2026-08-14T12:00:00.000Z");
+    sink.enqueue(r);
+    await sink.flushAndWait(5000);
+    const st = sink.stats();
+    expect(st.fatalPersistenceError).toBe(true);
+    expect(st.healthWarning).toMatch(/GCS_OBJECT_COLLISION/);
+    expect(readFileSync(join(dayDir, "chunk-00000.ndjson.gz")).toString()).toBe(
+      "occupied"
+    );
+  });
+
+  it("GCS upload helper uses create-only ifGenerationMatch:0", async () => {
+    const src = readFileSync(
       join(
         process.cwd(),
-        "src/services/microEdge/runtime/fastResearchCaptureRuntime.ts"
+        "src/services/microEdge/goldHunter/fast/research/researchDurableSink.ts"
       ),
       "utf8"
     );
-    expect(runtime).not.toMatch(/from\s+["'][^"']*executionAdapter["']/);
-    expect(runtime).not.toMatch(/new\s+ShadowExecutionAdapter/);
-    expect(runtime).not.toMatch(/from\s+["'][^"']*\/engine["']/);
-    expect(runtime).not.toMatch(/\bsubmitOrder\b|\bplaceOrder\b|\bENTER_BUY\b|\bENTER_SELL\b|\btradeExit\b/);
+    expect(src).toMatch(/preconditionOpts:\s*\{\s*ifGenerationMatch:\s*0\s*\}/);
+    expect(src).toMatch(/GCS_OBJECT_COLLISION/);
+    expect(src).toMatch(/nextChunkIndexByUtcDate/);
+    expect(src).toMatch(/allocateChunkIndex/);
+    expect(src).toMatch(/flag:\s*"wx"/);
   });
+
+  it("does not split a chunk across UTC dates and writes per-day summaries", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const observed: Array<{ date: string; dayIndex: number }> = [];
+    const sink = new ResearchDurableSink({
+      runId: "rollover_test",
+      datasetId: "ds_rollover",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 10,
+      maxQueue: 50,
+      campaignMode: false,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      onCaptureDateObserved: (date, dayIndex) => {
+        observed.push({ date, dayIndex });
+      }
+    });
+
+    const tDay1 = Date.parse("2026-08-14T22:00:00.000Z");
+    const tDay2 = Date.parse("2026-08-15T01:00:00.000Z");
+    for (let i = 0; i < 3; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = tDay1 + i * 1000;
+      r.eventKind = "SPOT";
+      r.market = {
+        kind: "SPOT",
+        bid: 1,
+        ask: 1.1,
+        spread: 0.1,
+        brokerTimestampMs: null
+      };
+      sink.enqueue(r);
+    }
+    // Cross UTC midnight — must seal day1 before accepting day2 in same chunk.
+    for (let i = 0; i < 3; i++) {
+      const r = fakeRecord(100 + i);
+      r.t = tDay2 + i * 1000;
+      r.eventKind = "DEPTH";
+      r.market = {
+        kind: "DEPTH",
+        bestBid: 1,
+        bestAsk: 1.1,
+        depthAvailable: true,
+        crossed: false,
+        bookGeneration: 1,
+        brokerTimestampMs: null
+      };
+      sink.enqueue(r);
+    }
+    await sink.finalizeCurrentDay();
+
+    expect(observed.map((o) => o.date)).toEqual(["2026-08-14", "2026-08-15"]);
+    expect(observed.map((o) => o.dayIndex)).toEqual([1, 2]);
+    expect(existsSync(join(dir, "2026-08-14"))).toBe(true);
+    expect(existsSync(join(dir, "2026-08-15"))).toBe(true);
+    expect(existsSync(join(dir, "2026-08-14", "CAPTURE_DAY_SUMMARY.json"))).toBe(
+      true
+    );
+    expect(existsSync(join(dir, "2026-08-15", "CAPTURE_DAY_SUMMARY.json"))).toBe(
+      true
+    );
+
+    const sum1 = JSON.parse(
+      readFileSync(join(dir, "2026-08-14", "CAPTURE_DAY_SUMMARY.json"), "utf8")
+    );
+    const sum2 = JSON.parse(
+      readFileSync(join(dir, "2026-08-15", "CAPTURE_DAY_SUMMARY.json"), "utf8")
+    );
+    expect(sum1.captureDayIndex).toBe(1);
+    expect(sum2.captureDayIndex).toBe(2);
+    expect(sum1.spotEventCount).toBe(3);
+    expect(sum2.depthEventCount).toBe(3);
+    expect(sum1.validatedIndependentDays).toBe(0);
+    expect(sum2.validatedIndependentDays).toBe(0);
+    expect(typeof sum1.campaignDayEligibleForLaterValidation).toBe("boolean");
+    expect(sum1.brokerOrders).toBe(0);
+    expect(sum1.shadowOrders).toBe(0);
+    expect(sum1.executionAdapter).toBe("NONE");
+
+    // No chunk mixes dates
+    for (const m of sink.manifests) {
+      const dates = new Set(
+        // reconstruct from start/end only — same UTC date required
+        [m.startTs, m.endTs].map((t) =>
+          new Date(t).toISOString().slice(0, 10)
+        )
+      );
+      expect(dates.size).toBe(1);
+      expect(m.captureUtcDate).toBe([...dates][0]);
+    }
+    expect(sink.stats().gcsPrefix).toContain("/2026-08-15");
+    expect(sink.stats().gcsPrefix).not.toContain("live-shadow");
+  });
+
+  it("rollover race does not overwrite prior-day chunks (delayed async write)", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const sink = new ResearchDurableSink({
+      runId: "collision_race",
+      datasetId: "ds_collision",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 3,
+      maxQueue: 50,
+      campaignMode: false,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      writeDelayMs: 40
+    });
+
+    const tDay1 = Date.parse("2026-08-14T22:00:00.000Z");
+    const tDay2 = Date.parse("2026-08-15T00:00:30.000Z");
+    const allSeqs: number[] = [];
+
+    // 3 full Day-1 chunks (indices 0,1,2) + partial buffer of 2
+    for (let i = 0; i < 11; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = tDay1 + i * 10;
+      r.receiveSeq = i + 1;
+      allSeqs.push(i + 1);
+      if (i % 2 === 0) {
+        r.eventKind = "SPOT";
+        r.market = {
+          kind: "SPOT",
+          bid: 1,
+          ask: 1.1,
+          spread: 0.1,
+          brokerTimestampMs: null
+        };
+      } else {
+        r.eventKind = "DEPTH";
+        r.market = {
+          kind: "DEPTH",
+          bestBid: 1,
+          bestAsk: 1.1,
+          depthAvailable: true,
+          crossed: false,
+          bookGeneration: 1,
+          brokerTimestampMs: null
+        };
+      }
+      sink.enqueue(r);
+    }
+    // Immediately cross midnight while Day-1 partial + prior chunks may still be writing
+    const d2 = fakeRecord(100);
+    d2.t = tDay2;
+    d2.receiveSeq = 100;
+    allSeqs.push(100);
+    d2.eventKind = "HEARTBEAT";
+    d2.market = {
+      kind: "HEARTBEAT",
+      heartbeatTs: tDay2,
+      eventLoopLagMs: 1,
+      connectionState: "CONNECTED",
+      spotSubscribed: true,
+      depthSubscribed: true,
+      spotAgeMs: 0,
+      depthAgeMs: 0,
+      queueDepth: 0,
+      persistenceQueueDepth: 0
+    };
+    sink.enqueue(d2);
+
+    await sink.flushAndWait(10_000);
+    await sink.finalizeCurrentDay();
+
+    const day1Files = readdirSync(join(dir, "2026-08-14"))
+      .filter((f) => f.endsWith(".ndjson.gz"))
+      .sort();
+    const day2Files = readdirSync(join(dir, "2026-08-15"))
+      .filter((f) => f.endsWith(".ndjson.gz"))
+      .sort();
+    expect(day1Files).toEqual([
+      "chunk-00000.ndjson.gz",
+      "chunk-00001.ndjson.gz",
+      "chunk-00002.ndjson.gz",
+      "chunk-00003.ndjson.gz"
+    ]);
+    expect(day2Files).toEqual(["chunk-00000.ndjson.gz"]);
+
+    // Original Day-1 chunk bodies remain distinct (no overwrite) — check sizes/sha via manifests
+    const day1Manifests = sink.manifests.filter((m) => m.captureUtcDate === "2026-08-14");
+    const day2Manifests = sink.manifests.filter((m) => m.captureUtcDate === "2026-08-15");
+    expect(day1Manifests.map((m) => m.chunkIndex)).toEqual([0, 1, 2, 3]);
+    expect(day2Manifests.map((m) => m.chunkIndex)).toEqual([0]);
+    const shas = day1Manifests.map((m) => m.sha256);
+    expect(new Set(shas).size).toBe(4);
+
+    const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
+    const seqs = rows.map((r) => r.receiveSeq as number).sort((a, b) => a - b);
+    expect(seqs).toEqual([...allSeqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(allSeqs.length);
+
+    for (const m of sink.manifests) {
+      const dates = new Set(
+        [m.startTs, m.endTs].map((t) => new Date(t).toISOString().slice(0, 10))
+      );
+      expect(dates.size).toBe(1);
+      expect(m.captureUtcDate).toBe([...dates][0]);
+    }
+
+    const st = sink.stats();
+    expect(st.persistenceDroppedRows).toBe(0);
+    expect(st.persistenceDroppedChunks).toBe(0);
+    expect(st.fatalPersistenceError).toBe(false);
+  }, 20_000);
 });

@@ -185,6 +185,8 @@ export type ResearchChunkManifest = {
   localPath?: string | null;
   uploadedAt: string | null;
   storagePrefix: typeof GH_FAST_RESEARCH_GCS_PREFIX_ROOT;
+  /** UTC calendar date of the chunk partition (YYYY-MM-DD). */
+  captureUtcDate?: string;
 };
 
 export type ResearchDaySummary = {
@@ -192,10 +194,15 @@ export type ResearchDaySummary = {
   runId: string;
   datasetId: string;
   schemaVersion: typeof GH_FAST_RESEARCH_SCHEMA_VERSION;
+  captureDayIndex: number;
   captureStart: string;
   captureEnd: string | null;
   eventsReceived: number;
   eventsDropped: number;
+  spotEventCount: number;
+  depthEventCount: number;
+  heartbeatCount: number;
+  sessionTransitionCount: number;
   feedGapCount: number;
   reconnectCount: number;
   resyncCount: number;
@@ -204,19 +211,31 @@ export type ResearchDaySummary = {
   candidateB: number;
   candidateC: number;
   chunksWritten: number;
+  chunksUploaded: number;
+  persistenceDroppedRows: number;
+  persistenceDroppedChunks: number;
+  writeErrors: number;
+  uploadErrors: number;
   brokerRequests: 0;
   brokerOrders: 0;
   shadowOrders: 0;
+  executionAdapter: "NONE";
   mode: typeof GH_FAST_RESEARCH_MODE;
   dataIntegrityStatus: ResearchDataIntegrityStatus;
   campaignValid: boolean;
   contaminated: boolean;
-  persistenceDroppedRows: number;
-  persistenceDroppedChunks: number;
   heartbeatsPersisted: number;
   sessionTransitionsPersisted: number;
   durableMode: "GCS" | "LOCAL_BUFFER_ONLY";
   scopeVerified: boolean;
+  /**
+   * Technically clean enough for later offline analysis.
+   * Does NOT mean profitable or independently validated.
+   */
+  campaignDayEligibleForLaterValidation: boolean;
+  /** Offline qualification counter — remains 0 until daily qualification runs. */
+  validatedIndependentDays: number;
+  note?: string;
 };
 
 export type ResearchCaptureHealth = {

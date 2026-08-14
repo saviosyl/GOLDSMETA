@@ -21,7 +21,6 @@ import {
   type ResearchCaptureHealth,
   type ResearchCaptureRecord,
   type ResearchConnectionState,
-  type ResearchDaySummary,
   type ResearchResubscribeState,
   type ResearchStatusUiDesign,
   type ResearchSubscriptionState
@@ -91,6 +90,8 @@ export class ResearchIngestBridge {
   private scopeVerified = false;
   private heartbeatsPersisted = 0;
   private sessionTransitions = 0;
+  private captureDayIndex = 1;
+  private currentCaptureUtcDate: string | null = null;
 
   constructor(opts?: {
     runId?: string;
@@ -104,6 +105,8 @@ export class ResearchIngestBridge {
     freshnessLimitMs?: number;
     campaignMode?: boolean;
     scopeVerified?: boolean;
+    campaignStartUtcDate?: string;
+    onCaptureDateObserved?: (date: string, dayIndex: number) => void;
     _executionAdapterMustBeUndefined?: unknown;
   }) {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
@@ -128,12 +131,30 @@ export class ResearchIngestBridge {
       gcsBucket: opts?.gcsBucket,
       chunkRows: opts?.chunkRows,
       maxQueue: opts?.maxQueue,
-      campaignMode: this.campaignMode
+      campaignMode: this.campaignMode,
+      campaignStartUtcDate: opts?.campaignStartUtcDate,
+      onCaptureDateObserved: (date, dayIndex) => {
+        this.currentCaptureUtcDate = date;
+        this.captureDayIndex = dayIndex;
+        opts?.onCaptureDateObserved?.(date, dayIndex);
+      }
     });
     this.collector = new ResearchEventCollector(this.sink);
     this.queue.setHandler(async (item) => {
       await this.processOrdered(item.payload, item.enqueuedAtMs);
     });
+  }
+
+  getCaptureDayIndex(): number {
+    return this.captureDayIndex;
+  }
+
+  getCurrentCaptureUtcDate(): string | null {
+    return this.currentCaptureUtcDate ?? this.sink.getCurrentUtcDate();
+  }
+
+  getCampaignStartUtcDate(): string {
+    return this.sink.getCampaignStartUtcDate();
   }
 
   setScopeVerified(verified: boolean): void {
@@ -670,38 +691,8 @@ export class ResearchIngestBridge {
   }
 
   async writeDaySummary(): Promise<string> {
-    const h = this.health();
-    const summary: ResearchDaySummary = {
-      date: new Date().toISOString().slice(0, 10),
-      runId: this.runId,
-      datasetId: this.datasetId,
-      schemaVersion: GH_FAST_RESEARCH_SCHEMA_VERSION,
-      captureStart: this.captureStartIso,
-      captureEnd: new Date().toISOString(),
-      eventsReceived: h.eventsReceived,
-      eventsDropped: h.eventsDropped,
-      feedGapCount: h.feedGapCount,
-      reconnectCount: h.reconnectCount,
-      resyncCount: h.resyncCount,
-      bookCrossedCount: h.bookCrossedCount,
-      candidateA: h.candidateA,
-      candidateB: h.candidateB,
-      candidateC: h.candidateC,
-      chunksWritten: this.sink.stats().chunksWritten,
-      brokerRequests: 0,
-      brokerOrders: 0,
-      shadowOrders: 0,
-      mode: GH_FAST_RESEARCH_MODE,
-      dataIntegrityStatus: h.dataIntegrityStatus,
-      campaignValid: h.campaignValid,
-      contaminated: !h.campaignValid || h.dataIntegrityStatus !== "CLEAN",
-      persistenceDroppedRows: h.persistenceDroppedRows,
-      persistenceDroppedChunks: h.persistenceDroppedChunks,
-      heartbeatsPersisted: h.heartbeatsPersisted,
-      sessionTransitionsPersisted: h.sessionTransitionsPersisted,
-      durableMode: h.durableMode,
-      scopeVerified: h.scopeVerified
-    };
-    return this.sink.writeDaySummary(summary);
+    // Finalize the current UTC capture day partition (rollover-aware).
+    const path = await this.sink.finalizeCurrentDay();
+    return path ?? this.sink.getLocalDir();
   }
 }
