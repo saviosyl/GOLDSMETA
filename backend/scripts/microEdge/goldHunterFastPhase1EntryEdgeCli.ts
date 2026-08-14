@@ -1,12 +1,23 @@
 /**
- * GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery CLI
+ * GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery CLI (corrected)
  *
  * Research only. Does NOT change strategy thresholds, deploy, or place orders.
  * Reconstructs A/B/C candidate evaluations from preserved market events and
  * scores forward executable labels (future prices as LABELS ONLY).
+ *
+ * Corrections vs first Phase 1 pass:
+ * 1) Forward clock starts at candidate.t (not last SPOT quote time)
+ * 2) Per-horizon CONTAMINATED_FUTURE_WINDOW when contamination hits the label window
+ * 3) Unique market-event counts + dedupe for cross-setup rules
  */
 import { createGunzip } from "node:zlib";
-import { createReadStream, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  writeFileSync
+} from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { InMemoryDepthBook } from "../../src/services/microEdge/goldHunter/fast/depthBook";
@@ -16,8 +27,7 @@ import { frozenGhFastSoakConfig } from "../../src/services/microEdge/goldHunter/
 import type {
   GhFastMarketEvent,
   GhFastSide,
-  GhFastSetupId,
-  GhFastSpecialistRawEval
+  GhFastSetupId
 } from "../../src/services/microEdge/goldHunter/fast/types";
 
 type CollectorRow = {
@@ -47,6 +57,17 @@ type CollectorRow = {
 
 type QuotePoint = { t: number; seq: number; bid: number; ask: number };
 
+type ContamEvent = {
+  t: number;
+  reason:
+    | "RESYNC"
+    | "RESYNC_EXIT_AUDIT"
+    | "BOOK_REBUILDING"
+    | "DATA_STALE"
+    | "crossed_book"
+    | "feed_gap";
+};
+
 type ForwardLabel = {
   horizonMs: number;
   signedExecutableMove: number | null;
@@ -56,6 +77,11 @@ type ForwardLabel = {
   timeToFavourableMs: Record<string, number | null>;
   timeToAdverseMs: Record<string, number | null>;
   samples: number;
+  futureWindowStatus: "CLEAN" | "CONTAMINATED_FUTURE_WINDOW";
+  futureContaminationReasons: string[];
+  /** Legacy clock (last SPOT t0) for material-change audit only */
+  legacySignedExecutableMove: number | null;
+  legacySamples: number;
 };
 
 type CandidateRow = {
@@ -99,7 +125,6 @@ type CandidateRow = {
   dublinHour: number;
   contaminated: boolean;
   contaminationReasons: string[];
-  /** Index into quotes[] at snapshot time — labels filled in a second pass. */
   quoteIdx: number;
   labels: ForwardLabel[];
 };
@@ -108,6 +133,7 @@ const HORIZONS = [250, 500, 1000, 2000, 3000, 5000, 10000] as const;
 const THRESHOLDS = [0.05, 0.1, 0.15, 0.2] as const;
 const FRICTION = frozenGhFastSoakConfig().friction;
 const GAP_MS = 2000;
+const MATERIAL_MOVE_EPS = 0.01;
 
 async function readChunks(dir: string): Promise<CollectorRow[]> {
   const files = readdirSync(dir)
@@ -127,12 +153,14 @@ async function readChunks(dir: string): Promise<CollectorRow[]> {
 }
 
 function dublinHour(tMs: number): number {
-  // Approximate Europe/Dublin summer = UTC+1
   const d = new Date(tMs + 3600_000);
   return d.getUTCHours();
 }
 
-function quantiles(xs: number[], qs = [0.1, 0.25, 0.5, 0.75, 0.9]): Record<string, number | null> {
+function quantiles(
+  xs: number[],
+  qs = [0.1, 0.25, 0.5, 0.75, 0.9]
+): Record<string, number | null> {
   if (!xs.length) return Object.fromEntries(qs.map((q) => [String(q), null]));
   const s = [...xs].sort((a, b) => a - b);
   const out: Record<string, number | null> = {};
@@ -140,7 +168,8 @@ function quantiles(xs: number[], qs = [0.1, 0.25, 0.5, 0.75, 0.9]): Record<strin
     const i = (s.length - 1) * q;
     const lo = Math.floor(i);
     const hi = Math.ceil(i);
-    out[String(q)] = lo === hi ? s[lo]! : s[lo]! * (hi - i) + s[hi]! * (i - lo);
+    out[String(q)] =
+      lo === hi ? s[lo]! : s[lo]! * (hi - i) + s[hi]! * (i - lo);
   }
   return out;
 }
@@ -150,63 +179,182 @@ function mean(xs: number[]): number | null {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
-function computeForwardLabels(
-  quotes: QuotePoint[],
-  startIdx: number,
-  side: GhFastSide,
-  entryAsk: number,
-  entryBid: number
-): ForwardLabel[] {
-  const entryPrice = side === "BUY" ? entryAsk : entryBid;
-  const t0 = quotes[startIdx]!.t;
-  const out: ForwardLabel[] = [];
-  for (const h of HORIZONS) {
-    let mfe = 0;
-    let mae = 0;
-    let lastSigned: number | null = null;
-    let samples = 0;
-    const timeFav: Record<string, number | null> = {};
-    const timeAdv: Record<string, number | null> = {};
-    const reached: Record<string, boolean | null> = {};
-    for (const th of THRESHOLDS) {
-      timeFav[String(th)] = null;
-      timeAdv[String(th)] = null;
-      reached[String(th)] = null;
+function eventKey(c: CandidateRow): string {
+  return `${c.runId}:${c.receiveSeq}`;
+}
+
+function eventSideKey(c: CandidateRow): string {
+  return `${c.runId}:${c.receiveSeq}:${c.side}`;
+}
+
+function uniqueEventCount(cs: CandidateRow[]): number {
+  return new Set(cs.map(eventKey)).size;
+}
+
+/** For cross-setup rules: one observation per market event + side. */
+function dedupeByEventSide(cs: CandidateRow[]): CandidateRow[] {
+  const map = new Map<string, CandidateRow>();
+  for (const c of cs) {
+    const k = eventSideKey(c);
+    const prev = map.get(k);
+    if (!prev) {
+      map.set(k, c);
+      continue;
     }
-    for (let i = startIdx + 1; i < quotes.length; i++) {
-      const q = quotes[i]!;
-      const dt = q.t - t0;
-      if (dt > h) break;
-      if (q.t - quotes[i - 1]!.t > GAP_MS) break; // stop at feed gap
-      const exec = side === "BUY" ? q.bid : q.ask;
-      const signed = side === "BUY" ? exec - entryPrice : entryPrice - exec;
-      mfe = Math.max(mfe, signed);
-      mae = Math.min(mae, signed);
-      lastSigned = signed;
-      samples += 1;
-      for (const th of THRESHOLDS) {
-        const key = String(th);
-        if (timeFav[key] == null && signed >= th) timeFav[key] = dt;
-        if (timeAdv[key] == null && signed <= -th) timeAdv[key] = dt;
-      }
+    // Prefer selected, then eligible, then higher rawQuality
+    const score = (x: CandidateRow) =>
+      (x.selected ? 4 : 0) +
+      (x.eligible ? 2 : 0) +
+      (x.rawQuality ?? x.softQuality ?? 0);
+    if (score(c) > score(prev)) map.set(k, c);
+  }
+  return [...map.values()];
+}
+
+function futureContamInWindow(
+  timeline: ContamEvent[],
+  t0: number,
+  horizonMs: number
+): ContamEvent[] {
+  const t1 = t0 + horizonMs;
+  return timeline.filter((e) => e.t > t0 && e.t <= t1);
+}
+
+function computeHorizonLabel(args: {
+  quotes: QuotePoint[];
+  quoteIdx: number;
+  candidateT: number;
+  side: GhFastSide;
+  entryAsk: number;
+  entryBid: number;
+  horizonMs: number;
+  timeline: ContamEvent[];
+  /** If true, use last-SPOT quote time as t0 (legacy bug — audit only). */
+  legacyClock: boolean;
+}): Omit<
+  ForwardLabel,
+  "legacySignedExecutableMove" | "legacySamples" | "futureWindowStatus" | "futureContaminationReasons"
+> & {
+  samples: number;
+  signedExecutableMove: number | null;
+  forwardMfe: number | null;
+  forwardMae: number | null;
+} {
+  const entryPrice = args.side === "BUY" ? args.entryAsk : args.entryBid;
+  const t0 = args.legacyClock
+    ? args.quotes[args.quoteIdx]!.t
+    : args.candidateT;
+  let mfe = 0;
+  let mae = 0;
+  let lastSigned: number | null = null;
+  let samples = 0;
+  const timeFav: Record<string, number | null> = {};
+  const timeAdv: Record<string, number | null> = {};
+  const reached: Record<string, boolean | null> = {};
+  for (const th of THRESHOLDS) {
+    timeFav[String(th)] = null;
+    timeAdv[String(th)] = null;
+    reached[String(th)] = null;
+  }
+
+  let prevQuoteT = t0;
+  for (let i = 0; i < args.quotes.length; i++) {
+    const q = args.quotes[i]!;
+    // Correct clock: strictly after candidate.t; legacy used startIdx+1 which
+    // is approximately quotes after last SPOT.
+    if (!args.legacyClock) {
+      if (q.t <= args.candidateT) continue;
+      if (q.t > args.candidateT + args.horizonMs) break;
+    } else {
+      if (i <= args.quoteIdx) continue;
+      const dtLegacy = q.t - t0;
+      if (dtLegacy > args.horizonMs) break;
     }
+
+    // Do not silently carry prices across a feed gap / RESYNC hole.
+    if (q.t - prevQuoteT > GAP_MS) break;
+    prevQuoteT = q.t;
+
+    const dt = q.t - t0;
+    if (dt > args.horizonMs) break;
+    if (dt <= 0 && !args.legacyClock) continue;
+
+    const exec = args.side === "BUY" ? q.bid : q.ask;
+    const signed =
+      args.side === "BUY" ? exec - entryPrice : entryPrice - exec;
+    mfe = Math.max(mfe, signed);
+    mae = Math.min(mae, signed);
+    lastSigned = signed;
+    samples += 1;
     for (const th of THRESHOLDS) {
       const key = String(th);
-      const tf = timeFav[key];
-      const ta = timeAdv[key];
-      if (tf == null && ta == null) reached[key] = null;
-      else if (tf != null && (ta == null || tf <= ta)) reached[key] = true;
-      else reached[key] = false;
+      if (timeFav[key] == null && signed >= th) timeFav[key] = dt;
+      if (timeAdv[key] == null && signed <= -th) timeAdv[key] = dt;
     }
-    out.push({
+  }
+
+  for (const th of THRESHOLDS) {
+    const key = String(th);
+    const tf = timeFav[key];
+    const ta = timeAdv[key];
+    if (tf == null && ta == null) reached[key] = null;
+    else if (tf != null && (ta == null || tf <= ta)) reached[key] = true;
+    else reached[key] = false;
+  }
+
+  return {
+    horizonMs: args.horizonMs,
+    signedExecutableMove: lastSigned,
+    forwardMfe: samples ? mfe : null,
+    forwardMae: samples ? mae : null,
+    reachedPosBeforeNeg: reached,
+    timeToFavourableMs: timeFav,
+    timeToAdverseMs: timeAdv,
+    samples
+  };
+}
+
+function computeForwardLabels(
+  quotes: QuotePoint[],
+  quoteIdx: number,
+  candidateT: number,
+  side: GhFastSide,
+  entryAsk: number,
+  entryBid: number,
+  timeline: ContamEvent[]
+): ForwardLabel[] {
+  const out: ForwardLabel[] = [];
+  for (const h of HORIZONS) {
+    const hits = futureContamInWindow(timeline, candidateT, h);
+    const corrected = computeHorizonLabel({
+      quotes,
+      quoteIdx,
+      candidateT,
+      side,
+      entryAsk,
+      entryBid,
       horizonMs: h,
-      signedExecutableMove: lastSigned,
-      forwardMfe: samples ? mfe : null,
-      forwardMae: samples ? mae : null,
-      reachedPosBeforeNeg: reached,
-      timeToFavourableMs: timeFav,
-      timeToAdverseMs: timeAdv,
-      samples
+      timeline,
+      legacyClock: false
+    });
+    const legacy = computeHorizonLabel({
+      quotes,
+      quoteIdx,
+      candidateT,
+      side,
+      entryAsk,
+      entryBid,
+      horizonMs: h,
+      timeline,
+      legacyClock: true
+    });
+    out.push({
+      ...corrected,
+      futureWindowStatus:
+        hits.length > 0 ? "CONTAMINATED_FUTURE_WINDOW" : "CLEAN",
+      futureContaminationReasons: [...new Set(hits.map((x) => x.reason))],
+      legacySignedExecutableMove: legacy.signedExecutableMove,
+      legacySamples: legacy.samples
     });
   }
   return out;
@@ -233,6 +381,7 @@ async function processRun(args: {
   };
   span: { start: string; end: string; hours: number } | null;
   configHashSeen: string | null;
+  contamTimelineCount: number;
 }> {
   const rows = await readChunks(args.dir);
   const cfg = frozenGhFastSoakConfig();
@@ -241,6 +390,7 @@ async function processRun(args: {
   const features = new FastFeatureEngine();
   const quotes: QuotePoint[] = [];
   const candidates: CandidateRow[] = [];
+  const timeline: ContamEvent[] = [];
   const contaminationStats: Record<string, number> = {
     book_rebuilding: 0,
     data_stale: 0,
@@ -262,20 +412,42 @@ async function processRun(args: {
   let contaminatedUntil = 0;
   let configHashSeen: string | null = null;
 
+  const pushContam = (t: number, reason: ContamEvent["reason"]) => {
+    const last = timeline[timeline.length - 1];
+    // Collapse dense same-reason spam (e.g. every tick in DATA_STALE) to
+    // interval starts / changes so future-window checks stay meaningful.
+    if (last && last.reason === reason && t - last.t < 50) return;
+    timeline.push({ t, reason });
+  };
+
   for (const row of rows) {
-    const ev = row.event as GhFastMarketEvent & { kind: string; configHash?: string };
+    const ev = row.event as GhFastMarketEvent & {
+      kind: string;
+      configHash?: string;
+    };
     if ((row as any).configHash && !configHashSeen) {
       configHashSeen = String((row as any).configHash);
     }
 
-    // Contaminating control events (may appear in Phase 0+ streams)
-    if (
-      ev.kind === "RESYNC" ||
-      ev.kind === "RESYNC_EXIT_AUDIT" ||
-      row.decision.action === "RESYNC" ||
-      row.decision.exitReason === "DATA_STALE"
-    ) {
+    if (ev.kind === "RESYNC") {
       contaminationStats.resync_marker += 1;
+      pushContam(ev.receivedAtMs, "RESYNC");
+      depth.clearForResync();
+      features.clear();
+      contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 3000);
+      continue;
+    }
+    if (ev.kind === "RESYNC_EXIT_AUDIT") {
+      contaminationStats.resync_marker += 1;
+      pushContam(ev.receivedAtMs, "RESYNC_EXIT_AUDIT");
+      continue;
+    }
+    if (row.decision.action === "RESYNC" || row.decision.exitReason === "DATA_STALE") {
+      contaminationStats.resync_marker += 1;
+      pushContam(
+        ev.receivedAtMs,
+        row.decision.exitReason === "DATA_STALE" ? "DATA_STALE" : "RESYNC"
+      );
       depth.clearForResync();
       features.clear();
       contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 3000);
@@ -290,6 +462,9 @@ async function processRun(args: {
         : 0;
     if (gap > 0) {
       contaminationStats.feed_gap += 1;
+      // Mark contamination at the start of the silence (prevT) and at resume.
+      if (prevT != null) pushContam(prevT + 1, "feed_gap");
+      pushContam(ev.receivedAtMs, "feed_gap");
       depth.clearForResync();
       features.clear();
       contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 3000);
@@ -298,14 +473,17 @@ async function processRun(args: {
 
     if (row.decision.state === "BOOK_REBUILDING") {
       contaminationStats.book_rebuilding += 1;
+      pushContam(ev.receivedAtMs, "BOOK_REBUILDING");
       contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 3000);
     }
     if (row.decision.state === "DATA_STALE") {
       contaminationStats.data_stale += 1;
+      pushContam(ev.receivedAtMs, "DATA_STALE");
       contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 1000);
     }
     if ((row.decision.reasons ?? []).includes("crossed_book")) {
       contaminationStats.crossed_book += 1;
+      pushContam(ev.receivedAtMs, "crossed_book");
       contaminatedUntil = Math.max(contaminatedUntil, ev.receivedAtMs + 1000);
     }
 
@@ -324,6 +502,10 @@ async function processRun(args: {
     }
 
     const depthStats = depth.stats(cfg.depthTopN);
+    if (depthStats.crossed) {
+      pushContam(ev.receivedAtMs, "crossed_book");
+    }
+
     const feat = features.snapshot(ev.receivedAtMs, depthStats);
     if (!feat) {
       contaminationStats.insufficient_features += 1;
@@ -335,8 +517,9 @@ async function processRun(args: {
     const contaminated =
       ev.receivedAtMs <= contaminatedUntil || depthStats.crossed;
 
-    // Per-tick C structural census (independent of candidate emission)
-    const cSp = evalStrict.specialists.find((s) => s.setup === "C_PULLBACK_REACCEL")!;
+    const cSp = evalStrict.specialists.find(
+      (s) => s.setup === "C_PULLBACK_REACCEL"
+    )!;
     setupCTickStats.featureTicks += 1;
     if (cSp.eligible) setupCTickStats.eligible += 1;
     if (cSp.selected) setupCTickStats.selected += 1;
@@ -349,7 +532,6 @@ async function processRun(args: {
       }
     }
 
-    // Emit candidate rows for each specialist that is eligible, sub-threshold, or soft-near.
     for (let i = 0; i < 3; i++) {
       const sp = evalStrict.specialists[i]!;
       const soft = evalSoft.specialists[i]!;
@@ -359,7 +541,6 @@ async function processRun(args: {
       if (!interesting) continue;
       const side = sp.candidateSide ?? soft.candidateSide;
       if (!side) continue;
-
       const quoteIdx = quotes.length - 1;
       if (quoteIdx < 0) continue;
 
@@ -420,9 +601,16 @@ async function processRun(args: {
     }
   }
 
-  // Second pass: future executable prices are LABELS ONLY (no look-ahead in features).
   for (const c of candidates) {
-    c.labels = computeForwardLabels(quotes, c.quoteIdx, c.side, c.ask, c.bid);
+    c.labels = computeForwardLabels(
+      quotes,
+      c.quoteIdx,
+      c.t,
+      c.side,
+      c.ask,
+      c.bid,
+      timeline
+    );
   }
 
   const span =
@@ -445,7 +633,8 @@ async function processRun(args: {
     contaminationStats,
     setupCTickStats,
     span,
-    configHashSeen
+    configHashSeen,
+    contamTimelineCount: timeline.length
   };
 }
 
@@ -453,10 +642,25 @@ function labelAt(c: CandidateRow, horizonMs: number): ForwardLabel | null {
   return c.labels.find((l) => l.horizonMs === horizonMs) ?? null;
 }
 
-function cohortMetrics(cs: CandidateRow[], horizonMs: number) {
-  const labs = cs
-    .map((c) => labelAt(c, horizonMs))
-    .filter((l): l is ForwardLabel => l != null && l.samples > 0);
+function cleanLabel(
+  c: CandidateRow,
+  horizonMs: number
+): ForwardLabel | null {
+  const l = labelAt(c, horizonMs);
+  if (!l || l.futureWindowStatus !== "CLEAN" || l.samples <= 0) return null;
+  return l;
+}
+
+function cohortMetrics(
+  cs: CandidateRow[],
+  horizonMs: number,
+  opts?: { dedupeEventSide?: boolean }
+) {
+  const rows = opts?.dedupeEventSide ? dedupeByEventSide(cs) : cs;
+  const pairs = rows
+    .map((c) => ({ c, l: cleanLabel(c, horizonMs) }))
+    .filter((x): x is { c: CandidateRow; l: ForwardLabel } => x.l != null);
+  const labs = pairs.map((p) => p.l);
   const signed = labs
     .map((l) => l.signedExecutableMove)
     .filter((x): x is number => x != null);
@@ -471,23 +675,20 @@ function cohortMetrics(cs: CandidateRow[], horizonMs: number) {
       .map((l) => l.reachedPosBeforeNeg[thr])
       .filter((x): x is boolean => x != null);
     const favFirst = reached.filter(Boolean).length;
-    return {
-      decided: reached.length,
-      pFavFirst: reached.length ? favFirst / reached.length : null
-    };
+    return reached.length ? favFirst / reached.length : null;
   }
   const gross = mean(signed);
-  const meanByHorizon: Record<string, number | null> = {};
-  // caller may pass mixed horizons via labs already filtered; keep signed mean only
   return {
-    n: cs.length,
-    labeled: labs.length,
-    buy: cs.filter((c) => c.side === "BUY").length,
-    sell: cs.filter((c) => c.side === "SELL").length,
-    pFavFirst_0_05: raceStats("0.05").pFavFirst,
-    pFavFirst_0_10: raceStats("0.1").pFavFirst,
-    pFavFirst_0_15: raceStats("0.15").pFavFirst,
-    pFavFirst_0_20: raceStats("0.2").pFavFirst,
+    candidateRowCount: cs.length,
+    uniqueCandidateEventCount: uniqueEventCount(cs),
+    nAfterDedupe: rows.length,
+    labeledClean: labs.length,
+    buy: rows.filter((c) => c.side === "BUY").length,
+    sell: rows.filter((c) => c.side === "SELL").length,
+    pFavFirst_0_05: raceStats("0.05"),
+    pFavFirst_0_10: raceStats("0.1"),
+    pFavFirst_0_15: raceStats("0.15"),
+    pFavFirst_0_20: raceStats("0.2"),
     avgForwardMfe: mean(mfe),
     avgForwardMae: mean(mae),
     medianForwardMfe: quantiles(mfe)["0.5"] ?? null,
@@ -497,14 +698,14 @@ function cohortMetrics(cs: CandidateRow[], horizonMs: number) {
     estimatedEdgeAfterFriction: gross == null ? null : gross - FRICTION,
     signedQuantiles: quantiles(signed),
     mfeQuantiles: quantiles(mfe),
-    maeQuantiles: quantiles(mae),
-    _unused: meanByHorizon
+    maeQuantiles: quantiles(mae)
   };
 }
 
 type Rule = {
   id: string;
   description: string;
+  setupSpecific: boolean;
   pred: (c: CandidateRow) => boolean;
 };
 
@@ -513,6 +714,7 @@ function buildRules(): Rule[] {
     {
       id: "R1_vel1s_accel_aligned",
       description: "abs(midVel1s)>=momentum band AND sign(accel)==sign(vel1s)",
+      setupSpecific: false,
       pred: (c) =>
         Math.abs(c.midVel1s) >= 0.00008 &&
         Math.sign(c.acceleration) === Math.sign(c.midVel1s || 1)
@@ -520,22 +722,27 @@ function buildRules(): Rule[] {
     {
       id: "R2_vel_spread_tight",
       description: "abs(midVel1s)>=8e-5 AND spread<=0.10",
+      setupSpecific: false,
       pred: (c) => Math.abs(c.midVel1s) >= 0.00008 && c.spread <= 0.1
     },
     {
       id: "R3_vel_depth_agree",
       description: "side-aligned vel1s AND depthImbalance agrees with side",
+      setupSpecific: false,
       pred: (c) => {
         const velOk =
           c.side === "BUY" ? c.midVel1s >= 0.00008 : c.midVel1s <= -0.00008;
         const dOk =
-          c.side === "BUY" ? c.depthImbalance >= 0.05 : c.depthImbalance <= -0.05;
+          c.side === "BUY"
+            ? c.depthImbalance >= 0.05
+            : c.depthImbalance <= -0.05;
         return velOk && dOk;
       }
     },
     {
       id: "R4_accel_remove_liq",
       description: "accel aligned + opposite liquidity being removed",
+      setupSpecific: false,
       pred: (c) => {
         if (c.side === "BUY") {
           return c.acceleration > 0 && c.removeRateAsk >= c.removeRateBid + 0.5;
@@ -546,6 +753,7 @@ function buildRules(): Rule[] {
     {
       id: "R5_breakout_touches_pressure",
       description: "setup B soft + touches>=2 + updateRate>=3",
+      setupSpecific: true,
       pred: (c) =>
         c.setup === "B_FAST_BREAKOUT" &&
         (c.side === "BUY" ? c.upTouches5s : c.downTouches5s) >= 2 &&
@@ -554,6 +762,7 @@ function buildRules(): Rule[] {
     {
       id: "R6_efficiency_pullback",
       description: "setup C soft + efficiency3s>0.35 + abs(midVel3s) strong",
+      setupSpecific: true,
       pred: (c) =>
         c.setup === "C_PULLBACK_REACCEL" &&
         c.efficiency3s > 0.35 &&
@@ -562,11 +771,13 @@ function buildRules(): Rule[] {
     {
       id: "R7_quality_ge_065",
       description: "rawQuality>=0.65 (control — quality alone)",
+      setupSpecific: false,
       pred: (c) => (c.rawQuality ?? c.softQuality ?? 0) >= 0.65
     },
     {
       id: "R8_imb_and_vel",
       description: "signedImbalance agrees with side AND abs(midVel250) strong",
+      setupSpecific: false,
       pred: (c) => {
         const imbOk =
           c.side === "BUY"
@@ -596,7 +807,10 @@ function analyzeSetupC(clean: CandidateRow[]) {
   }
   const eligibleNotSelected = eligible.filter((x) => !x.selected);
   return {
+    candidateRowCount: cAll.length,
+    uniqueCandidateEventCount: uniqueEventCount(cAll),
     rawEligibilityCount: eligible.length,
+    uniqueEligibleEventCount: uniqueEventCount(eligible),
     subThresholdCount: sub.length,
     softNearCount: softOnly.length,
     selectedCount: selected.length,
@@ -617,7 +831,11 @@ function ruleTable(cs: CandidateRow[], rules: Rule[], horizonMs: number) {
     return {
       id: r.id,
       description: r.description,
-      ...cohortMetrics(hit, horizonMs)
+      setupSpecific: r.setupSpecific,
+      specialistRows: cohortMetrics(hit, horizonMs, { dedupeEventSide: false }),
+      uniqueMarketEventSide: cohortMetrics(hit, horizonMs, {
+        dedupeEventSide: !r.setupSpecific
+      })
     };
   });
 }
@@ -625,11 +843,11 @@ function ruleTable(cs: CandidateRow[], rules: Rule[], horizonMs: number) {
 function featureSeparatorReport(discovery: CandidateRow[]) {
   const elig = discovery.filter((c) => c.eligible);
   const strong = elig.filter((c) => {
-    const l = labelAt(c, 3000);
+    const l = cleanLabel(c, 3000);
     return l?.reachedPosBeforeNeg["0.05"] === true;
   });
   const fail = elig.filter((c) => {
-    const l = labelAt(c, 3000);
+    const l = cleanLabel(c, 3000);
     return l?.reachedPosBeforeNeg["0.05"] === false;
   });
   const keys: Array<keyof CandidateRow> = [
@@ -665,29 +883,65 @@ function featureSeparatorReport(discovery: CandidateRow[]) {
       feature: k,
       strongContinuation: row(strong, k),
       immediateFailure: row(fail, k)
-    })),
-    conditional2d_vel_x_spread: (() => {
-      const bins = [
-        { vel: "weak", v: (x: number) => Math.abs(x) < 0.00005 },
-        { vel: "mod", v: (x: number) => Math.abs(x) >= 0.00005 && Math.abs(x) < 0.00012 },
-        { vel: "strong", v: (x: number) => Math.abs(x) >= 0.00012 }
-      ];
-      const spr = [
-        { spread: "tight", s: (x: number) => x <= 0.1 },
-        { spread: "mid", s: (x: number) => x > 0.1 && x <= 0.2 },
-        { spread: "wide", s: (x: number) => x > 0.2 }
-      ];
-      const out = [];
-      for (const b of bins) {
-        for (const s of spr) {
-          const hit = elig.filter((c) => b.v(c.midVel1s) && s.s(c.spread));
-          const m = cohortMetrics(hit, 3000);
-          out.push({ vel: b.vel, spread: s.spread, n: hit.length, pFavFirst_0_05: m.pFavFirst_0_05, meanSigned: m.meanSigned, edgeAfterFriction: m.estimatedEdgeAfterFriction });
-        }
-      }
-      return out;
-    })()
+    }))
   };
+}
+
+function materialLabelChangeAudit(clean: CandidateRow[]) {
+  let compared = 0;
+  let materialMoveChange = 0;
+  let sampleCountChange = 0;
+  let newlyEmpty = 0;
+  let newlyNonEmpty = 0;
+  const byHorizon: Record<string, { compared: number; material: number }> = {};
+  for (const h of HORIZONS) {
+    byHorizon[`${h}ms`] = { compared: 0, material: 0 };
+  }
+  for (const c of clean) {
+    for (const l of c.labels) {
+      // Compare corrected vs legacy clock on the same horizon regardless of
+      // future-window status (clock bug is independent of contamination mark).
+      compared += 1;
+      byHorizon[`${l.horizonMs}ms`]!.compared += 1;
+      const a = l.signedExecutableMove;
+      const b = l.legacySignedExecutableMove;
+      if ((l.samples === 0) !== (l.legacySamples === 0)) {
+        sampleCountChange += 1;
+        if (l.samples === 0) newlyEmpty += 1;
+        else newlyNonEmpty += 1;
+      }
+      if (a == null && b == null) continue;
+      if (a == null || b == null || Math.abs(a - b) >= MATERIAL_MOVE_EPS) {
+        materialMoveChange += 1;
+        byHorizon[`${l.horizonMs}ms`]!.material += 1;
+      }
+    }
+  }
+  return {
+    materialMoveEps: MATERIAL_MOVE_EPS,
+    labelPairsCompared: compared,
+    materialSignedMoveChanges: materialMoveChange,
+    samplePresenceChanges: sampleCountChange,
+    newlyEmptyUnderCorrectClock: newlyEmpty,
+    newlyNonEmptyUnderCorrectClock: newlyNonEmpty,
+    byHorizon
+  };
+}
+
+function cleanLabelAvailability(clean: CandidateRow[]) {
+  const out: Record<string, number> = {
+    cleanCandidateSnapshots: clean.length,
+    uniqueCleanCandidateEvents: uniqueEventCount(clean)
+  };
+  for (const h of [1000, 2000, 3000, 5000, 10000] as const) {
+    out[`clean${h / 1000}sLabels`] = clean.filter(
+      (c) => cleanLabel(c, h) != null
+    ).length;
+    out[`uniqueClean${h / 1000}sLabelEvents`] = uniqueEventCount(
+      clean.filter((c) => cleanLabel(c, h) != null)
+    );
+  }
+  return out;
 }
 
 async function main(): Promise<void> {
@@ -727,7 +981,6 @@ async function main(): Promise<void> {
   const clean = allCandidates.filter((c) => !c.contaminated);
   const contaminated = allCandidates.filter((c) => c.contaminated);
 
-  // Chronological split within the ONLY available morning — NOT credible OOS.
   const byTime = [...clean].sort((a, b) => a.t - b.t);
   const n = byTime.length;
   const discovery = byTime.slice(0, Math.floor(n * 0.5));
@@ -735,30 +988,53 @@ async function main(): Promise<void> {
   const holdoutPseudo = byTime.slice(Math.floor(n * 0.75));
 
   const rules = buildRules();
-  // Discover on discovery only: rank by estimatedEdgeAfterFriction at 3s
-  const discoveryRuleScores = ruleTable(discovery, rules, 3000).sort(
-    (a, b) =>
-      (b.estimatedEdgeAfterFriction ?? -999) -
-      (a.estimatedEdgeAfterFriction ?? -999)
-  );
+  const discoveryRuleScores = ruleTable(discovery, rules, 3000)
+    .map((r) => ({
+      ...r,
+      // Rank generic rules on deduped unique-event metrics; setup-specific on specialist rows
+      rankEdge:
+        (r.setupSpecific
+          ? r.specialistRows.estimatedEdgeAfterFriction
+          : r.uniqueMarketEventSide.estimatedEdgeAfterFriction) ?? -999,
+      rankN: r.setupSpecific
+        ? r.specialistRows.labeledClean
+        : r.uniqueMarketEventSide.labeledClean
+    }))
+    .sort((a, b) => b.rankEdge - a.rankEdge);
+
   const topIds = discoveryRuleScores.slice(0, 4).map((r) => r.id);
   const lockedRules = rules.filter((r) => topIds.includes(r.id));
 
-  const bySetup = (setup: GhFastSetupId) => clean.filter((c) => c.setup === setup);
+  const bySetup = (setup: GhFastSetupId) =>
+    clean.filter((c) => c.setup === setup);
   const bySide = (side: GhFastSide) => clean.filter((c) => c.side === side);
 
   const forwardTables: Record<string, unknown> = {};
   for (const h of [250, 500, 1000, 2000, 3000, 5000, 10000]) {
     forwardTables[`${h}ms`] = {
-      allClean: cohortMetrics(clean, h),
-      BUY: cohortMetrics(bySide("BUY"), h),
-      SELL: cohortMetrics(bySide("SELL"), h),
+      allCleanSpecialistRows: cohortMetrics(clean, h),
+      allCleanUniqueEventSide: cohortMetrics(clean, h, {
+        dedupeEventSide: true
+      }),
+      BUY_eligible: cohortMetrics(
+        bySide("BUY").filter((c) => c.eligible),
+        h
+      ),
+      SELL_eligible: cohortMetrics(
+        bySide("SELL").filter((c) => c.eligible),
+        h
+      ),
       A: cohortMetrics(bySetup("A_MOMENTUM_IGNITION"), h),
       B: cohortMetrics(bySetup("B_FAST_BREAKOUT"), h),
       C: cohortMetrics(bySetup("C_PULLBACK_REACCEL"), h),
-      eligibleOnly: cohortMetrics(
+      eligibleOnlySpecialistRows: cohortMetrics(
         clean.filter((c) => c.eligible),
         h
+      ),
+      eligibleOnlyUniqueEventSide: cohortMetrics(
+        clean.filter((c) => c.eligible),
+        h,
+        { dedupeEventSide: true }
       )
     };
   }
@@ -770,8 +1046,11 @@ async function main(): Promise<void> {
       acc.subThreshold += p.setupCTickStats.subThreshold;
       acc.structuralFail += p.setupCTickStats.structuralFail;
       acc.selected += p.setupCTickStats.selected;
-      for (const [k, v] of Object.entries(p.setupCTickStats.failedConditionCounts)) {
-        acc.failedConditionCounts[k] = (acc.failedConditionCounts[k] ?? 0) + v;
+      for (const [k, v] of Object.entries(
+        p.setupCTickStats.failedConditionCounts
+      )) {
+        acc.failedConditionCounts[k] =
+          (acc.failedConditionCounts[k] ?? 0) + v;
       }
       return acc;
     },
@@ -785,6 +1064,17 @@ async function main(): Promise<void> {
     }
   );
 
+  const calendarDays = [
+    ...new Set(
+      clean.map((c) => new Date(c.t).toISOString().slice(0, 10))
+    )
+  ];
+  const spanMs =
+    clean.length > 0
+      ? byTime[byTime.length - 1]!.t - byTime[0]!.t
+      : 0;
+  const insufficientOos = calendarDays.length < 2 || spanMs < 6 * 3600_000;
+
   const inventory = {
     note: "Inventory of GOLD_HUNTER FAST live-shadow GCS runs under gold-hunter-fast/live-shadow/",
     calendarDaysWithUsableChunks: [
@@ -792,9 +1082,12 @@ async function main(): Promise<void> {
       "2026-08-14 (only substantial day)"
     ],
     independentMarketPeriods: 1,
-    oosVerdict: "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION",
-    oosExplanation:
-      "All substantial continuous Spot+Depth streams are from a single London morning (2026-08-14). Chronological 50/25/25 splits within that morning are IN-SAMPLE RESEARCH only and must not be treated as true holdout across independent regimes.",
+    oosVerdict: insufficientOos
+      ? "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION"
+      : "SUFFICIENT_INDEPENDENT_PERIODS",
+    oosExplanation: insufficientOos
+      ? "All substantial continuous Spot+Depth streams are from a single London morning (2026-08-14). Chronological 50/25/25 splits within that morning are IN-SAMPLE RESEARCH only and must not be treated as true holdout across independent regimes."
+      : "Multiple independent calendar periods present.",
     gcsRunCatalogSummary: {
       totalRunIds: 28,
       substantialUsable: [
@@ -805,7 +1098,7 @@ async function main(): Promise<void> {
       unitTestOrTinyProbe:
         "Most other 10-chunk runs are unit-test uploads with rowCount=2 per chunk (configHash=default). Not usable for feature research.",
       knownInfrastructureContamination:
-        "V1 fail run (~91 resyncs / DATA_STALE / BOOK_REBUILDING windows). Stormy early run also has frequent rebuild/stale. Contaminated windows excluded from clean set."
+        "V1 fail run has frequent BOOK_REBUILDING/DATA_STALE/feed gaps. Stormy early run is mostly DATA_STALE. Contaminated entry snapshots and CONTAMINATED_FUTURE_WINDOW horizons excluded from clean edge metrics."
     },
     runsProcessed: processed.map((p) => ({
       runId: p.runId,
@@ -814,39 +1107,109 @@ async function main(): Promise<void> {
       marketEvents: p.marketEvents,
       span: p.span,
       candidateRows: p.candidates.length,
+      uniqueCandidateEvents: uniqueEventCount(p.candidates),
       cleanCandidates: p.candidates.filter((c) => !c.contaminated).length,
+      uniqueCleanEvents: uniqueEventCount(
+        p.candidates.filter((c) => !c.contaminated)
+      ),
       contaminationStats: p.contaminationStats,
+      contamTimelineCount: p.contamTimelineCount,
       setupCTickStats: p.setupCTickStats,
       configHashSeen: p.configHashSeen
     }))
   };
 
+  const labelChangeAudit = materialLabelChangeAudit(clean);
+  const labelAvailability = cleanLabelAvailability(clean);
   const separators = featureSeparatorReport(discovery);
 
+  const discRows = ruleTable(discovery, lockedRules, 3000);
+  const valRows = ruleTable(validation, lockedRules, 3000);
+  const evidence = discRows.map((d) => {
+    const v = valRows.find((x) => x.id === d.id)!;
+    const dMetric = d.setupSpecific
+      ? d.specialistRows
+      : d.uniqueMarketEventSide;
+    const vMetric = v.setupSpecific
+      ? v.specialistRows
+      : v.uniqueMarketEventSide;
+    const bothPositive =
+      dMetric.labeledClean >= 30 &&
+      vMetric.labeledClean >= 30 &&
+      (dMetric.estimatedEdgeAfterFriction ?? -1) > 0 &&
+      (vMetric.estimatedEdgeAfterFriction ?? -1) > 0;
+    return {
+      id: d.id,
+      setupSpecific: d.setupSpecific,
+      discoveryEdge: dMetric.estimatedEdgeAfterFriction,
+      validationEdge: vMetric.estimatedEdgeAfterFriction,
+      discoveryN: dMetric.labeledClean,
+      validationN: vMetric.labeledClean,
+      discoveryUniqueEvents: dMetric.uniqueCandidateEventCount,
+      validationUniqueEvents: vMetric.uniqueCandidateEventCount,
+      bothPositive
+    };
+  });
+  const anyPositive = evidence.some((e) => e.bothPositive);
+
   const report = {
-    title: "GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery",
+    title: "GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery (CORRECTED)",
+    correctionsApplied: [
+      "Forward label clock starts at candidate.t (not last SPOT quote t)",
+      "Per-horizon CONTAMINATED_FUTURE_WINDOW when contamination hits (candidate.t, candidate.t+horizon]",
+      "Unique market-event counts (runId+receiveSeq); cross-setup rules deduped by event+side"
+    ],
     constraints: {
       pr119Frozen: true,
       pr121DraftUnmerged: true,
+      pr122DraftUnmerged: true,
       deploy: false,
       thresholdChanges: false,
       brokerOrders: 0
     },
     frictionAssumed: FRICTION,
     inventory,
+    labelClockCorrectionAudit: labelChangeAudit,
+    cleanLabelAvailability: labelAvailability,
     sampleCounts: {
       candidatesBeforeExclusion: before,
+      uniqueEventsBeforeExclusion: uniqueEventCount(allCandidates),
       contaminatedExcluded: contaminated.length,
       cleanCandidates: clean.length,
+      uniqueCleanEvents: uniqueEventCount(clean),
       bySetupClean: {
-        A: bySetup("A_MOMENTUM_IGNITION").length,
-        B: bySetup("B_FAST_BREAKOUT").length,
-        C: bySetup("C_PULLBACK_REACCEL").length
+        A: {
+          rows: bySetup("A_MOMENTUM_IGNITION").length,
+          uniqueEvents: uniqueEventCount(bySetup("A_MOMENTUM_IGNITION"))
+        },
+        B: {
+          rows: bySetup("B_FAST_BREAKOUT").length,
+          uniqueEvents: uniqueEventCount(bySetup("B_FAST_BREAKOUT"))
+        },
+        C: {
+          rows: bySetup("C_PULLBACK_REACCEL").length,
+          uniqueEvents: uniqueEventCount(bySetup("C_PULLBACK_REACCEL"))
+        }
       },
       eligibleClean: {
-        A: bySetup("A_MOMENTUM_IGNITION").filter((c) => c.eligible).length,
-        B: bySetup("B_FAST_BREAKOUT").filter((c) => c.eligible).length,
-        C: bySetup("C_PULLBACK_REACCEL").filter((c) => c.eligible).length
+        A: {
+          rows: bySetup("A_MOMENTUM_IGNITION").filter((c) => c.eligible).length,
+          uniqueEvents: uniqueEventCount(
+            bySetup("A_MOMENTUM_IGNITION").filter((c) => c.eligible)
+          )
+        },
+        B: {
+          rows: bySetup("B_FAST_BREAKOUT").filter((c) => c.eligible).length,
+          uniqueEvents: uniqueEventCount(
+            bySetup("B_FAST_BREAKOUT").filter((c) => c.eligible)
+          )
+        },
+        C: {
+          rows: bySetup("C_PULLBACK_REACCEL").filter((c) => c.eligible).length,
+          uniqueEvents: uniqueEventCount(
+            bySetup("C_PULLBACK_REACCEL").filter((c) => c.eligible)
+          )
+        }
       },
       selectedClean: {
         A: bySetup("A_MOMENTUM_IGNITION").filter((c) => c.selected).length,
@@ -858,11 +1221,16 @@ async function main(): Promise<void> {
       runId: p.runId,
       span: p.span,
       cleanCandidates: p.candidates.filter((c) => !c.contaminated).length,
-      contaminatedCandidates: p.candidates.filter((c) => c.contaminated).length
+      uniqueCleanEvents: uniqueEventCount(
+        p.candidates.filter((c) => !c.contaminated)
+      ),
+      contaminatedCandidates: p.candidates.filter((c) => c.contaminated)
+        .length
     })),
     excludedContaminatedPeriods: processed.map((p) => ({
       runId: p.runId,
-      contaminationStats: p.contaminationStats
+      contaminationStats: p.contaminationStats,
+      contamTimelineCount: p.contamTimelineCount
     })),
     setupC: {
       ...analyzeSetupC(clean),
@@ -872,8 +1240,10 @@ async function main(): Promise<void> {
     },
     buyVsSell: {
       BUY: {
-        n: bySide("BUY").length,
-        eligible: bySide("BUY").filter((c) => c.eligible).length,
+        specialistRows: bySide("BUY").filter((c) => c.eligible).length,
+        uniqueEvents: uniqueEventCount(
+          bySide("BUY").filter((c) => c.eligible)
+        ),
         forward: Object.fromEntries(
           [1000, 2000, 3000, 5000, 10000].map((h) => [
             h,
@@ -885,8 +1255,10 @@ async function main(): Promise<void> {
         )
       },
       SELL: {
-        n: bySide("SELL").length,
-        eligible: bySide("SELL").filter((c) => c.eligible).length,
+        specialistRows: bySide("SELL").filter((c) => c.eligible).length,
+        uniqueEvents: uniqueEventCount(
+          bySide("SELL").filter((c) => c.eligible)
+        ),
         forward: Object.fromEntries(
           [1000, 2000, 3000, 5000, 10000].map((h) => [
             h,
@@ -901,109 +1273,79 @@ async function main(): Promise<void> {
     forwardMovementTables: forwardTables,
     featureSeparators: {
       method:
-        "Quantile compare strong continuation vs immediate failure on DISCOVERY eligible only; 2D vel×spread conditional probs",
+        "Quantile compare strong continuation vs immediate failure on DISCOVERY eligible with CLEAN 3s labels only",
       ...separators,
       discoveryRuleScores3s: discoveryRuleScores,
       lockedForValidation: topIds
     },
     candidateInterpretableRules: lockedRules.map((r) => ({
       id: r.id,
-      description: r.description
+      description: r.description,
+      setupSpecific: r.setupSpecific
     })),
     discoveryResults: {
       set: "first 50% clean candidates by time (IN-SAMPLE)",
-      n: discovery.length,
+      candidateRowCount: discovery.length,
+      uniqueCandidateEventCount: uniqueEventCount(discovery),
       rules3s: ruleTable(discovery, lockedRules, 3000),
       rules5s: ruleTable(discovery, lockedRules, 5000)
     },
     validationResults: {
       set: "next 25% clean candidates by time (IN-SAMPLE validation — same morning)",
-      n: validation.length,
+      candidateRowCount: validation.length,
+      uniqueCandidateEventCount: uniqueEventCount(validation),
       rules3s: ruleTable(validation, lockedRules, 3000),
       rules5s: ruleTable(validation, lockedRules, 5000)
     },
     holdoutResults: {
       trueUntouchedIndependentHoldout: null,
-      verdict: "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION",
+      verdict: inventory.oosVerdict,
       pseudoSameMorningHoldout: {
         warning:
           "NOT a true holdout. Same calendar morning / same regime. Reported only for transparency.",
-        n: holdoutPseudo.length,
+        candidateRowCount: holdoutPseudo.length,
+        uniqueCandidateEventCount: uniqueEventCount(holdoutPseudo),
         rules3s: ruleTable(holdoutPseudo, lockedRules, 3000),
         rules5s: ruleTable(holdoutPseudo, lockedRules, 5000)
       }
     },
     evidenceAfterFriction: {
-      anyPositiveProspectiveEdgeAfterFriction: null as boolean | null,
-      note: "Requires n>=30 on discovery AND validation with after-friction meanSigned@3s > 0 for the SAME locked rule. Pseudo-holdout never used for claim.",
-      details: [] as Array<{
-        id: string;
-        discoveryEdge: number | null;
-        validationEdge: number | null;
-        discoveryN: number;
-        validationN: number;
-        bothPositive: boolean;
-      }>
+      anyPositiveProspectiveEdgeAfterFriction: anyPositive,
+      note: "Requires labeledClean>=30 on discovery AND validation with after-friction meanSigned@3s > 0 for the SAME locked rule. Generic rules use event+side dedupe. Pseudo-holdout never used for claim.",
+      details: evidence
+    },
+    phase1Verdict: {
+      insufficientIndependentDataForOos: insufficientOos,
+      oosStatement: inventory.oosVerdict,
+      positiveProspectiveEntryEdgeFound: anyPositive,
+      positiveEdgeStatement: anyPositive
+        ? "POSITIVE_PROSPECTIVE_ENTRY_EDGE_CANDIDATE (still not shippable without independent OOS)"
+        : "NO POSITIVE PROSPECTIVE ENTRY EDGE FOUND",
+      conclusionChangedVsPriorPhase1Pass:
+        "Re-derived after clock + future-window + unique-event corrections; see labelClockCorrectionAudit and evidenceAfterFriction."
     },
     overfittingWarnings: [
       "Only one independent London morning with substantial Level-II coverage.",
       "Chronological splits within that morning share microstructure regime, news window, and liquidity.",
       "Do not combine Phase 0 loss-reduction rules with Phase 1 discovery rules on the same sample.",
       "Soft near-miss expansion increases sample size but is not the live entry gate.",
-      "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION — stop; do not pretend one morning split is strong OOS."
+      ...(insufficientOos
+        ? [
+            "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION — stop; do not pretend one morning split is strong OOS."
+          ]
+        : [])
     ],
-    moreDataRequired: true,
-    dataCaptureOnlyDesign: {
-      purpose:
-        "Collect independent clean Spot+Depth periods for genuine OOS entry-edge research",
-      scope: "SCOPE_VIEW only",
-      brokerOrders: 0,
-      shadowOrders: 0,
-      mutationSurface: "NONE",
-      capture: [
-        "Spot + Depth events with receiveSeq",
-        "raw transport/onSpot/onDepth callback timestamps (pre-queue)",
-        "subscription flags (spotSubscribed/depthSubscribed)",
-        "event-loop lag / heartbeat",
-        "ordered queue depth + enqueue→process latency",
-        "reconnect/resync lifecycle with classified reasons",
-        "per-event raw A/B/C specialist telemetry (eligible/rawQuality/failedConditions/selected)",
-        "book generation / crossed / warmingUp"
-      ],
-      deployNow: false,
-      note: "Design only — DO NOT deploy as part of Phase 1"
-    },
+    moreDataRequired: insufficientOos || !anyPositive,
     artifactsCreated: [
       "backend/scripts/microEdge/goldHunterFastPhase1EntryEdgeCli.ts",
       "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/PHASE1_REPORT.json",
       "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/PHASE1_REPORT.md",
       "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/DATASET_INVENTORY.json",
-      "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/candidates_clean_sample.jsonl"
+      "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/candidates_clean_sample.jsonl",
+      "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase2-data-capture/PHASE2_COLLECTOR_DESIGN.md",
+      "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase2-data-capture/PHASE2_COLLECTOR_DESIGN.json"
     ]
   };
-
-  // Fill evidenceAfterFriction — require BOTH discovery and validation positive
-  const discRows = ruleTable(discovery, lockedRules, 3000);
-  const valRows = ruleTable(validation, lockedRules, 3000);
-  const evidence = discRows.map((d) => {
-    const v = valRows.find((x) => x.id === d.id)!;
-    const bothPositive =
-      d.n >= 30 &&
-      v.n >= 30 &&
-      (d.estimatedEdgeAfterFriction ?? -1) > 0 &&
-      (v.estimatedEdgeAfterFriction ?? -1) > 0;
-    return {
-      id: d.id,
-      discoveryEdge: d.estimatedEdgeAfterFriction,
-      validationEdge: v.estimatedEdgeAfterFriction,
-      discoveryN: d.n,
-      validationN: v.n,
-      bothPositive
-    };
-  });
-  report.evidenceAfterFriction.details = evidence;
-  report.evidenceAfterFriction.anyPositiveProspectiveEdgeAfterFriction =
-    evidence.some((e) => e.bothPositive);
 
   writeFileSync(join(outDir, "PHASE1_REPORT.json"), JSON.stringify(report, null, 2));
   writeFileSync(
@@ -1016,21 +1358,9 @@ async function main(): Promise<void> {
         processedLocally: processed.map((p) => p.runId),
         contaminationExcluded: contaminated.length,
         cleanUsableCandidateRows: clean.length,
-        gcsRunChunkCounts: {
-          note: "From live inventory at Phase 1 run time",
-          substantial: {
-            gh_fast_mssjjspo_8ubuxa: 22,
-            gh_fast_mssmh2w2_ftl4pq: 3,
-            gh_fast_mssnh4uq_v488yc: 32
-          },
-          unitTestStyle10chunkProbes: [
-            "gh_fast_mssjhd5k_vpyoxj",
-            "gh_fast_mssm6242_w86z29",
-            "gh_fast_mssteivz_ye2udt",
-            "gh_fast_msstewh4_8oa5hr",
-            "gh_fast_msstfz57_b1zxva"
-          ]
-        }
+        uniqueCleanMarketEvents: uniqueEventCount(clean),
+        cleanLabelAvailability: labelAvailability,
+        labelClockCorrectionAudit: labelChangeAudit
       },
       null,
       2
@@ -1054,76 +1384,135 @@ async function main(): Promise<void> {
       .join("\n")
   );
 
+  const fmt = (x: number | null | undefined) =>
+    x == null || Number.isNaN(x) ? "null" : x.toFixed(4);
+
   const md: string[] = [];
-  md.push("# GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery");
+  md.push("# GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery (CORRECTED)");
   md.push("");
-  md.push("Research only. No deploy. No threshold changes. No broker orders.");
+  md.push(
+    "Research only. **No deploy. No threshold changes. No broker/shadow orders. No V2 trading logic.**"
+  );
   md.push("");
-  md.push("## OOS verdict");
-  md.push("**INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION**");
+  md.push("## Corrections applied");
+  md.push("");
+  for (const c of report.correctionsApplied) md.push(`- ${c}`);
+  md.push("");
+  md.push("## Verdict (re-derived)");
+  md.push("");
+  md.push(`**${report.phase1Verdict.oosStatement}**`);
+  md.push("");
+  md.push(`**${report.phase1Verdict.positiveEdgeStatement}**`);
   md.push("");
   md.push(inventory.oosExplanation);
   md.push("");
   md.push(
-    `Clean candidates: ${clean.length} (excluded contaminated: ${contaminated.length} of ${before})`
+    `- Clean candidate rows: **${clean.length}** (unique events: **${uniqueEventCount(clean)}**)`
+  );
+  md.push(
+    `- Contaminated entry snapshots excluded: ${contaminated.length} of ${before}`
+  );
+  md.push(`- Friction assumed: **${FRICTION}**`);
+  md.push(
+    `- Any positive prospective edge after friction: **${anyPositive}**`
   );
   md.push("");
-  md.push("## 1. Dataset inventory");
-  md.push(JSON.stringify(inventory.gcsRunCatalogSummary, null, 2));
+  md.push("## Label clock correction impact");
   md.push("");
-  md.push("## 2–3. Clean usable / excluded contaminated");
-  md.push(JSON.stringify(report.cleanUsableEventPeriods, null, 2));
-  md.push(JSON.stringify(report.excludedContaminatedPeriods, null, 2));
+  md.push("```json");
+  md.push(JSON.stringify(labelChangeAudit, null, 2));
+  md.push("```");
   md.push("");
-  md.push("## 4. Candidate counts A/B/C (clean)");
+  md.push("## Clean forward label availability");
+  md.push("");
+  md.push("```json");
+  md.push(JSON.stringify(labelAvailability, null, 2));
+  md.push("```");
+  md.push("");
+  md.push("## Sample counts (rows vs unique events)");
+  md.push("");
+  md.push("```json");
   md.push(JSON.stringify(report.sampleCounts, null, 2));
+  md.push("```");
   md.push("");
-  md.push("## 5. Setup C");
+  md.push("## Setup C");
+  md.push("");
+  md.push("```json");
   md.push(JSON.stringify(report.setupC, null, 2));
+  md.push("```");
   md.push("");
-  md.push("## 6–7. BUY vs SELL / forward tables");
-  md.push("See PHASE1_REPORT.json keys `buyVsSell` and `forwardMovementTables`.");
+  md.push("## BUY vs SELL (eligible, CLEAN forward labels @3s)");
   md.push("");
-  md.push("## 8–9. Separators & interpretable rules");
-  md.push(`Locked rules (DISCOVERY only): ${topIds.join(", ")}`);
-  for (const r of discoveryRuleScores.slice(0, 6)) {
+  const buy3 = report.buyVsSell.BUY.forward["3000"];
+  const sell3 = report.buyVsSell.SELL.forward["3000"];
+  md.push(
+    `| Side | rows | uniqueEvents | labeledClean | meanSigned | edgeAF | pFav@0.05 |`
+  );
+  md.push(
+    `|------|-----:|-------------:|-------------:|-----------:|-------:|----------:|`
+  );
+  md.push(
+    `| BUY | ${buy3.candidateRowCount} | ${buy3.uniqueCandidateEventCount} | ${buy3.labeledClean} | ${fmt(buy3.meanSigned)} | ${fmt(buy3.estimatedEdgeAfterFriction)} | ${fmt(buy3.pFavFirst_0_05)} |`
+  );
+  md.push(
+    `| SELL | ${sell3.candidateRowCount} | ${sell3.uniqueCandidateEventCount} | ${sell3.labeledClean} | ${fmt(sell3.meanSigned)} | ${fmt(sell3.estimatedEdgeAfterFriction)} | ${fmt(sell3.pFavFirst_0_05)} |`
+  );
+  md.push("");
+  md.push("## Forward tables (eligible, unique event+side dedupe)");
+  md.push("");
+  md.push(
+    `| Horizon | labeledClean | meanSigned | edgeAF | pFav@0.05 |`
+  );
+  md.push(`|--------:|-------------:|-----------:|-------:|----------:|`);
+  for (const h of ["1000ms", "2000ms", "3000ms", "5000ms", "10000ms"]) {
+    const m = (forwardTables[h] as any).eligibleOnlyUniqueEventSide;
     md.push(
-      `- ${r.id}: n=${r.n} edgeAfterFriction=${r.estimatedEdgeAfterFriction} meanSigned=${r.meanSigned} pFavFirst@0.05=${r.pFavFirst_0_05} pFavFirst@0.10=${r.pFavFirst_0_10}`
+      `| ${h} | ${m.labeledClean} | ${fmt(m.meanSigned)} | ${fmt(m.estimatedEdgeAfterFriction)} | ${fmt(m.pFavFirst_0_05)} |`
     );
   }
   md.push("");
-  md.push("## 10–12. Discovery / validation / holdout");
-  md.push(
-    `- Discovery n=${discovery.length}; Validation n=${validation.length}; Pseudo-holdout n=${holdoutPseudo.length}`
-  );
-  md.push("- True untouched independent holdout: **null**");
+  md.push("## Entry rules (discovery top / locked) — both tables");
   md.push("");
-  md.push("## 13–15. Edge after friction / overfitting");
-  md.push(
-    `Any positive prospective edge (disc∩val, n≥30): **${report.evidenceAfterFriction.anyPositiveProspectiveEdgeAfterFriction}**`
-  );
-  md.push(JSON.stringify(report.evidenceAfterFriction.details, null, 2));
+  for (const r of discRows) {
+    md.push(`### ${r.id} (${r.setupSpecific ? "setup-specific" : "generic"})`);
+    md.push(
+      `- specialistRows: labeledClean=${r.specialistRows.labeledClean} edgeAF=${fmt(r.specialistRows.estimatedEdgeAfterFriction)}`
+    );
+    md.push(
+      `- uniqueMarketEventSide: labeledClean=${r.uniqueMarketEventSide.labeledClean} edgeAF=${fmt(r.uniqueMarketEventSide.estimatedEdgeAfterFriction)} uniqueEvents=${r.uniqueMarketEventSide.uniqueCandidateEventCount}`
+    );
+  }
   md.push("");
-  md.push("## 16–17. More data / capture-only design");
-  md.push("YES — more independent periods required. Design in PHASE1_REPORT.json `dataCaptureOnlyDesign` (not deployed).");
+  md.push("## Evidence after friction");
   md.push("");
-  md.push("## 18. Artifacts");
-  for (const a of report.artifactsCreated) md.push(`- ${a}`);
+  md.push("```json");
+  md.push(JSON.stringify(report.evidenceAfterFriction, null, 2));
+  md.push("```");
+  md.push("");
+  md.push("## True holdout");
+  md.push("");
+  md.push("**null** — insufficient independent periods.");
+  md.push("");
+  md.push("## Artifacts");
+  md.push("");
+  for (const a of report.artifactsCreated) md.push(`- \`${a}\``);
   writeFileSync(join(outDir, "PHASE1_REPORT.md"), md.join("\n"));
 
   console.log(
     JSON.stringify(
       {
         outDir,
-        clean: clean.length,
+        cleanRows: clean.length,
+        uniqueCleanEvents: uniqueEventCount(clean),
         contaminated: contaminated.length,
-        anyPositiveEdge:
-          report.evidenceAfterFriction.anyPositiveProspectiveEdgeAfterFriction,
+        anyPositiveEdge: anyPositive,
         oos: inventory.oosVerdict,
+        labelChangeAudit,
+        labelAvailability,
         topDiscovery: discoveryRuleScores.slice(0, 5).map((r) => ({
           id: r.id,
-          n: r.n,
-          edge: r.estimatedEdgeAfterFriction
+          edge: r.rankEdge,
+          n: r.rankN
         }))
       },
       null,

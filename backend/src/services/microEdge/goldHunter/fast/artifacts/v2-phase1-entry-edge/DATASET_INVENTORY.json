@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-14T10:58:14.476Z",
+  "generatedAt": "2026-08-14T11:04:18.715Z",
   "note": "Inventory of GOLD_HUNTER FAST live-shadow GCS runs under gold-hunter-fast/live-shadow/",
   "calendarDaysWithUsableChunks": [
     "2026-08-13 (probe only)",
@@ -16,7 +16,7 @@
       "gh_fast_mssnh4uq_v488yc (32 chunks, ~07:53–10:06)"
     ],
     "unitTestOrTinyProbe": "Most other 10-chunk runs are unit-test uploads with rowCount=2 per chunk (configHash=default). Not usable for feature research.",
-    "knownInfrastructureContamination": "V1 fail run (~91 resyncs / DATA_STALE / BOOK_REBUILDING windows). Stormy early run also has frequent rebuild/stale. Contaminated windows excluded from clean set."
+    "knownInfrastructureContamination": "V1 fail run has frequent BOOK_REBUILDING/DATA_STALE/feed gaps. Stormy early run is mostly DATA_STALE. Contaminated entry snapshots and CONTAMINATED_FUTURE_WINDOW horizons excluded from clean edge metrics."
   },
   "runsProcessed": [
     {
@@ -30,7 +30,9 @@
         "hours": 1.367131111111111
       },
       "candidateRows": 9297,
+      "uniqueCandidateEvents": 6377,
       "cleanCandidates": 131,
+      "uniqueCleanEvents": 97,
       "contaminationStats": {
         "book_rebuilding": 0,
         "data_stale": 10779,
@@ -39,6 +41,7 @@
         "resync_marker": 2,
         "insufficient_features": 322
       },
+      "contamTimelineCount": 5957,
       "setupCTickStats": {
         "featureTicks": 10678,
         "eligible": 3,
@@ -69,7 +72,9 @@
         "hours": 0.22066027777777777
       },
       "candidateRows": 1241,
+      "uniqueCandidateEvents": 851,
       "cleanCandidates": 1007,
+      "uniqueCleanEvents": 695,
       "contaminationStats": {
         "book_rebuilding": 80,
         "data_stale": 22,
@@ -78,6 +83,7 @@
         "resync_marker": 9,
         "insufficient_features": 67
       },
+      "contamTimelineCount": 107,
       "setupCTickStats": {
         "featureTicks": 1433,
         "eligible": 0,
@@ -107,7 +113,9 @@
         "hours": 2.2178016666666664
       },
       "candidateRows": 13066,
+      "uniqueCandidateEvents": 9140,
       "cleanCandidates": 10889,
+      "uniqueCleanEvents": 7613,
       "contaminationStats": {
         "book_rebuilding": 877,
         "data_stale": 222,
@@ -116,6 +124,7 @@
         "resync_marker": 46,
         "insufficient_features": 632
       },
+      "contamTimelineCount": 1088,
       "setupCTickStats": {
         "featureTicks": 15368,
         "eligible": 4,
@@ -143,19 +152,57 @@
   ],
   "contaminationExcluded": 11577,
   "cleanUsableCandidateRows": 12027,
-  "gcsRunChunkCounts": {
-    "note": "From live inventory at Phase 1 run time",
-    "substantial": {
-      "gh_fast_mssjjspo_8ubuxa": 22,
-      "gh_fast_mssmh2w2_ftl4pq": 3,
-      "gh_fast_mssnh4uq_v488yc": 32
-    },
-    "unitTestStyle10chunkProbes": [
-      "gh_fast_mssjhd5k_vpyoxj",
-      "gh_fast_mssm6242_w86z29",
-      "gh_fast_mssteivz_ye2udt",
-      "gh_fast_msstewh4_8oa5hr",
-      "gh_fast_msstfz57_b1zxva"
-    ]
+  "uniqueCleanMarketEvents": 8405,
+  "cleanLabelAvailability": {
+    "cleanCandidateSnapshots": 12027,
+    "uniqueCleanCandidateEvents": 8405,
+    "clean1sLabels": 9271,
+    "uniqueClean1sLabelEvents": 6397,
+    "clean2sLabels": 10857,
+    "uniqueClean2sLabelEvents": 7559,
+    "clean3sLabels": 10250,
+    "uniqueClean3sLabelEvents": 7142,
+    "clean5sLabels": 9164,
+    "uniqueClean5sLabelEvents": 6386,
+    "clean10sLabels": 6752,
+    "uniqueClean10sLabelEvents": 4693
+  },
+  "labelClockCorrectionAudit": {
+    "materialMoveEps": 0.01,
+    "labelPairsCompared": 84189,
+    "materialSignedMoveChanges": 4892,
+    "samplePresenceChanges": 2493,
+    "newlyEmptyUnderCorrectClock": 0,
+    "newlyNonEmptyUnderCorrectClock": 2493,
+    "byHorizon": {
+      "250ms": {
+        "compared": 12027,
+        "material": 0
+      },
+      "500ms": {
+        "compared": 12027,
+        "material": 1945
+      },
+      "1000ms": {
+        "compared": 12027,
+        "material": 1605
+      },
+      "2000ms": {
+        "compared": 12027,
+        "material": 793
+      },
+      "3000ms": {
+        "compared": 12027,
+        "material": 362
+      },
+      "5000ms": {
+        "compared": 12027,
+        "material": 130
+      },
+      "10000ms": {
+        "compared": 12027,
+        "material": 57
+      }
+    }
   }
 }
