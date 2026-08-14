@@ -13,7 +13,7 @@ import {
 import { evaluateOpenExit, openTrade, updateOpenTrade } from "./exits";
 import { FastFeatureEngine } from "./features";
 import { buildLatencySample, LatencyTracker, LatencyTracker as LT } from "./latency";
-import { evaluateSetups } from "./setups";
+import { evaluateSetupsDetailed } from "./setups";
 import {
   diagnoseSetupNearMisses,
   GhFastRejectionCounter,
@@ -26,8 +26,11 @@ import type {
   GhFastHuntState,
   GhFastMarketEvent,
   GhFastOpenTrade,
+  GhFastResyncMarkerEvent,
+  GhFastResyncReason,
   GhFastShadowOrder,
-  GhFastSetupId
+  GhFastSetupId,
+  GhFastSpecialistRawEval
 } from "./types";
 import {
   GH_FAST_BROKER_EXECUTION_ENABLED,
@@ -74,7 +77,16 @@ export class GoldHunterFastEngine {
     B_FAST_BREAKOUT: 0,
     C_PULLBACK_REACCEL: 0
   };
+  /** Raw specialist eligibility counts (Phase 0B — independent of best-of). */
+  readonly setupRawEligible: Record<GhFastSetupId, number> = {
+    A_MOMENTUM_IGNITION: 0,
+    B_FAST_BREAKOUT: 0,
+    C_PULLBACK_REACCEL: 0
+  };
   readonly entryTimestampsMs: number[] = [];
+  /** Auditable EXIT decisions emitted by resync force-close (for collector/tests). */
+  readonly persistedExitEvidence: GhFastClosedTrade[] = [];
+  readonly resyncMarkers: GhFastResyncMarkerEvent[] = [];
 
   private cfg: GhFastConfig;
   private frozenIdentity = getFrozenGhFastIdentity();
@@ -211,33 +223,47 @@ export class GoldHunterFastEngine {
    * Explicit MARKET DATA RESET / RESYNC.
    * Clears Level-II + rolling features + side timestamps.
    * Preserves closed shadow history, soak counters, and frozen config.
-   * Safely exits any open shadow trade under DATA_STALE policy.
+   * Safely exits any open shadow trade under DATA_STALE policy and records
+   * exactly one auditable EXIT evidence row (Phase 0A).
    */
   async resetMarketDataForResync(args?: {
-    reason?: string;
+    reason?: GhFastResyncReason;
     nowMs?: number;
-  }): Promise<{ closedOpen: boolean }> {
+    receiveSeq?: number;
+  }): Promise<{
+    closedOpen: boolean;
+    closedTrades: GhFastClosedTrade[];
+    exitDecisions: GhFastDecision[];
+    resyncMarker: GhFastResyncMarkerEvent;
+    resyncDecision: GhFastDecision;
+  }> {
     const now = args?.nowMs ?? LT.nowMs();
-    let closedOpen = false;
+    const reason = args?.reason ?? "market_data_resync";
+    const receiveSeq = args?.receiveSeq ?? -1;
+    const closedTrades: GhFastClosedTrade[] = [];
+    const exitDecisions: GhFastDecision[] = [];
+
     if (this.open) {
       const bid = this.lastBid ?? this.open.entryBid;
       const ask = this.lastAsk ?? this.open.entryAsk;
       const exitPrice = this.open.side === "BUY" ? bid : ask;
+      const openSnap = this.open;
       await this.adapter.submit({
         kind: "EXIT",
-        side: this.open.side,
+        side: openSnap.side,
         price: exitPrice,
         timestampMs: now,
-        setup: this.open.setup,
+        setup: openSnap.setup,
         exitReason: "DATA_STALE"
       });
       const gross =
-        this.open.side === "BUY"
-          ? exitPrice - this.open.entryPrice
-          : this.open.entryPrice - exitPrice;
+        openSnap.side === "BUY"
+          ? exitPrice - openSnap.entryPrice
+          : openSnap.entryPrice - exitPrice;
       const net = gross - this.cfg.friction;
-      this.closed.push({
-        ...this.open,
+      const genAfterPreview = this.depth.generation() + 1;
+      const closed: GhFastClosedTrade = {
+        ...openSnap,
         exitTs: now,
         exitBid: bid,
         exitAsk: ask,
@@ -245,17 +271,35 @@ export class GoldHunterFastEngine {
         grossMove: gross,
         additionalFriction: this.cfg.friction,
         netMove: net,
-        durationMs: now - this.open.entryTs,
+        durationMs: now - openSnap.entryTs,
         exitReason: "DATA_STALE",
         result: net > 0 ? "WIN" : net < 0 ? "LOSS" : "BREAKEVEN",
         sampleTag:
           this.sampleTagMode === "QUALIFICATION"
             ? "QUALIFICATION"
-            : "PRE_FIX_DIAGNOSTIC"
-      });
+            : "PRE_FIX_DIAGNOSTIC",
+        resyncReason: reason,
+        resetSequence: receiveSeq,
+        bookGeneration: genAfterPreview
+      };
+      this.closed.push(closed);
+      this.persistedExitEvidence.push(closed);
+      closedTrades.push(closed);
       this.open = null;
-      closedOpen = true;
+      const exitDec = this.finishDecision({
+        t0: now,
+        t1: now,
+        state: "ABORT",
+        action: "EXIT",
+        setup: openSnap.setup,
+        quality: this.lastQuality,
+        side: openSnap.side,
+        exitReason: "DATA_STALE",
+        reasons: ["DATA_STALE", "resync_force_close", String(reason)]
+      });
+      exitDecisions.push(exitDec);
     }
+
     this.depth.clearForResync();
     this.features.clear();
     this.lastBid = null;
@@ -272,7 +316,40 @@ export class GoldHunterFastEngine {
     this.lastEventKey = "";
     this.warmingUp = true;
     this.state = "BOOK_REBUILDING";
-    return { closedOpen };
+
+    const resyncMarker: GhFastResyncMarkerEvent = {
+      kind: "RESYNC",
+      receiveSeq,
+      eventId: `RESYNC:${receiveSeq}:${reason}`,
+      receivedAtMs: now,
+      reason,
+      bookGenerationAfter: this.depth.generation(),
+      closedTradeIds: closedTrades.map((t) => t.tradeId)
+    };
+    this.resyncMarkers.push(resyncMarker);
+    // Patch bookGeneration on closed trades to post-clear generation.
+    for (const t of closedTrades) {
+      t.bookGeneration = resyncMarker.bookGenerationAfter;
+    }
+    const resyncDecision = this.finishDecision({
+      t0: now,
+      t1: now,
+      state: "BOOK_REBUILDING",
+      action: "RESYNC",
+      setup: null,
+      quality: 0,
+      side: null,
+      exitReason: null,
+      reasons: ["market_data_resync", String(reason)]
+    });
+
+    return {
+      closedOpen: closedTrades.length > 0,
+      closedTrades,
+      exitDecisions,
+      resyncMarker,
+      resyncDecision
+    };
   }
 
   /** Hot path: process one market event. No DB/Firestore. */
@@ -544,7 +621,11 @@ export class GoldHunterFastEngine {
     }
 
     // Pressure / arm / strike
-    const hit = evaluateSetups(feat, this.cfg);
+    const evalResult = evaluateSetupsDetailed(feat, this.cfg);
+    const hit = evalResult.selected;
+    for (const sp of evalResult.specialists) {
+      if (sp.eligible) this.setupRawEligible[sp.setup] += 1;
+    }
     if (!hit) {
       const near = diagnoseSetupNearMisses(feat, this.cfg);
       this.rejections.recordMany(near);
@@ -565,7 +646,10 @@ export class GoldHunterFastEngine {
         exitReason: null,
         reasons: pressure
           ? ["pressure_detected", ...near]
-          : ["hunting", ...near]
+          : ["hunting", ...near],
+        specialists: evalResult.specialists,
+        selectedSetup: null,
+        selectedQuality: 0
       });
     }
 
@@ -587,7 +671,10 @@ export class GoldHunterFastEngine {
         quality: hit.quality,
         side: hit.side,
         exitReason: null,
-        reasons: ["edge_below_friction_buffer", "expected_move_below_friction", ...hit.reasons]
+        reasons: ["edge_below_friction_buffer", "expected_move_below_friction", ...hit.reasons],
+        specialists: evalResult.specialists,
+        selectedSetup: hit.setup,
+        selectedQuality: hit.quality
       });
     }
 
@@ -630,7 +717,10 @@ export class GoldHunterFastEngine {
       side: hit.side,
       exitReason: null,
       reasons: hit.reasons,
-      tShadow
+      tShadow,
+      specialists: evalResult.specialists,
+      selectedSetup: hit.setup,
+      selectedQuality: hit.quality
     });
   }
 
@@ -663,6 +753,9 @@ export class GoldHunterFastEngine {
     exitReason: GhFastDecision["exitReason"];
     reasons: string[];
     tShadow?: number;
+    specialists?: GhFastSpecialistRawEval[];
+    selectedSetup?: GhFastSetupId | null;
+    selectedQuality?: number;
   }): GhFastDecision {
     const t2 = LT.nowMs();
     const latency = buildLatencySample({
@@ -680,7 +773,10 @@ export class GoldHunterFastEngine {
       side: args.side,
       exitReason: args.exitReason,
       latency,
-      reasons: args.reasons
+      reasons: args.reasons,
+      specialists: args.specialists,
+      selectedSetup: args.selectedSetup,
+      selectedQuality: args.selectedQuality
     };
     this.decisions.push(dec);
     if (this.decisions.length > 20_000) this.decisions.splice(0, 10_000);

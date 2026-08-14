@@ -80,15 +80,83 @@ export type GhFastLatencySample = {
   eventToDecisionMs: number;
 };
 
+/** Ops / market-data resync trigger classification (not strategy). */
+export type GhFastResyncReason =
+  | "stale_spot"
+  | "stale_depth"
+  | "stale_spot_and_depth"
+  | "ages_null"
+  | "invalid_crossed_book"
+  | "invalid_no_bids"
+  | "invalid_no_asks"
+  | "invalid_book"
+  | "transport_reconnect"
+  | "timeout"
+  | "other"
+  | "test"
+  | "market_data_resync";
+
+/** Deterministic replay marker — occupies a receiveSeq slot. */
+export type GhFastResyncMarkerEvent = {
+  kind: "RESYNC";
+  receiveSeq: number;
+  eventId: string;
+  receivedAtMs: number;
+  reason: GhFastResyncReason;
+  bookGenerationAfter: number;
+  closedTradeIds: string[];
+};
+
+/**
+ * Non-market audit row for a force-closed trade.
+ * NEVER a GhFastMarketEvent — must not affect spot freshness, features, or replay ticks.
+ */
+export type GhFastResyncExitAuditEvent = {
+  kind: "RESYNC_EXIT_AUDIT";
+  receiveSeq: number;
+  eventId: string;
+  receivedAtMs: number;
+  tradeId: string;
+  reason: GhFastResyncReason;
+};
+
+export type GhFastStreamEvent =
+  | GhFastMarketEvent
+  | GhFastResyncMarkerEvent
+  | GhFastResyncExitAuditEvent;
+
+/** Per-specialist raw evaluation (before best-of selection). */
+export type GhFastSpecialistRawEval = {
+  setup: GhFastSetupId;
+  eligible: boolean;
+  /** True only for the selected best-of hit (at most one). */
+  selected: boolean;
+  /** Side when determinable from structural gates / hit. */
+  candidateSide: GhFastSide | null;
+  /**
+   * Candidate quality when calculable.
+   * null when structural gates failed so quality was never computed.
+   * May be below minSetupQuality with eligible=false + quality_below_min.
+   */
+  rawQuality: number | null;
+  failedConditions: string[];
+  reasons: string[];
+};
+
 export type GhFastDecision = {
   state: GhFastHuntState;
-  action: "WAIT" | "ENTER_BUY" | "ENTER_SELL" | "HOLD" | "EXIT";
+  action: "WAIT" | "ENTER_BUY" | "ENTER_SELL" | "HOLD" | "EXIT" | "RESYNC";
   setup: GhFastSetupId | null;
   setupQuality: number;
   side: GhFastSide | null;
   exitReason: GhFastExitReason | null;
   latency: GhFastLatencySample;
   reasons: string[];
+  /** Raw A/B/C specialist scores for telemetry (Phase 0B). */
+  specialists?: GhFastSpecialistRawEval[];
+  /** Selected setup after best-of (may differ from raw eligibles). */
+  selectedSetup?: GhFastSetupId | null;
+  selectedQuality?: number;
 };
 
 export type GhFastShadowOrder = {
@@ -138,6 +206,11 @@ export type GhFastClosedTrade = GhFastOpenTrade & {
    * for analysis but excluded from the formal >=250 sample.
    */
   sampleTag?: "PRE_FIX_DIAGNOSTIC" | "QUALIFICATION" | null;
+  /** Present when force-closed by market-data resync (auditable EXIT). */
+  resyncReason?: GhFastResyncReason;
+  /** Receive / reset sequence at force-close. */
+  resetSequence?: number;
+  bookGeneration?: number;
 };
 
 export type GhFastConfig = {
