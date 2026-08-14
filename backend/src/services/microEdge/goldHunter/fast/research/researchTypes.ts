@@ -50,10 +50,14 @@ export type ResearchSpecialistObservation = {
   failedConditions: string[];
   /** Research-only best-of flag; does NOT create an order. */
   selectedCandidate: boolean;
-  /** Depth book semantic validity at evaluation time. */
+  /**
+   * Depth book semantic validity at evaluation time.
+   * Soft-stale Spot (or Depth) also forces derivedDataContaminated on the bridge
+   * even when depthValidity remains DEPTH_VALID.
+   */
   depthValidity: ResearchDepthValidity;
   /**
-   * True when depthValidity !== DEPTH_VALID.
+   * True when depthValidity !== DEPTH_VALID OR Spot/Depth soft-freshness fails.
    * Contaminated rows remain in raw capture; do not treat as clean evidence.
    */
   derivedDataContaminated: boolean;
@@ -98,6 +102,8 @@ export type ResearchRecentCandidateObservation = {
   distLow5s: number | null;
   upTouches5s: number | null;
   downTouches5s: number | null;
+  depthValidity?: ResearchDepthValidity;
+  derivedDataContaminated?: boolean;
   brokerRequests: 0;
   brokerOrders: 0;
   shadowOrders: 0;

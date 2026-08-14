@@ -46,6 +46,10 @@ import {
   GH_FAST_SUSTAINED_CROSS_RECOVERY_MS,
   type ResearchDepthValidity
 } from "../depthRecovery";
+import {
+  computeResearchReferencePaperDataOk,
+  feedsSoftFreshForQualification
+} from "./researchFeedFreshness";
 
 const RECENT_CANDIDATE_LIMIT = 80;
 
@@ -109,6 +113,8 @@ export class ResearchIngestBridge {
   private depthRecoveryInFlight = false;
   private sustainedCrossRecoveryCount = 0;
   private disconnectResyncCount = 0;
+  /** Last reference-paper dataOk from SPOT/DEPTH drive (test observability). */
+  private lastReferenceDataOk = false;
   private onDepthRecoveryRequest:
     | ((reason: string) => void | Promise<void>)
     | null = null;
@@ -629,8 +635,12 @@ export class ResearchIngestBridge {
         ask
       };
       const snap = this.pipeline.onSpot(spotEv);
-      this.tallyCandidates(
+      const specialists = this.annotateSpecialistsForSoftFreshness(
         snap.specialists,
+        item.rawCallbackArrivalMs
+      );
+      this.tallyCandidates(
+        specialists,
         snap.features,
         item.receiveSeq,
         "SPOT",
@@ -656,29 +666,25 @@ export class ResearchIngestBridge {
           inputNormalizationVerified: true
         },
         features: snap.features,
-        specialists: snap.specialists,
+        specialists,
         marketDataNormalizationVersion: n.normalizationVersion,
         inputNormalizationVerified: true
       };
       this.collector.record(rec);
-      // Reference paper only — block entries when Spot quote incomplete/crossed
-      // or Depth recovery is in flight (parity with engine dataOk entry gate).
-      const spotQuoteOk =
-        this.lastBid != null &&
-        this.lastAsk != null &&
-        this.lastAsk >= this.lastBid &&
-        !snap.crossed &&
-        snap.depthAvailable &&
-        !this.depthRecoveryInFlight &&
-        snap.depthValidity === "DEPTH_VALID";
+      // Reference paper: require fresh Spot AND fresh Depth at soft boundary
+      // (parity with FEED_STALE / GoldHunterFastEngine freshness intent).
+      const dataOk = this.computeReferencePaperDataOk(
+        item.rawCallbackArrivalMs,
+        snap
+      );
       this.driveReferencePaper({
         bid: this.lastBid,
         ask: this.lastAsk,
         tsMs: item.rawCallbackArrivalMs,
         receiveSeq: item.receiveSeq,
-        specialists: snap.specialists,
+        specialists,
         features: snap.features,
-        dataOk: spotQuoteOk
+        dataOk
       });
       return;
     }
@@ -699,8 +705,12 @@ export class ResearchIngestBridge {
     };
     const snap = this.pipeline.onDepth(depthEv);
     this.depthEventCount += 1;
-    this.tallyCandidates(
+    const specialists = this.annotateSpecialistsForSoftFreshness(
       snap.specialists,
+      item.rawCallbackArrivalMs
+    );
+    this.tallyCandidates(
+      specialists,
       snap.features,
       item.receiveSeq,
       "DEPTH",
@@ -763,24 +773,95 @@ export class ResearchIngestBridge {
         inputNormalizationVerified: true
       },
       features: snap.features,
-      specialists: snap.specialists,
+      specialists,
       marketDataNormalizationVersion: n.normalizationVersion,
       inputNormalizationVerified: true
     };
     this.collector.record(rec);
+    const dataOk = this.computeReferencePaperDataOk(
+      item.rawCallbackArrivalMs,
+      snap
+    );
     this.driveReferencePaper({
       bid: this.lastBid,
       ask: this.lastAsk,
       tsMs: item.rawCallbackArrivalMs,
       receiveSeq: item.receiveSeq,
-      specialists: snap.specialists,
+      specialists,
       features: snap.features,
-      dataOk:
-        !snap.crossed &&
-        snap.depthAvailable &&
-        !this.depthRecoveryInFlight &&
-        snap.depthValidity === "DEPTH_VALID"
+      dataOk
     });
+  }
+
+  /**
+   * Soft-freshness dataOk for reference paper (SPOT and DEPTH ticks).
+   * spotFresh/depthFresh use freshnessLimitMs (== soft stale 20s).
+   */
+  private computeReferencePaperDataOk(
+    nowMs: number,
+    snap: {
+      crossed: boolean;
+      depthAvailable: boolean;
+      depthValidity: ResearchDepthValidity;
+    }
+  ): boolean {
+    const dataOk = computeResearchReferencePaperDataOk({
+      nowMs,
+      lastSpotAtMs: this.lastSpotAt,
+      lastDepthAtMs: this.lastDepthAt,
+      freshnessLimitMs: this.freshnessLimitMs,
+      lastBid: this.lastBid,
+      lastAsk: this.lastAsk,
+      crossed: snap.crossed,
+      depthAvailable: snap.depthAvailable,
+      depthRecoveryInFlight: this.depthRecoveryInFlight,
+      depthValidity: snap.depthValidity
+    });
+    this.lastReferenceDataOk = dataOk;
+    return dataOk;
+  }
+
+  /**
+   * Soft-stale Spot or Depth → mark specialist rows contaminated for
+   * qualification. Raw capture rows are retained.
+   */
+  private annotateSpecialistsForSoftFreshness(
+    specialists: ResearchCaptureRecord["specialists"],
+    nowMs: number
+  ): ResearchCaptureRecord["specialists"] {
+    if (!specialists) return specialists;
+    if (
+      feedsSoftFreshForQualification({
+        nowMs,
+        lastSpotAtMs: this.lastSpotAt,
+        lastDepthAtMs: this.lastDepthAt,
+        freshnessLimitMs: this.freshnessLimitMs
+      })
+    ) {
+      return specialists;
+    }
+    return specialists.map((s) => ({
+      ...s,
+      derivedDataContaminated: true
+    }));
+  }
+
+  /** @internal test hook — last dataOk passed to reference paper. */
+  lastReferenceDataOkForTests(): boolean {
+    return this.lastReferenceDataOk;
+  }
+
+  /** @internal test hook — Spot/Depth ages at soft boundary. */
+  getFeedAgesMs(nowMs = Date.now()): {
+    spotAgeMs: number | null;
+    depthAgeMs: number | null;
+    freshnessLimitMs: number;
+  } {
+    return {
+      spotAgeMs: this.lastSpotAt != null ? nowMs - this.lastSpotAt : null,
+      depthAgeMs: this.lastDepthAt != null ? nowMs - this.lastDepthAt : null,
+      freshnessLimitMs: this.freshnessLimitMs
+    };
   }
 
   /** Derived-only — never mutates research capture / qualification. */
@@ -838,18 +919,19 @@ export class ResearchIngestBridge {
     for (const s of specialists) {
       // Count every evaluated specialist as an observation when any signal exists.
       if (!s.eligible && s.rawQuality == null && !s.selectedCandidate) continue;
+      const clean = !s.derivedDataContaminated;
       if (s.setup === "A_MOMENTUM_IGNITION") {
         this.observationA += 1;
-        if (s.eligible) this.eligibleA += 1;
-        if (s.selectedCandidate) this.selectedA += 1;
+        if (s.eligible && clean) this.eligibleA += 1;
+        if (s.selectedCandidate && clean) this.selectedA += 1;
       } else if (s.setup === "B_FAST_BREAKOUT") {
         this.observationB += 1;
-        if (s.eligible) this.eligibleB += 1;
-        if (s.selectedCandidate) this.selectedB += 1;
+        if (s.eligible && clean) this.eligibleB += 1;
+        if (s.selectedCandidate && clean) this.selectedB += 1;
       } else if (s.setup === "C_PULLBACK_REACCEL") {
         this.observationC += 1;
-        if (s.eligible) this.eligibleC += 1;
-        if (s.selectedCandidate) this.selectedC += 1;
+        if (s.eligible && clean) this.eligibleC += 1;
+        if (s.selectedCandidate && clean) this.selectedC += 1;
       }
       this.pushRecentCandidate(s, features, receiveSeq, eventKind, tsMs);
     }
@@ -896,6 +978,8 @@ export class ResearchIngestBridge {
       distLow5s: features?.distLow5s ?? null,
       upTouches5s: features?.upTouches5s ?? null,
       downTouches5s: features?.downTouches5s ?? null,
+      depthValidity: s.depthValidity,
+      derivedDataContaminated: s.derivedDataContaminated,
       brokerRequests: 0,
       brokerOrders: 0,
       shadowOrders: 0,
