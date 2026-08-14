@@ -149,6 +149,8 @@ export function reasonLabelFor(code: string): string {
     WAIT_MALFORMED_DATA: "Malformed market data",
     WAIT_PENDING_TIMEOUT: "Pending state timed out",
     WAIT_FLAP_GUARD: "Signal flap guard",
+    WAIT_M1_UNAVAILABLE: "Completed 1-minute candle unavailable",
+    WAIT_M1_STALE: "Completed 1-minute candle is stale",
     FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();

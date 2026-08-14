@@ -12,40 +12,45 @@ import {
   type FastSetupIdentity
 } from "../../../../../src/services/broker/ctrader/fastAutoTrade";
 
-const priorBar = {
-  time: 1_787_000_000,
-  open: 3386.2,
-  high: 3386.8,
-  low: 3384.4,
-  close: 3385.1,
-  volume: 800
-};
+function completedM1Pair(
+  nowMs: number,
+  latest: { open: number; high: number; low: number; close: number; volume: number },
+  prior: { open: number; high: number; low: number; close: number; volume: number }
+) {
+  const nowSec = Math.floor(nowMs / 1000);
+  return [
+    { time: nowSec - 150, ...prior },
+    { time: nowSec - 90, ...latest }
+  ];
+}
 
-const latestBar = {
-  time: 1_787_000_060,
+const firstLatest = {
   open: 3385.0,
   high: 3388.2,
   low: 3384.6,
   close: 3387.4,
   volume: 1200
 };
-
-const nextPriorBar = {
-  time: 1_787_000_420,
-  open: 3387.0,
-  high: 3388.0,
-  low: 3386.4,
-  close: 3386.8,
-  volume: 700
+const firstPrior = {
+  open: 3386.2,
+  high: 3386.8,
+  low: 3384.4,
+  close: 3385.1,
+  volume: 800
 };
-
-const nextLatestBar = {
-  time: 1_787_000_480,
+const nextLatest = {
   open: 3388.0,
   high: 3390.0,
   low: 3387.0,
   close: 3389.2,
   volume: 1100
+};
+const nextPrior = {
+  open: 3387.0,
+  high: 3388.0,
+  low: 3386.4,
+  close: 3386.8,
+  volume: 700
 };
 
 function decision(over: Partial<DecisionRecord> = {}): DecisionRecord {
@@ -155,7 +160,9 @@ describe("FAST persisted re-entry state", () => {
   beforeEach(() => {
     useFastReentryMemoryStore(true);
     resetFastReentryMemoryStore();
-    useCompletedM1LoaderForTests(async () => [priorBar, latestBar]);
+    useCompletedM1LoaderForTests(async (args) =>
+      completedM1Pair(args.nowMs ?? Date.parse("2026-08-14T09:02:00.000Z"), firstLatest, firstPrior)
+    );
   });
 
   afterEach(() => {
@@ -234,7 +241,9 @@ describe("FAST persisted re-entry state", () => {
       lastExitAtMs: Date.parse("2026-08-14T09:06:00.000Z")
     });
 
-    useCompletedM1LoaderForTests(async () => [nextPriorBar, nextLatestBar]);
+    useCompletedM1LoaderForTests(async (args) =>
+      completedM1Pair(args.nowMs ?? Date.parse("2026-08-14T09:08:00.000Z"), nextLatest, nextPrior)
+    );
     const next = await evaluateUid({
       uid,
       nowMs: Date.parse("2026-08-14T09:08:00.000Z"),

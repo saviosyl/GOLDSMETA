@@ -14,18 +14,6 @@ function asBias(v: string | null | undefined): FastBias | null {
   return null;
 }
 
-function ohlcFrom(decision: DecisionRecord): FastOhlc | null {
-  const o = decision.ohlcv;
-  if (!o) return null;
-  return {
-    open: o.open ?? null,
-    high: o.high ?? null,
-    low: o.low ?? null,
-    close: o.close ?? null,
-    volume: o.volume ?? null
-  };
-}
-
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
@@ -72,20 +60,22 @@ export function mapDecisionToFastInput(args: {
   riskLimitBreached?: boolean;
   sessionPlanState?: string | null;
   reentry?: FastReentryContext;
-  /** Override decision OHLC with a completed 1m candle when available. */
+  /** Completed 1m OHLC only — never silently use DecisionRecord OHLC. */
   ohlcv?: FastOhlc | null;
   priorOhlcv?: FastOhlc | null;
   timeframe?: string | null;
+  requireCompletedM1?: boolean;
+  m1Availability?: import("./types").FastM1Availability;
+  m1CompletedAtMs?: number | null;
 }): FastAutoTradeInput {
   const d = args.decision;
   const ms = d.marketStructure;
-  const mappedOhlcv = args.ohlcv !== undefined ? args.ohlcv : ohlcFrom(d);
+  const mappedOhlcv = args.ohlcv !== undefined ? args.ohlcv : null;
   const price =
     args.bid != null && args.ask != null
       ? (args.bid + args.ask) / 2
       : mappedOhlcv?.close ??
         d.lastKnownPrice ??
-        d.ohlcv?.close ??
         d.entry?.price ??
         0;
   const v3 = String(d.decision ?? "WAIT").toUpperCase();
@@ -143,6 +133,9 @@ export function mapDecisionToFastInput(args: {
       lastAction: null,
       lastActionAtMs: null
     },
-    lifecycle: { state: "SCANNING", stateEnteredAtMs: args.nowMs ?? Date.now() }
+    lifecycle: { state: "SCANNING", stateEnteredAtMs: args.nowMs ?? Date.now() },
+    requireCompletedM1: Boolean(args.requireCompletedM1),
+    m1Availability: args.m1Availability,
+    m1CompletedAtMs: args.m1CompletedAtMs ?? null
   };
 }

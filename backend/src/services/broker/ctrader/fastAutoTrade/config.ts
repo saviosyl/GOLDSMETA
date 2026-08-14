@@ -51,6 +51,8 @@ export type FastAutoTradeConfig = {
   pendingTriggerTimeoutMs: number;
   pendingEntryTimeoutMs: number;
   typicalAtrPricePct: number;
+  /** Max age of the latest completed M1 close before WAIT_M1_STALE. */
+  maxCompletedM1AgeMs: number;
 };
 
 export const DEFAULT_FAST_AUTOTRADE_CONFIG: FastAutoTradeConfig = {
@@ -83,7 +85,8 @@ export const DEFAULT_FAST_AUTOTRADE_CONFIG: FastAutoTradeConfig = {
   pendingSetupTimeoutMs: 4 * 60_000,
   pendingTriggerTimeoutMs: 3 * 60_000,
   pendingEntryTimeoutMs: 90_000,
-  typicalAtrPricePct: 0.0012
+  typicalAtrPricePct: 0.0012,
+  maxCompletedM1AgeMs: 180_000
 };
 
 function parseBounded(
@@ -215,6 +218,14 @@ export function loadFastAutoTradeConfig(
         d.demoReentryDelayMinutes,
         0,
         30
+      )
+    ),
+    maxCompletedM1AgeMs: Math.floor(
+      parseBounded(
+        source.FAST_MAX_COMPLETED_M1_AGE_MS,
+        d.maxCompletedM1AgeMs,
+        60_000,
+        900_000
       )
     )
   };

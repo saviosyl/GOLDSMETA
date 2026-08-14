@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { filterCompletedM1Bars } from "../../../../../src/services/broker/ctrader/fastAutoTrade/completedM1Candles";
+import {
+  classifyCompletedM1Freshness,
+  filterCompletedM1Bars
+} from "../../../../../src/services/broker/ctrader/fastAutoTrade/completedM1Candles";
 import { TRENDBAR_PERIOD } from "../../../../../src/services/broker/ctrader/openApiClient";
 
 describe("FAST completed 1m candles", () => {
@@ -19,5 +22,44 @@ describe("FAST completed 1m candles", () => {
     const completed = filterCompletedM1Bars(bars, nowMs);
     expect(completed.map((b) => b.time)).toEqual([nowSec - 180, nowSec - 120, nowSec - 60]);
     expect(completed.at(-1)?.close).toBe(3387.2);
+  });
+
+  it("classifies missing and stale completed M1 bars", () => {
+    const nowMs = Date.parse("2026-08-14T09:02:30.000Z");
+    expect(
+      classifyCompletedM1Freshness({ bars: [], nowMs }).availability
+    ).toBe("UNAVAILABLE");
+    expect(
+      classifyCompletedM1Freshness({ bars: null, nowMs, loaderFailed: true })
+        .availability
+    ).toBe("UNAVAILABLE");
+    const stale = classifyCompletedM1Freshness({
+      bars: [
+        {
+          time: Math.floor(nowMs / 1000) - 600,
+          open: 1,
+          high: 2,
+          low: 0.5,
+          close: 1.5,
+          volume: 1
+        }
+      ],
+      nowMs
+    });
+    expect(stale.availability).toBe("STALE");
+    const fresh = classifyCompletedM1Freshness({
+      bars: [
+        {
+          time: Math.floor(nowMs / 1000) - 90,
+          open: 1,
+          high: 2,
+          low: 0.5,
+          close: 1.5,
+          volume: 1
+        }
+      ],
+      nowMs
+    });
+    expect(fresh.availability).toBe("OK");
   });
 });

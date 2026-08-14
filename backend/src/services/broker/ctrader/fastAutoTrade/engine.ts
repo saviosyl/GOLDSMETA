@@ -708,6 +708,21 @@ export function evaluateFastAutoTrade(
       : veto) as FastWaitReason;
     return fail(intended, reason, veto);
   }
+  if (input.requireCompletedM1) {
+    if (input.m1Availability === "STALE") {
+      return fail(intended, "WAIT_M1_STALE", "WAIT_M1_STALE");
+    }
+    const m1OhlcReady =
+      input.m1Availability === "OK" &&
+      input.timeframe === "1" &&
+      present(input.ohlcv?.open) &&
+      present(input.ohlcv?.high) &&
+      present(input.ohlcv?.low) &&
+      present(input.ohlcv?.close);
+    if (!m1OhlcReady) {
+      return fail(intended, "WAIT_M1_UNAVAILABLE", "WAIT_M1_UNAVAILABLE");
+    }
+  }
   if (regime === "DANGEROUS") return fail(intended, "WAIT_DANGEROUS", "DANGEROUS");
   if (regime === "CHOP" && scored.score < config.chopEntryScore) {
     return fail(intended, "WAIT_CHOP", null);

@@ -6,10 +6,19 @@
 
 import type { DecisionRecord } from "../../../../models/types";
 import type { TrendbarCandle } from "../openApiClient";
-import { loadCompletedM1BarsForFastAutoTrade } from "./completedM1Candles";
+import { loadFastAutoTradeConfig } from "./config";
+import {
+  classifyCompletedM1Freshness,
+  loadCompletedM1BarsForFastAutoTrade
+} from "./completedM1Candles";
 import { mapDecisionToFastInput } from "./fromDecision";
 import { loadFastReentryState } from "./reentryStateStore";
-import type { FastAutoTradeInput, FastOhlc, FastReentryContext } from "./types";
+import type {
+  FastAutoTradeInput,
+  FastM1Availability,
+  FastOhlc,
+  FastReentryContext
+} from "./types";
 
 export function ohlcFromTrendbar(bar: TrendbarCandle): FastOhlc {
   return {
@@ -41,20 +50,47 @@ export function oneMinuteMarketFromBars(bars: TrendbarCandle[]): {
 export async function loadFastOneMinuteMarket(args: {
   ownerUid: string;
   nowMs?: number;
+  maxAgeMs?: number;
 }): Promise<{
   ohlcv: FastOhlc | null;
   priorOhlcv: FastOhlc | null;
   timeframe: "1" | null;
+  availability: FastM1Availability;
+  completedAtMs: number | null;
 }> {
+  const nowMs = args.nowMs ?? Date.now();
+  const maxAgeMs = args.maxAgeMs ?? loadFastAutoTradeConfig().maxCompletedM1AgeMs;
   try {
     const bars = await loadCompletedM1BarsForFastAutoTrade({
       ownerUid: args.ownerUid,
-      nowMs: args.nowMs,
+      nowMs,
       count: 8
     });
-    return oneMinuteMarketFromBars(bars);
+    const classified = classifyCompletedM1Freshness({ bars, nowMs, maxAgeMs });
+    if (!classified.latest) {
+      return {
+        ohlcv: null,
+        priorOhlcv: null,
+        timeframe: null,
+        availability: classified.availability,
+        completedAtMs: classified.completedAtMs
+      };
+    }
+    return {
+      ohlcv: ohlcFromTrendbar(classified.latest),
+      priorOhlcv: classified.prior ? ohlcFromTrendbar(classified.prior) : null,
+      timeframe: "1",
+      availability: classified.availability,
+      completedAtMs: classified.completedAtMs
+    };
   } catch {
-    return { ohlcv: null, priorOhlcv: null, timeframe: null };
+    return {
+      ohlcv: null,
+      priorOhlcv: null,
+      timeframe: null,
+      availability: "UNAVAILABLE",
+      completedAtMs: null
+    };
   }
 }
 
@@ -121,12 +157,11 @@ export async function buildFastAutoTradeInput(args: {
     riskLimitBreached: args.riskLimitBreached,
     sessionPlanState: args.sessionPlanState,
     reentry,
-    ...(m1.ohlcv
-      ? {
-          ohlcv: m1.ohlcv,
-          priorOhlcv: m1.priorOhlcv,
-          timeframe: m1.timeframe
-        }
-      : {})
+    ohlcv: m1.availability === "UNAVAILABLE" ? null : m1.ohlcv,
+    priorOhlcv: m1.availability === "UNAVAILABLE" ? null : m1.priorOhlcv,
+    timeframe: m1.availability === "UNAVAILABLE" ? null : m1.timeframe,
+    requireCompletedM1: true,
+    m1Availability: m1.availability,
+    m1CompletedAtMs: m1.completedAtMs
   });
 }

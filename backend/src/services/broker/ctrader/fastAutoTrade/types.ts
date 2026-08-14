@@ -49,7 +49,11 @@ export type FastWaitReason =
   | "WAIT_MALFORMED_DATA"
   | "WAIT_PENDING_TIMEOUT"
   | "WAIT_FLAP_GUARD"
+  | "WAIT_M1_UNAVAILABLE"
+  | "WAIT_M1_STALE"
   | "FAST_AUTOTRADE_V1_DEMO_ONLY";
+
+export type FastM1Availability = "OK" | "UNAVAILABLE" | "STALE";
 
 export type FastOhlc = {
   open: number | null;
@@ -131,6 +135,13 @@ export type FastAutoTradeInput = {
   safety: FastSafetyContext;
   reentry: FastReentryContext;
   lifecycle: FastLifecycleContext;
+  /**
+   * Qualification / 1-minute scan always requires a fresh completed M1.
+   * Direct engine unit tests omit this and supply ohlcv themselves.
+   */
+  requireCompletedM1?: boolean;
+  m1Availability?: FastM1Availability;
+  m1CompletedAtMs?: number | null;
 };
 
 export type FastGeometry = {

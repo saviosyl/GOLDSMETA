@@ -17,8 +17,11 @@ const fiveMinOhlcv = {
   volume: 9000
 };
 
+const NOW_MS = Date.parse("2026-08-14T09:02:30.000Z");
+const nowSec = Math.floor(NOW_MS / 1000);
+
 const priorBar = {
-  time: 1_787_000_000,
+  time: nowSec - 150,
   open: 3386.2,
   high: 3386.8,
   low: 3384.4,
@@ -27,7 +30,7 @@ const priorBar = {
 };
 
 const latestBar = {
-  time: 1_787_000_060,
+  time: nowSec - 90,
   open: 3385.0,
   high: 3388.2,
   low: 3384.6,
@@ -113,7 +116,7 @@ describe("FAST 1-minute market input", () => {
     const input = await buildFastAutoTradeInput({
       uid: "uid",
       decision: decision(),
-      nowMs: Date.parse("2026-08-14T09:02:00.000Z"),
+      nowMs: NOW_MS,
       bid: 3387.35,
       ask: 3387.45,
       spread: 0.1,
@@ -129,6 +132,27 @@ describe("FAST 1-minute market input", () => {
     expect(input.htfBias).toBe("BULLISH");
     expect(input.poc).toBe(3385.2);
     expect(input.v3Decision).toBe("WAIT");
+    expect(input.requireCompletedM1).toBe(true);
+    expect(input.m1Availability).toBe("OK");
+  });
+
+  it("does not fall back to DecisionRecord OHLC when M1 is missing", async () => {
+    useCompletedM1LoaderForTests(async () => []);
+    const input = await buildFastAutoTradeInput({
+      uid: "uid",
+      decision: decision({ decision: "BUY", setupScore: 91 }),
+      nowMs: NOW_MS,
+      bid: 3387.35,
+      ask: 3387.45,
+      spread: 0.1,
+      quoteAgeSeconds: 1,
+      ...safety
+    });
+    expect(input.ohlcv).toBeNull();
+    expect(input.priorOhlcv).toBeNull();
+    expect(input.m1Availability).toBe("UNAVAILABLE");
+    expect(input.v3Decision).toBe("BUY");
+    expect(input.poc).toBe(3385.2);
   });
 
   it("populates priorOhlcv only when a previous completed 1m bar exists", () => {

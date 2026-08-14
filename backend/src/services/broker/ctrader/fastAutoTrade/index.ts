@@ -8,7 +8,8 @@ export {
   type FastLifecycleState,
   type FastRegime,
   type FastSetupType,
-  type FastWaitReason
+  type FastWaitReason,
+  type FastM1Availability
 } from "./types";
 export {
   DEFAULT_FAST_AUTOTRADE_CONFIG,
@@ -41,6 +42,8 @@ export {
   oneMinuteMarketFromBars
 } from "./qualificationInput";
 export {
+  classifyCompletedM1Freshness,
+  DEFAULT_MAX_COMPLETED_M1_AGE_MS,
   filterCompletedM1Bars,
   loadCompletedM1BarsForFastAutoTrade,
   useCompletedM1LoaderForTests

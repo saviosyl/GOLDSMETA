@@ -11,7 +11,8 @@ import {
 import { getConnection } from "../connectionStore";
 import { createOpenApiClient, type TrendbarCandle } from "../openApiClient";
 
-const M1_SECONDS = 60;
+export const M1_PERIOD_SECONDS = 60;
+export const DEFAULT_MAX_COMPLETED_M1_AGE_MS = 180_000;
 
 export type CompletedM1Loader = (args: {
   ownerUid: string;
@@ -36,7 +37,35 @@ export function filterCompletedM1Bars(
 ): TrendbarCandle[] {
   const nowSec = Math.floor(nowMs / 1000);
   const sorted = [...bars].sort((a, b) => a.time - b.time);
-  return sorted.filter((b) => b.time + M1_SECONDS <= nowSec);
+  return sorted.filter((b) => b.time + M1_PERIOD_SECONDS <= nowSec);
+}
+
+export function classifyCompletedM1Freshness(args: {
+  bars: TrendbarCandle[] | null | undefined;
+  nowMs: number;
+  maxAgeMs?: number;
+  loaderFailed?: boolean;
+}): {
+  availability: import("./types").FastM1Availability;
+  latest: TrendbarCandle | null;
+  prior: TrendbarCandle | null;
+  completedAtMs: number | null;
+} {
+  if (args.loaderFailed || !args.bars) {
+    return { availability: "UNAVAILABLE", latest: null, prior: null, completedAtMs: null };
+  }
+  const completed = filterCompletedM1Bars(args.bars, args.nowMs);
+  if (!completed.length) {
+    return { availability: "UNAVAILABLE", latest: null, prior: null, completedAtMs: null };
+  }
+  const latest = completed[completed.length - 1]!;
+  const prior = completed.length >= 2 ? completed[completed.length - 2]! : null;
+  const completedAtMs = (latest.time + M1_PERIOD_SECONDS) * 1000;
+  const maxAge = args.maxAgeMs ?? DEFAULT_MAX_COMPLETED_M1_AGE_MS;
+  if (args.nowMs - completedAtMs > maxAge) {
+    return { availability: "STALE", latest, prior, completedAtMs };
+  }
+  return { availability: "OK", latest, prior, completedAtMs };
 }
 
 export async function loadCompletedM1BarsForFastAutoTrade(args: {
