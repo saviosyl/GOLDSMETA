@@ -14,12 +14,21 @@ import {
   gradeForScore
 } from "./config";
 import { setupIdentityKey, shouldBlockFlap } from "./stateMachine";
-import { FAST_AUTOTRADE_STRATEGY_ID } from "./types";
+import {
+  FAST_AUTOTRADE_STRATEGY_ID,
+  FAST_EXTENSION_ATR_MIN_SAMPLES,
+  FAST_EXTENSION_ATR_PERIOD,
+  FAST_EXTENSION_M1_GAP_TOLERANCE_SECONDS,
+  FAST_EXTENSION_M1_PERIOD_SECONDS
+} from "./types";
 import type {
   FastAction,
   FastAutoTradeDecision,
   FastAutoTradeInput,
   FastBias,
+  FastExtensionAnchorType,
+  FastExtensionAtrSource,
+  FastExtensionDiagnostic,
   FastGeometry,
   FastGrade,
   FastMissedOpportunity,
@@ -149,23 +158,357 @@ function nearLevel(price: number, level: number | null, atr: number): boolean {
   return Math.abs(price - level) <= atr * 0.55;
 }
 
+export type FastExtensionAssessment = FastExtensionDiagnostic & {
+  extended: boolean;
+  volatilityAvailable: boolean;
+};
+
+function emptyExtensionDiagnostic(
+  limitAtr: number,
+  source: FastExtensionAtrSource = "NONE"
+): FastExtensionDiagnostic {
+  return {
+    extensionAnchorType: "NONE",
+    extensionAnchorPrice: null,
+    extensionDistance: null,
+    extensionAtr: null,
+    extensionAtrSource: source,
+    extensionDistanceAtr: null,
+    extensionLimitAtr: limitAtr
+  };
+}
+
+/**
+ * True range of a completed bar vs the previous completed close.
+ * TR = max(high-low, |high-prevClose|, |low-prevClose|)
+ *
+ * Callers must only pass a previous close from a genuinely consecutive
+ * trading M1. Session-gap pairs are filtered by contiguousExtensionTrueRanges.
+ */
+export function completedBarTrueRange(
+  bar: FastOhlc,
+  previousClose: number
+): number | null {
+  if (!present(bar.high) || !present(bar.low) || !present(previousClose)) return null;
+  if (!(bar.high >= bar.low)) return null;
+  return Math.max(
+    bar.high - bar.low,
+    Math.abs(bar.high - previousClose),
+    Math.abs(bar.low - previousClose)
+  );
+}
+
+function barOpenTimeSec(bar: FastOhlc): number | null {
+  return present(bar.time) ? bar.time : null;
+}
+
+/**
+ * Consecutive completed M1s are ~60s apart (bar-open unix seconds).
+ * Missing timestamps are not consecutive — a weekend/session gap must not
+ * silently become one ordinary true range.
+ */
+export function isConsecutiveCompletedM1(
+  current: FastOhlc,
+  previous: FastOhlc
+): boolean {
+  const currentTime = barOpenTimeSec(current);
+  const previousTime = barOpenTimeSec(previous);
+  if (currentTime == null || previousTime == null) return false;
+  const delta = currentTime - previousTime;
+  return (
+    Math.abs(delta - FAST_EXTENSION_M1_PERIOD_SECONDS) <=
+    FAST_EXTENSION_M1_GAP_TOLERANCE_SECONDS
+  );
+}
+
+/**
+ * True ranges of the last contiguous completed-M1 run only.
+ * A large timestamp gap (weekend, daily broker maintenance, missing bar)
+ * does not produce a TR against the pre-gap close; the sequence resets.
+ */
+export function contiguousExtensionTrueRanges(history: FastOhlc[]): number[] {
+  let run: number[] = [];
+  for (let i = 1; i < history.length; i++) {
+    const previous = history[i - 1]!;
+    const current = history[i]!;
+    if (!isConsecutiveCompletedM1(current, previous)) {
+      run = [];
+      continue;
+    }
+    const prevClose = previous.close;
+    if (!present(prevClose)) continue;
+    const tr = completedBarTrueRange(current, prevClose);
+    if (tr != null && tr > 0) run.push(tr);
+  }
+  return run;
+}
+
+/**
+ * Rolling local ATR from completed M1 history only.
+ * Never uses the currently-forming candle (caller must exclude it).
+ * Never falls back to a single current M1 high-low.
+ * Never treats a session-gap bar vs the pre-gap close as one M1 TR.
+ *
+ * ≥14 contiguous true ranges → M1_ATR14 (SMA of the last 14 TRs)
+ * 5–13 contiguous true ranges → M1_ROLLING_TR (SMA of available TRs)
+ * otherwise → unavailable.
+ * Decision ATR is allowed only when requireCompletedM1 is not set
+ * (legacy / unit-test path). Production never falls back to Decision ATR.
+ */
+export function estimateExtensionAtr(input: FastAutoTradeInput): {
+  atr: number | null;
+  source: FastExtensionAtrSource;
+} {
+  const history = input.m1History;
+  if (history && history.length >= 2) {
+    const trs = contiguousExtensionTrueRanges(history);
+    if (trs.length >= FAST_EXTENSION_ATR_PERIOD) {
+      const window = trs.slice(-FAST_EXTENSION_ATR_PERIOD);
+      const atr = window.reduce((s, v) => s + v, 0) / window.length;
+      return { atr, source: "M1_ATR14" };
+    }
+    if (trs.length >= FAST_EXTENSION_ATR_MIN_SAMPLES) {
+      const atr = trs.reduce((s, v) => s + v, 0) / trs.length;
+      return { atr, source: "M1_ROLLING_TR" };
+    }
+  }
+  if (!input.requireCompletedM1 && present(input.atr) && input.atr > 0) {
+    return { atr: input.atr, source: "DECISION_ATR" };
+  }
+  return { atr: null, source: "NONE" };
+}
+
+function lastCompletedClose(input: FastAutoTradeInput): number | null {
+  const history = input.m1History;
+  if (history && history.length) {
+    const close = history[history.length - 1]!.close;
+    if (present(close)) return close;
+  }
+  return present(input.ohlcv?.close) ? input.ohlcv!.close : null;
+}
+
+function lastCompletedExtreme(
+  input: FastAutoTradeInput,
+  side: "BUY" | "SELL"
+): number | null {
+  const history = input.m1History;
+  const latest = history && history.length ? history[history.length - 1]! : input.ohlcv;
+  if (!latest) return null;
+  const level = side === "BUY" ? latest.low : latest.high;
+  return present(level) ? level : null;
+}
+
+/**
+ * Nearest valid broken BUY structure behind price: the highest of
+ * independent broken resistance and broken VAH. Telemetry follows the
+ * selected level (not a fixed resistance-then-VAH priority).
+ */
+function nearestBrokenBuyAnchor(
+  independentRes: number | null,
+  brokenVah: number | null
+): { type: FastExtensionAnchorType; price: number } | null {
+  if (independentRes != null && brokenVah != null) {
+    return independentRes >= brokenVah
+      ? { type: "BROKEN_RESISTANCE", price: independentRes }
+      : { type: "BROKEN_VAH", price: brokenVah };
+  }
+  if (independentRes != null) return { type: "BROKEN_RESISTANCE", price: independentRes };
+  if (brokenVah != null) return { type: "BROKEN_VAH", price: brokenVah };
+  return null;
+}
+
+/**
+ * Nearest valid broken SELL structure above price: the lowest of
+ * independent broken support and broken VAL.
+ */
+function nearestBrokenSellAnchor(
+  independentSup: number | null,
+  brokenVal: number | null
+): { type: FastExtensionAnchorType; price: number } | null {
+  if (independentSup != null && brokenVal != null) {
+    return independentSup <= brokenVal
+      ? { type: "BROKEN_SUPPORT", price: independentSup }
+      : { type: "BROKEN_VAL", price: brokenVal };
+  }
+  if (independentSup != null) return { type: "BROKEN_SUPPORT", price: independentSup };
+  if (brokenVal != null) return { type: "BROKEN_VAL", price: brokenVal };
+  return null;
+}
+
+/**
+ * Setup-aware extension reference. One universal POC/VWAP/EMA stack is not used.
+ *
+ * BREAKOUT / BREAKOUT_RETEST:
+ *   BUY: nearest valid broken structure behind price (highest of independent
+ *        broken resistance and broken VAH) → VWAP → EMA21 → local M1 →
+ *        POC only when no local structure exists and ATR is a rolling M1 estimate.
+ *   SELL: nearest valid broken support/VAL above price (lowest candidate) → mirror.
+ *
+ * PULLBACK / MOMENTUM / REVERSAL:
+ *   VWAP → EMA21 → broken VAH/VAL when price is already through it (chase check) →
+ *   local structure. A slow 15m POC alone does not prove a fresh M1 move is a chase.
+ */
+export function selectExtensionAnchor(
+  input: FastAutoTradeInput,
+  side: "BUY" | "SELL",
+  setupType: FastSetupType | null,
+  atrSource: FastExtensionAtrSource
+): { type: FastExtensionAnchorType; price: number } | null {
+  const breakout = setupType === "BREAKOUT" || setupType === "BREAKOUT_RETEST";
+  const local = lastCompletedExtreme(input, side) ?? lastCompletedClose(input);
+
+  if (side === "BUY") {
+    const brokenRes =
+      present(input.nearbyResistance) && input.nearbyResistance < input.price
+        ? input.nearbyResistance
+        : null;
+    const brokenVah =
+      present(input.vah) && input.vah < input.price ? input.vah : null;
+    const independentRes =
+      brokenRes != null && (brokenVah == null || brokenRes !== brokenVah)
+        ? brokenRes
+        : null;
+
+    if (breakout) {
+      const nearest = nearestBrokenBuyAnchor(independentRes, brokenVah);
+      if (nearest) return nearest;
+      if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
+      if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
+      if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
+      if (
+        present(input.poc) &&
+        (atrSource === "M1_ATR14" || atrSource === "M1_ROLLING_TR")
+      ) {
+        return { type: "POC", price: input.poc };
+      }
+      return null;
+    }
+
+    if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
+    if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
+    if (brokenVah != null) return { type: "BROKEN_VAH", price: brokenVah };
+    if (independentRes != null) {
+      return { type: "BROKEN_RESISTANCE", price: independentRes };
+    }
+    const nearbySupportBehind =
+      present(input.nearbySupport) && input.nearbySupport < input.price
+        ? input.nearbySupport
+        : null;
+    if (nearbySupportBehind != null) {
+      return { type: "LOCAL_STRUCTURE", price: nearbySupportBehind };
+    }
+    if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
+    return null;
+  }
+
+  const brokenSup =
+    present(input.nearbySupport) && input.nearbySupport > input.price
+      ? input.nearbySupport
+      : null;
+  const brokenVal =
+    present(input.val) && input.val > input.price ? input.val : null;
+  const independentSup =
+    brokenSup != null && (brokenVal == null || brokenSup !== brokenVal)
+      ? brokenSup
+      : null;
+
+  if (breakout) {
+    const nearest = nearestBrokenSellAnchor(independentSup, brokenVal);
+    if (nearest) return nearest;
+    if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
+    if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
+    if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
+    if (
+      present(input.poc) &&
+      (atrSource === "M1_ATR14" || atrSource === "M1_ROLLING_TR")
+    ) {
+      return { type: "POC", price: input.poc };
+    }
+    return null;
+  }
+
+  if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
+  if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
+  if (brokenVal != null) return { type: "BROKEN_VAL", price: brokenVal };
+  if (independentSup != null) return { type: "BROKEN_SUPPORT", price: independentSup };
+  const nearbyResAhead =
+    present(input.nearbyResistance) && input.nearbyResistance > input.price
+      ? input.nearbyResistance
+      : null;
+  if (nearbyResAhead != null) return { type: "LOCAL_STRUCTURE", price: nearbyResAhead };
+  if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
+  return null;
+}
+
+export function assessExtension(
+  input: FastAutoTradeInput,
+  bias: FastBias,
+  setupType: FastSetupType | null,
+  config: FastAutoTradeConfig = DEFAULT_FAST_AUTOTRADE_CONFIG
+): FastExtensionAssessment {
+  const limit = config.maximumExtensionAtr;
+  const { atr, source } = estimateExtensionAtr(input);
+  const side: "BUY" | "SELL" | null =
+    bias === "BULLISH" ? "BUY" : bias === "BEARISH" ? "SELL" : null;
+  if (side == null) {
+    return {
+      ...emptyExtensionDiagnostic(limit, source),
+      extensionAtr: atr,
+      extended: false,
+      volatilityAvailable: atr != null && atr > 0
+    };
+  }
+  const anchor = selectExtensionAnchor(input, side, setupType, source);
+  if (atr == null || !(atr > 0)) {
+    return {
+      extensionAnchorType: anchor?.type ?? "NONE",
+      extensionAnchorPrice: anchor?.price ?? null,
+      extensionDistance: anchor != null ? input.price - anchor.price : null,
+      extensionAtr: null,
+      extensionAtrSource: "NONE",
+      extensionDistanceAtr: null,
+      extensionLimitAtr: limit,
+      extended: false,
+      volatilityAvailable: false
+    };
+  }
+  if (!anchor) {
+    return {
+      ...emptyExtensionDiagnostic(limit, source),
+      extensionAtr: atr,
+      extended: false,
+      volatilityAvailable: true
+    };
+  }
+  const distance = input.price - anchor.price;
+  const signed = side === "BUY" ? distance : -distance;
+  const distanceAtr = signed / atr;
+  return {
+    extensionAnchorType: anchor.type,
+    extensionAnchorPrice: anchor.price,
+    extensionDistance: distance,
+    extensionAtr: atr,
+    extensionAtrSource: source,
+    extensionDistanceAtr: distanceAtr,
+    extensionLimitAtr: limit,
+    extended: signed > atr * limit,
+    volatilityAvailable: true
+  };
+}
+
+/**
+ * Setup-aware extension check. `atr` is unused — local rolling M1 ATR (or
+ * Decision ATR when no M1 history) is computed inside assessExtension.
+ * Kept in the signature so existing call sites compile.
+ */
 export function isExtended(
   input: FastAutoTradeInput,
   bias: FastBias,
-  atr: number,
-  config: FastAutoTradeConfig
+  _atr: number,
+  config: FastAutoTradeConfig,
+  setupType: FastSetupType | null = null
 ): boolean {
-  const c = input.ohlcv;
-  const range =
-    c && present(c.high) && present(c.low) ? c.high - c.low : null;
-  if (range != null && range > atr * config.maximumExtensionAtr) return true;
-  const anchor = input.vwap ?? input.ema21 ?? input.poc;
-  if (present(anchor) && atr > 0) {
-    const dist = input.price - anchor;
-    if (bias === "BULLISH" && dist > atr * config.maximumExtensionAtr) return true;
-    if (bias === "BEARISH" && -dist > atr * config.maximumExtensionAtr) return true;
-  }
-  return false;
+  return assessExtension(input, bias, setupType, config).extended;
 }
 
 export function detectFastSetup(
@@ -374,6 +717,9 @@ export function scoreFastQuality(args: {
   } else {
     score -= 6;
   }
+  // Intentional double use of extension: extended=true is a hard WAIT_EXTENDED
+  // veto later AND a −10 score (vs +6 when false). This PR does not change
+  // those weights — only the classification of `extended`.
   if (!extended) {
     score += 6;
     accepted.push("not excessively extended");
@@ -724,7 +1070,8 @@ function telemetryOf(
   missing: string[],
   hardVeto: string | null,
   spaceOk: boolean,
-  extended: boolean
+  extended: boolean,
+  extension: FastExtensionDiagnostic
 ): FastMissedOpportunity {
   return {
     direction: action,
@@ -739,7 +1086,14 @@ function telemetryOf(
     missingEvidence: missing,
     hardVeto,
     tradeSpaceOk: spaceOk,
-    extended
+    extended,
+    extensionAnchorType: extension.extensionAnchorType,
+    extensionAnchorPrice: extension.extensionAnchorPrice,
+    extensionDistance: extension.extensionDistance,
+    extensionAtr: extension.extensionAtr,
+    extensionAtrSource: extension.extensionAtrSource,
+    extensionDistanceAtr: extension.extensionDistanceAtr,
+    extensionLimitAtr: extension.extensionLimitAtr
   };
 }
 
@@ -755,7 +1109,8 @@ export function evaluateFastAutoTrade(
   const atr = estimateAtr(input, config);
   const intended: FastAction =
     bias === "BULLISH" ? "BUY" : bias === "BEARISH" ? "SELL" : "WAIT";
-  const extended = isExtended(input, bias, atr, config);
+  const extension = assessExtension(input, bias, setup.setupType, config);
+  const extended = extension.extended;
   const spaceOk =
     intended === "WAIT" ? false : tradeSpaceOk(input, intended, atr, config);
   const scored = scoreFastQuality({
@@ -799,6 +1154,7 @@ export function evaluateFastAutoTrade(
     signalId: null,
     tradeSpaceOk: spaceOk,
     extended,
+    extension,
     telemetry: telemetryOf(
       input,
       action,
@@ -811,7 +1167,8 @@ export function evaluateFastAutoTrade(
       missing,
       hard,
       spaceOk,
-      extended
+      extended,
+      extension
     )
   });
 
@@ -843,6 +1200,9 @@ export function evaluateFastAutoTrade(
   if (bias === "NEUTRAL") return fail("WAIT", "WAIT_NEUTRAL_BIAS", null);
   if (!setup.setupType) return fail(intended, "WAIT_NO_SETUP", null);
   if (!trig.trigger) return fail(intended, "WAIT_TRIGGER_NOT_CONFIRMED", null);
+  if (input.requireCompletedM1 && !extension.volatilityAvailable) {
+    return fail(intended, "WAIT_EXTENSION_VOLATILITY_UNAVAILABLE", null);
+  }
   if (extended) return fail(intended, "WAIT_EXTENDED", null);
   if (!spaceOk) return fail(intended, "WAIT_NO_TRADE_SPACE", null);
   if ((input.trendStrength ?? 100) < 22 && setup.setupType !== "REVERSAL") {
@@ -914,6 +1274,7 @@ export function evaluateFastAutoTrade(
     signalId,
     tradeSpaceOk: spaceOk,
     extended,
+    extension,
     telemetry: telemetryOf(
       input,
       intended,
@@ -926,7 +1287,8 @@ export function evaluateFastAutoTrade(
       missing,
       null,
       spaceOk,
-      extended
+      extended,
+      extension
     )
   };
 }

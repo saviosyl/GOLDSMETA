@@ -10,6 +10,7 @@ import {
 } from "../connectionService";
 import { getConnection } from "../connectionStore";
 import { createOpenApiClient, type TrendbarCandle } from "../openApiClient";
+import { FAST_EXTENSION_M1_HISTORY } from "./types";
 
 export const M1_PERIOD_SECONDS = 60;
 export const DEFAULT_MAX_COMPLETED_M1_AGE_MS = 180_000;
@@ -96,7 +97,7 @@ export async function loadCompletedM1BarsForFastAutoTrade(args: {
       ctidTraderAccountId: fresh.selectedAccountId!,
       symbolId: fresh.symbolId!,
       period: "M1",
-      count: args.count ?? 8,
+      count: args.count ?? FAST_EXTENSION_M1_HISTORY,
       isLive: Boolean(fresh.selectedAccountIsLive)
     });
     return filterCompletedM1Bars(bars, args.nowMs ?? Date.now());

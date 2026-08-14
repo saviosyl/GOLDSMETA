@@ -11,18 +11,7 @@ import {
   useFastReentryMemoryStore,
   type FastSetupIdentity
 } from "../../../../../src/services/broker/ctrader/fastAutoTrade";
-
-function completedM1Pair(
-  nowMs: number,
-  latest: { open: number; high: number; low: number; close: number; volume: number },
-  prior: { open: number; high: number; low: number; close: number; volume: number }
-) {
-  const nowSec = Math.floor(nowMs / 1000);
-  return [
-    { time: nowSec - 150, ...prior },
-    { time: nowSec - 90, ...latest }
-  ];
-}
+import { withRollingM1History } from "./extensionTestSupport";
 
 const firstLatest = {
   open: 3385.0,
@@ -110,6 +99,7 @@ function decision(over: Partial<DecisionRecord> = {}): DecisionRecord {
     dataSourceLabel: "TEST",
     environment: "TEST",
     isTestDecision: true,
+    optionalIndicators: { atr: 2.4 },
     ...over
   } as DecisionRecord;
 }
@@ -160,9 +150,15 @@ describe("FAST persisted re-entry state", () => {
   beforeEach(() => {
     useFastReentryMemoryStore(true);
     resetFastReentryMemoryStore();
-    useCompletedM1LoaderForTests(async (args) =>
-      completedM1Pair(args.nowMs ?? Date.parse("2026-08-14T09:02:00.000Z"), firstLatest, firstPrior)
-    );
+    useCompletedM1LoaderForTests(async (args) => {
+      const nowMs = args.nowMs ?? Date.parse("2026-08-14T09:02:00.000Z");
+      return withRollingM1History({
+        nowMs,
+        latest: firstLatest,
+        prior: firstPrior,
+        typicalTr: 2.4
+      });
+    });
   });
 
   afterEach(() => {
@@ -241,9 +237,15 @@ describe("FAST persisted re-entry state", () => {
       lastExitAtMs: Date.parse("2026-08-14T09:06:00.000Z")
     });
 
-    useCompletedM1LoaderForTests(async (args) =>
-      completedM1Pair(args.nowMs ?? Date.parse("2026-08-14T09:08:00.000Z"), nextLatest, nextPrior)
-    );
+    useCompletedM1LoaderForTests(async (args) => {
+      const nowMs = args.nowMs ?? Date.parse("2026-08-14T09:08:00.000Z");
+      return withRollingM1History({
+        nowMs,
+        latest: nextLatest,
+        prior: nextPrior,
+        typicalTr: 2.4
+      });
+    });
     const next = await evaluateUid({
       uid,
       nowMs: Date.parse("2026-08-14T09:08:00.000Z"),
