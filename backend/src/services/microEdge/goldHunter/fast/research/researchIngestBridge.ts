@@ -35,6 +35,11 @@ import {
   type ResearchSubscriptionState
 } from "./researchTypes";
 import { evaluateCaptureHealth } from "./researchCaptureHealth";
+import {
+  ReferencePaperSimulator,
+  type ReferencePaperSnapshot,
+  type ReferencePaperSummary
+} from "./referencePaperSimulator";
 
 const RECENT_CANDIDATE_LIMIT = 80;
 
@@ -109,6 +114,8 @@ export class ResearchIngestBridge {
   /** Bounded ring of recent specialist rows for the read-only monitor UI. */
   private readonly recentCandidates: ResearchRecentCandidateObservation[] = [];
   private observationSeq = 0;
+  /** Derived monitor-only paper book — never written to research capture rows. */
+  private readonly referencePaper = new ReferencePaperSimulator();
   private prevEventTs: number | null = null;
   private spotSubscribed = false;
   private depthSubscribed = false;
@@ -475,6 +482,12 @@ export class ResearchIngestBridge {
       this.lastBid = null;
       this.lastAsk = null;
       this.lastSpread = null;
+      // Reference paper: force-close with DATA_STALE; clear side state.
+      this.referencePaper.onResync({
+        tsMs: item.rawCallbackArrivalMs,
+        receiveSeq: item.receiveSeq,
+        reason: String(item.payload.reason ?? "resync")
+      });
       const rec: ResearchCaptureRecord = {
         ...base,
         eventKind: "RESYNC_MARKER",
@@ -597,6 +610,15 @@ export class ResearchIngestBridge {
         inputNormalizationVerified: true
       };
       this.collector.record(rec);
+      this.driveReferencePaper({
+        bid: this.lastBid,
+        ask: this.lastAsk,
+        tsMs: item.rawCallbackArrivalMs,
+        receiveSeq: item.receiveSeq,
+        specialists: snap.specialists,
+        features: snap.features,
+        dataOk: true
+      });
       return;
     }
 
@@ -649,6 +671,44 @@ export class ResearchIngestBridge {
       inputNormalizationVerified: true
     };
     this.collector.record(rec);
+    this.driveReferencePaper({
+      bid: this.lastBid,
+      ask: this.lastAsk,
+      tsMs: item.rawCallbackArrivalMs,
+      receiveSeq: item.receiveSeq,
+      specialists: snap.specialists,
+      features: snap.features,
+      dataOk: !snap.crossed
+    });
+  }
+
+  /** Derived-only — never mutates research capture / qualification. */
+  private driveReferencePaper(args: {
+    bid: number | null;
+    ask: number | null;
+    tsMs: number;
+    receiveSeq: number;
+    specialists: ResearchCaptureRecord["specialists"];
+    features: ResearchFeatureTelemetry | null;
+    dataOk: boolean;
+  }): void {
+    this.referencePaper.onMarketTick({
+      bid: args.bid,
+      ask: args.ask,
+      tsMs: args.tsMs,
+      receiveSeq: args.receiveSeq,
+      specialists: args.specialists,
+      features: args.features,
+      dataOk: args.dataOk
+    });
+  }
+
+  referencePaperSnapshot(): ReferencePaperSnapshot {
+    return this.referencePaper.snapshot();
+  }
+
+  referencePaperSummary(): ReferencePaperSummary {
+    return this.referencePaper.summary();
   }
 
   private tallyCandidates(
@@ -841,6 +901,25 @@ export class ResearchIngestBridge {
       spotBidOnlyEvents: this.spotBidOnlyEvents,
       spotAskOnlyEvents: this.spotAskOnlyEvents,
       spotTwoSidedEvents: this.spotTwoSidedEvents,
+      referencePaper: (() => {
+        const s = this.referencePaper.summary();
+        return {
+          mode: "REFERENCE_PAPER_ONLY" as const,
+          label: s.label,
+          paperTrades: s.paperTrades,
+          open: s.open,
+          wins: s.wins,
+          losses: s.losses,
+          breakeven: s.breakeven,
+          winRate: s.winRate,
+          profitFactor: s.profitFactor,
+          netMoveSum: s.netMoveSum,
+          tradesPerHour: s.tradesPerHour,
+          brokerRequests: 0 as const,
+          brokerOrders: 0 as const,
+          executionAdapter: "NONE" as const
+        };
+      })(),
       marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
       inputNormalizationVerified: true,
       captureStart: this.captureStartIso,

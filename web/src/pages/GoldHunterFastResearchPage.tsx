@@ -58,6 +58,77 @@ type ResearchHealth = {
   shadowOrders?: number;
   durableMode?: string;
   scopeVerified?: boolean;
+  referencePaper?: {
+    mode?: string;
+    label?: string;
+    paperTrades?: number;
+    open?: number;
+    wins?: number;
+    losses?: number;
+    breakeven?: number;
+    winRate?: number | null;
+    profitFactor?: number | null;
+    netMoveSum?: number;
+    tradesPerHour?: number | null;
+  };
+};
+
+type ReferencePaperOpen = {
+  referenceTradeId: string;
+  setup: string;
+  setupName: string;
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  executableExitPrice: number;
+  netMove: number;
+  mfe: number;
+  mae: number;
+  durationMs: number;
+};
+
+type ReferencePaperClosed = {
+  referenceTradeId: string;
+  entryTsIso: string;
+  setup: string;
+  setupName: string;
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  exitPrice: number;
+  durationMs: number;
+  mfe: number;
+  mae: number;
+  grossMove: number;
+  referenceFriction: number;
+  netMove: number;
+  result: "WIN" | "LOSS" | "BREAKEVEN";
+  exitReason: string;
+};
+
+type ReferencePaperSummary = {
+  mode?: string;
+  label?: string;
+  paperTrades?: number;
+  open?: number;
+  wins?: number;
+  losses?: number;
+  breakeven?: number;
+  winRate?: number | null;
+  profitFactor?: number | null;
+  grossMoveSum?: number;
+  frictionSum?: number;
+  netMoveSum?: number;
+  currentStreak?: number;
+  streakKind?: "WIN" | "LOSS" | "NONE";
+  tradesPerHour?: number | null;
+  friction?: number;
+};
+
+type ReferencePaperFeed = {
+  mode?: string;
+  label?: string;
+  summary?: ReferencePaperSummary;
+  openTrade?: ReferencePaperOpen | null;
+  history?: ReferencePaperClosed[];
 };
 
 type ResearchObservation = {
@@ -159,6 +230,7 @@ export function GoldHunterFastResearchPage() {
   const [health, setHealth] = useState<ResearchHealth | null>(null);
   const [prev, setPrev] = useState<ResearchHealth | null>(null);
   const [observations, setObservations] = useState<ResearchObservation[]>([]);
+  const [paper, setPaper] = useState<ReferencePaperFeed | null>(null);
   const [filter, setFilter] = useState<FeedFilter>("ELIGIBLE");
   const [feedAvailable, setFeedAvailable] = useState(false);
   const [lastOkAt, setLastOkAt] = useState<number | null>(null);
@@ -178,11 +250,12 @@ export function GoldHunterFastResearchPage() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const [hRes, cRes] = await Promise.all([
+        const [hRes, cRes, pRes] = await Promise.all([
           fetch(`${base}/health`, { cache: "no-store" }),
           fetch(`${base}/recent-candidates?limit=40&filter=${filter}`, {
             cache: "no-store"
-          })
+          }),
+          fetch(`${base}/reference-paper`, { cache: "no-store" })
         ]);
         if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
         const h = (await hRes.json()) as ResearchHealth;
@@ -200,6 +273,9 @@ export function GoldHunterFastResearchPage() {
           setFeedAvailable(true);
         } else {
           setFeedAvailable(false);
+        }
+        if (pRes.ok) {
+          setPaper((await pRes.json()) as ReferencePaperFeed);
         }
       } catch (e) {
         if (cancelled) return;
@@ -407,6 +483,181 @@ export function GoldHunterFastResearchPage() {
             HB {fmtNum(health?.heartbeatsPersisted)} · Chunks{" "}
             {fmtNum(health?.chunksUploaded)}
           </span>
+        </div>
+      </section>
+
+      <section className="gm-ghr-paper" data-testid="gh-research-paper">
+        <div className="gm-ghr-section-title">
+          REFERENCE PAPER TRADES
+          <span className="gm-ghr-feed-note">HYPOTHETICAL REFERENCE ONLY</span>
+        </div>
+        <p className="gm-ghr-paper-disclaimer" data-testid="gh-research-paper-disclaimer">
+          REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE. Deduplicated
+          opportunity episodes (not selected-event count). Executable-side
+          pricing only. No account EUR/$ P/L.
+        </p>
+        <div className="gm-ghr-paper-summary" data-testid="gh-research-paper-summary">
+          <div className="gm-ghr-paper-kpi">
+            <span>Paper trades</span>
+            <strong>{fmtNum(paper?.summary?.paperTrades)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Open</span>
+            <strong>{paper?.summary?.open ?? 0}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Wins</span>
+            <strong>{fmtNum(paper?.summary?.wins)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Losses</span>
+            <strong>{fmtNum(paper?.summary?.losses)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Breakeven</span>
+            <strong>{fmtNum(paper?.summary?.breakeven)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Win rate</span>
+            <strong>
+              {paper?.summary?.winRate == null
+                ? "—"
+                : `${(paper.summary.winRate * 100).toFixed(0)}%`}
+            </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Profit factor</span>
+            <strong>
+              {paper?.summary?.profitFactor == null
+                ? "—"
+                : Number.isFinite(paper.summary.profitFactor)
+                  ? paper.summary.profitFactor.toFixed(2)
+                  : "∞"}
+            </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Gross move</span>
+            <strong>{fmtPx(paper?.summary?.grossMoveSum)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Friction</span>
+            <strong>{fmtPx(paper?.summary?.frictionSum)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Net move</span>
+            <strong>{fmtPx(paper?.summary?.netMoveSum)}</strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Current streak</span>
+            <strong>
+              {paper?.summary?.streakKind &&
+              paper.summary.streakKind !== "NONE" &&
+              (paper.summary.currentStreak ?? 0) > 0
+                ? `${paper.summary.streakKind} ${paper.summary.currentStreak}`
+                : "—"}
+            </strong>
+          </div>
+          <div className="gm-ghr-paper-kpi">
+            <span>Trades/hour</span>
+            <strong>
+              {paper?.summary?.tradesPerHour == null
+                ? "—"
+                : paper.summary.tradesPerHour.toFixed(2)}
+            </strong>
+          </div>
+        </div>
+
+        {paper?.openTrade ? (
+          <div className="gm-ghr-paper-open" data-testid="gh-research-paper-open">
+            <div className="gm-ghr-paper-open-head">
+              <strong>{paper.openTrade.referenceTradeId}</strong>
+              <span>{paper.openTrade.setupName}</span>
+              <span>{paper.openTrade.side}</span>
+              <span className="gm-ghr-paper-hyp">OPEN · HYPOTHETICAL</span>
+            </div>
+            <div className="gm-ghr-paper-open-grid">
+              <span>
+                Entry <strong>{fmtPx(paper.openTrade.entryPrice)}</strong>
+              </span>
+              <span>
+                Current executable exit{" "}
+                <strong>{fmtPx(paper.openTrade.executableExitPrice)}</strong>
+              </span>
+              <span>
+                Live net move <strong>{fmtPx(paper.openTrade.netMove)}</strong>
+              </span>
+              <span>
+                MFE <strong>{fmtPx(paper.openTrade.mfe)}</strong>
+              </span>
+              <span>
+                MAE <strong>{fmtPx(paper.openTrade.mae)}</strong>
+              </span>
+              <span>
+                Duration{" "}
+                <strong>
+                  {paper.openTrade.durationMs != null
+                    ? `${Math.round(paper.openTrade.durationMs / 1000)}s`
+                    : "—"}
+                </strong>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="gm-ghr-empty">No open reference paper trade.</p>
+        )}
+
+        <div className="gm-ghr-paper-history" data-testid="gh-research-paper-history">
+          <div className="gm-ghr-section-title">REFERENCE HISTORY</div>
+          {(paper?.history?.length ?? 0) === 0 ? (
+            <p className="gm-ghr-empty">No closed reference paper trades yet.</p>
+          ) : (
+            <div className="gm-ghr-feed-desktop">
+              <table className="gm-ghr-table gm-ghr-paper-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Time</th>
+                    <th>Setup</th>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>Duration</th>
+                    <th>MFE</th>
+                    <th>MAE</th>
+                    <th>Gross</th>
+                    <th>Friction</th>
+                    <th>Net</th>
+                    <th>Result</th>
+                    <th>Exit reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paper!.history!.map((t) => (
+                    <tr key={t.referenceTradeId}>
+                      <td>{t.referenceTradeId}</td>
+                      <td>{t.entryTsIso.slice(11, 19)}</td>
+                      <td>{t.setupName}</td>
+                      <td>{t.side}</td>
+                      <td>{fmtPx(t.entryPrice)}</td>
+                      <td>{fmtPx(t.exitPrice)}</td>
+                      <td>
+                        {t.durationMs != null
+                          ? `${Math.round(t.durationMs / 1000)}s`
+                          : "—"}
+                      </td>
+                      <td>{fmtPx(t.mfe)}</td>
+                      <td>{fmtPx(t.mae)}</td>
+                      <td>{fmtPx(t.grossMove)}</td>
+                      <td>{fmtPx(t.referenceFriction)}</td>
+                      <td>{fmtPx(t.netMove)}</td>
+                      <td>{t.result ?? "—"}</td>
+                      <td>{t.exitReason ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

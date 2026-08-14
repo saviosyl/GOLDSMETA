@@ -589,7 +589,9 @@ export class GoldHunterFastResearchCaptureProcess {
           path !== "/" &&
           path !== "/ui-design" &&
           path !== "/recent-candidates" &&
-          path !== "/research/recent-candidates"
+          path !== "/research/recent-candidates" &&
+          path !== "/reference-paper" &&
+          path !== "/research/reference-paper"
         ) {
           res.writeHead(404, cors);
           res.end("not found");
@@ -645,6 +647,37 @@ export class GoldHunterFastResearchCaptureProcess {
               ...cors
             });
             res.end(JSON.stringify(feed, null, 2));
+            return;
+          }
+          if (
+            path === "/reference-paper" ||
+            path === "/research/reference-paper"
+          ) {
+            const paper =
+              this.runtime?.getBridge()?.referencePaperSnapshot() ?? {
+                mode: "REFERENCE_PAPER_ONLY" as const,
+                label:
+                  "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE" as const,
+                policy: null,
+                summary: {
+                  paperTrades: 0,
+                  open: 0,
+                  wins: 0,
+                  losses: 0,
+                  breakeven: 0,
+                  brokerRequests: 0,
+                  brokerOrders: 0,
+                  executionAdapter: "NONE"
+                },
+                openTrade: null,
+                history: []
+              };
+            res.writeHead(200, {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-store",
+              ...cors
+            });
+            res.end(JSON.stringify(paper, null, 2));
             return;
           }
           const health = this.buildHealth();

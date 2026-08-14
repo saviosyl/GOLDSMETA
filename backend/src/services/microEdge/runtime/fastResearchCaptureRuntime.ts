@@ -297,6 +297,22 @@ export class GoldHunterFastResearchCaptureRuntime {
         spotBidOnlyEvents: 0,
         spotAskOnlyEvents: 0,
         spotTwoSidedEvents: 0,
+        referencePaper: {
+          mode: "REFERENCE_PAPER_ONLY",
+          label: "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE",
+          paperTrades: 0,
+          open: 0,
+          wins: 0,
+          losses: 0,
+          breakeven: 0,
+          winRate: null,
+          profitFactor: null,
+          netMoveSum: 0,
+          tradesPerHour: null,
+          brokerRequests: 0,
+          brokerOrders: 0,
+          executionAdapter: "NONE"
+        },
         marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
         inputNormalizationVerified: true,
         captureStart: null,
@@ -500,6 +516,36 @@ export class GoldHunterFastResearchCaptureRuntime {
                 tradingButtons: [],
                 marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
                 inputNormalizationVerified: true
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+        if (
+          path === "/reference-paper" ||
+          path === "/research/reference-paper"
+        ) {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.referencePaperSnapshot() ?? {
+                mode: "REFERENCE_PAPER_ONLY",
+                label: "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE",
+                policy: null,
+                summary: {
+                  paperTrades: 0,
+                  open: 0,
+                  wins: 0,
+                  losses: 0,
+                  breakeven: 0,
+                  brokerRequests: 0,
+                  brokerOrders: 0,
+                  executionAdapter: "NONE"
+                },
+                openTrade: null,
+                history: []
               },
               null,
               2

@@ -372,6 +372,23 @@ export type ResearchCaptureHealth = {
   spotBidOnlyEvents: number;
   spotAskOnlyEvents: number;
   spotTwoSidedEvents: number;
+  /** Derived monitor-only reference paper summary (not research evidence). */
+  referencePaper: {
+    mode: "REFERENCE_PAPER_ONLY";
+    label: string;
+    paperTrades: number;
+    open: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    netMoveSum: number;
+    tradesPerHour: number | null;
+    brokerRequests: 0;
+    brokerOrders: 0;
+    executionAdapter: "NONE";
+  };
   marketDataNormalizationVersion: string;
   inputNormalizationVerified: boolean;
   captureStart: string | null;

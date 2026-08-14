@@ -60,7 +60,8 @@ describe("GoldHunterFastResearchPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (String(url).includes("/recent-candidates")) {
+        const u = String(url);
+        if (u.includes("/recent-candidates")) {
           return {
             ok: true,
             json: async () => ({
@@ -84,6 +85,35 @@ describe("GoldHunterFastResearchPage", () => {
                   acceleration: 0.001
                 }
               ]
+            })
+          };
+        }
+        if (u.includes("/reference-paper")) {
+          return {
+            ok: true,
+            json: async () => ({
+              mode: "REFERENCE_PAPER_ONLY",
+              label: "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE",
+              summary: {
+                paperTrades: 0,
+                open: 0,
+                wins: 0,
+                losses: 0,
+                breakeven: 0,
+                winRate: null,
+                profitFactor: null,
+                grossMoveSum: 0,
+                frictionSum: 0,
+                netMoveSum: 0,
+                currentStreak: 0,
+                streakKind: "NONE",
+                tradesPerHour: null,
+                brokerRequests: 0,
+                brokerOrders: 0,
+                executionAdapter: "NONE"
+              },
+              openTrade: null,
+              history: []
             })
           };
         }
@@ -126,6 +156,15 @@ describe("GoldHunterFastResearchPage", () => {
       "SELECTED SIGNAL EVENTS"
     );
     expect(screen.queryByText("SELECTED OPPORTUNITIES")).toBeNull();
+    expect(screen.getByTestId("gh-research-paper")).toHaveTextContent(
+      "REFERENCE PAPER TRADES"
+    );
+    expect(screen.getByTestId("gh-research-paper-disclaimer")).toHaveTextContent(
+      "HYPOTHETICAL, NOT A BROKER TRADE"
+    );
+    expect(screen.getByTestId("gh-research-paper-summary")).toHaveTextContent(
+      "Paper trades"
+    );
     expect(screen.getByTestId("gh-research-candidate-feed")).toHaveTextContent(
       "RESEARCH OBSERVATION — NOT A TRADE"
     );
