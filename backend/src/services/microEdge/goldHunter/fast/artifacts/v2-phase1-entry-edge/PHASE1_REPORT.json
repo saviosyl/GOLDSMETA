@@ -1,0 +1,4653 @@
+{
+  "title": "GOLD_HUNTER FAST V2 — Phase 1 Entry Edge Discovery",
+  "constraints": {
+    "pr119Frozen": true,
+    "pr121DraftUnmerged": true,
+    "deploy": false,
+    "thresholdChanges": false,
+    "brokerOrders": 0
+  },
+  "frictionAssumed": 0.06,
+  "inventory": {
+    "note": "Inventory of GOLD_HUNTER FAST live-shadow GCS runs under gold-hunter-fast/live-shadow/",
+    "calendarDaysWithUsableChunks": [
+      "2026-08-13 (probe only)",
+      "2026-08-14 (only substantial day)"
+    ],
+    "independentMarketPeriods": 1,
+    "oosVerdict": "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION",
+    "oosExplanation": "All substantial continuous Spot+Depth streams are from a single London morning (2026-08-14). Chronological 50/25/25 splits within that morning are IN-SAMPLE RESEARCH only and must not be treated as true holdout across independent regimes.",
+    "gcsRunCatalogSummary": {
+      "totalRunIds": 28,
+      "substantialUsable": [
+        "gh_fast_mssjjspo_8ubuxa (22 chunks, ~06:03–07:25)",
+        "gh_fast_mssmh2w2_ftl4pq (3 chunks, ~07:28–07:38)",
+        "gh_fast_mssnh4uq_v488yc (32 chunks, ~07:53–10:06)"
+      ],
+      "unitTestOrTinyProbe": "Most other 10-chunk runs are unit-test uploads with rowCount=2 per chunk (configHash=default). Not usable for feature research.",
+      "knownInfrastructureContamination": "V1 fail run (~91 resyncs / DATA_STALE / BOOK_REBUILDING windows). Stormy early run also has frequent rebuild/stale. Contaminated windows excluded from clean set."
+    },
+    "runsProcessed": [
+      {
+        "runId": "gh_fast_mssjjspo_8ubuxa",
+        "label": "EARLY_SAME_DAY_PRE_QUAL — 2026-08-14 ~06:03–07:25 UTC (stormy/pre-fix period)",
+        "eventCount": 11000,
+        "marketEvents": 11000,
+        "span": {
+          "start": "2026-08-14T06:03:24.833Z",
+          "end": "2026-08-14T07:25:26.505Z",
+          "hours": 1.367131111111111
+        },
+        "candidateRows": 9297,
+        "cleanCandidates": 131,
+        "contaminationStats": {
+          "book_rebuilding": 0,
+          "data_stale": 10779,
+          "feed_gap": 129,
+          "crossed_book": 0,
+          "resync_marker": 2,
+          "insufficient_features": 322
+        },
+        "setupCTickStats": {
+          "featureTicks": 10678,
+          "eligible": 3,
+          "subThreshold": 0,
+          "structuralFail": 10675,
+          "selected": 3,
+          "failedConditionCounts": {
+            "impulse_vel3s_too_weak": 9826,
+            "efficiency3s_too_low": 3514,
+            "pullback_too_shallow": 708,
+            "pullback_not_confirmed": 801,
+            "reaccel_acceleration_missing": 441,
+            "reaccel_imbalance_missing": 261,
+            "reaccel_vel250_missing": 206,
+            "pullback_too_deep": 4
+          }
+        },
+        "configHashSeen": null
+      },
+      {
+        "runId": "gh_fast_mssmh2w2_ftl4pq",
+        "label": "BRIDGE_SEGMENT — 2026-08-14 ~07:28–07:38 UTC (3 chunks)",
+        "eventCount": 1500,
+        "marketEvents": 1500,
+        "span": {
+          "start": "2026-08-14T07:25:16.976Z",
+          "end": "2026-08-14T07:38:31.353Z",
+          "hours": 0.22066027777777777
+        },
+        "candidateRows": 1241,
+        "cleanCandidates": 1007,
+        "contaminationStats": {
+          "book_rebuilding": 80,
+          "data_stale": 22,
+          "feed_gap": 19,
+          "crossed_book": 0,
+          "resync_marker": 9,
+          "insufficient_features": 67
+        },
+        "setupCTickStats": {
+          "featureTicks": 1433,
+          "eligible": 0,
+          "subThreshold": 0,
+          "structuralFail": 1433,
+          "selected": 0,
+          "failedConditionCounts": {
+            "impulse_vel3s_too_weak": 1346,
+            "efficiency3s_too_low": 381,
+            "pullback_too_shallow": 75,
+            "pullback_not_confirmed": 81,
+            "reaccel_vel250_missing": 21,
+            "reaccel_acceleration_missing": 42,
+            "reaccel_imbalance_missing": 21
+          }
+        },
+        "configHashSeen": null
+      },
+      {
+        "runId": "gh_fast_mssnh4uq_v488yc",
+        "label": "V1_EARLY_QUALIFICATION_FAIL — 2026-08-14 ~07:53–10:06 UTC",
+        "eventCount": 16000,
+        "marketEvents": 16000,
+        "span": {
+          "start": "2026-08-14T07:53:19.191Z",
+          "end": "2026-08-14T10:06:23.277Z",
+          "hours": 2.2178016666666664
+        },
+        "candidateRows": 13066,
+        "cleanCandidates": 10889,
+        "contaminationStats": {
+          "book_rebuilding": 877,
+          "data_stale": 222,
+          "feed_gap": 208,
+          "crossed_book": 0,
+          "resync_marker": 46,
+          "insufficient_features": 632
+        },
+        "setupCTickStats": {
+          "featureTicks": 15368,
+          "eligible": 4,
+          "subThreshold": 0,
+          "structuralFail": 15364,
+          "selected": 2,
+          "failedConditionCounts": {
+            "impulse_vel3s_too_weak": 14703,
+            "pullback_too_shallow": 585,
+            "reaccel_acceleration_missing": 334,
+            "pullback_not_confirmed": 643,
+            "reaccel_vel250_missing": 183,
+            "efficiency3s_too_low": 4969,
+            "reaccel_imbalance_missing": 198
+          }
+        },
+        "configHashSeen": null
+      }
+    ]
+  },
+  "sampleCounts": {
+    "candidatesBeforeExclusion": 23604,
+    "contaminatedExcluded": 11577,
+    "cleanCandidates": 12027,
+    "bySetupClean": {
+      "A": 5787,
+      "B": 5530,
+      "C": 710
+    },
+    "eligibleClean": {
+      "A": 442,
+      "B": 174,
+      "C": 4
+    },
+    "selectedClean": {
+      "A": 436,
+      "B": 156,
+      "C": 2
+    }
+  },
+  "cleanUsableEventPeriods": [
+    {
+      "runId": "gh_fast_mssjjspo_8ubuxa",
+      "span": {
+        "start": "2026-08-14T06:03:24.833Z",
+        "end": "2026-08-14T07:25:26.505Z",
+        "hours": 1.367131111111111
+      },
+      "cleanCandidates": 131,
+      "contaminatedCandidates": 9166
+    },
+    {
+      "runId": "gh_fast_mssmh2w2_ftl4pq",
+      "span": {
+        "start": "2026-08-14T07:25:16.976Z",
+        "end": "2026-08-14T07:38:31.353Z",
+        "hours": 0.22066027777777777
+      },
+      "cleanCandidates": 1007,
+      "contaminatedCandidates": 234
+    },
+    {
+      "runId": "gh_fast_mssnh4uq_v488yc",
+      "span": {
+        "start": "2026-08-14T07:53:19.191Z",
+        "end": "2026-08-14T10:06:23.277Z",
+        "hours": 2.2178016666666664
+      },
+      "cleanCandidates": 10889,
+      "contaminatedCandidates": 2177
+    }
+  ],
+  "excludedContaminatedPeriods": [
+    {
+      "runId": "gh_fast_mssjjspo_8ubuxa",
+      "contaminationStats": {
+        "book_rebuilding": 0,
+        "data_stale": 10779,
+        "feed_gap": 129,
+        "crossed_book": 0,
+        "resync_marker": 2,
+        "insufficient_features": 322
+      }
+    },
+    {
+      "runId": "gh_fast_mssmh2w2_ftl4pq",
+      "contaminationStats": {
+        "book_rebuilding": 80,
+        "data_stale": 22,
+        "feed_gap": 19,
+        "crossed_book": 0,
+        "resync_marker": 9,
+        "insufficient_features": 67
+      }
+    },
+    {
+      "runId": "gh_fast_mssnh4uq_v488yc",
+      "contaminationStats": {
+        "book_rebuilding": 877,
+        "data_stale": 222,
+        "feed_gap": 208,
+        "crossed_book": 0,
+        "resync_marker": 46,
+        "insufficient_features": 632
+      }
+    }
+  ],
+  "setupC": {
+    "rawEligibilityCount": 4,
+    "subThresholdCount": 0,
+    "softNearCount": 0,
+    "selectedCount": 2,
+    "failedConditionCounts": {
+      "pullback_too_shallow": 642,
+      "pullback_not_confirmed": 706,
+      "reaccel_acceleration_missing": 369,
+      "reaccel_imbalance_missing": 218,
+      "reaccel_vel250_missing": 197
+    },
+    "eligibleNotSelected": {
+      "n": 2,
+      "forward3s": {
+        "n": 2,
+        "labeled": 2,
+        "buy": 0,
+        "sell": 2,
+        "pFavFirst_0_05": 0,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": 0,
+        "pFavFirst_0_20": 0,
+        "avgForwardMfe": 0,
+        "avgForwardMae": -0.32999999999992724,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.32999999999992724,
+        "meanSigned": -0.32999999999992724,
+        "estimatedGrossEdge": -0.32999999999992724,
+        "estimatedEdgeAfterFriction": -0.38999999999992724,
+        "signedQuantiles": {
+          "0.1": -0.32999999999992724,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.32999999999992724,
+          "0.75": -0.32999999999992724,
+          "0.9": -0.32999999999992724
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.32999999999992724,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.32999999999992724,
+          "0.75": -0.32999999999992724,
+          "0.9": -0.32999999999992724
+        },
+        "_unused": {}
+      },
+      "forward5s": {
+        "n": 2,
+        "labeled": 2,
+        "buy": 0,
+        "sell": 2,
+        "pFavFirst_0_05": 0,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": 0,
+        "pFavFirst_0_20": 0,
+        "avgForwardMfe": 0,
+        "avgForwardMae": -0.7800000000006548,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.7800000000006548,
+        "meanSigned": -0.47000000000025466,
+        "estimatedGrossEdge": -0.47000000000025466,
+        "estimatedEdgeAfterFriction": -0.5300000000002547,
+        "signedQuantiles": {
+          "0.1": -0.47000000000025466,
+          "0.25": -0.47000000000025466,
+          "0.5": -0.47000000000025466,
+          "0.75": -0.47000000000025466,
+          "0.9": -0.47000000000025466
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.7800000000006548,
+          "0.25": -0.7800000000006548,
+          "0.5": -0.7800000000006548,
+          "0.75": -0.7800000000006548,
+          "0.9": -0.7800000000006548
+        },
+        "_unused": {}
+      }
+    },
+    "eligibleForward3s": {
+      "n": 4,
+      "labeled": 4,
+      "buy": 2,
+      "sell": 2,
+      "pFavFirst_0_05": 0,
+      "pFavFirst_0_10": 0,
+      "pFavFirst_0_15": 0,
+      "pFavFirst_0_20": 0,
+      "avgForwardMfe": 0,
+      "avgForwardMae": -0.24000000000023647,
+      "medianForwardMfe": 0,
+      "medianForwardMae": -0.24000000000023647,
+      "meanSigned": -0.24000000000023647,
+      "estimatedGrossEdge": -0.24000000000023647,
+      "estimatedEdgeAfterFriction": -0.30000000000023647,
+      "signedQuantiles": {
+        "0.1": -0.32999999999992724,
+        "0.25": -0.32999999999992724,
+        "0.5": -0.24000000000023647,
+        "0.75": -0.1500000000005457,
+        "0.9": -0.1500000000005457
+      },
+      "mfeQuantiles": {
+        "0.1": 0,
+        "0.25": 0,
+        "0.5": 0,
+        "0.75": 0,
+        "0.9": 0
+      },
+      "maeQuantiles": {
+        "0.1": -0.32999999999992724,
+        "0.25": -0.32999999999992724,
+        "0.5": -0.24000000000023647,
+        "0.75": -0.1500000000005457,
+        "0.9": -0.1500000000005457
+      },
+      "_unused": {}
+    },
+    "selectedForward3s": {
+      "n": 2,
+      "labeled": 2,
+      "buy": 2,
+      "sell": 0,
+      "pFavFirst_0_05": 0,
+      "pFavFirst_0_10": 0,
+      "pFavFirst_0_15": 0,
+      "pFavFirst_0_20": null,
+      "avgForwardMfe": 0,
+      "avgForwardMae": -0.1500000000005457,
+      "medianForwardMfe": 0,
+      "medianForwardMae": -0.1500000000005457,
+      "meanSigned": -0.1500000000005457,
+      "estimatedGrossEdge": -0.1500000000005457,
+      "estimatedEdgeAfterFriction": -0.2100000000005457,
+      "signedQuantiles": {
+        "0.1": -0.15000000000054572,
+        "0.25": -0.1500000000005457,
+        "0.5": -0.1500000000005457,
+        "0.75": -0.1500000000005457,
+        "0.9": -0.1500000000005457
+      },
+      "mfeQuantiles": {
+        "0.1": 0,
+        "0.25": 0,
+        "0.5": 0,
+        "0.75": 0,
+        "0.9": 0
+      },
+      "maeQuantiles": {
+        "0.1": -0.15000000000054572,
+        "0.25": -0.1500000000005457,
+        "0.5": -0.1500000000005457,
+        "0.75": -0.1500000000005457,
+        "0.9": -0.1500000000005457
+      },
+      "_unused": {}
+    },
+    "perTickStructuralCensus": {
+      "featureTicks": 27479,
+      "eligible": 7,
+      "subThreshold": 0,
+      "structuralFail": 27472,
+      "selected": 5,
+      "failedConditionCounts": {
+        "impulse_vel3s_too_weak": 25875,
+        "efficiency3s_too_low": 8864,
+        "pullback_too_shallow": 1368,
+        "pullback_not_confirmed": 1525,
+        "reaccel_acceleration_missing": 817,
+        "reaccel_imbalance_missing": 480,
+        "reaccel_vel250_missing": 410,
+        "pullback_too_deep": 4
+      }
+    },
+    "whyStructuralFails": "C requires impulse midVel3s + efficiency3s>0.35, pullback depth in (0.08, pullbackRetraceMax], then same-sign midVel250+acceleration+imbalance. Most feature ticks fail impulse/efficiency or pullback window — rawQuality stays null."
+  },
+  "buyVsSell": {
+    "BUY": {
+      "n": 6071,
+      "eligible": 287,
+      "forward": {
+        "1000": {
+          "n": 287,
+          "labeled": 241,
+          "buy": 287,
+          "sell": 0,
+          "pFavFirst_0_05": 0.03271028037383177,
+          "pFavFirst_0_10": 0.02142857142857143,
+          "pFavFirst_0_15": 0.019801980198019802,
+          "pFavFirst_0_20": 0.03508771929824561,
+          "avgForwardMfe": 0.004688796680505926,
+          "avgForwardMae": -0.1487136929460436,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.11000000000058208,
+          "meanSigned": -0.1379668049792267,
+          "estimatedGrossEdge": -0.1379668049792267,
+          "estimatedEdgeAfterFriction": -0.1979668049792267,
+          "signedQuantiles": {
+            "0.1": -0.3099999999994907,
+            "0.25": -0.1999999999998181,
+            "0.5": -0.10999999999967258,
+            "0.75": -0.06999999999970896,
+            "0.9": -0.010000000000218279
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0
+          },
+          "maeQuantiles": {
+            "0.1": -0.31999999999970896,
+            "0.25": -0.1999999999998181,
+            "0.5": -0.11000000000058208,
+            "0.75": -0.07000000000061846,
+            "0.9": -0.020000000000436557
+          },
+          "_unused": {}
+        },
+        "2000": {
+          "n": 287,
+          "labeled": 280,
+          "buy": 287,
+          "sell": 0,
+          "pFavFirst_0_05": 0.06818181818181818,
+          "pFavFirst_0_10": 0.04326923076923077,
+          "pFavFirst_0_15": 0.04790419161676647,
+          "pFavFirst_0_20": 0.017857142857142856,
+          "avgForwardMfe": 0.014142857142867017,
+          "avgForwardMae": -0.19896428571426636,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.17000000000007276,
+          "meanSigned": -0.144285714285687,
+          "estimatedGrossEdge": -0.144285714285687,
+          "estimatedEdgeAfterFriction": -0.204285714285687,
+          "signedQuantiles": {
+            "0.1": -0.3400000000001455,
+            "0.25": -0.23999999999978172,
+            "0.5": -0.125,
+            "0.75": -0.027499999999918145,
+            "0.9": 0.02999999999974534
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.0500000000001819
+          },
+          "maeQuantiles": {
+            "0.1": -0.38100000000013096,
+            "0.25": -0.27999999999974534,
+            "0.5": -0.17000000000007276,
+            "0.75": -0.09000000000014552,
+            "0.9": -0.03999999999996362
+          },
+          "_unused": {}
+        },
+        "3000": {
+          "n": 287,
+          "labeled": 280,
+          "buy": 287,
+          "sell": 0,
+          "pFavFirst_0_05": 0.072992700729927,
+          "pFavFirst_0_10": 0.07053941908713693,
+          "pFavFirst_0_15": 0.08695652173913043,
+          "pFavFirst_0_20": 0.05405405405405406,
+          "avgForwardMfe": 0.03003571428572026,
+          "avgForwardMae": -0.24782142857138426,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.20499999999992724,
+          "meanSigned": -0.15810714285707295,
+          "estimatedGrossEdge": -0.15810714285707295,
+          "estimatedEdgeAfterFriction": -0.21810714285707294,
+          "signedQuantiles": {
+            "0.1": -0.42000000000007276,
+            "0.25": -0.27249999999958163,
+            "0.5": -0.13999999999941792,
+            "0.75": -0.02999999999974534,
+            "0.9": 0.06999999999970896
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.020000000000436557,
+            "0.9": 0.09200000000009811
+          },
+          "maeQuantiles": {
+            "0.1": -0.45100000000065843,
+            "0.25": -0.339999999999236,
+            "0.5": -0.20499999999992724,
+            "0.75": -0.11999999999989086,
+            "0.9": -0.06899999999977814
+          },
+          "_unused": {}
+        },
+        "5000": {
+          "n": 287,
+          "labeled": 280,
+          "buy": 287,
+          "sell": 0,
+          "pFavFirst_0_05": 0.07246376811594203,
+          "pFavFirst_0_10": 0.09848484848484848,
+          "pFavFirst_0_15": 0.11618257261410789,
+          "pFavFirst_0_20": 0.10900473933649289,
+          "avgForwardMfe": 0.049321428571417004,
+          "avgForwardMae": -0.31099999999996075,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.2899999999999636,
+          "meanSigned": -0.1942857142856805,
+          "estimatedGrossEdge": -0.1942857142856805,
+          "estimatedEdgeAfterFriction": -0.2542857142856805,
+          "signedQuantiles": {
+            "0.1": -0.5400000000000545,
+            "0.25": -0.3424999999992906,
+            "0.5": -0.16499999999996362,
+            "0.75": -0.010000000000218279,
+            "0.9": 0.09000000000014552
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.05999999999949068,
+            "0.9": 0.19000000000050932
+          },
+          "maeQuantiles": {
+            "0.1": -0.5510000000001127,
+            "0.25": -0.4399999999995998,
+            "0.5": -0.2899999999999636,
+            "0.75": -0.15999999999985448,
+            "0.9": -0.08899999999930519
+          },
+          "_unused": {}
+        },
+        "10000": {
+          "n": 287,
+          "labeled": 280,
+          "buy": 287,
+          "sell": 0,
+          "pFavFirst_0_05": 0.07194244604316546,
+          "pFavFirst_0_10": 0.11313868613138686,
+          "pFavFirst_0_15": 0.13846153846153847,
+          "pFavFirst_0_20": 0.17408906882591094,
+          "avgForwardMfe": 0.12185714285715546,
+          "avgForwardMae": -0.3811785714285244,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.32500000000027285,
+          "meanSigned": -0.18407142857142844,
+          "estimatedGrossEdge": -0.18407142857142844,
+          "estimatedEdgeAfterFriction": -0.24407142857142844,
+          "signedQuantiles": {
+            "0.1": -0.6099999999996726,
+            "0.25": -0.3999999999996362,
+            "0.5": -0.18999999999959982,
+            "0.75": -0.02999999999974534,
+            "0.9": 0.2919999999999162
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.1999999999998181,
+            "0.9": 0.3899999999994179
+          },
+          "maeQuantiles": {
+            "0.1": -0.7399999999997817,
+            "0.25": -0.4899999999997817,
+            "0.5": -0.32500000000027285,
+            "0.75": -0.2074999999999818,
+            "0.9": -0.10999999999967258
+          },
+          "_unused": {}
+        }
+      }
+    },
+    "SELL": {
+      "n": 5956,
+      "eligible": 333,
+      "forward": {
+        "1000": {
+          "n": 333,
+          "labeled": 265,
+          "buy": 0,
+          "sell": 333,
+          "pFavFirst_0_05": 0.0603448275862069,
+          "pFavFirst_0_10": 0.06451612903225806,
+          "pFavFirst_0_15": 0.08130081300813008,
+          "pFavFirst_0_20": 0.031746031746031744,
+          "avgForwardMfe": 0.010037735849066351,
+          "avgForwardMae": -0.14479245283016423,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.13000000000010914,
+          "meanSigned": -0.1314339622641232,
+          "estimatedGrossEdge": -0.1314339622641232,
+          "estimatedEdgeAfterFriction": -0.1914339622641232,
+          "signedQuantiles": {
+            "0.1": -0.27999999999974534,
+            "0.25": -0.19000000000050932,
+            "0.5": -0.13000000000010914,
+            "0.75": -0.06999999999970896,
+            "0.9": 0.01600000000034919
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.01600000000034919
+          },
+          "maeQuantiles": {
+            "0.1": -0.27999999999974534,
+            "0.25": -0.19000000000050932,
+            "0.5": -0.13000000000010914,
+            "0.75": -0.06999999999970896,
+            "0.9": 0
+          },
+          "_unused": {}
+        },
+        "2000": {
+          "n": 333,
+          "labeled": 324,
+          "buy": 0,
+          "sell": 333,
+          "pFavFirst_0_05": 0.11003236245954692,
+          "pFavFirst_0_10": 0.12267657992565056,
+          "pFavFirst_0_15": 0.10784313725490197,
+          "pFavFirst_0_20": 0.07971014492753623,
+          "avgForwardMfe": 0.0346913580246991,
+          "avgForwardMae": -0.1952469135802448,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.16499999999950887,
+          "meanSigned": -0.13521604938270043,
+          "estimatedGrossEdge": -0.13521604938270043,
+          "estimatedEdgeAfterFriction": -0.19521604938270043,
+          "signedQuantiles": {
+            "0.1": -0.36699999999982535,
+            "0.25": -0.23999999999978172,
+            "0.5": -0.14000000000032742,
+            "0.75": -0.02999999999974534,
+            "0.9": 0.11999999999989086
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.019999999999527063,
+            "0.9": 0.14000000000005458
+          },
+          "maeQuantiles": {
+            "0.1": -0.38000000000010914,
+            "0.25": -0.26999999999952706,
+            "0.5": -0.16499999999950887,
+            "0.75": -0.09000000000014552,
+            "0.9": -0.02999999999974534
+          },
+          "_unused": {}
+        },
+        "3000": {
+          "n": 333,
+          "labeled": 324,
+          "buy": 0,
+          "sell": 333,
+          "pFavFirst_0_05": 0.12420382165605096,
+          "pFavFirst_0_10": 0.15916955017301038,
+          "pFavFirst_0_15": 0.164,
+          "pFavFirst_0_20": 0.1497326203208556,
+          "avgForwardMfe": 0.05932098765432458,
+          "avgForwardMae": -0.25416666666663973,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.1999999999998181,
+          "meanSigned": -0.15771604938270034,
+          "estimatedGrossEdge": -0.15771604938270034,
+          "estimatedEdgeAfterFriction": -0.21771604938270034,
+          "signedQuantiles": {
+            "0.1": -0.5100000000002183,
+            "0.25": -0.339999999999236,
+            "0.5": -0.1500000000005457,
+            "0.75": -0.010000000000218279,
+            "0.9": 0.17000000000007276
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.07999999999992724,
+            "0.9": 0.19399999999995976
+          },
+          "maeQuantiles": {
+            "0.1": -0.5469999999994798,
+            "0.25": -0.37250000000062755,
+            "0.5": -0.1999999999998181,
+            "0.75": -0.11000000000058208,
+            "0.9": -0.03999999999996362
+          },
+          "_unused": {}
+        },
+        "5000": {
+          "n": 333,
+          "labeled": 324,
+          "buy": 0,
+          "sell": 333,
+          "pFavFirst_0_05": 0.12264150943396226,
+          "pFavFirst_0_10": 0.16943521594684385,
+          "pFavFirst_0_15": 0.18309859154929578,
+          "pFavFirst_0_20": 0.20481927710843373,
+          "avgForwardMfe": 0.09074074074073962,
+          "avgForwardMae": -0.3431481481481322,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.30999999999994543,
+          "meanSigned": -0.18527777777776297,
+          "estimatedGrossEdge": -0.18527777777776297,
+          "estimatedEdgeAfterFriction": -0.24527777777776297,
+          "signedQuantiles": {
+            "0.1": -0.5470000000001164,
+            "0.25": -0.4499999999998181,
+            "0.5": -0.19000000000050932,
+            "0.75": 0.009999999999308784,
+            "0.9": 0.24000000000069122
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.12499999999977263,
+            "0.9": 0.280000000000382
+          },
+          "maeQuantiles": {
+            "0.1": -0.6400000000003274,
+            "0.25": -0.5250000000003183,
+            "0.5": -0.30999999999994543,
+            "0.75": -0.15999999999985448,
+            "0.9": -0.05999999999949068
+          },
+          "_unused": {}
+        },
+        "10000": {
+          "n": 333,
+          "labeled": 324,
+          "buy": 0,
+          "sell": 333,
+          "pFavFirst_0_05": 0.12264150943396226,
+          "pFavFirst_0_10": 0.16776315789473684,
+          "pFavFirst_0_15": 0.19243986254295534,
+          "pFavFirst_0_20": 0.21933085501858737,
+          "avgForwardMfe": 0.12827160493825038,
+          "avgForwardMae": -0.3997839506172944,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.3499999999994543,
+          "meanSigned": -0.1503703703703796,
+          "estimatedGrossEdge": -0.1503703703703796,
+          "estimatedEdgeAfterFriction": -0.2103703703703796,
+          "signedQuantiles": {
+            "0.1": -0.569999999999709,
+            "0.25": -0.3099999999994907,
+            "0.5": -0.14000000000032742,
+            "0.75": 0.012500000000272848,
+            "0.9": 0.27000000000043656
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.18000000000029104,
+            "0.9": 0.5
+          },
+          "maeQuantiles": {
+            "0.1": -0.7699999999995271,
+            "0.25": -0.5799999999999272,
+            "0.5": -0.3499999999994543,
+            "0.75": -0.17000000000007276,
+            "0.9": -0.07999999999992724
+          },
+          "_unused": {}
+        }
+      }
+    }
+  },
+  "forwardMovementTables": {
+    "250ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 10,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.8,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.11000000000003637,
+        "avgForwardMae": -0.018000000000029104,
+        "medianForwardMfe": 0.1000000000003638,
+        "medianForwardMae": 0,
+        "meanSigned": 0.09200000000000727,
+        "estimatedGrossEdge": 0.09200000000000727,
+        "estimatedEdgeAfterFriction": 0.03200000000000727,
+        "signedQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": 0.0500000000001819,
+          "0.5": 0.1000000000003638,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0.0500000000001819,
+          "0.5": 0.1000000000003638,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "maeQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 2,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 1,
+        "pFavFirst_0_10": null,
+        "pFavFirst_0_15": null,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.0500000000001819,
+        "avgForwardMae": 0,
+        "medianForwardMfe": 0.0500000000001819,
+        "medianForwardMae": 0,
+        "meanSigned": 0.0500000000001819,
+        "estimatedGrossEdge": 0.0500000000001819,
+        "estimatedEdgeAfterFriction": -0.009999999999818099,
+        "signedQuantiles": {
+          "0.1": 0.0500000000001819,
+          "0.25": 0.0500000000001819,
+          "0.5": 0.0500000000001819,
+          "0.75": 0.0500000000001819,
+          "0.9": 0.0500000000001819
+        },
+        "mfeQuantiles": {
+          "0.1": 0.0500000000001819,
+          "0.25": 0.0500000000001819,
+          "0.5": 0.0500000000001819,
+          "0.75": 0.0500000000001819,
+          "0.9": 0.0500000000001819
+        },
+        "maeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 8,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.75,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.125,
+        "avgForwardMae": -0.02250000000003638,
+        "medianForwardMfe": 0.15000000000009095,
+        "medianForwardMae": 0,
+        "meanSigned": 0.10249999999996362,
+        "estimatedGrossEdge": 0.10249999999996362,
+        "estimatedEdgeAfterFriction": 0.04249999999996362,
+        "signedQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": 0.05250000000023647,
+          "0.5": 0.15000000000009095,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0.07500000000027285,
+          "0.5": 0.15000000000009095,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "maeQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": -0.02250000000003638,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 4,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 1,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.15000000000009095,
+        "avgForwardMae": 0,
+        "medianForwardMfe": 0.15000000000009095,
+        "medianForwardMae": 0,
+        "meanSigned": 0.15000000000009095,
+        "estimatedGrossEdge": 0.15000000000009095,
+        "estimatedEdgeAfterFriction": 0.09000000000009095,
+        "signedQuantiles": {
+          "0.1": 0.1000000000003638,
+          "0.25": 0.1000000000003638,
+          "0.5": 0.15000000000009095,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "mfeQuantiles": {
+          "0.1": 0.1000000000003638,
+          "0.25": 0.1000000000003638,
+          "0.5": 0.15000000000009095,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.1999999999998181
+        },
+        "maeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 6,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.6666666666666666,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.08333333333333333,
+        "avgForwardMae": -0.030000000000048505,
+        "medianForwardMfe": 0.0500000000001819,
+        "medianForwardMae": 0,
+        "meanSigned": 0.05333333333328483,
+        "estimatedGrossEdge": 0.05333333333328483,
+        "estimatedEdgeAfterFriction": -0.006666666666715171,
+        "signedQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": -0.055000000000063665,
+          "0.5": 0.0500000000001819,
+          "0.75": 0.16249999999990905,
+          "0.9": 0.1999999999998181
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0.012500000000045475,
+          "0.5": 0.0500000000001819,
+          "0.75": 0.16249999999990905,
+          "0.9": 0.1999999999998181
+        },
+        "maeQuantiles": {
+          "0.1": -0.09000000000014552,
+          "0.25": -0.06750000000010914,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 0,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": null,
+        "pFavFirst_0_10": null,
+        "pFavFirst_0_15": null,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": null,
+        "avgForwardMae": null,
+        "medianForwardMfe": null,
+        "medianForwardMae": null,
+        "meanSigned": null,
+        "estimatedGrossEdge": null,
+        "estimatedEdgeAfterFriction": null,
+        "signedQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "mfeQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "maeQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 0,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": null,
+        "pFavFirst_0_10": null,
+        "pFavFirst_0_15": null,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": null,
+        "avgForwardMae": null,
+        "medianForwardMfe": null,
+        "medianForwardMae": null,
+        "meanSigned": null,
+        "estimatedGrossEdge": null,
+        "estimatedEdgeAfterFriction": null,
+        "signedQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "mfeQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "maeQuantiles": {
+          "0.1": null,
+          "0.25": null,
+          "0.5": null,
+          "0.75": null,
+          "0.9": null
+        },
+        "_unused": {}
+      }
+    },
+    "500ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 2545,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.09148839326354119,
+        "pFavFirst_0_10": 0.07129217059197963,
+        "pFavFirst_0_15": 0.083710407239819,
+        "pFavFirst_0_20": 0.0711743772241993,
+        "avgForwardMfe": 0.012294695481334508,
+        "avgForwardMae": -0.13317485265225623,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11000000000058208,
+        "meanSigned": -0.12088015717092172,
+        "estimatedGrossEdge": -0.12088015717092172,
+        "estimatedEdgeAfterFriction": -0.1808801571709217,
+        "signedQuantiles": {
+          "0.1": -0.27999999999974534,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.06000000000040018,
+          "0.9": 0.019999999999527063
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.019999999999527063
+        },
+        "maeQuantiles": {
+          "0.1": -0.27999999999974534,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.06000000000040018,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 1283,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.06411398040961709,
+        "pFavFirst_0_10": 0.05024509803921569,
+        "pFavFirst_0_15": 0.05217391304347826,
+        "pFavFirst_0_20": 0.03333333333333333,
+        "avgForwardMfe": 0.008246297739672585,
+        "avgForwardMae": -0.14164458300856267,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11999999999989086,
+        "meanSigned": -0.1333982852688901,
+        "estimatedGrossEdge": -0.1333982852688901,
+        "estimatedEdgeAfterFriction": -0.1933982852688901,
+        "signedQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18999999999959982,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.07000000000061846,
+          "0.9": -0.010000000000218279
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18999999999959982,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.07000000000061846,
+          "0.9": -0.010000000000218279
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 1262,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.12011173184357542,
+        "pFavFirst_0_10": 0.09403973509933775,
+        "pFavFirst_0_15": 0.1179245283018868,
+        "pFavFirst_0_20": 0.11450381679389313,
+        "avgForwardMfe": 0.016410459587952772,
+        "avgForwardMae": -0.12456418383518715,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.10815372424723438,
+        "estimatedGrossEdge": -0.10815372424723438,
+        "estimatedEdgeAfterFriction": -0.16815372424723438,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.049999999999272404,
+          "0.9": 0.0500000000001819
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.0500000000001819
+        },
+        "maeQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.049999999999272404,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 1212,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.10358180058083252,
+        "pFavFirst_0_10": 0.07923497267759563,
+        "pFavFirst_0_15": 0.09429280397022333,
+        "pFavFirst_0_20": 0.09090909090909091,
+        "avgForwardMfe": 0.014166666666667478,
+        "avgForwardMae": -0.12792904290428384,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.11376237623761634,
+        "estimatedGrossEdge": -0.11376237623761634,
+        "estimatedEdgeAfterFriction": -0.17376237623761634,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05749999999966349,
+          "0.9": 0.02999999999974534
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.02999999999974534
+        },
+        "maeQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05749999999966349,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 1170,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.07782101167315175,
+        "pFavFirst_0_10": 0.05714285714285714,
+        "pFavFirst_0_15": 0.07125890736342043,
+        "pFavFirst_0_20": 0.05970149253731343,
+        "avgForwardMfe": 0.010324786324781598,
+        "avgForwardMae": -0.13790598290598088,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11500000000023647,
+        "meanSigned": -0.1275811965811993,
+        "estimatedGrossEdge": -0.1275811965811993,
+        "estimatedEdgeAfterFriction": -0.1875811965811993,
+        "signedQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.11500000000023647,
+          "0.75": -0.06999999999970896,
+          "0.9": 0.010000000000218279
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.010000000000218279
+        },
+        "maeQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.11500000000023647,
+          "0.75": -0.06999999999970896,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 163,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.10294117647058823,
+        "pFavFirst_0_10": 0.11538461538461539,
+        "pFavFirst_0_15": 0.1,
+        "pFavFirst_0_20": 0,
+        "avgForwardMfe": 0.01251533742331824,
+        "avgForwardMae": -0.1382208588957207,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11000000000058208,
+        "meanSigned": -0.12570552147240246,
+        "estimatedGrossEdge": -0.12570552147240246,
+        "estimatedEdgeAfterFriction": -0.18570552147240246,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.04999999999972715,
+          "0.9": 0
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.04999999999972715,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 134,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.01652892561983471,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": 0,
+        "pFavFirst_0_20": 0,
+        "avgForwardMfe": 0.0014925373134518402,
+        "avgForwardMae": -0.1490298507462502,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.13000000000010914,
+        "meanSigned": -0.14753731343279836,
+        "estimatedGrossEdge": -0.14753731343279836,
+        "estimatedEdgeAfterFriction": -0.20753731343279835,
+        "signedQuantiles": {
+          "0.1": -0.30700000000033467,
+          "0.25": -0.19000000000050932,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.03999999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.30700000000033467,
+          "0.25": -0.19000000000050932,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      }
+    },
+    "1000ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 9028,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.09000762776506484,
+        "pFavFirst_0_10": 0.07373608322686621,
+        "pFavFirst_0_15": 0.08253772713273791,
+        "pFavFirst_0_20": 0.06988436400201106,
+        "avgForwardMfe": 0.013306380150642961,
+        "avgForwardMae": -0.13362649534779958,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.11760965883915774,
+        "estimatedGrossEdge": -0.11760965883915774,
+        "estimatedEdgeAfterFriction": -0.17760965883915775,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17999999999938154,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05999999999949068,
+          "0.9": 0.02999999999974534
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.02999999999974534
+        },
+        "maeQuantiles": {
+          "0.1": -0.27999999999974534,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.06000000000040018,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 4556,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.07259073842302878,
+        "pFavFirst_0_10": 0.059823008849557525,
+        "pFavFirst_0_15": 0.055388320288982544,
+        "pFavFirst_0_20": 0.05523809523809524,
+        "avgForwardMfe": 0.01124012291483459,
+        "avgForwardMae": -0.13844161545215375,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11000000000058208,
+        "meanSigned": -0.12368964003512027,
+        "estimatedGrossEdge": -0.12368964003512027,
+        "estimatedEdgeAfterFriction": -0.18368964003512028,
+        "signedQuantiles": {
+          "0.1": -0.28000000000065484,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.06000000000040018,
+          "0.9": 0.009999999999308784
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.010000000000218279
+        },
+        "maeQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18999999999959982,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.06000000000040018,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 4472,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.107982433479721,
+        "pFavFirst_0_10": 0.08854559155990957,
+        "pFavFirst_0_15": 0.11097099621689786,
+        "pFavFirst_0_20": 0.08626198083067092,
+        "avgForwardMfe": 0.015411449016104263,
+        "avgForwardMae": -0.12872093023254072,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.11141547406080236,
+        "estimatedGrossEdge": -0.11141547406080236,
+        "estimatedEdgeAfterFriction": -0.17141547406080238,
+        "signedQuantiles": {
+          "0.1": -0.26999999999952706,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.0500000000001819,
+          "0.9": 0.03999999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.03999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05999999999949068,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 4330,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.10184937014205307,
+        "pFavFirst_0_10": 0.07925407925407925,
+        "pFavFirst_0_15": 0.0913364674278039,
+        "pFavFirst_0_20": 0.08116883116883117,
+        "avgForwardMfe": 0.014741339491918313,
+        "avgForwardMae": -0.1288822170900591,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.11161200923786263,
+        "estimatedGrossEdge": -0.11161200923786263,
+        "estimatedEdgeAfterFriction": -0.17161200923786263,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.0500000000001819,
+          "0.9": 0.03999999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.03999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.2710000000003671,
+          "0.25": -0.17000000000007276,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05999999999949068,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 4136,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.07863623865823481,
+        "pFavFirst_0_10": 0.06577916992952232,
+        "pFavFirst_0_15": 0.07446113651208361,
+        "pFavFirst_0_20": 0.061636556854410204,
+        "avgForwardMfe": 0.011982591876208334,
+        "avgForwardMae": -0.137282398452604,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.11000000000058208,
+        "meanSigned": -0.12244197292068842,
+        "estimatedGrossEdge": -0.12244197292068842,
+        "estimatedEdgeAfterFriction": -0.18244197292068842,
+        "signedQuantiles": {
+          "0.1": -0.27000000000043656,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.06000000000040018,
+          "0.9": 0.010000000000218279
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.019999999999527063
+        },
+        "maeQuantiles": {
+          "0.1": -0.27999999999974534,
+          "0.25": -0.18999999999959982,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.06000000000040018,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 562,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.08433734939759036,
+        "pFavFirst_0_10": 0.09116809116809117,
+        "pFavFirst_0_15": 0.07929515418502203,
+        "pFavFirst_0_20": 0.04838709677419355,
+        "avgForwardMfe": 0.01199288256227881,
+        "avgForwardMae": -0.1432740213523285,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.10999999999967258,
+        "meanSigned": -0.12825622775801346,
+        "estimatedGrossEdge": -0.12825622775801346,
+        "estimatedEdgeAfterFriction": -0.18825622775801346,
+        "signedQuantiles": {
+          "0.1": -0.2899999999999636,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.05999999999949068,
+          "0.9": 0.01900000000041507
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.020000000000436557
+        },
+        "maeQuantiles": {
+          "0.1": -0.3000000000001819,
+          "0.25": -0.18000000000029104,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.06000000000040018,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 506,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.04708520179372197,
+        "pFavFirst_0_10": 0.046012269938650305,
+        "pFavFirst_0_15": 0.05357142857142857,
+        "pFavFirst_0_20": 0.03333333333333333,
+        "avgForwardMfe": 0.007490118577084014,
+        "avgForwardMae": -0.1466600790513637,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.1299999999996544,
+        "meanSigned": -0.13454545454542743,
+        "estimatedGrossEdge": -0.13454545454542743,
+        "estimatedEdgeAfterFriction": -0.19454545454542743,
+        "signedQuantiles": {
+          "0.1": -0.2849999999998545,
+          "0.25": -0.19000000000050932,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.06999999999970896,
+          "0.9": -0.004999999999654392
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "maeQuantiles": {
+          "0.1": -0.3049999999998363,
+          "0.25": -0.1999999999998181,
+          "0.5": -0.1299999999996544,
+          "0.75": -0.07000000000061846,
+          "0.9": -0.010000000000218279
+        },
+        "_unused": {}
+      }
+    },
+    "2000ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 11474,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.11448619702705198,
+        "pFavFirst_0_10": 0.11574021230453145,
+        "pFavFirst_0_15": 0.12566628977548053,
+        "pFavFirst_0_20": 0.111441647597254,
+        "avgForwardMfe": 0.030634477950144675,
+        "avgForwardMae": -0.17780808785078914,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.14000000000032742,
+        "meanSigned": -0.11851751786648271,
+        "estimatedGrossEdge": -0.11851751786648271,
+        "estimatedEdgeAfterFriction": -0.1785175178664827,
+        "signedQuantiles": {
+          "0.1": -0.32999999999992724,
+          "0.25": -0.21000000000003638,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.020000000000436557,
+          "0.9": 0.08000000000083674
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.10999999999967258
+        },
+        "maeQuantiles": {
+          "0.1": -0.3600000000005821,
+          "0.25": -0.25,
+          "0.5": -0.14000000000032742,
+          "0.75": -0.07999999999992724,
+          "0.9": -0.010000000000218279
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 5788,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.09622055870001826,
+        "pFavFirst_0_10": 0.09655017921146954,
+        "pFavFirst_0_15": 0.10484637313905606,
+        "pFavFirst_0_20": 0.09367996414164052,
+        "avgForwardMfe": 0.027332411886654487,
+        "avgForwardMae": -0.18369212163096518,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.1499999999996362,
+        "meanSigned": -0.12471147201106976,
+        "estimatedGrossEdge": -0.12471147201106976,
+        "estimatedEdgeAfterFriction": -0.18471147201106974,
+        "signedQuantiles": {
+          "0.1": -0.3400000000001455,
+          "0.25": -0.21999999999934516,
+          "0.5": -0.11000000000012733,
+          "0.75": -0.02999999999974534,
+          "0.9": 0.06999999999970896
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.08999999999923602
+        },
+        "maeQuantiles": {
+          "0.1": -0.36999999999989086,
+          "0.25": -0.2600000000002183,
+          "0.5": -0.1499999999996362,
+          "0.75": -0.08000000000083674,
+          "0.9": -0.020000000000436557
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 5686,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.13317146059021293,
+        "pFavFirst_0_10": 0.1356760530602746,
+        "pFavFirst_0_15": 0.14733025708635464,
+        "pFavFirst_0_20": 0.12996727442730246,
+        "avgForwardMfe": 0.03399577910657823,
+        "avgForwardMae": -0.1718185015828224,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.13999999999941792,
+        "meanSigned": -0.11221245163558756,
+        "estimatedGrossEdge": -0.11221245163558756,
+        "estimatedEdgeAfterFriction": -0.17221245163558757,
+        "signedQuantiles": {
+          "0.1": -0.31999999999970896,
+          "0.25": -0.21000000000003638,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.019999999999527063,
+          "0.9": 0.10999999999967258
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.010000000000218279,
+          "0.9": 0.12000000000080036
+        },
+        "maeQuantiles": {
+          "0.1": -0.3400000000001455,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.13999999999941792,
+          "0.75": -0.07000000000061846,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 5532,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.1276636590516414,
+        "pFavFirst_0_10": 0.12810707456978968,
+        "pFavFirst_0_15": 0.13520933424845574,
+        "pFavFirst_0_20": 0.12354085603112841,
+        "avgForwardMfe": 0.03325741142443724,
+        "avgForwardMae": -0.17114605929139284,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.13999999999941792,
+        "meanSigned": -0.11000542299349704,
+        "estimatedGrossEdge": -0.11000542299349704,
+        "estimatedEdgeAfterFriction": -0.17000542299349702,
+        "signedQuantiles": {
+          "0.1": -0.32000000000061846,
+          "0.25": -0.21000000000003638,
+          "0.5": -0.10999999999967258,
+          "0.75": -0.019999999999527063,
+          "0.9": 0.09000000000014552
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.010000000000218279,
+          "0.9": 0.11000000000058208
+        },
+        "maeQuantiles": {
+          "0.1": -0.3500000000003638,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.13999999999941792,
+          "0.75": -0.07999999999992724,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 5250,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.10301810865191147,
+        "pFavFirst_0_10": 0.10434782608695652,
+        "pFavFirst_0_15": 0.1168240643581672,
+        "pFavFirst_0_20": 0.0999505195447798,
+        "avgForwardMfe": 0.028243809523804796,
+        "avgForwardMae": -0.18123238095237304,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.14000000000032742,
+        "meanSigned": -0.12349333333333093,
+        "estimatedGrossEdge": -0.12349333333333093,
+        "estimatedEdgeAfterFriction": -0.18349333333333093,
+        "signedQuantiles": {
+          "0.1": -0.32999999999992724,
+          "0.25": -0.21000000000003638,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.030000000000654836,
+          "0.9": 0.07999999999992724
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.1000000000003638
+        },
+        "maeQuantiles": {
+          "0.1": -0.36999999999989086,
+          "0.25": -0.25,
+          "0.5": -0.14000000000032742,
+          "0.75": -0.07999999999992724,
+          "0.9": -0.019999999999527063
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 692,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.09662576687116564,
+        "pFavFirst_0_10": 0.10507246376811594,
+        "pFavFirst_0_15": 0.11961722488038277,
+        "pFavFirst_0_20": 0.10580204778156997,
+        "avgForwardMfe": 0.02780346820808954,
+        "avgForwardMae": -0.20508670520232802,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.15999999999985448,
+        "meanSigned": -0.14881502890174794,
+        "estimatedGrossEdge": -0.14881502890174794,
+        "estimatedEdgeAfterFriction": -0.20881502890174794,
+        "signedQuantiles": {
+          "0.1": -0.3800000000000182,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.020000000000436557,
+          "0.9": 0.0700000000005275
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.10000000000027284
+        },
+        "maeQuantiles": {
+          "0.1": -0.39899999999970526,
+          "0.25": -0.27999999999974534,
+          "0.5": -0.15999999999985448,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.010000000000218279
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 604,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.09075043630017451,
+        "pFavFirst_0_10": 0.0880503144654088,
+        "pFavFirst_0_15": 0.08086253369272237,
+        "pFavFirst_0_20": 0.052,
+        "avgForwardMfe": 0.025165562913916018,
+        "avgForwardMae": -0.19697019867548657,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17000000000007276,
+        "meanSigned": -0.13942052980130348,
+        "estimatedGrossEdge": -0.13942052980130348,
+        "estimatedEdgeAfterFriction": -0.19942052980130348,
+        "signedQuantiles": {
+          "0.1": -0.3500000000003638,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.02999999999974534,
+          "0.9": 0.0769999999998622
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.08000000000083674
+        },
+        "maeQuantiles": {
+          "0.1": -0.38000000000010914,
+          "0.25": -0.27999999999974534,
+          "0.5": -0.17000000000007276,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.03300000000044702
+        },
+        "_unused": {}
+      }
+    },
+    "3000ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 11474,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.12295008513307644,
+        "pFavFirst_0_10": 0.14317673378076062,
+        "pFavFirst_0_15": 0.15904700579523504,
+        "pFavFirst_0_20": 0.14808013355592656,
+        "avgForwardMfe": 0.04898989018650551,
+        "avgForwardMae": -0.21998169775143428,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17999999999938154,
+        "meanSigned": -0.12841641973155915,
+        "estimatedGrossEdge": -0.12841641973155915,
+        "estimatedEdgeAfterFriction": -0.18841641973155915,
+        "signedQuantiles": {
+          "0.1": -0.3999999999996362,
+          "0.25": -0.2599999999993088,
+          "0.5": -0.11000000000058208,
+          "0.75": 0,
+          "0.9": 0.1499999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.18000000000029104
+        },
+        "maeQuantiles": {
+          "0.1": -0.4499999999998181,
+          "0.25": -0.3099999999994907,
+          "0.5": -0.17999999999938154,
+          "0.75": -0.0999999999994543,
+          "0.9": -0.02999999999974534
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 5788,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.10183046028078906,
+        "pFavFirst_0_10": 0.11707219784603111,
+        "pFavFirst_0_15": 0.13555892766818411,
+        "pFavFirst_0_20": 0.12753433616742968,
+        "avgForwardMfe": 0.04392881824463407,
+        "avgForwardMae": -0.22773842432619756,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18000000000029104,
+        "meanSigned": -0.13729440221147607,
+        "estimatedGrossEdge": -0.13729440221147607,
+        "estimatedEdgeAfterFriction": -0.19729440221147607,
+        "signedQuantiles": {
+          "0.1": -0.3999999999996362,
+          "0.25": -0.26999999999952706,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.010000000000218279,
+          "0.9": 0.11999999999989086
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.030000000000654836,
+          "0.9": 0.15999999999985448
+        },
+        "maeQuantiles": {
+          "0.1": -0.4499999999998181,
+          "0.25": -0.31999999999970896,
+          "0.5": -0.18000000000029104,
+          "0.75": -0.1000000000003638,
+          "0.9": -0.040000000000873115
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 5686,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.14443239334779465,
+        "pFavFirst_0_10": 0.17033195020746889,
+        "pFavFirst_0_15": 0.18341642613487275,
+        "pFavFirst_0_20": 0.16950886766712142,
+        "avgForwardMfe": 0.054141751670774216,
+        "avgForwardMae": -0.21208582483290986,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17000000000007276,
+        "meanSigned": -0.11937917692576262,
+        "estimatedGrossEdge": -0.11937917692576262,
+        "estimatedEdgeAfterFriction": -0.1793791769257626,
+        "signedQuantiles": {
+          "0.1": -0.3999999999996362,
+          "0.25": -0.25,
+          "0.5": -0.10999999999967258,
+          "0.75": 0.009999999999308784,
+          "0.9": 0.17000000000007276
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.0500000000001819,
+          "0.9": 0.19000000000050932
+        },
+        "maeQuantiles": {
+          "0.1": -0.4400000000005093,
+          "0.25": -0.3000000000001819,
+          "0.5": -0.17000000000007276,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.010000000000218279
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 5532,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.13770674595800036,
+        "pFavFirst_0_10": 0.16075200675961132,
+        "pFavFirst_0_15": 0.17518248175182483,
+        "pFavFirst_0_20": 0.1667844522968198,
+        "avgForwardMfe": 0.05430404916847414,
+        "avgForwardMae": -0.209651120751984,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17000000000007276,
+        "meanSigned": -0.11388467100504966,
+        "estimatedGrossEdge": -0.11388467100504966,
+        "estimatedEdgeAfterFriction": -0.17388467100504967,
+        "signedQuantiles": {
+          "0.1": -0.3889999999994868,
+          "0.25": -0.25,
+          "0.5": -0.10999999999967258,
+          "0.75": 0.010000000000218279,
+          "0.9": 0.1500000000005457
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.05999999999949068,
+          "0.9": 0.18999999999959982
+        },
+        "maeQuantiles": {
+          "0.1": -0.4399999999995998,
+          "0.25": -0.3000000000001819,
+          "0.5": -0.17000000000007276,
+          "0.75": -0.09000000000014552,
+          "0.9": -0.020000000000436557
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 5250,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.10984699882306787,
+        "pFavFirst_0_10": 0.12767857142857142,
+        "pFavFirst_0_15": 0.14446952595936793,
+        "pFavFirst_0_20": 0.13178855901520636,
+        "avgForwardMfe": 0.04399999999999307,
+        "avgForwardMae": -0.22508571428570767,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18000000000029104,
+        "meanSigned": -0.13780571428570762,
+        "estimatedGrossEdge": -0.13780571428570762,
+        "estimatedEdgeAfterFriction": -0.19780571428570762,
+        "signedQuantiles": {
+          "0.1": -0.3999999999996362,
+          "0.25": -0.2600000000002183,
+          "0.5": -0.11999999999989086,
+          "0.75": -0.019999999999527063,
+          "0.9": 0.12999999999919964
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.027499999999918145,
+          "0.9": 0.17000000000007276
+        },
+        "maeQuantiles": {
+          "0.1": -0.4499999999998181,
+          "0.25": -0.3100000000004002,
+          "0.5": -0.18000000000029104,
+          "0.75": -0.1000000000003638,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 692,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.10441176470588236,
+        "pFavFirst_0_10": 0.12096774193548387,
+        "pFavFirst_0_15": 0.14367816091954022,
+        "pFavFirst_0_20": 0.12814070351758794,
+        "avgForwardMfe": 0.04436416184971335,
+        "avgForwardMae": -0.2638439306358617,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.21000000000003638,
+        "meanSigned": -0.17335260115608386,
+        "estimatedGrossEdge": -0.17335260115608386,
+        "estimatedEdgeAfterFriction": -0.23335260115608386,
+        "signedQuantiles": {
+          "0.1": -0.5,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.010000000000218279,
+          "0.9": 0.1499999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.17999999999938154
+        },
+        "maeQuantiles": {
+          "0.1": -0.5299999999997453,
+          "0.25": -0.3500000000003638,
+          "0.5": -0.21000000000003638,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.04099999999989473
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 604,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.10034013605442177,
+        "pFavFirst_0_10": 0.11886792452830189,
+        "pFavFirst_0_15": 0.12910284463894967,
+        "pFavFirst_0_20": 0.10746268656716418,
+        "avgForwardMfe": 0.04574503311258748,
+        "avgForwardMae": -0.25122516556287894,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.1999999999998181,
+        "meanSigned": -0.15789735099333665,
+        "estimatedGrossEdge": -0.15789735099333665,
+        "estimatedEdgeAfterFriction": -0.21789735099333665,
+        "signedQuantiles": {
+          "0.1": -0.47000000000025466,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.14000000000032742,
+          "0.75": -0.020000000000436557,
+          "0.9": 0.1499999999996362
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.030000000000654836,
+          "0.9": 0.17000000000007276
+        },
+        "maeQuantiles": {
+          "0.1": -0.5100000000002183,
+          "0.25": -0.3599999999996726,
+          "0.5": -0.1999999999998181,
+          "0.75": -0.11750000000006366,
+          "0.9": -0.0500000000001819
+        },
+        "_unused": {}
+      }
+    },
+    "5000ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 11474,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.12606082036775107,
+        "pFavFirst_0_10": 0.1610305958132045,
+        "pFavFirst_0_15": 0.18494271685761046,
+        "pFavFirst_0_20": 0.18392561457139217,
+        "avgForwardMfe": 0.07671518215095018,
+        "avgForwardMae": -0.2759499738539211,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.23000000000047294,
+        "meanSigned": -0.14276189646156118,
+        "estimatedGrossEdge": -0.14276189646156118,
+        "estimatedEdgeAfterFriction": -0.20276189646156118,
+        "signedQuantiles": {
+          "0.1": -0.47999999999956344,
+          "0.25": -0.3099999999994907,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.019999999999527063,
+          "0.9": 0.18000000000029104
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.0999999999994543,
+          "0.9": 0.2600000000002183
+        },
+        "maeQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.38000000000010914,
+          "0.5": -0.23000000000047294,
+          "0.75": -0.11999999999989086,
+          "0.9": -0.0500000000001819
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 5788,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.10510668065757257,
+        "pFavFirst_0_10": 0.1387906976744186,
+        "pFavFirst_0_15": 0.15678240241535477,
+        "pFavFirst_0_20": 0.16377794523988948,
+        "avgForwardMfe": 0.06786281962680639,
+        "avgForwardMae": -0.28439875604699305,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.25,
+        "meanSigned": -0.15611610228058467,
+        "estimatedGrossEdge": -0.15611610228058467,
+        "estimatedEdgeAfterFriction": -0.21611610228058467,
+        "signedQuantiles": {
+          "0.1": -0.48000000000047294,
+          "0.25": -0.31999999999970896,
+          "0.5": -0.13000000000010914,
+          "0.75": 0,
+          "0.9": 0.14000000000032742
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.08000000000015461,
+          "0.9": 0.22999999999956344
+        },
+        "maeQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.3900000000003274,
+          "0.5": -0.25,
+          "0.75": -0.12000000000080036,
+          "0.9": -0.06000000000040018
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 5686,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.14747944225956383,
+        "pFavFirst_0_10": 0.18409880355075262,
+        "pFavFirst_0_15": 0.2137809187279152,
+        "pFavFirst_0_20": 0.20465116279069767,
+        "avgForwardMfe": 0.08572634540978664,
+        "avgForwardMae": -0.26734963067180706,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.22000000000025466,
+        "meanSigned": -0.12916813225464807,
+        "estimatedGrossEdge": -0.12916813225464807,
+        "estimatedEdgeAfterFriction": -0.18916813225464807,
+        "signedQuantiles": {
+          "0.1": -0.4600000000000364,
+          "0.25": -0.3000000000001819,
+          "0.5": -0.11999999999989086,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.21000000000003638
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.11000000000058208,
+          "0.9": 0.28000000000065484
+        },
+        "maeQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.37000000000080036,
+          "0.5": -0.22000000000025466,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 5532,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.13970993207270058,
+        "pFavFirst_0_10": 0.17693367447352884,
+        "pFavFirst_0_15": 0.20187685969329366,
+        "pFavFirst_0_20": 0.20531400966183574,
+        "avgForwardMfe": 0.08332429501084826,
+        "avgForwardMae": -0.26246746203903837,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.22000000000025466,
+        "meanSigned": -0.12701735357917157,
+        "estimatedGrossEdge": -0.12701735357917157,
+        "estimatedEdgeAfterFriction": -0.18701735357917157,
+        "signedQuantiles": {
+          "0.1": -0.4500000000007276,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.11999999999989086,
+          "0.75": 0.029999999999972715,
+          "0.9": 0.1999999999998181
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.10999999999967258,
+          "0.9": 0.27999999999974534
+        },
+        "maeQuantiles": {
+          "0.1": -0.5289999999998143,
+          "0.25": -0.36999999999989086,
+          "0.5": -0.22000000000025466,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.0500000000001819
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 5250,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.11355735805330243,
+        "pFavFirst_0_10": 0.1466251298026999,
+        "pFavFirst_0_15": 0.1678221372220894,
+        "pFavFirst_0_20": 0.16376210235131397,
+        "avgForwardMfe": 0.07063809523809426,
+        "avgForwardMae": -0.2825847619047459,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.23999999999978172,
+        "meanSigned": -0.15311238095237248,
+        "estimatedGrossEdge": -0.15311238095237248,
+        "estimatedEdgeAfterFriction": -0.21311238095237248,
+        "signedQuantiles": {
+          "0.1": -0.47999999999956344,
+          "0.25": -0.3100000000004002,
+          "0.5": -0.13000000000010914,
+          "0.75": 0,
+          "0.9": 0.15999999999985448
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.07999999999992724,
+          "0.9": 0.25
+        },
+        "maeQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.3899999999994179,
+          "0.5": -0.23999999999978172,
+          "0.75": -0.11999999999989086,
+          "0.9": -0.05999999999949068
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 692,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.11208151382823872,
+        "pFavFirst_0_10": 0.1437216338880484,
+        "pFavFirst_0_15": 0.18107667210440456,
+        "pFavFirst_0_20": 0.17058823529411765,
+        "avgForwardMfe": 0.06998554913294051,
+        "avgForwardMae": -0.3333959537572465,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.27999999999974534,
+        "meanSigned": -0.19010115606939335,
+        "estimatedGrossEdge": -0.19010115606939335,
+        "estimatedEdgeAfterFriction": -0.2501011560693933,
+        "signedQuantiles": {
+          "0.1": -0.5600000000004002,
+          "0.25": -0.37999999999919964,
+          "0.5": -0.1500000000005457,
+          "0.75": 0.002499999999827196,
+          "0.9": 0.15999999999985448
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.11999999999989086,
+          "0.9": 0.22999999999956344
+        },
+        "maeQuantiles": {
+          "0.1": -0.6969999999998433,
+          "0.25": -0.4600000000000364,
+          "0.5": -0.27999999999974534,
+          "0.75": -0.1499999999996362,
+          "0.9": -0.07999999999992724
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 604,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.09932659932659933,
+        "pFavFirst_0_10": 0.13628318584070798,
+        "pFavFirst_0_15": 0.1523809523809524,
+        "pFavFirst_0_20": 0.1608695652173913,
+        "avgForwardMfe": 0.07153973509933179,
+        "avgForwardMae": -0.32824503311255604,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.3000000000001819,
+        "meanSigned": -0.18945364238408235,
+        "estimatedGrossEdge": -0.18945364238408235,
+        "estimatedEdgeAfterFriction": -0.24945364238408235,
+        "signedQuantiles": {
+          "0.1": -0.5400000000006003,
+          "0.25": -0.42000000000007276,
+          "0.5": -0.17000000000007276,
+          "0.75": 0,
+          "0.9": 0.1570000000000623
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.09000000000014552,
+          "0.9": 0.25
+        },
+        "maeQuantiles": {
+          "0.1": -0.6199999999998909,
+          "0.25": -0.47999999999956344,
+          "0.5": -0.3000000000001819,
+          "0.75": -0.15999999999985448,
+          "0.9": -0.06999999999970896
+        },
+        "_unused": {}
+      }
+    },
+    "10000ms": {
+      "allClean": {
+        "n": 12027,
+        "labeled": 11474,
+        "buy": 6071,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.12641242937853106,
+        "pFavFirst_0_10": 0.1675,
+        "pFavFirst_0_15": 0.20571254937708902,
+        "pFavFirst_0_20": 0.21670378619153674,
+        "avgForwardMfe": 0.12451542618093188,
+        "avgForwardMae": -0.3337057695659644,
+        "medianForwardMfe": 0.009999999999308784,
+        "medianForwardMae": -0.28000000000065484,
+        "meanSigned": -0.13210911626285704,
+        "estimatedGrossEdge": -0.13210911626285704,
+        "estimatedEdgeAfterFriction": -0.19210911626285704,
+        "signedQuantiles": {
+          "0.1": -0.5299999999997453,
+          "0.25": -0.31999999999970896,
+          "0.5": -0.12000000000080036,
+          "0.75": 0.0500000000001819,
+          "0.9": 0.27999999999974534
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0.009999999999308784,
+          "0.75": 0.18000000000029104,
+          "0.9": 0.3900000000003274
+        },
+        "maeQuantiles": {
+          "0.1": -0.6599999999998545,
+          "0.25": -0.4500000000007276,
+          "0.5": -0.28000000000065484,
+          "0.75": -0.13999999999941792,
+          "0.9": -0.06999999999970896
+        },
+        "_unused": {}
+      },
+      "BUY": {
+        "n": 6071,
+        "labeled": 5788,
+        "buy": 6071,
+        "sell": 0,
+        "pFavFirst_0_05": 0.10523560209424083,
+        "pFavFirst_0_10": 0.1466859833393698,
+        "pFavFirst_0_15": 0.18167425291905798,
+        "pFavFirst_0_20": 0.1976946498477599,
+        "avgForwardMfe": 0.11460435383551122,
+        "avgForwardMae": -0.34950241879749844,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.3000000000001819,
+        "meanSigned": -0.15643400138217498,
+        "estimatedGrossEdge": -0.15643400138217498,
+        "estimatedEdgeAfterFriction": -0.21643400138217497,
+        "signedQuantiles": {
+          "0.1": -0.5799999999999272,
+          "0.25": -0.3499999999994543,
+          "0.5": -0.14000000000032742,
+          "0.75": 0.020000000000436557,
+          "0.9": 0.2600000000002183
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.15999999999985448,
+          "0.9": 0.3499999999994543
+        },
+        "maeQuantiles": {
+          "0.1": -0.6900000000005093,
+          "0.25": -0.4600000000000364,
+          "0.5": -0.3000000000001819,
+          "0.75": -0.1499999999996362,
+          "0.9": -0.07999999999992724
+        },
+        "_unused": {}
+      },
+      "SELL": {
+        "n": 5956,
+        "labeled": 5686,
+        "buy": 0,
+        "sell": 5956,
+        "pFavFirst_0_05": 0.14808860307252592,
+        "pFavFirst_0_10": 0.18927624100037893,
+        "pFavFirst_0_15": 0.23091286307053943,
+        "pFavFirst_0_20": 0.23664993153811045,
+        "avgForwardMfe": 0.13460429124165904,
+        "avgForwardMae": -0.317625747449869,
+        "medianForwardMfe": 0.020000000000436557,
+        "medianForwardMae": -0.26999999999952706,
+        "meanSigned": -0.10734787196623159,
+        "estimatedGrossEdge": -0.10734787196623159,
+        "estimatedEdgeAfterFriction": -0.16734787196623158,
+        "signedQuantiles": {
+          "0.1": -0.5,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.1000000000003638,
+          "0.75": 0.07999999999992724,
+          "0.9": 0.3000000000001819
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0.020000000000436557,
+          "0.75": 0.1999999999998181,
+          "0.9": 0.4499999999998181
+        },
+        "maeQuantiles": {
+          "0.1": -0.6300000000001091,
+          "0.25": -0.4400000000005093,
+          "0.5": -0.26999999999952706,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.05999999999949068
+        },
+        "_unused": {}
+      },
+      "A": {
+        "n": 5787,
+        "labeled": 5532,
+        "buy": 2963,
+        "sell": 2824,
+        "pFavFirst_0_05": 0.13987167736022,
+        "pFavFirst_0_10": 0.18241293053684818,
+        "pFavFirst_0_15": 0.2222222222222222,
+        "pFavFirst_0_20": 0.23320807891028653,
+        "avgForwardMfe": 0.1293655097613915,
+        "avgForwardMae": -0.3206055676066376,
+        "medianForwardMfe": 0.019999999999527063,
+        "medianForwardMae": -0.2699999999999818,
+        "meanSigned": -0.12053506869124996,
+        "estimatedGrossEdge": -0.12053506869124996,
+        "estimatedEdgeAfterFriction": -0.18053506869124997,
+        "signedQuantiles": {
+          "0.1": -0.5100000000002183,
+          "0.25": -0.3000000000001819,
+          "0.5": -0.11000000000058208,
+          "0.75": 0.05999999999971806,
+          "0.9": 0.2899999999999636
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0.019999999999527063,
+          "0.75": 0.18999999999959982,
+          "0.9": 0.3999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.6400000000003274,
+          "0.25": -0.4399999999995998,
+          "0.5": -0.2699999999999818,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.06000000000040018
+        },
+        "_unused": {}
+      },
+      "B": {
+        "n": 5530,
+        "labeled": 5250,
+        "buy": 2753,
+        "sell": 2777,
+        "pFavFirst_0_05": 0.11415349016583108,
+        "pFavFirst_0_10": 0.15362788812322659,
+        "pFavFirst_0_15": 0.18996893031513537,
+        "pFavFirst_0_20": 0.20130340333091962,
+        "avgForwardMfe": 0.11949523809523782,
+        "avgForwardMae": -0.34002476190474945,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.2899999999999636,
+        "meanSigned": -0.14006095238095337,
+        "estimatedGrossEdge": -0.14006095238095337,
+        "estimatedEdgeAfterFriction": -0.20006095238095337,
+        "signedQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.27100000000037106
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.17000000000007276,
+          "0.9": 0.3900000000003274
+        },
+        "maeQuantiles": {
+          "0.1": -0.6599999999998545,
+          "0.25": -0.4600000000000364,
+          "0.5": -0.2899999999999636,
+          "0.75": -0.14000000000032742,
+          "0.9": -0.06999999999970896
+        },
+        "_unused": {}
+      },
+      "C": {
+        "n": 710,
+        "labeled": 692,
+        "buy": 355,
+        "sell": 355,
+        "pFavFirst_0_05": 0.11208151382823872,
+        "pFavFirst_0_10": 0.15396113602391628,
+        "pFavFirst_0_15": 0.1943127962085308,
+        "pFavFirst_0_20": 0.20552677029360966,
+        "avgForwardMfe": 0.1238294797687803,
+        "avgForwardMae": -0.3904913294798007,
+        "medianForwardMfe": 0.010000000000218279,
+        "medianForwardMae": -0.32999999999992724,
+        "meanSigned": -0.16430635838153418,
+        "estimatedGrossEdge": -0.16430635838153418,
+        "estimatedEdgeAfterFriction": -0.22430635838153418,
+        "signedQuantiles": {
+          "0.1": -0.569999999999709,
+          "0.25": -0.3500000000003638,
+          "0.5": -0.1500000000005457,
+          "0.75": 0.030000000000654836,
+          "0.9": 0.25
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0.010000000000218279,
+          "0.75": 0.21000000000003638,
+          "0.9": 0.3889999999994868
+        },
+        "maeQuantiles": {
+          "0.1": -0.768999999999596,
+          "0.25": -0.5599999999994907,
+          "0.5": -0.32999999999992724,
+          "0.75": -0.17999999999938154,
+          "0.9": -0.1000000000003638
+        },
+        "_unused": {}
+      },
+      "eligibleOnly": {
+        "n": 620,
+        "labeled": 604,
+        "buy": 287,
+        "sell": 333,
+        "pFavFirst_0_05": 0.09899328859060402,
+        "pFavFirst_0_10": 0.14186851211072665,
+        "pFavFirst_0_15": 0.16696914700544466,
+        "pFavFirst_0_20": 0.19767441860465115,
+        "avgForwardMfe": 0.12529801324502757,
+        "avgForwardMae": -0.3911589403973348,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.32999999999992724,
+        "meanSigned": -0.16599337748344858,
+        "estimatedGrossEdge": -0.16599337748344858,
+        "estimatedEdgeAfterFriction": -0.22599337748344858,
+        "signedQuantiles": {
+          "0.1": -0.6099999999996726,
+          "0.25": -0.37000000000080036,
+          "0.5": -0.15999999999985448,
+          "0.75": 0.009999999999308784,
+          "0.9": 0.28699999999989856
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.18999999999959982,
+          "0.9": 0.43000000000029104
+        },
+        "maeQuantiles": {
+          "0.1": -0.7569999999995161,
+          "0.25": -0.5399999999999636,
+          "0.5": -0.32999999999992724,
+          "0.75": -0.18999999999959982,
+          "0.9": -0.0929999999999377
+        },
+        "_unused": {}
+      }
+    }
+  },
+  "featureSeparators": {
+    "method": "Quantile compare strong continuation vs immediate failure on DISCOVERY eligible only; 2D vel×spread conditional probs",
+    "strongContinuationN": 36,
+    "immediateFailureN": 296,
+    "features": [
+      {
+        "feature": "midVel250",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.00002527378646286078,
+          "0.1": -0.00010999072600204712,
+          "0.25": -0.00005178324225244764,
+          "0.5": -0.00002192828067281843,
+          "0.75": -8.638597973319153e-7,
+          "0.9": 0.00003164377536757311
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.0000015988872166681346,
+          "0.1": -0.00008229342040818699,
+          "0.25": -0.000037191980484280745,
+          "0.5": -0.00000460402506880763,
+          "0.75": 0.00003454882902420213,
+          "0.9": 0.00008171947209249705
+        }
+      },
+      {
+        "feature": "midVel500",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.00003667840190989754,
+          "0.1": -0.00013725442703182002,
+          "0.25": -0.00008061456133898532,
+          "0.5": -0.000025924790946267897,
+          "0.75": -0.00000259070311625206,
+          "0.9": 0.0000552298020011096
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.0000033279361727817545,
+          "0.1": -0.00009204098585091575,
+          "0.25": -0.00005635351364175964,
+          "0.5": -0.00000460402506880763,
+          "0.75": 0.00004370586820737574,
+          "0.9": 0.00008913229367824504
+        }
+      },
+      {
+        "feature": "midVel1s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.000046683567858455435,
+          "0.1": -0.00013725442703182002,
+          "0.25": -0.0001069650836254878,
+          "0.5": -0.00008055819927093779,
+          "0.75": 0.00001381249246050737,
+          "0.9": 0.00009273625400127279
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.000012029845738566287,
+          "0.1": -0.0001203892177435325,
+          "0.25": -0.00008976732998593125,
+          "0.5": -0.00003395517712232591,
+          "0.75": 0.00008981725642834252,
+          "0.9": 0.0001093482384575139
+        }
+      },
+      {
+        "feature": "midVel2s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.00004868611692240014,
+          "0.1": -0.00015144868538573617,
+          "0.25": -0.00010960819434939668,
+          "0.5": -0.00006454146877168205,
+          "0.75": -5.804421288748299e-10,
+          "0.9": 0.00009734379775849448
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.000009275776231874612,
+          "0.1": -0.00013003152976928247,
+          "0.25": -0.00009092865783556106,
+          "0.5": -0.000027608351106795517,
+          "0.75": 0.00008290129207041378,
+          "0.9": 0.0001173148696597796
+        }
+      },
+      {
+        "feature": "midVel3s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.000034254979654412104,
+          "0.1": -0.0001392387594720527,
+          "0.25": -0.00009663536371115765,
+          "0.5": -0.00007497557526447763,
+          "0.75": 0.00003683249676459799,
+          "0.9": 0.00010424927889485854
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.000011949045121008831,
+          "0.1": -0.0001374168956572248,
+          "0.25": -0.00009555734717886308,
+          "0.5": -0.000028224590023179524,
+          "0.75": 0.00007826410290007315,
+          "0.9": 0.0001338220144135371
+        }
+      },
+      {
+        "feature": "acceleration",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.00003526524130698474,
+          "0.1": -0.00011226256861032747,
+          "0.25": -0.00007436093634548025,
+          "0.5": -0.00004831897887560332,
+          "0.75": 0.000007956903456413126,
+          "0.9": 0.00005780989245404998
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.000008046830698230005,
+          "0.1": -0.00009273915999581973,
+          "0.25": -0.00006188603769526599,
+          "0.5": -0.00001498376329613803,
+          "0.75": 0.00005678180715029802,
+          "0.9": 0.00008516378798918833
+        }
+      },
+      {
+        "feature": "efficiency1s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 0.9444444444444444,
+          "0.1": 1,
+          "0.25": 1,
+          "0.5": 1,
+          "0.75": 1,
+          "0.9": 1
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 0.9116276430197506,
+          "0.1": 0.7499999999894433,
+          "0.25": 1,
+          "0.5": 1,
+          "0.75": 1,
+          "0.9": 1
+        }
+      },
+      {
+        "feature": "efficiency3s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 0.6920283879062342,
+          "0.1": 0.20031581321952754,
+          "0.25": 0.48749999999971577,
+          "0.5": 0.8823529411757363,
+          "0.75": 1,
+          "0.9": 1
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 0.7205523713518481,
+          "0.1": 0.2855022831049293,
+          "0.25": 0.526530612245098,
+          "0.5": 0.796697626418596,
+          "0.75": 0.9887218045110314,
+          "0.9": 1
+        }
+      },
+      {
+        "feature": "signedImbalance1s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.5,
+          "0.1": -1,
+          "0.25": -1,
+          "0.5": -1,
+          "0.75": -0.16666666666666669,
+          "0.9": 1
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.06531531531531531,
+          "0.1": -1,
+          "0.25": -1,
+          "0.5": -0.3333333333333333,
+          "0.75": 1,
+          "0.9": 1
+        }
+      },
+      {
+        "feature": "depthImbalance",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 0,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.0011261261261261261,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        }
+      },
+      {
+        "feature": "weightedImbalance",
+        "strongContinuation": {
+          "n": 36,
+          "mean": -0.00006992515514286326,
+          "0.1": -0.00007015422768089789,
+          "0.25": -0.00007008046019123173,
+          "0.5": -0.00006986325336555247,
+          "0.75": -0.00006932396054424596,
+          "0.9": -0.00006922643395104172
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": -0.001196084048075335,
+          "0.1": -0.00007028402105043914,
+          "0.25": -0.00007008264919344562,
+          "0.5": -0.00006991969588633032,
+          "0.75": -0.00006929234936159884,
+          "0.9": -0.00006917513429760251
+        }
+      },
+      {
+        "feature": "removeRateBid",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 32.18055555555556,
+          "0.1": 20,
+          "0.25": 20,
+          "0.5": 28,
+          "0.75": 40,
+          "0.9": 53
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 32.317567567567565,
+          "0.1": 20,
+          "0.25": 20,
+          "0.5": 40,
+          "0.75": 40,
+          "0.9": 40
+        }
+      },
+      {
+        "feature": "removeRateAsk",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 33.166666666666664,
+          "0.1": 20,
+          "0.25": 20,
+          "0.5": 36.75,
+          "0.75": 40,
+          "0.9": 53
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 32.423986486486484,
+          "0.1": 20,
+          "0.25": 20,
+          "0.5": 40,
+          "0.75": 40,
+          "0.9": 40
+        }
+      },
+      {
+        "feature": "spread",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 0.10027777777766762,
+          "0.1": 0.08999999999923602,
+          "0.25": 0.08999999999991815,
+          "0.5": 0.09499999999979991,
+          "0.75": 0.11999999999989086,
+          "0.9": 0.12000000000034561
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 0.10635135135132222,
+          "0.1": 0.07999999999992724,
+          "0.25": 0.09000000000014552,
+          "0.5": 0.10999999999967258,
+          "0.75": 0.11999999999989086,
+          "0.9": 0.12000000000080036
+        }
+      },
+      {
+        "feature": "rawQuality",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 0.6338907788799986,
+          "0.1": 0.5750000000000001,
+          "0.25": 0.5826597707971948,
+          "0.5": 0.6249999999999999,
+          "0.75": 0.6538684477527671,
+          "0.9": 0.7303064340352461
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 0.6384994189173775,
+          "0.1": 0.5750000000000001,
+          "0.25": 0.5846892727876003,
+          "0.5": 0.6249999999999999,
+          "0.75": 0.6749999999999999,
+          "0.9": 0.725
+        }
+      },
+      {
+        "feature": "upTouches5s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 1.2777777777777777,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 1,
+          "0.75": 2,
+          "0.9": 3
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 1.4662162162162162,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 1,
+          "0.75": 2,
+          "0.9": 4
+        }
+      },
+      {
+        "feature": "downTouches5s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 1.8611111111111112,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 2,
+          "0.75": 3,
+          "0.9": 4
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 1.6182432432432432,
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 1,
+          "0.75": 3,
+          "0.9": 4
+        }
+      },
+      {
+        "feature": "updateRate1s",
+        "strongContinuation": {
+          "n": 36,
+          "mean": 2.4166666666666665,
+          "0.1": 2,
+          "0.25": 2,
+          "0.5": 2,
+          "0.75": 3,
+          "0.9": 3
+        },
+        "immediateFailure": {
+          "n": 296,
+          "mean": 2.3885135135135136,
+          "0.1": 2,
+          "0.25": 2,
+          "0.5": 2,
+          "0.75": 3,
+          "0.9": 3
+        }
+      }
+    ],
+    "conditional2d_vel_x_spread": [
+      {
+        "vel": "weak",
+        "spread": "tight",
+        "n": 19,
+        "pFavFirst_0_05": 0.2631578947368421,
+        "meanSigned": -0.06894736842097796,
+        "edgeAfterFriction": -0.12894736842097795
+      },
+      {
+        "vel": "weak",
+        "spread": "mid",
+        "n": 34,
+        "pFavFirst_0_05": 0,
+        "meanSigned": -0.20117647058818608,
+        "edgeAfterFriction": -0.26117647058818605
+      },
+      {
+        "vel": "weak",
+        "spread": "wide",
+        "n": 0,
+        "pFavFirst_0_05": null,
+        "meanSigned": null,
+        "edgeAfterFriction": null
+      },
+      {
+        "vel": "mod",
+        "spread": "tight",
+        "n": 88,
+        "pFavFirst_0_05": 0.1590909090909091,
+        "meanSigned": -0.17772727272722477,
+        "edgeAfterFriction": -0.23772727272722477
+      },
+      {
+        "vel": "mod",
+        "spread": "mid",
+        "n": 150,
+        "pFavFirst_0_05": 0.06716417910447761,
+        "meanSigned": -0.14618055555551893,
+        "edgeAfterFriction": -0.20618055555551892
+      },
+      {
+        "vel": "mod",
+        "spread": "wide",
+        "n": 0,
+        "pFavFirst_0_05": null,
+        "meanSigned": null,
+        "edgeAfterFriction": null
+      },
+      {
+        "vel": "strong",
+        "spread": "tight",
+        "n": 26,
+        "pFavFirst_0_05": 0.08333333333333333,
+        "meanSigned": -0.1176923076922881,
+        "edgeAfterFriction": -0.1776923076922881
+      },
+      {
+        "vel": "strong",
+        "spread": "mid",
+        "n": 33,
+        "pFavFirst_0_05": 0.18181818181818182,
+        "meanSigned": -0.10666666666673502,
+        "edgeAfterFriction": -0.16666666666673502
+      },
+      {
+        "vel": "strong",
+        "spread": "wide",
+        "n": 0,
+        "pFavFirst_0_05": null,
+        "meanSigned": null,
+        "edgeAfterFriction": null
+      }
+    ],
+    "discoveryRuleScores3s": [
+      {
+        "id": "R4_accel_remove_liq",
+        "description": "accel aligned + opposite liquidity being removed",
+        "n": 436,
+        "labeled": 413,
+        "buy": 190,
+        "sell": 246,
+        "pFavFirst_0_05": 0.1534526854219949,
+        "pFavFirst_0_10": 0.17994100294985252,
+        "pFavFirst_0_15": 0.21245421245421245,
+        "pFavFirst_0_20": 0.21739130434782608,
+        "avgForwardMfe": 0.0633898305085061,
+        "avgForwardMae": -0.2017675544793923,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.15999999999985448,
+        "meanSigned": -0.09953995157381385,
+        "estimatedGrossEdge": -0.09953995157381385,
+        "estimatedEdgeAfterFriction": -0.15953995157381384,
+        "signedQuantiles": {
+          "0.1": -0.3899999999994179,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.1000000000003638,
+          "0.75": 0.049999999999272404,
+          "0.9": 0.19000000000050932
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06999999999970896,
+          "0.9": 0.23999999999978172
+        },
+        "maeQuantiles": {
+          "0.1": -0.43000000000029104,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.15999999999985448,
+          "0.75": -0.07999999999992724,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R3_vel_depth_agree",
+        "description": "side-aligned vel1s AND depthImbalance agrees with side",
+        "n": 3,
+        "labeled": 3,
+        "buy": 0,
+        "sell": 3,
+        "pFavFirst_0_05": 0,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": null,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.03999999999996362,
+        "avgForwardMae": -0.13000000000010914,
+        "medianForwardMfe": 0.03999999999996362,
+        "medianForwardMae": -0.13000000000010914,
+        "meanSigned": -0.13000000000010914,
+        "estimatedGrossEdge": -0.13000000000010914,
+        "estimatedEdgeAfterFriction": -0.19000000000010914,
+        "signedQuantiles": {
+          "0.1": -0.13000000000010914,
+          "0.25": -0.13000000000010914,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.13000000000010914
+        },
+        "mfeQuantiles": {
+          "0.1": 0.03999999999996362,
+          "0.25": 0.03999999999996362,
+          "0.5": 0.03999999999996362,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.03999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.13000000000010914,
+          "0.25": -0.13000000000010914,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.13000000000010914
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+        "n": 667,
+        "labeled": 667,
+        "buy": 286,
+        "sell": 381,
+        "pFavFirst_0_05": 0.13416536661466458,
+        "pFavFirst_0_10": 0.1649659863945578,
+        "pFavFirst_0_15": 0.18762886597938144,
+        "pFavFirst_0_20": 0.1443850267379679,
+        "avgForwardMfe": 0.057511244377818786,
+        "avgForwardMae": -0.23730134932530014,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17999999999938154,
+        "meanSigned": -0.13059970014990954,
+        "estimatedGrossEdge": -0.13059970014990954,
+        "estimatedEdgeAfterFriction": -0.19059970014990954,
+        "signedQuantiles": {
+          "0.1": -0.43000000000029104,
+          "0.25": -0.26999999999952706,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.009999999999763531,
+          "0.9": 0.17000000000007276
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06000000000040018,
+          "0.9": 0.18999999999959982
+        },
+        "maeQuantiles": {
+          "0.1": -0.4500000000001819,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.17999999999938154,
+          "0.75": -0.09999999999990905,
+          "0.9": -0.009999999999854481
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "description": "rawQuality>=0.65 (control — quality alone)",
+        "n": 118,
+        "labeled": 116,
+        "buy": 57,
+        "sell": 61,
+        "pFavFirst_0_05": 0.07894736842105263,
+        "pFavFirst_0_10": 0.14953271028037382,
+        "pFavFirst_0_15": 0.19387755102040816,
+        "pFavFirst_0_20": 0.17647058823529413,
+        "avgForwardMfe": 0.06724137931036207,
+        "avgForwardMae": -0.24594827586208245,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18999999999959982,
+        "meanSigned": -0.13137931034479433,
+        "estimatedGrossEdge": -0.13137931034479433,
+        "estimatedEdgeAfterFriction": -0.19137931034479433,
+        "signedQuantiles": {
+          "0.1": -0.42000000000007276,
+          "0.25": -0.3074999999994361,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.019999999999754436,
+          "0.9": 0.18499999999994543
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.08750000000009095,
+          "0.9": 0.20999999999958163
+        },
+        "maeQuantiles": {
+          "0.1": -0.4699999999997999,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.18999999999959982,
+          "0.75": -0.11999999999989086,
+          "0.9": -0.07500000000027285
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R1_vel1s_accel_aligned",
+        "description": "abs(midVel1s)>=momentum band AND sign(accel)==sign(vel1s)",
+        "n": 620,
+        "labeled": 612,
+        "buy": 264,
+        "sell": 356,
+        "pFavFirst_0_05": 0.11447811447811448,
+        "pFavFirst_0_10": 0.13011152416356878,
+        "pFavFirst_0_15": 0.1279317697228145,
+        "pFavFirst_0_20": 0.14153846153846153,
+        "avgForwardMfe": 0.05125816993465372,
+        "avgForwardMae": -0.24044117647055346,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18000000000029104,
+        "meanSigned": -0.13326797385616077,
+        "estimatedGrossEdge": -0.13326797385616077,
+        "estimatedEdgeAfterFriction": -0.19326797385616076,
+        "signedQuantiles": {
+          "0.1": -0.4399999999995998,
+          "0.25": -0.26999999999952706,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.010000000000218279,
+          "0.9": 0.15999999999985448
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.07999999999992724,
+          "0.9": 0.179000000000269
+        },
+        "maeQuantiles": {
+          "0.1": -0.5179999999995744,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.18000000000029104,
+          "0.75": -0.11000000000058208,
+          "0.9": -0.02999999999974534
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R6_efficiency_pullback",
+        "description": "setup C soft + efficiency3s>0.35 + abs(midVel3s) strong",
+        "n": 415,
+        "labeled": 406,
+        "buy": 183,
+        "sell": 232,
+        "pFavFirst_0_05": 0.11392405063291139,
+        "pFavFirst_0_10": 0.12112676056338029,
+        "pFavFirst_0_15": 0.1598639455782313,
+        "pFavFirst_0_20": 0.1336405529953917,
+        "avgForwardMfe": 0.05118226600986951,
+        "avgForwardMae": -0.24775862068964882,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18999999999959982,
+        "meanSigned": -0.14448275862067586,
+        "estimatedGrossEdge": -0.14448275862067586,
+        "estimatedEdgeAfterFriction": -0.20448275862067586,
+        "signedQuantiles": {
+          "0.1": -0.4899999999997817,
+          "0.25": -0.28000000000042746,
+          "0.5": -0.11000000000012733,
+          "0.75": 0.020000000000436557,
+          "0.9": 0.17000000000007276
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.07000000000061846,
+          "0.9": 0.18999999999959982
+        },
+        "maeQuantiles": {
+          "0.1": -0.5299999999997453,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.18999999999959982,
+          "0.75": -0.1000000000003638,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R2_vel_spread_tight",
+        "description": "abs(midVel1s)>=8e-5 AND spread<=0.10",
+        "n": 242,
+        "labeled": 242,
+        "buy": 102,
+        "sell": 140,
+        "pFavFirst_0_05": 0.16101694915254236,
+        "pFavFirst_0_10": 0.1485148514851485,
+        "pFavFirst_0_15": 0.13580246913580246,
+        "pFavFirst_0_20": 0.11009174311926606,
+        "avgForwardMfe": 0.046074380165306544,
+        "avgForwardMae": -0.22995867768593387,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17000000000007276,
+        "meanSigned": -0.14673553719002716,
+        "estimatedGrossEdge": -0.14673553719002716,
+        "estimatedEdgeAfterFriction": -0.20673553719002716,
+        "signedQuantiles": {
+          "0.1": -0.5199999999995271,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.13000000000010914,
+          "0.75": 0,
+          "0.9": 0.09000000000014552
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.08000000000083674,
+          "0.9": 0.15999999999985448
+        },
+        "maeQuantiles": {
+          "0.1": -0.5199999999995271,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.17000000000007276,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.020000000000436557
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R5_breakout_touches_pressure",
+        "description": "setup B soft + touches>=2 + updateRate>=3",
+        "n": 118,
+        "labeled": 116,
+        "buy": 56,
+        "sell": 62,
+        "pFavFirst_0_05": 0.09821428571428571,
+        "pFavFirst_0_10": 0.1262135922330097,
+        "pFavFirst_0_15": 0.15789473684210525,
+        "pFavFirst_0_20": 0.11594202898550725,
+        "avgForwardMfe": 0.05043103448273824,
+        "avgForwardMae": -0.25318965517238934,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.22000000000025466,
+        "meanSigned": -0.1580172413793254,
+        "estimatedGrossEdge": -0.1580172413793254,
+        "estimatedEdgeAfterFriction": -0.2180172413793254,
+        "signedQuantiles": {
+          "0.1": -0.4899999999997817,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.1500000000005457,
+          "0.75": -0.03999999999996362,
+          "0.9": 0.16499999999950887
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.015000000000100044,
+          "0.9": 0.1799999999998363
+        },
+        "maeQuantiles": {
+          "0.1": -0.544999999999618,
+          "0.25": -0.3899999999994179,
+          "0.5": -0.22000000000025466,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      }
+    ],
+    "lockedForValidation": [
+      "R4_accel_remove_liq",
+      "R3_vel_depth_agree",
+      "R8_imb_and_vel",
+      "R7_quality_ge_065"
+    ]
+  },
+  "candidateInterpretableRules": [
+    {
+      "id": "R3_vel_depth_agree",
+      "description": "side-aligned vel1s AND depthImbalance agrees with side"
+    },
+    {
+      "id": "R4_accel_remove_liq",
+      "description": "accel aligned + opposite liquidity being removed"
+    },
+    {
+      "id": "R7_quality_ge_065",
+      "description": "rawQuality>=0.65 (control — quality alone)"
+    },
+    {
+      "id": "R8_imb_and_vel",
+      "description": "signedImbalance agrees with side AND abs(midVel250) strong"
+    }
+  ],
+  "discoveryResults": {
+    "set": "first 50% clean candidates by time (IN-SAMPLE)",
+    "n": 6013,
+    "rules3s": [
+      {
+        "id": "R3_vel_depth_agree",
+        "description": "side-aligned vel1s AND depthImbalance agrees with side",
+        "n": 3,
+        "labeled": 3,
+        "buy": 0,
+        "sell": 3,
+        "pFavFirst_0_05": 0,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": null,
+        "pFavFirst_0_20": null,
+        "avgForwardMfe": 0.03999999999996362,
+        "avgForwardMae": -0.13000000000010914,
+        "medianForwardMfe": 0.03999999999996362,
+        "medianForwardMae": -0.13000000000010914,
+        "meanSigned": -0.13000000000010914,
+        "estimatedGrossEdge": -0.13000000000010914,
+        "estimatedEdgeAfterFriction": -0.19000000000010914,
+        "signedQuantiles": {
+          "0.1": -0.13000000000010914,
+          "0.25": -0.13000000000010914,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.13000000000010914
+        },
+        "mfeQuantiles": {
+          "0.1": 0.03999999999996362,
+          "0.25": 0.03999999999996362,
+          "0.5": 0.03999999999996362,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.03999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.13000000000010914,
+          "0.25": -0.13000000000010914,
+          "0.5": -0.13000000000010914,
+          "0.75": -0.13000000000010914,
+          "0.9": -0.13000000000010914
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R4_accel_remove_liq",
+        "description": "accel aligned + opposite liquidity being removed",
+        "n": 436,
+        "labeled": 413,
+        "buy": 190,
+        "sell": 246,
+        "pFavFirst_0_05": 0.1534526854219949,
+        "pFavFirst_0_10": 0.17994100294985252,
+        "pFavFirst_0_15": 0.21245421245421245,
+        "pFavFirst_0_20": 0.21739130434782608,
+        "avgForwardMfe": 0.0633898305085061,
+        "avgForwardMae": -0.2017675544793923,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.15999999999985448,
+        "meanSigned": -0.09953995157381385,
+        "estimatedGrossEdge": -0.09953995157381385,
+        "estimatedEdgeAfterFriction": -0.15953995157381384,
+        "signedQuantiles": {
+          "0.1": -0.3899999999994179,
+          "0.25": -0.23999999999978172,
+          "0.5": -0.1000000000003638,
+          "0.75": 0.049999999999272404,
+          "0.9": 0.19000000000050932
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06999999999970896,
+          "0.9": 0.23999999999978172
+        },
+        "maeQuantiles": {
+          "0.1": -0.43000000000029104,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.15999999999985448,
+          "0.75": -0.07999999999992724,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "description": "rawQuality>=0.65 (control — quality alone)",
+        "n": 118,
+        "labeled": 116,
+        "buy": 57,
+        "sell": 61,
+        "pFavFirst_0_05": 0.07894736842105263,
+        "pFavFirst_0_10": 0.14953271028037382,
+        "pFavFirst_0_15": 0.19387755102040816,
+        "pFavFirst_0_20": 0.17647058823529413,
+        "avgForwardMfe": 0.06724137931036207,
+        "avgForwardMae": -0.24594827586208245,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18999999999959982,
+        "meanSigned": -0.13137931034479433,
+        "estimatedGrossEdge": -0.13137931034479433,
+        "estimatedEdgeAfterFriction": -0.19137931034479433,
+        "signedQuantiles": {
+          "0.1": -0.42000000000007276,
+          "0.25": -0.3074999999994361,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.019999999999754436,
+          "0.9": 0.18499999999994543
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.08750000000009095,
+          "0.9": 0.20999999999958163
+        },
+        "maeQuantiles": {
+          "0.1": -0.4699999999997999,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.18999999999959982,
+          "0.75": -0.11999999999989086,
+          "0.9": -0.07500000000027285
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+        "n": 667,
+        "labeled": 667,
+        "buy": 286,
+        "sell": 381,
+        "pFavFirst_0_05": 0.13416536661466458,
+        "pFavFirst_0_10": 0.1649659863945578,
+        "pFavFirst_0_15": 0.18762886597938144,
+        "pFavFirst_0_20": 0.1443850267379679,
+        "avgForwardMfe": 0.057511244377818786,
+        "avgForwardMae": -0.23730134932530014,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.17999999999938154,
+        "meanSigned": -0.13059970014990954,
+        "estimatedGrossEdge": -0.13059970014990954,
+        "estimatedEdgeAfterFriction": -0.19059970014990954,
+        "signedQuantiles": {
+          "0.1": -0.43000000000029104,
+          "0.25": -0.26999999999952706,
+          "0.5": -0.13000000000010914,
+          "0.75": 0.009999999999763531,
+          "0.9": 0.17000000000007276
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06000000000040018,
+          "0.9": 0.18999999999959982
+        },
+        "maeQuantiles": {
+          "0.1": -0.4500000000001819,
+          "0.25": -0.32999999999992724,
+          "0.5": -0.17999999999938154,
+          "0.75": -0.09999999999990905,
+          "0.9": -0.009999999999854481
+        },
+        "_unused": {}
+      }
+    ],
+    "rules5s": [
+      {
+        "id": "R3_vel_depth_agree",
+        "description": "side-aligned vel1s AND depthImbalance agrees with side",
+        "n": 3,
+        "labeled": 3,
+        "buy": 0,
+        "sell": 3,
+        "pFavFirst_0_05": 0,
+        "pFavFirst_0_10": 0,
+        "pFavFirst_0_15": 0,
+        "pFavFirst_0_20": 0,
+        "avgForwardMfe": 0.03999999999996362,
+        "avgForwardMae": -0.47999999999956344,
+        "medianForwardMfe": 0.03999999999996362,
+        "medianForwardMae": -0.47999999999956344,
+        "meanSigned": -0.47999999999956344,
+        "estimatedGrossEdge": -0.47999999999956344,
+        "estimatedEdgeAfterFriction": -0.5399999999995635,
+        "signedQuantiles": {
+          "0.1": -0.4799999999995635,
+          "0.25": -0.47999999999956344,
+          "0.5": -0.47999999999956344,
+          "0.75": -0.47999999999956344,
+          "0.9": -0.47999999999956344
+        },
+        "mfeQuantiles": {
+          "0.1": 0.03999999999996362,
+          "0.25": 0.03999999999996362,
+          "0.5": 0.03999999999996362,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.03999999999996362
+        },
+        "maeQuantiles": {
+          "0.1": -0.4799999999995635,
+          "0.25": -0.47999999999956344,
+          "0.5": -0.47999999999956344,
+          "0.75": -0.47999999999956344,
+          "0.9": -0.47999999999956344
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R4_accel_remove_liq",
+        "description": "accel aligned + opposite liquidity being removed",
+        "n": 436,
+        "labeled": 413,
+        "buy": 190,
+        "sell": 246,
+        "pFavFirst_0_05": 0.1728395061728395,
+        "pFavFirst_0_10": 0.21875,
+        "pFavFirst_0_15": 0.25757575757575757,
+        "pFavFirst_0_20": 0.26258992805755393,
+        "avgForwardMfe": 0.10389830508478505,
+        "avgForwardMae": -0.24566585956414272,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.21000000000003638,
+        "meanSigned": -0.09104116222757516,
+        "estimatedGrossEdge": -0.09104116222757516,
+        "estimatedEdgeAfterFriction": -0.15104116222757516,
+        "signedQuantiles": {
+          "0.1": -0.43399999999965067,
+          "0.25": -0.27000000000043656,
+          "0.5": -0.10999999999967258,
+          "0.75": 0.1000000000003638,
+          "0.9": 0.3000000000001819
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.16000000000076398,
+          "0.9": 0.3100000000004002
+        },
+        "maeQuantiles": {
+          "0.1": -0.5100000000002183,
+          "0.25": -0.3400000000001455,
+          "0.5": -0.21000000000003638,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.020000000000436557
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "description": "rawQuality>=0.65 (control — quality alone)",
+        "n": 118,
+        "labeled": 116,
+        "buy": 57,
+        "sell": 61,
+        "pFavFirst_0_05": 0.07894736842105263,
+        "pFavFirst_0_10": 0.14545454545454545,
+        "pFavFirst_0_15": 0.19230769230769232,
+        "pFavFirst_0_20": 0.22580645161290322,
+        "avgForwardMfe": 0.09025862068969658,
+        "avgForwardMae": -0.34249999999995706,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.3099999999994907,
+        "meanSigned": -0.19767241379301187,
+        "estimatedGrossEdge": -0.19767241379301187,
+        "estimatedEdgeAfterFriction": -0.25767241379301187,
+        "signedQuantiles": {
+          "0.1": -0.5399999999999636,
+          "0.25": -0.42250000000012733,
+          "0.5": -0.23999999999978172,
+          "0.75": 0,
+          "0.9": 0.22499999999990905
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.17000000000007276,
+          "0.9": 0.27999999999974534
+        },
+        "maeQuantiles": {
+          "0.1": -0.7350000000001273,
+          "0.25": -0.47000000000025466,
+          "0.5": -0.3099999999994907,
+          "0.75": -0.15999999999985448,
+          "0.9": -0.09499999999979991
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+        "n": 667,
+        "labeled": 667,
+        "buy": 286,
+        "sell": 381,
+        "pFavFirst_0_05": 0.1491628614916286,
+        "pFavFirst_0_10": 0.17467948717948717,
+        "pFavFirst_0_15": 0.19782214156079855,
+        "pFavFirst_0_20": 0.18219461697722567,
+        "avgForwardMfe": 0.0832383808096204,
+        "avgForwardMae": -0.3195652173912397,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.2999999999992724,
+        "meanSigned": -0.18251874062962212,
+        "estimatedGrossEdge": -0.18251874062962212,
+        "estimatedEdgeAfterFriction": -0.24251874062962211,
+        "signedQuantiles": {
+          "0.1": -0.5299999999997453,
+          "0.25": -0.32000000000061846,
+          "0.5": -0.1500000000005457,
+          "0.75": 0.010000000000218279,
+          "0.9": 0.19000000000050932
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.1000000000003638,
+          "0.9": 0.27999999999974534
+        },
+        "maeQuantiles": {
+          "0.1": -0.6999999999998181,
+          "0.25": -0.4399999999995998,
+          "0.5": -0.2999999999992724,
+          "0.75": -0.14000000000032742,
+          "0.9": -0.05999999999949068
+        },
+        "_unused": {}
+      }
+    ]
+  },
+  "validationResults": {
+    "set": "next 25% clean candidates by time (IN-SAMPLE validation — same morning)",
+    "n": 3007,
+    "rules3s": [
+      {
+        "id": "R3_vel_depth_agree",
+        "description": "side-aligned vel1s AND depthImbalance agrees with side",
+        "n": 1,
+        "labeled": 1,
+        "buy": 1,
+        "sell": 0,
+        "pFavFirst_0_05": 1,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": 1,
+        "avgForwardMfe": 0.21000000000003638,
+        "avgForwardMae": 0,
+        "medianForwardMfe": 0.21000000000003638,
+        "medianForwardMae": 0,
+        "meanSigned": 0.09000000000014552,
+        "estimatedGrossEdge": 0.09000000000014552,
+        "estimatedEdgeAfterFriction": 0.03000000000014552,
+        "signedQuantiles": {
+          "0.1": 0.09000000000014552,
+          "0.25": 0.09000000000014552,
+          "0.5": 0.09000000000014552,
+          "0.75": 0.09000000000014552,
+          "0.9": 0.09000000000014552
+        },
+        "mfeQuantiles": {
+          "0.1": 0.21000000000003638,
+          "0.25": 0.21000000000003638,
+          "0.5": 0.21000000000003638,
+          "0.75": 0.21000000000003638,
+          "0.9": 0.21000000000003638
+        },
+        "maeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R4_accel_remove_liq",
+        "description": "accel aligned + opposite liquidity being removed",
+        "n": 252,
+        "labeled": 246,
+        "buy": 125,
+        "sell": 127,
+        "pFavFirst_0_05": 0.11788617886178862,
+        "pFavFirst_0_10": 0.15625,
+        "pFavFirst_0_15": 0.18232044198895028,
+        "pFavFirst_0_20": 0.18045112781954886,
+        "avgForwardMfe": 0.053617886178834284,
+        "avgForwardMae": -0.21321138211388696,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.1750000000001819,
+        "meanSigned": -0.10792682926835998,
+        "estimatedGrossEdge": -0.10792682926835998,
+        "estimatedEdgeAfterFriction": -0.16792682926835997,
+        "signedQuantiles": {
+          "0.1": -0.3400000000001455,
+          "0.25": -0.2475000000001728,
+          "0.5": -0.11000000000012733,
+          "0.75": -0.030000000000654836,
+          "0.9": 0.23999999999978172
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0,
+          "0.9": 0.23999999999978172
+        },
+        "maeQuantiles": {
+          "0.1": -0.3999999999996362,
+          "0.25": -0.2999999999992724,
+          "0.5": -0.1750000000001819,
+          "0.75": -0.1000000000003638,
+          "0.9": -0.06000000000040018
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "description": "rawQuality>=0.65 (control — quality alone)",
+        "n": 73,
+        "labeled": 68,
+        "buy": 37,
+        "sell": 36,
+        "pFavFirst_0_05": 0.17647058823529413,
+        "pFavFirst_0_10": 0.234375,
+        "pFavFirst_0_15": 0.26785714285714285,
+        "pFavFirst_0_20": 0.20930232558139536,
+        "avgForwardMfe": 0.06161764705879089,
+        "avgForwardMae": -0.2847058823529096,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.20499999999992724,
+        "meanSigned": -0.187647058823546,
+        "estimatedGrossEdge": -0.187647058823546,
+        "estimatedEdgeAfterFriction": -0.24764705882354598,
+        "signedQuantiles": {
+          "0.1": -0.5889999999998509,
+          "0.25": -0.40249999999969077,
+          "0.5": -0.15999999999985448,
+          "0.75": 0.03999999999996362,
+          "0.9": 0.1959999999997309
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06999999999970896,
+          "0.9": 0.2290000000001784
+        },
+        "maeQuantiles": {
+          "0.1": -0.5889999999998509,
+          "0.25": -0.4149999999999636,
+          "0.5": -0.20499999999992724,
+          "0.75": -0.10000000000013642,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+        "n": 303,
+        "labeled": 297,
+        "buy": 147,
+        "sell": 156,
+        "pFavFirst_0_05": 0.17123287671232876,
+        "pFavFirst_0_10": 0.17938931297709923,
+        "pFavFirst_0_15": 0.19117647058823528,
+        "pFavFirst_0_20": 0.21379310344827587,
+        "avgForwardMfe": 0.06885521885516618,
+        "avgForwardMae": -0.2501010101009633,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.18000000000029104,
+        "meanSigned": -0.14922558922562193,
+        "estimatedGrossEdge": -0.14922558922562193,
+        "estimatedEdgeAfterFriction": -0.20922558922562193,
+        "signedQuantiles": {
+          "0.1": -0.5340000000000145,
+          "0.25": -0.25,
+          "0.5": -0.11000000000058208,
+          "0.75": -0.019999999999527063,
+          "0.9": 0.13000000000010914
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.06999999999970896,
+          "0.9": 0.22000000000025466
+        },
+        "maeQuantiles": {
+          "0.1": -0.5340000000000145,
+          "0.25": -0.3100000000004002,
+          "0.5": -0.18000000000029104,
+          "0.75": -0.1000000000003638,
+          "0.9": -0.0500000000001819
+        },
+        "_unused": {}
+      }
+    ],
+    "rules5s": [
+      {
+        "id": "R3_vel_depth_agree",
+        "description": "side-aligned vel1s AND depthImbalance agrees with side",
+        "n": 1,
+        "labeled": 1,
+        "buy": 1,
+        "sell": 0,
+        "pFavFirst_0_05": 1,
+        "pFavFirst_0_10": 1,
+        "pFavFirst_0_15": 1,
+        "pFavFirst_0_20": 1,
+        "avgForwardMfe": 0.21000000000003638,
+        "avgForwardMae": -0.6000000000003638,
+        "medianForwardMfe": 0.21000000000003638,
+        "medianForwardMae": -0.6000000000003638,
+        "meanSigned": -0.6000000000003638,
+        "estimatedGrossEdge": -0.6000000000003638,
+        "estimatedEdgeAfterFriction": -0.6600000000003639,
+        "signedQuantiles": {
+          "0.1": -0.6000000000003638,
+          "0.25": -0.6000000000003638,
+          "0.5": -0.6000000000003638,
+          "0.75": -0.6000000000003638,
+          "0.9": -0.6000000000003638
+        },
+        "mfeQuantiles": {
+          "0.1": 0.21000000000003638,
+          "0.25": 0.21000000000003638,
+          "0.5": 0.21000000000003638,
+          "0.75": 0.21000000000003638,
+          "0.9": 0.21000000000003638
+        },
+        "maeQuantiles": {
+          "0.1": -0.6000000000003638,
+          "0.25": -0.6000000000003638,
+          "0.5": -0.6000000000003638,
+          "0.75": -0.6000000000003638,
+          "0.9": -0.6000000000003638
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R4_accel_remove_liq",
+        "description": "accel aligned + opposite liquidity being removed",
+        "n": 252,
+        "labeled": 246,
+        "buy": 125,
+        "sell": 127,
+        "pFavFirst_0_05": 0.11788617886178862,
+        "pFavFirst_0_10": 0.15283842794759825,
+        "pFavFirst_0_15": 0.2,
+        "pFavFirst_0_20": 0.20125786163522014,
+        "avgForwardMfe": 0.08544715447150582,
+        "avgForwardMae": -0.26292682926834565,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.22000000000025466,
+        "meanSigned": -0.1284146341464086,
+        "estimatedGrossEdge": -0.1284146341464086,
+        "estimatedEdgeAfterFriction": -0.1884146341464086,
+        "signedQuantiles": {
+          "0.1": -0.47999999999956344,
+          "0.25": -0.2899999999999636,
+          "0.5": -0.15999999999985448,
+          "0.75": -0.020000000000436557,
+          "0.9": 0.2750000000005457
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.07999999999992724,
+          "0.9": 0.3400000000001455
+        },
+        "maeQuantiles": {
+          "0.1": -0.5099999999997635,
+          "0.25": -0.3725000000001728,
+          "0.5": -0.22000000000025466,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.06000000000040018
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "description": "rawQuality>=0.65 (control — quality alone)",
+        "n": 73,
+        "labeled": 68,
+        "buy": 37,
+        "sell": 36,
+        "pFavFirst_0_05": 0.17647058823529413,
+        "pFavFirst_0_10": 0.22727272727272727,
+        "pFavFirst_0_15": 0.25,
+        "pFavFirst_0_20": 0.24074074074074073,
+        "avgForwardMfe": 0.08367647058817591,
+        "avgForwardMae": -0.3597058823529551,
+        "medianForwardMfe": 0,
+        "medianForwardMae": -0.2950000000005275,
+        "meanSigned": -0.2079411764706198,
+        "estimatedGrossEdge": -0.2079411764706198,
+        "estimatedEdgeAfterFriction": -0.26794117647061977,
+        "signedQuantiles": {
+          "0.1": -0.6499999999996362,
+          "0.25": -0.48000000000047294,
+          "0.5": -0.1799999999998363,
+          "0.75": 0.03249999999979991,
+          "0.9": 0.24299999999984725
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0,
+          "0.75": 0.12499999999977263,
+          "0.9": 0.28399999999956016
+        },
+        "maeQuantiles": {
+          "0.1": -0.7150000000002364,
+          "0.25": -0.5625000000002274,
+          "0.5": -0.2950000000005275,
+          "0.75": -0.10749999999984539,
+          "0.9": -0.03999999999996362
+        },
+        "_unused": {}
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+        "n": 303,
+        "labeled": 297,
+        "buy": 147,
+        "sell": 156,
+        "pFavFirst_0_05": 0.16891891891891891,
+        "pFavFirst_0_10": 0.17883211678832117,
+        "pFavFirst_0_15": 0.2261904761904762,
+        "pFavFirst_0_20": 0.21428571428571427,
+        "avgForwardMfe": 0.09609427609419635,
+        "avgForwardMae": -0.31750841750843345,
+        "medianForwardMfe": 0.010000000000218279,
+        "medianForwardMae": -0.25,
+        "meanSigned": -0.15420875420882527,
+        "estimatedGrossEdge": -0.15420875420882527,
+        "estimatedEdgeAfterFriction": -0.21420875420882526,
+        "signedQuantiles": {
+          "0.1": -0.5600000000004002,
+          "0.25": -0.36999999999989086,
+          "0.5": -0.10999999999967258,
+          "0.75": 0.0500000000001819,
+          "0.9": 0.20399999999990576
+        },
+        "mfeQuantiles": {
+          "0.1": 0,
+          "0.25": 0,
+          "0.5": 0.010000000000218279,
+          "0.75": 0.11999999999989086,
+          "0.9": 0.2599999999993088
+        },
+        "maeQuantiles": {
+          "0.1": -0.6599999999998545,
+          "0.25": -0.47999999999956344,
+          "0.5": -0.25,
+          "0.75": -0.10999999999967258,
+          "0.9": -0.0500000000001819
+        },
+        "_unused": {}
+      }
+    ]
+  },
+  "holdoutResults": {
+    "trueUntouchedIndependentHoldout": null,
+    "verdict": "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION",
+    "pseudoSameMorningHoldout": {
+      "warning": "NOT a true holdout. Same calendar morning / same regime. Reported only for transparency.",
+      "n": 3007,
+      "rules3s": [
+        {
+          "id": "R3_vel_depth_agree",
+          "description": "side-aligned vel1s AND depthImbalance agrees with side",
+          "n": 0,
+          "labeled": 0,
+          "buy": 0,
+          "sell": 0,
+          "pFavFirst_0_05": null,
+          "pFavFirst_0_10": null,
+          "pFavFirst_0_15": null,
+          "pFavFirst_0_20": null,
+          "avgForwardMfe": null,
+          "avgForwardMae": null,
+          "medianForwardMfe": null,
+          "medianForwardMae": null,
+          "meanSigned": null,
+          "estimatedGrossEdge": null,
+          "estimatedEdgeAfterFriction": null,
+          "signedQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "mfeQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "maeQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R4_accel_remove_liq",
+          "description": "accel aligned + opposite liquidity being removed",
+          "n": 279,
+          "labeled": 256,
+          "buy": 128,
+          "sell": 151,
+          "pFavFirst_0_05": 0.08571428571428572,
+          "pFavFirst_0_10": 0.07906976744186046,
+          "pFavFirst_0_15": 0.0963855421686747,
+          "pFavFirst_0_20": 0.08088235294117647,
+          "avgForwardMfe": 0.0270703125000189,
+          "avgForwardMae": -0.22269531250002927,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.19000000000005457,
+          "meanSigned": -0.15289062499995865,
+          "estimatedGrossEdge": -0.15289062499995865,
+          "estimatedEdgeAfterFriction": -0.21289062499995864,
+          "signedQuantiles": {
+            "0.1": -0.38000000000010914,
+            "0.25": -0.26999999999975444,
+            "0.5": -0.13500000000021828,
+            "0.75": -0.0500000000001819,
+            "0.9": 0.06000000000040018
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.07999999999992724
+          },
+          "maeQuantiles": {
+            "0.1": -0.4099999999998545,
+            "0.25": -0.30999999999971806,
+            "0.5": -0.19000000000005457,
+            "0.75": -0.11000000000058208,
+            "0.9": -0.04500000000052751
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R7_quality_ge_065",
+          "description": "rawQuality>=0.65 (control — quality alone)",
+          "n": 28,
+          "labeled": 28,
+          "buy": 19,
+          "sell": 9,
+          "pFavFirst_0_05": 0.07142857142857142,
+          "pFavFirst_0_10": 0.07692307692307693,
+          "pFavFirst_0_15": 0.08,
+          "pFavFirst_0_20": 0.05263157894736842,
+          "avgForwardMfe": 0.04178571428571688,
+          "avgForwardMae": -0.24571428571415968,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.22999999999956344,
+          "meanSigned": -0.14714285714272332,
+          "estimatedGrossEdge": -0.14714285714272332,
+          "estimatedEdgeAfterFriction": -0.20714285714272332,
+          "signedQuantiles": {
+            "0.1": -0.3400000000001455,
+            "0.25": -0.2999999999992724,
+            "0.5": -0.22999999999956344,
+            "0.75": -0.040000000000190994,
+            "0.9": 0.054000000000087436
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.06099999999960358
+          },
+          "maeQuantiles": {
+            "0.1": -0.40200000000004366,
+            "0.25": -0.3175000000003365,
+            "0.5": -0.22999999999956344,
+            "0.75": -0.15750000000002728,
+            "0.9": -0.0810000000002219
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R8_imb_and_vel",
+          "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+          "n": 311,
+          "labeled": 307,
+          "buy": 171,
+          "sell": 140,
+          "pFavFirst_0_05": 0.06756756756756757,
+          "pFavFirst_0_10": 0.06390977443609022,
+          "pFavFirst_0_15": 0.06944444444444445,
+          "pFavFirst_0_20": 0.06417112299465241,
+          "avgForwardMfe": 0.024918566775216453,
+          "avgForwardMae": -0.2451140065146728,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.22000000000025466,
+          "meanSigned": -0.16058631921822386,
+          "estimatedGrossEdge": -0.16058631921822386,
+          "estimatedEdgeAfterFriction": -0.22058631921822386,
+          "signedQuantiles": {
+            "0.1": -0.4000000000005457,
+            "0.25": -0.3000000000001819,
+            "0.5": -0.14000000000032742,
+            "0.75": -0.030000000000654836,
+            "0.9": 0.06000000000040018
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.07399999999979662
+          },
+          "maeQuantiles": {
+            "0.1": -0.4500000000007276,
+            "0.25": -0.36999999999989086,
+            "0.5": -0.22000000000025466,
+            "0.75": -0.13000000000010914,
+            "0.9": -0.06999999999970896
+          },
+          "_unused": {}
+        }
+      ],
+      "rules5s": [
+        {
+          "id": "R3_vel_depth_agree",
+          "description": "side-aligned vel1s AND depthImbalance agrees with side",
+          "n": 0,
+          "labeled": 0,
+          "buy": 0,
+          "sell": 0,
+          "pFavFirst_0_05": null,
+          "pFavFirst_0_10": null,
+          "pFavFirst_0_15": null,
+          "pFavFirst_0_20": null,
+          "avgForwardMfe": null,
+          "avgForwardMae": null,
+          "medianForwardMfe": null,
+          "medianForwardMae": null,
+          "meanSigned": null,
+          "estimatedGrossEdge": null,
+          "estimatedEdgeAfterFriction": null,
+          "signedQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "mfeQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "maeQuantiles": {
+            "0.1": null,
+            "0.25": null,
+            "0.5": null,
+            "0.75": null,
+            "0.9": null
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R4_accel_remove_liq",
+          "description": "accel aligned + opposite liquidity being removed",
+          "n": 279,
+          "labeled": 256,
+          "buy": 128,
+          "sell": 151,
+          "pFavFirst_0_05": 0.084,
+          "pFavFirst_0_10": 0.09606986899563319,
+          "pFavFirst_0_15": 0.10362694300518134,
+          "pFavFirst_0_20": 0.08187134502923976,
+          "avgForwardMfe": 0.03988281249999659,
+          "avgForwardMae": -0.2634765625000455,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.25,
+          "meanSigned": -0.16996093749996533,
+          "estimatedGrossEdge": -0.16996093749996533,
+          "estimatedEdgeAfterFriction": -0.22996093749996532,
+          "signedQuantiles": {
+            "0.1": -0.42000000000007276,
+            "0.25": -0.3000000000001819,
+            "0.5": -0.18000000000029104,
+            "0.75": -0.030000000000427463,
+            "0.9": 0.06999999999970896
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.030000000000654836,
+            "0.9": 0.1499999999996362
+          },
+          "maeQuantiles": {
+            "0.1": -0.4899999999997817,
+            "0.25": -0.36999999999989086,
+            "0.5": -0.25,
+            "0.75": -0.11999999999989086,
+            "0.9": -0.05999999999949068
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R7_quality_ge_065",
+          "description": "rawQuality>=0.65 (control — quality alone)",
+          "n": 28,
+          "labeled": 28,
+          "buy": 19,
+          "sell": 9,
+          "pFavFirst_0_05": 0.07142857142857142,
+          "pFavFirst_0_10": 0.07407407407407407,
+          "pFavFirst_0_15": 0.07407407407407407,
+          "pFavFirst_0_20": 0.07692307692307693,
+          "avgForwardMfe": 0.05785714285717144,
+          "avgForwardMae": -0.3482142857141883,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.3000000000001819,
+          "meanSigned": -0.23178571428573896,
+          "estimatedGrossEdge": -0.23178571428573896,
+          "estimatedEdgeAfterFriction": -0.29178571428573896,
+          "signedQuantiles": {
+            "0.1": -0.536999999999989,
+            "0.25": -0.4600000000000364,
+            "0.5": -0.2699999999999818,
+            "0.75": -0.09499999999957254,
+            "0.9": 0.2120000000001711
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0,
+            "0.9": 0.24500000000007294
+          },
+          "maeQuantiles": {
+            "0.1": -0.5999999999994543,
+            "0.25": -0.5,
+            "0.5": -0.3000000000001819,
+            "0.75": -0.22749999999973625,
+            "0.9": -0.13000000000001813
+          },
+          "_unused": {}
+        },
+        {
+          "id": "R8_imb_and_vel",
+          "description": "signedImbalance agrees with side AND abs(midVel250) strong",
+          "n": 311,
+          "labeled": 307,
+          "buy": 171,
+          "sell": 140,
+          "pFavFirst_0_05": 0.06688963210702341,
+          "pFavFirst_0_10": 0.06093189964157706,
+          "pFavFirst_0_15": 0.06882591093117409,
+          "pFavFirst_0_20": 0.07423580786026202,
+          "avgForwardMfe": 0.04234527687293751,
+          "avgForwardMae": -0.3100000000000121,
+          "medianForwardMfe": 0,
+          "medianForwardMae": -0.2999999999992724,
+          "meanSigned": -0.18990228013034707,
+          "estimatedGrossEdge": -0.18990228013034707,
+          "estimatedEdgeAfterFriction": -0.24990228013034707,
+          "signedQuantiles": {
+            "0.1": -0.5,
+            "0.25": -0.3599999999996726,
+            "0.5": -0.1999999999998181,
+            "0.75": -0.03000000000020009,
+            "0.9": 0.10399999999954196
+          },
+          "mfeQuantiles": {
+            "0.1": 0,
+            "0.25": 0,
+            "0.5": 0,
+            "0.75": 0.02999999999974534,
+            "0.9": 0.1739999999997966
+          },
+          "maeQuantiles": {
+            "0.1": -0.5600000000004002,
+            "0.25": -0.4499999999998181,
+            "0.5": -0.2999999999992724,
+            "0.75": -0.15499999999974534,
+            "0.9": -0.07000000000061846
+          },
+          "_unused": {}
+        }
+      ]
+    }
+  },
+  "evidenceAfterFriction": {
+    "anyPositiveProspectiveEdgeAfterFriction": false,
+    "note": "Requires n>=30 on discovery AND validation with after-friction meanSigned@3s > 0 for the SAME locked rule. Pseudo-holdout never used for claim.",
+    "details": [
+      {
+        "id": "R3_vel_depth_agree",
+        "discoveryEdge": -0.19000000000010914,
+        "validationEdge": 0.03000000000014552,
+        "discoveryN": 3,
+        "validationN": 1,
+        "bothPositive": false
+      },
+      {
+        "id": "R4_accel_remove_liq",
+        "discoveryEdge": -0.15953995157381384,
+        "validationEdge": -0.16792682926835997,
+        "discoveryN": 436,
+        "validationN": 252,
+        "bothPositive": false
+      },
+      {
+        "id": "R7_quality_ge_065",
+        "discoveryEdge": -0.19137931034479433,
+        "validationEdge": -0.24764705882354598,
+        "discoveryN": 118,
+        "validationN": 73,
+        "bothPositive": false
+      },
+      {
+        "id": "R8_imb_and_vel",
+        "discoveryEdge": -0.19059970014990954,
+        "validationEdge": -0.20922558922562193,
+        "discoveryN": 667,
+        "validationN": 303,
+        "bothPositive": false
+      }
+    ]
+  },
+  "overfittingWarnings": [
+    "Only one independent London morning with substantial Level-II coverage.",
+    "Chronological splits within that morning share microstructure regime, news window, and liquidity.",
+    "Do not combine Phase 0 loss-reduction rules with Phase 1 discovery rules on the same sample.",
+    "Soft near-miss expansion increases sample size but is not the live entry gate.",
+    "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION — stop; do not pretend one morning split is strong OOS."
+  ],
+  "moreDataRequired": true,
+  "dataCaptureOnlyDesign": {
+    "purpose": "Collect independent clean Spot+Depth periods for genuine OOS entry-edge research",
+    "scope": "SCOPE_VIEW only",
+    "brokerOrders": 0,
+    "shadowOrders": 0,
+    "mutationSurface": "NONE",
+    "capture": [
+      "Spot + Depth events with receiveSeq",
+      "raw transport/onSpot/onDepth callback timestamps (pre-queue)",
+      "subscription flags (spotSubscribed/depthSubscribed)",
+      "event-loop lag / heartbeat",
+      "ordered queue depth + enqueue→process latency",
+      "reconnect/resync lifecycle with classified reasons",
+      "per-event raw A/B/C specialist telemetry (eligible/rawQuality/failedConditions/selected)",
+      "book generation / crossed / warmingUp"
+    ],
+    "deployNow": false,
+    "note": "Design only — DO NOT deploy as part of Phase 1"
+  },
+  "artifactsCreated": [
+    "backend/scripts/microEdge/goldHunterFastPhase1EntryEdgeCli.ts",
+    "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/PHASE1_REPORT.json",
+    "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/PHASE1_REPORT.md",
+    "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/DATASET_INVENTORY.json",
+    "backend/src/services/microEdge/goldHunter/fast/artifacts/v2-phase1-entry-edge/candidates_clean_sample.jsonl"
+  ]
+}

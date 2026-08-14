@@ -1,0 +1,161 @@
+{
+  "generatedAt": "2026-08-14T10:58:14.476Z",
+  "note": "Inventory of GOLD_HUNTER FAST live-shadow GCS runs under gold-hunter-fast/live-shadow/",
+  "calendarDaysWithUsableChunks": [
+    "2026-08-13 (probe only)",
+    "2026-08-14 (only substantial day)"
+  ],
+  "independentMarketPeriods": 1,
+  "oosVerdict": "INSUFFICIENT INDEPENDENT DATA FOR OOS VALIDATION",
+  "oosExplanation": "All substantial continuous Spot+Depth streams are from a single London morning (2026-08-14). Chronological 50/25/25 splits within that morning are IN-SAMPLE RESEARCH only and must not be treated as true holdout across independent regimes.",
+  "gcsRunCatalogSummary": {
+    "totalRunIds": 28,
+    "substantialUsable": [
+      "gh_fast_mssjjspo_8ubuxa (22 chunks, ~06:03–07:25)",
+      "gh_fast_mssmh2w2_ftl4pq (3 chunks, ~07:28–07:38)",
+      "gh_fast_mssnh4uq_v488yc (32 chunks, ~07:53–10:06)"
+    ],
+    "unitTestOrTinyProbe": "Most other 10-chunk runs are unit-test uploads with rowCount=2 per chunk (configHash=default). Not usable for feature research.",
+    "knownInfrastructureContamination": "V1 fail run (~91 resyncs / DATA_STALE / BOOK_REBUILDING windows). Stormy early run also has frequent rebuild/stale. Contaminated windows excluded from clean set."
+  },
+  "runsProcessed": [
+    {
+      "runId": "gh_fast_mssjjspo_8ubuxa",
+      "label": "EARLY_SAME_DAY_PRE_QUAL — 2026-08-14 ~06:03–07:25 UTC (stormy/pre-fix period)",
+      "eventCount": 11000,
+      "marketEvents": 11000,
+      "span": {
+        "start": "2026-08-14T06:03:24.833Z",
+        "end": "2026-08-14T07:25:26.505Z",
+        "hours": 1.367131111111111
+      },
+      "candidateRows": 9297,
+      "cleanCandidates": 131,
+      "contaminationStats": {
+        "book_rebuilding": 0,
+        "data_stale": 10779,
+        "feed_gap": 129,
+        "crossed_book": 0,
+        "resync_marker": 2,
+        "insufficient_features": 322
+      },
+      "setupCTickStats": {
+        "featureTicks": 10678,
+        "eligible": 3,
+        "subThreshold": 0,
+        "structuralFail": 10675,
+        "selected": 3,
+        "failedConditionCounts": {
+          "impulse_vel3s_too_weak": 9826,
+          "efficiency3s_too_low": 3514,
+          "pullback_too_shallow": 708,
+          "pullback_not_confirmed": 801,
+          "reaccel_acceleration_missing": 441,
+          "reaccel_imbalance_missing": 261,
+          "reaccel_vel250_missing": 206,
+          "pullback_too_deep": 4
+        }
+      },
+      "configHashSeen": null
+    },
+    {
+      "runId": "gh_fast_mssmh2w2_ftl4pq",
+      "label": "BRIDGE_SEGMENT — 2026-08-14 ~07:28–07:38 UTC (3 chunks)",
+      "eventCount": 1500,
+      "marketEvents": 1500,
+      "span": {
+        "start": "2026-08-14T07:25:16.976Z",
+        "end": "2026-08-14T07:38:31.353Z",
+        "hours": 0.22066027777777777
+      },
+      "candidateRows": 1241,
+      "cleanCandidates": 1007,
+      "contaminationStats": {
+        "book_rebuilding": 80,
+        "data_stale": 22,
+        "feed_gap": 19,
+        "crossed_book": 0,
+        "resync_marker": 9,
+        "insufficient_features": 67
+      },
+      "setupCTickStats": {
+        "featureTicks": 1433,
+        "eligible": 0,
+        "subThreshold": 0,
+        "structuralFail": 1433,
+        "selected": 0,
+        "failedConditionCounts": {
+          "impulse_vel3s_too_weak": 1346,
+          "efficiency3s_too_low": 381,
+          "pullback_too_shallow": 75,
+          "pullback_not_confirmed": 81,
+          "reaccel_vel250_missing": 21,
+          "reaccel_acceleration_missing": 42,
+          "reaccel_imbalance_missing": 21
+        }
+      },
+      "configHashSeen": null
+    },
+    {
+      "runId": "gh_fast_mssnh4uq_v488yc",
+      "label": "V1_EARLY_QUALIFICATION_FAIL — 2026-08-14 ~07:53–10:06 UTC",
+      "eventCount": 16000,
+      "marketEvents": 16000,
+      "span": {
+        "start": "2026-08-14T07:53:19.191Z",
+        "end": "2026-08-14T10:06:23.277Z",
+        "hours": 2.2178016666666664
+      },
+      "candidateRows": 13066,
+      "cleanCandidates": 10889,
+      "contaminationStats": {
+        "book_rebuilding": 877,
+        "data_stale": 222,
+        "feed_gap": 208,
+        "crossed_book": 0,
+        "resync_marker": 46,
+        "insufficient_features": 632
+      },
+      "setupCTickStats": {
+        "featureTicks": 15368,
+        "eligible": 4,
+        "subThreshold": 0,
+        "structuralFail": 15364,
+        "selected": 2,
+        "failedConditionCounts": {
+          "impulse_vel3s_too_weak": 14703,
+          "pullback_too_shallow": 585,
+          "reaccel_acceleration_missing": 334,
+          "pullback_not_confirmed": 643,
+          "reaccel_vel250_missing": 183,
+          "efficiency3s_too_low": 4969,
+          "reaccel_imbalance_missing": 198
+        }
+      },
+      "configHashSeen": null
+    }
+  ],
+  "gcsRunIdsListed": 28,
+  "processedLocally": [
+    "gh_fast_mssjjspo_8ubuxa",
+    "gh_fast_mssmh2w2_ftl4pq",
+    "gh_fast_mssnh4uq_v488yc"
+  ],
+  "contaminationExcluded": 11577,
+  "cleanUsableCandidateRows": 12027,
+  "gcsRunChunkCounts": {
+    "note": "From live inventory at Phase 1 run time",
+    "substantial": {
+      "gh_fast_mssjjspo_8ubuxa": 22,
+      "gh_fast_mssmh2w2_ftl4pq": 3,
+      "gh_fast_mssnh4uq_v488yc": 32
+    },
+    "unitTestStyle10chunkProbes": [
+      "gh_fast_mssjhd5k_vpyoxj",
+      "gh_fast_mssm6242_w86z29",
+      "gh_fast_mssteivz_ye2udt",
+      "gh_fast_msstewh4_8oa5hr",
+      "gh_fast_msstfz57_b1zxva"
+    ]
+  }
+}
