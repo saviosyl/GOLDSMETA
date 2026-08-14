@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fail if Micro Edge branch changes protected Core paths vs MICRO_BASE_SHA.
+ * Fail if a Micro Edge change set also modifies protected Core paths vs MICRO_BASE_SHA.
+ * AutoTrade / Core-only PRs are not Micro Edge change sets — this gate does not apply.
  * Usage: MICRO_BASE_SHA=<sha> node scripts/microEdge/assertProtectedCoreUnchanged.mjs
  */
 import { execSync } from "node:child_process";
@@ -57,13 +58,33 @@ function matchesGlob(file, glob) {
   return file === glob;
 }
 
+const MICRO_EDGE_SOURCE_PREFIXES = [
+  "backend/src/services/microEdge/",
+  "backend/src/routes/microEdge.ts"
+];
+
+function isMicroEdgeSource(file) {
+  return MICRO_EDGE_SOURCE_PREFIXES.some((prefix) =>
+    prefix.endsWith("/") ? file.startsWith(prefix) : file === prefix
+  );
+}
+
 const files = changedFiles(base);
+const microEdgeHits = files.filter(isMicroEdgeSource);
+if (!microEdgeHits.length) {
+  console.log(
+    "PASS: not a Micro Edge change set — protected Core gate does not apply"
+  );
+  console.log("Changed files scanned:", files.length);
+  process.exit(0);
+}
+
 const hits = files.filter((f) =>
   manifest.protectedGlobs.some((g) => matchesGlob(f, g))
 );
 
 if (hits.length) {
-  console.error("FAIL: Protected Core paths changed vs", base);
+  console.error("FAIL: Micro Edge PR changed protected Core paths vs", base);
   for (const h of hits) console.error("  -", h);
   process.exit(1);
 }

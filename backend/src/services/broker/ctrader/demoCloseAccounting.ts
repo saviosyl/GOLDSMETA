@@ -179,7 +179,8 @@ export async function applyConfirmedDemoBrokerClose(args: {
       closePrice: life.closePrice,
       closeReason: reason,
       brokerDealId: life.brokerDealId,
-      closedAt: life.closedAt
+      closedAt: life.closedAt,
+      strategyId: life.strategyId ?? null
     });
     return { applied: false, reason: "already_closed_confirmed" };
   }
@@ -237,7 +238,8 @@ export async function applyConfirmedDemoBrokerClose(args: {
     brokerDealId: args.deal.dealId,
     brokerPositionId: args.brokerPositionId,
     brokerOrderId: args.deal.orderId,
-    closedAt
+    closedAt,
+    strategyId: life.strategyId ?? null
   });
 
   try {

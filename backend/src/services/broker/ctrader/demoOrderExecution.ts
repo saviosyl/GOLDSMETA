@@ -20,6 +20,9 @@ import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
 import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 import { lotsToOrderVolumeUnits } from "./volumeUnits";
 import { denyCTraderMutation } from "./mutationGuard";
+import { assertFastAutoTradeDemoOnly } from "./fastAutoTrade/demoLock";
+import { isFastAutoTradeV1Enabled } from "./fastAutoTrade/config";
+import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
 
 const SPOT_PRICE_SCALE = 100_000;
 
@@ -33,6 +36,8 @@ export type SubmitDemoMarketOrderArgs = {
   symbolId?: string | null;
   comment?: string;
   label?: string;
+  /** When FAST_AUTOTRADE_V1, Live accounts are blocked even if other gates slip. */
+  strategyId?: string | null;
 };
 
 function relativeProtection(args: {
@@ -156,6 +161,17 @@ export async function submitDemoMarketOrder(
   }
 
   const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
+
+  const strategyId =
+    args.strategyId ??
+    (isFastAutoTradeV1Enabled() ? FAST_AUTOTRADE_STRATEGY_ID : null);
+  if (strategyId === FAST_AUTOTRADE_STRATEGY_ID) {
+    assertFastAutoTradeDemoOnly({
+      strategyId,
+      accountIsLive: connection.selectedAccountIsLive,
+      environment: connection.environment
+    });
+  }
 
   if (connection.selectedAccountIsLive || connection.environment === "LIVE") {
     throw new Error("CTRADER_DEMO_ONLY_LIVE_ACCOUNT_FORBIDDEN");

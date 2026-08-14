@@ -46,6 +46,9 @@ import {
 import { loadCompletedM5BarsForProfitLock } from "./demoProfitLockCandles";
 import { getConnection } from "./connectionStore";
 import { resolveManagementPolicy } from "./demoProfitLockTypes";
+import { evaluateFastManagement } from "./fastAutoTrade/management";
+import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
+import { loadFastAutoTradeConfig } from "./fastAutoTrade/config";
 
 function riskDistance(entry: number | null, sl: number | null): number | null {
   if (entry == null || sl == null) return null;
@@ -82,6 +85,7 @@ export async function createDemoPositionLifecycle(args: {
   decisionId: string | null;
   source: "qualification_controlled" | "demo_auto" | "manual";
   openedAt: string;
+  strategyId?: string | null;
 }): Promise<DemoPositionLifecycle> {
   const existing = await getPositionLifecycle(args.uid, args.correlationId);
   if (existing) {
@@ -173,6 +177,7 @@ export async function createDemoPositionLifecycle(args: {
     qualificationStage: args.qualificationStage,
     decisionId: args.decisionId,
     setupRef: args.decisionId,
+    strategyId: args.strategyId ?? null,
     source: args.source,
     managementState: args.stopLoss != null ? "SL_PROTECTED" : "HOLD",
     lastRecommendation: null,
@@ -530,7 +535,8 @@ async function closeLifecycleConfirmed(args: {
       closePrice: args.closePrice,
       closeReason: reason,
       brokerDealId: args.brokerDealId,
-      closedAt
+      closedAt,
+      strategyId: doc.strategyId ?? null
     });
   } catch {
     /* qualification close best-effort */
@@ -721,6 +727,136 @@ export async function manageOpenDemoPosition(
     if (hit.applied) {
       doc = { ...hit.doc, tp3Status: "HIT", managementState: "TP3_HIT" };
     }
+  }
+
+  if (doc.strategyId === FAST_AUTOTRADE_STRATEGY_ID && doc.entry != null) {
+    const openedMs = Date.parse(doc.openedAt);
+    const fastCfg = loadFastAutoTradeConfig();
+    const rDist = riskDistance(doc.entry, doc.initialSl);
+    const fav =
+      rDist != null && rDist > 0
+        ? doc.side === "BUY"
+          ? ((currentPrice ?? doc.entry) - doc.entry) / rDist
+          : (doc.entry - (currentPrice ?? doc.entry)) / rDist
+        : 0;
+    const fastMgmt = evaluateFastManagement(
+      {
+        side: doc.side,
+        entry: doc.entry,
+        currentPrice: currentPrice ?? doc.entry,
+        currentSl: doc.currentSl,
+        initialSl: doc.initialSl,
+        tp1: doc.tp1,
+        openedAtMs: Number.isFinite(openedMs) ? openedMs : Date.now(),
+        nowMs: Date.now(),
+        atr: rDist,
+        regime: null,
+        momentumCollapsed: fav < -0.15 && doc.tp1Status === "PENDING",
+        oppositeStructureBreak: false,
+        alreadyBreakeven: doc.managementState === "BREAKEVEN_SET"
+      },
+      fastCfg
+    );
+    doc = {
+      ...doc,
+      lastRecommendation: `${fastMgmt.action}: ${fastMgmt.reason}`
+    };
+    if (
+      (fastMgmt.action === "MOVE_SL_TO_BREAKEVEN" ||
+        fastMgmt.action === "TRAIL_STOP") &&
+      fastMgmt.newStopLoss != null &&
+      doc.brokerPositionId
+    ) {
+      const beKey = `fast_${fastMgmt.action}:${doc.correlationId}:${fastMgmt.newStopLoss}`;
+      if (!doc.appliedDedupeKeys.includes(beKey)) {
+        try {
+          const oldSl = doc.currentSl;
+          const result = await amendDemoStopLoss({
+            ownerUid: uid,
+            positionId: doc.brokerPositionId,
+            stopLoss: fastMgmt.newStopLoss,
+            takeProfit: doc.tp1
+          });
+          if (result.accepted) {
+            const ev = appendLifecycleEvent(doc, {
+              at: new Date().toISOString(),
+              kind: "BREAKEVEN",
+              reason: fastMgmt.reason,
+              oldSl,
+              newSl: fastMgmt.newStopLoss,
+              brokerAck: true,
+              dedupeKey: beKey
+            });
+            doc = {
+              ...ev.doc,
+              currentSl: fastMgmt.newStopLoss,
+              managementState:
+                fastMgmt.action === "MOVE_SL_TO_BREAKEVEN"
+                  ? "BREAKEVEN_SET"
+                  : doc.managementState,
+              currentRisk:
+                fastMgmt.action === "MOVE_SL_TO_BREAKEVEN"
+                  ? 0
+                  : doc.currentRisk
+            };
+          }
+        } catch {
+          /* retry next pass */
+        }
+      }
+    } else if (
+      (fastMgmt.action === "EXIT_MOMENTUM" ||
+        fastMgmt.action === "EXIT_STALE" ||
+        fastMgmt.action === "EXIT_STRUCTURE") &&
+      doc.brokerPositionId &&
+      doc.remainingLots != null &&
+      doc.remainingLots > 0
+    ) {
+      const exitKey = `fast_exit:${doc.correlationId}:${fastMgmt.action}`;
+      if (!doc.appliedDedupeKeys.includes(exitKey)) {
+        try {
+          const symbol = await loadDemoXauUsdSymbol(uid);
+          if (
+            symbol &&
+            symbol.minVolume != null &&
+            symbol.volumeStep != null &&
+            symbol.maxVolume != null
+          ) {
+            const converted = lotsToValidatedBrokerVolume({
+              lots: doc.remainingLots,
+              minLots: symbol.minVolume,
+              maxLots: symbol.maxVolume,
+              stepLots: symbol.volumeStep
+            });
+            if (converted.ok && converted.orderVolumeUnits != null) {
+              const closed = await closeDemoBrokerPosition({
+                ownerUid: uid,
+                positionId: doc.brokerPositionId,
+                volumeUnits: converted.orderVolumeUnits
+              });
+              if (closed.accepted) {
+                const ev = appendLifecycleEvent(doc, {
+                  at: new Date().toISOString(),
+                  kind: "CLOSE",
+                  reason: fastMgmt.reason,
+                  brokerAck: true,
+                  dedupeKey: exitKey
+                });
+                doc = {
+                  ...ev.doc,
+                  managementState: "EXIT_SIGNAL",
+                  lastRecommendation: `${fastMgmt.action}: ${fastMgmt.reason}`
+                };
+              }
+            }
+          }
+        } catch {
+          /* retry next pass */
+        }
+      }
+    }
+    await savePositionLifecycle(doc);
+    return doc;
   }
 
   const news = evaluateNewsGuard({

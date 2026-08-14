@@ -15,6 +15,8 @@ import {
 import type { DailySafetyDocument, DailySafetyPublicView } from "./dailySafetyTypes";
 import { reconcileDemoOpenPositionCounters } from "./openPositionReconcile";
 import { resolveDemoAutoAuthorityForUser } from "./demoAutoExecutionAuthority";
+import { loadFastAutoTradeConfig } from "./fastAutoTrade/config";
+import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
 
 export type EntryGateResult = {
   allowed: boolean;
@@ -180,11 +182,34 @@ export async function markTradeOpened(args: {
   await saveDailySafetyDoc(daily);
 }
 
+/**
+ * Demo post-loss cooldown minutes. The 1-minute FAST reduction applies only
+ * when the closed trade itself is FAST_AUTOTRADE_V1. Manual / Gold Hunter /
+ * legacy AutoTrade closes keep the user setting.
+ */
+export function demoPostLossCooldownMinutes(args: {
+  settingsCooldownMinutes: number;
+  environment: AutoTradeEnvironment;
+  strategyId?: string | null;
+}): number {
+  if (
+    args.environment === "demo" &&
+    args.strategyId === FAST_AUTOTRADE_STRATEGY_ID
+  ) {
+    return Math.min(
+      args.settingsCooldownMinutes,
+      loadFastAutoTradeConfig().demoReentryDelayMinutes
+    );
+  }
+  return args.settingsCooldownMinutes;
+}
+
 export async function markTradeClosed(args: {
   uid: string;
   environment: AutoTradeEnvironment;
   tradeId: string;
   pnl: number;
+  strategyId?: string | null;
 }): Promise<void> {
   const [settings, daily] = await Promise.all([
     getUserAutoTradeSettings(args.uid, args.environment),
@@ -200,9 +225,14 @@ export async function markTradeClosed(args: {
   daily.lastTradeWasLoss = loss;
   if (loss) {
     daily.consecutiveLosses += 1;
-    if (settings.tradeCooldownMinutes > 0) {
+    const cooldownMinutes = demoPostLossCooldownMinutes({
+      settingsCooldownMinutes: settings.tradeCooldownMinutes,
+      environment: args.environment,
+      strategyId: args.strategyId
+    });
+    if (cooldownMinutes > 0) {
       daily.cooldownUntil = new Date(
-        Date.now() + settings.tradeCooldownMinutes * 60_000
+        Date.now() + cooldownMinutes * 60_000
       ).toISOString();
     }
     if (daily.consecutiveLosses >= settings.pauseAfterConsecutiveLosses) {

@@ -21,6 +21,8 @@ import { processDecisionForQualification } from "./services/broker/ctrader/quali
 import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
 import { runDemoPositionManagementPass } from "./services/broker/ctrader/demoPositionLifecycle";
 import { runWeeklyReportPass } from "./services/broker/ctrader/weeklyReportService";
+import { isFastAutoTradeV1Enabled } from "./services/broker/ctrader/fastAutoTrade/config";
+import { runFastAutoTradeScanPass } from "./services/broker/ctrader/fastAutoTrade/scan";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
@@ -45,14 +47,16 @@ export const app = createApp();
  * OAuth redirect URI continues to come from CTRADER_REDIRECT_URI (Secret Manager).
  */
 /**
- * Demo opportunity mode remains ACTIVE_DEMO.
+ * Demo AutoTrade strategy is FAST_AUTOTRADE_V1 (Demo only).
  * Temporary overnight overlay (DEMO_OVERNIGHT_MODE) is OFF after morning handoff.
  * Guard implementation in demoOvernightGuard.ts is retained for future controlled sessions.
  * Never enables Live.
  */
 function applyDemoOvernightRuntimeEnv(): void {
   process.env.DEMO_OPPORTUNITY_MODE =
-    process.env.DEMO_OPPORTUNITY_MODE || "ACTIVE_DEMO";
+    process.env.DEMO_OPPORTUNITY_MODE || "FAST_AUTOTRADE_V1";
+  process.env.FAST_AUTOTRADE_V1_ENABLED =
+    process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
   // Morning handoff 2026-08-13: disable temporary overnight entry overlay.
   process.env.DEMO_OVERNIGHT_MODE = "false";
 }
@@ -89,6 +93,10 @@ function applyDemoAutoTradeRuntimeEnv(): void {
   process.env.CTRADER_LIVE_ENABLED = "false";
   process.env.BROKER_EXECUTION_ENABLED = "false";
   process.env.CTRADER_ENVIRONMENT = "DEMO";
+  process.env.FAST_AUTOTRADE_V1_ENABLED =
+    process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
+  process.env.DEMO_OPPORTUNITY_MODE =
+    process.env.DEMO_OPPORTUNITY_MODE || "FAST_AUTOTRADE_V1";
   applyDemoOvernightRuntimeEnv();
 }
 
@@ -266,11 +274,17 @@ export const manageDemoAutoTradePositions = onSchedule(
     process.env.CTRADER_LIVE_ENABLED = "false";
     process.env.BROKER_EXECUTION_ENABLED = "false";
     process.env.CTRADER_ENVIRONMENT = "DEMO";
+    process.env.FAST_AUTOTRADE_V1_ENABLED =
+      process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
     const result = await runDemoPositionManagementPass();
+    const fastScan = isFastAutoTradeV1Enabled()
+      ? await runFastAutoTradeScanPass()
+      : { scanned: 0, handled: 0 };
     console.log(
       JSON.stringify({
         event: "manage_demo_positions_pass",
         ...result,
+        fastScan,
         ts: new Date().toISOString()
       })
     );
