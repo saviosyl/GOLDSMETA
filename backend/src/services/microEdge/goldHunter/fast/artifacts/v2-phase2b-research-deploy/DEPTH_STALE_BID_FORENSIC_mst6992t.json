@@ -1,0 +1,72 @@
+{
+  "runId": "gh_research_mst6992t_ug7ykh",
+  "schemaVersion": "gh-fast-depth-forensic-v1",
+  "staleBestBid": 4387.32,
+  "staleQuoteId": "2361229607",
+  "lifecycle": {
+    "firstSeen": {
+      "receiveSeq": 297,
+      "t": 1786725624875,
+      "side": "BID",
+      "price": 4387.32,
+      "size": 1,
+      "rawSize": "100",
+      "raw": {
+        "id": "2361229607",
+        "size": "100",
+        "bid": "438732000",
+        "ask": null
+      }
+    },
+    "subsequentUpdates": [],
+    "appearedInDeletedQuotes": false,
+    "receivedSizeZero": false,
+    "sideChanged": false,
+    "priceChanged": false,
+    "lastEventAffectingId": {
+      "receiveSeq": 297,
+      "t": 1786725624875,
+      "kind": "newQuotes"
+    },
+    "shouldHaveCeasedValid": {
+      "reason": "Last DEPTH cohort before session_detached disconnect @receiveSeq=321. Post-resubscribe deletedQuotes never include pre-disconnect quote IDs.",
+      "disconnectReceiveSeq": 321,
+      "disconnectTs": 1786725647780,
+      "firstDeepCrossWithStaleBid": {
+        "receiveSeq": 445,
+        "t": 1786725676083,
+        "bestBid": 4387.32,
+        "bestAsk": 4386.79
+      },
+      "firstSpotAskWellBelow": {
+        "receiveSeq": 444,
+        "t": 1786725676082,
+        "spotAsk": 4386.79
+      }
+    }
+  },
+  "rootCause": {
+    "branch": "D_OTHER_PROVEN_RAW_PROTOCOL_BUG",
+    "summary": "Session disconnect/reconnect resubscribes Depth but does not clear local InMemoryDepthBook. Pre-disconnect quote IDs become immortal ghosts because the new subscription stream never emits deletedQuotes for old IDs.",
+    "notA": {
+      "deleteIdNormalization": false,
+      "zeroSizeAsDelete": false,
+      "sideMigration": false,
+      "referencePaperEntryBug": false
+    },
+    "evidence": {
+      "sizeZeroInRawRun": 0,
+      "staleIdInDeletedQuotes": false,
+      "deleteMissesForStaleId": 0,
+      "cohort297NeverDeleted": true,
+      "bookGenerationRemained0AfterReconnect": true,
+      "bookLevelsGrewTo": "171 bid / 171 ask",
+      "longestCrossedMs": 3362369
+    }
+  },
+  "fix": {
+    "primary": "noteDisconnect → ordered RESYNC_MARKER → clearForResync at receiveSeq",
+    "secondary": "sustained crossed ≥10000ms → recovery resync + depth resubscribe; cooldown 30000ms",
+    "zeroSizeAsDelete": "NOT implemented — not evidenced by raw feed"
+  }
+}

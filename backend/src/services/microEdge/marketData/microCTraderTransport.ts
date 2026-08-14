@@ -24,6 +24,10 @@ import {
 } from "./microCTraderProtocol";
 import type { MicroTimeframe } from "./types";
 
+/** Defaults mirrored by GH FAST research policy (avoid marketData→goldHunter import). */
+const RESEARCH_HB_INTERVAL_DEFAULT_MS = 10_000;
+const RESEARCH_HB_LIVENESS_DEFAULT_MS = 40_000;
+
 export type MicroTransportEventHandler = (
   eventName: string,
   payload: Record<string, unknown>
@@ -34,9 +38,48 @@ export type MicroAccountAuthMeta = {
   configuredAccountAuthorized: boolean;
 };
 
+/**
+ * Opt-in connection lifecycle for GOLD HUNTER FAST research only.
+ * Default callers omit this → unbounded connect (unchanged Core/Micro behaviour).
+ */
+export type MicroTransportConnectLifecycle = {
+  /** Absolute wall deadline for open + auth command phases. */
+  deadlineAtMs: number;
+  nowMs?: () => number;
+  /** When false, late resolution must not authenticate/connect. */
+  isAttemptCurrent?: () => boolean;
+};
+
+/**
+ * Opt-in GOLD HUNTER FAST research transport heartbeat.
+ * @reiryoku/ctrader-layer does NOT auto-send ProtoHeartbeatEvent —
+ * README requires callers to invoke sendHeartbeat() periodically.
+ * Default Core/Micro consumers leave this disabled.
+ */
+export type MicroTransportResearchHeartbeatOptions = {
+  intervalMs?: number;
+  nowMs?: () => number;
+  livenessTimeoutMs?: number;
+};
+
+export type ResearchTransportHeartbeatTelemetry = {
+  researchHeartbeatEnabled: boolean;
+  transportHeartbeatSentCount: number;
+  lastTransportHeartbeatSentAt: string | null;
+  /** True if the most recent outbound sendHeartbeat() call did not throw. */
+  lastHeartbeatSendOk: boolean;
+  transportHeartbeatReceivedCount: number;
+  lastTransportHeartbeatReceivedAt: string | null;
+  lastTransportMessageAt: string | null;
+  transportHeartbeatAgeMs: number | null;
+  transportMessageAgeMs: number | null;
+  transportLivenessTimeoutMs: number;
+  transportLivenessHealthy: boolean;
+};
+
 export type MicroOpenApiTransport = {
   readonly mutationSurface: "NONE";
-  connect(): Promise<void>;
+  connect(lifecycle?: MicroTransportConnectLifecycle): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;
   isApplicationAuthenticated(): boolean;
@@ -55,6 +98,8 @@ export type MicroOpenApiTransport = {
   subscribeSpots(symbolId: string): Promise<void>;
   /** VIEW-only Level-II depth subscription (no trade scope). */
   subscribeDepthQuotes(symbolId: string): Promise<void>;
+  /** VIEW-only Level-II depth unsubscribe (recovery / resubscribe). */
+  unsubscribeDepthQuotes(symbolId: string): Promise<void>;
   listSymbols(): Promise<Array<Record<string, unknown>>>;
   getTickData(args: {
     symbolId: string;
@@ -66,12 +111,22 @@ export type MicroOpenApiTransport = {
   getSubscribeSpotsCallCount(): number;
   /** Test/observability: count of SubscribeDepthQuotes commands sent. */
   getSubscribeDepthCallCount(): number;
+  /** Opt-in research ProtoHeartbeatEvent lifecycle (GH FAST only). */
+  enableResearchTransportHeartbeat?(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void;
+  stopResearchTransportHeartbeat?(): void;
+  getResearchTransportHeartbeatTelemetry?(): ResearchTransportHeartbeatTelemetry;
 };
 
 type ConnLike = {
   open: () => Promise<unknown>;
   close: () => Promise<unknown> | void;
-  sendCommand: (cmd: string, payload: Record<string, unknown>) => Promise<unknown>;
+  sendCommand: (
+    cmd: string,
+    payload?: Record<string, unknown>
+  ) => Promise<unknown>;
+  sendHeartbeat?: () => void;
   on: (event: string, cb: (evt: unknown) => void) => void;
   removeListener?: (event: string, cb: (evt: unknown) => void) => void;
   off?: (event: string, cb: (evt: unknown) => void) => void;
@@ -97,6 +152,8 @@ function unwrapEvent(evt: unknown): Record<string, unknown> {
 export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   readonly mutationSurface = "NONE" as const;
   private conn: ConnLike | null = null;
+  /** Conn created but not yet promoted — closeable during hung open/auth. */
+  private pendingConn: ConnLike | null = null;
   private connected = false;
   private applicationAuthenticated = false;
   private accountAuthenticated = false;
@@ -110,12 +167,36 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   private readonly factory: MicroTransportFactory;
   private subscribeSpotsCallCount = 0;
   private subscribeDepthCallCount = 0;
+  /** Bumped on disconnect/cancel so late open/auth cannot win. */
+  private connectGeneration = 0;
+  /** GOLD HUNTER FAST research-only ProtoHeartbeatEvent lifecycle. */
+  private researchHeartbeatEnabled = false;
+  private researchHeartbeatIntervalMs = RESEARCH_HB_INTERVAL_DEFAULT_MS;
+  private researchHeartbeatLivenessMs = RESEARCH_HB_LIVENESS_DEFAULT_MS;
+  private researchHeartbeatNowMs: () => number = () => Date.now();
+  private researchHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private transportHeartbeatSentCount = 0;
+  private lastTransportHeartbeatSentAtMs: number | null = null;
+  private transportHeartbeatReceivedCount = 0;
+  private lastTransportHeartbeatReceivedAtMs: number | null = null;
+  private lastTransportMessageAtMs: number | null = null;
+  private inboundHeartbeatHandler: MicroTransportEventHandler | null = null;
+  private lastHeartbeatSendOk = true;
 
   constructor(
     private readonly credentials: MicroCTraderCredentials,
     factory?: MicroTransportFactory
   ) {
     this.factory = factory ?? defaultFactory;
+  }
+
+  /** Test/observability: in-flight pending socket before connect completes. */
+  hasPendingConnectionForTests(): boolean {
+    return this.pendingConn != null;
+  }
+
+  getConnectGenerationForTests(): number {
+    return this.connectGeneration;
   }
 
   isConnected(): boolean {
@@ -142,76 +223,185 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     return this.subscribeDepthCallCount;
   }
 
-  async connect(): Promise<void> {
+  async connect(lifecycle?: MicroTransportConnectLifecycle): Promise<void> {
     if (this.connected && this.conn) return;
     await this.disconnect();
+    const gen = ++this.connectGeneration;
+    const nowMs = lifecycle?.nowMs ?? (() => Date.now());
     const host =
       this.credentials.environment === "LIVE" ? LIVE_HOST : DEMO_HOST;
     const conn = this.factory(host, PORT);
-    await conn.open();
-    this.conn = conn;
-    // Attach any handlers registered before connect.
-    this.attachAllHandlersToConnection(conn);
+    this.pendingConn = conn;
 
-    await conn.sendCommand("ProtoOAApplicationAuthReq", {
-      clientId: this.credentials.clientId,
-      clientSecret: this.credentials.clientSecret
-    });
-    this.applicationAuthenticated = true;
+    const assertCurrent = (): void => {
+      if (gen !== this.connectGeneration) {
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_CANCELLED"), {
+          code: "transport_connect_cancelled"
+        });
+      }
+      if (lifecycle?.isAttemptCurrent && !lifecycle.isAttemptCurrent()) {
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_OBSOLETE"), {
+          code: "transport_connect_obsolete"
+        });
+      }
+    };
 
-    let accountListRes: unknown;
+    const bound = async <T>(work: Promise<T>): Promise<T> => {
+      assertCurrent();
+      if (!lifecycle) return work;
+      const rem = Math.max(0, lifecycle.deadlineAtMs - nowMs());
+      if (rem <= 0) {
+        await this.closeConnBestEffort(conn);
+        if (this.pendingConn === conn) this.pendingConn = null;
+        throw Object.assign(new Error("MICRO_TRANSPORT_CONNECT_TIMEOUT"), {
+          code: "transport_connect_timeout"
+        });
+      }
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race([
+          work.then((v) => {
+            assertCurrent();
+            return v;
+          }),
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              void this.closeConnBestEffort(conn).finally(() => {
+                if (this.pendingConn === conn) this.pendingConn = null;
+                // Invalidate this generation so a late open cannot promote.
+                if (gen === this.connectGeneration) this.connectGeneration += 1;
+                reject(
+                  Object.assign(new Error("MICRO_TRANSPORT_CONNECT_TIMEOUT"), {
+                    code: "transport_connect_timeout"
+                  })
+                );
+              });
+            }, rem);
+            if (typeof (timer as { unref?: () => void }).unref === "function") {
+              (timer as { unref: () => void }).unref();
+            }
+          })
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
     try {
-      accountListRes = await conn.sendCommand(
-        "ProtoOAGetAccountListByAccessTokenReq",
-        { accessToken: this.credentials.accessToken }
+      await bound(Promise.resolve(conn.open()).then(() => undefined));
+      assertCurrent();
+      this.conn = conn;
+      this.pendingConn = null;
+      // Attach any handlers registered before connect.
+      this.attachAllHandlersToConnection(conn);
+
+      await bound(
+        conn.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: this.credentials.clientId,
+          clientSecret: this.credentials.clientSecret
+        })
       );
-    } catch (e) {
-      await this.failClosedDisconnect();
-      throw Object.assign(new Error("MICRO_ACCOUNT_LIST_FAILED"), {
-        code: "account_not_authorized",
-        cause: e
-      });
-    }
+      assertCurrent();
+      this.applicationAuthenticated = true;
 
-    const authorizedIds = extractAuthorizedAccountIds(accountListRes);
-    try {
-      this.accountAuthMeta = assertConfiguredAccountAuthorized({
-        configuredAccountId: this.credentials.accountId,
-        authorizedAccountIds: authorizedIds
-      });
+      let accountListRes: unknown;
+      try {
+        accountListRes = await bound(
+          conn.sendCommand("ProtoOAGetAccountListByAccessTokenReq", {
+            accessToken: this.credentials.accessToken
+          })
+        );
+      } catch (e) {
+        await this.failClosedDisconnect();
+        if ((e as { code?: string }).code === "transport_connect_timeout") {
+          throw e;
+        }
+        throw Object.assign(new Error("MICRO_ACCOUNT_LIST_FAILED"), {
+          code: "account_not_authorized",
+          cause: e
+        });
+      }
+
+      assertCurrent();
+      const authorizedIds = extractAuthorizedAccountIds(accountListRes);
+      try {
+        this.accountAuthMeta = assertConfiguredAccountAuthorized({
+          configuredAccountId: this.credentials.accountId,
+          authorizedAccountIds: authorizedIds
+        });
+      } catch (e) {
+        await this.failClosedDisconnect();
+        throw e;
+      }
+
+      try {
+        await bound(
+          conn.sendCommand("ProtoOAAccountAuthReq", {
+            accessToken: this.credentials.accessToken,
+            ctidTraderAccountId: Number(this.credentials.accountId)
+          })
+        );
+      } catch (e) {
+        await this.failClosedDisconnect();
+        if ((e as { code?: string }).code === "transport_connect_timeout") {
+          throw e;
+        }
+        throw Object.assign(new Error("MICRO_CTRADER_ACCOUNT_AUTH_FAILED"), {
+          code: "account_not_authorized",
+          cause: e
+        });
+      }
+
+      assertCurrent();
+      this.accountAuthenticated = true;
+      this.connected = true;
+      this.noteInboundTransportMessage(nowMs());
+      if (this.researchHeartbeatEnabled) {
+        this.startResearchHeartbeatTimer();
+      }
     } catch (e) {
-      await this.failClosedDisconnect();
+      if (this.pendingConn === conn) this.pendingConn = null;
+      if (this.conn === conn && !this.connected) {
+        await this.failClosedDisconnect();
+      } else if (!this.connected) {
+        await this.closeConnBestEffort(conn);
+      }
       throw e;
     }
+  }
 
+  private async closeConnBestEffort(c: ConnLike | null): Promise<void> {
+    if (!c) return;
+    this.detachAllNative(c);
     try {
-      await conn.sendCommand("ProtoOAAccountAuthReq", {
-        accessToken: this.credentials.accessToken,
-        ctidTraderAccountId: Number(this.credentials.accountId)
-      });
-    } catch (e) {
-      await this.failClosedDisconnect();
-      throw Object.assign(new Error("MICRO_CTRADER_ACCOUNT_AUTH_FAILED"), {
-        code: "account_not_authorized",
-        cause: e
-      });
+      await c.close();
+    } catch {
+      /* ignore */
     }
-
-    this.accountAuthenticated = true;
-    this.connected = true;
   }
 
   private async failClosedDisconnect(): Promise<void> {
+    this.stopResearchTransportHeartbeat();
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
     this.connected = false;
+    const pending = this.pendingConn;
+    this.pendingConn = null;
     const c = this.conn;
     this.conn = null;
     this.detachAllNative(c);
+    this.detachAllNative(pending);
     if (c) {
       try {
         await c.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (pending && pending !== c) {
+      try {
+        await pending.close();
       } catch {
         /* ignore */
       }
@@ -219,19 +409,162 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   }
 
   async disconnect(): Promise<void> {
+    // Invalidate any in-flight connect so late open/auth cannot promote.
+    this.connectGeneration += 1;
+    this.stopResearchTransportHeartbeat();
     this.connected = false;
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
+    const pending = this.pendingConn;
+    this.pendingConn = null;
     const c = this.conn;
     this.conn = null;
     this.detachAllNative(c);
+    this.detachAllNative(pending);
     if (c) {
       try {
         await c.close();
       } catch {
         /* ignore */
       }
+    }
+    if (pending && pending !== c) {
+      try {
+        await pending.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * GOLD HUNTER FAST research only — start ProtoHeartbeatEvent every ~10s.
+   * Not enabled for Core / other Micro consumers by default.
+   * Heartbeat is transport infrastructure (not a broker trade request).
+   */
+  enableResearchTransportHeartbeat(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void {
+    this.researchHeartbeatEnabled = true;
+    this.researchHeartbeatIntervalMs =
+      opts?.intervalMs ?? RESEARCH_HB_INTERVAL_DEFAULT_MS;
+    this.researchHeartbeatLivenessMs =
+      opts?.livenessTimeoutMs ?? RESEARCH_HB_LIVENESS_DEFAULT_MS;
+    if (opts?.nowMs) this.researchHeartbeatNowMs = opts.nowMs;
+    this.ensureInboundHeartbeatListener();
+    if (this.connected && this.conn) {
+      this.noteInboundTransportMessage(this.researchHeartbeatNowMs());
+      this.startResearchHeartbeatTimer();
+    }
+  }
+
+  stopResearchTransportHeartbeat(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    if (this.inboundHeartbeatHandler) {
+      this.off("ProtoHeartbeatEvent", this.inboundHeartbeatHandler);
+      this.inboundHeartbeatHandler = null;
+    }
+    // Keep counters for last telemetry snapshot; disable further sends.
+    this.researchHeartbeatEnabled = false;
+  }
+
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry {
+    const now = this.researchHeartbeatNowMs();
+    const hbAge =
+      this.lastTransportHeartbeatReceivedAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatReceivedAtMs)
+        : null;
+    const msgAge =
+      this.lastTransportMessageAtMs != null
+        ? Math.max(0, now - this.lastTransportMessageAtMs)
+        : null;
+    // Remote transport health requires recent INBOUND evidence only:
+    // ProtoHeartbeatEvent from Open API proxy OR any other inbound platform
+    // message. Successful local sendHeartbeat() is keep-alive ATTEMPT telemetry
+    // only — it must NOT indefinitely prove remote proxy liveness (f697b1f bug).
+    const inboundOk =
+      msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+    const healthy =
+      !this.researchHeartbeatEnabled || !this.connected
+        ? this.connected
+        : inboundOk;
+    return {
+      researchHeartbeatEnabled: this.researchHeartbeatEnabled,
+      transportHeartbeatSentCount: this.transportHeartbeatSentCount,
+      lastTransportHeartbeatSentAt:
+        this.lastTransportHeartbeatSentAtMs != null
+          ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
+          : null,
+      lastHeartbeatSendOk: this.lastHeartbeatSendOk,
+      transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
+      lastTransportHeartbeatReceivedAt:
+        this.lastTransportHeartbeatReceivedAtMs != null
+          ? new Date(this.lastTransportHeartbeatReceivedAtMs).toISOString()
+          : null,
+      lastTransportMessageAt:
+        this.lastTransportMessageAtMs != null
+          ? new Date(this.lastTransportMessageAtMs).toISOString()
+          : null,
+      transportHeartbeatAgeMs: hbAge,
+      transportMessageAgeMs: msgAge,
+      transportLivenessTimeoutMs: this.researchHeartbeatLivenessMs,
+      transportLivenessHealthy: healthy
+    };
+  }
+
+  private noteInboundTransportMessage(nowMs: number): void {
+    this.lastTransportMessageAtMs = nowMs;
+  }
+
+  private ensureInboundHeartbeatListener(): void {
+    if (this.inboundHeartbeatHandler) return;
+    this.inboundHeartbeatHandler = () => {
+      const now = this.researchHeartbeatNowMs();
+      this.transportHeartbeatReceivedCount += 1;
+      this.lastTransportHeartbeatReceivedAtMs = now;
+      this.noteInboundTransportMessage(now);
+    };
+    this.on("ProtoHeartbeatEvent", this.inboundHeartbeatHandler);
+  }
+
+  private startResearchHeartbeatTimer(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    if (!this.researchHeartbeatEnabled) return;
+    this.ensureInboundHeartbeatListener();
+    const tick = (): void => {
+      if (!this.researchHeartbeatEnabled || !this.connected || !this.conn) {
+        return;
+      }
+      try {
+        if (typeof this.conn.sendHeartbeat === "function") {
+          this.conn.sendHeartbeat();
+        } else {
+          void this.conn.sendCommand("ProtoHeartbeatEvent", {});
+        }
+        const now = this.researchHeartbeatNowMs();
+        this.transportHeartbeatSentCount += 1;
+        this.lastTransportHeartbeatSentAtMs = now;
+        this.lastHeartbeatSendOk = true;
+      } catch {
+        this.lastHeartbeatSendOk = false;
+        /* outbound HB failure is observed via liveness timeout */
+      }
+    };
+    // Immediate first tick so quiet feeds get an early liveness pulse.
+    tick();
+    this.researchHeartbeatTimer = setInterval(
+      tick,
+      this.researchHeartbeatIntervalMs
+    );
+    if (typeof this.researchHeartbeatTimer.unref === "function") {
+      this.researchHeartbeatTimer.unref();
     }
   }
 
@@ -272,6 +605,9 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     const map = this.nativeBindings.get(eventName)!;
     if (map.has(handler)) return; // no duplicate native registration
     const native = (evt: unknown) => {
+      if (this.researchHeartbeatEnabled) {
+        this.noteInboundTransportMessage(this.researchHeartbeatNowMs());
+      }
       handler(eventName, unwrapEvent(evt));
     };
     map.set(handler, native);
@@ -360,6 +696,13 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     });
   }
 
+  async unsubscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOAUnsubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.credentials.accountId),
+      symbolId: [Number(symbolId)]
+    });
+  }
+
   async listSymbols(): Promise<Array<Record<string, unknown>>> {
     const res = (await this.sendReadCommand("ProtoOASymbolsListReq", {
       ctidTraderAccountId: Number(this.credentials.accountId),
@@ -421,6 +764,19 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
   failConnectCode: string | null = null;
   rateLimitOnce = false;
   getTickDataCallCount = 0;
+  private researchHeartbeatEnabled = false;
+  private researchHeartbeatIntervalMs = 10_000;
+  private researchHeartbeatLivenessMs = 40_000;
+  private researchHeartbeatNowMs: () => number = () => Date.now();
+  private researchHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private transportHeartbeatSentCount = 0;
+  private lastTransportHeartbeatSentAtMs: number | null = null;
+  private transportHeartbeatReceivedCount = 0;
+  private lastTransportHeartbeatReceivedAtMs: number | null = null;
+  private lastTransportMessageAtMs: number | null = null;
+  private lastHeartbeatSendOk = true;
+  /** When true, fake outbound tick also synthesizes inbound ProtoHeartbeatEvent. */
+  private fakeInboundHeartbeatEcho = true;
 
   isConnected(): boolean {
     return this.connected;
@@ -441,7 +797,7 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     return this.subscribeDepthCallCount;
   }
 
-  async connect(): Promise<void> {
+  async connect(_lifecycle?: MicroTransportConnectLifecycle): Promise<void> {
     if (this.failConnectCode) {
       throw Object.assign(new Error("FAKE_CONNECT_FAILED"), {
         code: this.failConnectCode
@@ -460,14 +816,132 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
     });
     this.accountAuthenticated = true;
     this.connected = true;
+    this.lastTransportMessageAtMs = this.researchHeartbeatNowMs();
+    if (this.researchHeartbeatEnabled) {
+      this.enableResearchTransportHeartbeat({
+        intervalMs: this.researchHeartbeatIntervalMs,
+        livenessTimeoutMs: this.researchHeartbeatLivenessMs,
+        nowMs: this.researchHeartbeatNowMs
+      });
+    }
   }
 
   async disconnect(): Promise<void> {
+    this.stopResearchTransportHeartbeat();
     this.connected = false;
     this.applicationAuthenticated = false;
     this.accountAuthenticated = false;
     this.accountAuthMeta = null;
     this.handlers.clear();
+  }
+
+  enableResearchTransportHeartbeat(
+    opts?: MicroTransportResearchHeartbeatOptions
+  ): void {
+    this.researchHeartbeatEnabled = true;
+    this.researchHeartbeatIntervalMs = opts?.intervalMs ?? 10_000;
+    this.researchHeartbeatLivenessMs = opts?.livenessTimeoutMs ?? 40_000;
+    if (opts?.nowMs) this.researchHeartbeatNowMs = opts.nowMs;
+    if (this.researchHeartbeatTimer) clearInterval(this.researchHeartbeatTimer);
+    const tick = (): void => {
+      if (!this.connected || !this.researchHeartbeatEnabled) return;
+      this.transportHeartbeatSentCount += 1;
+      this.lastTransportHeartbeatSentAtMs = this.researchHeartbeatNowMs();
+      this.lastHeartbeatSendOk = true;
+      if (this.fakeInboundHeartbeatEcho) {
+        this.emitFakeInboundHeartbeatForTests();
+      }
+    };
+    tick();
+    this.researchHeartbeatTimer = setInterval(
+      tick,
+      this.researchHeartbeatIntervalMs
+    );
+    if (typeof this.researchHeartbeatTimer.unref === "function") {
+      this.researchHeartbeatTimer.unref();
+    }
+  }
+
+  stopResearchTransportHeartbeat(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+    this.researchHeartbeatEnabled = false;
+  }
+
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry {
+    const now = this.researchHeartbeatNowMs();
+    const hbAge =
+      this.lastTransportHeartbeatReceivedAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatReceivedAtMs)
+        : null;
+    const msgAge =
+      this.lastTransportMessageAtMs != null
+        ? Math.max(0, now - this.lastTransportMessageAtMs)
+        : null;
+    const inboundOk =
+      msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+    return {
+      researchHeartbeatEnabled: this.researchHeartbeatEnabled,
+      transportHeartbeatSentCount: this.transportHeartbeatSentCount,
+      lastTransportHeartbeatSentAt:
+        this.lastTransportHeartbeatSentAtMs != null
+          ? new Date(this.lastTransportHeartbeatSentAtMs).toISOString()
+          : null,
+      lastHeartbeatSendOk: this.lastHeartbeatSendOk,
+      transportHeartbeatReceivedCount: this.transportHeartbeatReceivedCount,
+      lastTransportHeartbeatReceivedAt:
+        this.lastTransportHeartbeatReceivedAtMs != null
+          ? new Date(this.lastTransportHeartbeatReceivedAtMs).toISOString()
+          : null,
+      lastTransportMessageAt:
+        this.lastTransportMessageAtMs != null
+          ? new Date(this.lastTransportMessageAtMs).toISOString()
+          : null,
+      transportHeartbeatAgeMs: hbAge,
+      transportMessageAgeMs: msgAge,
+      transportLivenessTimeoutMs: this.researchHeartbeatLivenessMs,
+      // Inbound-only remote liveness (matches RealMicroCTraderTransport).
+      transportLivenessHealthy:
+        !this.researchHeartbeatEnabled || !this.connected
+          ? this.connected
+          : inboundOk
+    };
+  }
+
+  /** Test helper — stop outbound timer (and any echo). */
+  stopFakeHeartbeatEchoForTests(): void {
+    if (this.researchHeartbeatTimer) {
+      clearInterval(this.researchHeartbeatTimer);
+      this.researchHeartbeatTimer = null;
+    }
+  }
+
+  /**
+   * Test helper — when false, outbound sendHeartbeat succeeds without any
+   * inbound ProtoHeartbeatEvent / transport message (f697b1f masking bug).
+   */
+  setResearchHeartbeatInboundEchoForTests(enabled: boolean): void {
+    this.fakeInboundHeartbeatEcho = enabled;
+  }
+
+  /** Test helper — synthesize one inbound ProtoHeartbeatEvent. */
+  emitFakeInboundHeartbeatForTests(): void {
+    const now = this.researchHeartbeatNowMs();
+    this.transportHeartbeatReceivedCount += 1;
+    this.lastTransportHeartbeatReceivedAtMs = now;
+    this.lastTransportMessageAtMs = now;
+    for (const h of this.handlers.get("ProtoHeartbeatEvent") ?? []) {
+      h("ProtoHeartbeatEvent", {});
+    }
+  }
+
+  /** Test helper — wipe inbound liveness clocks while leaving outbound ticking. */
+  clearInboundTransportLivenessForTests(): void {
+    this.lastTransportHeartbeatReceivedAtMs = null;
+    this.lastTransportMessageAtMs = null;
+    // Keep received count as historical telemetry.
   }
 
   async sendReadCommand(
@@ -609,6 +1083,13 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
 
   async subscribeDepthQuotes(symbolId: string): Promise<void> {
     await this.sendReadCommand("ProtoOASubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.configuredAccountId),
+      symbolId: [Number(symbolId)]
+    });
+  }
+
+  async unsubscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOAUnsubscribeDepthQuotesReq", {
       ctidTraderAccountId: Number(this.configuredAccountId),
       symbolId: [Number(symbolId)]
     });

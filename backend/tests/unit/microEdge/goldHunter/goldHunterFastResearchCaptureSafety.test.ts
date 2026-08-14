@@ -9,6 +9,7 @@ import { createGunzip } from "node:zlib";
 import { createInterface } from "node:readline";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { MICRO_SPOT_PRICE_SCALE } from "../../../../src/services/microEdge/marketData/microCTraderProtocol";
 
 import {
   assertResearchViewOnlyScope,
@@ -86,6 +87,11 @@ function baseHealthInput(
     sessionTransitionsPersisted: 1,
     ...overrides
   };
+}
+
+
+function rel(price: number): number {
+  return Math.round(price * MICRO_SPOT_PRICE_SCALE);
 }
 
 function fakeRecord(seq: number): ResearchCaptureRecord {
@@ -360,7 +366,7 @@ describe("research ingest bridge + durable sink", () => {
     const t0 = Date.now();
     for (let i = 0; i < 25; i++) {
       bridge.ingestSpot(
-        { bid: 2400 + i * 0.02, ask: 2400.1 + i * 0.02 },
+        { bid: rel(2400 + i * 0.02), ask: rel(2400.1 + i * 0.02) },
         t0 + i * 40
       );
       if (i % 3 === 0) {
@@ -427,7 +433,7 @@ describe("research ingest bridge + durable sink", () => {
       runId: "test_resync"
     });
     bridge.setConnectionState("CONNECTED");
-    bridge.ingestSpot({ bid: 2500, ask: 2500.1 }, Date.now());
+    bridge.ingestSpot({ bid: rel(2500), ask: rel(2500.1) }, Date.now());
     bridge.noteResync("test");
     await bridge.drainForTests();
     const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
@@ -452,7 +458,7 @@ describe("research ingest bridge + durable sink", () => {
     bridge.recordHeartbeatLag(30);
     bridge.recordHeartbeatLag(8);
     for (let i = 0; i < 5; i++) {
-      bridge.ingestSpot({ bid: 1 + i, ask: 1.1 + i }, Date.now());
+      bridge.ingestSpot({ bid: rel(1 + i), ask: rel(1.1 + i) }, Date.now());
     }
     await bridge.drainForTests();
     const h = bridge.health();
@@ -479,7 +485,7 @@ describe("research ingest bridge + durable sink", () => {
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
     const t = Date.now();
-    bridge.ingestSpot({ bid: 1, ask: 1.1 }, t);
+    bridge.ingestSpot({ bid: rel(1), ask: rel(1.1) }, t);
     bridge.ingestDepth({ newQuotes: [] }, t);
     await bridge.drainForTests();
     const h1 = bridge.health(t + 50);
@@ -499,7 +505,7 @@ describe("research ingest bridge + durable sink", () => {
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
     const t0 = Date.now();
-    bridge.ingestSpot({ bid: 1, ask: 1.1 }, t0);
+    bridge.ingestSpot({ bid: rel(1), ask: rel(1.1) }, t0);
     bridge.ingestDepth({ newQuotes: [] }, t0);
     await bridge.drainForTests();
     expect(bridge.health(t0 + 50).captureHealthy).toBe(true);
@@ -566,6 +572,70 @@ describe("research ingest bridge + durable sink", () => {
     expect(blob).toMatch(/subscription/);
     expect(bridge.health().sessionTransitionsPersisted).toBeGreaterThan(0);
     expect(bridge.health().reconnectCount).toBe(1);
+  });
+
+  it("exposes bounded recent-candidates feed (research observation only)", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 100,
+      runId: "test_recent_candidates",
+      gcsBucket: null,
+      scopeVerified: true
+    });
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    const t0 = Date.now();
+    for (let i = 0; i < 80; i++) {
+      bridge.ingestSpot(
+        { bid: rel(2400 + i * 0.01), ask: rel(2400.08 + i * 0.01) },
+        t0 + i * 20
+      );
+      if (i % 2 === 0) {
+        bridge.ingestDepth(
+          {
+            newQuotes: [
+              { id: i, type: "BID", price: 2400 + i * 0.01, size: 1.2 },
+              { id: 1000 + i, type: "ASK", price: 2400.08 + i * 0.01, size: 1.1 }
+            ]
+          },
+          t0 + i * 20 + 1
+        );
+      }
+    }
+    await bridge.drainForTests();
+    const feed = bridge.recentCandidatesResponse(40);
+    expect(feed.mode).toBe(GH_FAST_RESEARCH_MODE);
+    expect(feed.label).toMatch(/NOT TRADES/);
+    expect(feed.brokerOrders).toBe(0);
+    expect(feed.shadowOrders).toBe(0);
+    expect(feed.executionAdapter).toBe("NONE");
+    expect(feed.tradingButtons).toEqual([]);
+    expect(feed.observations.length).toBeLessThanOrEqual(40);
+    for (const o of feed.observations) {
+      expect(o.label).toBe("RESEARCH OBSERVATION — NOT A TRADE");
+      expect(o.brokerOrders).toBe(0);
+      expect(o.shadowOrders).toBe(0);
+      expect(o.executionAdapter).toBe("NONE");
+      expect([
+        "A_OBSERVATION",
+        "B_OBSERVATION",
+        "C_OBSERVATION",
+        "A_CANDIDATE",
+        "B_CANDIDATE",
+        "C_CANDIDATE",
+        "A_SELECTED",
+        "B_SELECTED",
+        "C_SELECTED"
+      ]).toContain(o.kind);
+      expect(o).not.toHaveProperty("pnl");
+      expect(o).not.toHaveProperty("win");
+      expect(o).not.toHaveProperty("loss");
+    }
+    const h = bridge.health();
+    expect(
+      h.observationA + h.observationB + h.observationC
+    ).toBeGreaterThanOrEqual(feed.count);
+    expect(h.eligibleA + h.eligibleB + h.eligibleC).toBe(h.candidateA + h.candidateB + h.candidateC);
   });
 
   it("persistence backpressure fails loudly — no silent chunk loss", async () => {
@@ -820,7 +890,7 @@ describe("research capture runtime", () => {
     });
     await campaignRt.start();
     campaignRt.markScopeVerifiedForTests();
-    campaignRt.ingestSpotForTests({ bid: 1, ask: 1.1 });
+    campaignRt.ingestSpotForTests({ bid: rel(1), ask: rel(1.1) });
     campaignRt.ingestDepthForTests({ newQuotes: [] });
     await campaignRt.drainForTests();
     const h = campaignRt.health();
@@ -834,8 +904,8 @@ describe("research capture runtime", () => {
     const t0 = Date.now();
     for (let i = 0; i < 200; i++) {
       rt.ingestSpotForTests({
-        bid: 2600 + (i % 50) * 0.01,
-        ask: 2600.08 + (i % 50) * 0.01,
+        bid: rel(2600 + (i % 50) * 0.01),
+        ask: rel(2600.08 + (i % 50) * 0.01),
         brokerTimestampMs: t0 + i
       });
       if (i % 2 === 0) {

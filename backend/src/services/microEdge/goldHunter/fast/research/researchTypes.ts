@@ -29,6 +29,18 @@ export type ResearchResubscribeState =
   | "COMPLETE"
   | "FAILED";
 
+/**
+ * Depth semantic validity for a specialist evaluation row.
+ * Non-DEPTH_VALID rows are DERIVED-DATA CONTAMINATED for offline qualification
+ * but raw capture rows are never deleted.
+ */
+export type ResearchDepthValidity =
+  | "DEPTH_VALID"
+  | "DEPTH_UNAVAILABLE"
+  | "DEPTH_CROSSED"
+  | "DEPTH_STALE"
+  | "RESYNC_RECOVERY";
+
 /** A/B/C observation — never implies order submission. */
 export type ResearchSpecialistObservation = {
   setup: GhFastSetupId;
@@ -38,6 +50,82 @@ export type ResearchSpecialistObservation = {
   failedConditions: string[];
   /** Research-only best-of flag; does NOT create an order. */
   selectedCandidate: boolean;
+  /**
+   * Depth book semantic validity at evaluation time.
+   * Soft-stale Spot (or Depth) also forces derivedDataContaminated on the bridge
+   * even when depthValidity remains DEPTH_VALID.
+   */
+  depthValidity: ResearchDepthValidity;
+  /**
+   * True when depthValidity !== DEPTH_VALID OR Spot/Depth soft-freshness fails.
+   * Contaminated rows remain in raw capture; do not treat as clean evidence.
+   */
+  derivedDataContaminated: boolean;
+};
+
+/**
+ * Bounded recent-candidate row for the research monitor UI.
+ * RESEARCH OBSERVATION ONLY — never a trade / P/L / WIN-LOSS.
+ */
+export type ResearchRecentCandidateObservation = {
+  observationId: number;
+  label: "RESEARCH OBSERVATION — NOT A TRADE";
+  kind:
+    | "A_OBSERVATION"
+    | "B_OBSERVATION"
+    | "C_OBSERVATION"
+    | "A_CANDIDATE"
+    | "B_CANDIDATE"
+    | "C_CANDIDATE"
+    | "A_SELECTED"
+    | "B_SELECTED"
+    | "C_SELECTED";
+  setup: GhFastSetupId;
+  setupName: string;
+  side: GhFastSide | null;
+  eligible: boolean;
+  rawQuality: number | null;
+  selectedCandidate: boolean;
+  failedConditions: string[];
+  receiveSeq: number;
+  eventKind: "SPOT" | "DEPTH";
+  tsMs: number;
+  tsIso: string;
+  bid: number | null;
+  ask: number | null;
+  spread: number | null;
+  mid: number | null;
+  imbalance: number | null;
+  velocity1s: number | null;
+  acceleration: number | null;
+  distHigh5s: number | null;
+  distLow5s: number | null;
+  upTouches5s: number | null;
+  downTouches5s: number | null;
+  depthValidity?: ResearchDepthValidity;
+  derivedDataContaminated?: boolean;
+  brokerRequests: 0;
+  brokerOrders: 0;
+  shadowOrders: 0;
+  executionAdapter: "NONE";
+};
+
+export type ResearchRecentCandidatesResponse = {
+  mode: typeof GH_FAST_RESEARCH_MODE;
+  label: "RESEARCH OBSERVATION FEED — NOT TRADES";
+  runId: string | null;
+  limit: number;
+  count: number;
+  filter: "SELECTED" | "ELIGIBLE" | "ALL";
+  observations: ResearchRecentCandidateObservation[];
+  brokerRequests: 0;
+  brokerOrders: 0;
+  shadowOrders: 0;
+  executionAdapter: "NONE";
+  mutationSurface: "NONE";
+  tradingButtons: [];
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
 };
 
 export type ResearchFeatureTelemetry = {
@@ -96,21 +184,33 @@ export const GH_FAST_RESEARCH_FRESHNESS_MS = 20_000;
 export type ResearchMarketPayload =
   | {
       kind: "SPOT";
+      /** Absolute price (cTrader relative ÷ 100000). */
       bid: number | null;
       ask: number | null;
       spread: number | null;
+      /** Raw cTrader relative integers preserved for forensic replay. */
+      bidRelative?: number | null;
+      askRelative?: number | null;
       brokerTimestampMs: number | null;
+      marketDataNormalizationVersion?: string;
+      inputNormalizationVerified?: boolean;
     }
   | {
       kind: "DEPTH";
+      /** Normalized quotes (absolute price + size units). */
       newQuotes?: unknown[];
       deletedQuotes?: unknown[];
+      /** Raw ProtoOA depth payload preserved for forensic replay. */
+      rawNewQuotes?: unknown[];
+      rawDeletedQuotes?: unknown;
       bestBid: number | null;
       bestAsk: number | null;
       depthAvailable: boolean;
       crossed: boolean;
       bookGeneration: number;
       brokerTimestampMs: number | null;
+      marketDataNormalizationVersion?: string;
+      inputNormalizationVerified?: boolean;
     }
   | {
       kind: "RESYNC_MARKER";
@@ -155,6 +255,9 @@ export type ResearchCaptureRecord = {
   market: ResearchMarketPayload;
   features: ResearchFeatureTelemetry | null;
   specialists: ResearchSpecialistObservation[] | null;
+  /** cTrader normalization identity for this record (SPOT/DEPTH). */
+  marketDataNormalizationVersion?: string | null;
+  inputNormalizationVerified?: boolean;
   /** Hard-coded safety counters — always zero. */
   safety: {
     brokerRequests: 0;
@@ -270,10 +373,88 @@ export type ResearchCaptureHealth = {
   feedGapCount: number;
   reconnectCount: number;
   resyncCount: number;
+  /**
+   * @deprecated Prefer depthCrossedEventCount — historically inflated by SPOT
+   * ticks observing an already-crossed book. Equals depthCrossedEventCount.
+   */
   bookCrossedCount: number;
+  /** DEPTH events only. */
+  depthEventCount: number;
+  /** DEPTH events whose book snapshot was crossed (not SPOT observations). */
+  depthCrossedEventCount: number;
+  /** depthCrossedEventCount / depthEventCount, or null if no depth events. */
+  depthCrossedPct: number | null;
+  /** Current Depth semantic state for the monitor. */
+  currentDepthState: ResearchDepthValidity;
+  /** Continuous crossed duration while currently crossed; else 0. */
+  crossedDurationMs: number;
+  /** Sustained-cross / disconnect ordered resync recoveries. */
+  depthResyncCount: number;
+  /** Ordered RESYNCs from session detach / genuine disconnect ghost-clear. */
+  disconnectResyncCount: number;
+  /** Sustained-cross recovery resyncs (10s policy — unchanged). */
+  sustainedCrossRecoveryCount: number;
+  deleteHits: number;
+  deleteMisses: number;
+  /**
+   * @deprecated Prefer eligibleA/B/C — historically mixed observations.
+   * Now equals eligibleA/B/C (true candidates only).
+   */
   candidateA: number;
   candidateB: number;
   candidateC: number;
+  observationA: number;
+  observationB: number;
+  observationC: number;
+  eligibleA: number;
+  eligibleB: number;
+  eligibleC: number;
+  selectedA: number;
+  selectedB: number;
+  selectedC: number;
+  lastBid: number | null;
+  lastAsk: number | null;
+  lastSpread: number | null;
+  /** Research diagnostics — cTrader ProtoOASpotEvent may be one-sided. */
+  spotBidOnlyEvents: number;
+  spotAskOnlyEvents: number;
+  spotTwoSidedEvents: number;
+  /** Derived monitor-only reference paper summary (not research evidence). */
+  referencePaper: {
+    mode: "REFERENCE_PAPER_ONLY";
+    label: string;
+    paperTrades: number;
+    open: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    netMoveSum: number;
+    tradesPerHour: number | null;
+    tradesPerHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
+    paperTradesPerRuntimeHour: number | null;
+    paperTradesPerRuntimeHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR";
+    totalClosedTrades: number;
+    historyRows: number;
+    paperEntriesBlockedDataNotOk: number;
+    paperDataStaleExits: number;
+    paperResyncExits: number;
+    startingBalanceEur: 500;
+    currentBalanceEur: number;
+    totalReturnPct: number;
+    referenceMarketExposureEur: 1000;
+    referencePositionValueEur: 1000;
+    marginRequirementPct: 50;
+    referenceMarginUsedEur: 500;
+    hypotheticalEurPnlSum: number;
+    hypotheticalEurPnlLabel: "HYPOTHETICAL PAPER ACCOUNT · NOT A BROKER ACCOUNT P/L";
+    brokerRequests: 0;
+    brokerOrders: 0;
+    executionAdapter: "NONE";
+  };
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
   captureStart: string | null;
   captureDurationMs: number;
   runId: string;
@@ -289,6 +470,21 @@ export type ResearchCaptureHealth = {
   executionAdapter: "NONE";
   openShadowTrade: false;
   connectionState: ResearchConnectionState;
+  /**
+   * Physical/auth/subscription cohort for the research session.
+   * CONNECTED means cTrader transport cohort is up — independent of quote age.
+   */
+  transportSessionState: "CONNECTED" | "DISCONNECTED";
+  /**
+   * Market-data freshness relative to soft stale threshold.
+   * LIVE = both Spot+Depth soft-fresh; STALE otherwise (including unknown ages).
+   */
+  feedState: "LIVE" | "STALE" | "HARD_STALE";
+  /**
+   * Strict Micro liveConnected (quote/M1/heartbeat). Diagnostic only —
+   * must not drive research transport teardown.
+   */
+  strictLiveConnected: boolean | null;
   storagePrefix: typeof GH_FAST_RESEARCH_GCS_PREFIX_ROOT;
   durableMode: "GCS" | "LOCAL_BUFFER_ONLY";
   persistenceQueueDepth: number;
@@ -319,6 +515,10 @@ export type ResearchStatusUiDesign = {
   queueLatencyP95: number | null;
   eventLoopLagP95: number | null;
   candidateObservations: { A: number; B: number; C: number };
+  eligibleObservations: { A: number; B: number; C: number };
+  selectedOpportunities: { A: number; B: number; C: number };
+  marketDataNormalizationVersion: string;
+  inputNormalizationVerified: boolean;
   safety: {
     shadowOrders: 0;
     brokerRequests: 0;

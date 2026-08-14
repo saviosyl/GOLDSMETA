@@ -4,6 +4,7 @@ export * from "./defaults";
 export * from "./depthDiagnostics";
 export * from "./depthBook";
 export * from "./depthProtocol";
+export * from "./depthRecovery";
 export * from "./eventQueue";
 export * from "./features";
 export * from "./setups";

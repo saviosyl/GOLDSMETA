@@ -10,7 +10,10 @@ import {
   FakeMicroCTraderTransport,
   RealMicroCTraderTransport,
   type MicroOpenApiTransport,
-  type MicroTransportEventHandler
+  type MicroTransportConnectLifecycle,
+  type MicroTransportEventHandler,
+  type MicroTransportResearchHeartbeatOptions,
+  type ResearchTransportHeartbeatTelemetry
 } from "./microCTraderTransport";
 import { resolveMicroXauUsd } from "./microCTraderSymbolResolver";
 import {
@@ -38,7 +41,28 @@ import type { MicroQuote } from "../types";
 
 export type MicroLiveSessionState = {
   connectionState: MicroMarketDataConnectionState;
+  /**
+   * Strict LIVE_CONNECTED: transport/auth/symbol/spot + fresh quote + M1 + heartbeat.
+   * Semantics UNCHANGED for existing Micro/Core consumers.
+   */
   liveConnected: boolean;
+  /**
+   * Additive — physical transport socket connected.
+   * Independent of quote/M1/heartbeat freshness.
+   */
+  transportConnected: boolean;
+  /**
+   * Additive — application + account authenticated (and account authorized when known).
+   * Independent of quote/M1/heartbeat freshness.
+   */
+  transportAuthenticated: boolean;
+  /**
+   * Additive — GOLD HUNTER FAST research transport/session cohort:
+   * transport connected + app/account auth + account authorized + symbol resolved +
+   * Spot subscribed + Depth subscribed.
+   * Does NOT require fresh quote, fresh M1, or fresh collector heartbeat.
+   */
+  researchSessionConnected: boolean;
   credentialsConfigured: boolean;
   applicationAuthenticated: boolean;
   accountAuthenticated: boolean;
@@ -75,6 +99,21 @@ export type LiveSessionOptions = {
   credentials?: MicroCTraderCredentials;
   quoteSampleIntervalMs?: number;
   nowMs?: () => number;
+  /**
+   * Opt-in for GOLD HUNTER FAST research: bound transport open/auth.
+   * Omitted → default unbounded connect (unchanged for other callers).
+   */
+  connectLifecycle?: MicroTransportConnectLifecycle | null;
+  /**
+   * Dynamic lifecycle resolver (research process remaining budget).
+   * When set, preferred over static connectLifecycle at connect() time.
+   */
+  resolveConnectLifecycle?: () => MicroTransportConnectLifecycle | null | undefined;
+  /**
+   * Opt-in GOLD HUNTER FAST research ProtoHeartbeatEvent (~10s).
+   * Default/Core callers omit → no automatic heartbeat (unchanged).
+   */
+  enableResearchTransportHeartbeat?: boolean | MicroTransportResearchHeartbeatOptions;
 };
 
 export class MicroLiveMarketSession {
@@ -146,14 +185,25 @@ export class MicroLiveMarketSession {
     if (this.transport.mutationSurface !== "NONE") {
       throw new Error("MICRO_MUTATION_SURFACE_UNEXPECTED");
     }
+    const lifecycle =
+      this.opts.resolveConnectLifecycle?.() ??
+      this.opts.connectLifecycle ??
+      undefined;
     try {
-      await this.transport.connect();
+      await this.transport.connect(lifecycle ?? undefined);
     } catch (e) {
       this.lastErrorCode =
         (e as { code?: string }).code ?? "transport_disconnected";
       this.lastDisconnectedAt = new Date().toISOString();
       microLog("MICRO_CTRADER_DISCONNECTED", { code: this.lastErrorCode });
       throw e;
+    }
+    // Research-only: start ProtoHeartbeatEvent after auth succeeds.
+    const hbOpt = this.opts.enableResearchTransportHeartbeat;
+    if (hbOpt && this.transport.enableResearchTransportHeartbeat) {
+      this.transport.enableResearchTransportHeartbeat(
+        hbOpt === true ? undefined : hbOpt
+      );
     }
     this.lastConnectedAt = new Date().toISOString();
     this.reconnectAttempts = 0;
@@ -302,6 +352,13 @@ export class MicroLiveMarketSession {
     this.lastQuotePersistMs = now;
   }
 
+  /**
+   * Research-only transport heartbeat telemetry (null when not enabled).
+   */
+  getResearchTransportHeartbeatTelemetry(): ResearchTransportHeartbeatTelemetry | null {
+    return this.transport?.getResearchTransportHeartbeatTelemetry?.() ?? null;
+  }
+
   async disconnect(): Promise<void> {
     this.clearSpotState();
     if (this.transport) {
@@ -425,6 +482,35 @@ export class MicroLiveMarketSession {
     return created;
   }
 
+  /**
+   * Force Depth unsubscribe+subscribe so the broker re-sends a fresh book.
+   * Used by GOLD_HUNTER FAST research sustained-cross recovery only.
+   * Does not place orders; VIEW-only Open API commands.
+   */
+  async resubscribeDepthForRecovery(): Promise<boolean> {
+    if (!this.transport || !this.symbol) return false;
+    if (!this.transport.isConnected()) return false;
+    try {
+      if (this.depthSubscribed) {
+        await this.transport.unsubscribeDepthQuotes(this.symbol.symbolId);
+        this.depthSubscribed = false;
+        this.depthSubscribedAt = null;
+      }
+      // Allow subscribeDepthOnce to run again.
+      await this.subscribeDepthOnce();
+      microLog("MICRO_DEPTH_RESUBSCRIBED", {
+        symbolId: this.symbol.symbolId,
+        reason: "sustained_cross_recovery",
+        mutationSurface: "NONE"
+      });
+      return this.depthSubscribed;
+    } catch (e) {
+      this.lastErrorCode =
+        (e as { code?: string }).code ?? "depth_resubscribe_failed";
+      return false;
+    }
+  }
+
   async boundedReconnect(): Promise<boolean> {
     this.reconnectAttempts += 1;
     if (this.reconnectAttempts > 8) {
@@ -443,6 +529,22 @@ export class MicroLiveMarketSession {
         (e as { code?: string }).code ?? "transport_disconnected";
       return false;
     }
+  }
+
+  /**
+   * Research transport/session cohort — connected/auth/subscribed without
+   * requiring fresh quote/M1/heartbeat. Used by GOLD HUNTER FAST only.
+   */
+  isResearchSessionConnected(): boolean {
+    if (!this.transport?.isConnected()) return false;
+    if (!this.transport.isApplicationAuthenticated()) return false;
+    if (!this.transport.isAccountAuthenticated()) return false;
+    const authMeta = this.transport.getAccountAuthMeta();
+    if (authMeta && !authMeta.configuredAccountAuthorized) return false;
+    if (!this.symbol) return false;
+    if (!this.spotSubscribed) return false;
+    if (!this.depthSubscribed) return false;
+    return true;
   }
 
   async getState(): Promise<MicroLiveSessionState> {
@@ -494,10 +596,23 @@ export class MicroLiveMarketSession {
     if (this.lastErrorCode) reasons.push(this.lastErrorCode);
 
     const unique = [...new Set(reasons)];
+    // Strict liveConnected semantics UNCHANGED — still requires fresh quote/M1/hb.
     const liveConnected = unique.length === 0;
     const connectionState: MicroMarketDataConnectionState = liveConnected
       ? "LIVE_CONNECTED"
       : "LIVE_NOT_CONNECTED";
+
+    const transportConnected = Boolean(this.transport?.isConnected());
+    const applicationAuthenticated =
+      this.transport?.isApplicationAuthenticated() ?? false;
+    const accountAuthenticated =
+      this.transport?.isAccountAuthenticated() ?? false;
+    const transportAuthenticated =
+      transportConnected &&
+      applicationAuthenticated &&
+      accountAuthenticated &&
+      (authMeta == null || authMeta.configuredAccountAuthorized);
+    const researchSessionConnected = this.isResearchSessionConnected();
 
     const quoteAgeMs = this.lastQuote
       ? now - Date.parse(this.lastQuote.brokerTimestamp)
@@ -506,9 +621,12 @@ export class MicroLiveMarketSession {
     return {
       connectionState,
       liveConnected,
+      transportConnected,
+      transportAuthenticated,
+      researchSessionConnected,
       credentialsConfigured: credsConfigured,
-      applicationAuthenticated: this.transport?.isApplicationAuthenticated() ?? false,
-      accountAuthenticated: this.transport?.isAccountAuthenticated() ?? false,
+      applicationAuthenticated,
+      accountAuthenticated,
       configuredAccountAuthorized: authMeta?.configuredAccountAuthorized ?? null,
       authorizedAccountCount: authMeta?.authorizedAccountCount ?? null,
       symbol: this.symbol,

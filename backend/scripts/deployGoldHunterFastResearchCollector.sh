@@ -35,9 +35,25 @@ cp -R src "$CONTEXT_DIR/src"
 cp scripts/applyCTraderLayerProtoExtensions.mjs "$CONTEXT_DIR/scripts/"
 cp scripts/microEdge/runFastResearchCaptureRuntime.ts "$CONTEXT_DIR/scripts/microEdge/"
 
+# Bake exact git HEAD into the image so runtimeSha cannot drift from a stale env-only value.
+cat >"$CONTEXT_DIR/cloudbuild.gold-hunter-fast-research.yaml" <<EOF
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - GOLD_HUNTER_FAST_DEPLOY_GIT_SHA=${DEPLOY_SHA}
+      - -t
+      - ${IMAGE}
+      - .
+images:
+  - ${IMAGE}
+timeout: 1200s
+EOF
+
 gcloud builds submit \
   --project="$PROJECT" \
-  --tag="$IMAGE" \
+  --config="$CONTEXT_DIR/cloudbuild.gold-hunter-fast-research.yaml" \
   --timeout=1200s \
   --gcs-log-dir="gs://${PROJECT}_cloudbuild/logs" \
   "$CONTEXT_DIR"
@@ -93,3 +109,23 @@ gcloud run deploy "$SERVICE" \
 echo "Deployed. Recording descriptors:"
 gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
   --format='yaml(status.url,status.latestReadyRevisionName,status.latestCreatedRevisionName,spec.template.spec.containers[0].image)'
+
+# Provenance gate: live runtimeSha MUST equal the exact deploy git HEAD.
+SERVICE_URL="$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')"
+echo "Verifying runtimeSha against deploy SHA ${DEPLOY_SHA} ..."
+RUNTIME_SHA=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  HEALTH_JSON="$(curl -fsS "${SERVICE_URL}/health" || true)"
+  RUNTIME_SHA="$(python3 -c 'import json,sys; print((json.loads(sys.argv[1]).get("runtimeSha") or ""))' "${HEALTH_JSON}" 2>/dev/null || true)"
+  if [[ -n "${RUNTIME_SHA}" ]]; then
+    break
+  fi
+  sleep 3
+done
+if [[ "${RUNTIME_SHA}" != "${DEPLOY_SHA}" ]]; then
+  echo "FATAL: runtimeSha provenance mismatch" >&2
+  echo "  expected (deploy git HEAD): ${DEPLOY_SHA}" >&2
+  echo "  actual runtimeSha:          ${RUNTIME_SHA:-<empty>}" >&2
+  exit 1
+fi
+echo "runtimeSha OK: ${RUNTIME_SHA}"

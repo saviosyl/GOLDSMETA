@@ -76,7 +76,10 @@ export class GoldHunterFastResearchCaptureRuntime {
   private running = false;
   private scopeVerified = false;
   private lastSessionSnap: {
+    /** Strict liveConnected — retained for diagnostics only. */
     liveConnected: boolean;
+    /** Research transport/session cohort — drives disconnect classification. */
+    researchSessionConnected: boolean;
     spotSubscribed: boolean;
     depthSubscribed: boolean;
     connectionMapped: ResearchConnectionState;
@@ -137,7 +140,17 @@ export class GoldHunterFastResearchCaptureRuntime {
       campaignMode,
       scopeVerified: false,
       campaignStartUtcDate: this.opts.campaignStartUtcDate,
-      onCaptureDateObserved: this.opts.onCaptureDateObserved
+      onCaptureDateObserved: this.opts.onCaptureDateObserved,
+      onDepthRecoveryRequest: async (reason) => {
+        // Prefer Depth-only resubscribe; fall back is no-op if session gone.
+        if (!this.session) return;
+        try {
+          await this.session.resubscribeDepthForRecovery();
+        } catch {
+          /* best-effort — ordered RESYNC_MARKER already cleared local book */
+        }
+        void reason;
+      }
     });
     this.bridge.setConnectionState("DISCONNECTED", "runtime_start");
     this.startHeartbeat();
@@ -166,6 +179,15 @@ export class GoldHunterFastResearchCaptureRuntime {
     this.detachSession();
     this.session = session;
     this.bridge.setConnectionState("CONNECTED", "session_attached");
+    // Optimistic research-session snap so a quiet feed cannot race a poll into
+    // a false "was connected → now disconnected" transition on attach.
+    this.lastSessionSnap = {
+      liveConnected: false,
+      researchSessionConnected: true,
+      spotSubscribed: true,
+      depthSubscribed: true,
+      connectionMapped: "CONNECTED"
+    };
     this.unsubs.push(
       session.onSpotForFast((payload) => {
         this.bridge?.ingestSpot(payload, this.nowMs());
@@ -196,7 +218,14 @@ export class GoldHunterFastResearchCaptureRuntime {
       this.bridge?.noteDisconnect("session_detached");
     }
     this.session = null;
-    this.lastSessionSnap = null;
+    // Prevent session_poll from emitting a duplicate RESYNC for the same detach.
+    this.lastSessionSnap = {
+      liveConnected: false,
+      researchSessionConnected: false,
+      spotSubscribed: false,
+      depthSubscribed: false,
+      connectionMapped: "DISCONNECTED"
+    };
   }
 
   ingestSpotForTests(payload: Record<string, unknown>): void {
@@ -279,9 +308,70 @@ export class GoldHunterFastResearchCaptureRuntime {
         reconnectCount: 0,
         resyncCount: 0,
         bookCrossedCount: 0,
+        depthEventCount: 0,
+        depthCrossedEventCount: 0,
+        depthCrossedPct: null,
+        currentDepthState: "DEPTH_UNAVAILABLE",
+        crossedDurationMs: 0,
+        depthResyncCount: 0,
+        disconnectResyncCount: 0,
+        sustainedCrossRecoveryCount: 0,
+        deleteHits: 0,
+        deleteMisses: 0,
         candidateA: 0,
         candidateB: 0,
         candidateC: 0,
+        observationA: 0,
+        observationB: 0,
+        observationC: 0,
+        eligibleA: 0,
+        eligibleB: 0,
+        eligibleC: 0,
+        selectedA: 0,
+        selectedB: 0,
+        selectedC: 0,
+        lastBid: null,
+        lastAsk: null,
+        lastSpread: null,
+        spotBidOnlyEvents: 0,
+        spotAskOnlyEvents: 0,
+        spotTwoSidedEvents: 0,
+        referencePaper: {
+          mode: "REFERENCE_PAPER_ONLY",
+          label: "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE",
+          paperTrades: 0,
+          open: 0,
+          wins: 0,
+          losses: 0,
+          breakeven: 0,
+          winRate: null,
+          profitFactor: null,
+          netMoveSum: 0,
+          tradesPerHour: null,
+          tradesPerHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR",
+          paperTradesPerRuntimeHour: null,
+          paperTradesPerRuntimeHourLabel: "PAPER TRADES / WALL-CLOCK RUNTIME HOUR",
+          totalClosedTrades: 0,
+          historyRows: 0,
+          paperEntriesBlockedDataNotOk: 0,
+          paperDataStaleExits: 0,
+          paperResyncExits: 0,
+          startingBalanceEur: 500,
+          currentBalanceEur: 500,
+          totalReturnPct: 0,
+          referenceMarketExposureEur: 1000,
+          referencePositionValueEur: 1000,
+          marginRequirementPct: 50,
+          referenceMarginUsedEur: 500,
+          hypotheticalEurPnlSum: 0,
+          hypotheticalEurPnlLabel:
+            "HYPOTHETICAL PAPER ACCOUNT · NOT A BROKER ACCOUNT P/L",
+          brokerRequests: 0,
+          brokerOrders: 0,
+          executionAdapter: "NONE"
+        },
+        marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
+        inputNormalizationVerified: true,
         captureStart: null,
         captureDurationMs: 0,
         runId: "not_started",
@@ -297,6 +387,9 @@ export class GoldHunterFastResearchCaptureRuntime {
         executionAdapter: identity.executionAdapter,
         openShadowTrade: identity.openShadowTrade,
         connectionState: "DISCONNECTED",
+        transportSessionState: "DISCONNECTED",
+        feedState: "STALE",
+        strictLiveConnected: null,
         storagePrefix: "gold-hunter-fast/research-capture",
         durableMode: "LOCAL_BUFFER_ONLY",
         persistenceQueueDepth: 0,
@@ -314,7 +407,16 @@ export class GoldHunterFastResearchCaptureRuntime {
           "RESEARCH CAPTURE ONLY — no trading, no shadow orders, no broker orders"
       };
     }
-    return this.bridge.health(this.nowMs());
+    const base = this.bridge.health(this.nowMs());
+    return {
+      ...base,
+      strictLiveConnected: this.lastSessionSnap?.liveConnected ?? null,
+      transportSessionState:
+        this.lastSessionSnap?.researchSessionConnected === true ||
+        base.connectionState === "CONNECTED"
+          ? "CONNECTED"
+          : "DISCONNECTED"
+    };
   }
 
   async stop(): Promise<void> {
@@ -342,10 +444,14 @@ export class GoldHunterFastResearchCaptureRuntime {
     this.healthServer = null;
   }
 
+  /**
+   * Map GOLD HUNTER research connection from transport/session cohort —
+   * NOT strict liveConnected (quote/M1/heartbeat freshness).
+   */
   private mapSessionConnection(
     st: MicroLiveSessionState
   ): ResearchConnectionState {
-    if (st.liveConnected) return "CONNECTED";
+    if (st.researchSessionConnected) return "CONNECTED";
     if (st.reconnectAttempts > 0 && st.lastDisconnectedAt) return "RECONNECTING";
     return "DISCONNECTED";
   }
@@ -353,26 +459,36 @@ export class GoldHunterFastResearchCaptureRuntime {
   private async syncSessionState(reason: string): Promise<void> {
     if (!this.session || !this.bridge) return;
     const st = await this.session.getState();
+    const researchConnected = st.researchSessionConnected;
     const mapped = this.mapSessionConnection(st);
     const prev = this.lastSessionSnap;
 
-    if (!st.liveConnected && prev?.liveConnected) {
+    // Physical/auth/subscription loss only — quote_stale / m1_stale /
+    // collector_heartbeat_stale must NOT tear down the research session.
+    if (!researchConnected && prev?.researchSessionConnected) {
       this.bridge.noteDisconnect(
         st.lastErrorCode ?? reason ?? "session_disconnected"
       );
     } else if (
-      !st.liveConnected &&
+      !researchConnected &&
       st.reconnectAttempts > 0 &&
       prev &&
-      prev.connectionMapped !== "RECONNECTING"
+      prev.connectionMapped !== "RECONNECTING" &&
+      this.bridge.health().connectionState !== "DISCONNECTED"
     ) {
       this.bridge.noteReconnectStart(
         this.nowMs(),
         st.lastErrorCode ?? "session_reconnecting"
       );
-    } else if (st.liveConnected && prev && !prev.liveConnected) {
-      this.bridge.noteReconnectFinish(this.nowMs());
-    } else if (st.liveConnected && mapped !== this.bridge.health().connectionState) {
+    } else if (researchConnected && prev && !prev.researchSessionConnected) {
+      // Genuine session restored (process reconnect may also note finish).
+      if (this.bridge.health().connectionState !== "CONNECTED") {
+        this.bridge.noteReconnectFinish(this.nowMs());
+      }
+    } else if (
+      researchConnected &&
+      mapped !== this.bridge.health().connectionState
+    ) {
       this.bridge.setConnectionState(mapped, reason);
     }
 
@@ -384,10 +500,16 @@ export class GoldHunterFastResearchCaptureRuntime {
 
     this.lastSessionSnap = {
       liveConnected: st.liveConnected,
+      researchSessionConnected: researchConnected,
       spotSubscribed: st.spotSubscribed,
       depthSubscribed: st.depthSubscribed,
       connectionMapped: mapped
     };
+  }
+
+  /** @internal — drive session poll classification in unit tests. */
+  async syncSessionStateForTests(reason = "session_poll"): Promise<void> {
+    await this.syncSessionState(reason);
   }
 
   private startHeartbeat(): void {
@@ -419,33 +541,108 @@ export class GoldHunterFastResearchCaptureRuntime {
   private startHealthServer(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.healthServer = http.createServer((req, res) => {
-        if (req.url === "/health" || req.url === "/") {
-          const body = JSON.stringify(this.health(), null, 2);
-          res.writeHead(200, {
-            "content-type": "application/json",
-            "cache-control": "no-store"
-          });
-          res.end(body);
+        const origin = req.headers.origin ?? "*";
+        const cors = {
+          "Access-Control-Allow-Origin": origin === "null" ? "*" : origin,
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Cache-Control": "no-store",
+          Vary: "Origin"
+        };
+        if (req.method === "OPTIONS") {
+          res.writeHead(204, cors);
+          res.end();
           return;
         }
-        if (req.url === "/ui-design") {
-          const body = JSON.stringify(
-            this.bridge?.uiDesign(this.nowMs()) ?? {
-              title: "GOLD_HUNTER FAST",
-              subtitle: "RESEARCH CAPTURE — NO TRADING",
-              tradingButtons: []
-            },
-            null,
-            2
+        const path = (req.url ?? "/").split("?")[0];
+        if (path === "/health" || path === "/") {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(JSON.stringify(this.health(), null, 2));
+          return;
+        }
+        if (path === "/ui-design") {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.uiDesign(this.nowMs()) ?? {
+                title: "GOLD_HUNTER FAST",
+                subtitle: "RESEARCH CAPTURE — NO TRADING",
+                tradingButtons: []
+              },
+              null,
+              2
+            )
           );
-          res.writeHead(200, {
-            "content-type": "application/json",
-            "cache-control": "no-store"
-          });
-          res.end(body);
           return;
         }
-        res.writeHead(404);
+        if (
+          path === "/recent-candidates" ||
+          path === "/research/recent-candidates"
+        ) {
+          const q = new URL(req.url ?? "/", "http://localhost").searchParams;
+          const limit = Number(q.get("limit") ?? 40);
+          const filterRaw = (q.get("filter") ?? "ELIGIBLE").toUpperCase();
+          const filter =
+            filterRaw === "SELECTED" || filterRaw === "ALL"
+              ? filterRaw
+              : "ELIGIBLE";
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.recentCandidatesResponse(limit, filter) ?? {
+                mode: "RESEARCH_CAPTURE_ONLY",
+                label: "RESEARCH OBSERVATION FEED — NOT TRADES",
+                runId: null,
+                limit: 40,
+                count: 0,
+                filter: "ELIGIBLE",
+                observations: [],
+                brokerRequests: 0,
+                brokerOrders: 0,
+                shadowOrders: 0,
+                executionAdapter: "NONE",
+                mutationSurface: "NONE",
+                tradingButtons: [],
+                marketDataNormalizationVersion: "CTRADER_NORMALIZED_V1",
+                inputNormalizationVerified: true
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+        if (
+          path === "/reference-paper" ||
+          path === "/research/reference-paper"
+        ) {
+          res.writeHead(200, { "content-type": "application/json", ...cors });
+          res.end(
+            JSON.stringify(
+              this.bridge?.referencePaperSnapshot() ?? {
+                mode: "REFERENCE_PAPER_ONLY",
+                label: "REFERENCE PAPER P/L — HYPOTHETICAL, NOT A BROKER TRADE",
+                policy: null,
+                summary: {
+                  paperTrades: 0,
+                  open: 0,
+                  wins: 0,
+                  losses: 0,
+                  breakeven: 0,
+                  brokerRequests: 0,
+                  brokerOrders: 0,
+                  executionAdapter: "NONE"
+                },
+                openTrade: null,
+                history: []
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+        res.writeHead(404, cors);
         res.end("not found");
       });
       this.healthServer.once("error", reject);
