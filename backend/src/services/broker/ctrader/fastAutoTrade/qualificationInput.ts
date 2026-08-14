@@ -9,15 +9,17 @@ import type { TrendbarCandle } from "../openApiClient";
 import { loadFastAutoTradeConfig } from "./config";
 import {
   classifyCompletedM1Freshness,
+  filterCompletedM1Bars,
   loadCompletedM1BarsForFastAutoTrade
 } from "./completedM1Candles";
 import { mapDecisionToFastInput } from "./fromDecision";
 import { loadFastReentryState } from "./reentryStateStore";
-import type {
-  FastAutoTradeInput,
-  FastM1Availability,
-  FastOhlc,
-  FastReentryContext
+import {
+  FAST_EXTENSION_M1_HISTORY,
+  type FastAutoTradeInput,
+  type FastM1Availability,
+  type FastOhlc,
+  type FastReentryContext
 } from "./types";
 
 export function ohlcFromTrendbar(bar: TrendbarCandle): FastOhlc {
@@ -57,6 +59,7 @@ export async function loadFastOneMinuteMarket(args: {
   timeframe: "1" | null;
   availability: FastM1Availability;
   completedAtMs: number | null;
+  history: FastOhlc[];
 }> {
   const nowMs = args.nowMs ?? Date.now();
   const maxAgeMs = args.maxAgeMs ?? loadFastAutoTradeConfig().maxCompletedM1AgeMs;
@@ -64,16 +67,18 @@ export async function loadFastOneMinuteMarket(args: {
     const bars = await loadCompletedM1BarsForFastAutoTrade({
       ownerUid: args.ownerUid,
       nowMs,
-      count: 8
+      count: FAST_EXTENSION_M1_HISTORY
     });
     const classified = classifyCompletedM1Freshness({ bars, nowMs, maxAgeMs });
+    const history = filterCompletedM1Bars(bars, nowMs).map(ohlcFromTrendbar);
     if (!classified.latest) {
       return {
         ohlcv: null,
         priorOhlcv: null,
         timeframe: null,
         availability: classified.availability,
-        completedAtMs: classified.completedAtMs
+        completedAtMs: classified.completedAtMs,
+        history
       };
     }
     return {
@@ -81,7 +86,8 @@ export async function loadFastOneMinuteMarket(args: {
       priorOhlcv: classified.prior ? ohlcFromTrendbar(classified.prior) : null,
       timeframe: "1",
       availability: classified.availability,
-      completedAtMs: classified.completedAtMs
+      completedAtMs: classified.completedAtMs,
+      history
     };
   } catch {
     return {
@@ -89,7 +95,8 @@ export async function loadFastOneMinuteMarket(args: {
       priorOhlcv: null,
       timeframe: null,
       availability: "UNAVAILABLE",
-      completedAtMs: null
+      completedAtMs: null,
+      history: []
     };
   }
 }
@@ -162,6 +169,7 @@ export async function buildFastAutoTradeInput(args: {
     timeframe: m1.availability === "UNAVAILABLE" ? null : m1.timeframe,
     requireCompletedM1: true,
     m1Availability: m1.availability,
-    m1CompletedAtMs: m1.completedAtMs
+    m1CompletedAtMs: m1.completedAtMs,
+    m1History: m1.history
   });
 }

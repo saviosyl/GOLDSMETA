@@ -51,9 +51,46 @@ export type FastWaitReason =
   | "WAIT_FLAP_GUARD"
   | "WAIT_M1_UNAVAILABLE"
   | "WAIT_M1_STALE"
+  | "WAIT_EXTENSION_VOLATILITY_UNAVAILABLE"
   | "FAST_AUTOTRADE_V1_DEMO_ONLY";
 
 export type FastM1Availability = "OK" | "UNAVAILABLE" | "STALE";
+
+/**
+ * Extension-model sample sizes. ATR14 needs 15 completed M1s (14 true ranges).
+ * Fewer than FAST_EXTENSION_ATR_MIN_SAMPLES true ranges is not a valid local
+ * volatility estimate — production must WAIT rather than use one M1 range.
+ */
+export const FAST_EXTENSION_ATR_PERIOD = 14;
+export const FAST_EXTENSION_ATR_MIN_SAMPLES = 5;
+export const FAST_EXTENSION_M1_HISTORY = 20;
+
+export type FastExtensionAnchorType =
+  | "VWAP"
+  | "EMA21"
+  | "BROKEN_RESISTANCE"
+  | "BROKEN_VAH"
+  | "BROKEN_SUPPORT"
+  | "BROKEN_VAL"
+  | "POC"
+  | "LOCAL_STRUCTURE"
+  | "NONE";
+
+export type FastExtensionAtrSource =
+  | "M1_ATR14"
+  | "M1_ROLLING_TR"
+  | "DECISION_ATR"
+  | "NONE";
+
+export type FastExtensionDiagnostic = {
+  extensionAnchorType: FastExtensionAnchorType;
+  extensionAnchorPrice: number | null;
+  extensionDistance: number | null;
+  extensionAtr: number | null;
+  extensionAtrSource: FastExtensionAtrSource;
+  extensionDistanceAtr: number | null;
+  extensionLimitAtr: number;
+};
 
 export type FastOhlc = {
   open: number | null;
@@ -142,6 +179,11 @@ export type FastAutoTradeInput = {
   requireCompletedM1?: boolean;
   m1Availability?: FastM1Availability;
   m1CompletedAtMs?: number | null;
+  /**
+   * Completed M1 bars oldest → newest (forming bar excluded).
+   * Used only for the extension-model local ATR — not for geometry ATR.
+   */
+  m1History?: FastOhlc[] | null;
 };
 
 export type FastGeometry = {
@@ -176,6 +218,8 @@ export type FastAutoTradeDecision = {
   tradeSpaceOk: boolean;
   /** Independent of trade-space — true when the move is already stretched. */
   extended: boolean;
+  /** Backend-only extension classification diagnostics. */
+  extension: FastExtensionDiagnostic;
 };
 
 export type FastMissedOpportunity = {
@@ -192,6 +236,13 @@ export type FastMissedOpportunity = {
   hardVeto: string | null;
   tradeSpaceOk: boolean;
   extended: boolean;
+  extensionAnchorType: FastExtensionAnchorType;
+  extensionAnchorPrice: number | null;
+  extensionDistance: number | null;
+  extensionAtr: number | null;
+  extensionAtrSource: FastExtensionAtrSource;
+  extensionDistanceAtr: number | null;
+  extensionLimitAtr: number;
 };
 
 export type FastManagementAction =

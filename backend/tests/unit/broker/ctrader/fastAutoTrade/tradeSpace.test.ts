@@ -222,15 +222,15 @@ describe("FAST_AUTOTRADE_V1 forward trade-space", () => {
 
   it("breakout above VAH but excessively extended → WAIT_EXTENDED", () => {
     const input = baseInput({
-      price: 3362.5,
-      bid: 3362.45,
-      ask: 3362.55,
+      price: 3369.2,
+      bid: 3369.15,
+      ask: 3369.25,
       atr: 5.2,
       ohlcv: {
-        open: 3358.0,
-        high: 3363.2,
-        low: 3357.4,
-        close: 3362.5,
+        open: 3364.0,
+        high: 3370.0,
+        low: 3363.4,
+        close: 3369.2,
         volume: 1600
       },
       vwap: 3349.0,

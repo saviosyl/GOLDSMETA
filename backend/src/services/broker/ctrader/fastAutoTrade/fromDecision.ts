@@ -87,6 +87,7 @@ export function mapDecisionToFastInput(args: {
   requireCompletedM1?: boolean;
   m1Availability?: import("./types").FastM1Availability;
   m1CompletedAtMs?: number | null;
+  m1History?: import("./types").FastOhlc[] | null;
 }): FastAutoTradeInput {
   const d = args.decision;
   const ms = d.marketStructure;
@@ -156,6 +157,7 @@ export function mapDecisionToFastInput(args: {
     lifecycle: { state: "SCANNING", stateEnteredAtMs: args.nowMs ?? Date.now() },
     requireCompletedM1: Boolean(args.requireCompletedM1),
     m1Availability: args.m1Availability,
-    m1CompletedAtMs: args.m1CompletedAtMs ?? null
+    m1CompletedAtMs: args.m1CompletedAtMs ?? null,
+    m1History: args.m1History ?? null
   };
 }

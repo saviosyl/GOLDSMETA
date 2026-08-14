@@ -66,6 +66,13 @@ export type FastWaitTelemetry = {
   m1AgeMs?: number | null;
   tradeSpaceOk?: boolean | null;
   extended?: boolean | null;
+  extensionAnchorType?: string | null;
+  extensionAnchorPrice?: number | null;
+  extensionDistance?: number | null;
+  extensionAtr?: number | null;
+  extensionAtrSource?: string | null;
+  extensionDistanceAtr?: number | null;
+  extensionLimitAtr?: number | null;
   waitReason?: string | null;
   spread?: number | null;
   quoteAgeSeconds?: number | null;
@@ -164,6 +171,8 @@ export function reasonLabelFor(code: string): string {
     WAIT_FLAP_GUARD: "Signal flap guard",
     WAIT_M1_UNAVAILABLE: "Completed 1-minute candle unavailable",
     WAIT_M1_STALE: "Completed 1-minute candle is stale",
+    WAIT_EXTENSION_VOLATILITY_UNAVAILABLE:
+      "Local M1 volatility unavailable for extension test",
     FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();

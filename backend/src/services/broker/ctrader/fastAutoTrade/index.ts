@@ -1,9 +1,15 @@
 export {
   FAST_AUTOTRADE_STRATEGY_ID,
+  FAST_EXTENSION_ATR_MIN_SAMPLES,
+  FAST_EXTENSION_ATR_PERIOD,
+  FAST_EXTENSION_M1_HISTORY,
   type FastAction,
   type FastAutoTradeDecision,
   type FastAutoTradeInput,
   type FastBias,
+  type FastExtensionAnchorType,
+  type FastExtensionAtrSource,
+  type FastExtensionDiagnostic,
   type FastGrade,
   type FastLifecycleState,
   type FastRegime,
@@ -19,18 +25,24 @@ export {
   loadFastAutoTradeConfig
 } from "./config";
 export {
+  assessExtension,
   brokenStructureLevel,
   buildFastGeometry,
   candleKey,
   classifyFastRegime,
+  completedBarTrueRange,
   determineFastBias,
   detectFastSetup,
   detectFastTrigger,
+  estimateAtr,
+  estimateExtensionAtr,
   evaluateFastAutoTrade,
   evaluateFastReentry,
   forwardTradeBarrier,
   hardSafetyVeto,
   isExtended,
+  scoreFastQuality,
+  selectExtensionAnchor,
   tradeSpaceOk
 } from "./engine";
 export { evaluateFastManagement } from "./management";
