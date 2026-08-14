@@ -283,28 +283,12 @@ describe("worker FAST attach / detach", () => {
       timestamp: Date.now(),
       symbolId: 41
     };
-    const worker = new MicroLiveCollectorWorker({
-      store,
-      allowLocalInjectedCredentials: true,
-      credentials: {
-        clientId: "t",
-        clientSecret: "t",
-        accessToken: "a",
-        refreshToken: "r",
-        accountId: "123",
-        environment: "DEMO",
-        tokenUrl: "https://example.test/token",
-        authUrl: "https://example.test/auth",
-        redirectUri: null
-      }
-    });
-    // Manually connect session path via private-ish: start would need vault.
-    // Exercise bridge flag path:
+    // Bridge flag path only — do not construct MicroLiveCollectorWorker here
+    // (vault/encryption env is orthogonal to FAST attach gating).
     const bridge = new GoldHunterFastLiveBridge({ enabled: false });
     expect(bridge.isEnabled()).toBe(false);
     bridge.attach(session);
     expect(bridge.isAttached()).toBe(false);
-    void worker;
   });
 
   it("reconnect attaches once; disconnect detaches", async () => {
