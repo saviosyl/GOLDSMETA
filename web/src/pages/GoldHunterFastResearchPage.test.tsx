@@ -114,6 +114,7 @@ describe("GoldHunterFastResearchPage", () => {
       );
     });
     expect(screen.getByTestId("gh-research-market")).toHaveTextContent("0.09");
+    expect(screen.getByTestId("gh-research-market")).toHaveTextContent("SPOT");
     expect(screen.getByTestId("gh-research-activity")).toHaveTextContent(
       "1,824"
     );
@@ -121,6 +122,10 @@ describe("GoldHunterFastResearchPage", () => {
     expect(screen.getByTestId("gh-research-activity")).toHaveTextContent(
       "A ELIGIBLE"
     );
+    expect(screen.getByTestId("gh-research-activity")).toHaveTextContent(
+      "SELECTED SIGNAL EVENTS"
+    );
+    expect(screen.queryByText("SELECTED OPPORTUNITIES")).toBeNull();
     expect(screen.getByTestId("gh-research-candidate-feed")).toHaveTextContent(
       "RESEARCH OBSERVATION — NOT A TRADE"
     );

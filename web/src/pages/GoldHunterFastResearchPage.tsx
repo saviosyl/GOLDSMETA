@@ -304,6 +304,9 @@ export function GoldHunterFastResearchPage() {
 
       <section className="gm-ghr-market" data-testid="gh-research-market">
         <span className="gm-ghr-sym">XAUUSD</span>
+        <span className="gm-ghr-market-source" title="lastBid/lastAsk/lastSpread from normalized SPOT">
+          SPOT
+        </span>
         <span>
           BID <strong>{fmtPx(health?.lastBid)}</strong>
         </span>
@@ -379,7 +382,9 @@ export function GoldHunterFastResearchPage() {
             </strong>
           </div>
           <div className="gm-ghr-activity-row">
-            <span>SELECTED OPPORTUNITIES</span>
+            <span title="Event-level specialist selections — not unique trade/opportunity count">
+              SELECTED SIGNAL EVENTS
+            </span>
             <strong>
               {fmtNum(selectedTotal)}
               <Delta

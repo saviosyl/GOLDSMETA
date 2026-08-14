@@ -103,6 +103,7 @@ describe("research corrected offline replay", () => {
     expect(result.rawRows).toBe(2);
     expect(result.normalizedSpot).toBe(1);
     expect(result.normalizedDepth).toBe(1);
+    expect(result.resyncMarkersProcessed).toBe(0);
     expect(result.before.A).toBe(1);
     expect(existsSync(join(outDir, "CORRECTED_REPLAY_SUMMARY.json"))).toBe(true);
     const summary = JSON.parse(

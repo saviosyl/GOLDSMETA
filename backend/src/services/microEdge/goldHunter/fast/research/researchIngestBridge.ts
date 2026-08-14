@@ -116,6 +116,12 @@ export class ResearchIngestBridge {
   private resubscribeState: ResearchResubscribeState = "IDLE";
   private reconnectReason: string | null = null;
   private lastEventLoopLagMs: number | null = null;
+  /**
+   * Test-only gate: when set, processOrdered awaits it before applying work.
+   * Used to build a real backlog before noteResync without out-of-order clears.
+   */
+  private orderedProcessGate: Promise<void> = Promise.resolve();
+  private releaseOrderedProcessGate: (() => void) | null = null;
   private readonly gapMs: number;
   private readonly freshnessLimitMs: number;
   private readonly campaignMode: boolean;
@@ -257,12 +263,13 @@ export class ResearchIngestBridge {
   }
 
   /**
-   * Market-data reset for research — clears book/features and records a marker.
+   * Market-data reset for research — enqueue RESYNC_MARKER only.
+   * Pipeline clear happens inside processOrdered at this receiveSeq
+   * so previously queued SPOT/DEPTH are never applied after an early clear.
    * Does NOT fabricate trades (there is no trade state).
    */
   noteResync(reason: string, ts = Date.now()): void {
     this.resyncCount += 1;
-    this.pipeline.clearForResync();
     const receiveSeq = this.nextSeq();
     const rawCallbackArrivalMs = ts;
     const bridgeEnqueueMs = ts;
@@ -273,6 +280,25 @@ export class ResearchIngestBridge {
       bridgeEnqueueMs,
       payload: { reason }
     });
+  }
+
+  /** Test-only: pause ordered consumer so ingress can build a backlog. */
+  closeOrderedProcessGateForTests(): void {
+    this.orderedProcessGate = new Promise((resolve) => {
+      this.releaseOrderedProcessGate = resolve;
+    });
+  }
+
+  /** Test-only: release the ordered consumer gate. */
+  openOrderedProcessGateForTests(): void {
+    this.releaseOrderedProcessGate?.();
+    this.releaseOrderedProcessGate = null;
+    this.orderedProcessGate = Promise.resolve();
+  }
+
+  /** Test-only: expose pipeline for ordered-resync assertions. */
+  pipelineForTests(): ResearchFeaturePipeline {
+    return this.pipeline;
   }
 
   /**
@@ -395,6 +421,9 @@ export class ResearchIngestBridge {
     item: QueuedIngress,
     _queueEnqueuedAtMs: number
   ): Promise<void> {
+    // Test gate only — production gate is already resolved.
+    await this.orderedProcessGate;
+
     const processStartMs = Math.max(Date.now(), item.bridgeEnqueueMs);
     const enqueueToProcessLatencyMs = Math.max(
       0,
@@ -437,6 +466,8 @@ export class ResearchIngestBridge {
     } as const;
 
     if (item.kind === "RESYNC_MARKER") {
+      // Ordered boundary: clear book/features at this receiveSeq, then persist.
+      this.pipeline.clearForResync();
       const rec: ResearchCaptureRecord = {
         ...base,
         eventKind: "RESYNC_MARKER",
@@ -573,16 +604,8 @@ export class ResearchIngestBridge {
       item.rawCallbackArrivalMs
     );
     if (snap.crossed) this.bookCrossedCount += 1;
-    // Market strip uses a coherent top-of-book pair only (avoid stale one-sided mix).
-    if (
-      snap.bestBid != null &&
-      snap.bestAsk != null &&
-      snap.bestAsk >= snap.bestBid
-    ) {
-      this.lastBid = snap.bestBid;
-      this.lastAsk = snap.bestAsk;
-      this.lastSpread = snap.bestAsk - snap.bestBid;
-    }
+    // Monitor strip lastBid/lastAsk/lastSpread are SPOT-sourced only
+    // (set in SPOT path). Depth top-of-book is not written to the strip.
     const rec: ResearchCaptureRecord = {
       ...base,
       eventKind: "DEPTH",

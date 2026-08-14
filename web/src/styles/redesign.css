@@ -7763,11 +7763,13 @@ body.gm-drawer-open {
   background: linear-gradient(135deg, rgba(18, 28, 38, 0.95), rgba(10, 14, 20, 0.98));
 }
 
-.gm-ghr-sym {
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
-  font-weight: 700;
+.gm-ghr-market-source {
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--ghr-gold);
+  border: 1px solid color-mix(in srgb, var(--ghr-gold) 40%, transparent);
+  padding: 2px 6px;
 }
 
 .gm-ghr-market strong {
