@@ -299,12 +299,50 @@ function lastCompletedExtreme(
 }
 
 /**
+ * Nearest valid broken BUY structure behind price: the highest of
+ * independent broken resistance and broken VAH. Telemetry follows the
+ * selected level (not a fixed resistance-then-VAH priority).
+ */
+function nearestBrokenBuyAnchor(
+  independentRes: number | null,
+  brokenVah: number | null
+): { type: FastExtensionAnchorType; price: number } | null {
+  if (independentRes != null && brokenVah != null) {
+    return independentRes >= brokenVah
+      ? { type: "BROKEN_RESISTANCE", price: independentRes }
+      : { type: "BROKEN_VAH", price: brokenVah };
+  }
+  if (independentRes != null) return { type: "BROKEN_RESISTANCE", price: independentRes };
+  if (brokenVah != null) return { type: "BROKEN_VAH", price: brokenVah };
+  return null;
+}
+
+/**
+ * Nearest valid broken SELL structure above price: the lowest of
+ * independent broken support and broken VAL.
+ */
+function nearestBrokenSellAnchor(
+  independentSup: number | null,
+  brokenVal: number | null
+): { type: FastExtensionAnchorType; price: number } | null {
+  if (independentSup != null && brokenVal != null) {
+    return independentSup <= brokenVal
+      ? { type: "BROKEN_SUPPORT", price: independentSup }
+      : { type: "BROKEN_VAL", price: brokenVal };
+  }
+  if (independentSup != null) return { type: "BROKEN_SUPPORT", price: independentSup };
+  if (brokenVal != null) return { type: "BROKEN_VAL", price: brokenVal };
+  return null;
+}
+
+/**
  * Setup-aware extension reference. One universal POC/VWAP/EMA stack is not used.
  *
  * BREAKOUT / BREAKOUT_RETEST:
- *   BUY: broken independent resistance → broken VAH → VWAP → EMA21 → local M1 →
+ *   BUY: nearest valid broken structure behind price (highest of independent
+ *        broken resistance and broken VAH) → VWAP → EMA21 → local M1 →
  *        POC only when no local structure exists and ATR is a rolling M1 estimate.
- *   SELL: broken independent support → broken VAL → mirror.
+ *   SELL: nearest valid broken support/VAL above price (lowest candidate) → mirror.
  *
  * PULLBACK / MOMENTUM / REVERSAL:
  *   VWAP → EMA21 → broken VAH/VAL when price is already through it (chase check) →
@@ -332,10 +370,8 @@ export function selectExtensionAnchor(
         : null;
 
     if (breakout) {
-      if (independentRes != null) {
-        return { type: "BROKEN_RESISTANCE", price: independentRes };
-      }
-      if (brokenVah != null) return { type: "BROKEN_VAH", price: brokenVah };
+      const nearest = nearestBrokenBuyAnchor(independentRes, brokenVah);
+      if (nearest) return nearest;
       if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
       if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
       if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
@@ -377,8 +413,8 @@ export function selectExtensionAnchor(
       : null;
 
   if (breakout) {
-    if (independentSup != null) return { type: "BROKEN_SUPPORT", price: independentSup };
-    if (brokenVal != null) return { type: "BROKEN_VAL", price: brokenVal };
+    const nearest = nearestBrokenSellAnchor(independentSup, brokenVal);
+    if (nearest) return nearest;
     if (present(input.vwap)) return { type: "VWAP", price: input.vwap };
     if (present(input.ema21)) return { type: "EMA21", price: input.ema21 };
     if (present(local)) return { type: "LOCAL_STRUCTURE", price: local };
