@@ -128,12 +128,33 @@ describe("FakeMicroCTraderTransport research heartbeat", () => {
     vi.advanceTimersByTime(10_000);
     const mid = t.getResearchTransportHeartbeatTelemetry();
     expect(mid.transportHeartbeatSentCount).toBeGreaterThanOrEqual(1);
-    expect(mid.transportHeartbeatReceivedCount).toBeGreaterThanOrEqual(1);
     expect(mid.transportLivenessHealthy).toBe(true);
-    expect(mid.lastTransportMessageAt).not.toBeNull();
+    expect(mid.lastTransportHeartbeatSentAt).not.toBeNull();
     t.disconnect();
-    expect(t.getResearchTransportHeartbeatTelemetry().researchHeartbeatEnabled).toBe(
+    expect(
+      t.getResearchTransportHeartbeatTelemetry().researchHeartbeatEnabled
+    ).toBe(false);
+  });
+
+  it("outbound heartbeat alone keeps liveness during market silence", () => {
+    const t = new FakeMicroCTraderTransport();
+    void t.connect();
+    let now = 1_000_000;
+    t.enableResearchTransportHeartbeat({
+      intervalMs: 10_000,
+      livenessTimeoutMs: 40_000,
+      nowMs: () => now
+    });
+    now += 60_000;
+    vi.advanceTimersByTime(60_000);
+    expect(t.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy).toBe(
+      true
+    );
+    t.stopFakeHeartbeatEchoForTests();
+    now += 50_000;
+    expect(t.getResearchTransportHeartbeatTelemetry().transportLivenessHealthy).toBe(
       false
     );
+    t.disconnect();
   });
 });

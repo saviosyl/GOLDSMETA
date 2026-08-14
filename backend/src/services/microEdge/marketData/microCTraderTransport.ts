@@ -179,6 +179,7 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
   private lastTransportHeartbeatReceivedAtMs: number | null = null;
   private lastTransportMessageAtMs: number | null = null;
   private inboundHeartbeatHandler: MicroTransportEventHandler | null = null;
+  private lastHeartbeatSendOk = true;
 
   constructor(
     private readonly credentials: MicroCTraderCredentials,
@@ -479,10 +480,24 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
       this.lastTransportMessageAtMs != null
         ? Math.max(0, now - this.lastTransportMessageAtMs)
         : null;
+    const sentAge =
+      this.lastTransportHeartbeatSentAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatSentAtMs)
+        : null;
+    // cTrader may not echo ProtoHeartbeatEvent while quiet; successful outbound
+    // keep-alive (plus socket still connected) is sufficient transport liveness.
+    // Inbound market/HB messages also prove liveness. Spot/Depth silence alone
+    // must NOT declare the transport dead.
+    const inboundOk =
+      msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+    const outboundOk =
+      this.lastHeartbeatSendOk &&
+      sentAge != null &&
+      sentAge <= this.researchHeartbeatLivenessMs;
     const healthy =
       !this.researchHeartbeatEnabled || !this.connected
         ? this.connected
-        : msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+        : inboundOk || outboundOk;
     return {
       researchHeartbeatEnabled: this.researchHeartbeatEnabled,
       transportHeartbeatSentCount: this.transportHeartbeatSentCount,
@@ -541,7 +556,9 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
         const now = this.researchHeartbeatNowMs();
         this.transportHeartbeatSentCount += 1;
         this.lastTransportHeartbeatSentAtMs = now;
+        this.lastHeartbeatSendOk = true;
       } catch {
+        this.lastHeartbeatSendOk = false;
         /* outbound HB failure is observed via liveness timeout */
       }
     };
@@ -865,6 +882,14 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       this.lastTransportMessageAtMs != null
         ? Math.max(0, now - this.lastTransportMessageAtMs)
         : null;
+    const sentAge =
+      this.lastTransportHeartbeatSentAtMs != null
+        ? Math.max(0, now - this.lastTransportHeartbeatSentAtMs)
+        : null;
+    const inboundOk =
+      msgAge != null && msgAge <= this.researchHeartbeatLivenessMs;
+    const outboundOk =
+      sentAge != null && sentAge <= this.researchHeartbeatLivenessMs;
     return {
       researchHeartbeatEnabled: this.researchHeartbeatEnabled,
       transportHeartbeatSentCount: this.transportHeartbeatSentCount,
@@ -887,7 +912,7 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
       transportLivenessHealthy:
         !this.researchHeartbeatEnabled || !this.connected
           ? this.connected
-          : msgAge != null && msgAge <= this.researchHeartbeatLivenessMs
+          : inboundOk || outboundOk
     };
   }
 
