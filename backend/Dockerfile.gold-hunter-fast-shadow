@@ -10,7 +10,9 @@ RUN npm ci --omit=dev
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts/microEdge/runFastShadowRuntime.ts ./scripts/microEdge/runFastShadowRuntime.ts
-RUN npm install tsx@latest --no-save
+# Pin to package-lock resolved version (devDependency tsx@4.23.1) for reproducible images.
+# npm ci --omit=dev excludes tsx; install the locked release explicitly — never @latest.
+RUN npm install tsx@4.23.1 --no-save
 ENV PORT=8080
 ENV NODE_ENV=production
 ENV APP_ENV=production
