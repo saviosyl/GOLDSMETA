@@ -49,6 +49,17 @@ export type EvaluationRecord = {
   finalReason?: string | null;
   /** Optional overnight Demo run correlation id. */
   overnightRunId?: string | null;
+  /** FAST_AUTOTRADE_V1 missed-opportunity diagnostics. */
+  fastTelemetry?: {
+    strategyId?: string;
+    regime?: string | null;
+    setupType?: string | null;
+    grade?: string | null;
+    trigger?: string | null;
+    accepted?: string[];
+    missing?: string[];
+    supporting?: string[];
+  } | null;
 };
 
 function col(uid: string) {
@@ -117,7 +128,28 @@ export function reasonLabelFor(code: string): string {
     TRADING_OAUTH_REQUIRED: "Trading OAuth scope required",
     DEMO_ACCOUNT_NOT_SELECTED: "Demo account not selected",
     DEMO_SUBMISSION_FLAG_OFF: "Demo submission flag off",
-    OVERNIGHT_WINDOW_ENDED: "Demo overnight entry window ended"
+    OVERNIGHT_WINDOW_ENDED: "Demo overnight entry window ended",
+    WAIT_NO_SETUP: "No valid FAST setup",
+    WAIT_CHOP: "CHOP regime — waiting",
+    WAIT_LOW_MOMENTUM: "Momentum too weak",
+    WAIT_SPREAD: "Spread guard",
+    WAIT_RISK_LIMIT: "Risk limit",
+    WAIT_NEWS: "News guard",
+    WAIT_EXTENDED: "Move already extended",
+    WAIT_NO_TRADE_SPACE: "Not enough room to target",
+    WAIT_TRIGGER_NOT_CONFIRMED: "Setup found — trigger not confirmed",
+    WAIT_DUPLICATE_SETUP: "Duplicate setup",
+    WAIT_REENTRY_DELAY: "Re-entry delay",
+    WAIT_SAME_CANDLE: "Same-candle re-entry blocked",
+    WAIT_NEUTRAL_BIAS: "No directional bias",
+    WAIT_LOW_QUALITY: "Quality below entry grade",
+    WAIT_DANGEROUS: "DANGEROUS regime",
+    WAIT_STALE_PRICE: "Stale price",
+    WAIT_MARKET_CLOSED: "Market closed",
+    WAIT_MALFORMED_DATA: "Malformed market data",
+    WAIT_PENDING_TIMEOUT: "Pending state timed out",
+    WAIT_FLAP_GUARD: "Signal flap guard",
+    FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
@@ -195,7 +227,8 @@ export async function appendEvaluation(
     finalReason:
       partial.finalReason ??
       (partial.outcome === "QUALIFIED" ? null : reasonLabel),
-    overnightRunId: partial.overnightRunId ?? null
+    overnightRunId: partial.overnightRunId ?? null,
+    fastTelemetry: partial.fastTelemetry ?? null
   };
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).

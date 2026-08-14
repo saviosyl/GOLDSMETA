@@ -15,6 +15,7 @@ import {
 import type { DailySafetyDocument, DailySafetyPublicView } from "./dailySafetyTypes";
 import { reconcileDemoOpenPositionCounters } from "./openPositionReconcile";
 import { resolveDemoAutoAuthorityForUser } from "./demoAutoExecutionAuthority";
+import { isFastAutoTradeV1Enabled, loadFastAutoTradeConfig } from "./fastAutoTrade/config";
 
 export type EntryGateResult = {
   allowed: boolean;
@@ -200,9 +201,16 @@ export async function markTradeClosed(args: {
   daily.lastTradeWasLoss = loss;
   if (loss) {
     daily.consecutiveLosses += 1;
-    if (settings.tradeCooldownMinutes > 0) {
+    const cooldownMinutes =
+      args.environment === "demo" && isFastAutoTradeV1Enabled()
+        ? Math.min(
+            settings.tradeCooldownMinutes,
+            loadFastAutoTradeConfig().demoReentryDelayMinutes
+          )
+        : settings.tradeCooldownMinutes;
+    if (cooldownMinutes > 0) {
       daily.cooldownUntil = new Date(
-        Date.now() + settings.tradeCooldownMinutes * 60_000
+        Date.now() + cooldownMinutes * 60_000
       ).toISOString();
     }
     if (daily.consecutiveLosses >= settings.pauseAfterConsecutiveLosses) {

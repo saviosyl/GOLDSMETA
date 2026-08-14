@@ -118,6 +118,12 @@ import {
   getArmedCandidate,
   saveArmedCandidate
 } from "./armedCandidateStore";
+import { isFastAutoTradeV1Enabled, loadFastAutoTradeConfig } from "./fastAutoTrade/config";
+import { evaluateFastAutoTrade } from "./fastAutoTrade/engine";
+import { mapDecisionToFastInput } from "./fastAutoTrade/fromDecision";
+import { evaluateFastAutoTradeDemoLock } from "./fastAutoTrade/demoLock";
+import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
+import type { FastAutoTradeDecision } from "./fastAutoTrade/types";
 
 function buildSha(): string | null {
   return (process.env.GOLD_META_COMMIT_SHA || process.env.VITE_GOLD_META_COMMIT_SHA || "").trim() || null;
@@ -780,6 +786,28 @@ export async function processDecisionForQualification(args: {
       : false;
 
     const oppConfig = loadDemoOpportunityConfig();
+    const fastEnabled = isFastAutoTradeV1Enabled();
+    const fastCfg = fastEnabled ? loadFastAutoTradeConfig() : null;
+    let fastDecision: FastAutoTradeDecision | null = null;
+    if (fastEnabled && fastCfg) {
+      const fastInput = mapDecisionToFastInput({
+        decision: d,
+        nowMs: Date.now(),
+        bid: quote?.bid ?? null,
+        ask: quote?.ask ?? null,
+        spread: quote?.spread ?? null,
+        quoteAgeSeconds,
+        quoteStale: Boolean(quote?.stale),
+        marketStatus: quote?.marketStatus ?? null,
+        accountIsLive: Boolean(setup.accountIsLive),
+        accountEnvironment: setup.accountIsLive ? "LIVE" : "DEMO",
+        spreadLimit: settings.maxSpread,
+        maxQuoteAgeSeconds: settings.maxQuoteAgeSeconds,
+        newsBlocked: false,
+        sessionPlanState: sessionPlan?.lifecycleState ?? null
+      });
+      fastDecision = evaluateFastAutoTrade(fastInput, fastCfg);
+    }
 
     // Autonomous Demo Auto: authority loss must cancel an armed thesis so a
     // stale candidate cannot fire immediately after re-enable.
@@ -856,7 +884,7 @@ export async function processDecisionForQualification(args: {
       } catch {
         /* ignore */
       }
-      if (!existingArmed) {
+      if (!existingArmed && !(fastDecision && fastDecision.action !== "WAIT")) {
         return { handled: true, message: "arm_hard_reject:INCOMPLETE_GEOMETRY" };
       }
     }
@@ -906,7 +934,11 @@ export async function processDecisionForQualification(args: {
         );
         // ACTIVE_DEMO: setupScore tier is authoritative — confidence alone must
         // not arm/execute BELOW-A setups.
-        if (oppConfig.mode === "ACTIVE_DEMO" && setupTierPre === "BELOW") {
+        if (
+          !fastEnabled &&
+          oppConfig.mode === "ACTIVE_DEMO" &&
+          setupTierPre === "BELOW"
+        ) {
           try {
             await appendEvaluation({
               uid,
@@ -993,13 +1025,89 @@ export async function processDecisionForQualification(args: {
           failed: preCandidate.failed
         });
         // No existing armed thesis to monitor — stop here (avoid silent fallthrough).
-        if (!existingArmed) {
+        if (!existingArmed && !(fastDecision && fastDecision.action !== "WAIT")) {
           return {
             handled: true,
             message: `arm_hard_reject:${preCandidate.failed[0] ?? "REJECTED"}`
           };
         }
       }
+    }
+
+    if (fastDecision && fastDecision.action === "WAIT") {
+      qualifiedSetup = null;
+    }
+    if (
+      fastDecision &&
+      (fastDecision.action === "BUY" || fastDecision.action === "SELL") &&
+      fastDecision.geometry &&
+      fastDecision.signalId
+    ) {
+      qualifiedSetup = {
+        direction: fastDecision.action,
+        signalId: fastDecision.signalId,
+        planSourceKey,
+        entry: fastDecision.geometry.entry,
+        stopLoss: fastDecision.geometry.stopLoss,
+        takeProfit: fastDecision.geometry.takeProfit,
+        confidence: fastDecision.qualityScore,
+        setupScore: fastDecision.qualityScore
+      };
+      logger.info("FAST_AUTOTRADE_V1 setup qualified", {
+        uid,
+        signalId: fastDecision.signalId,
+        direction: fastDecision.action,
+        regime: fastDecision.regime,
+        setupType: fastDecision.setupType,
+        grade: fastDecision.grade,
+        score: fastDecision.qualityScore
+      });
+    } else if (fastDecision && fastDecision.action === "WAIT" && !existingArmed) {
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: fastDecision.bias === "BULLISH" ? "BUY" : fastDecision.bias === "BEARISH" ? "SELL" : "WAIT",
+          signalId: d.decisionId,
+          decisionId: d.decisionId,
+          confidence: fastDecision.qualityScore,
+          entry: geom.entry,
+          stopLoss: geom.stopLoss,
+          takeProfit: geom.takeProfit,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "REJECTED",
+          reasonCode: fastDecision.waitReason ?? "WAIT_NO_SETUP",
+          reasonLabel: reasonLabelFor(fastDecision.waitReason ?? "WAIT_NO_SETUP"),
+          passed: fastDecision.accepted,
+          failed: fastDecision.rejected,
+          finalReason: `MISSED / REJECTED ${
+            fastDecision.bias === "BULLISH" ? "BUY" : fastDecision.bias === "BEARISH" ? "SELL" : "WAIT"
+          } — Regime: ${fastDecision.regime} Setup: ${
+            fastDecision.setupType ?? "none"
+          } Score: ${fastDecision.qualityScore} — ${fastDecision.waitReason ?? "WAIT"}`,
+          fastTelemetry: {
+            strategyId: FAST_AUTOTRADE_STRATEGY_ID,
+            regime: fastDecision.regime,
+            setupType: fastDecision.setupType,
+            grade: fastDecision.grade,
+            trigger: fastDecision.trigger,
+            accepted: fastDecision.accepted,
+            missing: fastDecision.missing,
+            supporting: fastDecision.supporting
+          }
+        });
+      } catch {
+        /* never block on log failure */
+      }
+      return {
+        handled: true,
+        message: `fast_wait:${fastDecision.waitReason ?? "WAIT_NO_SETUP"}`
+      };
     }
 
     const planLifecycle = sessionPlan?.lifecycleState ?? null;
@@ -1061,7 +1169,10 @@ export async function processDecisionForQualification(args: {
             originalReasons: decisionReasons
           }
         : null,
-      confirmationRequired: settings.confirmationCandleRequired,
+      confirmationRequired:
+        fastEnabled && fastDecision?.action !== "WAIT"
+          ? false
+          : settings.confirmationCandleRequired,
       confirmationState,
       candleClassification,
       sessionPlanValidUntil: null, // do not bind armed expiry to plan refresh
@@ -1359,6 +1470,9 @@ export async function processDecisionForQualification(args: {
     ? riskRewardFromGeometry ?? riskRewardFromDecision
     : riskRewardFromDecision ?? riskRewardFromGeometry;
 
+  const fastSubmitCfg = isFastAutoTradeV1Enabled()
+    ? loadFastAutoTradeConfig()
+    : null;
   const candidate = evaluateQualificationCandidate({
     direction,
     signalId,
@@ -1366,8 +1480,12 @@ export async function processDecisionForQualification(args: {
     stopLoss,
     takeProfit: rrTakeProfit,
     confidence: tradeConfidence,
-    minConfidence: settings.minConfidence,
-    minRiskReward: settings.minRiskReward,
+    minConfidence: fastSubmitCfg
+      ? Math.min(settings.minConfidence, fastSubmitCfg.fastEntryScore)
+      : settings.minConfidence,
+    minRiskReward: fastSubmitCfg
+      ? Math.min(settings.minRiskReward, fastSubmitCfg.minRiskReward)
+      : settings.minRiskReward,
     quoteBid: quote?.bid ?? null,
     quoteAsk: quote?.ask ?? null,
     quoteSpread: quote?.spread ?? null,
@@ -1523,7 +1641,15 @@ export async function processDecisionForQualification(args: {
       return { handled: true, message: "controlled_blocked:OVERNIGHT_WINDOW_ENDED" };
     }
     const entryGate = await assertEntryAllowed(uid, "demo", {
-      settingsOverride: settings
+      settingsOverride: fastSubmitCfg
+        ? {
+            ...settings,
+            maxTradesPerDay: Math.max(
+              settings.maxTradesPerDay,
+              fastSubmitCfg.demoMaxTradesPerDay
+            )
+          }
+        : settings
     });
     if (!entryGate.allowed) {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
@@ -1539,13 +1665,17 @@ export async function processDecisionForQualification(args: {
     const oppCfg = loadDemoOpportunityConfig();
     // Prefer persisted armed tier so configured thresholds cannot drift.
     // ACTIVE_DEMO never substitutes confidence for a missing setupScore.
-    const setupTier = resolveExecutionSetupTier({
-      armedTier: armedTrade?.tier,
-      setupScore: armedTrade?.setupScore ?? d.setupScore ?? null,
-      confidence: tradeConfidence,
-      config: oppCfg
-    });
-    if (oppCfg.mode === "ACTIVE_DEMO" && setupTier === "BELOW") {
+    const setupTier = fastSubmitCfg
+      ? (tradeConfidence ?? 0) >= fastSubmitCfg.aPlusMin
+        ? "A_PLUS"
+        : "A"
+      : resolveExecutionSetupTier({
+          armedTier: armedTrade?.tier,
+          setupScore: armedTrade?.setupScore ?? d.setupScore ?? null,
+          confidence: tradeConfidence,
+          config: oppCfg
+        });
+    if (!isFastAutoTradeV1Enabled() && oppCfg.mode === "ACTIVE_DEMO" && setupTier === "BELOW") {
       doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
       await saveQualificationDoc(doc);
       await logEval(
@@ -2004,6 +2134,23 @@ export async function processDecisionForQualification(args: {
         }
         brokerOrderTakeProfit = targets.tp3;
       }
+      if (fastSubmitCfg) {
+        const liveLock = evaluateFastAutoTradeDemoLock({
+          strategyId: FAST_AUTOTRADE_STRATEGY_ID,
+          accountIsLive: Boolean(setup.accountIsLive),
+          environment: setup.accountIsLive ? "LIVE" : "DEMO"
+        });
+        if (!liveLock.ok) {
+          await logEval(
+            "REJECTED",
+            "FAST_AUTOTRADE_V1_DEMO_ONLY",
+            ["FAST_AUTOTRADE_V1_DEMO_ONLY"],
+            candidate.passed,
+            { brokerSubmissionAttempted: false }
+          );
+          return { handled: true, message: "FAST_AUTOTRADE_V1_DEMO_ONLY" };
+        }
+      }
       const result = await submitDemoMarketOrder({
         ownerUid: uid,
         side: direction as "BUY" | "SELL",
@@ -2012,7 +2159,8 @@ export async function processDecisionForQualification(args: {
         takeProfit: brokerOrderTakeProfit,
         entryHint: entryPx,
         comment: `GMQ ${correlationId}`,
-        label: correlationId.slice(0, 30)
+        label: correlationId.slice(0, 30),
+        strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null
       });
 
       if (!result.accepted) {
@@ -2287,7 +2435,8 @@ export async function processDecisionForQualification(args: {
             state === "CONTROLLED_DEMO_QUALIFICATION"
               ? "qualification_controlled"
               : "demo_auto",
-          openedAt: trade.at
+          openedAt: trade.at,
+          strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null
         });
       } catch (lifeErr) {
         logger.error("AutoTrade demo position lifecycle create failed", {

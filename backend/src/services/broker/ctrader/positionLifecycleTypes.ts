@@ -100,6 +100,8 @@ export type DemoPositionLifecycle = {
   qualificationStage: string | null;
   decisionId: string | null;
   setupRef: string | null;
+  /** FAST_AUTOTRADE_V1 when opened by the Demo FAST engine. */
+  strategyId?: string | null;
   source: "qualification_controlled" | "demo_auto" | "manual";
   managementState: PositionManagementState;
   lastRecommendation: string | null;
