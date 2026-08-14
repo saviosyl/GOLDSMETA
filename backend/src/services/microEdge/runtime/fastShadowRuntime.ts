@@ -66,9 +66,39 @@ export type FastShadowSoakHealth = {
   mutationSurface: "NONE";
   permissionScope: "SCOPE_VIEW";
   environment: string | null;
+  liveConnected: boolean;
   spotSubscribed: boolean;
   depthSubscribed: boolean;
   fast: GhFastRuntimeHealth | null;
+  /** Live UI strip for preview dashboard (shadow research only). */
+  ui: ReturnType<GoldHunterFastLiveBridge["uiStatus"]> | null;
+  /** Most recent closed shadow trades (newest last). */
+  recentTrades: Array<{
+    tradeId: string;
+    side: string;
+    setup: string;
+    entryTs: number;
+    exitTs: number;
+    entryPrice: number;
+    exitPrice: number;
+    durationMs: number;
+    netMove: number;
+    mfe: number;
+    mae: number;
+    result: string;
+    exitReason: string;
+  }>;
+  todaySummary: {
+    netMove: number;
+    trades: number;
+    wins: number;
+    losses: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    expectancy: number | null;
+    maxDrawdown: number;
+    setupStats: ReturnType<typeof computeSetupStats>[];
+  };
   rejections: Record<string, number>;
   setupDetections: Record<string, number>;
   setupStats: ReturnType<typeof computeSetupStats>[];
@@ -83,8 +113,12 @@ export type FastShadowSoakHealth = {
   } | null;
   targetCompletedTrades: number;
   completedShadowTrades: number;
+  openShadowTrade: ReturnType<GoldHunterFastLiveBridge["uiStatus"]>["open"];
+  approvedGitSha: string | null;
+  deployGitSha: string | null;
   brokerRequests: 0;
   brokerOrders: 0;
+  disclaimer: string;
 };
 
 export class GoldHunterFastShadowRuntime {
@@ -332,6 +366,26 @@ export class GoldHunterFastShadowRuntime {
       Boolean(state?.depthSubscribed) &&
       (this.lastReplay?.code !== "LIVE_REPLAY_DIVERGENCE");
 
+    const allStats =
+      setupStats.find((s) => s.setup === "ALL") ??
+      computeSetupStats("ALL", closed, 0, 0);
+    const ui = this.bridge?.uiStatus() ?? null;
+    const recentTrades = closed.slice(-40).map((t) => ({
+      tradeId: t.tradeId,
+      side: t.side,
+      setup: t.setup,
+      entryTs: t.entryTs,
+      exitTs: t.exitTs,
+      entryPrice: t.entryPrice,
+      exitPrice: t.exitPrice,
+      durationMs: t.durationMs,
+      netMove: t.netMove,
+      mfe: t.mfe,
+      mae: t.mae,
+      result: t.result,
+      exitReason: t.exitReason
+    }));
+
     return {
       service: "gold-hunter-fast-shadow",
       serviceHealthy: healthy,
@@ -344,9 +398,26 @@ export class GoldHunterFastShadowRuntime {
       mutationSurface: "NONE",
       permissionScope: "SCOPE_VIEW",
       environment: state?.symbol?.environment ?? null,
+      liveConnected: Boolean(state?.liveConnected),
       spotSubscribed: Boolean(state?.spotSubscribed),
       depthSubscribed: Boolean(state?.depthSubscribed),
       fast,
+      ui,
+      recentTrades,
+      todaySummary: {
+        netMove: allStats.netMove,
+        trades: allStats.completedTrades,
+        wins: allStats.wins,
+        losses: allStats.losses,
+        winRate: allStats.winRate,
+        profitFactor:
+          allStats.profitFactor != null && Number.isFinite(allStats.profitFactor)
+            ? allStats.profitFactor
+            : null,
+        expectancy: allStats.expectancy,
+        maxDrawdown: allStats.maxDrawdown,
+        setupStats
+      },
       rejections: engine?.rejections.snapshot() ?? {},
       setupDetections: { ...detections },
       setupStats,
@@ -358,28 +429,51 @@ export class GoldHunterFastShadowRuntime {
         process.env.GOLD_HUNTER_FAST_SOAK_TARGET_TRADES ?? 250
       ),
       completedShadowTrades: closed.length,
+      openShadowTrade: ui?.open ?? null,
+      approvedGitSha: (process.env.GOLD_HUNTER_FAST_APPROVED_GIT_SHA ?? "").trim() || null,
+      deployGitSha: (process.env.GOLD_HUNTER_FAST_DEPLOY_GIT_SHA ?? "").trim() || null,
       brokerRequests: 0,
-      brokerOrders: 0
+      brokerOrders: 0,
+      disclaimer:
+        "SHADOW RESULT is hypothetical research executable movement — not Pepperstone account P/L. Broker orders = 0."
     };
   }
 
   private async listenHealth(port: number): Promise<void> {
-    this.healthServer = http.createServer((_req, res) => {
+    this.healthServer = http.createServer((req, res) => {
+      const origin = req.headers.origin ?? "*";
+      const cors = {
+        "Access-Control-Allow-Origin": origin === "null" ? "*" : origin,
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Max-Age": "86400",
+        Vary: "Origin"
+      };
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, cors);
+        res.end();
+        return;
+      }
       void (async () => {
         try {
           const health = await this.buildHealth();
           res.writeHead(health.serviceHealthy ? 200 : 503, {
             "Content-Type": "application/json",
-            "Cache-Control": "no-store"
+            "Cache-Control": "no-store",
+            ...cors
           });
           res.end(JSON.stringify(health));
         } catch {
-          res.writeHead(500, { "Content-Type": "application/json" });
+          res.writeHead(500, {
+            "Content-Type": "application/json",
+            ...cors
+          });
           res.end(
             JSON.stringify({
               serviceHealthy: false,
               mutationSurface: "NONE",
-              brokerOrders: 0
+              brokerOrders: 0,
+              disclaimer: "SHADOW health unavailable"
             })
           );
         }

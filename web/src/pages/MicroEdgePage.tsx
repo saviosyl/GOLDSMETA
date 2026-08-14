@@ -108,6 +108,103 @@ type GhFastLive = {
   shadowOnly?: boolean;
 };
 
+type FastSoakHealth = {
+  serviceHealthy?: boolean;
+  liveConnected?: boolean;
+  spotSubscribed?: boolean;
+  depthSubscribed?: boolean;
+  engineVersion?: string;
+  configSha256?: string;
+  soakLabel?: string;
+  tuningAllowed?: boolean;
+  mutationSurface?: string;
+  permissionScope?: string;
+  brokerOrders?: number;
+  brokerRequests?: number;
+  completedShadowTrades?: number;
+  openShadowTrade?: GhFastLive["open"];
+  ui?: GhFastLive | null;
+  recentTrades?: Array<{
+    tradeId: string;
+    side: string;
+    setup: string;
+    entryTs: number;
+    exitTs: number;
+    entryPrice: number;
+    exitPrice: number;
+    durationMs: number;
+    netMove: number;
+    mfe: number;
+    mae: number;
+    result: string;
+    exitReason: string;
+  }>;
+  todaySummary?: {
+    netMove: number;
+    trades: number;
+    wins: number;
+    losses: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    expectancy: number | null;
+    maxDrawdown: number;
+  };
+  activity?: {
+    eventsPerSec?: number | null;
+    decisionsPerSec?: number | null;
+    signalsPerHour?: number | null;
+    entriesPerHour?: number | null;
+    tradesPerHour?: number | null;
+    medianEntryIntervalSec?: number | null;
+  } | null;
+  setupDetections?: Record<string, number>;
+  fast?: {
+    spotAgeMs?: number | null;
+    depthAgeMs?: number | null;
+    depthBookAvailable?: boolean;
+    queueDepth?: number;
+    eventsDropped?: number;
+    eventToDecision?: { p50: number | null; p95: number | null; p99: number | null };
+    durableMode?: string;
+    persistenceHealthWarning?: string | null;
+    eventsReceived?: number;
+    decisions?: number;
+    shadowEntries?: number;
+    shadowExits?: number;
+    fastAttached?: boolean;
+  } | null;
+  replayParity?: { code?: string; ok?: boolean } | null;
+  disclaimer?: string;
+};
+
+function mapSoakTrades(
+  rows: NonNullable<FastSoakHealth["recentTrades"]>
+): ShadowTrade[] {
+  return [...rows].reverse().map((t) => ({
+    tradeId: t.tradeId,
+    date: dublinToday(),
+    strategyVersion: "GOLD_HUNTER_FAST_V1",
+    modelVersion: "GH_FAST_EVENT_V1",
+    entryTimestampMs: t.entryTs,
+    exitTimestampMs: t.exitTs,
+    durationSeconds: Math.max(0, Math.round(t.durationMs / 1000)),
+    side: t.side === "SELL" ? "SELL" : "BUY",
+    entryPrice: t.entryPrice,
+    exitPrice: t.exitPrice,
+    entrySpread: 0,
+    netMove: t.netMove,
+    mfe: t.mfe,
+    mae: t.mae,
+    entryProbs: {},
+    entryReason: t.setup,
+    exitReason: t.exitReason,
+    result:
+      t.result === "WIN" || t.result === "LOSS" || t.result === "BREAKEVEN"
+        ? t.result
+        : "BREAKEVEN"
+  }));
+}
+
 type GhStatus = {
   huntState?: string;
   forecast?: GhForecast | null;
@@ -204,6 +301,12 @@ function dublinToday(): string {
 
 export function MicroEdgePage() {
   const { api } = useAuth();
+  const fastHealthUrl = (
+    import.meta.env.VITE_GOLD_HUNTER_FAST_HEALTH_URL as string | undefined
+  )?.trim();
+  const isFastPreview =
+    (import.meta.env.VITE_GOLD_HUNTER_FAST_PREVIEW as string | undefined) ===
+    "true";
   const [gh, setGh] = useState<GhStatus | null>(null);
   const [daily, setDaily] = useState<DailySummary | null>(null);
   const [explanations, setExplanations] = useState<string[]>([]);
@@ -219,49 +322,155 @@ export function MicroEdgePage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [oauthOk, setOauthOk] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [soak, setSoak] = useState<FastSoakHealth | null>(null);
+
+  useEffect(() => {
+    if (!isFastPreview) return;
+    let meta = document.querySelector('meta[name="robots"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "robots");
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content", "noindex, nofollow");
+    document.title = "GOLD_HUNTER FAST — Live-Shadow Preview (noindex)";
+  }, [isFastPreview]);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [status, dailyRes, tradesRes, modelRes, microStatus] = await Promise.all([
-        api.goldHunterStatus() as Promise<GhStatus>,
-        api.goldHunterDaily(date) as Promise<{
-          summary: DailySummary;
-          explanations?: string[];
-          availableDates?: string[];
-          equityCurve?: Array<{ t: number; equity: number }>;
-        }>,
-        api.goldHunterTrades(date) as Promise<{ trades: ShadowTrade[] }>,
-        api.goldHunterModel() as Promise<Record<string, unknown>>,
-        api.microEdgeStatus() as Promise<{
-          authorizationStatus?: string;
-          oauth?: { configured?: boolean; status?: string };
-        }>
-      ]);
-      setGh(status);
-      setDaily(dailyRes.summary);
-      setExplanations(dailyRes.explanations ?? []);
-      setAvailableDates(dailyRes.availableDates ?? []);
-      setEquityCurve(dailyRes.equityCurve ?? []);
-      setTrades(tradesRes.trades ?? []);
+      const soakPromise = fastHealthUrl
+        ? fetch(fastHealthUrl, { cache: "no-store" })
+            .then(async (r) => (await r.json()) as FastSoakHealth)
+            .catch(() => null)
+        : Promise.resolve(null);
+
+      const soft = async <T,>(p: Promise<T>): Promise<T | null> => {
+        try {
+          return await p;
+        } catch {
+          return null;
+        }
+      };
+
+      const [status, dailyRes, tradesRes, modelRes, microStatus, soakHealth] =
+        await Promise.all([
+          soft(api.goldHunterStatus() as Promise<GhStatus>),
+          soft(
+            api.goldHunterDaily(date) as Promise<{
+              summary: DailySummary;
+              explanations?: string[];
+              availableDates?: string[];
+              equityCurve?: Array<{ t: number; equity: number }>;
+            }>
+          ),
+          soft(api.goldHunterTrades(date) as Promise<{ trades: ShadowTrade[] }>),
+          soft(api.goldHunterModel() as Promise<Record<string, unknown>>),
+          soft(
+            api.microEdgeStatus() as Promise<{
+              authorizationStatus?: string;
+              oauth?: { configured?: boolean; status?: string };
+            }>
+          ),
+          soakPromise
+        ]);
+
+      if (!soakHealth && !status) {
+        throw new Error("Failed to load GOLD_HUNTER status");
+      }
+
+      if (soakHealth) {
+        setSoak(soakHealth);
+        const ui = soakHealth.ui ?? null;
+        const summary = soakHealth.todaySummary;
+        setGh({
+          ...(status ?? {}),
+          huntState: ui?.state ?? status?.huntState,
+          researchModel: status?.researchModel ?? true,
+          fast: {
+            ...(status?.fast ?? {}),
+            ...(ui ?? {}),
+            soakLabel: soakHealth.soakLabel ?? ui?.soakLabel ?? null,
+            engineVersion: soakHealth.engineVersion ?? ui?.engineVersion ?? null,
+            configSha256: soakHealth.configSha256 ?? ui?.configSha256 ?? null,
+            tuningAllowed: false,
+            completedShadowTrades: soakHealth.completedShadowTrades,
+            todayNetMove: summary?.netMove,
+            wins: summary?.wins,
+            losses: summary?.losses,
+            profitFactor: summary?.profitFactor ?? null,
+            setupDetections: soakHealth.setupDetections,
+            brokerOrders: 0,
+            shadowOnly: true,
+            realMarketData: true,
+            pepperstoneDemo: true,
+            open: soakHealth.openShadowTrade ?? ui?.open ?? null
+          },
+          openPnl: soakHealth.openShadowTrade?.openPnl ?? status?.openPnl,
+          banner: "SHADOW ONLY — NO BROKER ORDERS — LIVE-SHADOW PREVIEW"
+        });
+        if (summary) {
+          setDaily({
+            date: dublinToday(),
+            strategyVersion: "GOLD_HUNTER_FAST_V1",
+            modelVersion: soakHealth.engineVersion ?? "GH_FAST_EVENT_V1",
+            netPnl: summary.netMove,
+            returnPct: 0,
+            tradeCount: summary.trades,
+            wins: summary.wins,
+            losses: summary.losses,
+            winRate: summary.winRate ?? 0,
+            profitFactor: summary.profitFactor ?? 0,
+            maxDrawdown: summary.maxDrawdown,
+            buyPnl: 0,
+            sellPnl: 0
+          });
+        } else if (dailyRes?.summary) {
+          setDaily(dailyRes.summary);
+        }
+        const mapped = mapSoakTrades(soakHealth.recentTrades ?? []);
+        setTrades(mapped.length ? mapped : tradesRes?.trades ?? []);
+        setEquityCurve(
+          mapped
+            .slice()
+            .reverse()
+            .reduce<Array<{ t: number; equity: number }>>((acc, t) => {
+              const prev = acc.length ? acc[acc.length - 1]!.equity : 0;
+              acc.push({ t: t.exitTimestampMs, equity: prev + t.netMove });
+              return acc;
+            }, [])
+        );
+      } else if (status) {
+        setSoak(null);
+        setGh(status);
+        setDaily(dailyRes?.summary ?? null);
+        setTrades(tradesRes?.trades ?? []);
+        setEquityCurve(dailyRes?.equityCurve ?? []);
+      }
+
+      setExplanations(dailyRes?.explanations ?? []);
+      setAvailableDates(dailyRes?.availableDates ?? []);
       setModelInfo(modelRes);
       setOauthOk(
-        microStatus.authorizationStatus === "READ_ONLY_AUTHORIZED" ||
-          Boolean(microStatus.oauth?.configured && microStatus.oauth?.status === "CONNECTED")
+        microStatus?.authorizationStatus === "READ_ONLY_AUTHORIZED" ||
+          Boolean(
+            microStatus?.oauth?.configured &&
+              microStatus?.oauth?.status === "CONNECTED"
+          )
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load GOLD_HUNTER");
     } finally {
       setLoading(false);
     }
-  }, [api, date]);
+  }, [api, date, fastHealthUrl]);
 
   useEffect(() => {
     void reload();
-    const id = window.setInterval(() => void reload(), 5000);
+    const id = window.setInterval(() => void reload(), fastHealthUrl ? 2000 : 5000);
     return () => window.clearInterval(id);
-  }, [reload]);
+  }, [reload, fastHealthUrl]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -273,6 +482,7 @@ export function MicroEdgePage() {
   const huntState = fast?.state ?? gh?.huntState ?? "HUNTING";
   const balance = gh?.pepperstoneDemoBalance ?? gh?.accountBalance;
   const researchModel = Boolean(gh?.researchModel);
+  const expectancy = soak?.todaySummary?.expectancy ?? null;
 
   const curvePath = useMemo(() => {
     if (!equityCurve.length) return "";
@@ -368,37 +578,119 @@ export function MicroEdgePage() {
         <div className="gm-gh-soak-title">LIVE-SHADOW OBSERVATION</div>
         <div className="gm-gh-soak-grid">
           <span>Mode SHADOW ONLY</span>
-          <span>Broker orders {fast?.brokerOrders ?? 0}</span>
-          <span>Engine {fast?.engineVersion ?? "—"}</span>
+          <span>Broker orders {fast?.brokerOrders ?? soak?.brokerOrders ?? 0}</span>
+          <span>Engine {fast?.engineVersion ?? soak?.engineVersion ?? "—"}</span>
           <span>
             Config{" "}
-            {fast?.configSha256
-              ? `${fast.configSha256.slice(0, 12)}…`
+            {(fast?.configSha256 ?? soak?.configSha256)
+              ? `${(fast?.configSha256 ?? soak?.configSha256)!.slice(0, 12)}…`
               : "—"}
           </span>
-          <span>Soak {fast?.soakLabel ?? "standby"}</span>
-          <span>Tuning {fast?.tuningAllowed === false ? "FROZEN" : "—"}</span>
-          <span>Shadow trades {fast?.completedShadowTrades ?? 0}</span>
-          <span>Net move {signed(fast?.todayNetMove)}</span>
+          <span>Soak {fast?.soakLabel ?? soak?.soakLabel ?? "standby"}</span>
+          <span>Tuning FROZEN</span>
           <span>
-            W/L {(fast?.wins ?? 0)}/{(fast?.losses ?? 0)}
+            Shadow trades {fast?.completedShadowTrades ?? soak?.completedShadowTrades ?? 0}
           </span>
-          <span>PF {num(fast?.profitFactor, 2)}</span>
+          <span>Net move {signed(fast?.todayNetMove ?? soak?.todaySummary?.netMove)}</span>
           <span>
-            Setup A {fast?.setupDetections?.A_MOMENTUM_IGNITION ?? 0}
+            W/L {(fast?.wins ?? soak?.todaySummary?.wins ?? 0)}/
+            {(fast?.losses ?? soak?.todaySummary?.losses ?? 0)}
+          </span>
+          <span>PF {num(fast?.profitFactor ?? soak?.todaySummary?.profitFactor, 2)}</span>
+          <span>Expectancy {signed(expectancy)}</span>
+          <span>
+            Setup A {fast?.setupDetections?.A_MOMENTUM_IGNITION ?? soak?.setupDetections?.A_MOMENTUM_IGNITION ?? 0}
           </span>
           <span>
-            Setup B {fast?.setupDetections?.B_FAST_BREAKOUT ?? 0}
+            Setup B {fast?.setupDetections?.B_FAST_BREAKOUT ?? soak?.setupDetections?.B_FAST_BREAKOUT ?? 0}
           </span>
           <span>
-            Setup C {fast?.setupDetections?.C_PULLBACK_REACCEL ?? 0}
+            Setup C {fast?.setupDetections?.C_PULLBACK_REACCEL ?? soak?.setupDetections?.C_PULLBACK_REACCEL ?? 0}
           </span>
         </div>
         <p className="gm-muted gm-gh-balance-note">
-          Shadow executable movement is research observation only — not Pepperstone
-          account P/L. No Demo or Live broker orders are placed by FAST.
+          TODAY SHADOW RESULT ≠ broker account P/L. FAST places zero Demo/Live orders.
         </p>
       </section>
+
+      {soak ? (
+        <section className="gm-gh-summary" data-testid="gh-fast-health-activity">
+          <div className="gm-gh-stat">
+            <span className="gm-label">Spot</span>
+            <strong>{soak.spotSubscribed ? "SUBSCRIBED" : "NO"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Depth</span>
+            <strong>{soak.depthSubscribed ? "SUBSCRIBED" : "NO"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Spot age</span>
+            <strong>
+              {soak.fast?.spotAgeMs != null ? `${Math.round(soak.fast.spotAgeMs)}ms` : "—"}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Depth age</span>
+            <strong>
+              {soak.fast?.depthAgeMs != null ? `${Math.round(soak.fast.depthAgeMs)}ms` : "—"}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Depth book</span>
+            <strong>{soak.fast?.depthBookAvailable ? "OK" : "NO"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Queue / dropped</span>
+            <strong>
+              {soak.fast?.queueDepth ?? 0} / {soak.fast?.eventsDropped ?? 0}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Decision p50/p95/p99</span>
+            <strong>
+              {num(soak.fast?.eventToDecision?.p50, 1)}/
+              {num(soak.fast?.eventToDecision?.p95, 1)}/
+              {num(soak.fast?.eventToDecision?.p99, 1)}
+            </strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">GCS</span>
+            <strong>{soak.fast?.durableMode ?? "—"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Replay</span>
+            <strong>{soak.replayParity?.code ?? "—"}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Evt/s</span>
+            <strong>{num(soak.activity?.eventsPerSec, 1)}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Dec/s</span>
+            <strong>{num(soak.activity?.decisionsPerSec, 1)}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Signals/h</span>
+            <strong>{num(soak.activity?.signalsPerHour, 1)}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Entries/h</span>
+            <strong>{num(soak.activity?.entriesPerHour, 1)}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Trades/h</span>
+            <strong>{num(soak.activity?.tradesPerHour, 1)}</strong>
+          </div>
+          <div className="gm-gh-stat">
+            <span className="gm-label">Median entry gap</span>
+            <strong>
+              {soak.activity?.medianEntryIntervalSec != null
+                ? `${num(soak.activity.medianEntryIntervalSec, 1)}s`
+                : "—"}
+            </strong>
+          </div>
+        </section>
+      ) : null}
 
       {/* Top daily summary */}
       <section className="gm-gh-summary" data-testid="gh-daily-summary">
@@ -614,11 +906,12 @@ export function MicroEdgePage() {
             <tr>
               <th>Time</th>
               <th>Side</th>
+              <th>Setup</th>
               <th>Entry</th>
               <th>Exit</th>
               <th>Duration</th>
               <th>Result</th>
-              <th>P/L</th>
+              <th>Net move</th>
               <th>Reason</th>
             </tr>
           </thead>
@@ -627,6 +920,7 @@ export function MicroEdgePage() {
               <tr key={t.tradeId}>
                 <td>{fmtTime(t.entryTimestampMs)}</td>
                 <td>{t.side}</td>
+                <td>{t.entryReason}</td>
                 <td>{num(t.entryPrice, 2)}</td>
                 <td>{num(t.exitPrice, 2)}</td>
                 <td>{t.durationSeconds}s</td>
