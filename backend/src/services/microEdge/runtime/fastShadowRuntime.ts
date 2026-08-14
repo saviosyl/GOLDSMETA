@@ -156,6 +156,9 @@ export class GoldHunterFastShadowRuntime {
   private invalidBookTicks = 0;
   private resyncInFlight = false;
   private qualificationStarted = false;
+  /** Ops holdoff after market-data reset — avoid null-age reconnect storms. */
+  private resyncHoldoffUntilMs = 0;
+  private lastReconnectAttemptMs = 0;
 
   constructor(private readonly opts: FastShadowRuntimeOptions = {}) {
     // Always isolate FAST from the shared Micro collector Firestore write path.
@@ -255,6 +258,11 @@ export class GoldHunterFastShadowRuntime {
 
   private scheduleReconnect(): void {
     if (this.stopping || !this.running || this.reconnectTimer) return;
+    const now = this.nowMs();
+    // Minimum spacing between reconnect attempts (ops only).
+    if (now - this.lastReconnectAttemptMs < 30_000 && this.lastReconnectAttemptMs > 0) {
+      return;
+    }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.reconnect();
@@ -264,6 +272,7 @@ export class GoldHunterFastShadowRuntime {
   private async reconnect(): Promise<void> {
     if (this.resyncInFlight) return;
     this.resyncInFlight = true;
+    this.lastReconnectAttemptMs = this.nowMs();
     try {
       this.bridge?.detach();
       this.bridge?.markStale();
@@ -272,11 +281,18 @@ export class GoldHunterFastShadowRuntime {
       if (this.bridge) {
         await this.bridge.resetMarketDataForResync("transport_reconnect");
       }
+      // Hold off stale/invalid watchdogs while the book rebuilds.
+      this.resyncHoldoffUntilMs = this.nowMs() + 45_000;
       if (!this.session) {
         await this.connectOnce();
         return;
       }
-      const ok = await this.session.boundedReconnect();
+      const ok = await Promise.race([
+        this.session.boundedReconnect(),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 40_000)
+        )
+      ]);
       if (ok) {
         if (!this.bridge) {
           this.bridge = new GoldHunterFastLiveBridge({
@@ -313,8 +329,12 @@ export class GoldHunterFastShadowRuntime {
   }
 
   private async checkStaleAndReconnect(): Promise<void> {
-    if (this.stopping || !this.running) return;
+    if (this.stopping || !this.running || this.resyncInFlight) return;
+    if (this.nowMs() < this.resyncHoldoffUntilMs) return;
     const fast = this.bridge?.health() ?? null;
+    // During BOOK_REBUILDING, null ages are expected until the first events
+    // after reset — do not treat that as an immediate reconnect storm.
+    if (fast?.warmingUp) return;
     const spotAge = fast?.spotAgeMs;
     const depthAge = fast?.depthAgeMs;
     const stale =
@@ -339,8 +359,14 @@ export class GoldHunterFastShadowRuntime {
    */
   private async checkInvalidBookAndResync(): Promise<void> {
     if (this.stopping || !this.running || this.resyncInFlight) return;
+    if (this.nowMs() < this.resyncHoldoffUntilMs) return;
     const fast = this.bridge?.health() ?? null;
     if (!fast?.fastAttached) return;
+    // Never resync-storm during intentional warm-up / book rebuild.
+    if (fast.warmingUp) {
+      this.invalidBookTicks = 0;
+      return;
+    }
     const depthFresh =
       fast.depthAgeMs != null && fast.depthAgeMs <= this.staleReconnectMs;
     const invalid =

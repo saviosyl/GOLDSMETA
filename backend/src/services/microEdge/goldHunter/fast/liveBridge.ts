@@ -278,8 +278,8 @@ export class GoldHunterFastLiveBridge {
       reason,
       nowMs: Date.now()
     });
-    this.lastSpotAt = null;
-    this.lastDepthAt = null;
+    // Keep last event timestamps during rebuild so ops watchdogs do not treat
+    // a deliberate clear as an immediate "null age" reconnect storm.
     this.lastAction = null;
     this.lastDecision = null;
     this.staleMarked = false;
