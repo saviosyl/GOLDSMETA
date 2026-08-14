@@ -1083,7 +1083,8 @@ export async function processDecisionForQualification(args: {
         const duplicate = isDuplicateFastWaitEval(recent, {
           decisionId: d.decisionId,
           reasonCode: waitReason,
-          candleKey: scanCandleKey
+          candleKey: scanCandleKey,
+          m1CompletedAtMs: fastInput?.m1CompletedAtMs ?? null
         });
         if (!duplicate) {
           await appendEvaluation({

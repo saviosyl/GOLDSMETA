@@ -214,7 +214,9 @@ export function formatEvaluationActivityMessage(row: {
 /** Firestore rejects `undefined` fields — strip them so FAST wait rows persist. */
 export function omitUndefinedDeep(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item: unknown) => omitUndefinedDeep(item));
+    return value
+      .filter((item: unknown) => item !== undefined)
+      .map((item: unknown) => omitUndefinedDeep(item));
   }
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
@@ -231,14 +233,24 @@ export function fastWaitDedupeKey(args: {
   decisionId?: string | null;
   reasonCode: string;
   candleKey?: string | null;
+  m1CompletedAtMs?: number | null;
 }): string {
-  return `${args.decisionId ?? ""}|${args.reasonCode}|${args.candleKey ?? ""}`;
+  const m1 =
+    args.m1CompletedAtMs != null && Number.isFinite(args.m1CompletedAtMs)
+      ? String(args.m1CompletedAtMs)
+      : "";
+  return `${args.decisionId ?? ""}|${args.reasonCode}|${args.candleKey ?? ""}|${m1}`;
 }
 
-/** Same decision + same completed candle + same WAIT reason → do not write again. */
+/** Same decision + same completed M1 + same WAIT reason → do not write again. */
 export function isDuplicateFastWaitEval(
   recent: Array<Pick<EvaluationRecord, "decisionId" | "reasonCode" | "fastTelemetry">>,
-  next: { decisionId?: string | null; reasonCode: string; candleKey?: string | null }
+  next: {
+    decisionId?: string | null;
+    reasonCode: string;
+    candleKey?: string | null;
+    m1CompletedAtMs?: number | null;
+  }
 ): boolean {
   const key = fastWaitDedupeKey(next);
   return recent.some(
@@ -247,7 +259,8 @@ export function isDuplicateFastWaitEval(
       fastWaitDedupeKey({
         decisionId: row.decisionId,
         reasonCode: row.reasonCode,
-        candleKey: row.fastTelemetry.candleKey ?? null
+        candleKey: row.fastTelemetry.candleKey ?? null,
+        m1CompletedAtMs: row.fastTelemetry.m1CompletedAtMs ?? null
       }) === key
   );
 }

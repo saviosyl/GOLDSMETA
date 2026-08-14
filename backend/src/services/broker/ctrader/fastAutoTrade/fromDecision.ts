@@ -39,6 +39,26 @@ function optionalNumber(decision: DecisionRecord, keys: string[]): number | null
   return null;
 }
 
+/**
+ * Nearby resistance/support only when independently present.
+ * Do not copy VAH/VAL — those stay separate fields. Missing stays null.
+ */
+function independentNearbyLevel(
+  decision: DecisionRecord,
+  ms: DecisionRecord["marketStructure"],
+  keys: string[]
+): number | null {
+  const fromDecision = optionalNumber(decision, keys);
+  if (fromDecision != null) return fromDecision;
+  if (!ms) return null;
+  const rec = ms as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const v = num(rec[key]);
+    if (v != null) return v;
+  }
+  return null;
+}
+
 export function mapDecisionToFastInput(args: {
   decision: DecisionRecord;
   nowMs?: number;
@@ -101,8 +121,8 @@ export function mapDecisionToFastInput(args: {
     poc: ms?.poc ?? null,
     vah: ms?.vah ?? null,
     val: ms?.val ?? null,
-    nearbyResistance: ms?.vah ?? optionalNumber(d, ["nearbyResistance"]),
-    nearbySupport: ms?.val ?? optionalNumber(d, ["nearbySupport"]),
+    nearbyResistance: independentNearbyLevel(d, ms, ["nearbyResistance"]),
+    nearbySupport: independentNearbyLevel(d, ms, ["nearbySupport"]),
     marketRegimeHint: d.marketRegime ?? null,
     setupScore: typeof d.setupScore === "number" ? d.setupScore : null,
     v3Decision: v3 === "BUY" || v3 === "SELL" ? v3 : "WAIT",

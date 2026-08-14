@@ -39,24 +39,57 @@ describe("omitUndefinedDeep", () => {
     });
     expect(JSON.stringify(sanitized).includes("undefined")).toBe(false);
   });
+
+  it("removes undefined array entries including nested arrays", () => {
+    const sanitized = omitUndefinedDeep({
+      passed: [1, undefined, { a: undefined, b: 2 }, [undefined, 3, { c: undefined }]]
+    });
+    expect(sanitized).toEqual({
+      passed: [1, { b: 2 }, [3, {}]]
+    });
+    expect(JSON.stringify(sanitized).includes("undefined")).toBe(false);
+  });
 });
 
 describe("FAST wait dedupe", () => {
-  it("treats same decision + candle + wait reason as a duplicate", () => {
+  it("treats same decision + completed M1 + wait reason as a duplicate", () => {
     const recent = [
       {
         decisionId: "dec_1",
         reasonCode: "WAIT_EXTENDED",
-        fastTelemetry: { candleKey: "1:3388:3391:3388:3391" }
+        fastTelemetry: {
+          candleKey: "1:3388:3391:3388:3391",
+          m1CompletedAtMs: 1_723_636_740_000
+        }
       }
     ];
     expect(
       isDuplicateFastWaitEval(recent, {
         decisionId: "dec_1",
         reasonCode: "WAIT_EXTENDED",
-        candleKey: "1:3388:3391:3388:3391"
+        candleKey: "1:3388:3391:3388:3391",
+        m1CompletedAtMs: 1_723_636_740_000
       })
     ).toBe(true);
+  });
+
+  it("allows a new completed M1 even when OHLC values match", () => {
+    const ohlcKey = "1:3388:3391:3388:3391";
+    const recent = [
+      {
+        decisionId: "dec_1",
+        reasonCode: "WAIT_EXTENDED",
+        fastTelemetry: { candleKey: ohlcKey, m1CompletedAtMs: 1_723_636_740_000 }
+      }
+    ];
+    expect(
+      isDuplicateFastWaitEval(recent, {
+        decisionId: "dec_1",
+        reasonCode: "WAIT_EXTENDED",
+        candleKey: ohlcKey,
+        m1CompletedAtMs: 1_723_636_800_000
+      })
+    ).toBe(false);
   });
 
   it("allows a new candle or a new wait reason", () => {
@@ -64,26 +97,33 @@ describe("FAST wait dedupe", () => {
       {
         decisionId: "dec_1",
         reasonCode: "WAIT_EXTENDED",
-        fastTelemetry: { candleKey: "1:a" }
+        fastTelemetry: { candleKey: "1:a", m1CompletedAtMs: 100 }
       }
     ];
     expect(
       isDuplicateFastWaitEval(recent, {
         decisionId: "dec_1",
         reasonCode: "WAIT_EXTENDED",
-        candleKey: "1:b"
+        candleKey: "1:b",
+        m1CompletedAtMs: 100
       })
     ).toBe(false);
     expect(
       isDuplicateFastWaitEval(recent, {
         decisionId: "dec_1",
         reasonCode: "WAIT_NO_TRADE_SPACE",
-        candleKey: "1:a"
+        candleKey: "1:a",
+        m1CompletedAtMs: 100
       })
     ).toBe(false);
-    expect(fastWaitDedupeKey({ decisionId: "dec_1", reasonCode: "WAIT_EXTENDED", candleKey: "1:a" })).toBe(
-      "dec_1|WAIT_EXTENDED|1:a"
-    );
+    expect(
+      fastWaitDedupeKey({
+        decisionId: "dec_1",
+        reasonCode: "WAIT_EXTENDED",
+        candleKey: "1:a",
+        m1CompletedAtMs: 100
+      })
+    ).toBe("dec_1|WAIT_EXTENDED|1:a|100");
   });
 
   it("does not treat non-FAST rows as duplicates", () => {

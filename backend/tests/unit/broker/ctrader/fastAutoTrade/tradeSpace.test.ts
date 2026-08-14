@@ -268,4 +268,70 @@ describe("FAST_AUTOTRADE_V1 forward trade-space", () => {
     expect(d.geometry).not.toBeNull();
     expect(d.geometry!.takeProfit).toBeGreaterThan(d.geometry!.entry);
   });
+
+  it("BUY breakout above VAH does not use a distant VAL for SL when broken VAH is the relevant structure", () => {
+    const input = baseInput({
+      nearbySupport: 3384.0,
+      val: 3384.0,
+      vah: 3390.0,
+      nearbyResistance: null
+    });
+    const d = evaluateFastAutoTrade(input);
+    expect(d.action).toBe("BUY");
+    expect(d.setupType).toBe("BREAKOUT");
+    expect(d.geometry).not.toBeNull();
+    expect(d.geometry!.stopLoss).toBeLessThan(d.geometry!.entry);
+    expect(d.geometry!.stopLoss).toBeCloseTo(3390.0, 2);
+    expect(d.geometry!.stopLoss).toBeGreaterThan(input.val!);
+    expect(d.geometry!.entry - d.geometry!.stopLoss).toBeGreaterThanOrEqual(
+      input.atr! * 0.35 - 1e-9
+    );
+  });
+
+  it("SELL breakout below VAL does not use a distant VAH for SL when broken VAL is the relevant structure", () => {
+    const input = baseInput({
+      price: 3378.8,
+      bid: 3378.75,
+      ask: 3378.85,
+      ohlcv: {
+        open: 3381.6,
+        high: 3382.0,
+        low: 3378.4,
+        close: 3378.8,
+        volume: 1300
+      },
+      priorOhlcv: {
+        open: 3382.2,
+        high: 3383.0,
+        low: 3381.4,
+        close: 3381.7,
+        volume: 800
+      },
+      trendDirection: "BEARISH",
+      htfBias: "BEARISH",
+      marketRegimeHint: "TRENDING_DOWN",
+      vwap: 3379.7,
+      ema21: 3379.9,
+      ema50: 3380.6,
+      poc: 3379.6,
+      vah: 3386.0,
+      val: 3380.0,
+      nearbyResistance: 3386.0,
+      nearbySupport: null,
+      v3Decision: "SELL",
+      bullishEvidence: [],
+      bearishEvidence: ["breakout", "impulse"],
+      confirmationDirection: "BEARISH"
+    });
+    const d = evaluateFastAutoTrade(input);
+    expect(d.action).toBe("SELL");
+    expect(d.setupType).toBe("BREAKOUT");
+    expect(d.geometry).not.toBeNull();
+    expect(d.geometry!.stopLoss).toBeGreaterThan(d.geometry!.entry);
+    expect(d.geometry!.stopLoss).toBeCloseTo(3380.0, 2);
+    expect(d.geometry!.stopLoss).toBeLessThan(input.vah!);
+    expect(d.geometry!.stopLoss - d.geometry!.entry).toBeGreaterThanOrEqual(
+      input.atr! * 0.35 - 1e-9
+    );
+  });
 });

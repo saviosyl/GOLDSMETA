@@ -545,6 +545,66 @@ export function brokenStructureLevel(
   return Math.min(...behind);
 }
 
+function isValidInvalidationBehind(
+  level: number | null | undefined,
+  action: "BUY" | "SELL",
+  entry: number
+): level is number {
+  if (!present(level)) return false;
+  return action === "BUY" ? level < entry : level > entry;
+}
+
+function nearestInvalidationBehind(
+  action: "BUY" | "SELL",
+  entry: number,
+  levels: Array<number | null | undefined>
+): number | null {
+  const valid = levels.filter((level): level is number =>
+    isValidInvalidationBehind(level, action, entry)
+  );
+  if (!valid.length) return null;
+  return action === "BUY" ? Math.max(...valid) : Math.min(...valid);
+}
+
+function firstInvalidationBehind(
+  action: "BUY" | "SELL",
+  entry: number,
+  levels: Array<number | null | undefined>
+): number | null {
+  for (const level of levels) {
+    if (isValidInvalidationBehind(level, action, entry)) return level;
+  }
+  return null;
+}
+
+/**
+ * Structural invalidation behind entry. Never uses a level on the wrong side.
+ * Breakout / retest: nearest valid structure wins, so a just-broken VAH /
+ * resistance (BUY) or VAL / support (SELL) is not displaced by a distant VA.
+ */
+function selectStructuralStop(
+  input: FastAutoTradeInput,
+  action: "BUY" | "SELL",
+  entry: number,
+  setupType: FastSetupType | null | undefined
+): number | null {
+  const broken = brokenStructureLevel(input, action);
+  const m1Extreme = action === "BUY" ? input.ohlcv?.low ?? null : input.ohlcv?.high ?? null;
+  const nearby = action === "BUY" ? input.nearbySupport : input.nearbyResistance;
+  const valueArea = action === "BUY" ? input.val : input.vah;
+  const breakoutSetup = setupType === "BREAKOUT" || setupType === "BREAKOUT_RETEST";
+  if (breakoutSetup) {
+    return nearestInvalidationBehind(action, entry, [broken, nearby, valueArea, m1Extreme]);
+  }
+  return firstInvalidationBehind(
+    action,
+    entry,
+    action === "BUY"
+      ? [input.nearbySupport, input.val, broken, m1Extreme]
+      : [input.nearbyResistance, input.vah, broken, m1Extreme]
+  );
+}
+
 export function tradeSpaceOk(
   input: FastAutoTradeInput,
   action: "BUY" | "SELL",
@@ -562,22 +622,12 @@ export function buildFastGeometry(
   input: FastAutoTradeInput,
   action: "BUY" | "SELL",
   regime: FastRegime,
-  config: FastAutoTradeConfig = DEFAULT_FAST_AUTOTRADE_CONFIG
+  config: FastAutoTradeConfig = DEFAULT_FAST_AUTOTRADE_CONFIG,
+  setupType: FastSetupType | null = null
 ): FastGeometry | null {
   const atr = estimateAtr(input, config);
   const entry = input.price;
-  const swingSl =
-    action === "BUY"
-      ? input.nearbySupport ??
-        input.val ??
-        brokenStructureLevel(input, "BUY") ??
-        input.ohlcv?.low ??
-        null
-      : input.nearbyResistance ??
-        input.vah ??
-        brokenStructureLevel(input, "SELL") ??
-        input.ohlcv?.high ??
-        null;
+  const swingSl = selectStructuralStop(input, action, entry, setupType);
   let sl: number;
   if (present(swingSl)) {
     sl =
@@ -586,6 +636,11 @@ export function buildFastGeometry(
         : Math.max(swingSl, entry + atr * 0.35);
   } else {
     sl = action === "BUY" ? entry - atr * config.atrStopMultiplier : entry + atr * config.atrStopMultiplier;
+  }
+  if (action === "BUY" && !(sl < entry)) {
+    sl = entry - atr * config.atrStopMultiplier;
+  } else if (action === "SELL" && !(sl > entry)) {
+    sl = entry + atr * config.atrStopMultiplier;
   }
   const risk = Math.abs(entry - sl);
   if (!(risk > 0)) return null;
@@ -830,7 +885,7 @@ export function evaluateFastAutoTrade(
     return fail(intended, "WAIT_FLAP_GUARD", null);
   }
 
-  const geometry = buildFastGeometry(input, intended, regime, config);
+  const geometry = buildFastGeometry(input, intended, regime, config, setup.setupType);
   if (!geometry) return fail(intended, "WAIT_NO_TRADE_SPACE", null);
 
   const signalId = `fast_${intended}_${setup.setupType}_${identity.structureAnchor}_${identity.triggerCandle}`.replace(
