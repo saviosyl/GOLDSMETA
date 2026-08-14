@@ -342,7 +342,6 @@ export class GoldHunterFastResearchCaptureRuntime {
   ): ResearchConnectionState {
     if (st.liveConnected) return "CONNECTED";
     if (st.reconnectAttempts > 0 && st.lastDisconnectedAt) return "RECONNECTING";
-    if (st.connectionState === "RECONNECTING") return "RECONNECTING";
     return "DISCONNECTED";
   }
 
