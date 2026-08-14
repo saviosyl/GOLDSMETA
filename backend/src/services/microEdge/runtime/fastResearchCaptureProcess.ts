@@ -731,28 +731,15 @@ export class GoldHunterFastResearchCaptureProcess {
         const oldSession = this.session;
         this.session = null;
         if (oldSession) {
-          try {
-            await this.awaitPhase(
-              "DISCONNECTING_OLD_SESSION",
-              oldSession.disconnect(),
-              attemptId
-            );
-          } catch (e) {
-            // Hung disconnect: abandon old session. Continue only if budget remains.
-            if (
-              e instanceof ResearchReconnectTimeoutError &&
-              this.attemptDeadlineAtMs != null &&
-              remainingBudgetMs(this.attemptDeadlineAtMs, this.nowMs) > 0
-            ) {
-              microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
-                code: "RESEARCH_OLD_SESSION_DISCONNECT_ABANDONED",
-                phase: e.phase,
-                reconnectAttemptId: attemptId
-              });
-            } else {
-              throw e;
-            }
-          }
+          // Bound old disconnect under the overall attempt deadline. On timeout
+          // the attempt fails (TIMED_OUT @ DISCONNECTING_OLD_SESSION) and the
+          // outer finally schedules a bounded retry — do not silently continue
+          // the same attempt with a near-zero remaining budget.
+          await this.awaitPhase(
+            "DISCONNECTING_OLD_SESSION",
+            oldSession.disconnect(),
+            attemptId
+          );
         }
       }
 
