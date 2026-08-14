@@ -32,5 +32,5 @@
   "executionAdapter": "NONE",
   "campaignDayEligibleForLaterValidation": true,
   "validatedIndependentDays": 0,
-  "note": "campaignDayEligibleForLaterValidation means technically clean for later analysis — not profitable and not independently validated."
+  "note": "campaignDayEligibleForLaterValidation is a technical prefilter only — not profitable, not validated, not OOS-qualified. Requires Spot>0, Depth>0, heartbeats>0, zero drops, CLEAN, GCS."
 }

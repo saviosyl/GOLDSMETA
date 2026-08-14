@@ -321,13 +321,30 @@ describe("research feature pipeline observation", () => {
 
 describe("research ingest bridge + durable sink", () => {
   let dir: string;
+  let prevResearchGcs: string | undefined;
+  let prevFastGcs: string | undefined;
 
   beforeEach(async () => {
+    // Unit tests must not inherit a live deploy GCS bucket from the agent env.
+    prevResearchGcs = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    prevFastGcs = process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
     dir = await mkdtemp(join(tmpdir(), "gh-research-"));
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+    if (prevResearchGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prevResearchGcs;
+    }
+    if (prevFastGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_GCS_BUCKET = prevFastGcs;
+    }
   });
 
   it("round-trips Spot/Depth gzip chunks and keeps A/B/C telemetry", async () => {
@@ -335,7 +352,8 @@ describe("research ingest bridge + durable sink", () => {
       localDir: dir,
       chunkRows: 10,
       runId: "test_research_roundtrip",
-      datasetId: "ds_test"
+      datasetId: "ds_test",
+      gcsBucket: null
     });
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
@@ -448,7 +466,8 @@ describe("research ingest bridge + durable sink", () => {
       localDir: dir,
       chunkRows: 100,
       runId: "test_disc_health",
-      scopeVerified: true
+      scopeVerified: true,
+      gcsBucket: null
     });
     // default DISCONNECTED — process up, capture not healthy
     const h0 = bridge.health();
@@ -474,7 +493,8 @@ describe("research ingest bridge + durable sink", () => {
       chunkRows: 100,
       runId: "test_stale",
       freshnessLimitMs: 500,
-      scopeVerified: true
+      scopeVerified: true,
+      gcsBucket: null
     });
     bridge.setConnectionState("CONNECTED");
     bridge.setSubscriptionFlags(true, true);
@@ -556,7 +576,8 @@ describe("research ingest bridge + durable sink", () => {
       captureStart: new Date().toISOString(),
       localDir: dir,
       chunkRows: 1,
-      maxQueue: 1
+      maxQueue: 1,
+      gcsBucket: null
     });
     // Flood synchronously so pending fills before drain finishes writing.
     for (let i = 0; i < 40; i++) {
@@ -1024,13 +1045,29 @@ describe("Phase 2B research process startup gate", () => {
 
 describe("UTC date rollover + captureDayIndex", () => {
   let dir: string;
+  let prevResearchGcs: string | undefined;
+  let prevFastGcs: string | undefined;
 
   beforeEach(async () => {
+    prevResearchGcs = process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    prevFastGcs = process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
     dir = await mkdtemp(join(tmpdir(), "gh-rollover-"));
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+    if (prevResearchGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET = prevResearchGcs;
+    }
+    if (prevFastGcs === undefined) {
+      delete process.env.GOLD_HUNTER_FAST_GCS_BUCKET;
+    } else {
+      process.env.GOLD_HUNTER_FAST_GCS_BUCKET = prevFastGcs;
+    }
   });
 
   it("captureDayIndexFromDates advances by calendar day", async () => {
@@ -1046,6 +1083,89 @@ describe("UTC date rollover + captureDayIndex", () => {
     expect(utcDateFromMs(Date.parse("2026-08-15T00:00:01.000Z"))).toBe(
       "2026-08-15"
     );
+  });
+
+  it("allocates chunkIndex at seal time per UTC date (not at async write)", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const sink = new ResearchDurableSink({
+      runId: "seal_idx",
+      datasetId: "ds_seal",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 2,
+      maxQueue: 50,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      writeDelayMs: 30
+    });
+    const t1 = Date.parse("2026-08-14T12:00:00.000Z");
+    const t2 = Date.parse("2026-08-15T00:00:01.000Z");
+    for (let i = 0; i < 4; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = t1 + i;
+      sink.enqueue(r);
+    }
+    const d2 = fakeRecord(50);
+    d2.t = t2;
+    sink.enqueue(d2);
+    await sink.flushAndWait(5000);
+    const idxByDate = new Map<string, number[]>();
+    for (const m of sink.manifests) {
+      const list = idxByDate.get(m.captureUtcDate!) ?? [];
+      list.push(m.chunkIndex);
+      idxByDate.set(m.captureUtcDate!, list);
+    }
+    expect(idxByDate.get("2026-08-14")).toEqual([0, 1]);
+    expect(idxByDate.get("2026-08-15")).toEqual([0]);
+  });
+
+  it("refuses local overwrite of an existing chunk (create-only)", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const dayDir = join(dir, "2026-08-14");
+    await mkdir(dayDir, { recursive: true });
+    await writeFile(join(dayDir, "chunk-00000.ndjson.gz"), Buffer.from("occupied"));
+    const sink = new ResearchDurableSink({
+      runId: "local_collision",
+      datasetId: "ds_col",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 1,
+      maxQueue: 10,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14"
+    });
+    const r = fakeRecord(1);
+    r.t = Date.parse("2026-08-14T12:00:00.000Z");
+    sink.enqueue(r);
+    await sink.flushAndWait(5000);
+    const st = sink.stats();
+    expect(st.fatalPersistenceError).toBe(true);
+    expect(st.healthWarning).toMatch(/GCS_OBJECT_COLLISION/);
+    expect(readFileSync(join(dayDir, "chunk-00000.ndjson.gz")).toString()).toBe(
+      "occupied"
+    );
+  });
+
+  it("GCS upload helper uses create-only ifGenerationMatch:0", async () => {
+    const src = readFileSync(
+      join(
+        process.cwd(),
+        "src/services/microEdge/goldHunter/fast/research/researchDurableSink.ts"
+      ),
+      "utf8"
+    );
+    expect(src).toMatch(/preconditionOpts:\s*\{\s*ifGenerationMatch:\s*0\s*\}/);
+    expect(src).toMatch(/GCS_OBJECT_COLLISION/);
+    expect(src).toMatch(/nextChunkIndexByUtcDate/);
+    expect(src).toMatch(/allocateChunkIndex/);
+    expect(src).toMatch(/flag:\s*"wx"/);
   });
 
   it("does not split a chunk across UTC dates and writes per-day summaries", async () => {
@@ -1144,4 +1264,119 @@ describe("UTC date rollover + captureDayIndex", () => {
     expect(sink.stats().gcsPrefix).toContain("/2026-08-15");
     expect(sink.stats().gcsPrefix).not.toContain("live-shadow");
   });
+
+  it("rollover race does not overwrite prior-day chunks (delayed async write)", async () => {
+    const { ResearchDurableSink } = await import(
+      "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink"
+    );
+    const sink = new ResearchDurableSink({
+      runId: "collision_race",
+      datasetId: "ds_collision",
+      researchConfigSha: "sha",
+      captureStart: "2026-08-14T12:00:00.000Z",
+      localDir: dir,
+      chunkRows: 3,
+      maxQueue: 50,
+      campaignMode: false,
+      gcsBucket: null,
+      campaignStartUtcDate: "2026-08-14",
+      writeDelayMs: 40
+    });
+
+    const tDay1 = Date.parse("2026-08-14T22:00:00.000Z");
+    const tDay2 = Date.parse("2026-08-15T00:00:30.000Z");
+    const allSeqs: number[] = [];
+
+    // 3 full Day-1 chunks (indices 0,1,2) + partial buffer of 2
+    for (let i = 0; i < 11; i++) {
+      const r = fakeRecord(i + 1);
+      r.t = tDay1 + i * 10;
+      r.receiveSeq = i + 1;
+      allSeqs.push(i + 1);
+      if (i % 2 === 0) {
+        r.eventKind = "SPOT";
+        r.market = {
+          kind: "SPOT",
+          bid: 1,
+          ask: 1.1,
+          spread: 0.1,
+          brokerTimestampMs: null
+        };
+      } else {
+        r.eventKind = "DEPTH";
+        r.market = {
+          kind: "DEPTH",
+          bestBid: 1,
+          bestAsk: 1.1,
+          depthAvailable: true,
+          crossed: false,
+          bookGeneration: 1,
+          brokerTimestampMs: null
+        };
+      }
+      sink.enqueue(r);
+    }
+    // Immediately cross midnight while Day-1 partial + prior chunks may still be writing
+    const d2 = fakeRecord(100);
+    d2.t = tDay2;
+    d2.receiveSeq = 100;
+    allSeqs.push(100);
+    d2.eventKind = "HEARTBEAT";
+    d2.market = {
+      kind: "HEARTBEAT",
+      heartbeatTs: tDay2,
+      eventLoopLagMs: 1,
+      connectionState: "CONNECTED",
+      spotSubscribed: true,
+      depthSubscribed: true,
+      spotAgeMs: 0,
+      depthAgeMs: 0,
+      queueDepth: 0,
+      persistenceQueueDepth: 0
+    };
+    sink.enqueue(d2);
+
+    await sink.flushAndWait(10_000);
+    await sink.finalizeCurrentDay();
+
+    const day1Files = readdirSync(join(dir, "2026-08-14"))
+      .filter((f) => f.endsWith(".ndjson.gz"))
+      .sort();
+    const day2Files = readdirSync(join(dir, "2026-08-15"))
+      .filter((f) => f.endsWith(".ndjson.gz"))
+      .sort();
+    expect(day1Files).toEqual([
+      "chunk-00000.ndjson.gz",
+      "chunk-00001.ndjson.gz",
+      "chunk-00002.ndjson.gz",
+      "chunk-00003.ndjson.gz"
+    ]);
+    expect(day2Files).toEqual(["chunk-00000.ndjson.gz"]);
+
+    // Original Day-1 chunk bodies remain distinct (no overwrite) — check sizes/sha via manifests
+    const day1Manifests = sink.manifests.filter((m) => m.captureUtcDate === "2026-08-14");
+    const day2Manifests = sink.manifests.filter((m) => m.captureUtcDate === "2026-08-15");
+    expect(day1Manifests.map((m) => m.chunkIndex)).toEqual([0, 1, 2, 3]);
+    expect(day2Manifests.map((m) => m.chunkIndex)).toEqual([0]);
+    const shas = day1Manifests.map((m) => m.sha256);
+    expect(new Set(shas).size).toBe(4);
+
+    const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
+    const seqs = rows.map((r) => r.receiveSeq as number).sort((a, b) => a - b);
+    expect(seqs).toEqual([...allSeqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(allSeqs.length);
+
+    for (const m of sink.manifests) {
+      const dates = new Set(
+        [m.startTs, m.endTs].map((t) => new Date(t).toISOString().slice(0, 10))
+      );
+      expect(dates.size).toBe(1);
+      expect(m.captureUtcDate).toBe([...dates][0]);
+    }
+
+    const st = sink.stats();
+    expect(st.persistenceDroppedRows).toBe(0);
+    expect(st.persistenceDroppedChunks).toBe(0);
+    expect(st.fatalPersistenceError).toBe(false);
+  }, 20_000);
 });

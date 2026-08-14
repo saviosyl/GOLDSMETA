@@ -67,6 +67,8 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   /** Offline qualification count — not advanced by calendar rollover alone. */
   validatedIndependentDays: number;
   campaignStartUtcDate: string | null;
+  /** Exact original campaign activation timestamp (not midnight). */
+  campaignStartedAt: string | null;
   currentCaptureUtcDate: string | null;
   day1StartedAt: string | null;
   liveCaptureReady: boolean;
@@ -166,6 +168,7 @@ export class GoldHunterFastResearchCaptureProcess {
   private captureDayIndex: number | null = null;
   private validatedIndependentDays = 0;
   private campaignStartUtcDate: string;
+  private campaignStartedAt: string;
   private currentCaptureUtcDate: string | null = null;
   private readonly gcsBucket: string;
   private readonly researchConfigSha: string;
@@ -204,6 +207,12 @@ export class GoldHunterFastResearchCaptureProcess {
     this.campaignStartUtcDate =
       (process.env.GOLD_HUNTER_FAST_CAMPAIGN_START_DATE ?? "").trim() ||
       utcDateFromMs(this.nowMs());
+    this.campaignStartedAt =
+      (process.env.GOLD_HUNTER_FAST_CAMPAIGN_STARTED_AT ?? "").trim() ||
+      // Preserve original Day-1 wall clock when env is set at deploy; otherwise
+      // use this process activation time (never force midnight).
+      new Date(this.nowMs()).toISOString();
+    this.day1StartedAt = this.campaignStartedAt;
     void createMicroTokenVault();
   }
 
@@ -376,13 +385,12 @@ export class GoldHunterFastResearchCaptureProcess {
           this.campaignStartUtcDate,
           this.currentCaptureUtcDate ?? today
         );
-        this.day1StartedAt =
-          this.day1StartedAt ??
-          `${this.campaignStartUtcDate}T00:00:00.000Z`;
+        this.day1StartedAt = this.campaignStartedAt;
         microLog("MICRO_COLLECTOR_CONNECTED", {
           code: "CAPTURE_CAMPAIGN_ACTIVE",
           day: this.captureDayIndex,
           campaignStartUtcDate: this.campaignStartUtcDate,
+          campaignStartedAt: this.campaignStartedAt,
           currentCaptureUtcDate: this.currentCaptureUtcDate ?? today,
           day1StartedAt: this.day1StartedAt,
           validatedIndependentDays: this.validatedIndependentDays,
@@ -541,11 +549,12 @@ export class GoldHunterFastResearchCaptureProcess {
       captureDayIndex: this.captureDayIndex,
       validatedIndependentDays: this.validatedIndependentDays,
       campaignStartUtcDate: this.campaignStartUtcDate,
+      campaignStartedAt: this.campaignStartedAt,
       currentCaptureUtcDate:
         this.currentCaptureUtcDate ??
         this.runtime?.getBridge()?.getCurrentCaptureUtcDate() ??
         null,
-      day1StartedAt: this.day1StartedAt,
+      day1StartedAt: this.day1StartedAt ?? this.campaignStartedAt,
       liveCaptureReady: gate.ok,
       brokerPermissionProof: this.brokerPermissionProof,
       startupGate: gate,

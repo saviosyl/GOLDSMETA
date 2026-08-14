@@ -43,7 +43,7 @@ async function tryUploadGcs(
   objectPath: string,
   body: Buffer,
   contentType = "application/gzip"
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; collision?: boolean }> {
   if (objectPath.includes(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX)) {
     return { ok: false, error: "REFUSING_LIVE_SHADOW_PREFIX" };
   }
@@ -62,21 +62,34 @@ async function tryUploadGcs(
           projectId: (JSON.parse(saRaw) as { project_id?: string }).project_id
         })
       : new mod.Storage();
+    // Create-only: never overwrite an existing research-capture object.
     await storage.bucket(bucket).file(objectPath).save(body, {
       contentType,
       resumable: false,
+      preconditionOpts: { ifGenerationMatch: 0 },
       metadata: { cacheControl: "no-store" }
     });
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: msg.slice(0, 180) };
+    const code = (e as { code?: number | string }).code;
+    const collision =
+      code === 412 ||
+      code === "412" ||
+      /condition|precondition|already exists|412/i.test(msg);
+    return {
+      ok: false,
+      error: collision ? "GCS_OBJECT_COLLISION" : msg.slice(0, 180),
+      collision
+    };
   }
 }
 
 type PendingChunk = {
   records: ResearchCaptureRecord[];
   utcDate: string;
+  /** Allocated at seal time — never read a mutable shared counter at write time. */
+  chunkIndex: number;
   enqueuedAtMs: number;
 };
 
@@ -142,7 +155,8 @@ export class ResearchDurableSink {
   private pending: PendingChunk[] = [];
   private buf: ResearchCaptureRecord[] = [];
   private bufUtcDate: string | null = null;
-  private dayChunkIdx = 0;
+  /** Per-UTC-date next chunk index — allocate only at seal time. */
+  private readonly nextChunkIndexByUtcDate = new Map<string, number>();
   private writing = false;
   private chunksWritten = 0;
   private chunksUploaded = 0;
@@ -164,6 +178,8 @@ export class ResearchDurableSink {
   private readonly gcsBucket: string | null;
   private readonly gcsPrefixRoot: string;
   private readonly campaignMode: boolean;
+  /** Test-only: delay inside writeChunk to surface async rollover races. */
+  private readonly writeDelayMs: number;
   private currentUtcDate: string | null = null;
   private readonly days = new Map<string, DayAccumulator>();
   private readonly pendingDayFinalize = new Set<string>();
@@ -188,6 +204,8 @@ export class ResearchDurableSink {
     campaignMode?: boolean;
     campaignStartUtcDate?: string;
     onCaptureDateObserved?: (date: string, dayIndex: number) => void;
+    /** Test hook — delays each chunk write to expose seal/write races. */
+    writeDelayMs?: number;
     _executionAdapterMustBeUndefined?: unknown;
   }) {
     assertNoExecutionAdapterArgument(opts._executionAdapterMustBeUndefined);
@@ -199,6 +217,7 @@ export class ResearchDurableSink {
     this.chunkRows = opts.chunkRows ?? 500;
     this.maxQueue = opts.maxQueue ?? 200;
     this.campaignMode = opts.campaignMode === true;
+    this.writeDelayMs = Math.max(0, opts.writeDelayMs ?? 0);
     this.campaignStartUtcDate =
       (opts.campaignStartUtcDate ?? "").trim() ||
       (process.env.GOLD_HUNTER_FAST_CAMPAIGN_START_DATE ?? "").trim() ||
@@ -351,13 +370,20 @@ export class ResearchDurableSink {
 
   private openDay(date: string, t0: number): void {
     this.currentUtcDate = date;
-    this.dayChunkIdx = 0;
+    // Do NOT reset any shared chunk index here — indices are per-date and
+    // allocated at seal time via nextChunkIndexByUtcDate.
     this.bufUtcDate = date;
     if (!this.days.has(date)) {
       const idx = captureDayIndexFromDates(this.campaignStartUtcDate, date);
       this.days.set(date, emptyDayAcc(date, idx, t0));
       this.onCaptureDateObserved?.(date, idx);
     }
+  }
+
+  private allocateChunkIndex(utcDate: string): number {
+    const next = this.nextChunkIndexByUtcDate.get(utcDate) ?? 0;
+    this.nextChunkIndexByUtcDate.set(utcDate, next + 1);
+    return next;
   }
 
   private noteRecord(rec: ResearchCaptureRecord): void {
@@ -422,6 +448,7 @@ export class ResearchDurableSink {
     this.pending.push({
       records: this.buf,
       utcDate: this.bufUtcDate,
+      chunkIndex: this.allocateChunkIndex(this.bufUtcDate),
       enqueuedAtMs: Date.now()
     });
     this.buf = [];
@@ -434,7 +461,7 @@ export class ResearchDurableSink {
     try {
       while (this.pending.length > 0) {
         const chunk = this.pending.shift()!;
-        await this.writeChunk(chunk.records, chunk.utcDate);
+        await this.writeChunk(chunk.records, chunk.utcDate, chunk.chunkIndex);
       }
       await this.finalizePendingDays();
     } finally {
@@ -468,13 +495,21 @@ export class ResearchDurableSink {
   private buildDaySummary(date: string): ResearchDaySummary | null {
     const day = this.days.get(date);
     if (!day) return null;
+    const durableOk = !this.campaignMode || this.gcsBucket != null;
     const eligible =
       day.dataIntegrityStatus === "CLEAN" &&
       day.persistenceDroppedRows === 0 &&
       day.persistenceDroppedChunks === 0 &&
       day.eventsDropped === 0 &&
       day.writeErrors === 0 &&
-      (!this.campaignMode || this.gcsBucket != null);
+      day.spotEventCount > 0 &&
+      day.depthEventCount > 0 &&
+      day.heartbeatCount > 0 &&
+      durableOk &&
+      (this.gcsBucket ? true : !this.campaignMode);
+    // campaignMode requires GCS durableMode for eligibility.
+    const eligibleFinal =
+      eligible && (!this.campaignMode || Boolean(this.gcsBucket));
     return {
       date,
       runId: this.runId,
@@ -508,15 +543,15 @@ export class ResearchDurableSink {
       shadowOrders: 0,
       executionAdapter: "NONE",
       mode: GH_FAST_RESEARCH_MODE,
-      campaignValid: eligible && this.campaignMode ? this.gcsBucket != null : eligible,
-      contaminated: !eligible,
+      campaignValid: eligibleFinal,
+      contaminated: !eligibleFinal,
       durableMode: this.gcsBucket ? "GCS" : "LOCAL_BUFFER_ONLY",
       scopeVerified: true,
       heartbeatsPersisted: day.heartbeatCount,
       sessionTransitionsPersisted: day.sessionTransitionCount,
-      campaignDayEligibleForLaterValidation: eligible,
+      campaignDayEligibleForLaterValidation: eligibleFinal,
       validatedIndependentDays: 0,
-      note: "campaignDayEligibleForLaterValidation means technically clean for later analysis — not profitable and not independently validated."
+      note: "campaignDayEligibleForLaterValidation is a technical prefilter only — not profitable, not validated, not OOS-qualified."
     };
   }
 
@@ -525,18 +560,46 @@ export class ResearchDurableSink {
     await mkdir(dayDir, { recursive: true });
     const path = join(dayDir, "CAPTURE_DAY_SUMMARY.json");
     const body = Buffer.from(JSON.stringify(summary, null, 2), "utf8");
+    // Local day summary may be rewritten within the same process finalize path;
+    // GCS objects remain create-only (never overwrite an existing object).
     await writeFile(path, body);
     if (this.gcsBucket) {
       const objectPath = `${this.gcsPrefixRoot}/${summary.date}/CAPTURE_DAY_SUMMARY.json`;
-      await tryUploadGcs(this.gcsBucket, objectPath, body, "application/json");
+      const up = await tryUploadGcs(
+        this.gcsBucket,
+        objectPath,
+        body,
+        "application/json"
+      );
+      if (!up.ok && up.collision) {
+        this.failIntegrity("GCS_OBJECT_COLLISION");
+        const day = this.days.get(summary.date);
+        if (day) day.dataIntegrityStatus = "FAILED";
+      } else if (!up.ok) {
+        this.uploadErrors += 1;
+        const day = this.days.get(summary.date);
+        if (day) {
+          day.uploadErrors += 1;
+          if (day.dataIntegrityStatus === "CLEAN") {
+            day.dataIntegrityStatus = "DEGRADED";
+          }
+        }
+        if (!this.fatalPersistenceError) {
+          this.healthWarning = `GCS_UPLOAD_FAILED — local buffer retained (${up.error})`;
+        }
+      }
     }
     return path;
   }
 
   private async writeChunk(
     records: ResearchCaptureRecord[],
-    utcDate: string
+    utcDate: string,
+    chunkIndex: number
   ): Promise<void> {
+    if (this.writeDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, this.writeDelayMs));
+    }
     const startTs = records[0]?.t ?? Date.now();
     const endTs = records[records.length - 1]?.t ?? startTs;
     const sequenceStart = records[0]?.receiveSeq ?? 0;
@@ -544,7 +607,7 @@ export class ResearchDurableSink {
     const body = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
     const gz = gzipSync(Buffer.from(body, "utf8"));
     const sha256 = createHash("sha256").update(gz).digest("hex");
-    const name = `chunk-${String(this.dayChunkIdx).padStart(5, "0")}.ndjson.gz`;
+    const name = `chunk-${String(chunkIndex).padStart(5, "0")}.ndjson.gz`;
     const dayDir = join(this.localDirRoot, utcDate);
     const gcsPrefix = `${this.gcsPrefixRoot}/${utcDate}`;
     const day = this.days.get(utcDate);
@@ -552,7 +615,20 @@ export class ResearchDurableSink {
     try {
       await mkdir(dayDir, { recursive: true });
       const localPath = join(dayDir, name);
-      await writeFile(localPath, gz);
+      // Create-only local write — never overwrite an existing chunk file.
+      try {
+        await writeFile(localPath, gz, { flag: "wx" });
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "EEXIST") {
+          this.failIntegrity("GCS_OBJECT_COLLISION");
+          if (day) day.dataIntegrityStatus = "FAILED";
+          this.healthWarning =
+            "DATA_INTEGRITY_FAILED: GCS_OBJECT_COLLISION — refused overwrite of existing chunk";
+          return;
+        }
+        throw e;
+      }
       const manifest: ResearchChunkManifest = {
         runId: this.runId,
         datasetId: this.datasetId,
@@ -560,7 +636,7 @@ export class ResearchDurableSink {
         runtimeSha: this.runtimeSha,
         researchConfigSha: this.researchConfigSha,
         captureStart: this.captureStart,
-        chunkIndex: this.dayChunkIdx,
+        chunkIndex,
         startTs,
         endTs,
         rowCount: records.length,
@@ -582,12 +658,21 @@ export class ResearchDurableSink {
           this.chunksUploaded += 1;
           if (day) day.chunksUploaded += 1;
           const manBody = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
-          await tryUploadGcs(
+          const manUp = await tryUploadGcs(
             this.gcsBucket,
             `${gcsPrefix}/${name}.manifest.json`,
             manBody,
             "application/json"
           );
+          if (!manUp.ok && manUp.collision) {
+            this.failIntegrity("GCS_OBJECT_COLLISION");
+            if (day) day.dataIntegrityStatus = "FAILED";
+            return;
+          }
+        } else if (up.collision) {
+          this.failIntegrity("GCS_OBJECT_COLLISION");
+          if (day) day.dataIntegrityStatus = "FAILED";
+          return;
         } else {
           this.uploadErrors += 1;
           if (day) {
@@ -596,20 +681,31 @@ export class ResearchDurableSink {
               day.dataIntegrityStatus = "DEGRADED";
             }
           }
-          this.healthWarning = `GCS_UPLOAD_FAILED — local buffer retained (${up.error})`;
+          // Never clobber a prior fatal integrity warning.
+          if (!this.fatalPersistenceError) {
+            this.healthWarning = `GCS_UPLOAD_FAILED — local buffer retained (${up.error})`;
+          }
         }
       }
       await appendFile(
         join(dayDir, "checkpoint.jsonl"),
         JSON.stringify(manifest) + "\n"
       );
-      await writeFile(
-        join(dayDir, `${name}.manifest.json`),
-        JSON.stringify(manifest, null, 2)
-      );
+      const manLocal = join(dayDir, `${name}.manifest.json`);
+      try {
+        await writeFile(manLocal, JSON.stringify(manifest, null, 2), {
+          flag: "wx"
+        });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+          this.failIntegrity("GCS_OBJECT_COLLISION");
+          if (day) day.dataIntegrityStatus = "FAILED";
+          return;
+        }
+        throw e;
+      }
       this.manifests.push(manifest);
       this.chunksWritten += 1;
-      this.dayChunkIdx += 1;
       if (day) day.chunksWritten += 1;
     } catch {
       this.writeErrors += 1;
