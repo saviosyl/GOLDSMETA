@@ -55,6 +55,8 @@ export type MicroOpenApiTransport = {
   subscribeSpots(symbolId: string): Promise<void>;
   /** VIEW-only Level-II depth subscription (no trade scope). */
   subscribeDepthQuotes(symbolId: string): Promise<void>;
+  /** VIEW-only Level-II depth unsubscribe (recovery / resubscribe). */
+  unsubscribeDepthQuotes(symbolId: string): Promise<void>;
   listSymbols(): Promise<Array<Record<string, unknown>>>;
   getTickData(args: {
     symbolId: string;
@@ -360,6 +362,13 @@ export class RealMicroCTraderTransport implements MicroOpenApiTransport {
     });
   }
 
+  async unsubscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOAUnsubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.credentials.accountId),
+      symbolId: [Number(symbolId)]
+    });
+  }
+
   async listSymbols(): Promise<Array<Record<string, unknown>>> {
     const res = (await this.sendReadCommand("ProtoOASymbolsListReq", {
       ctidTraderAccountId: Number(this.credentials.accountId),
@@ -609,6 +618,13 @@ export class FakeMicroCTraderTransport implements MicroOpenApiTransport {
 
   async subscribeDepthQuotes(symbolId: string): Promise<void> {
     await this.sendReadCommand("ProtoOASubscribeDepthQuotesReq", {
+      ctidTraderAccountId: Number(this.configuredAccountId),
+      symbolId: [Number(symbolId)]
+    });
+  }
+
+  async unsubscribeDepthQuotes(symbolId: string): Promise<void> {
+    await this.sendReadCommand("ProtoOAUnsubscribeDepthQuotesReq", {
       ctidTraderAccountId: Number(this.configuredAccountId),
       symbolId: [Number(symbolId)]
     });

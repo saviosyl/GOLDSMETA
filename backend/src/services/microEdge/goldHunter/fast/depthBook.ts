@@ -95,9 +95,15 @@ export class InMemoryDepthBook {
    * Hard market-data reset for transport reconnect / book resync.
    * Drops all quote IDs so a stale pre-reconnect Level-II book cannot
    * contaminate a newly subscribed depth stream.
+   * Preserves cumulative deleteHits/Misses for monitor diagnostics.
    */
   clearForResync(): void {
-    this.clearMaps();
+    this.bids.clear();
+    this.asks.clear();
+    this.lastUpdateMs = null;
+    this.lastValidBookMs = null;
+    this.consecutiveInvalidSnapshots = 0;
+    this.resetRates(0);
     this.bookGeneration += 1;
     this.resyncCount += 1;
   }

@@ -40,6 +40,12 @@ import {
   type ReferencePaperSnapshot,
   type ReferencePaperSummary
 } from "./referencePaperSimulator";
+import {
+  decideSustainedCrossRecovery,
+  GH_FAST_SUSTAINED_CROSS_RECOVERY_COOLDOWN_MS,
+  GH_FAST_SUSTAINED_CROSS_RECOVERY_MS,
+  type ResearchDepthValidity
+} from "../depthRecovery";
 
 const RECENT_CANDIDATE_LIMIT = 80;
 
@@ -95,7 +101,17 @@ export class ResearchIngestBridge {
   private feedGapCount = 0;
   private reconnectCount = 0;
   private resyncCount = 0;
-  private bookCrossedCount = 0;
+  /** DEPTH-only crossed snapshots (not SPOT observations of an already-crossed book). */
+  private depthEventCount = 0;
+  private depthCrossedEventCount = 0;
+  private crossedSinceMs: number | null = null;
+  private lastSustainedRecoveryAttemptMs: number | null = null;
+  private depthRecoveryInFlight = false;
+  private sustainedCrossRecoveryCount = 0;
+  private disconnectResyncCount = 0;
+  private onDepthRecoveryRequest:
+    | ((reason: string) => void | Promise<void>)
+    | null = null;
   private observationA = 0;
   private observationB = 0;
   private observationC = 0;
@@ -155,10 +171,12 @@ export class ResearchIngestBridge {
     scopeVerified?: boolean;
     campaignStartUtcDate?: string;
     onCaptureDateObserved?: (date: string, dayIndex: number) => void;
+    onDepthRecoveryRequest?: (reason: string) => void | Promise<void>;
     _executionAdapterMustBeUndefined?: unknown;
   }) {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
     researchSafetyIdentity();
+    this.onDepthRecoveryRequest = opts?.onDepthRecoveryRequest ?? null;
     this.runId = opts?.runId ?? makeRunId();
     this.datasetId = opts?.datasetId ?? `dataset_${this.runId}`;
     this.researchConfigSha = hashGhFastConfig(frozenGhFastSoakConfig());
@@ -242,6 +260,20 @@ export class ResearchIngestBridge {
     this.spotSubscribed = false;
     this.depthSubscribed = false;
     this.setConnectionState("DISCONNECTED", reason);
+    // Forensic: pre-disconnect quote IDs are never present in post-resubscribe
+    // deletedQuotes. Ordered RESYNC_MARKER clears the local book so ghost
+    // levels (e.g. stale bestBid 4387.32 / id 2361229607) cannot survive.
+    this.disconnectResyncCount += 1;
+    this.depthRecoveryInFlight = true;
+    this.pipeline.setRecoveryInFlight(true);
+    this.noteResync(`session_disconnect:${reason}`, ts);
+  }
+
+  /** Register/replace transport depth resubscribe hook (research runtime). */
+  setDepthRecoveryRequestHandler(
+    handler: ((reason: string) => void | Promise<void>) | null
+  ): void {
+    this.onDepthRecoveryRequest = handler;
   }
 
   noteReconnectStart(ts = Date.now(), reason: string | null = null): void {
@@ -478,6 +510,8 @@ export class ResearchIngestBridge {
     if (item.kind === "RESYNC_MARKER") {
       // Ordered boundary: clear book/features/sides at this receiveSeq, then persist.
       this.pipeline.clearForResync();
+      this.depthRecoveryInFlight = true;
+      this.crossedSinceMs = null;
       // Monitor SPOT strip must not show stale pre-resync sides.
       this.lastBid = null;
       this.lastAsk = null;
@@ -586,7 +620,8 @@ export class ResearchIngestBridge {
         "SPOT",
         item.rawCallbackArrivalMs
       );
-      if (snap.crossed) this.bookCrossedCount += 1;
+      // Do NOT increment crossed counters on SPOT — that inflated bookCrossedCount
+      // while an already-crossed Depth book sat unchanged.
       const rec: ResearchCaptureRecord = {
         ...base,
         eventKind: "SPOT",
@@ -611,12 +646,15 @@ export class ResearchIngestBridge {
       };
       this.collector.record(rec);
       // Reference paper only — block entries when Spot quote incomplete/crossed
-      // (parity with engine dataOk entry gate). Does not change research capture.
+      // or Depth recovery is in flight (parity with engine dataOk entry gate).
       const spotQuoteOk =
         this.lastBid != null &&
         this.lastAsk != null &&
         this.lastAsk >= this.lastBid &&
-        !snap.crossed;
+        !snap.crossed &&
+        snap.depthAvailable &&
+        !this.depthRecoveryInFlight &&
+        snap.depthValidity === "DEPTH_VALID";
       this.driveReferencePaper({
         bid: this.lastBid,
         ask: this.lastAsk,
@@ -644,6 +682,7 @@ export class ResearchIngestBridge {
       deletedQuotes
     };
     const snap = this.pipeline.onDepth(depthEv);
+    this.depthEventCount += 1;
     this.tallyCandidates(
       snap.specialists,
       snap.features,
@@ -651,7 +690,42 @@ export class ResearchIngestBridge {
       "DEPTH",
       item.rawCallbackArrivalMs
     );
-    if (snap.crossed) this.bookCrossedCount += 1;
+    if (snap.crossed) {
+      this.depthCrossedEventCount += 1;
+      if (this.crossedSinceMs == null) {
+        this.crossedSinceMs = item.rawCallbackArrivalMs;
+      }
+    } else {
+      this.crossedSinceMs = null;
+    }
+    if (snap.depthAvailable && !snap.crossed) {
+      this.depthRecoveryInFlight = false;
+      this.pipeline.noteValidDepthRestored();
+    }
+
+    // Sustained-crossed recovery: ordered RESYNC + transport depth resubscribe.
+    const recovery = decideSustainedCrossRecovery({
+      crossed: snap.crossed,
+      crossedSinceMs: this.crossedSinceMs,
+      nowMs: item.rawCallbackArrivalMs,
+      recoveryInFlight: this.depthRecoveryInFlight,
+      lastRecoveryAttemptMs: this.lastSustainedRecoveryAttemptMs,
+      thresholdMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_MS,
+      cooldownMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_COOLDOWN_MS
+    });
+    if (recovery.action === "TRIGGER_RECOVERY") {
+      this.sustainedCrossRecoveryCount += 1;
+      this.lastSustainedRecoveryAttemptMs = item.rawCallbackArrivalMs;
+      this.depthRecoveryInFlight = true;
+      this.pipeline.setRecoveryInFlight(true);
+      this.noteResync(recovery.reason, item.rawCallbackArrivalMs);
+      try {
+        void this.onDepthRecoveryRequest?.(recovery.reason);
+      } catch {
+        /* transport recovery is best-effort; ordered clear still applies */
+      }
+    }
+
     // Monitor strip lastBid/lastAsk/lastSpread are SPOT-sourced only
     // (set in SPOT path). Depth top-of-book is not written to the strip.
     const rec: ResearchCaptureRecord = {
@@ -685,7 +759,11 @@ export class ResearchIngestBridge {
       receiveSeq: item.receiveSeq,
       specialists: snap.specialists,
       features: snap.features,
-      dataOk: !snap.crossed
+      dataOk:
+        !snap.crossed &&
+        snap.depthAvailable &&
+        !this.depthRecoveryInFlight &&
+        snap.depthValidity === "DEPTH_VALID"
     });
   }
 
@@ -716,6 +794,21 @@ export class ResearchIngestBridge {
 
   referencePaperSummary(): ReferencePaperSummary {
     return this.referencePaper.summary();
+  }
+
+  private currentDepthState(nowMs: number): ResearchDepthValidity {
+    if (this.depthRecoveryInFlight || this.pipeline.isRecoveryInFlight()) {
+      return "RESYNC_RECOVERY";
+    }
+    const snap = this.pipeline.currentDepthStats();
+    const depthAgeMs =
+      this.lastDepthAt != null ? nowMs - this.lastDepthAt : null;
+    if (snap.crossed) return "DEPTH_CROSSED";
+    if (!snap.available) return "DEPTH_UNAVAILABLE";
+    if (depthAgeMs == null || depthAgeMs > this.freshnessLimitMs) {
+      return "DEPTH_STALE";
+    }
+    return "DEPTH_VALID";
   }
 
   private tallyCandidates(
@@ -889,7 +982,22 @@ export class ResearchIngestBridge {
       feedGapCount: this.feedGapCount,
       reconnectCount: this.reconnectCount,
       resyncCount: this.resyncCount,
-      bookCrossedCount: this.bookCrossedCount,
+      bookCrossedCount: this.depthCrossedEventCount,
+      depthEventCount: this.depthEventCount,
+      depthCrossedEventCount: this.depthCrossedEventCount,
+      depthCrossedPct:
+        this.depthEventCount > 0
+          ? this.depthCrossedEventCount / this.depthEventCount
+          : null,
+      currentDepthState: this.currentDepthState(nowMs),
+      crossedDurationMs:
+        this.crossedSinceMs != null
+          ? Math.max(0, nowMs - this.crossedSinceMs)
+          : 0,
+      depthResyncCount:
+        this.disconnectResyncCount + this.sustainedCrossRecoveryCount,
+      deleteHits: this.pipeline.currentDepthStats().deleteHits,
+      deleteMisses: this.pipeline.currentDepthStats().deleteMisses,
       candidateA: this.eligibleA,
       candidateB: this.eligibleB,
       candidateC: this.eligibleC,

@@ -47,6 +47,14 @@ type ResearchHealth = {
   reconnectCount?: number;
   resyncCount?: number;
   bookCrossedCount?: number;
+  depthEventCount?: number;
+  depthCrossedEventCount?: number;
+  depthCrossedPct?: number | null;
+  currentDepthState?: string;
+  crossedDurationMs?: number;
+  depthResyncCount?: number;
+  deleteHits?: number;
+  deleteMisses?: number;
   captureDayIndex?: number | null;
   validatedIndependentDays?: number;
   captureDurationMs?: number;
@@ -1054,7 +1062,22 @@ export function GoldHunterFastResearchPage() {
           value={`${fmtMs(health?.eventLoopLagP50)}/${fmtMs(health?.eventLoopLagP95)}/${fmtMs(health?.eventLoopLagP99)}`}
         />
         <Kpi label="Gaps/Reconn/Resync" value={`${fmtNum(health?.feedGapCount)}/${fmtNum(health?.reconnectCount)}/${fmtNum(health?.resyncCount)}`} />
-        <Kpi label="Crossed Book" value={fmtNum(health?.bookCrossedCount)} />
+        <Kpi label="DEPTH Events" value={fmtNum(health?.depthEventCount)} />
+        <Kpi
+          label="DEPTH Crossed"
+          value={`${fmtNum(health?.depthCrossedEventCount)} (${
+            health?.depthCrossedPct != null
+              ? `${(health.depthCrossedPct * 100).toFixed(1)}%`
+              : "—"
+          })`}
+        />
+        <Kpi label="DEPTH State" value={health?.currentDepthState ?? "—"} />
+        <Kpi label="Crossed Dur" value={fmtMs(health?.crossedDurationMs)} />
+        <Kpi label="DEPTH Resyncs" value={fmtNum(health?.depthResyncCount)} />
+        <Kpi
+          label="Delete Hit/Miss"
+          value={`${fmtNum(health?.deleteHits)}/${fmtNum(health?.deleteMisses)}`}
+        />
         <Kpi
           label="Day / Validated"
           value={`${fmtNum(health?.captureDayIndex ?? undefined)} / ${fmtNum(health?.validatedIndependentDays)}`}

@@ -20,6 +20,13 @@ import {
   normalizeCTraderDepthPayload,
   normalizeCTraderSpotPayload
 } from "../ctraderMarketNormalize";
+import { InMemoryDepthBook } from "../depthBook";
+import {
+  decideSustainedCrossRecovery,
+  GH_FAST_DEPTH_RECOVERY_THRESHOLD_REASON,
+  GH_FAST_SUSTAINED_CROSS_RECOVERY_COOLDOWN_MS,
+  GH_FAST_SUSTAINED_CROSS_RECOVERY_MS
+} from "../depthRecovery";
 import { ResearchFeaturePipeline } from "./researchFeaturePipeline";
 import { spotPriceFromRelative } from "../../../marketData/microCTraderProtocol";
 
@@ -354,6 +361,359 @@ export async function replayResearchCaptureNormalized(opts: {
     heartbeatsSkipped,
     before,
     after,
+    materialChange,
+    outPath
+  };
+}
+
+export type DepthBookCorrectedReplayResult = {
+  runId: string | null;
+  rawSpotCount: number;
+  rawDepthCount: number;
+  crossedSnapshotsBefore: number;
+  crossedSnapshotsAfter: number;
+  crossedPctBefore: number | null;
+  crossedPctAfter: number | null;
+  longestCrossedMsBefore: number;
+  longestCrossedMsAfter: number;
+  deleteHitsBefore: number;
+  deleteMissesBefore: number;
+  deleteHitsAfter: number;
+  deleteMissesAfter: number;
+  resyncRecoveryCount: number;
+  disconnectResyncCount: number;
+  sustainedCrossRecoveryCount: number;
+  eligibleBefore: AbcCounts;
+  eligibleAfter: AbcCounts;
+  selectedBefore: AbcCounts;
+  selectedAfter: AbcCounts;
+  validDepthSelectedA: number;
+  validDepthSelectedB: number;
+  validDepthSelectedC: number;
+  contaminatedSelectedExcluded: number;
+  materialChange: boolean;
+  outPath: string;
+};
+
+/**
+ * Offline Level-II corrected replay:
+ *   - On SESSION_TRANSITION → DISCONNECTED: clearForResync (disconnect ghost fix)
+ *   - Sustained crossed ≥10s → clearForResync with cooldown (recovery)
+ *   - Annotate specialist validity; count valid-depth selected vs contaminated
+ * Never overwrites raw capture.
+ */
+export async function replayResearchCaptureDepthBookCorrected(opts: {
+  inputDir: string;
+  outDir: string;
+}): Promise<DepthBookCorrectedReplayResult> {
+  const files = collectNdjsonGz(opts.inputDir);
+  const all: Row[] = [];
+  for (const f of files) {
+    all.push(...(await readGzJsonl(f)));
+  }
+  all.sort((a, b) => a.receiveSeq - b.receiveSeq || a.t - b.t);
+  const runIds = new Set(
+    all.map((r) => r.runId).filter((id): id is string => typeof id === "string")
+  );
+  if (runIds.size > 1) {
+    throw new Error(
+      `CORRECTED_REPLAY_MULTI_RUN: refuse to merge runIds=${[...runIds].join(",")}`
+    );
+  }
+  const runId = runIds.size === 1 ? [...runIds][0]! : null;
+
+  const eligibleBefore = emptyAbc();
+  const selectedBefore = emptyAbc();
+  for (const r of all) {
+    tallySpecialists(eligibleBefore, r.specialists);
+    for (const s of r.specialists ?? []) {
+      if (!s.selectedCandidate) continue;
+      if (s.setup === "A_MOMENTUM_IGNITION") selectedBefore.selectedA += 1;
+      else if (s.setup === "B_FAST_BREAKOUT") selectedBefore.selectedB += 1;
+      else if (s.setup === "C_PULLBACK_REACCEL") selectedBefore.selectedC += 1;
+    }
+  }
+
+  // BEFORE: naive book (no disconnect clear, no recovery)
+  const bookBefore = new InMemoryDepthBook();
+  let crossedBefore = 0;
+  let depthBefore = 0;
+  let crossedStartBefore: number | null = null;
+  let longestBefore = 0;
+  let rawSpot = 0;
+  let rawDepth = 0;
+  for (const r of all) {
+    if (r.eventKind === "SPOT") rawSpot += 1;
+    if (r.eventKind !== "DEPTH") continue;
+    rawDepth += 1;
+    depthBefore += 1;
+    const m = r.market;
+    const n = normalizeCTraderDepthPayload({
+      timestamp: m.brokerTimestampMs ?? r.t,
+      newQuotes: (m.rawNewQuotes as unknown[]) ?? m.newQuotes ?? [],
+      deletedQuotes: m.rawDeletedQuotes ?? m.deletedQuotes ?? []
+    });
+    bookBefore.applyDepthEvent({
+      kind: "DEPTH",
+      receiveSeq: r.receiveSeq,
+      eventId: `DEPTH:${r.receiveSeq}`,
+      receivedAtMs: r.t,
+      brokerTimestampMs: n.brokerTimestampMs,
+      newQuotes: n.newQuotes,
+      deletedQuotes: n.deletedQuotes
+    });
+    const s = bookBefore.stats();
+    if (s.crossed) {
+      crossedBefore += 1;
+      if (crossedStartBefore == null) crossedStartBefore = r.t;
+    } else if (crossedStartBefore != null) {
+      longestBefore = Math.max(longestBefore, r.t - crossedStartBefore);
+      crossedStartBefore = null;
+    }
+  }
+  if (crossedStartBefore != null) {
+    const lastT = all[all.length - 1]?.t ?? crossedStartBefore;
+    longestBefore = Math.max(longestBefore, lastT - crossedStartBefore);
+  }
+  const deleteHitsBefore = bookBefore.stats().deleteHits;
+  const deleteMissesBefore = bookBefore.stats().deleteMisses;
+
+  // AFTER: disconnect clear + sustained-cross recovery
+  const pipe = new ResearchFeaturePipeline();
+  const eligibleAfter = emptyAbc();
+  let crossedAfter = 0;
+  let depthAfter = 0;
+  let crossedStartAfter: number | null = null;
+  let longestAfter = 0;
+  let crossedSinceMs: number | null = null;
+  let recoveryInFlight = false;
+  let lastRecoveryMs: number | null = null;
+  let disconnectResyncCount = 0;
+  let sustainedCrossRecoveryCount = 0;
+  let validDepthSelectedA = 0;
+  let validDepthSelectedB = 0;
+  let validDepthSelectedC = 0;
+  let contaminatedSelectedExcluded = 0;
+
+  const applyClear = (reason: string, t: number, seq: number) => {
+    pipe.clearForResync();
+    recoveryInFlight = true;
+    crossedSinceMs = null;
+    return { reason, t, seq };
+  };
+
+  for (const r of all) {
+    if (r.eventKind === "RESYNC_MARKER") {
+      applyClear(String(r.market?.reason ?? "resync"), r.t, r.receiveSeq);
+      continue;
+    }
+    if (r.eventKind === "SESSION_TRANSITION") {
+      const toState = String(r.market?.toState ?? "");
+      if (toState === "DISCONNECTED") {
+        disconnectResyncCount += 1;
+        applyClear(
+          `session_disconnect:${String(r.market?.reason ?? "unknown")}`,
+          r.t,
+          r.receiveSeq
+        );
+      }
+      continue;
+    }
+    if (r.eventKind === "HEARTBEAT") continue;
+
+    if (r.eventKind === "SPOT") {
+      const m = r.market;
+      const bidRel =
+        typeof m.bidRelative === "number"
+          ? m.bidRelative
+          : looksRelative(m.bid as number)
+            ? (m.bid as number)
+            : null;
+      const askRel =
+        typeof m.askRelative === "number"
+          ? m.askRelative
+          : looksRelative(m.ask as number)
+            ? (m.ask as number)
+            : null;
+      const n = normalizeCTraderSpotPayload({
+        bid:
+          bidRel ??
+          (typeof m.bid === "number" ? (m.bid as number) * 100_000 : null),
+        ask:
+          askRel ??
+          (typeof m.ask === "number" ? (m.ask as number) * 100_000 : null),
+        timestamp: m.brokerTimestampMs ?? r.t
+      } as Record<string, unknown>);
+      const snap = pipe.onSpot({
+        kind: "SPOT",
+        receiveSeq: r.receiveSeq,
+        eventId: `SPOT:${r.receiveSeq}`,
+        receivedAtMs: r.t,
+        brokerTimestampMs: n.brokerTimestampMs,
+        bid: n.bid,
+        ask: n.ask
+      });
+      if (recoveryInFlight) pipe.setRecoveryInFlight(true);
+      tallySpecialists(eligibleAfter, snap.specialists);
+      for (const s of snap.specialists ?? []) {
+        if (!s.selectedCandidate) continue;
+        if (s.derivedDataContaminated) {
+          contaminatedSelectedExcluded += 1;
+          continue;
+        }
+        if (s.setup === "A_MOMENTUM_IGNITION") validDepthSelectedA += 1;
+        else if (s.setup === "B_FAST_BREAKOUT") validDepthSelectedB += 1;
+        else if (s.setup === "C_PULLBACK_REACCEL") validDepthSelectedC += 1;
+      }
+      continue;
+    }
+
+    if (r.eventKind === "DEPTH") {
+      const m = r.market;
+      const n = normalizeCTraderDepthPayload({
+        timestamp: m.brokerTimestampMs ?? r.t,
+        newQuotes: (m.rawNewQuotes as unknown[]) ?? m.newQuotes ?? [],
+        deletedQuotes: m.rawDeletedQuotes ?? m.deletedQuotes ?? []
+      });
+      depthAfter += 1;
+      if (recoveryInFlight) pipe.setRecoveryInFlight(true);
+      const snap = pipe.onDepth({
+        kind: "DEPTH",
+        receiveSeq: r.receiveSeq,
+        eventId: `DEPTH:${r.receiveSeq}`,
+        receivedAtMs: r.t,
+        brokerTimestampMs: n.brokerTimestampMs,
+        newQuotes: n.newQuotes,
+        deletedQuotes: n.deletedQuotes
+      });
+      if (snap.crossed) {
+        crossedAfter += 1;
+        if (crossedStartAfter == null) crossedStartAfter = r.t;
+        if (crossedSinceMs == null) crossedSinceMs = r.t;
+      } else {
+        if (crossedStartAfter != null) {
+          longestAfter = Math.max(longestAfter, r.t - crossedStartAfter);
+          crossedStartAfter = null;
+        }
+        crossedSinceMs = null;
+        if (snap.depthAvailable) {
+          recoveryInFlight = false;
+          pipe.noteValidDepthRestored();
+        }
+      }
+
+      const decision = decideSustainedCrossRecovery({
+        crossed: snap.crossed,
+        crossedSinceMs,
+        nowMs: r.t,
+        recoveryInFlight,
+        lastRecoveryAttemptMs: lastRecoveryMs,
+        thresholdMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_MS,
+        cooldownMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_COOLDOWN_MS
+      });
+      if (decision.action === "TRIGGER_RECOVERY") {
+        sustainedCrossRecoveryCount += 1;
+        lastRecoveryMs = r.t;
+        applyClear(decision.reason, r.t, r.receiveSeq);
+      }
+
+      tallySpecialists(eligibleAfter, snap.specialists);
+      for (const s of snap.specialists ?? []) {
+        if (!s.selectedCandidate) continue;
+        if (s.derivedDataContaminated || snap.depthValidity !== "DEPTH_VALID") {
+          contaminatedSelectedExcluded += 1;
+          continue;
+        }
+        if (s.setup === "A_MOMENTUM_IGNITION") validDepthSelectedA += 1;
+        else if (s.setup === "B_FAST_BREAKOUT") validDepthSelectedB += 1;
+        else if (s.setup === "C_PULLBACK_REACCEL") validDepthSelectedC += 1;
+      }
+    }
+  }
+  if (crossedStartAfter != null) {
+    const lastT = all[all.length - 1]?.t ?? crossedStartAfter;
+    longestAfter = Math.max(longestAfter, lastT - crossedStartAfter);
+  }
+
+  const deleteHitsAfter = pipe.currentDepthStats().deleteHits;
+  const deleteMissesAfter = pipe.currentDepthStats().deleteMisses;
+  const selectedAfter = emptyAbc();
+  selectedAfter.selectedA = eligibleAfter.selectedA;
+  selectedAfter.selectedB = eligibleAfter.selectedB;
+  selectedAfter.selectedC = eligibleAfter.selectedC;
+
+  const materialChange =
+    crossedBefore !== crossedAfter ||
+    longestBefore !== longestAfter ||
+    selectedBefore.selectedA !== selectedAfter.selectedA ||
+    selectedBefore.selectedB !== selectedAfter.selectedB ||
+    selectedBefore.selectedC !== selectedAfter.selectedC ||
+    disconnectResyncCount > 0 ||
+    sustainedCrossRecoveryCount > 0;
+
+  mkdirSync(opts.outDir, { recursive: true });
+  const summary = {
+    runId,
+    marketDataNormalizationVersion: GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+    provenance: "DEPTH_BOOK_CORRECTED_REPLAY_V1",
+    note: "Corrected Depth-book offline replay — raw capture NOT modified. Disconnect clear + sustained-cross recovery applied. Contaminated selected rows excluded from valid-depth counts but not deleted from raw.",
+    recoveryThresholdMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_MS,
+    recoveryCooldownMs: GH_FAST_SUSTAINED_CROSS_RECOVERY_COOLDOWN_MS,
+    recoveryThresholdReason: GH_FAST_DEPTH_RECOVERY_THRESHOLD_REASON,
+    rawSpotCount: rawSpot,
+    rawDepthCount: rawDepth,
+    crossedSnapshotsBefore: crossedBefore,
+    crossedSnapshotsAfter: crossedAfter,
+    crossedPctBefore: depthBefore > 0 ? crossedBefore / depthBefore : null,
+    crossedPctAfter: depthAfter > 0 ? crossedAfter / depthAfter : null,
+    longestCrossedMsBefore: longestBefore,
+    longestCrossedMsAfter: longestAfter,
+    deleteHitsBefore,
+    deleteMissesBefore,
+    deleteHitsAfter,
+    deleteMissesAfter,
+    resyncRecoveryCount: disconnectResyncCount + sustainedCrossRecoveryCount,
+    disconnectResyncCount,
+    sustainedCrossRecoveryCount,
+    eligibleBefore,
+    eligibleAfter,
+    selectedBefore,
+    selectedAfter,
+    validDepthSelectedA,
+    validDepthSelectedB,
+    validDepthSelectedC,
+    contaminatedSelectedExcluded,
+    materialChange,
+    day1Status: "NOT_VALIDATED"
+  };
+  const outPath = join(opts.outDir, "DEPTH_BOOK_CORRECTED_REPLAY_SUMMARY.json");
+  writeFileSync(outPath, JSON.stringify(summary, null, 2));
+
+  return {
+    runId,
+    rawSpotCount: rawSpot,
+    rawDepthCount: rawDepth,
+    crossedSnapshotsBefore: crossedBefore,
+    crossedSnapshotsAfter: crossedAfter,
+    crossedPctBefore: depthBefore > 0 ? crossedBefore / depthBefore : null,
+    crossedPctAfter: depthAfter > 0 ? crossedAfter / depthAfter : null,
+    longestCrossedMsBefore: longestBefore,
+    longestCrossedMsAfter: longestAfter,
+    deleteHitsBefore,
+    deleteMissesBefore,
+    deleteHitsAfter,
+    deleteMissesAfter,
+    resyncRecoveryCount: disconnectResyncCount + sustainedCrossRecoveryCount,
+    disconnectResyncCount,
+    sustainedCrossRecoveryCount,
+    eligibleBefore,
+    eligibleAfter,
+    selectedBefore,
+    selectedAfter,
+    validDepthSelectedA,
+    validDepthSelectedB,
+    validDepthSelectedC,
+    contaminatedSelectedExcluded,
     materialChange,
     outPath
   };

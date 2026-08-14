@@ -3,6 +3,7 @@ import { redactSecrets } from "./microCTraderProtocol";
 
 export type MicroLogEvent =
   | "MICRO_DEPTH_SUBSCRIBED"
+  | "MICRO_DEPTH_RESUBSCRIBED"
   | "MICRO_CTRADER_CONNECTING"
   | "MICRO_CTRADER_CONNECTED"
   | "MICRO_CTRADER_DISCONNECTED"

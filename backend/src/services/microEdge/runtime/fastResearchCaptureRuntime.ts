@@ -137,7 +137,17 @@ export class GoldHunterFastResearchCaptureRuntime {
       campaignMode,
       scopeVerified: false,
       campaignStartUtcDate: this.opts.campaignStartUtcDate,
-      onCaptureDateObserved: this.opts.onCaptureDateObserved
+      onCaptureDateObserved: this.opts.onCaptureDateObserved,
+      onDepthRecoveryRequest: async (reason) => {
+        // Prefer Depth-only resubscribe; fall back is no-op if session gone.
+        if (!this.session) return;
+        try {
+          await this.session.resubscribeDepthForRecovery();
+        } catch {
+          /* best-effort — ordered RESYNC_MARKER already cleared local book */
+        }
+        void reason;
+      }
     });
     this.bridge.setConnectionState("DISCONNECTED", "runtime_start");
     this.startHeartbeat();
@@ -279,6 +289,14 @@ export class GoldHunterFastResearchCaptureRuntime {
         reconnectCount: 0,
         resyncCount: 0,
         bookCrossedCount: 0,
+        depthEventCount: 0,
+        depthCrossedEventCount: 0,
+        depthCrossedPct: null,
+        currentDepthState: "DEPTH_UNAVAILABLE",
+        crossedDurationMs: 0,
+        depthResyncCount: 0,
+        deleteHits: 0,
+        deleteMisses: 0,
         candidateA: 0,
         candidateB: 0,
         candidateC: 0,

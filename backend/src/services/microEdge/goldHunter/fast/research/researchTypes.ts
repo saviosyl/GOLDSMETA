@@ -29,6 +29,18 @@ export type ResearchResubscribeState =
   | "COMPLETE"
   | "FAILED";
 
+/**
+ * Depth semantic validity for a specialist evaluation row.
+ * Non-DEPTH_VALID rows are DERIVED-DATA CONTAMINATED for offline qualification
+ * but raw capture rows are never deleted.
+ */
+export type ResearchDepthValidity =
+  | "DEPTH_VALID"
+  | "DEPTH_UNAVAILABLE"
+  | "DEPTH_CROSSED"
+  | "DEPTH_STALE"
+  | "RESYNC_RECOVERY";
+
 /** A/B/C observation — never implies order submission. */
 export type ResearchSpecialistObservation = {
   setup: GhFastSetupId;
@@ -38,6 +50,13 @@ export type ResearchSpecialistObservation = {
   failedConditions: string[];
   /** Research-only best-of flag; does NOT create an order. */
   selectedCandidate: boolean;
+  /** Depth book semantic validity at evaluation time. */
+  depthValidity: ResearchDepthValidity;
+  /**
+   * True when depthValidity !== DEPTH_VALID.
+   * Contaminated rows remain in raw capture; do not treat as clean evidence.
+   */
+  derivedDataContaminated: boolean;
 };
 
 /**
@@ -348,7 +367,25 @@ export type ResearchCaptureHealth = {
   feedGapCount: number;
   reconnectCount: number;
   resyncCount: number;
+  /**
+   * @deprecated Prefer depthCrossedEventCount — historically inflated by SPOT
+   * ticks observing an already-crossed book. Equals depthCrossedEventCount.
+   */
   bookCrossedCount: number;
+  /** DEPTH events only. */
+  depthEventCount: number;
+  /** DEPTH events whose book snapshot was crossed (not SPOT observations). */
+  depthCrossedEventCount: number;
+  /** depthCrossedEventCount / depthEventCount, or null if no depth events. */
+  depthCrossedPct: number | null;
+  /** Current Depth semantic state for the monitor. */
+  currentDepthState: ResearchDepthValidity;
+  /** Continuous crossed duration while currently crossed; else 0. */
+  crossedDurationMs: number;
+  /** Sustained-cross / disconnect ordered resync recoveries. */
+  depthResyncCount: number;
+  deleteHits: number;
+  deleteMisses: number;
   /**
    * @deprecated Prefer eligibleA/B/C — historically mixed observations.
    * Now equals eligibleA/B/C (true candidates only).

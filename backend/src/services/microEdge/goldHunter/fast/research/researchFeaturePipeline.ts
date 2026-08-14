@@ -6,7 +6,12 @@
  * ProtoOASpotEvent bid/ask are optional; maintain last-known sides and only
  * call FastFeatureEngine when both sides are known.
  */
-import { InMemoryDepthBook } from "../depthBook";
+import { InMemoryDepthBook, type DepthBookStats } from "../depthBook";
+import {
+  classifyResearchDepthValidity,
+  isDerivedDataContaminated,
+  type ResearchDepthValidity
+} from "../depthRecovery";
 import { FastFeatureEngine } from "../features";
 import { evaluateSetupsDetailed } from "../setups";
 import { frozenGhFastSoakConfig } from "../frozenConfig";
@@ -26,6 +31,9 @@ export type ResearchPipelineSnapshot = {
   depthAvailable: boolean;
   crossed: boolean;
   bookGeneration: number;
+  depthValidity: ResearchDepthValidity;
+  derivedDataContaminated: boolean;
+  depthStats: DepthBookStats;
   /** Last-known Spot sides after this event (engine-parity). */
   lastSpotBid: number | null;
   lastSpotAsk: number | null;
@@ -43,9 +51,17 @@ export class ResearchFeaturePipeline {
   private spotBidOnlyEvents = 0;
   private spotAskOnlyEvents = 0;
   private spotTwoSidedEvents = 0;
+  private recoveryInFlight = false;
+  private depthFreshnessMs = 2000;
 
-  constructor(opts?: { _executionAdapterMustBeUndefined?: unknown }) {
+  constructor(opts?: {
+    _executionAdapterMustBeUndefined?: unknown;
+    depthFreshnessMs?: number;
+  }) {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
+    if (opts?.depthFreshnessMs != null && opts.depthFreshnessMs > 0) {
+      this.depthFreshnessMs = opts.depthFreshnessMs;
+    }
   }
 
   clearForResync(): void {
@@ -55,6 +71,28 @@ export class ResearchFeaturePipeline {
     this.lastBid = null;
     this.lastAsk = null;
     this.lastFeatureSpot = null;
+    this.recoveryInFlight = true;
+  }
+
+  /** Mark recovery complete once a fresh non-crossed two-sided book exists. */
+  noteValidDepthRestored(): void {
+    this.recoveryInFlight = false;
+  }
+
+  setRecoveryInFlight(v: boolean): void {
+    this.recoveryInFlight = v;
+  }
+
+  isRecoveryInFlight(): boolean {
+    return this.recoveryInFlight;
+  }
+
+  depthBook(): InMemoryDepthBook {
+    return this.depth;
+  }
+
+  currentDepthStats(): DepthBookStats {
+    return this.depth.stats(this.cfg.depthTopN);
   }
 
   spotPartialStats(): {
@@ -101,6 +139,18 @@ export class ResearchFeaturePipeline {
 
   private snapshot(nowMs: number): ResearchPipelineSnapshot {
     const depthStats = this.depth.stats(this.cfg.depthTopN);
+    if (depthStats.available && !depthStats.crossed && this.recoveryInFlight) {
+      this.recoveryInFlight = false;
+    }
+    const depthAgeMs =
+      depthStats.lastUpdateMs != null ? nowMs - depthStats.lastUpdateMs : null;
+    const depthValidity = classifyResearchDepthValidity({
+      stats: depthStats,
+      recoveryInFlight: this.recoveryInFlight,
+      depthAgeMs,
+      depthFreshnessMs: this.depthFreshnessMs
+    });
+    const derivedDataContaminated = isDerivedDataContaminated(depthValidity);
     const feat = this.features.snapshot(nowMs, depthStats);
     const bestBid = depthStats.bestBid ?? this.lastBid;
     const bestAsk = depthStats.bestAsk ?? this.lastAsk;
@@ -117,6 +167,9 @@ export class ResearchFeaturePipeline {
         depthAvailable: depthStats.available,
         crossed: depthStats.crossed,
         bookGeneration: depthStats.bookGeneration,
+        depthValidity,
+        derivedDataContaminated,
+        depthStats,
         lastSpotBid: this.lastBid,
         lastSpotAsk: this.lastAsk,
         lastFeatureSpot: this.lastFeatureSpot
@@ -131,7 +184,9 @@ export class ResearchFeaturePipeline {
         candidateSide: s.candidateSide,
         rawQuality: s.rawQuality,
         failedConditions: s.failedConditions,
-        selectedCandidate: s.selected
+        selectedCandidate: s.selected,
+        depthValidity,
+        derivedDataContaminated
       }));
 
     const features: ResearchFeatureTelemetry = {
@@ -174,6 +229,9 @@ export class ResearchFeaturePipeline {
       depthAvailable: depthStats.available,
       crossed: depthStats.crossed,
       bookGeneration: depthStats.bookGeneration,
+      depthValidity,
+      derivedDataContaminated,
+      depthStats,
       lastSpotBid: this.lastBid,
       lastSpotAsk: this.lastAsk,
       lastFeatureSpot: this.lastFeatureSpot

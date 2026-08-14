@@ -62,7 +62,9 @@ function selected(
     candidateSide: side,
     rawQuality: 0.7,
     failedConditions: [],
-    selectedCandidate: true
+    selectedCandidate: true,
+    depthValidity: "DEPTH_VALID",
+    derivedDataContaminated: false
   };
 }
 
