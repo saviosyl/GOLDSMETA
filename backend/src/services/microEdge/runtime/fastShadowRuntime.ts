@@ -21,7 +21,6 @@ import {
 import type { MicroCTraderCredentials } from "../marketData/microCTraderAuth";
 import { MicroLiveMarketSession } from "../marketData/liveSession";
 import {
-  createMicroMarketDataStore,
   MemoryMicroMarketDataStore,
   type MicroMarketDataStore
 } from "../marketData/marketDataStore";
@@ -31,7 +30,6 @@ import {
   refreshVaultTokensIfNeeded
 } from "../marketData/oauthService";
 import { createMicroTokenVault } from "../marketData/tokenVault";
-import { isDeployedMicroRuntime } from "../marketData/storageMode";
 import {
   GoldHunterFastLiveBridge,
   getFrozenGhFastIdentity,
@@ -134,23 +132,22 @@ export class GoldHunterFastShadowRuntime {
   private healthServer: http.Server | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private replayTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private startedAtMs = 0;
   private lastReplay: FastShadowSoakHealth["replayParity"] = null;
   private readonly replayEveryMs: number;
+  /** Spot/depth older than this triggers reconnect (ops only — not strategy). */
+  private readonly staleReconnectMs: number;
 
   constructor(private readonly opts: FastShadowRuntimeOptions = {}) {
-    // Prefer isolated memory market store for FAST so we do not contend with
-    // the main Micro collector Firestore write path unless explicitly shared.
-    this.store =
-      opts.store ??
-      (isDeployedMicroRuntime()
-        ? createMicroMarketDataStore()
-        : new MemoryMicroMarketDataStore());
+    // Always isolate FAST from the shared Micro collector Firestore write path.
+    this.store = opts.store ?? new MemoryMicroMarketDataStore();
     this.nowMs = opts.nowMs ?? (() => Date.now());
     this.collectDir =
       opts.collectDir ??
       join(process.cwd(), ".gold-hunter-data", "fast-soak", this.frozen.configSha256.slice(0, 12));
     this.replayEveryMs = opts.replayVerifyEveryMs ?? 15 * 60_000;
+    this.staleReconnectMs = Number(process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ?? 20_000);
     void createMicroTokenVault();
   }
 
@@ -174,6 +171,7 @@ export class GoldHunterFastShadowRuntime {
     this.startedAtMs = this.nowMs();
     await this.connectOnce();
     this.startReplayLoop();
+    this.startStaleWatchdog();
     if (this.opts.healthPort != null) {
       await this.listenHealth(this.opts.healthPort);
     }
@@ -270,6 +268,34 @@ export class GoldHunterFastShadowRuntime {
     this.replayTimer = setInterval(() => {
       void this.runReplayCheck();
     }, this.replayEveryMs);
+    // First verify shortly after chunks begin flushing.
+    setTimeout(() => void this.runReplayCheck(), 60_000);
+  }
+
+  private startStaleWatchdog(): void {
+    this.watchdogTimer = setInterval(() => {
+      void this.checkStaleAndReconnect();
+    }, 5_000);
+  }
+
+  private async checkStaleAndReconnect(): Promise<void> {
+    if (this.stopping || !this.running) return;
+    const fast = this.bridge?.health() ?? null;
+    const spotAge = fast?.spotAgeMs;
+    const depthAge = fast?.depthAgeMs;
+    const stale =
+      spotAge == null ||
+      depthAge == null ||
+      spotAge > this.staleReconnectMs ||
+      depthAge > this.staleReconnectMs;
+    if (!stale) return;
+    microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
+      code: "FAST_FEED_STALE_RECONNECT",
+      spotAgeMs: spotAge,
+      depthAgeMs: depthAge,
+      thresholdMs: this.staleReconnectMs
+    });
+    this.scheduleReconnect();
   }
 
   async runReplayCheck(): Promise<void> {
@@ -360,10 +386,17 @@ export class GoldHunterFastShadowRuntime {
       sessionTradeCounts[k] = v.length;
     }
 
+    const spotAgeOk =
+      fast?.spotAgeMs != null && fast.spotAgeMs <= this.staleReconnectMs;
+    const depthAgeOk =
+      fast?.depthAgeMs != null && fast.depthAgeMs <= this.staleReconnectMs;
+    // FAST soak health is feed-freshness based (not M1/heartbeat collector health).
     const healthy =
-      Boolean(state?.liveConnected) &&
       Boolean(fast?.fastAttached) &&
+      Boolean(state?.spotSubscribed) &&
       Boolean(state?.depthSubscribed) &&
+      spotAgeOk &&
+      depthAgeOk &&
       (this.lastReplay?.code !== "LIVE_REPLAY_DIVERGENCE");
 
     const allStats =
@@ -494,6 +527,7 @@ export class GoldHunterFastShadowRuntime {
     this.running = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.replayTimer) clearInterval(this.replayTimer);
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
     this.bridge?.detach();
     this.bridge?.markStale();
     try {
