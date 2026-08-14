@@ -28,7 +28,8 @@ export function ohlcFromTrendbar(bar: TrendbarCandle): FastOhlc {
     high: bar.high,
     low: bar.low,
     close: bar.close,
-    volume: bar.volume
+    volume: bar.volume,
+    time: bar.time
   };
 }
 

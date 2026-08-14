@@ -6,16 +6,14 @@ export const EXT_VAH = 4374.4;
 export const EXT_VAL = 4342.6;
 export const EXT_TYPICAL_TR = 5.0;
 
-export function buildCompletedM1Series(args: {
-  nowMs: number;
+export function buildCompletedM1SeriesAt(args: {
+  lastTime: number;
   last: { open: number; high: number; low: number; close: number; volume?: number };
   count?: number;
   typicalTr?: number;
 }): TrendbarCandle[] {
   const count = args.count ?? 20;
   const typicalTr = args.typicalTr ?? EXT_TYPICAL_TR;
-  const nowSec = Math.floor(args.nowMs / 1000);
-  const lastTime = nowSec - 90;
   const bars: TrendbarCandle[] = [];
   let close = args.last.close - typicalTr * (count - 1) * 0.15;
   for (let i = 0; i < count - 1; i++) {
@@ -24,7 +22,7 @@ export function buildCompletedM1Series(args: {
     const low = open - typicalTr * 0.35;
     const next = open + typicalTr * 0.15;
     bars.push({
-      time: lastTime - (count - 1 - i) * 60,
+      time: args.lastTime - (count - 1 - i) * 60,
       open,
       high,
       low,
@@ -34,7 +32,7 @@ export function buildCompletedM1Series(args: {
     close = next;
   }
   bars.push({
-    time: lastTime,
+    time: args.lastTime,
     open: args.last.open,
     high: args.last.high,
     low: args.last.low,
@@ -42,6 +40,52 @@ export function buildCompletedM1Series(args: {
     volume: args.last.volume ?? 1400
   });
   return bars;
+}
+
+export function buildCompletedM1Series(args: {
+  nowMs: number;
+  last: { open: number; high: number; low: number; close: number; volume?: number };
+  count?: number;
+  typicalTr?: number;
+}): TrendbarCandle[] {
+  const nowSec = Math.floor(args.nowMs / 1000);
+  return buildCompletedM1SeriesAt({
+    lastTime: nowSec - 90,
+    last: args.last,
+    count: args.count,
+    typicalTr: args.typicalTr
+  });
+}
+
+/**
+ * Friday (or pre-break) completed M1s, then a large timestamp gap, then
+ * post-reopen completed M1s. The weekend / maintenance price gap must not
+ * become one ordinary true range.
+ */
+export function buildSessionGapM1Series(args: {
+  fridayLastTime: number;
+  sundayLastTime: number;
+  fridayCount: number;
+  sundayCount: number;
+  fridayLast: { open: number; high: number; low: number; close: number; volume?: number };
+  sundayLast: { open: number; high: number; low: number; close: number; volume?: number };
+  fridayTypicalTr?: number;
+  sundayTypicalTr?: number;
+}): TrendbarCandle[] {
+  return [
+    ...buildCompletedM1SeriesAt({
+      lastTime: args.fridayLastTime,
+      last: args.fridayLast,
+      count: args.fridayCount,
+      typicalTr: args.fridayTypicalTr ?? EXT_TYPICAL_TR
+    }),
+    ...buildCompletedM1SeriesAt({
+      lastTime: args.sundayLastTime,
+      last: args.sundayLast,
+      count: args.sundayCount,
+      typicalTr: args.sundayTypicalTr ?? EXT_TYPICAL_TR
+    })
+  ];
 }
 
 /** Keep the last two completed bars exact; pad earlier bars for rolling ATR. */

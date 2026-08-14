@@ -17,7 +17,9 @@ import { setupIdentityKey, shouldBlockFlap } from "./stateMachine";
 import {
   FAST_AUTOTRADE_STRATEGY_ID,
   FAST_EXTENSION_ATR_MIN_SAMPLES,
-  FAST_EXTENSION_ATR_PERIOD
+  FAST_EXTENSION_ATR_PERIOD,
+  FAST_EXTENSION_M1_GAP_TOLERANCE_SECONDS,
+  FAST_EXTENSION_M1_PERIOD_SECONDS
 } from "./types";
 import type {
   FastAction,
@@ -179,6 +181,9 @@ function emptyExtensionDiagnostic(
 /**
  * True range of a completed bar vs the previous completed close.
  * TR = max(high-low, |high-prevClose|, |low-prevClose|)
+ *
+ * Callers must only pass a previous close from a genuinely consecutive
+ * trading M1. Session-gap pairs are filtered by contiguousExtensionTrueRanges.
  */
 export function completedBarTrueRange(
   bar: FastOhlc,
@@ -193,13 +198,59 @@ export function completedBarTrueRange(
   );
 }
 
+function barOpenTimeSec(bar: FastOhlc): number | null {
+  return present(bar.time) ? bar.time : null;
+}
+
+/**
+ * Consecutive completed M1s are ~60s apart (bar-open unix seconds).
+ * Missing timestamps are not consecutive — a weekend/session gap must not
+ * silently become one ordinary true range.
+ */
+export function isConsecutiveCompletedM1(
+  current: FastOhlc,
+  previous: FastOhlc
+): boolean {
+  const currentTime = barOpenTimeSec(current);
+  const previousTime = barOpenTimeSec(previous);
+  if (currentTime == null || previousTime == null) return false;
+  const delta = currentTime - previousTime;
+  return (
+    Math.abs(delta - FAST_EXTENSION_M1_PERIOD_SECONDS) <=
+    FAST_EXTENSION_M1_GAP_TOLERANCE_SECONDS
+  );
+}
+
+/**
+ * True ranges of the last contiguous completed-M1 run only.
+ * A large timestamp gap (weekend, daily broker maintenance, missing bar)
+ * does not produce a TR against the pre-gap close; the sequence resets.
+ */
+export function contiguousExtensionTrueRanges(history: FastOhlc[]): number[] {
+  let run: number[] = [];
+  for (let i = 1; i < history.length; i++) {
+    const previous = history[i - 1]!;
+    const current = history[i]!;
+    if (!isConsecutiveCompletedM1(current, previous)) {
+      run = [];
+      continue;
+    }
+    const prevClose = previous.close;
+    if (!present(prevClose)) continue;
+    const tr = completedBarTrueRange(current, prevClose);
+    if (tr != null && tr > 0) run.push(tr);
+  }
+  return run;
+}
+
 /**
  * Rolling local ATR from completed M1 history only.
  * Never uses the currently-forming candle (caller must exclude it).
  * Never falls back to a single current M1 high-low.
+ * Never treats a session-gap bar vs the pre-gap close as one M1 TR.
  *
- * ≥14 true ranges → M1_ATR14 (SMA of the last 14 TRs)
- * 5–13 true ranges → M1_ROLLING_TR (SMA of available TRs)
+ * ≥14 contiguous true ranges → M1_ATR14 (SMA of the last 14 TRs)
+ * 5–13 contiguous true ranges → M1_ROLLING_TR (SMA of available TRs)
  * otherwise → unavailable.
  * Decision ATR is allowed only when requireCompletedM1 is not set
  * (legacy / unit-test path). Production never falls back to Decision ATR.
@@ -210,13 +261,7 @@ export function estimateExtensionAtr(input: FastAutoTradeInput): {
 } {
   const history = input.m1History;
   if (history && history.length >= 2) {
-    const trs: number[] = [];
-    for (let i = 1; i < history.length; i++) {
-      const prevClose = history[i - 1]!.close;
-      if (!present(prevClose)) continue;
-      const tr = completedBarTrueRange(history[i]!, prevClose);
-      if (tr != null && tr > 0) trs.push(tr);
-    }
+    const trs = contiguousExtensionTrueRanges(history);
     if (trs.length >= FAST_EXTENSION_ATR_PERIOD) {
       const window = trs.slice(-FAST_EXTENSION_ATR_PERIOD);
       const atr = window.reduce((s, v) => s + v, 0) / window.length;
