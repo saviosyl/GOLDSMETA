@@ -55,7 +55,6 @@ import {
   GH_FAST_RESEARCH_STOP_DISCONNECT_TIMEOUT_MS,
   connectFailureBackoffMs,
   raceUntilDeadline,
-  remainingBudgetMs,
   ResearchReconnectTimeoutError,
   ResearchReconnectObsoleteError,
   type ResearchReconnectPhase
