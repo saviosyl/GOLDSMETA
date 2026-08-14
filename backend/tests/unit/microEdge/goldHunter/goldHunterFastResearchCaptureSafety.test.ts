@@ -1,5 +1,5 @@
 /**
- * GOLD_HUNTER FAST research capture — safety + telemetry tests.
+ * GOLD_HUNTER FAST research capture — safety + data-integrity tests.
  * Observation only. Asserts absence of trading / execution paths.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
@@ -17,15 +17,21 @@ import {
   assertNoExecutionAdapterArgument,
   isForbiddenExecutionAdapterName
 } from "../../../../src/services/microEdge/goldHunter/fast/research/nullExecutionGuard";
+import { evaluateCaptureHealth } from "../../../../src/services/microEdge/goldHunter/fast/research/researchCaptureHealth";
 import { ResearchFeaturePipeline } from "../../../../src/services/microEdge/goldHunter/fast/research/researchFeaturePipeline";
 import { ResearchIngestBridge } from "../../../../src/services/microEdge/goldHunter/fast/research/researchIngestBridge";
+import { ResearchDurableSink } from "../../../../src/services/microEdge/goldHunter/fast/research/researchDurableSink";
+import { verifyResearchScopeFromBrokerAuth } from "../../../../src/services/microEdge/goldHunter/fast/research/researchScopeVerify";
 import {
   GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX,
   GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
   GH_FAST_RESEARCH_MODE,
-  GH_FAST_RESEARCH_SCHEMA_VERSION
+  GH_FAST_RESEARCH_SCHEMA_VERSION,
+  type ResearchCaptureRecord
 } from "../../../../src/services/microEdge/goldHunter/fast/research/researchTypes";
 import { GoldHunterFastResearchCaptureRuntime } from "../../../../src/services/microEdge/runtime/fastResearchCaptureRuntime";
+import type { MicroLiveMarketSession } from "../../../../src/services/microEdge/marketData/liveSession";
+import type { MicroLiveSessionState } from "../../../../src/services/microEdge/marketData/liveSession";
 
 async function readGzJsonl(dir: string): Promise<unknown[]> {
   const files = readdirSync(dir)
@@ -41,6 +47,86 @@ async function readGzJsonl(dir: string): Promise<unknown[]> {
     }
   }
   return rows;
+}
+
+function baseHealthInput(
+  overrides: Partial<Parameters<typeof evaluateCaptureHealth>[0]> = {}
+) {
+  return {
+    processHealthy: true,
+    connectionState: "CONNECTED" as const,
+    spotSubscribed: true,
+    depthSubscribed: true,
+    spotAgeMs: 100,
+    depthAgeMs: 100,
+    freshnessLimitMs: 20_000,
+    eventsDropped: 0,
+    persistenceDroppedRows: 0,
+    persistenceDroppedChunks: 0,
+    writeErrors: 0,
+    uploadErrors: 0,
+    durableMode: "LOCAL_BUFFER_ONLY" as const,
+    campaignMode: false,
+    scopeVerified: true,
+    fatalPersistenceError: false,
+    healthWarning: null,
+    heartbeatsPersisted: 1,
+    sessionTransitionsPersisted: 1,
+    ...overrides
+  };
+}
+
+function fakeRecord(seq: number): ResearchCaptureRecord {
+  return {
+    schemaVersion: GH_FAST_RESEARCH_SCHEMA_VERSION,
+    mode: GH_FAST_RESEARCH_MODE,
+    t: Date.now(),
+    runId: "r",
+    datasetId: "d",
+    receiveSeq: seq,
+    eventKind: "HEARTBEAT",
+    transport: {
+      rawCallbackArrivalMs: Date.now(),
+      bridgeEnqueueMs: Date.now(),
+      processStartMs: Date.now(),
+      enqueueToProcessLatencyMs: 0
+    },
+    subscription: {
+      spotSubscribed: true,
+      depthSubscribed: true,
+      connectionState: "CONNECTED",
+      disconnectTs: null,
+      reconnectStartTs: null,
+      reconnectFinishTs: null,
+      resubscribeState: "IDLE",
+      reconnectReason: null
+    },
+    queueDepthAtProcess: 0,
+    eventLoopLagMs: 0,
+    market: {
+      kind: "HEARTBEAT",
+      heartbeatTs: Date.now(),
+      eventLoopLagMs: 0,
+      connectionState: "CONNECTED",
+      spotSubscribed: true,
+      depthSubscribed: true,
+      spotAgeMs: 0,
+      depthAgeMs: 0,
+      queueDepth: 0,
+      persistenceQueueDepth: 0
+    },
+    features: null,
+    specialists: null,
+    safety: {
+      brokerRequests: 0,
+      brokerOrders: 0,
+      shadowOrders: 0,
+      openShadowTrade: false,
+      executionAdapter: "NONE",
+      mutationSurface: "NONE",
+      permissionScope: "SCOPE_VIEW"
+    }
+  };
 }
 
 describe("research null execution guard", () => {
@@ -79,6 +165,111 @@ describe("research null execution guard", () => {
       true
     );
     expect(isForbiddenExecutionAdapterName("ResearchNone")).toBe(false);
+  });
+});
+
+describe("captureHealthy evaluation", () => {
+  it("DISCONNECTED => captureHealthy=false (even if processHealthy)", () => {
+    const h = evaluateCaptureHealth(
+      baseHealthInput({ connectionState: "DISCONNECTED" })
+    );
+    expect(h.processHealthy).toBe(true);
+    expect(h.captureHealthy).toBe(false);
+    expect(h.serviceHealthy).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("connection_not_connected");
+  });
+
+  it("Spot missing => false", () => {
+    const h = evaluateCaptureHealth(baseHealthInput({ spotSubscribed: false }));
+    expect(h.captureHealthy).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("spot_not_subscribed");
+  });
+
+  it("Depth missing => false", () => {
+    const h = evaluateCaptureHealth(baseHealthInput({ depthSubscribed: false }));
+    expect(h.captureHealthy).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("depth_not_subscribed");
+  });
+
+  it("stale Spot => false", () => {
+    const h = evaluateCaptureHealth(
+      baseHealthInput({ spotAgeMs: 25_000, freshnessLimitMs: 20_000 })
+    );
+    expect(h.captureHealthy).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("spot_stale");
+  });
+
+  it("stale Depth => false", () => {
+    const h = evaluateCaptureHealth(
+      baseHealthInput({ depthAgeMs: 25_000, freshnessLimitMs: 20_000 })
+    );
+    expect(h.captureHealthy).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("depth_stale");
+  });
+
+  it("healthy fresh Spot+Depth => true", () => {
+    const h = evaluateCaptureHealth(baseHealthInput());
+    expect(h.captureHealthy).toBe(true);
+    expect(h.serviceHealthy).toBe(true);
+    expect(h.dataIntegrityStatus).toBe("CLEAN");
+  });
+
+  it("GCS-required campaign health rejects LOCAL_BUFFER_ONLY", () => {
+    const h = evaluateCaptureHealth(
+      baseHealthInput({
+        campaignMode: true,
+        durableMode: "LOCAL_BUFFER_ONLY",
+        healthWarning: "CAMPAIGN_GCS_REQUIRED"
+      })
+    );
+    expect(h.captureHealthy).toBe(true);
+    expect(h.campaignValid).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("gcs_required_for_campaign");
+  });
+
+  it("campaignValid requires GCS + heartbeats + session telemetry", () => {
+    const ok = evaluateCaptureHealth(
+      baseHealthInput({
+        campaignMode: true,
+        durableMode: "GCS",
+        heartbeatsPersisted: 3,
+        sessionTransitionsPersisted: 2
+      })
+    );
+    expect(ok.campaignValid).toBe(true);
+    const noHb = evaluateCaptureHealth(
+      baseHealthInput({
+        campaignMode: true,
+        durableMode: "GCS",
+        heartbeatsPersisted: 0,
+        sessionTransitionsPersisted: 2
+      })
+    );
+    expect(noHb.campaignValid).toBe(false);
+  });
+});
+
+describe("actual SCOPE_VIEW authorization verification", () => {
+  it("accepts broker auth response resolving to SCOPE_VIEW", () => {
+    const proof = verifyResearchScopeFromBrokerAuth({
+      permissionScope: "SCOPE_VIEW"
+    });
+    expect(proof.ok).toBe(true);
+    expect(proof.permissionScope).toBe("SCOPE_VIEW");
+    expect(proof.source).toBe("broker_authorization_response");
+  });
+
+  it("rejects SCOPE_TRADE", () => {
+    expect(() =>
+      verifyResearchScopeFromBrokerAuth({ permissionScope: "SCOPE_TRADE" })
+    ).toThrow(/SCOPE_TRADE/);
+  });
+
+  it("rejects UNKNOWN / missing scope", () => {
+    expect(() => verifyResearchScopeFromBrokerAuth({})).toThrow(/UNKNOWN/);
+    expect(() =>
+      verifyResearchScopeFromBrokerAuth({ permissionScope: "WEIRD" })
+    ).toThrow(/UNKNOWN/);
   });
 });
 
@@ -237,6 +428,158 @@ describe("research ingest bridge + durable sink", () => {
     expect(h.eventLoopLagP95).not.toBeNull();
     expect(h.mode).toBe("RESEARCH_CAPTURE_ONLY");
   });
+
+  it("bridge DISCONNECTED reports captureHealthy=false", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 100,
+      runId: "test_disc_health",
+      scopeVerified: true
+    });
+    // default DISCONNECTED — process up, capture not healthy
+    const h0 = bridge.health();
+    expect(h0.processHealthy).toBe(true);
+    expect(h0.connectionState).toBe("DISCONNECTED");
+    expect(h0.captureHealthy).toBe(false);
+    expect(h0.serviceHealthy).toBe(false);
+
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    const t = Date.now();
+    bridge.ingestSpot({ bid: 1, ask: 1.1 }, t);
+    bridge.ingestDepth({ newQuotes: [] }, t);
+    await bridge.drainForTests();
+    const h1 = bridge.health(t + 50);
+    expect(h1.captureHealthy).toBe(true);
+    expect(h1.dataIntegrityStatus).toBe("CLEAN");
+  });
+
+  it("stale Spot/Depth ages make captureHealthy false", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 100,
+      runId: "test_stale",
+      freshnessLimitMs: 500,
+      scopeVerified: true
+    });
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    const t0 = Date.now();
+    bridge.ingestSpot({ bid: 1, ask: 1.1 }, t0);
+    bridge.ingestDepth({ newQuotes: [] }, t0);
+    await bridge.drainForTests();
+    expect(bridge.health(t0 + 50).captureHealthy).toBe(true);
+    expect(bridge.health(t0 + 2000).captureHealthy).toBe(false);
+    expect(bridge.health(t0 + 2000).captureUnhealthyReasons).toEqual(
+      expect.arrayContaining(["spot_stale", "depth_stale"])
+    );
+  });
+
+  it("persists HEARTBEAT rows with no market events", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 5,
+      runId: "test_heartbeat_only"
+    });
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    const t0 = Date.now();
+    for (let i = 0; i < 5; i++) {
+      bridge.persistHeartbeat(2 + i, t0 + i * 1000);
+    }
+    await bridge.drainForTests();
+    const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
+    const heartbeats = rows.filter((r) => r.eventKind === "HEARTBEAT");
+    expect(heartbeats.length).toBeGreaterThanOrEqual(5);
+    const m = heartbeats[0]!.market as Record<string, unknown>;
+    expect(m).toMatchObject({
+      kind: "HEARTBEAT",
+      connectionState: "CONNECTED",
+      spotSubscribed: true,
+      depthSubscribed: true
+    });
+    expect(m).toHaveProperty("heartbeatTs");
+    expect(m).toHaveProperty("eventLoopLagMs");
+    expect(m).toHaveProperty("spotAgeMs");
+    expect(m).toHaveProperty("depthAgeMs");
+    expect(m).toHaveProperty("queueDepth");
+    expect(m).toHaveProperty("persistenceQueueDepth");
+    expect(bridge.health().heartbeatsPersisted).toBeGreaterThanOrEqual(5);
+    expect(bridge.health().eventsReceived).toBe(0);
+  });
+
+  it("records disconnect/reconnect and subscription loss/recovery timeline", async () => {
+    const bridge = new ResearchIngestBridge({
+      localDir: dir,
+      chunkRows: 50,
+      runId: "test_lifecycle"
+    });
+    bridge.setConnectionState("CONNECTED", "boot");
+    bridge.setSubscriptionFlags(true, true);
+    bridge.noteDisconnect("transport_lost", Date.now());
+    bridge.noteReconnectStart(Date.now(), "retry");
+    bridge.noteReconnectFinish(Date.now());
+    bridge.noteSubscriptionChange(false, false, "subscription_lost");
+    bridge.noteSubscriptionChange(true, true, "subscription_restored");
+    await bridge.drainForTests();
+    const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
+    const transitions = rows.filter((r) => r.eventKind === "SESSION_TRANSITION");
+    expect(transitions.length).toBeGreaterThanOrEqual(4);
+    const blob = JSON.stringify(transitions);
+    expect(blob).toMatch(/DISCONNECTED/);
+    expect(blob).toMatch(/RECONNECTING/);
+    expect(blob).toMatch(/CONNECTED/);
+    expect(blob).toMatch(/subscription/);
+    expect(bridge.health().sessionTransitionsPersisted).toBeGreaterThan(0);
+    expect(bridge.health().reconnectCount).toBe(1);
+  });
+
+  it("persistence backpressure fails loudly — no silent chunk loss", async () => {
+    const sink = new ResearchDurableSink({
+      runId: "bp",
+      datasetId: "bp",
+      researchConfigSha: "sha",
+      captureStart: new Date().toISOString(),
+      localDir: dir,
+      chunkRows: 1,
+      maxQueue: 1
+    });
+    // Flood synchronously so pending fills before drain finishes writing.
+    for (let i = 0; i < 40; i++) {
+      sink.enqueue(fakeRecord(i + 1));
+    }
+    await sink.flushAndWait(5000);
+    const st = sink.stats();
+    expect(st.fatalPersistenceError).toBe(true);
+    expect(st.accepting).toBe(false);
+    expect(st.persistenceDroppedChunks).toBeGreaterThan(0);
+    expect(st.persistenceDroppedRows).toBeGreaterThan(0);
+    expect(st.healthWarning).toMatch(/DATA_INTEGRITY_FAILED/);
+    // Already-written evidence retained
+    expect(st.chunksWritten).toBeGreaterThan(0);
+    expect(existsSync(join(dir, "chunk-00000.ndjson.gz"))).toBe(true);
+
+    const bridge = new ResearchIngestBridge({
+      localDir: join(dir, "bridge"),
+      chunkRows: 1,
+      maxQueue: 1,
+      runId: "bp_bridge",
+      scopeVerified: true
+    });
+    bridge.setConnectionState("CONNECTED");
+    bridge.setSubscriptionFlags(true, true);
+    // Force integrity fail via sink backpressure path through bridge
+    const sink2 = bridge.getSink();
+    for (let i = 0; i < 40; i++) {
+      sink2.enqueue(fakeRecord(100 + i));
+    }
+    await sink2.flushAndWait(5000);
+    const h = bridge.health();
+    expect(h.dataIntegrityStatus).toBe("FAILED");
+    expect(h.captureHealthy).toBe(false);
+    expect(h.persistenceDroppedChunks).toBeGreaterThan(0);
+    expect(h.persistenceDroppedRows).toBeGreaterThan(0);
+  });
 });
 
 describe("research capture runtime", () => {
@@ -248,9 +591,12 @@ describe("research capture runtime", () => {
     rt = new GoldHunterFastResearchCaptureRuntime({
       collectDir: dir,
       permissionScope: "SCOPE_VIEW",
-      heartbeatEveryMs: 50
+      // Slow default so drainForTests is not starved by continuous HEARTBEATs.
+      heartbeatEveryMs: 60_000,
+      sessionPollEveryMs: 40
     });
     await rt.start();
+    rt.markScopeVerifiedForTests();
   });
 
   afterEach(async () => {
@@ -271,6 +617,178 @@ describe("research capture runtime", () => {
     expect(() => rt.submitExecutionAdapter({ name: "ShadowExecutionAdapter" })).toThrow(
       /RESEARCH_CAPTURE_REFUSING_EXECUTION_ADAPTER/
     );
+  });
+
+  it("attachSession verifies actual broker SCOPE_VIEW and rejects TRADE/UNKNOWN", async () => {
+    const state: MicroLiveSessionState = {
+      connectionState: "LIVE_CONNECTED",
+      liveConnected: true,
+      credentialsConfigured: true,
+      applicationAuthenticated: true,
+      accountAuthenticated: true,
+      configuredAccountAuthorized: true,
+      authorizedAccountCount: 1,
+      symbol: null,
+      spotSubscribed: true,
+      spotSubscribedAt: null,
+      lastSpotEventAt: null,
+      depthSubscribed: true,
+      depthSubscribedAt: null,
+      lastDepthEventAt: null,
+      lastQuote: null,
+      lastQuoteTs: null,
+      quoteAgeMs: null,
+      lastCompletedM1Ts: null,
+      lastCompletedM5Ts: null,
+      lastCompletedM15Ts: null,
+      lastConnectedAt: new Date().toISOString(),
+      lastDisconnectedAt: null,
+      reconnectAttempts: 0,
+      lastErrorCode: null,
+      healthReasons: [],
+      collectorHeartbeatAt: null,
+      m1CompletedEvents: 0,
+      subscribeSpotsCallCount: 0,
+      subscribeDepthCallCount: 0
+    };
+    const session = {
+      onSpotForFast: () => () => undefined,
+      onDepthForFast: () => () => undefined,
+      getState: async () => state
+    } as unknown as MicroLiveMarketSession;
+
+    expect(() =>
+      rt.attachSession(session, { permissionScope: "SCOPE_TRADE" })
+    ).toThrow(/SCOPE_TRADE/);
+    expect(() => rt.attachSession(session, {})).toThrow(/UNKNOWN/);
+
+    rt.attachSession(session, { permissionScope: "SCOPE_VIEW" });
+    expect(rt.isScopeVerified()).toBe(true);
+    expect(rt.health().scopeVerified).toBe(true);
+  });
+
+  it("wires session disconnect/reconnect into bridge transitions", async () => {
+    let state: MicroLiveSessionState = {
+      connectionState: "LIVE_CONNECTED",
+      liveConnected: true,
+      credentialsConfigured: true,
+      applicationAuthenticated: true,
+      accountAuthenticated: true,
+      configuredAccountAuthorized: true,
+      authorizedAccountCount: 1,
+      symbol: null,
+      spotSubscribed: true,
+      spotSubscribedAt: null,
+      lastSpotEventAt: null,
+      depthSubscribed: true,
+      depthSubscribedAt: null,
+      lastDepthEventAt: null,
+      lastQuote: null,
+      lastQuoteTs: null,
+      quoteAgeMs: null,
+      lastCompletedM1Ts: null,
+      lastCompletedM5Ts: null,
+      lastCompletedM15Ts: null,
+      lastConnectedAt: new Date().toISOString(),
+      lastDisconnectedAt: null,
+      reconnectAttempts: 0,
+      lastErrorCode: null,
+      healthReasons: [],
+      collectorHeartbeatAt: null,
+      m1CompletedEvents: 0,
+      subscribeSpotsCallCount: 0,
+      subscribeDepthCallCount: 0
+    };
+    const session = {
+      onSpotForFast: () => () => undefined,
+      onDepthForFast: () => () => undefined,
+      getState: async () => state
+    } as unknown as MicroLiveMarketSession;
+
+    rt.attachSession(session, { permissionScope: "SCOPE_VIEW" });
+    await new Promise((r) => setTimeout(r, 60));
+
+    state = {
+      ...state,
+      liveConnected: false,
+      connectionState: "LIVE_NOT_CONNECTED",
+      lastDisconnectedAt: new Date().toISOString(),
+      lastErrorCode: "TEST_DISCONNECT",
+      spotSubscribed: false,
+      depthSubscribed: false,
+      reconnectAttempts: 0
+    };
+    await new Promise((r) => setTimeout(r, 80));
+
+    state = {
+      ...state,
+      reconnectAttempts: 1,
+      connectionState: "LIVE_NOT_CONNECTED",
+      lastErrorCode: "TEST_RECONNECTING"
+    };
+    await new Promise((r) => setTimeout(r, 80));
+
+    state = {
+      ...state,
+      liveConnected: true,
+      connectionState: "LIVE_CONNECTED",
+      lastConnectedAt: new Date().toISOString(),
+      spotSubscribed: true,
+      depthSubscribed: true,
+      lastErrorCode: null
+    };
+    await new Promise((r) => setTimeout(r, 80));
+
+    await rt.drainForTests();
+    const rows = (await readGzJsonl(dir)) as Array<Record<string, unknown>>;
+    const transitions = rows.filter((r) => r.eventKind === "SESSION_TRANSITION");
+    expect(transitions.length).toBeGreaterThan(0);
+    const blob = JSON.stringify(transitions);
+    expect(blob).toMatch(/DISCONNECTED|RECONNECTING|CONNECTED|subscription/);
+  }, 15_000);
+
+  it("runtime heartbeat persists without market events", async () => {
+    await rt.stop();
+    const hbRt = new GoldHunterFastResearchCaptureRuntime({
+      collectDir: join(dir, "hb"),
+      permissionScope: "SCOPE_VIEW",
+      heartbeatEveryMs: 40,
+      sessionPollEveryMs: 60_000
+    });
+    await hbRt.start();
+    hbRt.markScopeVerifiedForTests();
+    await new Promise((r) => setTimeout(r, 180));
+    await hbRt.drainForTests();
+    const rows = (await readGzJsonl(join(dir, "hb"))) as Array<
+      Record<string, unknown>
+    >;
+    const heartbeats = rows.filter((r) => r.eventKind === "HEARTBEAT");
+    expect(heartbeats.length).toBeGreaterThanOrEqual(2);
+    expect(hbRt.health().heartbeatsPersisted).toBeGreaterThanOrEqual(2);
+    expect(hbRt.health().brokerOrders).toBe(0);
+    expect(hbRt.health().shadowOrders).toBe(0);
+    await hbRt.stop();
+  }, 15_000);
+
+  it("campaignMode without GCS is not campaignValid", async () => {
+    await rt.stop();
+    const campaignRt = new GoldHunterFastResearchCaptureRuntime({
+      collectDir: join(dir, "campaign"),
+      permissionScope: "SCOPE_VIEW",
+      campaignMode: true,
+      gcsBucket: null,
+      heartbeatEveryMs: 10_000
+    });
+    await campaignRt.start();
+    campaignRt.markScopeVerifiedForTests();
+    campaignRt.ingestSpotForTests({ bid: 1, ask: 1.1 });
+    campaignRt.ingestDepthForTests({ newQuotes: [] });
+    await campaignRt.drainForTests();
+    const h = campaignRt.health();
+    expect(h.durableMode).toBe("LOCAL_BUFFER_ONLY");
+    expect(h.campaignValid).toBe(false);
+    expect(h.captureUnhealthyReasons).toContain("gcs_required_for_campaign");
+    await campaignRt.stop();
   });
 
   it("emits no ENTER/EXIT across a large synthetic stream", async () => {

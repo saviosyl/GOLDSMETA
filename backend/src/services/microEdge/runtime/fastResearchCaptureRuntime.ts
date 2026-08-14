@@ -16,15 +16,22 @@ import {
   MICRO_SHADOW_ONLY
 } from "../config";
 import type { MicroLiveMarketSession } from "../marketData/liveSession";
+import type { MicroLiveSessionState } from "../marketData/liveSession";
 import {
   assertResearchViewOnlyScope,
   assertNoExecutionAdapterArgument,
   refuseExecutionAdapter,
   researchSafetyIdentity
 } from "../goldHunter/fast/research/nullExecutionGuard";
+import { verifyResearchScopeFromBrokerAuth } from "../goldHunter/fast/research/researchScopeVerify";
 import { ResearchIngestBridge } from "../goldHunter/fast/research/researchIngestBridge";
-import type { ResearchCaptureHealth } from "../goldHunter/fast/research/researchTypes";
-import type { MicroPermissionScope } from "../marketData/accountSelection";
+import {
+  GH_FAST_RESEARCH_FRESHNESS_MS,
+  GH_FAST_RESEARCH_SCHEMA_VERSION,
+  type ResearchCaptureHealth,
+  type ResearchConnectionState
+} from "../goldHunter/fast/research/researchTypes";
+import { evaluateCaptureHealth } from "../goldHunter/fast/research/researchCaptureHealth";
 
 export type FastResearchCaptureRuntimeOptions = {
   healthPort?: number;
@@ -33,12 +40,19 @@ export type FastResearchCaptureRuntimeOptions = {
   runId?: string;
   datasetId?: string;
   runtimeSha?: string | null;
-  /** Required to be SCOPE_VIEW — fail closed otherwise. */
-  permissionScope?: MicroPermissionScope;
+  /**
+   * Optional hint only — attach/campaign must verify broker auth response.
+   * Construction still fail-closes if explicitly SCOPE_TRADE/UNKNOWN.
+   */
+  permissionScope?: "SCOPE_VIEW" | "SCOPE_TRADE" | "UNKNOWN";
   /** Must remain undefined — any value is refused. */
   executionAdapter?: never;
   nowMs?: () => number;
   heartbeatEveryMs?: number;
+  sessionPollEveryMs?: number;
+  freshnessLimitMs?: number;
+  /** Campaign mode requires GCS durable persistence for campaignValid. */
+  campaignMode?: boolean;
 };
 
 export class GoldHunterFastResearchCaptureRuntime {
@@ -55,13 +69,20 @@ export class GoldHunterFastResearchCaptureRuntime {
   private unsubs: Array<() => void> = [];
   private healthServer: http.Server | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionPollTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private scopeVerified = false;
+  private lastSessionSnap: {
+    liveConnected: boolean;
+    spotSubscribed: boolean;
+    depthSubscribed: boolean;
+    connectionMapped: ResearchConnectionState;
+  } | null = null;
   private readonly nowMs: () => number;
   private readonly opts: FastResearchCaptureRuntimeOptions;
   private lastHeartbeatAt = 0;
 
   constructor(opts: FastResearchCaptureRuntimeOptions = {}) {
-    // Refuse any accidental adapter injection (typed as never, runtime check too).
     assertNoExecutionAdapterArgument(
       (opts as { executionAdapter?: unknown }).executionAdapter
     );
@@ -71,17 +92,14 @@ export class GoldHunterFastResearchCaptureRuntime {
     if (!MICRO_SHADOW_ONLY) {
       throw new Error("RESEARCH_CAPTURE_REFUSING_NON_SHADOW_ENV");
     }
-    const scope = opts.permissionScope ?? "SCOPE_VIEW";
-    assertResearchViewOnlyScope(scope);
+    if (opts.permissionScope != null) {
+      assertResearchViewOnlyScope(opts.permissionScope);
+    }
     researchSafetyIdentity();
     this.opts = opts;
     this.nowMs = opts.nowMs ?? (() => Date.now());
   }
 
-  /**
-   * Explicitly forbidden API — research runtime has no execution path.
-   * Present so misuse fails loudly rather than silently no-oping.
-   */
   submitExecutionAdapter(adapter: unknown): never {
     return refuseExecutionAdapter(adapter);
   }
@@ -90,41 +108,59 @@ export class GoldHunterFastResearchCaptureRuntime {
     return this.bridge;
   }
 
+  isScopeVerified(): boolean {
+    return this.scopeVerified;
+  }
+
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
     const collectDir =
       this.opts.collectDir ??
       join(process.cwd(), ".gold-hunter-data", "fast-research-capture");
+    const campaignMode = this.opts.campaignMode === true;
+    if (campaignMode && !(this.opts.gcsBucket ?? "").trim()) {
+      // Still allow construction for tests that set campaignMode with explicit
+      // null bucket to assert campaignValid=false; warn via sink.
+    }
     this.bridge = new ResearchIngestBridge({
       runId: this.opts.runId,
       datasetId: this.opts.datasetId,
       localDir: collectDir,
       gcsBucket: this.opts.gcsBucket ?? null,
-      runtimeSha: this.opts.runtimeSha ?? null
+      runtimeSha: this.opts.runtimeSha ?? null,
+      freshnessLimitMs:
+        this.opts.freshnessLimitMs ?? GH_FAST_RESEARCH_FRESHNESS_MS,
+      campaignMode,
+      scopeVerified: false
     });
-    this.bridge.setConnectionState("DISCONNECTED");
+    this.bridge.setConnectionState("DISCONNECTED", "runtime_start");
     this.startHeartbeat();
+    this.startSessionPoll();
     if (this.opts.healthPort != null) {
       await this.startHealthServer(this.opts.healthPort);
     }
   }
 
   /**
-   * Attach read-only Spot/Depth listeners. Session must already be SCOPE_VIEW.
-   * Does not create trades.
+   * Attach read-only Spot/Depth listeners.
+   * Requires actual broker authorization payload resolving to SCOPE_VIEW.
    */
   attachSession(
     session: MicroLiveMarketSession,
-    permissionScope: MicroPermissionScope
+    brokerAuthorizationResponse: unknown
   ): void {
-    assertResearchViewOnlyScope(permissionScope);
+    const verified = verifyResearchScopeFromBrokerAuth(
+      brokerAuthorizationResponse
+    );
+    this.scopeVerified = true;
     if (!this.bridge) {
       throw new Error("RESEARCH_CAPTURE_NOT_STARTED");
     }
+    this.bridge.setScopeVerified(true);
     this.detachSession();
     this.session = session;
-    this.bridge.setConnectionState("CONNECTED");
+    this.bridge.setConnectionState("CONNECTED", "session_attached");
     this.unsubs.push(
       session.onSpotForFast((payload) => {
         this.bridge?.ingestSpot(payload, this.nowMs());
@@ -135,52 +171,96 @@ export class GoldHunterFastResearchCaptureRuntime {
         this.bridge?.ingestDepth(payload, this.nowMs());
       })
     );
-    void session.getState().then((st) => {
-      this.bridge?.setSubscriptionFlags(
-        Boolean(st.spotSubscribed),
-        Boolean(st.depthSubscribed)
-      );
-    });
+    void this.syncSessionState("attach");
+    void verified;
+  }
+
+  /**
+   * Test helper: mark SCOPE_VIEW verified without broker payload
+   * (unit tests only — campaign attach must use attachSession).
+   */
+  markScopeVerifiedForTests(): void {
+    this.scopeVerified = true;
+    this.bridge?.setScopeVerified(true);
   }
 
   detachSession(): void {
     for (const u of this.unsubs) u();
     this.unsubs = [];
+    if (this.session) {
+      this.bridge?.noteDisconnect("session_detached");
+    }
     this.session = null;
-    this.bridge?.setConnectionState("DISCONNECTED");
-    this.bridge?.setSubscriptionFlags(false, false);
+    this.lastSessionSnap = null;
   }
 
-  /** Test / offline inject path — no live session required. */
   ingestSpotForTests(payload: Record<string, unknown>): void {
     if (!this.bridge) throw new Error("RESEARCH_CAPTURE_NOT_STARTED");
-    this.bridge.setConnectionState("CONNECTED");
+    this.bridge.setConnectionState("CONNECTED", "test_inject");
     this.bridge.setSubscriptionFlags(true, true);
     this.bridge.ingestSpot(payload, this.nowMs());
   }
 
   ingestDepthForTests(payload: Record<string, unknown>): void {
     if (!this.bridge) throw new Error("RESEARCH_CAPTURE_NOT_STARTED");
-    this.bridge.setConnectionState("CONNECTED");
+    this.bridge.setConnectionState("CONNECTED", "test_inject");
     this.bridge.setSubscriptionFlags(true, true);
     this.bridge.ingestDepth(payload, this.nowMs());
   }
 
   async drainForTests(): Promise<void> {
+    // Pause timers so OrderedEventQueue.drain can reach idle.
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.sessionPollTimer) {
+      clearInterval(this.sessionPollTimer);
+      this.sessionPollTimer = null;
+    }
     await this.bridge?.drainForTests();
+    if (this.running) {
+      this.startHeartbeat();
+      this.startSessionPoll();
+    }
   }
 
   health(): ResearchCaptureHealth {
     if (!this.bridge) {
       const identity = researchSafetyIdentity();
-      return {
-        mode: "RESEARCH_CAPTURE_ONLY",
-        service: "gold-hunter-fast-research-capture",
-        serviceHealthy: false,
+      const evaluated = evaluateCaptureHealth({
+        processHealthy: false,
+        connectionState: "DISCONNECTED",
         spotSubscribed: false,
         depthSubscribed: false,
         spotAgeMs: null,
         depthAgeMs: null,
+        eventsDropped: 0,
+        persistenceDroppedRows: 0,
+        persistenceDroppedChunks: 0,
+        writeErrors: 0,
+        uploadErrors: 0,
+        durableMode: "LOCAL_BUFFER_ONLY",
+        campaignMode: this.opts.campaignMode === true,
+        scopeVerified: false,
+        fatalPersistenceError: false,
+        healthWarning: "NOT_STARTED"
+      });
+      return {
+        mode: "RESEARCH_CAPTURE_ONLY",
+        service: "gold-hunter-fast-research-capture",
+        processHealthy: evaluated.processHealthy,
+        captureHealthy: evaluated.captureHealthy,
+        serviceHealthy: evaluated.serviceHealthy,
+        dataIntegrityStatus: evaluated.dataIntegrityStatus,
+        campaignValid: evaluated.campaignValid,
+        scopeVerified: false,
+        spotSubscribed: false,
+        depthSubscribed: false,
+        spotAgeMs: null,
+        depthAgeMs: null,
+        freshnessLimitMs:
+          this.opts.freshnessLimitMs ?? GH_FAST_RESEARCH_FRESHNESS_MS,
         eventsReceived: 0,
         eventsDropped: 0,
         queueDepth: 0,
@@ -201,7 +281,7 @@ export class GoldHunterFastResearchCaptureRuntime {
         captureDurationMs: 0,
         runId: "not_started",
         datasetId: "not_started",
-        schemaVersion: "gh-fast-research-capture-v1.0.0",
+        schemaVersion: GH_FAST_RESEARCH_SCHEMA_VERSION,
         researchConfigSha: "",
         runtimeSha: null,
         brokerRequests: identity.brokerRequests,
@@ -214,7 +294,17 @@ export class GoldHunterFastResearchCaptureRuntime {
         connectionState: "DISCONNECTED",
         storagePrefix: "gold-hunter-fast/research-capture",
         durableMode: "LOCAL_BUFFER_ONLY",
+        persistenceQueueDepth: 0,
+        persistenceDroppedChunks: 0,
+        persistenceDroppedRows: 0,
+        chunksWritten: 0,
+        chunksUploaded: 0,
+        writeErrors: 0,
+        uploadErrors: 0,
         healthWarning: "NOT_STARTED",
+        captureUnhealthyReasons: evaluated.captureUnhealthyReasons,
+        heartbeatsPersisted: 0,
+        sessionTransitionsPersisted: 0,
         disclaimer:
           "RESEARCH CAPTURE ONLY — no trading, no shadow orders, no broker orders"
       };
@@ -227,6 +317,10 @@ export class GoldHunterFastResearchCaptureRuntime {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+    if (this.sessionPollTimer) {
+      clearInterval(this.sessionPollTimer);
+      this.sessionPollTimer = null;
     }
     this.detachSession();
     if (this.bridge) {
@@ -243,6 +337,55 @@ export class GoldHunterFastResearchCaptureRuntime {
     this.healthServer = null;
   }
 
+  private mapSessionConnection(
+    st: MicroLiveSessionState
+  ): ResearchConnectionState {
+    if (st.liveConnected) return "CONNECTED";
+    if (st.reconnectAttempts > 0 && st.lastDisconnectedAt) return "RECONNECTING";
+    if (st.connectionState === "RECONNECTING") return "RECONNECTING";
+    return "DISCONNECTED";
+  }
+
+  private async syncSessionState(reason: string): Promise<void> {
+    if (!this.session || !this.bridge) return;
+    const st = await this.session.getState();
+    const mapped = this.mapSessionConnection(st);
+    const prev = this.lastSessionSnap;
+
+    if (!st.liveConnected && prev?.liveConnected) {
+      this.bridge.noteDisconnect(
+        st.lastErrorCode ?? reason ?? "session_disconnected"
+      );
+    } else if (
+      !st.liveConnected &&
+      st.reconnectAttempts > 0 &&
+      prev &&
+      prev.connectionMapped !== "RECONNECTING"
+    ) {
+      this.bridge.noteReconnectStart(
+        this.nowMs(),
+        st.lastErrorCode ?? "session_reconnecting"
+      );
+    } else if (st.liveConnected && prev && !prev.liveConnected) {
+      this.bridge.noteReconnectFinish(this.nowMs());
+    } else if (st.liveConnected && mapped !== this.bridge.health().connectionState) {
+      this.bridge.setConnectionState(mapped, reason);
+    }
+
+    this.bridge.noteSubscriptionChange(
+      Boolean(st.spotSubscribed),
+      Boolean(st.depthSubscribed),
+      reason
+    );
+
+    this.lastSessionSnap = {
+      liveConnected: st.liveConnected,
+      spotSubscribed: st.spotSubscribed,
+      depthSubscribed: st.depthSubscribed,
+      connectionMapped: mapped
+    };
+  }
+
   private startHeartbeat(): void {
     const every = this.opts.heartbeatEveryMs ?? 1000;
     this.lastHeartbeatAt = this.nowMs();
@@ -250,12 +393,22 @@ export class GoldHunterFastResearchCaptureRuntime {
       const now = this.nowMs();
       const expected = this.lastHeartbeatAt + every;
       const lag = Math.max(0, now - expected);
-      this.bridge?.recordHeartbeatLag(lag);
+      // Persist independent HEARTBEAT rows even with zero market events.
+      this.bridge?.persistHeartbeat(lag, now);
       this.lastHeartbeatAt = now;
     }, every);
-    // Do not keep process alive solely for heartbeat in tests.
     if (typeof this.heartbeatTimer.unref === "function") {
       this.heartbeatTimer.unref();
+    }
+  }
+
+  private startSessionPoll(): void {
+    const every = this.opts.sessionPollEveryMs ?? 1000;
+    this.sessionPollTimer = setInterval(() => {
+      void this.syncSessionState("session_poll");
+    }, every);
+    if (typeof this.sessionPollTimer.unref === "function") {
+      this.sessionPollTimer.unref();
     }
   }
 

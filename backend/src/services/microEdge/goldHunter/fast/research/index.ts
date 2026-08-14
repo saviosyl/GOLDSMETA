@@ -4,6 +4,8 @@
  */
 export * from "./researchTypes";
 export * from "./nullExecutionGuard";
+export * from "./researchCaptureHealth";
+export * from "./researchScopeVerify";
 export * from "./researchFeaturePipeline";
 export * from "./researchDurableSink";
 export * from "./researchCollector";

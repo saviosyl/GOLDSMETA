@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "gh-fast-research-capture-v1.0.0",
+  "mode": "RESEARCH_CAPTURE_ONLY",
+  "eventKind": "HEARTBEAT",
+  "receiveSeq": 42,
+  "t": 1723632001000,
+  "market": {
+    "kind": "HEARTBEAT",
+    "heartbeatTs": 1723632001000,
+    "eventLoopLagMs": 3,
+    "connectionState": "CONNECTED",
+    "spotSubscribed": true,
+    "depthSubscribed": true,
+    "spotAgeMs": 850,
+    "depthAgeMs": 900,
+    "queueDepth": 0,
+    "persistenceQueueDepth": 0
+  },
+  "features": null,
+  "specialists": null,
+  "safety": {
+    "brokerRequests": 0,
+    "brokerOrders": 0,
+    "shadowOrders": 0,
+    "openShadowTrade": false,
+    "executionAdapter": "NONE",
+    "mutationSurface": "NONE",
+    "permissionScope": "SCOPE_VIEW"
+  },
+  "note": "Persisted ~1Hz even when Spot/Depth are silent — distinguishes feed silence from event-loop stall."
+}

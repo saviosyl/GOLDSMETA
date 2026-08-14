@@ -14,6 +14,7 @@ import {
   researchSafetyIdentity
 } from "./nullExecutionGuard";
 import {
+  GH_FAST_RESEARCH_FRESHNESS_MS,
   GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
   GH_FAST_RESEARCH_MODE,
   GH_FAST_RESEARCH_SCHEMA_VERSION,
@@ -25,9 +26,10 @@ import {
   type ResearchStatusUiDesign,
   type ResearchSubscriptionState
 } from "./researchTypes";
+import { evaluateCaptureHealth } from "./researchCaptureHealth";
 
 type QueuedIngress = {
-  kind: "SPOT" | "DEPTH" | "RESYNC_MARKER" | "HEARTBEAT";
+  kind: "SPOT" | "DEPTH" | "RESYNC_MARKER" | "HEARTBEAT" | "SESSION_TRANSITION";
   receiveSeq: number;
   rawCallbackArrivalMs: number;
   bridgeEnqueueMs: number;
@@ -84,6 +86,11 @@ export class ResearchIngestBridge {
   private reconnectReason: string | null = null;
   private lastEventLoopLagMs: number | null = null;
   private readonly gapMs: number;
+  private readonly freshnessLimitMs: number;
+  private readonly campaignMode: boolean;
+  private scopeVerified = false;
+  private heartbeatsPersisted = 0;
+  private sessionTransitions = 0;
 
   constructor(opts?: {
     runId?: string;
@@ -91,8 +98,12 @@ export class ResearchIngestBridge {
     localDir?: string;
     gcsBucket?: string | null;
     chunkRows?: number;
+    maxQueue?: number;
     runtimeSha?: string | null;
     gapMs?: number;
+    freshnessLimitMs?: number;
+    campaignMode?: boolean;
+    scopeVerified?: boolean;
     _executionAdapterMustBeUndefined?: unknown;
   }) {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
@@ -104,6 +115,9 @@ export class ResearchIngestBridge {
     this.captureStartMs = Date.now();
     this.captureStartIso = new Date(this.captureStartMs).toISOString();
     this.gapMs = opts?.gapMs ?? 2000;
+    this.freshnessLimitMs = opts?.freshnessLimitMs ?? GH_FAST_RESEARCH_FRESHNESS_MS;
+    this.campaignMode = opts?.campaignMode === true;
+    this.scopeVerified = opts?.scopeVerified === true;
     this.sink = new ResearchDurableSink({
       runId: this.runId,
       datasetId: this.datasetId,
@@ -112,12 +126,22 @@ export class ResearchIngestBridge {
       captureStart: this.captureStartIso,
       localDir: opts?.localDir,
       gcsBucket: opts?.gcsBucket,
-      chunkRows: opts?.chunkRows
+      chunkRows: opts?.chunkRows,
+      maxQueue: opts?.maxQueue,
+      campaignMode: this.campaignMode
     });
     this.collector = new ResearchEventCollector(this.sink);
     this.queue.setHandler(async (item) => {
       await this.processOrdered(item.payload, item.enqueuedAtMs);
     });
+  }
+
+  setScopeVerified(verified: boolean): void {
+    this.scopeVerified = verified;
+  }
+
+  isScopeVerified(): boolean {
+    return this.scopeVerified;
   }
 
   getRunId(): string {
@@ -133,33 +157,50 @@ export class ResearchIngestBridge {
   }
 
   setSubscriptionFlags(spot: boolean, depth: boolean): void {
-    this.spotSubscribed = spot;
-    this.depthSubscribed = depth;
+    this.noteSubscriptionChange(spot, depth, "subscription_flags_set");
   }
 
-  setConnectionState(state: ResearchConnectionState): void {
+  setConnectionState(state: ResearchConnectionState, reason: string | null = null): void {
+    if (state === this.connectionState) return;
+    const from = this.connectionState;
     this.connectionState = state;
+    this.persistSessionTransition(from, state, reason);
   }
 
   noteDisconnect(reason: string, ts = Date.now()): void {
     this.disconnectTs = ts;
-    this.connectionState = "DISCONNECTED";
     this.reconnectReason = reason;
     this.spotSubscribed = false;
     this.depthSubscribed = false;
+    this.setConnectionState("DISCONNECTED", reason);
   }
 
-  noteReconnectStart(ts = Date.now()): void {
+  noteReconnectStart(ts = Date.now(), reason: string | null = null): void {
     this.reconnectStartTs = ts;
     this.reconnectCount += 1;
-    this.connectionState = "RECONNECTING";
     this.resubscribeState = "PENDING";
+    this.setConnectionState("RECONNECTING", reason ?? this.reconnectReason);
   }
 
   noteReconnectFinish(ts = Date.now()): void {
     this.reconnectFinishTs = ts;
-    this.connectionState = "CONNECTED";
     this.resubscribeState = "COMPLETE";
+    this.setConnectionState("CONNECTED", "reconnect_complete");
+  }
+
+  noteSubscriptionChange(spot: boolean, depth: boolean, reason: string | null = null): void {
+    const prevSpot = this.spotSubscribed;
+    const prevDepth = this.depthSubscribed;
+    this.spotSubscribed = spot;
+    this.depthSubscribed = depth;
+    if (prevSpot !== spot || prevDepth !== depth) {
+      this.persistSessionTransition(
+        this.connectionState,
+        this.connectionState,
+        reason ??
+          `subscription spot ${prevSpot}->${spot} depth ${prevDepth}->${depth}`
+      );
+    }
   }
 
   /**
@@ -181,7 +222,11 @@ export class ResearchIngestBridge {
     });
   }
 
-  recordHeartbeatLag(lagMs: number): void {
+  /**
+   * Persist an independent HEARTBEAT row (even with zero market events).
+   * Distinguishes feed silence from event-loop/process stall.
+   */
+  persistHeartbeat(lagMs: number, ts = Date.now()): void {
     this.lastEventLoopLagMs = lagMs;
     this.lagLat.record({
       marketEventReceivedMs: 0,
@@ -189,6 +234,42 @@ export class ResearchIngestBridge {
       decisionProducedMs: lagMs,
       shadowOrderProducedMs: null,
       eventToDecisionMs: lagMs
+    });
+    const receiveSeq = this.nextSeq();
+    this.queue.enqueue(receiveSeq, {
+      kind: "HEARTBEAT",
+      receiveSeq,
+      rawCallbackArrivalMs: ts,
+      bridgeEnqueueMs: Math.max(Date.now(), ts),
+      payload: { eventLoopLagMs: lagMs, heartbeatTs: ts }
+    });
+  }
+
+  /** @deprecated use persistHeartbeat — kept for call-site compatibility */
+  recordHeartbeatLag(lagMs: number): void {
+    this.persistHeartbeat(lagMs);
+  }
+
+  private persistSessionTransition(
+    from: ResearchConnectionState,
+    to: ResearchConnectionState,
+    reason: string | null
+  ): void {
+    this.sessionTransitions += 1;
+    const ts = Date.now();
+    const receiveSeq = this.nextSeq();
+    this.queue.enqueue(receiveSeq, {
+      kind: "SESSION_TRANSITION",
+      receiveSeq,
+      rawCallbackArrivalMs: ts,
+      bridgeEnqueueMs: ts,
+      payload: {
+        fromState: from,
+        toState: to,
+        reason,
+        spotSubscribed: this.spotSubscribed,
+        depthSubscribed: this.depthSubscribed
+      }
     });
   }
 
@@ -319,10 +400,47 @@ export class ResearchIngestBridge {
 
     if (item.kind === "HEARTBEAT") {
       const lag = num(item.payload.eventLoopLagMs) ?? 0;
+      const heartbeatTs = num(item.payload.heartbeatTs) ?? item.rawCallbackArrivalMs;
+      const sinkStats = this.sink.stats();
+      const now = item.rawCallbackArrivalMs;
       const rec: ResearchCaptureRecord = {
         ...base,
         eventKind: "HEARTBEAT",
-        market: { kind: "HEARTBEAT", eventLoopLagMs: lag },
+        market: {
+          kind: "HEARTBEAT",
+          heartbeatTs,
+          eventLoopLagMs: lag,
+          connectionState: this.connectionState,
+          spotSubscribed: this.spotSubscribed,
+          depthSubscribed: this.depthSubscribed,
+          spotAgeMs: this.lastSpotAt != null ? now - this.lastSpotAt : null,
+          depthAgeMs: this.lastDepthAt != null ? now - this.lastDepthAt : null,
+          queueDepth: qStats.depth,
+          persistenceQueueDepth: sinkStats.persistenceQueueDepth
+        },
+        features: null,
+        specialists: null
+      };
+      if (this.collector.record(rec)) this.heartbeatsPersisted += 1;
+      return;
+    }
+
+    if (item.kind === "SESSION_TRANSITION") {
+      const rec: ResearchCaptureRecord = {
+        ...base,
+        eventKind: "SESSION_TRANSITION",
+        market: {
+          kind: "SESSION_TRANSITION",
+          fromState: String(item.payload.fromState) as ResearchConnectionState,
+          toState: String(item.payload.toState) as ResearchConnectionState,
+          reason:
+            item.payload.reason == null ? null : String(item.payload.reason),
+          spotSubscribed: Boolean(item.payload.spotSubscribed),
+          depthSubscribed: Boolean(item.payload.depthSubscribed),
+          liveConnected: null,
+          reconnectAttempts: this.reconnectCount,
+          lastErrorCode: this.reconnectReason
+        },
         features: null,
         specialists: null
       };
@@ -425,17 +543,44 @@ export class ResearchIngestBridge {
     const ql = this.queueLat.percentiles();
     const el = this.lagLat.percentiles();
     const identity = researchSafetyIdentity();
+    const spotAgeMs = this.lastSpotAt != null ? nowMs - this.lastSpotAt : null;
+    const depthAgeMs =
+      this.lastDepthAt != null ? nowMs - this.lastDepthAt : null;
+    const evaluated = evaluateCaptureHealth({
+      processHealthy: true,
+      connectionState: this.connectionState,
+      spotSubscribed: this.spotSubscribed,
+      depthSubscribed: this.depthSubscribed,
+      spotAgeMs,
+      depthAgeMs,
+      freshnessLimitMs: this.freshnessLimitMs,
+      eventsDropped: q.dropped,
+      persistenceDroppedRows: sink.persistenceDroppedRows,
+      persistenceDroppedChunks: sink.persistenceDroppedChunks,
+      writeErrors: sink.writeErrors,
+      uploadErrors: sink.uploadErrors,
+      durableMode: sink.durableMode,
+      campaignMode: this.campaignMode,
+      scopeVerified: this.scopeVerified,
+      fatalPersistenceError: sink.fatalPersistenceError,
+      healthWarning: sink.healthWarning,
+      heartbeatsPersisted: this.heartbeatsPersisted,
+      sessionTransitionsPersisted: this.sessionTransitions
+    });
     return {
       mode: GH_FAST_RESEARCH_MODE,
       service: "gold-hunter-fast-research-capture",
-      serviceHealthy:
-        this.connectionState === "CONNECTED" ||
-        this.connectionState === "DISCONNECTED" ||
-        this.eventsReceived > 0,
+      processHealthy: evaluated.processHealthy,
+      captureHealthy: evaluated.captureHealthy,
+      serviceHealthy: evaluated.serviceHealthy,
+      dataIntegrityStatus: evaluated.dataIntegrityStatus,
+      campaignValid: evaluated.campaignValid,
+      scopeVerified: this.scopeVerified,
       spotSubscribed: this.spotSubscribed,
       depthSubscribed: this.depthSubscribed,
-      spotAgeMs: this.lastSpotAt != null ? nowMs - this.lastSpotAt : null,
-      depthAgeMs: this.lastDepthAt != null ? nowMs - this.lastDepthAt : null,
+      spotAgeMs,
+      depthAgeMs,
+      freshnessLimitMs: this.freshnessLimitMs,
       eventsReceived: this.eventsReceived,
       eventsDropped: q.dropped,
       queueDepth: q.depth,
@@ -469,7 +614,17 @@ export class ResearchIngestBridge {
       connectionState: this.connectionState,
       storagePrefix: GH_FAST_RESEARCH_GCS_PREFIX_ROOT,
       durableMode: sink.durableMode,
+      persistenceQueueDepth: sink.persistenceQueueDepth,
+      persistenceDroppedChunks: sink.persistenceDroppedChunks,
+      persistenceDroppedRows: sink.persistenceDroppedRows,
+      chunksWritten: sink.chunksWritten,
+      chunksUploaded: sink.chunksUploaded,
+      writeErrors: sink.writeErrors,
+      uploadErrors: sink.uploadErrors,
       healthWarning: sink.healthWarning,
+      captureUnhealthyReasons: evaluated.captureUnhealthyReasons,
+      heartbeatsPersisted: this.heartbeatsPersisted,
+      sessionTransitionsPersisted: this.sessionTransitions,
       disclaimer:
         "RESEARCH CAPTURE ONLY — no trading, no shadow orders, no broker orders"
     };
@@ -483,9 +638,17 @@ export class ResearchIngestBridge {
     return {
       title: "GOLD_HUNTER FAST",
       subtitle: "RESEARCH CAPTURE — NO TRADING",
-      data: h.connectionState === "CONNECTED" ? "LIVE" : "OFFLINE",
-      spot: h.spotSubscribed ? "LIVE" : "OFFLINE",
-      depth: h.depthSubscribed ? "LIVE" : "OFFLINE",
+      data: h.captureHealthy ? "LIVE" : "OFFLINE",
+      spot:
+        h.spotSubscribed && h.spotAgeMs != null && h.spotAgeMs <= h.freshnessLimitMs
+          ? "LIVE"
+          : "OFFLINE",
+      depth:
+        h.depthSubscribed &&
+        h.depthAgeMs != null &&
+        h.depthAgeMs <= h.freshnessLimitMs
+          ? "LIVE"
+          : "OFFLINE",
       captureDayLabel: `Day ${day}`,
       eventsCaptured: h.eventsReceived,
       feedGaps: h.feedGapCount,
@@ -528,7 +691,16 @@ export class ResearchIngestBridge {
       brokerRequests: 0,
       brokerOrders: 0,
       shadowOrders: 0,
-      mode: GH_FAST_RESEARCH_MODE
+      mode: GH_FAST_RESEARCH_MODE,
+      dataIntegrityStatus: h.dataIntegrityStatus,
+      campaignValid: h.campaignValid,
+      contaminated: !h.campaignValid || h.dataIntegrityStatus !== "CLEAN",
+      persistenceDroppedRows: h.persistenceDroppedRows,
+      persistenceDroppedChunks: h.persistenceDroppedChunks,
+      heartbeatsPersisted: h.heartbeatsPersisted,
+      sessionTransitionsPersisted: h.sessionTransitionsPersisted,
+      durableMode: h.durableMode,
+      scopeVerified: h.scopeVerified
     };
     return this.sink.writeDaySummary(summary);
   }

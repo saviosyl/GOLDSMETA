@@ -15,9 +15,9 @@ export class ResearchEventCollector {
     assertNoExecutionAdapterArgument(opts?._executionAdapterMustBeUndefined);
   }
 
-  record(rec: ResearchCaptureRecord): void {
+  record(rec: ResearchCaptureRecord): boolean {
     this.records += 1;
-    this.sink.enqueue(rec);
+    return this.sink.enqueue(rec);
   }
 
   count(): number {

@@ -68,6 +68,10 @@ export class ResearchDurableSink {
   private chunksUploaded = 0;
   private writeErrors = 0;
   private uploadErrors = 0;
+  private persistenceDroppedChunks = 0;
+  private persistenceDroppedRows = 0;
+  private accepting = true;
+  private fatalPersistenceError = false;
   private healthWarning: string | null = null;
   private readonly chunkRows: number;
   private readonly maxQueue: number;
@@ -79,6 +83,7 @@ export class ResearchDurableSink {
   private readonly localDir: string;
   private readonly gcsBucket: string | null;
   private readonly gcsPrefix: string;
+  private readonly campaignMode: boolean;
   readonly manifests: ResearchChunkManifest[] = [];
 
   constructor(opts: {
@@ -91,6 +96,8 @@ export class ResearchDurableSink {
     maxQueue?: number;
     localDir?: string;
     gcsBucket?: string | null;
+    /** When true, LOCAL_BUFFER_ONLY is not campaign-valid (GCS required). */
+    campaignMode?: boolean;
     _executionAdapterMustBeUndefined?: unknown;
   }) {
     assertNoExecutionAdapterArgument(opts._executionAdapterMustBeUndefined);
@@ -101,6 +108,7 @@ export class ResearchDurableSink {
     this.captureStart = opts.captureStart;
     this.chunkRows = opts.chunkRows ?? 500;
     this.maxQueue = opts.maxQueue ?? 200;
+    this.campaignMode = opts.campaignMode === true;
     this.localDir =
       opts.localDir ??
       join(
@@ -117,7 +125,13 @@ export class ResearchDurableSink {
       process.env.GOLD_HUNTER_FAST_GCS_BUCKET ??
       ""
     ).trim();
-    this.gcsBucket = opts.gcsBucket ?? (envBucket || null);
+    // Explicit null/"" forces LOCAL_BUFFER_ONLY (tests/dev). Undefined → env.
+    if (opts.gcsBucket === undefined) {
+      this.gcsBucket = envBucket || null;
+    } else {
+      const explicit = (opts.gcsBucket ?? "").trim();
+      this.gcsBucket = explicit || null;
+    }
     const date = new Date().toISOString().slice(0, 10);
     this.gcsPrefix = `${GH_FAST_RESEARCH_GCS_PREFIX_ROOT}/${this.runId}/${date}`;
     if (this.gcsPrefix.includes(GH_FAST_RESEARCH_FORBIDDEN_GCS_PREFIX)) {
@@ -126,6 +140,10 @@ export class ResearchDurableSink {
     if (!this.gcsBucket) {
       this.healthWarning =
         "RESEARCH_SINK_LOCAL_ONLY — set GOLD_HUNTER_FAST_RESEARCH_GCS_BUCKET for Cloud Storage";
+      if (this.campaignMode) {
+        this.healthWarning =
+          "CAMPAIGN_GCS_REQUIRED — LOCAL_BUFFER_ONLY is not a valid campaign day";
+      }
     }
   }
 
@@ -145,10 +163,26 @@ export class ResearchDurableSink {
     return this.localDir;
   }
 
-  enqueue(rec: ResearchCaptureRecord): void {
+  enqueue(rec: ResearchCaptureRecord): boolean {
+    if (!this.accepting) {
+      this.persistenceDroppedRows += 1;
+      return false;
+    }
     this.buf.push(rec);
     if (this.buf.length >= this.chunkRows) this.sealChunk();
     void this.drain();
+    return true;
+  }
+
+  /** Mark period DATA_INTEGRITY_FAILED and stop accepting new rows. */
+  failIntegrity(reason: string): void {
+    this.fatalPersistenceError = true;
+    this.accepting = false;
+    this.healthWarning = `DATA_INTEGRITY_FAILED: ${reason}`;
+  }
+
+  isAccepting(): boolean {
+    return this.accepting;
   }
 
   flush(): void {
@@ -186,9 +220,12 @@ export class ResearchDurableSink {
   private sealChunk(): void {
     if (!this.buf.length) return;
     if (this.pending.length >= this.maxQueue) {
-      this.healthWarning = "RESEARCH_PERSISTENCE_QUEUE_BACKPRESSURE";
-      this.pending.shift();
-      this.writeErrors += 1;
+      // NEVER silently discard oldest research chunks.
+      this.failIntegrity("PERSISTENCE_QUEUE_BACKPRESSURE");
+      this.persistenceDroppedChunks += 1;
+      this.persistenceDroppedRows += this.buf.length;
+      this.buf = [];
+      return;
     }
     this.pending.push({ records: this.buf, enqueuedAtMs: Date.now() });
     this.buf = [];
@@ -272,21 +309,29 @@ export class ResearchDurableSink {
       this.chunkIdx += 1;
     } catch {
       this.writeErrors += 1;
-      this.healthWarning = "LOCAL_PERSIST_FAILED";
+      this.persistenceDroppedChunks += 1;
+      this.persistenceDroppedRows += records.length;
+      this.failIntegrity("LOCAL_PERSIST_FAILED");
     }
   }
 
   stats() {
     return {
       queueDepth: this.pending.length + (this.buf.length > 0 ? 1 : 0),
+      persistenceQueueDepth: this.pending.length + (this.buf.length > 0 ? 1 : 0),
       chunksWritten: this.chunksWritten,
       chunksUploaded: this.chunksUploaded,
       writeErrors: this.writeErrors,
       uploadErrors: this.uploadErrors,
+      persistenceDroppedChunks: this.persistenceDroppedChunks,
+      persistenceDroppedRows: this.persistenceDroppedRows,
+      fatalPersistenceError: this.fatalPersistenceError,
+      accepting: this.accepting,
       healthWarning: this.healthWarning,
       durableMode: (this.gcsBucket ? "GCS" : "LOCAL_BUFFER_ONLY") as
         | "GCS"
         | "LOCAL_BUFFER_ONLY",
+      campaignMode: this.campaignMode,
       gcsPrefix: this.gcsPrefix,
       localDir: this.localDir
     };

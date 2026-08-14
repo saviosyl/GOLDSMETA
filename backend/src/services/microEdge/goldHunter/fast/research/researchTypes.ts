@@ -89,6 +89,10 @@ export type ResearchSubscriptionState = {
   reconnectReason: string | null;
 };
 
+export type ResearchDataIntegrityStatus = "CLEAN" | "DEGRADED" | "FAILED";
+
+export const GH_FAST_RESEARCH_FRESHNESS_MS = 20_000;
+
 export type ResearchMarketPayload =
   | {
       kind: "SPOT";
@@ -114,7 +118,26 @@ export type ResearchMarketPayload =
     }
   | {
       kind: "HEARTBEAT";
+      heartbeatTs: number;
       eventLoopLagMs: number;
+      connectionState: ResearchConnectionState;
+      spotSubscribed: boolean;
+      depthSubscribed: boolean;
+      spotAgeMs: number | null;
+      depthAgeMs: number | null;
+      queueDepth: number;
+      persistenceQueueDepth: number;
+    }
+  | {
+      kind: "SESSION_TRANSITION";
+      fromState: ResearchConnectionState;
+      toState: ResearchConnectionState;
+      reason: string | null;
+      spotSubscribed: boolean;
+      depthSubscribed: boolean;
+      liveConnected: boolean | null;
+      reconnectAttempts: number | null;
+      lastErrorCode: string | null;
     };
 
 export type ResearchCaptureRecord = {
@@ -185,16 +208,37 @@ export type ResearchDaySummary = {
   brokerOrders: 0;
   shadowOrders: 0;
   mode: typeof GH_FAST_RESEARCH_MODE;
+  dataIntegrityStatus: ResearchDataIntegrityStatus;
+  campaignValid: boolean;
+  contaminated: boolean;
+  persistenceDroppedRows: number;
+  persistenceDroppedChunks: number;
+  heartbeatsPersisted: number;
+  sessionTransitionsPersisted: number;
+  durableMode: "GCS" | "LOCAL_BUFFER_ONLY";
+  scopeVerified: boolean;
 };
 
 export type ResearchCaptureHealth = {
   mode: typeof GH_FAST_RESEARCH_MODE;
   service: "gold-hunter-fast-research-capture";
+  /** Process is up (runtime constructed / started). */
+  processHealthy: boolean;
+  /**
+   * Capture pipeline is producing valid research data right now.
+   * Requires CONNECTED + both subscriptions + fresh ages + no drops + no fatal persist.
+   */
+  captureHealthy: boolean;
+  /** Backward-compatible alias: same as captureHealthy (never true while disconnected). */
   serviceHealthy: boolean;
+  dataIntegrityStatus: ResearchDataIntegrityStatus;
+  campaignValid: boolean;
+  scopeVerified: boolean;
   spotSubscribed: boolean;
   depthSubscribed: boolean;
   spotAgeMs: number | null;
   depthAgeMs: number | null;
+  freshnessLimitMs: number;
   eventsReceived: number;
   eventsDropped: number;
   queueDepth: number;
@@ -228,7 +272,17 @@ export type ResearchCaptureHealth = {
   connectionState: ResearchConnectionState;
   storagePrefix: typeof GH_FAST_RESEARCH_GCS_PREFIX_ROOT;
   durableMode: "GCS" | "LOCAL_BUFFER_ONLY";
+  persistenceQueueDepth: number;
+  persistenceDroppedChunks: number;
+  persistenceDroppedRows: number;
+  chunksWritten: number;
+  chunksUploaded: number;
+  writeErrors: number;
+  uploadErrors: number;
   healthWarning: string | null;
+  captureUnhealthyReasons: string[];
+  heartbeatsPersisted: number;
+  sessionTransitionsPersisted: number;
   disclaimer: string;
 };
 

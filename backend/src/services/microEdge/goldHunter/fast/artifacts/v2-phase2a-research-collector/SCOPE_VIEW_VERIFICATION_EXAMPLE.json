@@ -1,0 +1,23 @@
+{
+  "path": "verifyResearchScopeFromBrokerAuth(brokerAuthorizationResponse)",
+  "reuse": [
+    "parsePermissionScope",
+    "assertViewOnlyPermissionScope"
+  ],
+  "accepted": {
+    "brokerAuthorizationResponse": { "permissionScope": "SCOPE_VIEW" },
+    "result": {
+      "ok": true,
+      "permissionScope": "SCOPE_VIEW",
+      "rawPermissionScope": "SCOPE_VIEW",
+      "source": "broker_authorization_response"
+    }
+  },
+  "rejected": [
+    { "permissionScope": "SCOPE_TRADE", "error": "RESEARCH_CAPTURE_REFUSING_SCOPE_TRADE" },
+    { "permissionScope": null, "error": "RESEARCH_CAPTURE_REFUSING_UNKNOWN_SCOPE" },
+    { "missing": true, "error": "RESEARCH_CAPTURE_REFUSING_UNKNOWN_SCOPE" }
+  ],
+  "attachApi": "GoldHunterFastResearchCaptureRuntime.attachSession(session, brokerAuthorizationResponse)",
+  "note": "Caller-supplied permissionScope string alone is not trusted for attach/campaign."
+}
