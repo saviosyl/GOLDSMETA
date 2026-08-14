@@ -49,6 +49,15 @@ import {
   staleFeedBackoffMs,
   type ResearchReconnectReason
 } from "../goldHunter/fast/research/researchStaleReconnectPolicy";
+import {
+  GH_FAST_RESEARCH_RECONNECT_ATTEMPT_TIMEOUT_MS,
+  GH_FAST_RESEARCH_RECONNECT_TIMEOUT_REASON,
+  connectFailureBackoffMs,
+  raceReconnectAttempt,
+  ResearchReconnectTimeoutError,
+  ResearchReconnectObsoleteError,
+  type ResearchReconnectPhase
+} from "../goldHunter/fast/research/researchReconnectOrchestrator";
 
 export type ResearchBrokerPermissionProof = {
   permissionScope: "SCOPE_VIEW";
@@ -97,6 +106,16 @@ export type ResearchProcessHealth = ResearchCaptureHealth & {
   hardStaleThresholdReason: string;
   feedSoftStale: boolean;
   reconnectInFlight: boolean;
+  reconnectInFlightAgeMs: number | null;
+  reconnectPhase: ResearchReconnectPhase;
+  lastReconnectStartedAt: string | null;
+  lastReconnectFinishedAt: string | null;
+  lastReconnectFailureAt: string | null;
+  lastReconnectFailureCode: string | null;
+  lastReconnectFailurePhase: ResearchReconnectPhase | null;
+  reconnectAttemptTimeoutMs: number;
+  reconnectAttemptTimeoutReason: string;
+  connectFailureBackoffIndex: number;
   /** Genuine transport / session disconnect recoveries. */
   transportReconnectCount: number;
   /** Prolonged silence while transport claimed connected. */
@@ -185,6 +204,15 @@ export class GoldHunterFastResearchCaptureProcess {
   private lastReconnectAttemptMs = 0;
   /** Mutex: only one process reconnect may execute at a time. */
   private reconnectInFlight = false;
+  private reconnectInFlightStartedAtMs: number | null = null;
+  private reconnectPhase: ResearchReconnectPhase = "IDLE";
+  private reconnectAttemptId = 0;
+  private lastReconnectStartedAtMs: number | null = null;
+  private lastReconnectFinishedAtMs: number | null = null;
+  private lastReconnectFailureAtMs: number | null = null;
+  private lastReconnectFailureCode: string | null = null;
+  private lastReconnectFailurePhase: ResearchReconnectPhase | null = null;
+  private connectFailureBackoffIndex = 0;
   /** Invalidates reconnect timers scheduled before the current attempt. */
   private reconnectEpoch = 0;
   private pendingReconnectReason: ResearchReconnectReason | null = null;
@@ -198,6 +226,8 @@ export class GoldHunterFastResearchCaptureProcess {
   private reconnectHoldMsForTests = 0;
   /** @internal test hook — skip live session connect (mutex / backoff unit tests). */
   private skipSessionConnectForTests = false;
+  /** @internal test hook — hang connectOnce forever during reconnect (timeout test). */
+  private hangConnectOnceForTests = false;
   private brokerPermissionProof: ResearchBrokerPermissionProof | null = null;
   private lastBrokerAuthRaw: unknown = null;
   private campaignStatus: ResearchCampaignStatus = "STARTING";
@@ -216,6 +246,7 @@ export class GoldHunterFastResearchCaptureProcess {
   private readonly staleReconnectMs: number;
   private readonly softStaleMs: number;
   private readonly hardStaleReconnectMs: number;
+  private readonly reconnectAttemptTimeoutMs: number;
 
   constructor(
     private readonly opts: {
@@ -257,6 +288,10 @@ export class GoldHunterFastResearchCaptureProcess {
     this.staleReconnectMs = Number(
       process.env.GOLD_HUNTER_FAST_STALE_RECONNECT_MS ??
         this.hardStaleReconnectMs
+    );
+    this.reconnectAttemptTimeoutMs = Number(
+      process.env.GOLD_HUNTER_FAST_RECONNECT_ATTEMPT_TIMEOUT_MS ??
+        GH_FAST_RESEARCH_RECONNECT_ATTEMPT_TIMEOUT_MS
     );
     this.campaignStartUtcDate =
       (process.env.GOLD_HUNTER_FAST_CAMPAIGN_START_DATE ?? "").trim() ||
@@ -383,8 +418,24 @@ export class GoldHunterFastResearchCaptureProcess {
     return { proof, raw: list.raw };
   }
 
-  private async connectOnce(opts?: { fromReconnect?: boolean }): Promise<void> {
+  private async connectOnce(opts?: {
+    fromReconnect?: boolean;
+    attemptId?: number;
+  }): Promise<void> {
     const fromReconnect = opts?.fromReconnect === true;
+    const attemptId = opts?.attemptId;
+    const assertCurrentAttempt = (): void => {
+      if (
+        fromReconnect &&
+        attemptId != null &&
+        attemptId !== this.reconnectAttemptId
+      ) {
+        throw new ResearchReconnectObsoleteError(attemptId);
+      }
+    };
+    const setPhase = (phase: ResearchReconnectPhase): void => {
+      if (fromReconnect) this.reconnectPhase = phase;
+    };
     const scheduleIfNeeded = (reason: ResearchReconnectReason) => {
       // When called inside reconnect(), scheduleReconnect refuses in-flight and
       // records pending for finally — or we throw so reconnect catch retries.
@@ -407,6 +458,7 @@ export class GoldHunterFastResearchCaptureProcess {
     }
 
     try {
+      setPhase("VERIFYING_SCOPE");
       const { proof, raw } = await this.verifyLiveBrokerScope(creds);
       this.brokerPermissionProof = proof;
       this.lastBrokerAuthRaw = raw;
@@ -423,15 +475,24 @@ export class GoldHunterFastResearchCaptureProcess {
       return;
     }
 
-    this.session = new MicroLiveMarketSession({
+    setPhase("CONNECTING_SESSION");
+    const candidateSession = new MicroLiveMarketSession({
       store: this.store,
       credentials: creds,
       nowMs: this.nowMs
     });
 
     try {
-      await this.session.connect();
+      if (this.hangConnectOnceForTests && fromReconnect) {
+        await new Promise<void>(() => {
+          /* hang forever for timeout test */
+        });
+      }
+      await candidateSession.connect();
+      assertCurrentAttempt();
       if (!this.runtime) throw new Error("RESEARCH_CAPTURE_NOT_STARTED");
+      setPhase("ATTACHING");
+      this.session = candidateSession;
       this.runtime.attachSession(this.session, this.lastBrokerAuthRaw);
       microLog("MICRO_COLLECTOR_CONNECTED", {
         service: this.cloudRunService,
@@ -442,6 +503,21 @@ export class GoldHunterFastResearchCaptureProcess {
       });
       this.maybeActivateCampaign();
     } catch (e) {
+      if (e instanceof ResearchReconnectObsoleteError) {
+        try {
+          await candidateSession.disconnect();
+        } catch {
+          /* best effort */
+        }
+        if (this.session === candidateSession) this.session = null;
+        throw e;
+      }
+      try {
+        await candidateSession.disconnect();
+      } catch {
+        /* best effort */
+      }
+      if (this.session === candidateSession) this.session = null;
       microLog("MICRO_COLLECTOR_CONNECT_FAILED", {
         service: this.cloudRunService,
         code: (e as { code?: string }).code ?? "transport_disconnected",
@@ -450,6 +526,16 @@ export class GoldHunterFastResearchCaptureProcess {
       scheduleIfNeeded("connect_failed");
       if (fromReconnect) throw e instanceof Error ? e : new Error(String(e));
     }
+  }
+
+  private async bestEffortDisconnectSession(): Promise<void> {
+    if (!this.session) return;
+    try {
+      await this.session.disconnect();
+    } catch {
+      /* best effort */
+    }
+    this.session = null;
   }
 
   private maybeActivateCampaign(): void {
@@ -507,7 +593,7 @@ export class GoldHunterFastResearchCaptureProcess {
    */
   private scheduleReconnect(
     reason: ResearchReconnectReason = "connect_failed",
-    delayMs = 2500
+    delayMs?: number
   ): boolean {
     if (this.stopping || !this.running) return false;
     if (this.reconnectInFlight) {
@@ -518,6 +604,15 @@ export class GoldHunterFastResearchCaptureProcess {
       return false;
     }
     if (this.reconnectTimer) return false;
+
+    const resolvedDelay =
+      delayMs ??
+      (reason === "stale_feed"
+        ? 0
+        : reason === "transport_disconnect"
+          ? 500
+          : connectFailureBackoffMs(this.connectFailureBackoffIndex));
+
     const epoch = this.reconnectEpoch;
     this.pendingReconnectReason = reason;
     this.reconnectTimer = setTimeout(() => {
@@ -525,7 +620,7 @@ export class GoldHunterFastResearchCaptureProcess {
       if (this.stopping || this.reconnectInFlight) return;
       if (epoch !== this.reconnectEpoch) return;
       void this.reconnect(reason);
-    }, delayMs);
+    }, resolvedDelay);
     return true;
   }
 
@@ -535,6 +630,9 @@ export class GoldHunterFastResearchCaptureProcess {
     if (this.stopping || !this.running) return;
     if (this.reconnectInFlight) return;
     this.reconnectInFlight = true;
+    this.reconnectInFlightStartedAtMs = this.nowMs();
+    this.reconnectAttemptId += 1;
+    const attemptId = this.reconnectAttemptId;
     this.reconnectEpoch += 1;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -542,6 +640,8 @@ export class GoldHunterFastResearchCaptureProcess {
     }
     this.lastReconnectAttemptMs = this.nowMs();
     this.pendingReconnectReason = reason;
+    this.reconnectPhase = "DETACHING";
+    this.lastReconnectStartedAtMs = this.nowMs();
 
     if (reason === "stale_feed") {
       this.staleFeedReconnectCount += 1;
@@ -556,22 +656,26 @@ export class GoldHunterFastResearchCaptureProcess {
         hardStaleReconnectMs: this.hardStaleReconnectMs,
         staleFeedReconnectCount: this.staleFeedReconnectCount,
         staleFeedBackoffIndex: this.staleFeedBackoffIndex,
-        backoffMs
+        backoffMs,
+        reconnectAttemptId: attemptId
       });
     } else if (reason === "transport_disconnect") {
       this.transportReconnectCount += 1;
       microLog("MICRO_COLLECTOR_BAR_POLL_FAILED", {
         code: "RESEARCH_TRANSPORT_RECONNECT_START",
-        transportReconnectCount: this.transportReconnectCount
+        transportReconnectCount: this.transportReconnectCount,
+        reconnectAttemptId: attemptId
       });
     }
 
-    let connectFailed = false;
+    let succeeded = false;
+    let scheduleFailureBackoff = false;
+    let obsoleteAttempt = false;
     try {
-      // Telemetry: process-driven reconnect must record lifecycle (was RECONN=0).
       this.runtime?.getBridge()?.noteReconnectStart(this.nowMs(), reason);
 
       this.runtime?.detachSession();
+      this.reconnectPhase = "DISCONNECTING_OLD_SESSION";
       if (this.session) {
         try {
           await this.session.disconnect();
@@ -586,12 +690,22 @@ export class GoldHunterFastResearchCaptureProcess {
       }
       if (this.stopping) return;
 
-      if (this.skipSessionConnectForTests) {
-        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
-      } else {
-        await this.connectOnce({ fromReconnect: true });
-        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
-      }
+      await raceReconnectAttempt({
+        body: (async () => {
+          if (this.skipSessionConnectForTests) return;
+          await this.connectOnce({ fromReconnect: true, attemptId });
+        })(),
+        timeoutMs: this.reconnectAttemptTimeoutMs,
+        attemptId,
+        getPhase: () => this.reconnectPhase,
+        nowMs: () => this.nowMs()
+      });
+
+      this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
+      this.reconnectPhase = "COMPLETE";
+      this.lastReconnectFinishedAtMs = this.nowMs();
+      this.connectFailureBackoffIndex = 0;
+      succeeded = true;
 
       if (reason === "stale_feed") {
         // Next quiet/market-closed episode waits longer until fresh data resets.
@@ -602,21 +716,60 @@ export class GoldHunterFastResearchCaptureProcess {
         this.nextStaleReconnectEligibleAtMs =
           this.nowMs() + staleFeedBackoffMs(this.staleFeedBackoffIndex);
       }
-    } catch {
-      connectFailed = true;
-      try {
-        this.runtime?.getBridge()?.noteReconnectFinish(this.nowMs());
-      } catch {
-        /* ignore */
+    } catch (e) {
+      if (e instanceof ResearchReconnectTimeoutError) {
+        this.reconnectPhase = "TIMED_OUT";
+        this.reconnectAttemptId += 1;
+        this.lastReconnectFailureAtMs = this.nowMs();
+        this.lastReconnectFailureCode = e.code;
+        this.lastReconnectFailurePhase = e.phase;
+        await this.bestEffortDisconnectSession();
+        try {
+          this.runtime
+            ?.getBridge()
+            ?.noteReconnectFailed(this.nowMs(), e.code, e.phase);
+        } catch {
+          /* ignore */
+        }
+        this.connectFailureBackoffIndex += 1;
+        scheduleFailureBackoff = true;
+      } else if (e instanceof ResearchReconnectObsoleteError) {
+        obsoleteAttempt = true;
+        await this.bestEffortDisconnectSession();
+      } else {
+        this.reconnectPhase = "FAILED";
+        this.lastReconnectFailureAtMs = this.nowMs();
+        this.lastReconnectFailureCode =
+          (e as { code?: string }).code ??
+          (e instanceof Error ? e.message.slice(0, 80) : "connect_failed");
+        this.lastReconnectFailurePhase = this.reconnectPhase;
+        try {
+          this.runtime
+            ?.getBridge()
+            ?.noteReconnectFailed(
+              this.nowMs(),
+              this.lastReconnectFailureCode,
+              this.reconnectPhase
+            );
+        } catch {
+          /* ignore */
+        }
+        this.connectFailureBackoffIndex += 1;
+        scheduleFailureBackoff = true;
       }
     } finally {
       this.reconnectInFlight = false;
+      this.reconnectInFlightStartedAtMs = null;
+      if (this.reconnectPhase === "COMPLETE") {
+        this.reconnectPhase = "IDLE";
+      }
       const pending = this.pendingReconnectReason;
       this.pendingReconnectReason = null;
       if (this.stopping || !this.running) return;
-      if (connectFailed) {
-        this.scheduleReconnect("connect_failed", 2500);
+      if (scheduleFailureBackoff && !obsoleteAttempt) {
+        this.scheduleReconnect("connect_failed");
       } else if (
+        succeeded &&
         pending != null &&
         pending !== "stale_feed" &&
         pending !== reason
@@ -700,6 +853,11 @@ export class GoldHunterFastResearchCaptureProcess {
     this.skipSessionConnectForTests = skip;
   }
 
+  /** @internal test hook — hang connectOnce during reconnect (timeout test). */
+  setHangConnectOnceForTests(hang: boolean): void {
+    this.hangConnectOnceForTests = hang;
+  }
+
   /** @internal test hook — schedule reconnect with explicit reason. */
   scheduleReconnectForTests(
     reason: ResearchReconnectReason,
@@ -718,9 +876,12 @@ export class GoldHunterFastResearchCaptureProcess {
 
   getReconnectTelemetryForTests(): {
     reconnectInFlight: boolean;
+    reconnectPhase: ResearchReconnectPhase;
+    reconnectAttemptId: number;
     transportReconnectCount: number;
     staleFeedReconnectCount: number;
     staleFeedBackoffIndex: number;
+    connectFailureBackoffIndex: number;
     lastStaleFeedReconnectAttemptMs: number | null;
     nextStaleReconnectEligibleAtMs: number | null;
     feedSoftStale: boolean;
@@ -728,9 +889,12 @@ export class GoldHunterFastResearchCaptureProcess {
   } {
     return {
       reconnectInFlight: this.reconnectInFlight,
+      reconnectPhase: this.reconnectPhase,
+      reconnectAttemptId: this.reconnectAttemptId,
       transportReconnectCount: this.transportReconnectCount,
       staleFeedReconnectCount: this.staleFeedReconnectCount,
       staleFeedBackoffIndex: this.staleFeedBackoffIndex,
+      connectFailureBackoffIndex: this.connectFailureBackoffIndex,
       lastStaleFeedReconnectAttemptMs: this.lastStaleFeedReconnectAttemptMs,
       nextStaleReconnectEligibleAtMs: this.nextStaleReconnectEligibleAtMs,
       feedSoftStale: this.feedSoftStale,
@@ -849,6 +1013,28 @@ export class GoldHunterFastResearchCaptureProcess {
       hardStaleThresholdReason: GH_FAST_RESEARCH_HARD_STALE_THRESHOLD_REASON,
       feedSoftStale: softNow,
       reconnectInFlight: this.reconnectInFlight,
+      reconnectInFlightAgeMs:
+        this.reconnectInFlight && this.reconnectInFlightStartedAtMs != null
+          ? Math.max(0, this.nowMs() - this.reconnectInFlightStartedAtMs)
+          : null,
+      reconnectPhase: this.reconnectPhase,
+      lastReconnectStartedAt:
+        this.lastReconnectStartedAtMs != null
+          ? new Date(this.lastReconnectStartedAtMs).toISOString()
+          : null,
+      lastReconnectFinishedAt:
+        this.lastReconnectFinishedAtMs != null
+          ? new Date(this.lastReconnectFinishedAtMs).toISOString()
+          : null,
+      lastReconnectFailureAt:
+        this.lastReconnectFailureAtMs != null
+          ? new Date(this.lastReconnectFailureAtMs).toISOString()
+          : null,
+      lastReconnectFailureCode: this.lastReconnectFailureCode,
+      lastReconnectFailurePhase: this.lastReconnectFailurePhase,
+      reconnectAttemptTimeoutMs: this.reconnectAttemptTimeoutMs,
+      reconnectAttemptTimeoutReason: GH_FAST_RESEARCH_RECONNECT_TIMEOUT_REASON,
+      connectFailureBackoffIndex: this.connectFailureBackoffIndex,
       transportReconnectCount: this.transportReconnectCount,
       staleFeedReconnectCount: this.staleFeedReconnectCount,
       sustainedCrossRecoveryCount: bridge?.getSustainedCrossRecoveryCount() ?? 0,
