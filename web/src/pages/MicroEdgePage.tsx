@@ -338,7 +338,7 @@ export function MicroEdgePage() {
             SHADOW ONLY
           </span>
           <span className="gm-chip" data-testid="gh-no-orders-badge">
-            BROKER ORDERS 0
+            NO BROKER ORDERS
           </span>
           <span className="gm-chip gm-chip-soft" data-testid="gh-real-market-badge">
             REAL MARKET DATA

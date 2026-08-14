@@ -6,8 +6,7 @@ import { classifySession } from "../sessionRegime";
 import type {
   GhFastClosedTrade,
   GhFastExitReason,
-  GhFastSetupId,
-  GhFastSide
+  GhFastSetupId
 } from "./types";
 
 export type SoakSetupStats = {

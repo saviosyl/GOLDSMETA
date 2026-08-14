@@ -185,5 +185,5 @@ export function readLocalCheckpoint(chunkDir: string): unknown[] {
   return readFileSync(p, "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((l) => JSON.parse(l));
+    .map((l): unknown => JSON.parse(l) as unknown);
 }
