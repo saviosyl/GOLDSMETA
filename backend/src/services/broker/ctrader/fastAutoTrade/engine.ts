@@ -200,7 +200,9 @@ export function completedBarTrueRange(
  *
  * ≥14 true ranges → M1_ATR14 (SMA of the last 14 TRs)
  * 5–13 true ranges → M1_ROLLING_TR (SMA of available TRs)
- * otherwise → unavailable (caller may use Decision ATR in unit-test path only)
+ * otherwise → unavailable.
+ * Decision ATR is allowed only when requireCompletedM1 is not set
+ * (legacy / unit-test path). Production never falls back to Decision ATR.
  */
 export function estimateExtensionAtr(input: FastAutoTradeInput): {
   atr: number | null;
@@ -225,7 +227,7 @@ export function estimateExtensionAtr(input: FastAutoTradeInput): {
       return { atr, source: "M1_ROLLING_TR" };
     }
   }
-  if (present(input.atr) && input.atr > 0) {
+  if (!input.requireCompletedM1 && present(input.atr) && input.atr > 0) {
     return { atr: input.atr, source: "DECISION_ATR" };
   }
   return { atr: null, source: "NONE" };

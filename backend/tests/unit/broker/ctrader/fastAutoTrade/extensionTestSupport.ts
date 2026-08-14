@@ -44,6 +44,34 @@ export function buildCompletedM1Series(args: {
   return bars;
 }
 
+/** Keep the last two completed bars exact; pad earlier bars for rolling ATR. */
+export function withRollingM1History(args: {
+  nowMs: number;
+  latest: { open: number; high: number; low: number; close: number; volume?: number };
+  prior?: { open: number; high: number; low: number; close: number; volume?: number };
+  typicalTr?: number;
+  count?: number;
+}): TrendbarCandle[] {
+  const series = buildCompletedM1Series({
+    nowMs: args.nowMs,
+    last: args.latest,
+    count: args.count ?? 20,
+    typicalTr: args.typicalTr ?? EXT_TYPICAL_TR
+  });
+  if (args.prior && series.length >= 2) {
+    const priorTime = series[series.length - 2]!.time;
+    series[series.length - 2] = {
+      time: priorTime,
+      open: args.prior.open,
+      high: args.prior.high,
+      low: args.prior.low,
+      close: args.prior.close,
+      volume: args.prior.volume ?? 800
+    };
+  }
+  return series;
+}
+
 export function productionLikeDecision(
   over: Partial<DecisionRecord> = {}
 ): DecisionRecord {

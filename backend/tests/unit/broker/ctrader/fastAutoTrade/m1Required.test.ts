@@ -5,6 +5,7 @@ import {
   evaluateFastAutoTrade,
   useCompletedM1LoaderForTests
 } from "../../../../../src/services/broker/ctrader/fastAutoTrade";
+import { withRollingM1History } from "./extensionTestSupport";
 
 const NOW_MS = Date.parse("2026-08-14T09:02:30.000Z");
 const nowSec = Math.floor(NOW_MS / 1000);
@@ -125,7 +126,14 @@ describe("FAST requires a fresh completed M1 for entry", () => {
   });
 
   it("fresh completed M1 → FAST may BUY/SELL", async () => {
-    useCompletedM1LoaderForTests(async () => [priorBar, freshLatest]);
+    useCompletedM1LoaderForTests(async () =>
+      withRollingM1History({
+        nowMs: NOW_MS,
+        latest: freshLatest,
+        prior: priorBar,
+        typicalTr: 2.4
+      })
+    );
     const { input, decision: d } = await evaluate(decision());
     expect(input.m1Availability).toBe("OK");
     expect(input.timeframe).toBe("1");

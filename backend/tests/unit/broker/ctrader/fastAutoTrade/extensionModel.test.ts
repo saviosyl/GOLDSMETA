@@ -380,4 +380,122 @@ describe("FAST_AUTOTRADE_V1 setup-aware extension model", () => {
     expect(decision.extension.extensionLimitAtr).toBe(2.2);
     expect(decision.extension.extensionDistanceAtr).toBeGreaterThan(2.2);
   });
+
+  it("production requireCompletedM1 + 2 M1 bars + Decision ATR → WAIT_EXTENSION_VOLATILITY_UNAVAILABLE", async () => {
+    const nowMs = Date.parse("2026-08-14T12:49:00.000Z");
+    const price = VAH + 0.8;
+    const nowSec = Math.floor(nowMs / 1000);
+    const { input, decision } = await evaluatePath({
+      nowMs,
+      decision: productionLikeDecision({
+        lastKnownPrice: price,
+        entry: { price },
+        optionalIndicators: { atr: 5.2 }
+      } as DecisionRecord),
+      bars: [
+        {
+          time: nowSec - 150,
+          open: price - 1.2,
+          high: price - 0.4,
+          low: price - 1.6,
+          close: price - 0.6,
+          volume: 700
+        },
+        {
+          time: nowSec - 90,
+          open: price - 0.5,
+          high: price + 0.3,
+          low: price - 0.8,
+          close: price,
+          volume: 900
+        }
+      ],
+      bid: price - 0.05,
+      ask: price + 0.05
+    });
+
+    expect(input.requireCompletedM1).toBe(true);
+    expect(input.atr).toBe(5.2);
+    expect(input.m1History?.length).toBe(2);
+    expect(decision.action).toBe("WAIT");
+    expect(decision.waitReason).toBe("WAIT_EXTENSION_VOLATILITY_UNAVAILABLE");
+    expect(decision.extension.extensionAtrSource).toBe("NONE");
+    expect(decision.extension.extensionAtr).toBeNull();
+  });
+
+  it("non-production requireCompletedM1=false + Decision ATR + no M1 history → DECISION_ATR", async () => {
+    const { evaluateFastAutoTrade, estimateExtensionAtr } = await import(
+      "../../../../../src/services/broker/ctrader/fastAutoTrade"
+    );
+    const input = {
+      nowMs: Date.parse("2026-08-14T12:50:00.000Z"),
+      price: VAH + 0.8,
+      bid: VAH + 0.75,
+      ask: VAH + 0.85,
+      spread: 0.1,
+      quoteAgeSeconds: 1,
+      quoteStale: false,
+      marketStatus: "OPEN",
+      timeframe: "1",
+      ohlcv: {
+        open: VAH - 1,
+        high: VAH + 1,
+        low: VAH - 1.4,
+        close: VAH + 0.8,
+        volume: 900
+      },
+      priorOhlcv: null,
+      trendDirection: "BULLISH" as const,
+      trendStrength: 62,
+      htfBias: "BULLISH" as const,
+      vwap: null,
+      ema21: null,
+      ema50: null,
+      atr: 5.2,
+      poc: POC,
+      vah: VAH,
+      val: VAL,
+      nearbyResistance: VAH,
+      nearbySupport: VAL,
+      marketRegimeHint: "TRENDING_UP",
+      setupScore: 84,
+      v3Decision: "BUY" as const,
+      bullishEvidence: ["breakout"],
+      bearishEvidence: [],
+      reasonCodes: [],
+      confirmationClassification: "BREAKOUT",
+      confirmationDirection: "BULLISH" as const,
+      dataQuality: "GOOD",
+      sessionPlanState: null,
+      safety: {
+        accountIsLive: false,
+        accountEnvironment: "DEMO" as const,
+        spreadLimit: 2,
+        maxQuoteAgeSeconds: 15,
+        dailyLossBreached: false,
+        maxOpenReached: false,
+        newsBlocked: false,
+        disconnected: false,
+        duplicateActiveOrder: false,
+        riskLimitBreached: false
+      },
+      reentry: {
+        lastSetup: null,
+        lastExitAtMs: null,
+        lastSignalKey: null,
+        currentCandleKey: null,
+        lastAction: null,
+        lastActionAtMs: null
+      },
+      lifecycle: { state: "SCANNING" as const, stateEnteredAtMs: Date.parse("2026-08-14T12:50:00.000Z") },
+      requireCompletedM1: false,
+      m1History: null
+    };
+    const atr = estimateExtensionAtr(input);
+    expect(atr.source).toBe("DECISION_ATR");
+    expect(atr.atr).toBe(5.2);
+    const decision = evaluateFastAutoTrade(input);
+    expect(decision.extension.extensionAtrSource).toBe("DECISION_ATR");
+    expect(decision.waitReason).not.toBe("WAIT_EXTENSION_VOLATILITY_UNAVAILABLE");
+  });
 });

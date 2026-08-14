@@ -6,6 +6,7 @@ import {
   forwardTradeBarrier,
   useCompletedM1LoaderForTests
 } from "../../../../../src/services/broker/ctrader/fastAutoTrade";
+import { withRollingM1History } from "./extensionTestSupport";
 
 const NOW_MS = Date.parse("2026-08-14T11:40:00.000Z");
 const nowSec = Math.floor(NOW_MS / 1000);
@@ -175,7 +176,14 @@ describe("FAST DecisionRecord → map/build → engine trade-space", () => {
   });
 
   it("BUY above broken VAH + separate resistance ahead uses that resistance as the forward barrier", async () => {
-    useCompletedM1LoaderForTests(async () => [buyPriorBar, buyLatestBar]);
+    useCompletedM1LoaderForTests(async () =>
+      withRollingM1History({
+        nowMs: NOW_MS,
+        latest: buyLatestBar,
+        prior: buyPriorBar,
+        typicalTr: 2.4
+      })
+    );
     const rec = withIndicators(decision(), {
       ...buyIndicators,
       nearbyResistance: 3393.6
@@ -228,7 +236,14 @@ describe("FAST DecisionRecord → map/build → engine trade-space", () => {
   });
 
   it("BUY above VAH with no separate resistance does not invent a forward barrier; ATR target is allowed", async () => {
-    useCompletedM1LoaderForTests(async () => [buyPriorBar, buyLatestBar]);
+    useCompletedM1LoaderForTests(async () =>
+      withRollingM1History({
+        nowMs: NOW_MS,
+        latest: buyLatestBar,
+        prior: buyPriorBar,
+        typicalTr: 2.4
+      })
+    );
     const input = await buildFastAutoTradeInput({
       uid: "uid-map",
       decision: withIndicators(decision(), buyIndicators),
@@ -254,7 +269,14 @@ describe("FAST DecisionRecord → map/build → engine trade-space", () => {
   });
 
   it("SELL below broken VAL + separate support ahead uses that support as the forward barrier", async () => {
-    useCompletedM1LoaderForTests(async () => [sellPriorBar, sellLatestBar]);
+    useCompletedM1LoaderForTests(async () =>
+      withRollingM1History({
+        nowMs: NOW_MS,
+        latest: sellLatestBar,
+        prior: sellPriorBar,
+        typicalTr: 2.4
+      })
+    );
     const rec = withIndicators(sellDecision(), {
       ...sellIndicators,
       nearbySupport: 3376.4
@@ -307,7 +329,14 @@ describe("FAST DecisionRecord → map/build → engine trade-space", () => {
   });
 
   it("SELL below VAL with no separate support does not invent a forward barrier; ATR target is allowed", async () => {
-    useCompletedM1LoaderForTests(async () => [sellPriorBar, sellLatestBar]);
+    useCompletedM1LoaderForTests(async () =>
+      withRollingM1History({
+        nowMs: NOW_MS,
+        latest: sellLatestBar,
+        prior: sellPriorBar,
+        typicalTr: 2.4
+      })
+    );
     const input = await buildFastAutoTradeInput({
       uid: "uid-map",
       decision: withIndicators(sellDecision(), sellIndicators),

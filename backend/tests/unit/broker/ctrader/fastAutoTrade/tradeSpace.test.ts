@@ -76,7 +76,7 @@ function baseInput(over: Partial<FastAutoTradeInput> = {}): FastAutoTradeInput {
       lastActionAtMs: null
     },
     lifecycle: { state: "SCANNING", stateEnteredAtMs: Date.parse("2026-08-14T11:40:00.000Z") },
-    requireCompletedM1: true,
+    requireCompletedM1: false,
     m1Availability: "OK",
     m1CompletedAtMs: Date.parse("2026-08-14T11:39:00.000Z"),
     ...over
