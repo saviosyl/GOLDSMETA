@@ -172,6 +172,10 @@ export type FastAutoTradeDecision = {
   lifecycleState: FastLifecycleState;
   signalId: string | null;
   telemetry: FastMissedOpportunity;
+  /** True when a genuine forward barrier has enough room, or none exists. */
+  tradeSpaceOk: boolean;
+  /** Independent of trade-space — true when the move is already stretched. */
+  extended: boolean;
 };
 
 export type FastMissedOpportunity = {
@@ -186,6 +190,8 @@ export type FastMissedOpportunity = {
   supportingEvidence: string[];
   missingEvidence: string[];
   hardVeto: string | null;
+  tradeSpaceOk: boolean;
+  extended: boolean;
 };
 
 export type FastManagementAction =

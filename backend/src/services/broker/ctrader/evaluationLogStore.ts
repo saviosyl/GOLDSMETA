@@ -44,22 +44,35 @@ export type EvaluationRecord = {
     executionAuthority?: string | null;
     brokerSubmissionAttempted?: boolean;
     brokerOrderIdMasked?: string | null;
-  };
+  } | null;
   /** One human-readable final reason when not submitted. */
   finalReason?: string | null;
   /** Optional overnight Demo run correlation id. */
   overnightRunId?: string | null;
   /** FAST_AUTOTRADE_V1 missed-opportunity diagnostics. */
-  fastTelemetry?: {
-    strategyId?: string;
-    regime?: string | null;
-    setupType?: string | null;
-    grade?: string | null;
-    trigger?: string | null;
-    accepted?: string[];
-    missing?: string[];
-    supporting?: string[];
-  } | null;
+  fastTelemetry?: FastWaitTelemetry | null;
+};
+
+export type FastWaitTelemetry = {
+  strategyId?: string;
+  regime?: string | null;
+  bias?: string | null;
+  setupType?: string | null;
+  trigger?: string | null;
+  qualityScore?: number | null;
+  grade?: string | null;
+  m1Availability?: string | null;
+  m1CompletedAtMs?: number | null;
+  m1AgeMs?: number | null;
+  tradeSpaceOk?: boolean | null;
+  extended?: boolean | null;
+  waitReason?: string | null;
+  spread?: number | null;
+  quoteAgeSeconds?: number | null;
+  candleKey?: string | null;
+  accepted?: string[];
+  missing?: string[];
+  supporting?: string[];
 };
 
 function col(uid: string) {
@@ -198,40 +211,81 @@ export function formatEvaluationActivityMessage(row: {
   return `${head} skipped — ${why}.`;
 }
 
+/** Firestore rejects `undefined` fields — strip them so FAST wait rows persist. */
+export function omitUndefinedDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => omitUndefinedDeep(item));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === undefined) continue;
+      out[key] = omitUndefinedDeep(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function fastWaitDedupeKey(args: {
+  decisionId?: string | null;
+  reasonCode: string;
+  candleKey?: string | null;
+}): string {
+  return `${args.decisionId ?? ""}|${args.reasonCode}|${args.candleKey ?? ""}`;
+}
+
+/** Same decision + same completed candle + same WAIT reason → do not write again. */
+export function isDuplicateFastWaitEval(
+  recent: Array<Pick<EvaluationRecord, "decisionId" | "reasonCode" | "fastTelemetry">>,
+  next: { decisionId?: string | null; reasonCode: string; candleKey?: string | null }
+): boolean {
+  const key = fastWaitDedupeKey(next);
+  return recent.some(
+    (row) =>
+      row.fastTelemetry != null &&
+      fastWaitDedupeKey({
+        decisionId: row.decisionId,
+        reasonCode: row.reasonCode,
+        candleKey: row.fastTelemetry.candleKey ?? null
+      }) === key
+  );
+}
+
 export async function appendEvaluation(
   partial: Omit<EvaluationRecord, "id" | "signalIdHash"> & { signalId: string }
 ): Promise<EvaluationRecord> {
   const id = `ev_${Date.now().toString(36)}_${randomBytes(3).toString("hex")}`;
   const reasonLabel = partial.reasonLabel || reasonLabelFor(partial.reasonCode);
-  const row: EvaluationRecord = {
+  const row = omitUndefinedDeep({
     id,
     uid: partial.uid,
-    accountMasked: partial.accountMasked,
+    accountMasked: partial.accountMasked ?? null,
     at: partial.at,
     tradingDay: partial.tradingDay,
     stage: partial.stage,
     direction: partial.direction,
     signalIdHash: hashSignal(partial.signalId),
     decisionId: partial.decisionId ?? null,
-    confidence: partial.confidence,
-    entry: partial.entry,
-    stopLoss: partial.stopLoss,
-    takeProfit: partial.takeProfit,
-    riskReward: partial.riskReward,
-    spread: partial.spread,
-    maxSpread: partial.maxSpread,
+    confidence: partial.confidence ?? null,
+    entry: partial.entry ?? null,
+    stopLoss: partial.stopLoss ?? null,
+    takeProfit: partial.takeProfit ?? null,
+    riskReward: partial.riskReward ?? null,
+    spread: partial.spread ?? null,
+    maxSpread: partial.maxSpread ?? null,
     outcome: partial.outcome,
     reasonCode: partial.reasonCode,
     reasonLabel,
-    passed: partial.passed.slice(0, 24),
-    failed: partial.failed.slice(0, 24),
-    pipeline: partial.pipeline,
+    passed: (partial.passed ?? []).slice(0, 24),
+    failed: (partial.failed ?? []).slice(0, 24),
+    pipeline: partial.pipeline ?? null,
     finalReason:
       partial.finalReason ??
       (partial.outcome === "QUALIFIED" ? null : reasonLabel),
     overnightRunId: partial.overnightRunId ?? null,
     fastTelemetry: partial.fastTelemetry ?? null
-  };
+  }) as EvaluationRecord;
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).
   void FieldValue;

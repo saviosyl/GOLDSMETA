@@ -149,7 +149,7 @@ function nearLevel(price: number, level: number | null, atr: number): boolean {
   return Math.abs(price - level) <= atr * 0.55;
 }
 
-function isExtended(
+export function isExtended(
   input: FastAutoTradeInput,
   bias: FastBias,
   atr: number,
@@ -502,20 +502,59 @@ export function hardSafetyVeto(input: FastAutoTradeInput): string | null {
   return null;
 }
 
-function tradeSpaceOk(
+/**
+ * Next genuine forward barrier only.
+ * BUY: resistance/VAH strictly above price. SELL: support/VAL strictly below.
+ * A level already broken and behind price is structure/invalidation, not a target.
+ * When several candidates sit ahead, the nearest one is the constraint.
+ */
+export function forwardTradeBarrier(
+  input: FastAutoTradeInput,
+  action: "BUY" | "SELL"
+): number | null {
+  if (action === "BUY") {
+    const ahead = [input.nearbyResistance, input.vah].filter(
+      (level): level is number => present(level) && level > input.price
+    );
+    if (!ahead.length) return null;
+    return Math.min(...ahead);
+  }
+  const ahead = [input.nearbySupport, input.val].filter(
+    (level): level is number => present(level) && level < input.price
+  );
+  if (!ahead.length) return null;
+  return Math.max(...ahead);
+}
+
+/** Broken resistance (BUY) / support (SELL) used as structure, not as a forward target. */
+export function brokenStructureLevel(
+  input: FastAutoTradeInput,
+  action: "BUY" | "SELL"
+): number | null {
+  if (action === "BUY") {
+    const behind = [input.nearbyResistance, input.vah].filter(
+      (level): level is number => present(level) && level < input.price
+    );
+    if (!behind.length) return null;
+    return Math.max(...behind);
+  }
+  const behind = [input.nearbySupport, input.val].filter(
+    (level): level is number => present(level) && level > input.price
+  );
+  if (!behind.length) return null;
+  return Math.min(...behind);
+}
+
+export function tradeSpaceOk(
   input: FastAutoTradeInput,
   action: "BUY" | "SELL",
   atr: number,
   config: FastAutoTradeConfig
 ): boolean {
   const need = atr * config.minimumTradeSpaceAtr;
-  if (action === "BUY") {
-    const barrier = input.nearbyResistance ?? input.vah;
-    if (!present(barrier)) return true;
-    return barrier - input.price >= need;
-  }
-  const barrier = input.nearbySupport ?? input.val;
+  const barrier = forwardTradeBarrier(input, action);
   if (!present(barrier)) return true;
+  if (action === "BUY") return barrier - input.price >= need;
   return input.price - barrier >= need;
 }
 
@@ -529,8 +568,16 @@ export function buildFastGeometry(
   const entry = input.price;
   const swingSl =
     action === "BUY"
-      ? input.nearbySupport ?? input.val ?? input.ohlcv?.low ?? null
-      : input.nearbyResistance ?? input.vah ?? input.ohlcv?.high ?? null;
+      ? input.nearbySupport ??
+        input.val ??
+        brokenStructureLevel(input, "BUY") ??
+        input.ohlcv?.low ??
+        null
+      : input.nearbyResistance ??
+        input.vah ??
+        brokenStructureLevel(input, "SELL") ??
+        input.ohlcv?.high ??
+        null;
   let sl: number;
   if (present(swingSl)) {
     sl =
@@ -543,10 +590,13 @@ export function buildFastGeometry(
   const risk = Math.abs(entry - sl);
   if (!(risk > 0)) return null;
   const tpMult = regime === "FAST" ? config.atrTpMultiplierFast : config.atrTpMultiplierNormal;
-  const space =
-    action === "BUY"
-      ? (input.nearbyResistance ?? input.vah ?? entry + atr * tpMult) - entry
-      : entry - (input.nearbySupport ?? input.val ?? entry - atr * tpMult);
+  const barrier = forwardTradeBarrier(input, action);
+  const atrTarget = atr * tpMult;
+  const space = present(barrier)
+    ? action === "BUY"
+      ? barrier - entry
+      : entry - barrier
+    : atrTarget;
   const rawTpDist = Math.min(atr * tpMult, Math.max(space * 0.7, risk * config.minRiskReward));
   const tpDist = Math.max(rawTpDist, risk * config.minRiskReward);
   const tp = action === "BUY" ? entry + tpDist : entry - tpDist;
@@ -571,7 +621,7 @@ function structureAnchor(input: FastAutoTradeInput, setup: FastSetupType, bias: 
   return `${setup}:${bias}:${Math.round(level * 10) / 10}`;
 }
 
-function candleKey(input: FastAutoTradeInput): string {
+export function candleKey(input: FastAutoTradeInput): string {
   const c = input.ohlcv;
   if (!c) return `${input.timeframe ?? "na"}:${Math.round(input.price * 10) / 10}`;
   return `${input.timeframe ?? "na"}:${c.open ?? ""}:${c.high ?? ""}:${c.low ?? ""}:${c.close ?? ""}`;
@@ -617,7 +667,9 @@ function telemetryOf(
   reason: FastWaitReason | null,
   supporting: string[],
   missing: string[],
-  hardVeto: string | null
+  hardVeto: string | null,
+  spaceOk: boolean,
+  extended: boolean
 ): FastMissedOpportunity {
   return {
     direction: action,
@@ -630,7 +682,9 @@ function telemetryOf(
     rejectionReason: reason,
     supportingEvidence: supporting,
     missingEvidence: missing,
-    hardVeto
+    hardVeto,
+    tradeSpaceOk: spaceOk,
+    extended
   };
 }
 
@@ -688,6 +742,8 @@ export function evaluateFastAutoTrade(
     geometry: null,
     lifecycleState: "SCANNING",
     signalId: null,
+    tradeSpaceOk: spaceOk,
+    extended,
     telemetry: telemetryOf(
       input,
       action,
@@ -698,7 +754,9 @@ export function evaluateFastAutoTrade(
       waitReason,
       supporting,
       missing,
-      hard
+      hard,
+      spaceOk,
+      extended
     )
   });
 
@@ -799,6 +857,8 @@ export function evaluateFastAutoTrade(
     geometry,
     lifecycleState: "ENTRY_PENDING",
     signalId,
+    tradeSpaceOk: spaceOk,
+    extended,
     telemetry: telemetryOf(
       input,
       intended,
@@ -809,7 +869,9 @@ export function evaluateFastAutoTrade(
       null,
       supporting,
       missing,
-      null
+      null,
+      spaceOk,
+      extended
     )
   };
 }

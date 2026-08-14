@@ -86,6 +86,7 @@ import { QUALIFICATION_GATES } from "./qualificationTypes";
 import {
   appendEvaluation,
   countEvaluationsForDay,
+  isDuplicateFastWaitEval,
   listRecentEvaluations,
   reasonLabelFor
 } from "./evaluationLogStore";
@@ -119,11 +120,11 @@ import {
   saveArmedCandidate
 } from "./armedCandidateStore";
 import { isFastAutoTradeV1Enabled, loadFastAutoTradeConfig } from "./fastAutoTrade/config";
-import { evaluateFastAutoTrade } from "./fastAutoTrade/engine";
+import { candleKey, evaluateFastAutoTrade } from "./fastAutoTrade/engine";
 import { buildFastAutoTradeInput } from "./fastAutoTrade/qualificationInput";
 import { evaluateFastAutoTradeDemoLock } from "./fastAutoTrade/demoLock";
 import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
-import type { FastAutoTradeDecision } from "./fastAutoTrade/types";
+import type { FastAutoTradeDecision, FastAutoTradeInput } from "./fastAutoTrade/types";
 import { setupIdentityKey } from "./fastAutoTrade/stateMachine";
 import {
   persistFastReentryEntry,
@@ -785,6 +786,7 @@ export async function processDecisionForQualification(args: {
   // --- Internal armed-candidate lifecycle (order states only; no UI) ---
   let armedTrade: ArmedCandidate | null = null;
   let fastDecision: FastAutoTradeDecision | null = null;
+  let fastInput: FastAutoTradeInput | null = null;
   if (orderStates) {
     const existingArmed = await getArmedCandidate(uid).catch(() => null);
     const alreadyCountedArmed = existingArmed
@@ -796,7 +798,7 @@ export async function processDecisionForQualification(args: {
     const fastEnabled = isFastAutoTradeV1Enabled();
     const fastCfg = fastEnabled ? loadFastAutoTradeConfig() : null;
     if (fastEnabled && fastCfg) {
-      const fastInput = await buildFastAutoTradeInput({
+      fastInput = await buildFastAutoTradeInput({
         uid,
         decision: d,
         nowMs: Date.now(),
@@ -1070,50 +1072,102 @@ export async function processDecisionForQualification(args: {
         score: fastDecision.qualityScore
       });
     } else if (fastDecision && fastDecision.action === "WAIT" && !existingArmed) {
+      const waitReason = fastDecision.waitReason ?? "WAIT_NO_SETUP";
+      const scanCandleKey = fastInput ? candleKey(fastInput) : null;
+      const m1AgeMs =
+        fastInput?.m1CompletedAtMs != null
+          ? Math.max(0, (fastInput.nowMs ?? Date.now()) - fastInput.m1CompletedAtMs)
+          : null;
       try {
-        await appendEvaluation({
-          uid,
-          accountMasked: setup.accountMasked,
-          at: new Date().toISOString(),
-          tradingDay: tradingDayKey(),
-          stage: state,
-          direction: fastDecision.bias === "BULLISH" ? "BUY" : fastDecision.bias === "BEARISH" ? "SELL" : "WAIT",
-          signalId: d.decisionId,
+        const recent = await listRecentEvaluations(uid, 12).catch(() => []);
+        const duplicate = isDuplicateFastWaitEval(recent, {
           decisionId: d.decisionId,
-          confidence: fastDecision.qualityScore,
-          entry: geom.entry,
-          stopLoss: geom.stopLoss,
-          takeProfit: geom.takeProfit,
-          riskReward: null,
+          reasonCode: waitReason,
+          candleKey: scanCandleKey
+        });
+        if (!duplicate) {
+          await appendEvaluation({
+            uid,
+            accountMasked: setup.accountMasked,
+            at: new Date().toISOString(),
+            tradingDay: tradingDayKey(),
+            stage: state,
+            direction:
+              fastDecision.bias === "BULLISH"
+                ? "BUY"
+                : fastDecision.bias === "BEARISH"
+                  ? "SELL"
+                  : "WAIT",
+            signalId: d.decisionId,
+            decisionId: d.decisionId,
+            confidence: fastDecision.qualityScore,
+            entry: geom.entry ?? null,
+            stopLoss: geom.stopLoss ?? null,
+            takeProfit: geom.takeProfit ?? null,
+            riskReward: null,
+            spread: quote?.spread ?? fastInput?.spread ?? null,
+            maxSpread: settings.maxSpread,
+            outcome: "REJECTED",
+            reasonCode: waitReason,
+            reasonLabel: reasonLabelFor(waitReason),
+            passed: fastDecision.accepted,
+            failed: fastDecision.rejected,
+            pipeline: null,
+            finalReason: `MISSED / REJECTED ${
+              fastDecision.bias === "BULLISH"
+                ? "BUY"
+                : fastDecision.bias === "BEARISH"
+                  ? "SELL"
+                  : "WAIT"
+            } — Regime: ${fastDecision.regime} Setup: ${
+              fastDecision.setupType ?? "none"
+            } Score: ${fastDecision.qualityScore} — ${waitReason}`,
+            fastTelemetry: {
+              strategyId: FAST_AUTOTRADE_STRATEGY_ID,
+              regime: fastDecision.regime,
+              bias: fastDecision.bias,
+              setupType: fastDecision.setupType,
+              trigger: fastDecision.trigger,
+              qualityScore: fastDecision.qualityScore,
+              grade: fastDecision.grade,
+              m1Availability: fastInput?.m1Availability ?? null,
+              m1CompletedAtMs: fastInput?.m1CompletedAtMs ?? null,
+              m1AgeMs,
+              tradeSpaceOk: fastDecision.tradeSpaceOk,
+              extended: fastDecision.extended,
+              waitReason,
+              spread: quote?.spread ?? fastInput?.spread ?? null,
+              quoteAgeSeconds: fastInput?.quoteAgeSeconds ?? quoteAgeSeconds,
+              candleKey: scanCandleKey,
+              accepted: fastDecision.accepted,
+              missing: fastDecision.missing,
+              supporting: fastDecision.supporting
+            }
+          });
+        }
+        logger.info("FAST_AUTOTRADE_V1 wait", {
+          uid,
+          decisionId: d.decisionId,
+          regime: fastDecision.regime,
+          bias: fastDecision.bias,
+          setupType: fastDecision.setupType,
+          trigger: fastDecision.trigger,
+          score: fastDecision.qualityScore,
+          grade: fastDecision.grade,
+          waitReason,
+          tradeSpaceOk: fastDecision.tradeSpaceOk,
+          extended: fastDecision.extended,
+          m1Availability: fastInput?.m1Availability ?? null,
           spread: quote?.spread ?? null,
-          maxSpread: settings.maxSpread,
-          outcome: "REJECTED",
-          reasonCode: fastDecision.waitReason ?? "WAIT_NO_SETUP",
-          reasonLabel: reasonLabelFor(fastDecision.waitReason ?? "WAIT_NO_SETUP"),
-          passed: fastDecision.accepted,
-          failed: fastDecision.rejected,
-          finalReason: `MISSED / REJECTED ${
-            fastDecision.bias === "BULLISH" ? "BUY" : fastDecision.bias === "BEARISH" ? "SELL" : "WAIT"
-          } — Regime: ${fastDecision.regime} Setup: ${
-            fastDecision.setupType ?? "none"
-          } Score: ${fastDecision.qualityScore} — ${fastDecision.waitReason ?? "WAIT"}`,
-          fastTelemetry: {
-            strategyId: FAST_AUTOTRADE_STRATEGY_ID,
-            regime: fastDecision.regime,
-            setupType: fastDecision.setupType,
-            grade: fastDecision.grade,
-            trigger: fastDecision.trigger,
-            accepted: fastDecision.accepted,
-            missing: fastDecision.missing,
-            supporting: fastDecision.supporting
-          }
+          quoteAgeSeconds,
+          duplicate
         });
       } catch {
         /* never block on log failure */
       }
       return {
         handled: true,
-        message: `fast_wait:${fastDecision.waitReason ?? "WAIT_NO_SETUP"}`
+        message: `fast_wait:${waitReason}`
       };
     }
 
