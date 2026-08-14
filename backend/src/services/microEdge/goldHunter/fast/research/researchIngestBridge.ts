@@ -295,6 +295,22 @@ export class ResearchIngestBridge {
     this.setConnectionState("CONNECTED", "reconnect_complete");
   }
 
+  /**
+   * Failed / timed-out process reconnect — must NOT report CONNECTED or COMPLETE.
+   */
+  noteReconnectFailed(
+    ts = Date.now(),
+    reason: string | null = null,
+    phase: string | null = null
+  ): void {
+    this.reconnectFinishTs = ts;
+    this.resubscribeState = "FAILED";
+    this.reconnectReason =
+      reason ??
+      (phase != null ? `reconnect_failed:${phase}` : "reconnect_failed");
+    this.setConnectionState("DISCONNECTED", this.reconnectReason);
+  }
+
   getDisconnectResyncCount(): number {
     return this.disconnectResyncCount;
   }

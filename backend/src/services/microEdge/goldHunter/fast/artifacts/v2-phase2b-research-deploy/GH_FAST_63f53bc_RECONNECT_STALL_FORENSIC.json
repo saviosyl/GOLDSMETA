@@ -1,0 +1,76 @@
+{
+  "runtimeSha": "63f53bc68f093a12a6320a7ec7bab43232fecb30",
+  "revision": "gold-hunter-fast-research-collector-00021-hqm",
+  "runId": "gh_research_mstaod7m_0sy3ew",
+  "campaignStartedAt": "2026-08-14T11:42:19.002Z",
+  "timeline": [
+    {
+      "t": "2026-08-14T18:42:47Z",
+      "phase": "process_start"
+    },
+    {
+      "t": "2026-08-14T18:42:48.637Z",
+      "phase": "initial_CONNECTING"
+    },
+    {
+      "t": "2026-08-14T18:42:59.482Z",
+      "phase": "initial_CONNECTED",
+      "note": "~11s connect"
+    },
+    {
+      "t": "2026-08-14T18:43:00.337Z",
+      "phase": "XAUUSD_RESOLVED"
+    },
+    {
+      "t": "2026-08-14T18:43:00.535Z",
+      "phase": "DEPTH_SUBSCRIBED"
+    },
+    {
+      "t": "2026-08-14T18:43:00.536Z",
+      "phase": "COLLECTOR_CONNECTED"
+    },
+    {
+      "t": "2026-08-14T18:43:05.538Z",
+      "phase": "CAPTURE_CAMPAIGN_ACTIVE",
+      "runId": "gh_research_mstaod7m_0sy3ew"
+    },
+    {
+      "t": "2026-08-14T18:43:59.9Z approx",
+      "phase": "last_fresh_feeds",
+      "evidence": "QUOTE_STALE from 18:44:30 implies soft>20s so last event ~18:44:10; HARD ages 45080ms at 18:44:45 => last ~18:44:00.5"
+    },
+    {
+      "t": "2026-08-14T18:44:30Z",
+      "phase": "soft_stale_MICRO_QUOTE_STALE"
+    },
+    {
+      "t": "2026-08-14T18:44:45.549Z",
+      "phase": "HARD_STALE",
+      "spotAgeMs": 45081,
+      "depthAgeMs": 45080
+    },
+    {
+      "t": "2026-08-14T18:44:45.552Z",
+      "phase": "STALE_FEED_RECONNECT_START"
+    },
+    {
+      "t": "2026-08-14T18:44:45.552Z",
+      "phase": "DETACH_DISCONNECT",
+      "event": "MICRO_CTRADER_DISCONNECTED"
+    },
+    {
+      "t": "2026-08-14T18:44:46.240Z",
+      "phase": "CONNECTING_SESSION",
+      "event": "MICRO_CTRADER_CONNECTING"
+    },
+    {
+      "t": "NEVER",
+      "phase": "transport.connect hang \u2014 no MICRO_CTRADER_CONNECTED"
+    }
+  ],
+  "stallPhase": "CONNECTING_SESSION / await transport.connect() after MICRO_CTRADER_CONNECTING",
+  "rootCauseClass": "A transport.open hung",
+  "evidence": "No MICRO_CTRADER_CONNECTED/XAUUSD/DEPTH_SUBSCRIBED after 18:44:46.240 CONNECTING; health kept serving; reconnectInFlight never cleared",
+  "initialConnectDurationMs": 11000,
+  "recommendedReconnectTimeoutMs": 30000
+}

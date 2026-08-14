@@ -4,16 +4,26 @@
  *
  * Soft threshold is GH_FAST_RESEARCH_FRESHNESS_MS (20s) — NOT a new knob.
  * Hard reconnect (45s) and engine sideFreshnessMs/depthFreshnessMs are separate.
+ *
+ * Freshness uses ORDERED/processed timestamps for paper + qualification.
+ * Ingress timestamps are operational-only (health/watchdog).
  */
 import type { ResearchDepthValidity } from "../depthRecovery";
 import { GH_FAST_RESEARCH_FRESHNESS_MS } from "./researchTypes";
 
+/**
+ * age = nowMs - lastAtMs
+ * fresh only if lastAt known, age >= 0, and age <= limit.
+ * Negative age (future lastAt) is NEVER fresh.
+ */
 export function feedAgeFresh(
   lastAtMs: number | null | undefined,
   nowMs: number,
   freshnessLimitMs: number = GH_FAST_RESEARCH_FRESHNESS_MS
 ): boolean {
-  return lastAtMs != null && nowMs - lastAtMs <= freshnessLimitMs;
+  if (lastAtMs == null) return false;
+  const age = nowMs - lastAtMs;
+  return age >= 0 && age <= freshnessLimitMs;
 }
 
 /**
