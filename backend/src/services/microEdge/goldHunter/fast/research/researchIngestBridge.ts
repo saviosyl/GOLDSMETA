@@ -573,9 +573,14 @@ export class ResearchIngestBridge {
       item.rawCallbackArrivalMs
     );
     if (snap.crossed) this.bookCrossedCount += 1;
-    if (snap.bestBid != null) this.lastBid = snap.bestBid;
-    if (snap.bestAsk != null) this.lastAsk = snap.bestAsk;
-    if (snap.bestBid != null && snap.bestAsk != null) {
+    // Market strip uses a coherent top-of-book pair only (avoid stale one-sided mix).
+    if (
+      snap.bestBid != null &&
+      snap.bestAsk != null &&
+      snap.bestAsk >= snap.bestBid
+    ) {
+      this.lastBid = snap.bestBid;
+      this.lastAsk = snap.bestAsk;
       this.lastSpread = snap.bestAsk - snap.bestBid;
     }
     const rec: ResearchCaptureRecord = {
