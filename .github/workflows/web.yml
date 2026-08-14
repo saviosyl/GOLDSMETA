@@ -11,11 +11,13 @@ on:
       - cursor/phase3-stage3-live-forward-c2c2
       - cursor/goldmeta-v4-stage-b-c2c2
       - cursor/v5-4-3-approved-base-c2c2
+      - cursor/gold-hunter-fast-v2-phase2b-deploy-ffd6
   push:
     branches:
       - main
       - cursor/production-connection
       - cursor/live-xauusd-price-e1a2
+      - cursor/gold-hunter-fast-research-monitor-ui-ffd6
   workflow_dispatch:
 
 defaults:
