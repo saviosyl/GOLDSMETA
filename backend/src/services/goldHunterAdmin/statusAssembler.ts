@@ -212,12 +212,17 @@ export async function assembleGoldHunterStatus(
     isAdmin
   });
 
-  const arming = evaluateGoldHunterArmingReadiness({
+  const armCheck = evaluateGoldHunterArmingReadiness({
     snapshot: account,
     allocatedCapitalEur: config.allocatedCapitalEur,
     riskPerTradePct: config.riskPerTradePct,
     strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
   });
+  const arming = {
+    ready: armCheck.ok,
+    blockers: armCheck.blockers,
+    strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
+  };
 
   let autoTradeHealth: GoldHunterStatusPayload["health"]["autoTrade"] = "OFF";
   if (config.emergencyStopActive || config.pauseNewEntries) autoTradeHealth = "PAUSED";
