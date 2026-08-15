@@ -9,7 +9,9 @@ import {
   type GoldHunterDemoTrade
 } from "./types";
 
-const memoryTrades = new Map<string, Map<string, GoldHunterDemoTrade & Record<string, unknown>>>();
+type StoredGoldHunterTrade = GoldHunterDemoTrade & Record<string, unknown>;
+
+const memoryTrades = new Map<string, Map<string, StoredGoldHunterTrade>>();
 
 export function resetGoldHunterTradeMemory(): void {
   memoryTrades.clear();
@@ -59,17 +61,19 @@ export async function listGoldHunterDemoTrades(
 
 export async function upsertGoldHunterDemoTrade(
   ownerUid: string,
-  trade: GoldHunterDemoTrade & Record<string, unknown>
+  trade: StoredGoldHunterTrade
 ): Promise<void> {
   if (trade.strategy !== GH_ADMIN_STRATEGY_ID || trade.environment !== "DEMO") {
     throw new Error("REFUSE: only GOLD_HUNTER DEMO trades may be persisted");
   }
   const col = tradesCol(ownerUid);
   if (!col) {
-    const map: Map<string, GoldHunterDemoTrade & Record<string, unknown>> =
-      memoryTrades.get(ownerUid) ?? new Map();
+    let map = memoryTrades.get(ownerUid);
+    if (!map) {
+      map = new Map<string, StoredGoldHunterTrade>();
+      memoryTrades.set(ownerUid, map);
+    }
     map.set(trade.goldHunterTradeId, trade);
-    memoryTrades.set(ownerUid, map);
     return;
   }
   await col.doc(trade.goldHunterTradeId).set(trade, { merge: true });
