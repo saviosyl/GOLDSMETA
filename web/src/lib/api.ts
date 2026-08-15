@@ -1549,6 +1549,13 @@ export class ApiClient {
       `/v1/gold-hunter/performance?range=${encodeURIComponent(range)}`
     );
   }
+
+  goldHunterRefreshAccount(): Promise<GoldHunterStatusResponse> {
+    return this.request("/v1/gold-hunter/account/refresh", {
+      method: "POST",
+      body: "{}"
+    });
+  }
 }
 
 export type GoldHunterTrade = {
@@ -1630,8 +1637,11 @@ export type GoldHunterStatusResponse = {
     updatedAt: string | null;
   };
   broker: {
+    provider?: "cTrader";
     connected: boolean;
     environment: "DEMO" | "LIVE" | null;
+    authState?: string;
+    authorised?: boolean;
     accountMasked: string | null;
     brokerName: string | null;
     balance: number | null;
@@ -1639,6 +1649,12 @@ export type GoldHunterStatusResponse = {
     equity: number | null;
     marginUsed: number | null;
     freeMargin: number | null;
+    openPositionCount?: number | null;
+    snapshotAgeMs?: number | null;
+    lastSyncAt?: string | null;
+    snapshotSource?: string;
+    demoOrderSubmissionEnabled?: boolean;
+    validForRisk?: boolean;
   };
   capital: {
     allocatedEur: number;
@@ -1655,6 +1671,19 @@ export type GoldHunterStatusResponse = {
     strategy: string;
     risk: string;
     autoTrade: string;
+  };
+  strategyPipeline?: {
+    connected: boolean;
+    spot: string;
+    depth: string;
+    selector: string;
+    state: string;
+    lastSelectedCandidate: null;
+  };
+  arming?: {
+    ready: boolean;
+    blockers: string[];
+    strategySelectorConnected: boolean;
   };
   gates: {
     ok: boolean;

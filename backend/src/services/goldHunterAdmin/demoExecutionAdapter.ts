@@ -41,6 +41,8 @@ export type GoldHunterDemoSubmitArgs = {
   openTradeCount: number;
   signalPresent: boolean;
   signalConsumed: boolean;
+  /** Authoritative Demo snapshot valid — fail closed when omitted/false. */
+  accountSnapshotValid: boolean;
 };
 
 /**
@@ -103,6 +105,7 @@ export async function submitGoldHunterDemoOrder(
     config,
     brokerEnvironment,
     brokerConnected: Boolean(connection),
+    accountSnapshotValid: args.accountSnapshotValid,
     marketOpen: args.marketOpen,
     feedFresh: args.feedFresh,
     depthValid: args.depthValid,

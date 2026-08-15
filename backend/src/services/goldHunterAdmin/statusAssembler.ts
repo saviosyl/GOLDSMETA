@@ -1,10 +1,14 @@
 /**
  * Assemble Gold Hunter Admin status payload for Dashboard / Monitor / Control.
- * Truthful: does not invent quotes when feed is closed/stale.
+ * Truthful: does not invent quotes or broker money fields.
  */
 
-import { getConnection } from "../broker/ctrader/connectionStore";
 import { getSharedXauusdQuote } from "../marketFeed/sharedMarketData";
+import {
+  evaluateGoldHunterArmingReadiness,
+  fetchGoldHunterAccountSnapshot,
+  type GoldHunterAccountSnapshot
+} from "./accountSnapshot";
 import { loadGoldHunterConfig, listGoldHunterAudit } from "./configStore";
 import { evaluateGoldHunterOrderGates } from "./orderGates";
 import {
@@ -24,6 +28,9 @@ import {
 
 const FEED_STALE_MS = 45_000;
 const FEED_HARD_STALE_MS = 120_000;
+
+/** Gold Hunter A/B/C selector is not wired on this product surface yet. */
+export const GH_STRATEGY_SELECTOR_CONNECTED = false;
 
 export type GoldHunterStatusPayload = {
   product: "GOLD_HUNTER";
@@ -50,16 +57,24 @@ export type GoldHunterStatusPayload = {
     updatedAt: string | null;
   };
   broker: {
+    provider: "cTrader";
     connected: boolean;
     environment: "DEMO" | "LIVE" | null;
+    authState: GoldHunterAccountSnapshot["authState"];
+    authorised: boolean;
     accountMasked: string | null;
     brokerName: string | null;
     balance: number | null;
     currency: string | null;
-    /** Equity/margin not always in connection record — null when unknown. */
     equity: number | null;
     marginUsed: number | null;
     freeMargin: number | null;
+    openPositionCount: number | null;
+    snapshotAgeMs: number | null;
+    lastSyncAt: string | null;
+    snapshotSource: GoldHunterAccountSnapshot["source"];
+    demoOrderSubmissionEnabled: boolean;
+    validForRisk: boolean;
   };
   capital: {
     allocatedEur: number;
@@ -72,10 +87,23 @@ export type GoldHunterStatusPayload = {
   health: {
     marketFeed: "LIVE" | "STALE" | "HARD_STALE" | "UNAVAILABLE";
     transport: "CONNECTED" | "DISCONNECTED";
-    depth: "VALID" | "STALE" | "CROSSED" | "RECOVERY" | "UNKNOWN";
-    strategy: "READY" | "WAITING" | "PAUSED";
+    depth: "VALID" | "STALE" | "CROSSED" | "RECOVERY" | "UNKNOWN" | "UNAVAILABLE";
+    strategy: "READY" | "WAITING" | "PAUSED" | "WAITING_FOR_MARKET";
     risk: "NORMAL" | "LIMITED" | "HALTED";
     autoTrade: "ACTIVE" | "OFF" | "PAUSED";
+  };
+  strategyPipeline: {
+    connected: boolean;
+    spot: "LIVE" | "STALE" | "HARD_STALE" | "UNAVAILABLE" | "CLOSED";
+    depth: string;
+    selector: "CONNECTED" | "NOT_CONNECTED";
+    state: string;
+    lastSelectedCandidate: null;
+  };
+  arming: {
+    ready: boolean;
+    blockers: string[];
+    strategySelectorConnected: boolean;
   };
   gates: ReturnType<typeof evaluateGoldHunterOrderGates>;
   openTrades: GoldHunterDemoTrade[];
@@ -101,7 +129,6 @@ function feedStateFromAge(
 ): "LIVE" | "STALE" | "HARD_STALE" | "UNAVAILABLE" {
   if (freshness === "UNAVAILABLE" || ageMs == null) return "UNAVAILABLE";
   if (marketStatus === "CLOSED") {
-    // Closed market: age grows; classify honestly without calling it transport failure.
     if (ageMs > FEED_HARD_STALE_MS) return "HARD_STALE";
     if (ageMs > FEED_STALE_MS) return "STALE";
     return "STALE";
@@ -113,7 +140,8 @@ function feedStateFromAge(
 
 export async function assembleGoldHunterStatus(
   ownerUid: string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  opts?: { forceAccountRefresh?: boolean }
 ): Promise<GoldHunterStatusPayload> {
   const config = await loadGoldHunterConfig(ownerUid);
   const trades = await listGoldHunterDemoTrades(ownerUid, { limit: 200 });
@@ -131,38 +159,34 @@ export async function assembleGoldHunterStatus(
 
   const q = marketQuote?.quote ?? null;
   const ageMs = q?.ageMs ?? null;
+  const marketStatus = q?.marketStatus ?? marketQuote?.marketStatus ?? "UNKNOWN";
   const feedState = feedStateFromAge(
     ageMs,
     marketQuote?.freshness ?? "UNAVAILABLE",
-    q?.marketStatus ?? marketQuote?.marketStatus ?? "UNKNOWN"
+    marketStatus
   );
 
-  let connection = null as Awaited<ReturnType<typeof getConnection>>;
-  try {
-    connection = await getConnection(ownerUid);
-  } catch {
-    connection = null;
-  }
+  const account = await fetchGoldHunterAccountSnapshot({
+    ownerUid,
+    forceRefresh: opts?.forceAccountRefresh === true
+  });
 
-  const brokerConnected = Boolean(connection?.selectedAccountId);
-  const brokerEnvironment: "DEMO" | "LIVE" | null = connection
-    ? connection.selectedAccountIsLive
-      ? "LIVE"
-      : "DEMO"
-    : null;
+  const brokerConnected =
+    account.authState === "AUTHORISED" ||
+    account.authState === "STALE" ||
+    account.authState === "CONNECTED";
+  const brokerEnvironment = account.environment;
 
   const todayPnl = todayNetPnlEur(trades);
   const dailyLossBudget = plannedDailyLossBudgetEur(config);
   const riskBudget = plannedRiskBudgetEur(config);
-  const committedEur = 0; // Open margin commitment requires broker position reconcile; fail-closed as 0 until proven.
+  const committedEur = 0;
   const availableEur = Math.max(0, config.allocatedCapitalEur - committedEur);
 
-  const marketOpen = (q?.marketStatus ?? marketQuote?.marketStatus) === "OPEN";
+  const marketOpen = marketStatus === "OPEN";
   const feedFresh = feedState === "LIVE";
-  // Depth cohort not yet attached to this admin status surface.
-  // Health shows UNKNOWN; gate does not invent VALID. Depth blocks only when a
-  // depth-requiring signal is present (none in this release → depthValid=true).
-  const depthHealth: GoldHunterStatusPayload["health"]["depth"] = "UNKNOWN";
+  const depthHealth: GoldHunterStatusPayload["health"]["depth"] =
+    marketStatus === "CLOSED" ? "UNAVAILABLE" : "UNKNOWN";
   const signalPresent = false;
   const depthValid = !signalPresent;
 
@@ -175,6 +199,7 @@ export async function assembleGoldHunterStatus(
     config,
     brokerEnvironment,
     brokerConnected,
+    accountSnapshotValid: account.validForRisk,
     marketOpen,
     feedFresh,
     depthValid,
@@ -187,16 +212,29 @@ export async function assembleGoldHunterStatus(
     isAdmin
   });
 
+  const armCheck = evaluateGoldHunterArmingReadiness({
+    snapshot: account,
+    allocatedCapitalEur: config.allocatedCapitalEur,
+    riskPerTradePct: config.riskPerTradePct,
+    strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
+  });
+  const arming = {
+    ready: armCheck.ok,
+    blockers: armCheck.blockers,
+    strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
+  };
+
   let autoTradeHealth: GoldHunterStatusPayload["health"]["autoTrade"] = "OFF";
   if (config.emergencyStopActive || config.pauseNewEntries) autoTradeHealth = "PAUSED";
   else if (config.demoAutoTradeEnabled) autoTradeHealth = "ACTIVE";
 
   let riskHealth: GoldHunterStatusPayload["health"]["risk"] = "NORMAL";
   if (config.emergencyStopActive) riskHealth = "HALTED";
-  else if (!dailyLossOk || !capitalOk) riskHealth = "LIMITED";
+  else if (!dailyLossOk || !capitalOk || !account.validForRisk) riskHealth = "LIMITED";
 
   let strategyHealth: GoldHunterStatusPayload["health"]["strategy"] = "WAITING";
   if (config.pauseNewEntries || config.emergencyStopActive) strategyHealth = "PAUSED";
+  else if (!marketOpen) strategyHealth = "WAITING_FOR_MARKET";
   else if (gates.ok) strategyHealth = "READY";
 
   const modeLabel =
@@ -204,13 +242,31 @@ export async function assembleGoldHunterStatus(
       ? {
           primary: "DEMO AUTOTRADE",
           secondary: "CTRADER DEMO",
-          tertiary: brokerConnected ? "CONNECTED" : "DISCONNECTED"
+          tertiary:
+            account.authState === "AUTHORISED"
+              ? "CONNECTED"
+              : account.authState === "STALE"
+                ? "STALE"
+                : account.authState
         }
-      : {
-          primary: "RESEARCH",
-          secondary: "PAPER ONLY",
-          tertiary: "NO BROKER EXECUTION"
-        };
+      : marketOpen
+        ? {
+            primary: "RESEARCH",
+            secondary: "PAPER ONLY",
+            tertiary: "NO BROKER EXECUTION"
+          }
+        : {
+            primary: config.demoAutoTradeEnabled ? "DEMO AUTOTRADE" : "RESEARCH",
+            secondary: "CTRADER DEMO",
+            tertiary: marketOpen ? "READY" : "WAITING FOR MARKET"
+          };
+
+  const spotPipeline =
+    marketStatus === "CLOSED"
+      ? ("CLOSED" as const)
+      : feedState === "LIVE"
+        ? ("LIVE" as const)
+        : feedState;
 
   return {
     product: "GOLD_HUNTER",
@@ -226,22 +282,31 @@ export async function assembleGoldHunterStatus(
       ask: q?.ask ?? null,
       mid: q?.mid ?? null,
       spread: q?.spread ?? null,
-      marketStatus: q?.marketStatus ?? marketQuote?.marketStatus ?? "UNKNOWN",
+      marketStatus,
       freshness: marketQuote?.freshness ?? "UNAVAILABLE",
       ageMs,
       feedState,
       updatedAt: marketQuote?.updatedAt ?? null
     },
     broker: {
+      provider: "cTrader",
       connected: brokerConnected,
       environment: brokerEnvironment,
-      accountMasked: connection?.selectedAccountMasked ?? null,
-      brokerName: connection?.brokerName ?? null,
-      balance: connection?.balance ?? null,
-      currency: connection?.currency ?? null,
-      equity: connection?.balance ?? null,
-      marginUsed: null,
-      freeMargin: null
+      authState: account.authState,
+      authorised: account.authorised,
+      accountMasked: account.accountMasked,
+      brokerName: account.brokerName,
+      balance: account.balance,
+      currency: account.currency,
+      equity: account.equity,
+      marginUsed: account.marginUsed,
+      freeMargin: account.freeMargin,
+      openPositionCount: account.openPositionCount,
+      snapshotAgeMs: account.ageMs,
+      lastSyncAt: account.capturedAt,
+      snapshotSource: account.source,
+      demoOrderSubmissionEnabled: account.demoOrderSubmissionEnabled,
+      validForRisk: account.validForRisk
     },
     capital: {
       allocatedEur: config.allocatedCapitalEur,
@@ -259,6 +324,19 @@ export async function assembleGoldHunterStatus(
       risk: riskHealth,
       autoTrade: autoTradeHealth
     },
+    strategyPipeline: {
+      connected: GH_STRATEGY_SELECTOR_CONNECTED,
+      spot: spotPipeline,
+      depth: depthHealth,
+      selector: GH_STRATEGY_SELECTOR_CONNECTED ? "CONNECTED" : "NOT_CONNECTED",
+      state: !marketOpen
+        ? "WAITING_FOR_MARKET"
+        : GH_STRATEGY_SELECTOR_CONNECTED
+          ? "EVALUATING"
+          : "SELECTOR_NOT_CONNECTED",
+      lastSelectedCandidate: null
+    },
+    arming,
     gates,
     openTrades,
     unmatchedDemoPositions: [],
@@ -268,7 +346,9 @@ export async function assembleGoldHunterStatus(
       present: false,
       setup: null,
       side: null,
-      note: "WAIT — NO SETUP SELECTED (strategy signal engine not armed for auto-entry in this release)"
+      note: GH_STRATEGY_SELECTOR_CONNECTED
+        ? "WAIT — NO SETUP SELECTED"
+        : "WAIT — NO SETUP SELECTED (Gold Hunter A/B/C selector not connected — Demo AutoTrade remains fail-closed for natural entries)"
     }
   };
 }

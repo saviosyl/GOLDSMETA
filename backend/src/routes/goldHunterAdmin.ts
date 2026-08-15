@@ -11,7 +11,14 @@ import {
   loadGoldHunterConfig,
   saveGoldHunterConfig
 } from "../services/goldHunterAdmin/configStore";
-import { assembleGoldHunterStatus } from "../services/goldHunterAdmin/statusAssembler";
+import {
+  evaluateGoldHunterArmingReadiness,
+  resetGoldHunterAccountSnapshotCache
+} from "../services/goldHunterAdmin/accountSnapshot";
+import {
+  assembleGoldHunterStatus,
+  GH_STRATEGY_SELECTOR_CONNECTED
+} from "../services/goldHunterAdmin/statusAssembler";
 import {
   computeDemoPerformance,
   listGoldHunterDemoTrades
@@ -39,13 +46,39 @@ export const buildGoldHunterAdminRouter = (): Router => {
       return;
     }
     try {
-      const status = await assembleGoldHunterStatus(uid, true);
+      const force = String(req.query.refresh ?? "") === "1";
+      const status = await assembleGoldHunterStatus(uid, true, {
+        forceAccountRefresh: force
+      });
       res.status(200).json(status);
     } catch (e) {
       res.status(500).json({
         error: {
           code: "GH_STATUS_FAILED",
           message: e instanceof Error ? e.message : "status_failed"
+        }
+      });
+    }
+  });
+
+  /** Read-only broker account refresh — clears soft cache then returns status. */
+  router.post("/v1/gold-hunter/account/refresh", ...adminGate, async (req, res) => {
+    const uid = getAuthenticatedUserId(req);
+    if (!uid) {
+      res.status(401).json({ error: { code: "UNAUTHENTICATED" } });
+      return;
+    }
+    resetGoldHunterAccountSnapshotCache();
+    try {
+      const status = await assembleGoldHunterStatus(uid, true, {
+        forceAccountRefresh: true
+      });
+      res.status(200).json(status);
+    } catch (e) {
+      res.status(500).json({
+        error: {
+          code: "GH_ACCOUNT_REFRESH_FAILED",
+          message: e instanceof Error ? e.message : "refresh_failed"
         }
       });
     }
@@ -128,15 +161,56 @@ export const buildGoldHunterAdminRouter = (): Router => {
         return;
       }
       if (body.demoAutoTradeEnabled === true) {
-        // Ensure selected broker is DEMO before arming.
+        // Ensure selected broker is DEMO + account snapshot valid before arming.
         try {
-          const status = await assembleGoldHunterStatus(uid, true);
+          resetGoldHunterAccountSnapshotCache();
+          const status = await assembleGoldHunterStatus(uid, true, {
+            forceAccountRefresh: true
+          });
           assertGoldHunterDemoOnlyEnvironment(status.broker.environment);
           if (!status.broker.connected || status.broker.environment !== "DEMO") {
             res.status(403).json({
               error: {
                 code: "DEMO_ACCOUNT_REQUIRED",
                 message: "Gold Hunter AutoTrade requires a connected cTrader DEMO account."
+              }
+            });
+            return;
+          }
+          const arm = evaluateGoldHunterArmingReadiness({
+            snapshot: {
+              provider: "cTrader",
+              environment: status.broker.environment,
+              authState: status.broker.authState,
+              authorised: status.broker.authorised,
+              accountMasked: status.broker.accountMasked,
+              brokerName: status.broker.brokerName,
+              currency: status.broker.currency,
+              balance: status.broker.balance,
+              equity: status.broker.equity,
+              marginUsed: status.broker.marginUsed,
+              freeMargin: status.broker.freeMargin,
+              openPositionCount: status.broker.openPositionCount,
+              capturedAt: status.broker.lastSyncAt,
+              ageMs: status.broker.snapshotAgeMs,
+              source: status.broker.snapshotSource,
+              notes: [],
+              demoOrderSubmissionEnabled: status.broker.demoOrderSubmissionEnabled,
+              validForRisk: status.broker.validForRisk
+            },
+            allocatedCapitalEur: status.config.allocatedCapitalEur,
+            riskPerTradePct: status.config.riskPerTradePct,
+            strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
+          });
+          if (!arm.ok) {
+            res.status(403).json({
+              error: {
+                code: "ARMING_BLOCKED",
+                message:
+                  "Gold Hunter Demo AutoTrade cannot be armed until all readiness gates pass.",
+                blockers: arm.blockers,
+                executionMode: GH_ADMIN_EXECUTION_MODE,
+                liveExecutionEnabled: false
               }
             });
             return;

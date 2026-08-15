@@ -9,17 +9,18 @@ import { resolve } from "node:path";
 describe("Gold Hunter isolation from Fast AutoTrade", () => {
   it("does not import Fast AutoTrade engine from GH admin modules", () => {
     const files = [
-      "src/services/goldHunterAdmin/demoExecutionAdapter.ts",
-      "src/services/goldHunterAdmin/orderGates.ts",
-      "src/services/goldHunterAdmin/statusAssembler.ts",
-      "src/routes/goldHunterAdmin.ts"
+      "backend/src/services/goldHunterAdmin/demoExecutionAdapter.ts",
+      "backend/src/services/goldHunterAdmin/orderGates.ts",
+      "backend/src/services/goldHunterAdmin/statusAssembler.ts",
+      "backend/src/services/goldHunterAdmin/accountSnapshot.ts",
+      "backend/src/routes/goldHunterAdmin.ts"
     ];
     for (const f of files) {
-      const text = readFileSync(resolve(process.cwd(), f), "utf8");
+      const text = readFileSync(resolve(process.cwd(), f.replace(/^backend\//, "")), "utf8");
       expect(text).not.toMatch(/fastAutoTrade\/engine/);
       expect(text).not.toMatch(/createAutoTradeService/);
       expect(text).not.toMatch(/qualificationMachine/);
-      expect(text).toMatch(/GOLD_HUNTER|GH_ADMIN_STRATEGY|gold-hunter|Gold Hunter/);
+      expect(text).toMatch(/GOLD_HUNTER|GH_ADMIN_STRATEGY|gold-hunter|Gold Hunter|cTrader/);
     }
   });
 
