@@ -44,6 +44,7 @@ export type EvaluationRecord = {
     executionAuthority?: string | null;
     brokerSubmissionAttempted?: boolean;
     brokerOrderIdMasked?: string | null;
+    brokerErrorCode?: string | null;
   } | null;
   /** One human-readable final reason when not submitted. */
   finalReason?: string | null;
@@ -134,6 +135,10 @@ export function reasonLabelFor(code: string): string {
     QUALIFICATION_NOT_STARTED: "Demo Auto qualification was not started",
     EXECUTION_AUTHORITY_OFF: "Demo Auto authority OFF",
     BROKER_SUBMITTED: "Broker Demo order submitted",
+    BROKER_REJECTED: "Broker rejected Demo order",
+    BROKER_SUBMIT_ERROR: "Broker Demo order submission error",
+    FAST_STRATEGY_REPLACED_LEGACY_ARMED:
+      "FAST strategy replaced legacy armed candidate",
     BROKER_BOUNDARY_REACHED: "Reached Demo order submission boundary",
     PLAN_REFRESH_UNAVAILABLE:
       "Session plan refresh unavailable — still monitoring armed candidate",

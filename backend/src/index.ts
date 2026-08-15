@@ -23,6 +23,10 @@ import { runDemoPositionManagementPass } from "./services/broker/ctrader/demoPos
 import { runWeeklyReportPass } from "./services/broker/ctrader/weeklyReportService";
 import { isFastAutoTradeV1Enabled } from "./services/broker/ctrader/fastAutoTrade/config";
 import { runFastAutoTradeScanPass } from "./services/broker/ctrader/fastAutoTrade/scan";
+import {
+  applyCanonicalDemoFastRuntimeEnv,
+  CTRADER_DEMO_FUNCTION_SECRETS
+} from "./services/broker/ctrader/demoFastRuntime";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
@@ -80,24 +84,6 @@ function applyProductionCTraderRuntimeEnv(): void {
   }
   // Force DEMO Open API environment for this phase.
   process.env.CTRADER_ENVIRONMENT = "DEMO";
-}
-
-/** Shared Demo Auto runtime env for decision-triggered execution (never Live). */
-function applyDemoAutoTradeRuntimeEnv(): void {
-  if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
-  process.env.CTRADER_CONNECTOR_ENABLED =
-    process.env.CTRADER_CONNECTOR_ENABLED || "true";
-  process.env.CTRADER_DEMO_READ_ENABLED =
-    process.env.CTRADER_DEMO_READ_ENABLED || "true";
-  process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
-  process.env.CTRADER_LIVE_ENABLED = "false";
-  process.env.BROKER_EXECUTION_ENABLED = "false";
-  process.env.CTRADER_ENVIRONMENT = "DEMO";
-  process.env.FAST_AUTOTRADE_V1_ENABLED =
-    process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
-  process.env.DEMO_OPPORTUNITY_MODE =
-    process.env.DEMO_OPPORTUNITY_MODE || "FAST_AUTOTRADE_V1";
-  applyDemoOvernightRuntimeEnv();
 }
 
 /**
@@ -249,15 +235,10 @@ export const manageDemoAutoTradePositions = onSchedule(
     region: env.FIREBASE_REGION,
     timeoutSeconds: 240,
     memory: "512MiB",
-    secrets: [
-      "CTRADER_CLIENT_ID",
-      "CTRADER_CLIENT_SECRET",
-      "CTRADER_REDIRECT_URI",
-      "CTRADER_" + "TOKEN_ENCRYPTION_KEY",
-      "CTRADER_ENVIRONMENT"
-    ]
+    secrets: [...CTRADER_DEMO_FUNCTION_SECRETS]
   },
   async () => {
+    applyCanonicalDemoFastRuntimeEnv();
     if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) {
       console.log(
         JSON.stringify({
@@ -268,14 +249,6 @@ export const manageDemoAutoTradePositions = onSchedule(
       );
       return;
     }
-    process.env.CTRADER_CONNECTOR_ENABLED = "true";
-    process.env.CTRADER_DEMO_READ_ENABLED = "true";
-    process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
-    process.env.CTRADER_LIVE_ENABLED = "false";
-    process.env.BROKER_EXECUTION_ENABLED = "false";
-    process.env.CTRADER_ENVIRONMENT = "DEMO";
-    process.env.FAST_AUTOTRADE_V1_ENABLED =
-      process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
     const result = await runDemoPositionManagementPass();
     const fastScan = isFastAutoTradeV1Enabled()
       ? await runFastAutoTradeScanPass()
@@ -318,13 +291,14 @@ export const generateWeeklyGoldMetaReports = onSchedule(
 export const onGoldMetaDecisionCreated = onDocumentCreated(
   {
     document: "users/{userId}/decisions/{decisionId}",
-    region: env.FIREBASE_REGION
+    region: env.FIREBASE_REGION,
+    secrets: [...CTRADER_DEMO_FUNCTION_SECRETS]
   },
   async (event) => {
     const userId = event.params.userId;
     const decisionId = event.params.decisionId;
     // Demo paper AutoTrade path — submission on; Live stays hard-off.
-    applyDemoAutoTradeRuntimeEnv();
+    applyCanonicalDemoFastRuntimeEnv();
     await processDecisionForAutoTrade({
       userId,
       decisionId,

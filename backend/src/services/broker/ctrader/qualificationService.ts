@@ -125,6 +125,12 @@ import { buildFastAutoTradeInput } from "./fastAutoTrade/qualificationInput";
 import { evaluateFastAutoTradeDemoLock } from "./fastAutoTrade/demoLock";
 import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
 import type { FastAutoTradeDecision, FastAutoTradeInput } from "./fastAutoTrade/types";
+import { buildFastExecutionIntent } from "./fastAutoTrade/executionIntent";
+import type { FastExecutionIntent } from "./fastAutoTrade/executionIntent";
+import {
+  sanitizeBrokerErrorCode,
+  sanitizeBrokerFailure
+} from "./fastAutoTrade/brokerTelemetry";
 import { setupIdentityKey } from "./fastAutoTrade/stateMachine";
 import {
   persistFastReentryEntry,
@@ -676,6 +682,40 @@ export async function processDecisionForQualification(args: {
     if (setup.emergencyStopActive || setup.accountIsLive) {
       await clearArmedCandidate(uid).catch(() => undefined);
     }
+    if (setup.accountIsLive && isFastAutoTradeV1Enabled()) {
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: "qualification",
+          direction: "WAIT",
+          signalId: decisionId,
+          decisionId,
+          confidence: null,
+          entry: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          spread: null,
+          maxSpread: null,
+          outcome: "REJECTED",
+          reasonCode: "FAST_AUTOTRADE_V1_DEMO_ONLY",
+          reasonLabel: reasonLabelFor("FAST_AUTOTRADE_V1_DEMO_ONLY"),
+          passed: [],
+          failed: ["FAST_AUTOTRADE_V1_DEMO_ONLY"],
+          pipeline: {
+            brokerSubmissionAttempted: false,
+            executionAuthority: "OFF"
+          },
+          finalReason: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked"
+        });
+      } catch {
+        /* ignore */
+      }
+      return { handled: true, message: "FAST_AUTOTRADE_V1_DEMO_ONLY" };
+    }
     return { handled: false, message: "setup_or_live_or_stop" };
   }
 
@@ -787,6 +827,7 @@ export async function processDecisionForQualification(args: {
   let armedTrade: ArmedCandidate | null = null;
   let fastDecision: FastAutoTradeDecision | null = null;
   let fastInput: FastAutoTradeInput | null = null;
+  let fastExecution: FastExecutionIntent | null = null;
   if (orderStates) {
     const existingArmed = await getArmedCandidate(uid).catch(() => null);
     const alreadyCountedArmed = existingArmed
@@ -1043,6 +1084,37 @@ export async function processDecisionForQualification(args: {
       }
     }
 
+    if (fastEnabled && existingArmed) {
+      await clearArmedCandidate(uid).catch(() => undefined);
+      try {
+        await appendEvaluation({
+          uid,
+          accountMasked: setup.accountMasked,
+          at: new Date().toISOString(),
+          tradingDay: tradingDayKey(),
+          stage: state,
+          direction: existingArmed.direction,
+          signalId: existingArmed.signalId,
+          decisionId: existingArmed.signalId,
+          confidence: existingArmed.setupScore ?? existingArmed.confidence,
+          entry: existingArmed.entry,
+          stopLoss: existingArmed.stopLoss,
+          takeProfit: existingArmed.takeProfit,
+          riskReward: null,
+          spread: quote?.spread ?? null,
+          maxSpread: settings.maxSpread,
+          outcome: "IGNORED",
+          reasonCode: "FAST_STRATEGY_REPLACED_LEGACY_ARMED",
+          reasonLabel: reasonLabelFor("FAST_STRATEGY_REPLACED_LEGACY_ARMED"),
+          passed: [],
+          failed: ["FAST_STRATEGY_REPLACED_LEGACY_ARMED"],
+          finalReason: "FAST_AUTOTRADE_V1 replaced legacy armed candidate"
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
     if (fastDecision && fastDecision.action === "WAIT") {
       qualifiedSetup = null;
     }
@@ -1052,6 +1124,7 @@ export async function processDecisionForQualification(args: {
       fastDecision.geometry &&
       fastDecision.signalId
     ) {
+      fastExecution = buildFastExecutionIntent(fastDecision);
       qualifiedSetup = {
         direction: fastDecision.action,
         signalId: fastDecision.signalId,
@@ -1071,7 +1144,7 @@ export async function processDecisionForQualification(args: {
         grade: fastDecision.grade,
         score: fastDecision.qualityScore
       });
-    } else if (fastDecision && fastDecision.action === "WAIT" && !existingArmed) {
+    } else if (fastDecision && fastDecision.action === "WAIT") {
       const waitReason = fastDecision.waitReason ?? "WAIT_NO_SETUP";
       const scanCandleKey = fastInput ? candleKey(fastInput) : null;
       const m1AgeMs =
@@ -1099,7 +1172,7 @@ export async function processDecisionForQualification(args: {
                 : fastDecision.bias === "BEARISH"
                   ? "SELL"
                   : "WAIT",
-            signalId: d.decisionId,
+            signalId: fastDecision.signalId ?? d.decisionId,
             decisionId: d.decisionId,
             confidence: fastDecision.qualityScore,
             entry: geom.entry ?? null,
@@ -1179,6 +1252,7 @@ export async function processDecisionForQualification(args: {
       };
     }
 
+    if (!fastExecution) {
     const planLifecycle = sessionPlan?.lifecycleState ?? null;
     // ACTIVE_DEMO: NO_VALID_PLAN alone must NOT kill an armed thesis.
     // NO_TRADE remains a hard invalidator (GoldMeta non-actionable).
@@ -1466,6 +1540,7 @@ export async function processDecisionForQualification(args: {
       }
       return { handled: false, message: "wait_hold_ignored" };
     }
+    }
   } else if (decisionDirection !== "BUY" && decisionDirection !== "SELL") {
     try {
       await appendEvaluation({
@@ -1495,17 +1570,18 @@ export async function processDecisionForQualification(args: {
     return { handled: false, message: "wait_hold_ignored" };
   }
 
-  // Prefer armed candidate geometry when confirmation finally arrives on a later cycle.
-  // Original TP2/TP3 must survive WAIT/confirmation cycles that omit them.
-  const direction = armedTrade?.direction ?? decisionDirection;
-  const entry = armedTrade?.entry ?? geom.entry;
-  const stopLoss = armedTrade?.stopLoss ?? geom.stopLoss;
-  const takeProfit = armedTrade?.takeProfit ?? geom.takeProfit;
-  const tp1 = armedTrade?.takeProfit ?? geom.tp1;
-  const tp2 = armedTrade?.takeProfit2 ?? geom.tp2;
-  const tp3 = armedTrade?.takeProfit3 ?? geom.tp3;
-  const signalId = armedTrade?.signalId ?? d.decisionId;
-  const tradeConfidence = armedTrade?.confidence ?? d.confidence ?? null;
+  // FAST execution object is authoritative when FAST_AUTOTRADE_V1 is enabled.
+  // Do not fall back to DecisionRecord direction/geometry/id for the broker order.
+  const direction = fastExecution?.direction ?? armedTrade?.direction ?? decisionDirection;
+  const entry = fastExecution?.entry ?? armedTrade?.entry ?? geom.entry;
+  const stopLoss = fastExecution?.stopLoss ?? armedTrade?.stopLoss ?? geom.stopLoss;
+  const takeProfit = fastExecution?.takeProfit ?? armedTrade?.takeProfit ?? geom.takeProfit;
+  const tp1 = fastExecution?.takeProfit ?? armedTrade?.takeProfit ?? geom.tp1;
+  const tp2 = fastExecution ? null : (armedTrade?.takeProfit2 ?? geom.tp2);
+  const tp3 = fastExecution ? null : (armedTrade?.takeProfit3 ?? geom.tp3);
+  const signalId = fastExecution?.signalId ?? armedTrade?.signalId ?? d.decisionId;
+  const tradeConfidence =
+    fastExecution?.qualityScore ?? armedTrade?.confidence ?? d.confidence ?? null;
 
   const alreadyCounted =
     doc.previewSignalIds.includes(signalId) ||
@@ -1582,6 +1658,7 @@ export async function processDecisionForQualification(args: {
     extras?: {
       brokerSubmissionAttempted?: boolean;
       brokerOrderIdMasked?: string | null;
+      brokerErrorCode?: string | null;
       executionAuthority?: string | null;
     }
   ) => {
@@ -1618,8 +1695,23 @@ export async function processDecisionForQualification(args: {
           armedCandidate: armedTrade ? "ARMED" : null,
           executionAuthority: extras?.executionAuthority ?? null,
           brokerSubmissionAttempted: extras?.brokerSubmissionAttempted ?? false,
-          brokerOrderIdMasked: extras?.brokerOrderIdMasked ?? null
+          brokerOrderIdMasked: extras?.brokerOrderIdMasked ?? null,
+          brokerErrorCode: extras?.brokerErrorCode ?? null
         },
+        fastTelemetry: fastDecision
+          ? {
+              strategyId: FAST_AUTOTRADE_STRATEGY_ID,
+              regime: fastDecision.regime,
+              bias: fastDecision.bias,
+              setupType: fastDecision.setupType,
+              trigger: fastDecision.trigger,
+              qualityScore: fastDecision.qualityScore,
+              grade: fastDecision.grade,
+              waitReason: fastDecision.waitReason,
+              spread: quote?.spread ?? fastInput?.spread ?? null,
+              quoteAgeSeconds: fastInput?.quoteAgeSeconds ?? quoteAgeSeconds
+            }
+          : null,
         finalReason: outcome === "QUALIFIED" ? null : reasonLabelFor(reasonCode),
         overnightRunId: overnight.runId
       });
@@ -2071,7 +2163,7 @@ export async function processDecisionForQualification(args: {
           expectedMargin: marginGate.expectedMargin,
           marginSource: marginGate.marginSource,
           marginAgeMs: marginGate.marginAgeMs,
-          openPositionCount: marginGate.marginSnapshot.openPositionCount
+          openPositionCount: marginGate.marginSnapshot?.openPositionCount
         });
       }
     } else if (oppCfg.mode === "ACTIVE_DEMO") {
@@ -2172,7 +2264,8 @@ export async function processDecisionForQualification(args: {
 
     const correlationId = newId("corr");
     try {
-      const profitLockActive = isDemoProfitLockLadderEnabled(settings);
+      const profitLockActive =
+        !fastExecution && isDemoProfitLockLadderEnabled(settings);
       const managementPolicy = profitLockActive
         ? ("PROFIT_LOCK_V1" as const)
         : ("LEGACY_V1" as const);
@@ -2235,7 +2328,24 @@ export async function processDecisionForQualification(args: {
       if (!result.accepted) {
         doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
         await saveQualificationDoc(doc);
-        logger.info("AutoTrade order rejected", { uid, signalId, direction });
+        const rejectedCode = sanitizeBrokerErrorCode(result.errorCode);
+        logger.info("AutoTrade order rejected", {
+          uid,
+          signalId,
+          direction,
+          errorCode: rejectedCode
+        });
+        await logEval(
+          "REJECTED",
+          "BROKER_REJECTED",
+          ["BROKER_REJECTED", rejectedCode],
+          candidate.passed,
+          {
+            brokerSubmissionAttempted: true,
+            brokerErrorCode: rejectedCode,
+            executionAuthority: "ON"
+          }
+        );
         return { handled: true, message: "order_rejected" };
       }
       if (fastSubmitCfg && fastDecision?.identity && (fastDecision.action === "BUY" || fastDecision.action === "SELL")) {
@@ -2367,7 +2477,7 @@ export async function processDecisionForQualification(args: {
       const submitLabel = formatOpportunityActivity({
         tier: setupTier,
         direction: trade.direction,
-        score: d.setupScore ?? d.confidence ?? null,
+        score: fastExecution?.qualityScore ?? d.setupScore ?? d.confidence ?? null,
         event:
           confirmMethod === "FAST_CONFIRMATION"
             ? "FAST_CONFIRMATION_SUBMITTED"
@@ -2383,7 +2493,7 @@ export async function processDecisionForQualification(args: {
           direction: trade.direction,
           signalId,
           decisionId,
-          confidence: d.setupScore ?? tradeConfidence,
+          confidence: fastExecution?.qualityScore ?? d.setupScore ?? tradeConfidence,
           entry: trade.entry,
           stopLoss: trade.stopLoss,
           takeProfit: trade.takeProfit,
@@ -2410,7 +2520,20 @@ export async function processDecisionForQualification(args: {
               ? `${String(trade.brokerOrderId).slice(0, 2)}…${String(trade.brokerOrderId).slice(-2)}`
               : null
           },
-          finalReason: submitLabel
+          finalReason: submitLabel,
+          fastTelemetry: fastDecision
+            ? {
+                strategyId: FAST_AUTOTRADE_STRATEGY_ID,
+                regime: fastDecision.regime,
+                bias: fastDecision.bias,
+                setupType: fastDecision.setupType,
+                trigger: fastDecision.trigger,
+                qualityScore: fastDecision.qualityScore,
+                grade: fastDecision.grade,
+                spread: quote?.spread ?? fastInput?.spread ?? null,
+                quoteAgeSeconds: fastInput?.quoteAgeSeconds ?? quoteAgeSeconds
+              }
+            : null
         });
       } catch {
         /* never block on log failure */
@@ -2525,12 +2648,24 @@ export async function processDecisionForQualification(args: {
       }
       return { handled: true, message: "order_submitted" };
     } catch (e) {
+      const sanitized = sanitizeBrokerFailure(e);
       doc = {
         ...doc,
         controlledBlockedAttempts: doc.controlledBlockedAttempts + 1,
-        lastError: e instanceof Error ? e.message : "order_failed"
+        lastError: sanitized.code
       };
       await saveQualificationDoc(doc);
+      await logEval(
+        "REJECTED",
+        "BROKER_SUBMIT_ERROR",
+        ["BROKER_SUBMIT_ERROR", sanitized.code],
+        candidate.passed,
+        {
+          brokerSubmissionAttempted: true,
+          brokerErrorCode: sanitized.code,
+          executionAuthority: "ON"
+        }
+      );
       return { handled: true, message: "order_error" };
     }
   }
