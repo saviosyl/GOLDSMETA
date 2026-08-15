@@ -30,6 +30,7 @@ import { buildCTraderRouter } from "./routes/ctrader";
 import { buildRegistrationRouter } from "./routes/registration";
 import { buildAuthSessionRouter } from "./routes/authSession";
 import { buildAdminUsersRouter } from "./routes/adminUsers";
+import { buildGoldHunterAdminRouter } from "./routes/goldHunterAdmin";
 import { AiExplainer } from "./services/ai/explainer";
 import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
@@ -120,6 +121,7 @@ export const createApiApp = (
   app.use(buildRegistrationRouter());
   app.use(buildAuthSessionRouter());
   app.use(buildAdminUsersRouter());
+  app.use(buildGoldHunterAdminRouter());
   app.use(buildWebhooksRouter(store, aiExplainer));
   app.use(buildTradingViewRouter(store, aiExplainer));
   app.use(buildDevicesRouter(store));

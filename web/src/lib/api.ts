@@ -1512,4 +1512,168 @@ export class ApiClient {
       body: JSON.stringify({ accountId })
     });
   }
+
+  /** GOLD HUNTER Admin Tool — ADMIN ONLY. */
+  goldHunterStatus(): Promise<GoldHunterStatusResponse> {
+    return this.request("/v1/gold-hunter/status");
+  }
+
+  goldHunterConfig(): Promise<GoldHunterConfigResponse> {
+    return this.request("/v1/gold-hunter/config");
+  }
+
+  goldHunterUpdateConfig(
+    patch: Record<string, unknown>
+  ): Promise<GoldHunterConfigResponse> {
+    return this.request("/v1/gold-hunter/config", {
+      method: "PUT",
+      body: JSON.stringify(patch)
+    });
+  }
+
+  goldHunterTrades(): Promise<{
+    trades: GoldHunterTrade[];
+    strategy: "GOLD_HUNTER";
+    environment: "DEMO";
+  }> {
+    return this.request("/v1/gold-hunter/trades");
+  }
+
+  goldHunterPerformance(range: "today" | "week" | "month" | "all" = "today"): Promise<{
+    range: string;
+    demo: GoldHunterPerformanceBucket;
+    paper: null;
+    paperNote: string;
+  }> {
+    return this.request(
+      `/v1/gold-hunter/performance?range=${encodeURIComponent(range)}`
+    );
+  }
 }
+
+export type GoldHunterTrade = {
+  goldHunterTradeId: string;
+  strategy: "GOLD_HUNTER";
+  environment: "DEMO";
+  setup: "A" | "B" | "C" | null;
+  side: "BUY" | "SELL";
+  signalTs: string | null;
+  orderTs: string | null;
+  fillTs: string | null;
+  closeTs: string | null;
+  entry: number | null;
+  exit: number | null;
+  stop: number | null;
+  entrySpread: number | null;
+  durationMs: number | null;
+  mfe: number | null;
+  mae: number | null;
+  grossPnlEur: number | null;
+  netPnlEur: number | null;
+  result: "WIN" | "LOSS" | "BREAKEVEN" | "OPEN" | null;
+  exitReason: string | null;
+  brokerOrderId: string | null;
+  brokerPositionId: string | null;
+  status: string;
+};
+
+export type GoldHunterPerformanceBucket = {
+  netPnl: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  profitFactor: number | null;
+  avgWin: number | null;
+  avgLoss: number | null;
+  expectancy: number | null;
+  maxDrawdown: number | null;
+};
+
+export type GoldHunterConfigResponse = {
+  config: {
+    allocatedCapitalEur: number;
+    riskPerTradePct: number;
+    dailyLossLimitPct: number;
+    maxOpenTrades: number;
+    demoAutoTradeEnabled: boolean;
+    pauseNewEntries: boolean;
+    emergencyStopActive: boolean;
+    mode: "RESEARCH" | "DEMO_AUTO" | "LIVE_LOCKED";
+    updatedAt: string;
+    updatedBy: string;
+  };
+  presetsEur?: number[];
+  executionMode: "DEMO_ONLY";
+  liveExecutionEnabled: false;
+  riskBudgetEur?: number;
+  dailyLossBudgetEur?: number;
+};
+
+export type GoldHunterStatusResponse = {
+  product: "GOLD_HUNTER";
+  executionMode: "DEMO_ONLY";
+  liveExecutionEnabled: false;
+  runtimeSha: string | null;
+  config: GoldHunterConfigResponse["config"];
+  modeLabel: { primary: string; secondary: string; tertiary: string };
+  market: {
+    symbol: "XAUUSD";
+    bid: number | null;
+    ask: number | null;
+    mid: number | null;
+    spread: number | null;
+    marketStatus: string;
+    freshness: string;
+    ageMs: number | null;
+    feedState: string;
+    updatedAt: string | null;
+  };
+  broker: {
+    connected: boolean;
+    environment: "DEMO" | "LIVE" | null;
+    accountMasked: string | null;
+    brokerName: string | null;
+    balance: number | null;
+    currency: string | null;
+    equity: number | null;
+    marginUsed: number | null;
+    freeMargin: number | null;
+  };
+  capital: {
+    allocatedEur: number;
+    committedEur: number;
+    availableEur: number;
+    todayPnlEur: number;
+    riskBudgetEur: number;
+    dailyLossBudgetEur: number;
+  };
+  health: {
+    marketFeed: string;
+    transport: string;
+    depth: string;
+    strategy: string;
+    risk: string;
+    autoTrade: string;
+  };
+  gates: {
+    ok: boolean;
+    blockers: string[];
+    executionMode: "DEMO_ONLY";
+    liveExecutionEnabled: false;
+  };
+  openTrades: GoldHunterTrade[];
+  unmatchedDemoPositions: Array<{
+    label: string;
+    brokerPositionId: string;
+    note: string;
+  }>;
+  performanceToday: GoldHunterPerformanceBucket;
+  audit: Array<{ id: string; at: string; byUid: string; action: string; detail: string }>;
+  signal: {
+    present: boolean;
+    setup: "A" | "B" | "C" | null;
+    side: "BUY" | "SELL" | null;
+    note: string;
+  };
+};

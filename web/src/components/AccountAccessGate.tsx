@@ -172,5 +172,13 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
     return <Navigate to="/" replace />;
   }
 
+  if (
+    (path === "/gold-hunter" || path.startsWith("/gold-hunter/")) &&
+    account.role !== "OWNER" &&
+    account.role !== "ADMIN"
+  ) {
+    return <Navigate to="/" replace />;
+  }
+
   return <>{children}</>;
 }

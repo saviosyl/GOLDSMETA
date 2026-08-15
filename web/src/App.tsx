@@ -84,6 +84,29 @@ const TradingViewTemplateAdminPage = lazy(() =>
 const AdminUsersPage = lazy(() =>
   import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage }))
 );
+const GoldHunterShell = lazy(() =>
+  import("./pages/goldHunter/GoldHunterShell").then((m) => ({ default: m.GoldHunterShell }))
+);
+const GoldHunterDashboardPage = lazy(() =>
+  import("./pages/goldHunter/GoldHunterDashboardPage").then((m) => ({
+    default: m.GoldHunterDashboardPage
+  }))
+);
+const GoldHunterControlPage = lazy(() =>
+  import("./pages/goldHunter/GoldHunterControlPage").then((m) => ({
+    default: m.GoldHunterControlPage
+  }))
+);
+const GoldHunterMonitorPage = lazy(() =>
+  import("./pages/goldHunter/GoldHunterMonitorPage").then((m) => ({
+    default: m.GoldHunterMonitorPage
+  }))
+);
+const GoldHunterPerformancePage = lazy(() =>
+  import("./pages/goldHunter/GoldHunterPerformancePage").then((m) => ({
+    default: m.GoldHunterPerformancePage
+  }))
+);
 
 function RouteFallback({ label }: { label: string }) {
   return (
@@ -338,6 +361,47 @@ function ProtectedApp() {
               </LazyRoute>
             }
           />
+          <Route
+            path="/gold-hunter"
+            element={
+              <LazyRoute label="Gold Hunter">
+                <GoldHunterShell />
+              </LazyRoute>
+            }
+          >
+            <Route
+              index
+              element={
+                <LazyRoute label="Gold Hunter Dashboard">
+                  <GoldHunterDashboardPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="control"
+              element={
+                <LazyRoute label="Gold Hunter Control">
+                  <GoldHunterControlPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="monitor"
+              element={
+                <LazyRoute label="Gold Hunter Monitor">
+                  <GoldHunterMonitorPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="performance"
+              element={
+                <LazyRoute label="Gold Hunter Performance">
+                  <GoldHunterPerformancePage />
+                </LazyRoute>
+              }
+            />
+          </Route>
           <Route
             path="/settings"
             element={

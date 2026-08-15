@@ -1,0 +1,99 @@
+/**
+ * GOLD HUNTER Admin Tool — shared types.
+ * DEMO_ONLY execution. Independent of Core Fast AutoTrade.
+ */
+
+export const GH_ADMIN_STRATEGY_ID = "GOLD_HUNTER" as const;
+export const GH_ADMIN_EXECUTION_MODE = "DEMO_ONLY" as const;
+
+export type GoldHunterMode = "RESEARCH" | "DEMO_AUTO" | "LIVE_LOCKED";
+
+export type GoldHunterWaitReason =
+  | "WAIT — MARKET CLOSED"
+  | "WAIT — AUTOTRADE OFF"
+  | "WAIT — FEED STALE"
+  | "WAIT — DEPTH INVALID"
+  | "WAIT — SPREAD TOO WIDE"
+  | "WAIT — CAPITAL LIMIT"
+  | "WAIT — DAILY LOSS LIMIT"
+  | "WAIT — MAX OPEN TRADES"
+  | "WAIT — DUPLICATE SIGNAL"
+  | "WAIT — BROKER DISCONNECTED"
+  | "WAIT — LIVE ENVIRONMENT REFUSED"
+  | "WAIT — EMERGENCY STOP"
+  | "WAIT — PAUSED"
+  | "WAIT — NO SETUP SELECTED"
+  | "WAIT — UNAUTHORIZED"
+  | "WAIT — CONFIG INVALID";
+
+export type GoldHunterAdminConfig = {
+  allocatedCapitalEur: number;
+  riskPerTradePct: number;
+  dailyLossLimitPct: number;
+  maxOpenTrades: number;
+  demoAutoTradeEnabled: boolean;
+  pauseNewEntries: boolean;
+  emergencyStopActive: boolean;
+  mode: GoldHunterMode;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export const GH_ADMIN_DEFAULT_CONFIG: Omit<
+  GoldHunterAdminConfig,
+  "updatedAt" | "updatedBy"
+> = {
+  allocatedCapitalEur: 5000,
+  riskPerTradePct: 1,
+  dailyLossLimitPct: 5,
+  maxOpenTrades: 1,
+  demoAutoTradeEnabled: false,
+  pauseNewEntries: false,
+  emergencyStopActive: false,
+  mode: "RESEARCH"
+};
+
+export const GH_ADMIN_ALLOCATION_PRESETS_EUR = [
+  500, 1000, 2500, 5000, 10_000
+] as const;
+
+export type GoldHunterAuditEntry = {
+  id: string;
+  at: string;
+  byUid: string;
+  action: string;
+  detail: string;
+};
+
+export type GoldHunterDemoTrade = {
+  goldHunterTradeId: string;
+  strategy: typeof GH_ADMIN_STRATEGY_ID;
+  environment: "DEMO";
+  setup: "A" | "B" | "C" | null;
+  side: "BUY" | "SELL";
+  signalTs: string | null;
+  orderTs: string | null;
+  fillTs: string | null;
+  closeTs: string | null;
+  entry: number | null;
+  exit: number | null;
+  stop: number | null;
+  entrySpread: number | null;
+  durationMs: number | null;
+  mfe: number | null;
+  mae: number | null;
+  grossPnlEur: number | null;
+  netPnlEur: number | null;
+  result: "WIN" | "LOSS" | "BREAKEVEN" | "OPEN" | null;
+  exitReason: string | null;
+  brokerOrderId: string | null;
+  brokerPositionId: string | null;
+  status: "SIGNAL" | "ORDER_CREATED" | "SENT" | "FILLED" | "PROTECTED" | "CLOSED";
+};
+
+export type GoldHunterOrderGateResult = {
+  ok: boolean;
+  blockers: GoldHunterWaitReason[];
+  executionMode: typeof GH_ADMIN_EXECUTION_MODE;
+  liveExecutionEnabled: false;
+};
