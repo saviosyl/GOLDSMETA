@@ -41,6 +41,7 @@ const REQUIRED_PATHS = [
   "/tradingview",
   "/admin/users",
   "/admin/tradingview-template",
+  "/gold-hunter",
   "/settings",
   "/help",
   "/learn",

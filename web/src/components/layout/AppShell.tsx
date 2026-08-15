@@ -7,6 +7,7 @@ import {
   BookOpen,
   Bot,
   ChevronRight,
+  Crosshair,
   Gauge,
   Globe2,
   GraduationCap,
@@ -77,6 +78,7 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
   {
     heading: "Admin",
     items: [
+      { to: "/gold-hunter", label: "Gold Hunter", staffOnly: true, icon: Crosshair },
       { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
       {
         to: "/admin/tradingview-template",
@@ -134,6 +136,7 @@ const MOBILE_MORE_GROUPS: MoreGroup[] = [
   {
     heading: "Admin",
     items: [
+      { to: "/gold-hunter", label: "Gold Hunter", staffOnly: true, icon: Crosshair },
       { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
       {
         to: "/admin/tradingview-template",
@@ -221,13 +224,19 @@ export function AppShell({
     );
   }, [location.pathname, prefix, mobileMoreGroups]);
 
-  /** Plan page owns the single premium market strip — hide duplicate mobile quote. */
-  const hideMobileQuote =
-    location.pathname === withPrefix("/") || location.pathname === "/";
-
   const isAdminSurface =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith(withPrefix("/admin"));
+
+  const isGoldHunterSurface =
+    location.pathname.startsWith("/gold-hunter") ||
+    location.pathname.startsWith(withPrefix("/gold-hunter"));
+
+  /** Plan page owns the single premium market strip — hide duplicate mobile quote. */
+  const hideMobileQuote =
+    location.pathname === withPrefix("/") ||
+    location.pathname === "/" ||
+    isGoldHunterSurface;
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -380,7 +389,7 @@ export function AppShell({
         </div>
       </div>
 
-      {isAdminSurface ? (
+      {isGoldHunterSurface ? null : isAdminSurface ? (
         <nav
           className="gm-mobile-nav gm-mobile-nav--admin"
           aria-label="Admin"
@@ -430,7 +439,7 @@ export function AppShell({
         </nav>
       )}
 
-      {!isAdminSurface && moreOpen && (
+      {!isAdminSurface && !isGoldHunterSurface && moreOpen && (
         <div className="gm-more-sheet" id="gm-more-sheet" data-testid="mobile-more-sheet">
           <div className="gm-more-sheet-card">
             <div className="gm-section-head" style={{ display: "flex", justifyContent: "space-between" }}>

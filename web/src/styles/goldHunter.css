@@ -1,0 +1,638 @@
+/**
+ * GOLD HUNTER Admin Tool — scoped premium styles.
+ * Contained under .gm-gold-hunter to avoid global CSS bleed.
+ */
+
+.gm-gold-hunter {
+  --gh-bg: #0c0e12;
+  --gh-bg-elevated: #14181f;
+  --gh-bg-card: #171b22;
+  --gh-border: rgba(212, 175, 95, 0.18);
+  --gh-border-soft: rgba(255, 255, 255, 0.06);
+  --gh-gold: #d4af5f;
+  --gh-gold-soft: rgba(212, 175, 95, 0.14);
+  --gh-text: #f3efe6;
+  --gh-muted: #9aa3b2;
+  --gh-positive: #3ecf8e;
+  --gh-negative: #ef6b6b;
+  --gh-warn: #e0b34d;
+  --gh-radius: 14px;
+  --gh-font: "Segoe UI", "Helvetica Neue", sans-serif;
+
+  color: var(--gh-text);
+  background:
+    radial-gradient(120% 80% at 10% -10%, rgba(212, 175, 95, 0.12), transparent 55%),
+    radial-gradient(90% 60% at 100% 0%, rgba(40, 55, 80, 0.35), transparent 50%),
+    var(--gh-bg);
+  min-height: calc(100dvh - 120px);
+  margin: -8px -12px 0;
+  padding: 12px 12px 88px;
+  font-family: var(--gh-font);
+  border-radius: 18px 18px 0 0;
+}
+
+@media (min-width: 960px) {
+  .gm-gold-hunter {
+    margin: 0;
+    padding: 20px 20px 28px;
+    min-height: auto;
+    border-radius: 18px;
+  }
+}
+
+.gm-gold-hunter * {
+  box-sizing: border-box;
+}
+
+.gh-brand-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.gh-brand {
+  display: grid;
+  gap: 2px;
+}
+
+.gh-brand strong {
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--gh-gold);
+}
+
+.gh-brand span {
+  font-size: 0.78rem;
+  color: var(--gh-muted);
+}
+
+.gh-mode-stack {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gh-mode-stack .primary {
+  color: var(--gh-gold);
+  font-weight: 700;
+}
+
+.gh-mode-stack .secondary,
+.gh-mode-stack .tertiary {
+  color: var(--gh-muted);
+}
+
+.gh-hero {
+  background: linear-gradient(160deg, rgba(212, 175, 95, 0.12), transparent 60%),
+    var(--gh-bg-card);
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.gh-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gh-hero-symbol {
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+.gh-hero-price {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.gh-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.75rem;
+  color: var(--gh-muted);
+}
+
+.gh-hero-meta strong {
+  color: var(--gh-text);
+  font-weight: 600;
+}
+
+.gh-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gh-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gh-card {
+  background: var(--gh-bg-card);
+  border: 1px solid var(--gh-border-soft);
+  border-radius: var(--gh-radius);
+  padding: 12px;
+}
+
+.gh-card h3,
+.gh-section-title {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gh-muted);
+  font-weight: 650;
+}
+
+.gh-kpi-label {
+  font-size: 0.68rem;
+  color: var(--gh-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gh-kpi-value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  margin-top: 4px;
+}
+
+.gh-kpi-value.pos {
+  color: var(--gh-positive);
+}
+
+.gh-kpi-value.neg {
+  color: var(--gh-negative);
+}
+
+.gh-health {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gh-health-item {
+  background: var(--gh-bg-elevated);
+  border: 1px solid var(--gh-border-soft);
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.gh-health-item .label {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--gh-muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.gh-health-item .value {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.gh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  border: 1px solid var(--gh-border);
+  background: var(--gh-gold-soft);
+  color: var(--gh-gold);
+}
+
+.gh-badge--demo {
+  border-color: rgba(62, 207, 142, 0.35);
+  background: rgba(62, 207, 142, 0.12);
+  color: var(--gh-positive);
+}
+
+.gh-badge--warn {
+  border-color: rgba(224, 179, 77, 0.4);
+  background: rgba(224, 179, 77, 0.12);
+  color: var(--gh-warn);
+}
+
+.gh-badge--danger {
+  border-color: rgba(239, 107, 107, 0.4);
+  background: rgba(239, 107, 107, 0.12);
+  color: var(--gh-negative);
+}
+
+.gh-badge--muted {
+  border-color: var(--gh-border-soft);
+  background: transparent;
+  color: var(--gh-muted);
+}
+
+.gh-wait {
+  border: 1px dashed rgba(224, 179, 77, 0.35);
+  background: rgba(224, 179, 77, 0.08);
+  color: var(--gh-warn);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+}
+
+.gh-btn {
+  appearance: none;
+  border: 1px solid var(--gh-border);
+  background: var(--gh-bg-elevated);
+  color: var(--gh-text);
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.gh-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gh-btn-gold {
+  background: linear-gradient(180deg, #e0c078, #c9a24a);
+  color: #1a1408;
+  border-color: transparent;
+}
+
+.gh-btn-danger {
+  border-color: rgba(239, 107, 107, 0.5);
+  color: var(--gh-negative);
+  background: rgba(239, 107, 107, 0.08);
+}
+
+.gh-btn-row {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.gh-input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--gh-border-soft);
+  background: #0f1218;
+  color: var(--gh-text);
+  padding: 10px 12px;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.gh-presets button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--gh-border-soft);
+  background: transparent;
+  color: var(--gh-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.gh-presets button.active {
+  border-color: var(--gh-gold);
+  color: var(--gh-gold);
+  background: var(--gh-gold-soft);
+}
+
+.gh-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.gh-field label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gh-muted);
+}
+
+.gh-field .hint {
+  font-size: 0.72rem;
+  color: var(--gh-muted);
+}
+
+.gh-split {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 960px) {
+  .gh-split {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .gh-health {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+.gh-trade-card {
+  border: 1px solid var(--gh-border-soft);
+  border-radius: var(--gh-radius);
+  padding: 12px;
+  background: var(--gh-bg-elevated);
+  margin-bottom: 8px;
+}
+
+.gh-trade-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.gh-trade-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 0.78rem;
+}
+
+.gh-trade-grid span {
+  color: var(--gh-muted);
+}
+
+.gh-trade-grid strong {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-table-wrap {
+  display: none;
+  overflow-x: auto;
+}
+
+@media (min-width: 960px) {
+  .gh-mobile-trades {
+    display: none;
+  }
+
+  .gh-table-wrap {
+    display: block;
+  }
+
+  .gh-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+
+  .gh-table th,
+  .gh-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--gh-border-soft);
+    white-space: nowrap;
+  }
+
+  .gh-table th {
+    color: var(--gh-muted);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+  }
+}
+
+.gh-tabs-range {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.gh-tabs-range button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--gh-border-soft);
+  background: transparent;
+  color: var(--gh-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.gh-tabs-range button.active {
+  color: var(--gh-gold);
+  border-color: var(--gh-gold);
+  background: var(--gh-gold-soft);
+}
+
+.gh-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: rgba(12, 14, 18, 0.94);
+  border-top: 1px solid var(--gh-border);
+  backdrop-filter: blur(10px);
+}
+
+.gh-bottom-nav a {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-decoration: none;
+  color: var(--gh-muted);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  padding: 6px 4px;
+  min-height: 48px;
+  align-content: center;
+}
+
+.gh-bottom-nav a.active {
+  color: var(--gh-gold);
+}
+
+.gh-bottom-nav svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (min-width: 960px) {
+  .gh-bottom-nav {
+    display: none;
+  }
+
+  .gm-gold-hunter {
+    padding-bottom: 20px;
+  }
+}
+
+.gh-desktop-tabs {
+  display: none;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+@media (min-width: 960px) {
+  .gh-desktop-tabs {
+    display: flex;
+  }
+
+  .gh-desktop-tabs a {
+    text-decoration: none;
+    color: var(--gh-muted);
+    border: 1px solid var(--gh-border-soft);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .gh-desktop-tabs a.active {
+    color: var(--gh-gold);
+    border-color: var(--gh-gold);
+    background: var(--gh-gold-soft);
+  }
+}
+
+.gh-empty {
+  text-align: center;
+  padding: 28px 12px;
+  color: var(--gh-muted);
+  font-size: 0.85rem;
+}
+
+.gh-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 60;
+  display: grid;
+  place-items: end center;
+  padding: 16px;
+}
+
+@media (min-width: 720px) {
+  .gh-modal-backdrop {
+    place-items: center;
+  }
+}
+
+.gh-modal {
+  width: min(420px, 100%);
+  background: var(--gh-bg-card);
+  border: 1px solid var(--gh-border);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.gh-modal h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--gh-gold);
+}
+
+.gh-modal p {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: var(--gh-muted);
+}
+
+.gh-modal dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  margin: 12px 0;
+  font-size: 0.8rem;
+}
+
+.gh-modal dt {
+  color: var(--gh-muted);
+}
+
+.gh-modal dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-diag summary {
+  cursor: pointer;
+  color: var(--gh-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+
+.gh-diag pre {
+  margin-top: 8px;
+  font-size: 0.68rem;
+  color: var(--gh-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0a0c10;
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid var(--gh-border-soft);
+}
+
+.gh-unauthorized {
+  max-width: 420px;
+  margin: 40px auto;
+  text-align: center;
+  padding: 24px;
+}
+
+.gh-unauthorized h1 {
+  color: var(--gh-gold);
+  font-size: 1.1rem;
+}
+
+/* Hide GoldMeta mobile quote strip bleed when GH owns the viewport feel */
+.gm-shell:has(.gm-gold-hunter) .gm-mobile-quote {
+  display: none;
+}
