@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type GoldHunterPerformanceBucket, type GoldHunterTrade } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
+import type { GoldHunterPerformanceBucket, GoldHunterTrade } from "../../lib/api";
 import { formatEur, useGoldHunter } from "./GoldHunterShell";
 import { formatResearchLocalTime, formatResearchUtcTime } from "../../lib/formatResearchLocalTime";
 
@@ -7,6 +8,7 @@ type Range = "today" | "week" | "month" | "all";
 type Tab = "demo" | "paper";
 
 export function GoldHunterPerformancePage() {
+  const { api } = useAuth();
   const { status } = useGoldHunter();
   const [range, setRange] = useState<Range>("today");
   const [tab, setTab] = useState<Tab>("demo");

@@ -3,20 +3,18 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useState,
-  type ReactNode
+  useState
 } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   Crosshair,
-  Gauge,
   LayoutDashboard,
   LineChart,
   SlidersHorizontal
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
-import { api, type GoldHunterStatusResponse } from "../../lib/api";
+import type { GoldHunterStatusResponse } from "../../lib/api";
 import "../../styles/goldHunter.css";
 
 type GhCtx = {
@@ -50,7 +48,7 @@ const TABS = [
 ] as const;
 
 export function GoldHunterShell() {
-  const { account } = useAuth();
+  const { account, api } = useAuth();
   const location = useLocation();
   const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
   const [status, setStatus] = useState<GoldHunterStatusResponse | null>(null);
@@ -68,7 +66,7 @@ export function GoldHunterShell() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!isStaff) return;
@@ -92,7 +90,6 @@ export function GoldHunterShell() {
     );
   }
 
-  // Normalize /gold-hunter/ → dashboard
   if (location.pathname === "/gold-hunter/") {
     return <Navigate to="/gold-hunter" replace />;
   }
@@ -157,8 +154,4 @@ export function GhStatusTone({ value }: { value: string }) {
   if (/STALE|WAITING|PAUSED|LIMITED|UNKNOWN|CLOSED/.test(v)) cls = "gh-badge--warn";
   if (/HARD|DISCONNECTED|HALTED|INVALID|CROSSED|OFF/.test(v)) cls = "gh-badge--danger";
   return <span className={`gh-badge ${cls}`}>{value}</span>;
-}
-
-export function GaugeIcon() {
-  return <Gauge size={16} aria-hidden />;
 }

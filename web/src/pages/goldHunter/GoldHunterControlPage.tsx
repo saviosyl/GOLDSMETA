@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { api } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 import { formatEur, useGoldHunter } from "./GoldHunterShell";
 
 const PRESETS = [500, 1000, 2500, 5000, 10_000] as const;
 
 export function GoldHunterControlPage() {
+  const { api } = useAuth();
   const { status, refresh } = useGoldHunter();
   const [alloc, setAlloc] = useState<string>("");
   const [riskPct, setRiskPct] = useState<string>("");
@@ -192,7 +193,12 @@ export function GoldHunterControlPage() {
           <button type="button" className={cfg.demoAutoTradeEnabled ? "active" : undefined}>
             DEMO AUTO
           </button>
-          <button type="button" className="active" disabled title="Live permanently locked">
+          <button
+            type="button"
+            disabled
+            title="Live permanently locked"
+            className="gh-live-locked"
+          >
             LIVE LOCKED
           </button>
         </div>

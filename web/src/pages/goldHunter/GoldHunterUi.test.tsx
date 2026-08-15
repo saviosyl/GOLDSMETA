@@ -7,17 +7,10 @@ import { GoldHunterControlPage } from "./GoldHunterControlPage";
 import { GoldHunterMonitorPage } from "./GoldHunterMonitorPage";
 import { GoldHunterPerformancePage } from "./GoldHunterPerformancePage";
 
-vi.mock("../../lib/auth", () => ({
-  useAuth: () => ({
-    account: { role: "OWNER", uid: "owner-1" },
-    user: { uid: "owner-1" }
-  })
-}));
-
 const status = {
-  product: "GOLD_HUNTER",
-  executionMode: "DEMO_ONLY",
-  liveExecutionEnabled: false,
+  product: "GOLD_HUNTER" as const,
+  executionMode: "DEMO_ONLY" as const,
+  liveExecutionEnabled: false as const,
   runtimeSha: "testsha",
   config: {
     allocatedCapitalEur: 5000,
@@ -27,7 +20,7 @@ const status = {
     demoAutoTradeEnabled: false,
     pauseNewEntries: false,
     emergencyStopActive: false,
-    mode: "RESEARCH",
+    mode: "RESEARCH" as const,
     updatedAt: "2026-08-15T00:00:00.000Z",
     updatedBy: "owner-1"
   },
@@ -37,7 +30,7 @@ const status = {
     tertiary: "NO BROKER EXECUTION"
   },
   market: {
-    symbol: "XAUUSD",
+    symbol: "XAUUSD" as const,
     bid: 2390.1,
     ask: 2390.4,
     mid: 2390.25,
@@ -50,7 +43,7 @@ const status = {
   },
   broker: {
     connected: true,
-    environment: "DEMO",
+    environment: "DEMO" as const,
     accountMasked: "****1234",
     brokerName: "Pepperstone",
     balance: 50000,
@@ -78,8 +71,8 @@ const status = {
   gates: {
     ok: false,
     blockers: ["WAIT — AUTOTRADE OFF", "WAIT — MARKET CLOSED"],
-    executionMode: "DEMO_ONLY",
-    liveExecutionEnabled: false
+    executionMode: "DEMO_ONLY" as const,
+    liveExecutionEnabled: false as const
   },
   openTrades: [],
   unmatchedDemoPositions: [],
@@ -104,27 +97,35 @@ const status = {
   }
 };
 
-vi.mock("../../lib/api", () => ({
-  api: {
-    goldHunterStatus: vi.fn(async () => status),
-    goldHunterConfig: vi.fn(async () => ({
-      config: status.config,
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    })),
-    goldHunterUpdateConfig: vi.fn(async () => ({
-      config: status.config,
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    })),
-    goldHunterTrades: vi.fn(async () => ({ trades: [], strategy: "GOLD_HUNTER", environment: "DEMO" })),
-    goldHunterPerformance: vi.fn(async () => ({
-      range: "today",
-      demo: status.performanceToday,
-      paper: null,
-      paperNote: "separate"
-    }))
-  }
+vi.mock("../../lib/auth", () => ({
+  useAuth: () => ({
+    account: { role: "OWNER", uid: "owner-1" },
+    user: { uid: "owner-1" },
+    api: {
+      goldHunterStatus: vi.fn(async () => status),
+      goldHunterConfig: vi.fn(async () => ({
+        config: status.config,
+        executionMode: "DEMO_ONLY",
+        liveExecutionEnabled: false
+      })),
+      goldHunterUpdateConfig: vi.fn(async () => ({
+        config: status.config,
+        executionMode: "DEMO_ONLY",
+        liveExecutionEnabled: false
+      })),
+      goldHunterTrades: vi.fn(async () => ({
+        trades: [],
+        strategy: "GOLD_HUNTER",
+        environment: "DEMO"
+      })),
+      goldHunterPerformance: vi.fn(async () => ({
+        range: "today",
+        demo: status.performanceToday,
+        paper: null,
+        paperNote: "separate"
+      }))
+    }
+  })
 }));
 
 function renderAt(path: string) {
@@ -171,19 +172,5 @@ describe("Gold Hunter UI", () => {
     renderAt("/gold-hunter/performance");
     await waitFor(() => expect(screen.getByTestId("gh-performance")).toBeInTheDocument());
     expect(screen.getByTestId("gh-no-trades")).toBeInTheDocument();
-  });
-});
-
-describe("Gold Hunter unauthorized", () => {
-  it("shows unauthorized for non-staff", async () => {
-    vi.doMock("../../lib/auth", () => ({
-      useAuth: () => ({
-        account: { role: "USER_APPROVED", uid: "u1" },
-        user: { uid: "u1" }
-      })
-    }));
-    // Re-import would be needed for fresh mock; shell already mocked OWNER above.
-    // Gate coverage is also in AccountAccessGate + API 403 tests.
-    expect(true).toBe(true);
   });
 });
