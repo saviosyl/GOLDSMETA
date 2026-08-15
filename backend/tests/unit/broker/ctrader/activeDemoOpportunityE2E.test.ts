@@ -319,6 +319,8 @@ function decision(over: Record<string, unknown> = {}) {
 }
 
 describe("ACTIVE_DEMO processDecision submit call counts", () => {
+  // FAST must stay off — leftover FAST_AUTOTRADE_V1_ENABLED from other files
+  // would otherwise replace ACTIVE_DEMO armed/tier behaviour.
   beforeEach(() => {
     submitDemoMarketOrder.mockClear();
     appendEvaluation.mockClear();
@@ -346,6 +348,7 @@ describe("ACTIVE_DEMO processDecision submit call counts", () => {
     settingsState.confirmationCandleRequired = true;
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
     process.env.DEMO_OPPORTUNITY_MODE = "ACTIVE_DEMO";
+    process.env.FAST_AUTOTRADE_V1_ENABLED = "false";
     process.env.CTRADER_CLIENT_ID = "test-client";
     process.env.CTRADER_CLIENT_SECRET = "test-secret";
     delete process.env.DEMO_A_PLUS_MIN_SCORE;

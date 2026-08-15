@@ -59,6 +59,8 @@ describe("submitDemoMarketOrder", () => {
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
     process.env.CTRADER_CLIENT_ID = "cid";
     process.env.CTRADER_CLIENT_SECRET = "csecret";
+    process.env.FAST_AUTOTRADE_V1_ENABLED = "false";
+    process.env.DEMO_OPPORTUNITY_MODE = "ACTIVE_DEMO";
     vi.mocked(getConnection).mockResolvedValue({
       selectedAccountId: "123",
       selectedAccountIsLive: false,

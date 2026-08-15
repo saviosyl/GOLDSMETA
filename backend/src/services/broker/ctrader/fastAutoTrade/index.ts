@@ -58,6 +58,14 @@ export {
 } from "./demoLock";
 export { mapDecisionToFastInput } from "./fromDecision";
 export {
+  buildFastExecutionIntent,
+  type FastExecutionIntent
+} from "./executionIntent";
+export {
+  sanitizeBrokerErrorCode,
+  sanitizeBrokerFailure
+} from "./brokerTelemetry";
+export {
   buildFastAutoTradeInput,
   loadFastOneMinuteMarket,
   ohlcFromTrendbar,

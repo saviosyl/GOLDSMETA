@@ -320,6 +320,7 @@ describe("Aug 12 MARGIN_UNAVAILABLE → authoritative margin fix", () => {
     getArmedCandidate.mockResolvedValue(null);
     process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
     process.env.DEMO_OPPORTUNITY_MODE = "ACTIVE_DEMO";
+    process.env.FAST_AUTOTRADE_V1_ENABLED = "false";
     process.env.CTRADER_CLIENT_ID = "test-client";
     process.env.CTRADER_CLIENT_SECRET = "test-secret";
     process.env.CTRADER_LIVE_ENABLED = "false";
