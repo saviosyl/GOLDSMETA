@@ -66,7 +66,8 @@ export async function upsertGoldHunterDemoTrade(
   }
   const col = tradesCol(ownerUid);
   if (!col) {
-    const map = memoryTrades.get(ownerUid) ?? new Map();
+    const map: Map<string, GoldHunterDemoTrade & Record<string, unknown>> =
+      memoryTrades.get(ownerUid) ?? new Map();
     map.set(trade.goldHunterTradeId, trade);
     memoryTrades.set(ownerUid, map);
     return;
