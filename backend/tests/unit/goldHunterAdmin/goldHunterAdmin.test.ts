@@ -98,6 +98,7 @@ describe("Gold Hunter order gates", () => {
     },
     brokerEnvironment: "DEMO",
     brokerConnected: true,
+    accountSnapshotValid: true,
     marketOpen: true,
     feedFresh: true,
     depthValid: true,

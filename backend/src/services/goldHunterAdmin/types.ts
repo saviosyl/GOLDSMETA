@@ -24,7 +24,9 @@ export type GoldHunterWaitReason =
   | "WAIT — PAUSED"
   | "WAIT — NO SETUP SELECTED"
   | "WAIT — UNAUTHORIZED"
-  | "WAIT — CONFIG INVALID";
+  | "WAIT — CONFIG INVALID"
+  | "WAIT — ACCOUNT SNAPSHOT INVALID"
+  | "WAIT — ACCOUNT ENVIRONMENT UNKNOWN";
 
 export type GoldHunterAdminConfig = {
   allocatedCapitalEur: number;

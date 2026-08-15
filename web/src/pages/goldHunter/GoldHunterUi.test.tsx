@@ -42,15 +42,24 @@ const status = {
     updatedAt: "2026-08-15T00:00:00.000Z"
   },
   broker: {
+    provider: "cTrader" as const,
     connected: true,
     environment: "DEMO" as const,
+    authState: "AUTHORISED",
+    authorised: true,
     accountMasked: "****1234",
     brokerName: "Pepperstone",
     balance: 50000,
     currency: "EUR",
-    equity: 50000,
-    marginUsed: null,
-    freeMargin: null
+    equity: 49985.2,
+    marginUsed: 120,
+    freeMargin: 49865.2,
+    openPositionCount: 0,
+    snapshotAgeMs: 1200,
+    lastSyncAt: "2026-08-15T22:00:00.000Z",
+    snapshotSource: "AUTHORITATIVE_DEMO",
+    demoOrderSubmissionEnabled: true,
+    validForRisk: true
   },
   capital: {
     allocatedEur: 5000,
@@ -63,10 +72,23 @@ const status = {
   health: {
     marketFeed: "STALE",
     transport: "CONNECTED",
-    depth: "UNKNOWN",
-    strategy: "WAITING",
+    depth: "UNAVAILABLE",
+    strategy: "WAITING_FOR_MARKET",
     risk: "NORMAL",
     autoTrade: "OFF"
+  },
+  strategyPipeline: {
+    connected: false,
+    spot: "CLOSED",
+    depth: "UNAVAILABLE",
+    selector: "NOT_CONNECTED",
+    state: "WAITING_FOR_MARKET",
+    lastSelectedCandidate: null
+  },
+  arming: {
+    ready: false,
+    blockers: ["STRATEGY_SELECTOR_NOT_CONNECTED"],
+    strategySelectorConnected: false
   },
   gates: {
     ok: false,
@@ -123,7 +145,8 @@ vi.mock("../../lib/auth", () => ({
         demo: status.performanceToday,
         paper: null,
         paperNote: "separate"
-      }))
+      })),
+      goldHunterRefreshAccount: vi.fn(async () => status)
     }
   })
 }));
@@ -152,8 +175,10 @@ describe("Gold Hunter UI", () => {
     renderAt("/gold-hunter");
     await waitFor(() => expect(screen.getByTestId("gh-dashboard")).toBeInTheDocument());
     expect(screen.getByTestId("gh-allocation")).toHaveTextContent("5,000");
-    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("AUTOTRADE OFF");
+    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("MARKET CLOSED");
     expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
+    expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
+    expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
   });
 
   it("renders control with arm confirmation flow", async () => {

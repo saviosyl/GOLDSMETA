@@ -31,6 +31,19 @@ export function GoldHunterControlPage() {
     (Number(alloc || cfg.allocatedCapitalEur) * Number(dailyPct || cfg.dailyLossLimitPct)) /
     100;
   const demoBal = status.broker.balance;
+  const cur = (status.broker.currency ?? "EUR").toUpperCase();
+  const fmtMoney = (n: number | null | undefined) => {
+    if (n == null || !Number.isFinite(n)) return "—";
+    try {
+      return new Intl.NumberFormat("en-IE", {
+        style: "currency",
+        currency: cur,
+        maximumFractionDigits: 2
+      }).format(n);
+    } catch {
+      return `${cur} ${n.toFixed(2)}`;
+    }
+  };
   const unallocated =
     demoBal != null ? Math.max(0, demoBal - Number(alloc || cfg.allocatedCapitalEur)) : null;
 
@@ -61,29 +74,29 @@ export function GoldHunterControlPage() {
           <div className="gh-trade-grid">
             <div>
               <span>Balance</span>
-              <strong data-testid="gh-ctrl-balance">
-                {demoBal != null ? `€${demoBal.toLocaleString()}` : "—"}
-              </strong>
+              <strong data-testid="gh-ctrl-balance">{fmtMoney(demoBal)}</strong>
             </div>
             <div>
               <span>Equity</span>
-              <strong>
-                {status.broker.equity != null
-                  ? `€${status.broker.equity.toLocaleString()}`
-                  : "—"}
-              </strong>
+              <strong>{fmtMoney(status.broker.equity)}</strong>
             </div>
             <div>
               <span>Margin used</span>
-              <strong>—</strong>
+              <strong>{fmtMoney(status.broker.marginUsed)}</strong>
             </div>
             <div>
               <span>Free margin</span>
-              <strong>—</strong>
+              <strong>{fmtMoney(status.broker.freeMargin)}</strong>
             </div>
           </div>
-          <div style={{ marginTop: 8 }}>
-            <span className="gh-badge gh-badge--demo">DEMO</span>
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span className="gh-badge gh-badge--demo">
+              {status.broker.environment ?? "UNKNOWN"}
+            </span>
+            <span className="gh-badge gh-badge--muted">
+              {status.broker.authState ?? (status.broker.connected ? "CONNECTED" : "DISCONNECTED")}
+            </span>
+            <span className="gh-kpi-label">{status.broker.accountMasked ?? "—"}</span>
           </div>
         </section>
 
@@ -112,8 +125,8 @@ export function GoldHunterControlPage() {
               ))}
             </div>
             <p className="hint">
-              Demo equity {demoBal != null ? `€${demoBal.toLocaleString()}` : "—"}
-              {unallocated != null ? ` · Unallocated €${unallocated.toLocaleString()}` : ""}
+              Demo equity {fmtMoney(status.broker.equity ?? demoBal)}
+              {unallocated != null ? ` · Unallocated ${fmtMoney(unallocated)}` : ""}
             </p>
             <p className="hint">Changes apply to future Demo trades only.</p>
           </div>
@@ -259,6 +272,11 @@ export function GoldHunterControlPage() {
         {msg ? (
           <p className="hint" style={{ marginTop: 10 }} data-testid="gh-control-msg">
             {msg}
+          </p>
+        ) : null}
+        {status.arming && !status.arming.ready ? (
+          <p className="hint" style={{ marginTop: 10 }} data-testid="gh-arming-blockers">
+            Arming blocked: {status.arming.blockers.join(", ")}
           </p>
         ) : null}
       </section>

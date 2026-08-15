@@ -4,7 +4,11 @@
  */
 
 import { isCTraderLiveEnabled } from "../broker/ctrader/flags";
-import type { GoldHunterAdminConfig, GoldHunterOrderGateResult, GoldHunterWaitReason } from "./types";
+import type {
+  GoldHunterAdminConfig,
+  GoldHunterOrderGateResult,
+  GoldHunterWaitReason
+} from "./types";
 import { GH_ADMIN_EXECUTION_MODE } from "./types";
 
 export type GoldHunterGateInput = {
@@ -12,6 +16,8 @@ export type GoldHunterGateInput = {
   /** Broker account environment string from connection. */
   brokerEnvironment: string | null;
   brokerConnected: boolean;
+  /** Authoritative Demo snapshot valid for risk (fresh DEMO balance). */
+  accountSnapshotValid: boolean;
   marketOpen: boolean;
   feedFresh: boolean;
   depthValid: boolean;
@@ -26,6 +32,7 @@ export type GoldHunterGateInput = {
 
 /**
  * Absolute Live refuse — no override, no admin bypass.
+ * UNKNOWN / empty environment also refused for execution.
  */
 export function assertGoldHunterDemoOnlyEnvironment(
   brokerEnvironment: string | null
@@ -38,6 +45,13 @@ export function assertGoldHunterDemoOnlyEnvironment(
     });
   }
   const env = (brokerEnvironment ?? "").trim().toUpperCase();
+  if (!env) {
+    throw Object.assign(new Error("GOLD_HUNTER_ENVIRONMENT_UNKNOWN"), {
+      code: "account_environment_unknown",
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    });
+  }
   if (env === "LIVE" || env === "REAL") {
     throw Object.assign(new Error("GOLD_HUNTER_LIVE_ACCOUNT_REFUSED"), {
       code: "live_account_refused",
@@ -45,7 +59,7 @@ export function assertGoldHunterDemoOnlyEnvironment(
       liveExecutionEnabled: false
     });
   }
-  if (env && env !== "DEMO") {
+  if (env !== "DEMO") {
     throw Object.assign(new Error("GOLD_HUNTER_NON_DEMO_REFUSED"), {
       code: "non_demo_environment_refused",
       executionMode: GH_ADMIN_EXECUTION_MODE,
@@ -65,11 +79,16 @@ export function evaluateGoldHunterOrderGates(
     blockers.push("WAIT — LIVE ENVIRONMENT REFUSED");
   }
   const env = (input.brokerEnvironment ?? "").trim().toUpperCase();
-  if (env === "LIVE" || env === "REAL" || (env && env !== "DEMO")) {
+  if (!env) {
+    blockers.push("WAIT — ACCOUNT ENVIRONMENT UNKNOWN");
+  } else if (env === "LIVE" || env === "REAL" || env !== "DEMO") {
     blockers.push("WAIT — LIVE ENVIRONMENT REFUSED");
   }
 
   if (!input.brokerConnected) blockers.push("WAIT — BROKER DISCONNECTED");
+  if (!input.accountSnapshotValid) {
+    blockers.push("WAIT — ACCOUNT SNAPSHOT INVALID");
+  }
   if (input.config.emergencyStopActive) blockers.push("WAIT — EMERGENCY STOP");
   if (input.config.pauseNewEntries) blockers.push("WAIT — PAUSED");
   if (!input.config.demoAutoTradeEnabled) blockers.push("WAIT — AUTOTRADE OFF");
@@ -98,4 +117,22 @@ export function evaluateGoldHunterOrderGates(
     executionMode: GH_ADMIN_EXECUTION_MODE,
     liveExecutionEnabled: false
   };
+}
+
+/**
+ * In-memory duplicate-signal guard for a single process.
+ * Production durable dedupe should also persist signalId on trade docs.
+ */
+const consumedSignals = new Set<string>();
+
+export function markGoldHunterSignalConsumed(signalId: string): void {
+  if (signalId) consumedSignals.add(signalId);
+}
+
+export function isGoldHunterSignalConsumed(signalId: string): boolean {
+  return Boolean(signalId) && consumedSignals.has(signalId);
+}
+
+export function resetGoldHunterConsumedSignals(): void {
+  consumedSignals.clear();
 }
