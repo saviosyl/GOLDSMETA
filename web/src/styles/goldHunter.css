@@ -336,6 +336,13 @@
   background: var(--gh-gold-soft);
 }
 
+.gh-presets button.gh-live-locked {
+  border-color: rgba(239, 107, 107, 0.35);
+  color: var(--gh-negative);
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
 .gh-field {
   display: grid;
   gap: 6px;
