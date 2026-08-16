@@ -89,15 +89,18 @@ function symbolMeta(over: Partial<BrokerSymbol> = {}): BrokerSymbol {
 function baseCandidate(
   over: Partial<GoldHunterSelectedCandidate> = {}
 ): GoldHunterSelectedCandidate {
+  const opportunityId = over.opportunityId ?? over.signalId ?? "GH-OPP-AB-e1-test";
   return {
     strategy: GH_ADMIN_STRATEGY_ID,
     setup: "A",
     setupId: "A_MOMENTUM_IGNITION",
     side: "BUY",
     quality: 0.82,
-    signalId: "GH-AB-1-test",
+    signalId: opportunityId,
+    opportunityId,
     signalTimestamp: new Date().toISOString(),
     receiveSeq: 1,
+    latestReceiveSeq: 1,
     bookGeneration: 1,
     resyncGeneration: 0,
     bid: 2600,
@@ -109,6 +112,24 @@ function baseCandidate(
     featureSchema: "GOLD_HUNTER_FAST_V1",
     mid: 2600.06,
     consumed: false,
+    opportunityStartedAtMs: Date.now(),
+    ...over,
+    signalId: over.signalId ?? opportunityId,
+    opportunityId: over.opportunityId ?? over.signalId ?? opportunityId
+  };
+}
+
+const freshOk = () => ({ ok: true as const });
+
+function orchDeps(
+  over: Partial<Parameters<typeof attemptGoldHunterDemoExecution>[2]> = {}
+) {
+  return {
+    isAdmin: true,
+    marketOpen: true,
+    feedFresh: true,
+    symbol: symbolMeta(),
+    assertFresh: freshOk,
     ...over
   };
 }
@@ -474,10 +495,7 @@ describe("Durable claim + broker truth", () => {
   it("orchestrator: timeout before broker → PENDING_RECONCILIATION no resubmit", async () => {
     const cand = baseCandidate({ signalId: "sig-timeout" });
     const r1 = await attemptGoldHunterDemoExecution(OWNER, cand, {
-      isAdmin: true,
-      marketOpen: true,
-      feedFresh: true,
-      symbol: symbolMeta(),
+      ...orchDeps(),
       beforeBrokerSubmit: async () => {
         throw new Error("TIMEOUT");
       }
@@ -485,10 +503,7 @@ describe("Durable claim + broker truth", () => {
     expect(r1.ok).toBe(true);
     if (r1.ok) expect(r1.outcome).toBe("PENDING_RECONCILIATION");
     const r2 = await attemptGoldHunterDemoExecution(OWNER, cand, {
-      isAdmin: true,
-      marketOpen: true,
-      feedFresh: true,
-      symbol: symbolMeta(),
+      ...orchDeps(),
       placeOrder: async () => {
         throw new Error("SHOULD_NOT_RUN");
       }
@@ -501,12 +516,7 @@ describe("Durable claim + broker truth", () => {
     const r = await attemptGoldHunterDemoExecution(
       OWNER,
       baseCandidate({ signalId: "sig-meta" }),
-      {
-        isAdmin: true,
-        marketOpen: true,
-        feedFresh: true,
-        symbol: symbolMeta({ maxVolume: null })
-      }
+      orchDeps({ symbol: symbolMeta({ maxVolume: null }) })
     );
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -522,12 +532,7 @@ describe("Durable claim + broker truth", () => {
         depthExecutable: false,
         depthValidity: "DEPTH_CROSSED"
       }),
-      {
-        isAdmin: true,
-        marketOpen: true,
-        feedFresh: true,
-        symbol: symbolMeta()
-      }
+      orchDeps()
     );
     expect(r.ok).toBe(false);
   });

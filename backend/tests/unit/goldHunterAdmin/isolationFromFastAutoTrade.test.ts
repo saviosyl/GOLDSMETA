@@ -15,6 +15,9 @@ describe("Gold Hunter isolation from Fast AutoTrade", () => {
       "backend/src/services/goldHunterAdmin/accountSnapshot.ts",
       "backend/src/services/goldHunterAdmin/executionOrchestrator.ts",
       "backend/src/services/goldHunterAdmin/strategySelector.ts",
+      "backend/src/services/goldHunterAdmin/demoAutoExecutionRuntime.ts",
+      "backend/src/services/goldHunterAdmin/demoPositionManager.ts",
+      "backend/src/services/goldHunterAdmin/marketFeedHook.ts",
       "backend/src/routes/goldHunterAdmin.ts"
     ];
     for (const f of files) {
@@ -22,7 +25,9 @@ describe("Gold Hunter isolation from Fast AutoTrade", () => {
       expect(text).not.toMatch(/fastAutoTrade\/engine/);
       expect(text).not.toMatch(/createAutoTradeService/);
       expect(text).not.toMatch(/qualificationMachine/);
-      expect(text).toMatch(/GOLD_HUNTER|GH_ADMIN_STRATEGY|gold-hunter|Gold Hunter|cTrader/);
+      expect(text).toMatch(
+        /GOLD_HUNTER|GH_ADMIN_STRATEGY|gold-hunter|Gold Hunter|GoldHunter|cTrader/
+      );
     }
   });
 

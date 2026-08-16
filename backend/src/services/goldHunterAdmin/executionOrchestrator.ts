@@ -1,13 +1,16 @@
 /**
  * Gold Hunter Demo execution orchestrator.
  * Claim → size → protect → submit. Durable dedupe before broker.
+ * Claim key = opportunity identity (candidate.signalId / opportunityId).
  */
 import { randomBytes } from "crypto";
 import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
 import type { SubmitDemoMarketOrderArgs } from "../broker/ctrader/demoOrderExecution";
 import { fetchGoldHunterAccountSnapshot } from "./accountSnapshot";
+import { assertGoldHunterCandidateFresh } from "./candidateFreshness";
 import { computeGoldHunterCommittedCapital } from "./committedCapital";
 import { submitGoldHunterDemoOrder } from "./demoExecutionAdapter";
+import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
 import { loadGoldHunterConfig } from "./configStore";
 import {
   metadataFromBrokerSymbol,
@@ -19,7 +22,10 @@ import {
   acquireGoldHunterSignalClaim,
   updateGoldHunterSignalClaim
 } from "./signalClaimStore";
-import type { GoldHunterSelectedCandidate } from "./strategySelector";
+import {
+  getGoldHunterStrategySelector,
+  type GoldHunterSelectedCandidate
+} from "./strategySelector";
 import { listGoldHunterDemoTrades, todayNetPnlEur } from "./tradeStore";
 import type { BrokerSymbol } from "../broker/domain";
 import { GH_ADMIN_STRATEGY_ID } from "./types";
@@ -35,6 +41,8 @@ export type OrchestratorDeps = {
   placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
   /** Simulate broker hang after claim (tests). */
   beforeBrokerSubmit?: () => Promise<void>;
+  /** Override freshness gate (production uses assertGoldHunterCandidateFresh). */
+  assertFresh?: typeof assertGoldHunterCandidateFresh;
 };
 
 export type OrchestratorResult =
@@ -55,18 +63,21 @@ export type OrchestratorResult =
 
 /**
  * Attempt one Demo submission for an executable selected candidate.
+ * Durable claim uses opportunity identity (signalId === opportunityId).
  */
 export async function attemptGoldHunterDemoExecution(
   ownerUid: string,
   candidate: GoldHunterSelectedCandidate,
   deps: OrchestratorDeps
 ): Promise<OrchestratorResult> {
+  const opportunityId = candidate.opportunityId || candidate.signalId;
+
   if (!candidate.depthExecutable) {
     return {
       ok: false,
       submitted: false,
       blockers: ["WAIT — DEPTH INVALID"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
   if (candidate.consumed) {
@@ -74,7 +85,21 @@ export async function attemptGoldHunterDemoExecution(
       ok: false,
       submitted: false,
       blockers: ["WAIT — DUPLICATE SIGNAL"],
-      signalId: candidate.signalId
+      signalId: opportunityId
+    };
+  }
+
+  const checkFresh = deps.assertFresh ?? assertGoldHunterCandidateFresh;
+  const fresh = checkFresh({
+    ownerUid,
+    candidate: { ...candidate, signalId: opportunityId, opportunityId }
+  });
+  if (!fresh.ok) {
+    return {
+      ok: false,
+      submitted: false,
+      blockers: [fresh.blocker],
+      signalId: opportunityId
     };
   }
 
@@ -85,7 +110,7 @@ export async function attemptGoldHunterDemoExecution(
       ok: false,
       submitted: false,
       blockers: ["WAIT — SIZING METADATA UNAVAILABLE"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
 
@@ -98,7 +123,7 @@ export async function attemptGoldHunterDemoExecution(
       ok: false,
       submitted: false,
       blockers: ["WAIT — PROTECTION GEOMETRY NOT CONNECTED"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
 
@@ -115,7 +140,7 @@ export async function attemptGoldHunterDemoExecution(
       ok: false,
       submitted: false,
       blockers: ["WAIT — COMMITTED CAPITAL UNKNOWN"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
 
@@ -133,8 +158,10 @@ export async function attemptGoldHunterDemoExecution(
     return {
       ok: false,
       submitted: false,
-      blockers: [sized.blocker.startsWith("WAIT") ? sized.blocker : `WAIT — ${sized.blocker}`],
-      signalId: candidate.signalId
+      blockers: [
+        sized.blocker.startsWith("WAIT") ? sized.blocker : `WAIT — ${sized.blocker}`
+      ],
+      signalId: opportunityId
     };
   }
 
@@ -148,7 +175,7 @@ export async function attemptGoldHunterDemoExecution(
       ok: false,
       submitted: false,
       blockers: ["WAIT — CAPITAL LIMIT"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
 
@@ -156,26 +183,32 @@ export async function attemptGoldHunterDemoExecution(
   const spreadOk = candidate.spread <= cfg.maxSpread;
 
   const goldHunterTradeId = `GH-D-${randomBytes(4).toString("hex")}`;
-  const clientOrderId = `gh_${candidate.signalId}`.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 50);
+  const clientOrderId = `gh_${opportunityId}`
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .slice(0, 50);
 
   const claim = await acquireGoldHunterSignalClaim({
     ownerUid,
-    signalId: candidate.signalId,
+    signalId: opportunityId,
     goldHunterTradeId,
     clientOrderId,
     setup: candidate.setup,
     side: candidate.side
   });
   if (!claim.ok) {
+    getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
     return {
       ok: false,
       submitted: false,
       blockers: ["WAIT — DUPLICATE SIGNAL"],
-      signalId: candidate.signalId
+      signalId: opportunityId
     };
   }
 
-  await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+  // Mark opportunity consumed immediately after durable claim (before broker).
+  getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
+
+  await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
     state: "SUBMITTING"
   });
 
@@ -183,7 +216,7 @@ export async function attemptGoldHunterDemoExecution(
     try {
       await deps.beforeBrokerSubmit();
     } catch {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "PENDING_RECONCILIATION",
         errorCode: "BROKER_TIMEOUT_UNKNOWN"
       });
@@ -191,7 +224,7 @@ export async function attemptGoldHunterDemoExecution(
         ok: true,
         submitted: false,
         outcome: "PENDING_RECONCILIATION",
-        signalId: candidate.signalId,
+        signalId: opportunityId,
         tradeId: goldHunterTradeId,
         detail: "Broker outcome unknown — no blind resubmit"
       };
@@ -213,7 +246,7 @@ export async function attemptGoldHunterDemoExecution(
       takeProfit: null,
       entryHint: protection.entryPrice,
       setup: candidate.setup,
-      signalId: candidate.signalId,
+      signalId: opportunityId,
       goldHunterTradeId,
       clientOrderId,
       symbolId: meta.symbolId,
@@ -231,7 +264,7 @@ export async function attemptGoldHunterDemoExecution(
     });
 
     if (!result.ok) {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
       });
@@ -239,30 +272,38 @@ export async function attemptGoldHunterDemoExecution(
         ok: false,
         submitted: false,
         blockers: result.blockers,
-        signalId: candidate.signalId
+        signalId: opportunityId
       };
     }
 
     if (result.outcome === "FILLED") {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "OPEN",
         brokerOrderId: result.trade?.brokerOrderId ?? null,
         brokerPositionId: result.trade?.brokerPositionId ?? null,
         goldHunterTradeId
       });
+      if (result.trade) {
+        registerGoldHunterOpenPositionForOwner({
+          ownerUid,
+          trade: result.trade,
+          bid: candidate.bid,
+          ask: candidate.ask
+        });
+      }
     } else if (result.outcome === "BROKER_REJECTED") {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_REJECTED",
         errorCode: result.errorCode,
         brokerOrderId: result.trade?.brokerOrderId ?? null
       });
     } else if (result.outcome === "BROKER_SUBMIT_ERROR") {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_SUBMIT_ERROR",
         errorCode: result.errorCode
       });
     } else if (result.outcome === "ACCEPTED_PENDING_FILL") {
-      await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "ACCEPTED",
         brokerOrderId: result.trade?.brokerOrderId ?? null,
         brokerPositionId: result.trade?.brokerPositionId ?? null
@@ -273,12 +314,11 @@ export async function attemptGoldHunterDemoExecution(
       ok: true,
       submitted: true,
       outcome: result.outcome,
-      signalId: candidate.signalId,
+      signalId: opportunityId,
       tradeId: result.trade?.goldHunterTradeId ?? goldHunterTradeId
     };
   } catch (e) {
-    // Timeout / unknown after submit attempt — do not release claim for retry.
-    await updateGoldHunterSignalClaim(ownerUid, candidate.signalId, {
+    await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
       state: "PENDING_RECONCILIATION",
       errorCode:
         e instanceof Error ? e.message.slice(0, 120) : "UNKNOWN_BROKER_OUTCOME"
@@ -287,7 +327,7 @@ export async function attemptGoldHunterDemoExecution(
       ok: true,
       submitted: true,
       outcome: "PENDING_RECONCILIATION",
-      signalId: candidate.signalId,
+      signalId: opportunityId,
       tradeId: goldHunterTradeId,
       detail: "Unknown broker outcome — reconcile before any retry"
     };
