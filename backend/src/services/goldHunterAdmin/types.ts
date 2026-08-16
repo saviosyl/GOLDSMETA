@@ -90,6 +90,12 @@ export type GoldHunterDemoTrade = {
   mae: number | null;
   grossPnlEur: number | null;
   netPnlEur: number | null;
+  /** Broker commission from closing deal aggregation (when settled). */
+  commissionEur?: number | null;
+  /** Broker swap from closing deal aggregation (when settled). */
+  swapEur?: number | null;
+  /** Broker closing deal id(s) when settled. */
+  brokerDealId?: string | null;
   result: "WIN" | "LOSS" | "BREAKEVEN" | "OPEN" | null;
   exitReason: string | null;
   brokerOrderId: string | null;
@@ -100,6 +106,8 @@ export type GoldHunterDemoTrade = {
     | "SENT"
     | "FILLED"
     | "PROTECTED"
+    | "CLOSE_REQUESTED"
+    | "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
     | "CLOSED"
     | "BROKER_REJECTED"
     | "BROKER_SUBMIT_ERROR"

@@ -141,6 +141,10 @@ export type BrokerOpenPosition = {
    */
   usedMargin: number | null;
   openTimestamp: string | null;
+  /** Optional order label when present on tradeData (ownership correlation). */
+  label?: string | null;
+  /** Optional order comment when present on tradeData (ownership correlation). */
+  comment?: string | null;
 };
 
 export type AuthoritativeMarginSnapshotResult =
@@ -491,7 +495,19 @@ function parseBrokerOpenPositions(raw: unknown): BrokerOpenPosition[] {
       unrealisedPnl: moneyFromCenti(row.unrealizedPnl ?? row.unrealisedPnl, 2),
       usedMargin,
       openTimestamp:
-        openTs != null ? new Date(openTs).toISOString() : null
+        openTs != null ? new Date(openTs).toISOString() : null,
+      label:
+        typeof trade.label === "string"
+          ? trade.label
+          : typeof row.label === "string"
+            ? row.label
+            : null,
+      comment:
+        typeof trade.comment === "string"
+          ? trade.comment
+          : typeof row.comment === "string"
+            ? row.comment
+            : null
     });
   }
   return out;
