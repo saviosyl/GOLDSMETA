@@ -1715,4 +1715,28 @@ export type GoldHunterStatusResponse = {
     ageMs?: number | null;
     note: string;
   };
+  execution?: {
+    autoTradeEnabled: boolean;
+    lastOpportunityId: string | null;
+    lastSignalId: string | null;
+    lastSetup: "A" | "B" | "C" | null;
+    lastSide: "BUY" | "SELL" | null;
+    lastOpportunityStartedAt: string | null;
+    lastAttemptAt: string | null;
+    lastAttemptCompletedAt: string | null;
+    state: string;
+    blocker: string | null;
+    detail: string | null;
+    outcome: string | null;
+    tradeId: string | null;
+    brokerOrderIdMaskedOrSafe: string | null;
+    brokerPositionIdMaskedOrSafe: string | null;
+    attemptCountForOpportunity: number;
+    queue: {
+      pending: number;
+      dropped: number;
+      completed: number;
+      maxPendingSeen: number;
+    };
+  };
 };

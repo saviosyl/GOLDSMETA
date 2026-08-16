@@ -17,7 +17,10 @@ import {
   type GoldHunterSelectorTickResult
 } from "./strategySelector";
 import { saveGoldHunterSelectorRuntime } from "./selectorRuntimeStore";
-import { enqueueGoldHunterDemoAutoExecution } from "./demoAutoExecutionRuntime";
+import {
+  enqueueGoldHunterDemoAutoExecution,
+  maybeReconsiderGoldHunterDemoAutoExecution
+} from "./demoAutoExecutionRuntime";
 import { enqueueGoldHunterPositionManagerTick } from "./demoPositionManager";
 
 export type GhMarketFeedMeta = {
@@ -151,11 +154,15 @@ function afterSelectorTick(
     enqueueGoldHunterDemoAutoExecution({
       ownerUid: meta.ownerUid,
       newOpportunity: tick.newOpportunity,
-      opportunity: tick.opportunity
+      opportunity: tick.opportunity,
+      source: "NEW"
     });
   } else {
     // Throttled monitoring snapshot only.
     void persistRuntime(meta.ownerUid, tick.candidate).catch(() => undefined);
+    // Bounded reconsider: same opportunity still active + unconsumed after
+    // retryable PRE-CLAIM failure / QUEUE_FULL — never blocks quote ingestion.
+    maybeReconsiderGoldHunterDemoAutoExecution(meta.ownerUid);
   }
 
   // Position management — bounded async, never blocks quote path.

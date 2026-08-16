@@ -1,6 +1,12 @@
 /**
  * Gold Hunter Demo AutoExecution runtime — production call site for
  * attemptGoldHunterDemoExecution. Worker-driven only (not UI polling).
+ *
+ * Reliability:
+ * - Enqueue on newOpportunity
+ * - Bounded reconsider of the SAME opportunityId after retryable PRE-CLAIM failure
+ *   or QUEUE_FULL (never after durable claim / unknown broker outcome)
+ * - Telemetry + structured logs; exceptions never crash the quote worker
  */
 import { loadDemoXauUsdSymbol } from "../broker/ctrader/demoPositionMutations";
 import { getSharedXauusdQuote } from "../marketFeed/sharedMarketData";
@@ -8,11 +14,29 @@ import { loadOwnerAuthConfig } from "../auth/ownerAuthConfig";
 import { getOwnerQueue, resetOwnerQueuesForTests } from "./boundedQueue";
 import { loadGoldHunterConfig } from "./configStore";
 import {
+  refreshGoldHunterCandidateAgainstLive
+} from "./candidateFreshness";
+import {
   attemptGoldHunterDemoExecution,
   type OrchestratorDeps,
   type OrchestratorResult
 } from "./executionOrchestrator";
-import type { GoldHunterSelectedCandidate } from "./strategySelector";
+import {
+  getGoldHunterExecutionTelemetry,
+  logGoldHunterExecutionEvent,
+  patchGoldHunterExecutionTelemetry,
+  resetGoldHunterExecutionRuntimeForTests,
+  syncGoldHunterExecutionQueueStats,
+  type GoldHunterExecutionState
+} from "./executionRuntimeStore";
+import {
+  getGoldHunterSignalClaim,
+  isGoldHunterSignalDurablyConsumed
+} from "./signalClaimStore";
+import {
+  getGoldHunterStrategySelector,
+  type GoldHunterSelectedCandidate
+} from "./strategySelector";
 import type { BrokerSymbol } from "../broker/domain";
 
 function isPinnedOwnerAdmin(ownerUid: string): boolean {
@@ -22,13 +46,24 @@ function isPinnedOwnerAdmin(ownerUid: string): boolean {
 
 const FEED_STALE_MS = 45_000;
 
+/** Coalesce retries — not every Depth event. Matches monitoring persist order of magnitude. */
+export const GH_EXECUTION_RETRY_COOLDOWN_MS = 750;
+/** Hard cap per opportunity identity — prevents unbounded retry storms. */
+export const GH_EXECUTION_MAX_ATTEMPTS_PER_OPPORTUNITY = 8;
+
 export type DemoAutoExecutionEnqueueResult = {
   enqueued: boolean;
   reason:
     | "ENQUEUED"
     | "NOT_NEW_OPPORTUNITY"
     | "QUEUE_FULL"
-    | "NO_OPPORTUNITY";
+    | "NO_OPPORTUNITY"
+    | "COOLDOWN"
+    | "MAX_ATTEMPTS"
+    | "ALREADY_CLAIMED"
+    | "NOT_RETRYABLE"
+    | "QUEUE_BUSY"
+    | "IDENTITY_MISMATCH";
 };
 
 type RuntimeHooks = {
@@ -48,32 +83,320 @@ export function setGoldHunterDemoAutoExecutionHooksForTests(
 export function resetGoldHunterDemoAutoExecutionForTests(): void {
   hooks = {};
   resetOwnerQueuesForTests();
+  resetGoldHunterExecutionRuntimeForTests();
+}
+
+function syncQueue(ownerUid: string): void {
+  syncGoldHunterExecutionQueueStats(
+    ownerUid,
+    getOwnerQueue("gh-demo-exec", ownerUid, 2).stats()
+  );
 }
 
 /**
- * Called from market-data hot path when selector reports newOpportunity.
+ * Classify whether a PRE-CLAIM failure may be reconsidered for the SAME opportunity.
+ * Never retry after durable claim / unknown broker outcome.
+ */
+export function isGoldHunterPreclaimFailureRetryable(args: {
+  blocker: string | null;
+  detail?: string | null;
+  claimed: boolean;
+  outcome?: string | null;
+}): boolean {
+  if (args.claimed) return false;
+  if (args.outcome === "PENDING_RECONCILIATION") return false;
+  if (args.outcome === "FILLED" || args.outcome === "ACCEPTED_PENDING_FILL") {
+    return false;
+  }
+  if (args.outcome === "BROKER_REJECTED" || args.outcome === "BROKER_SUBMIT_ERROR") {
+    return false;
+  }
+
+  const b = args.blocker ?? "";
+  const d = args.detail ?? "";
+
+  // Hard non-retryable policy / config / environment.
+  const nonRetryable = new Set([
+    "WAIT — AUTOTRADE OFF",
+    "WAIT — PAUSED",
+    "WAIT — EMERGENCY STOP",
+    "WAIT — LIVE ENVIRONMENT REFUSED",
+    "WAIT — UNAUTHORIZED",
+    "WAIT — CONFIG INVALID",
+    "WAIT — DAILY LOSS LIMIT",
+    "WAIT — MAX OPEN TRADES",
+    "WAIT — CAPITAL LIMIT",
+    "WAIT — SPREAD TOO WIDE",
+    "WAIT — DEPTH INVALID",
+    "WAIT — NO SETUP SELECTED",
+    "WAIT — DUPLICATE SIGNAL",
+    "WAIT — PROTECTION GEOMETRY NOT CONNECTED",
+    "WAIT — ACCOUNT ENVIRONMENT UNKNOWN",
+    "WAIT — BROKER DISCONNECTED",
+    "WAIT — MARKET CLOSED"
+  ]);
+  if (nonRetryable.has(b)) return false;
+
+  // Sizing fundamentally impossible (not transient metadata).
+  if (b.includes("RISK BUDGET") || b.includes("LOT") || b.includes("STOP DISTANCE")) {
+    return false;
+  }
+
+  // Resync permanently invalidates this opportunity identity.
+  if (d === "resync_generation_mismatch") return false;
+  if (d === "opportunity_no_longer_active") return false;
+  if (d === "setup_or_side_changed") return false;
+  if (d === "opportunity_consumed_or_not_executable") return false;
+
+  // Transient / infrastructure / race (pre-claim).
+  if (b === "WAIT — SIGNAL STALE") {
+    // spot/depth stale or book race — reconsider while opportunity stays active.
+    return (
+      d === "book_generation_mismatch" ||
+      d === "no_live_snapshot" ||
+      d === "spot_side_stale" ||
+      d === "depth_stale" ||
+      d === "depth_book_age" ||
+      d.startsWith("depth_")
+    );
+  }
+  if (b === "WAIT — SIZING METADATA UNAVAILABLE") return true;
+  if (b === "WAIT — ACCOUNT SNAPSHOT INVALID") return true;
+  if (b === "WAIT — COMMITTED CAPITAL UNKNOWN") return true;
+  if (b === "QUEUE_FULL" || b === "RUNTIME_ERROR") return true;
+  if (b.startsWith("RUNTIME_ERROR")) return true;
+
+  // Unknown blockers: fail-closed (no rapid retry).
+  return false;
+}
+
+function mapBlockerToState(blocker: string): GoldHunterExecutionState {
+  switch (blocker) {
+    case "WAIT — AUTOTRADE OFF":
+      return "AUTOTRADE_OFF";
+    case "WAIT — PAUSED":
+      return "PAUSED";
+    case "WAIT — EMERGENCY STOP":
+      return "EMERGENCY_STOP";
+    case "WAIT — DUPLICATE SIGNAL":
+      return "DUPLICATE_ALREADY_CLAIMED";
+    case "QUEUE_FULL":
+      return "QUEUE_FULL";
+    default:
+      return "PRECLAIM_BLOCKED";
+  }
+}
+
+function noteOpportunityDetected(
+  ownerUid: string,
+  opportunity: GoldHunterSelectedCandidate,
+  autoTradeEnabled: boolean
+): void {
+  const id = opportunity.opportunityId || opportunity.signalId;
+  const prev = getGoldHunterExecutionTelemetry(ownerUid);
+  const same =
+    prev.lastOpportunityId === id && prev.lastOpportunityStartedAt != null;
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    autoTradeEnabled,
+    lastOpportunityId: id,
+    lastSignalId: id,
+    lastSetup: opportunity.setup,
+    lastSide: opportunity.side,
+    lastOpportunityStartedAt: same
+      ? prev.lastOpportunityStartedAt
+      : new Date().toISOString(),
+    attemptCountForOpportunity: same ? prev.attemptCountForOpportunity : 0,
+    lastRetryablePreclaim: same ? prev.lastRetryablePreclaim : false,
+    lastAttemptClaimed: same ? prev.lastAttemptClaimed : false,
+    state: "OPPORTUNITY_DETECTED",
+    blocker: null,
+    detail: same ? prev.detail : null,
+    outcome: same ? prev.outcome : null
+  });
+  logGoldHunterExecutionEvent("gold_hunter_opportunity_detected", {
+    opportunityId: id,
+    setup: opportunity.setup,
+    side: opportunity.side,
+    attempt: same ? prev.attemptCountForOpportunity : 0
+  });
+}
+
+/**
+ * Called from market-data hot path when selector reports newOpportunity
+ * OR when reconsidering an active unconsumed opportunity after retryable failure.
  * Never blocks on broker — enqueues bounded async work.
  */
 export function enqueueGoldHunterDemoAutoExecution(args: {
   ownerUid: string;
   newOpportunity: boolean;
   opportunity: GoldHunterSelectedCandidate | null;
+  source?: "NEW" | "RETRY";
 }): DemoAutoExecutionEnqueueResult {
-  if (!args.newOpportunity || !args.opportunity) {
-    return {
-      enqueued: false,
-      reason: args.opportunity ? "NOT_NEW_OPPORTUNITY" : "NO_OPPORTUNITY"
-    };
+  const source = args.source ?? (args.newOpportunity ? "NEW" : "RETRY");
+  if (!args.opportunity) {
+    return { enqueued: false, reason: "NO_OPPORTUNITY" };
   }
+  if (source === "NEW" && !args.newOpportunity) {
+    return { enqueued: false, reason: "NOT_NEW_OPPORTUNITY" };
+  }
+
   const opportunity = args.opportunity;
+  const id = opportunity.opportunityId || opportunity.signalId;
+  const tel = getGoldHunterExecutionTelemetry(args.ownerUid);
+
+  if (source === "NEW") {
+    noteOpportunityDetected(args.ownerUid, opportunity, tel.autoTradeEnabled);
+  }
+
+  if (source === "RETRY") {
+    if (tel.lastAttemptClaimed) {
+      return { enqueued: false, reason: "ALREADY_CLAIMED" };
+    }
+    if (tel.lastOpportunityId === id && !tel.lastRetryablePreclaim) {
+      // First attempt never ran (e.g. only QUEUE_FULL) → allow; else require retryable flag.
+      if (tel.attemptCountForOpportunity > 0 && tel.state !== "QUEUE_FULL") {
+        return { enqueued: false, reason: "NOT_RETRYABLE" };
+      }
+    }
+    if (
+      tel.lastOpportunityId === id &&
+      tel.attemptCountForOpportunity >= GH_EXECUTION_MAX_ATTEMPTS_PER_OPPORTUNITY
+    ) {
+      return { enqueued: false, reason: "MAX_ATTEMPTS" };
+    }
+    const lastAt = tel.lastAttemptAt ? Date.parse(tel.lastAttemptAt) : 0;
+    if (
+      Number.isFinite(lastAt) &&
+      Date.now() - lastAt < GH_EXECUTION_RETRY_COOLDOWN_MS
+    ) {
+      return { enqueued: false, reason: "COOLDOWN" };
+    }
+  }
+
   const q = getOwnerQueue("gh-demo-exec", args.ownerUid, 2);
+  const stats = q.stats();
+  if (stats.pending > 0 && source === "RETRY") {
+    syncQueue(args.ownerUid);
+    return { enqueued: false, reason: "QUEUE_BUSY" };
+  }
+
   const ok = q.enqueue(async () => {
-    await runGoldHunterDemoAutoExecution(args.ownerUid, opportunity);
+    try {
+      await runGoldHunterDemoAutoExecution(args.ownerUid, opportunity);
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message.slice(0, 160) : "UNKNOWN_RUNTIME_ERROR";
+      patchGoldHunterExecutionTelemetry(args.ownerUid, {
+        state: "RUNTIME_ERROR",
+        blocker: "RUNTIME_ERROR",
+        detail: msg,
+        lastAttemptCompletedAt: new Date().toISOString(),
+        lastRetryablePreclaim: true,
+        lastAttemptClaimed: false,
+        outcome: null
+      });
+      logGoldHunterExecutionEvent("gold_hunter_execution_runtime_error", {
+        opportunityId: id,
+        setup: opportunity.setup,
+        side: opportunity.side,
+        error: msg,
+        attempt: getGoldHunterExecutionTelemetry(args.ownerUid)
+          .attemptCountForOpportunity
+      });
+    } finally {
+      syncQueue(args.ownerUid);
+    }
   });
-  return {
-    enqueued: ok,
-    reason: ok ? "ENQUEUED" : "QUEUE_FULL"
-  };
+
+  syncQueue(args.ownerUid);
+
+  if (!ok) {
+    patchGoldHunterExecutionTelemetry(args.ownerUid, {
+      autoTradeEnabled: tel.autoTradeEnabled,
+      lastOpportunityId: id,
+      lastSignalId: id,
+      lastSetup: opportunity.setup,
+      lastSide: opportunity.side,
+      state: "QUEUE_FULL",
+      blocker: "QUEUE_FULL",
+      detail: "execution_queue_at_capacity",
+      lastRetryablePreclaim: true,
+      lastAttemptClaimed: false
+    });
+    logGoldHunterExecutionEvent("gold_hunter_execution_queue_full", {
+      opportunityId: id,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      pending: q.stats().pending,
+      dropped: q.stats().dropped
+    });
+    return { enqueued: false, reason: "QUEUE_FULL" };
+  }
+
+  patchGoldHunterExecutionTelemetry(args.ownerUid, {
+    state: "QUEUED",
+    blocker: null,
+    detail: source === "RETRY" ? "retry_enqueued" : "new_opportunity_enqueued"
+  });
+  logGoldHunterExecutionEvent(
+    source === "RETRY"
+      ? "gold_hunter_execution_retry_scheduled"
+      : "gold_hunter_execution_enqueued",
+    {
+      opportunityId: id,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      attempt: getGoldHunterExecutionTelemetry(args.ownerUid)
+        .attemptCountForOpportunity
+    }
+  );
+  return { enqueued: true, reason: "ENQUEUED" };
+}
+
+/**
+ * On later market ticks: if the SAME opportunity is still active, unconsumed,
+ * depth-executable, and a prior attempt failed before durable claim with a
+ * retryable condition (or never ran due to QUEUE_FULL), enqueue a bounded retry.
+ */
+export function maybeReconsiderGoldHunterDemoAutoExecution(
+  ownerUid: string
+): DemoAutoExecutionEnqueueResult {
+  const sel = getGoldHunterStrategySelector(ownerUid);
+  const live = sel.getExecutableCandidate();
+  if (!live || !live.depthExecutable || live.consumed) {
+    return { enqueued: false, reason: "NO_OPPORTUNITY" };
+  }
+
+  const id = live.opportunityId || live.signalId;
+  const tel = getGoldHunterExecutionTelemetry(ownerUid);
+
+  // Only reconsider the opportunity we already know about.
+  if (tel.lastOpportunityId != null && tel.lastOpportunityId !== id) {
+    return { enqueued: false, reason: "IDENTITY_MISMATCH" };
+  }
+
+  if (tel.lastAttemptClaimed) {
+    return { enqueued: false, reason: "ALREADY_CLAIMED" };
+  }
+
+  const eligible =
+    tel.state === "QUEUE_FULL" ||
+    tel.state === "RUNTIME_ERROR" ||
+    (tel.lastRetryablePreclaim && tel.state === "PRECLAIM_BLOCKED") ||
+    (tel.state === "OPPORTUNITY_DETECTED" &&
+      tel.attemptCountForOpportunity === 0 &&
+      tel.lastOpportunityId === id);
+
+  if (!eligible) {
+    return { enqueued: false, reason: "NOT_RETRYABLE" };
+  }
+
+  return enqueueGoldHunterDemoAutoExecution({
+    ownerUid,
+    newOpportunity: false,
+    opportunity: live,
+    source: "RETRY"
+  });
 }
 
 /**
@@ -84,10 +407,101 @@ export async function runGoldHunterDemoAutoExecution(
   opportunity: GoldHunterSelectedCandidate,
   depsOverride?: Partial<OrchestratorDeps>
 ): Promise<OrchestratorResult | { ok: false; skipped: string }> {
+  const opportunityId = opportunity.opportunityId || opportunity.signalId;
   const config = await loadGoldHunterConfig(ownerUid);
+
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    autoTradeEnabled: config.demoAutoTradeEnabled,
+    lastOpportunityId: opportunityId,
+    lastSignalId: opportunityId,
+    lastSetup: opportunity.setup,
+    lastSide: opportunity.side,
+    lastAttemptAt: new Date().toISOString(),
+    state: "EXECUTION_STARTED",
+    attemptCountForOpportunity:
+      getGoldHunterExecutionTelemetry(ownerUid).lastOpportunityId === opportunityId
+        ? getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity + 1
+        : 1,
+    lastAttemptClaimed: false
+  });
+
+  // Prefer specific safety states over generic AUTOTRADE_OFF when both apply.
+  if (config.emergencyStopActive) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "EMERGENCY_STOP",
+      blocker: "WAIT — EMERGENCY STOP",
+      detail: "emergency_stop_active",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      autoTradeEnabled: false
+    });
+    return { ok: false, skipped: "WAIT — EMERGENCY STOP" };
+  }
+
+  if (config.pauseNewEntries) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "PAUSED",
+      blocker: "WAIT — PAUSED",
+      detail: "pause_new_entries",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false
+    });
+    return { ok: false, skipped: "WAIT — PAUSED" };
+  }
+
   if (!config.demoAutoTradeEnabled) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "AUTOTRADE_OFF",
+      blocker: "WAIT — AUTOTRADE OFF",
+      detail: "demo_auto_trade_disabled",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      outcome: null
+    });
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: "WAIT — AUTOTRADE OFF",
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
     return { ok: false, skipped: "WAIT — AUTOTRADE OFF" };
   }
+
+  // Durable claim already exists → never resubmit.
+  if (await isGoldHunterSignalDurablyConsumed(ownerUid, opportunityId)) {
+    getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
+    const claim = await getGoldHunterSignalClaim(ownerUid, opportunityId);
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "DUPLICATE_ALREADY_CLAIMED",
+      blocker: "WAIT — DUPLICATE SIGNAL",
+      detail: claim?.state ?? "claim_exists",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      lastAttemptClaimed: true,
+      tradeId: claim?.goldHunterTradeId ?? null,
+      outcome: claim?.state ?? "ALREADY_CLAIMED",
+      brokerOrderId: claim?.brokerOrderId ?? null,
+      brokerPositionId: claim?.brokerPositionId ?? null
+    });
+    return {
+      ok: false,
+      submitted: false,
+      blockers: ["WAIT — DUPLICATE SIGNAL"],
+      signalId: opportunityId
+    };
+  }
+
+  // Refresh market fields against live active opportunity (same identity).
+  const refreshed =
+    refreshGoldHunterCandidateAgainstLive({ ownerUid, candidate: opportunity }) ??
+    opportunity;
+
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    state: "PRECLAIM_CHECK",
+    blocker: null,
+    detail: null
+  });
 
   const attempt = hooks.attempt ?? attemptGoldHunterDemoExecution;
   const loadSymbol = hooks.loadSymbol ?? loadDemoXauUsdSymbol;
@@ -98,11 +512,28 @@ export async function runGoldHunterDemoAutoExecution(
   const symbol =
     depsOverride?.symbol ?? (await loadSymbol(ownerUid));
   if (!symbol) {
+    const blocker = "WAIT — SIZING METADATA UNAVAILABLE";
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "PRECLAIM_BLOCKED",
+      blocker,
+      detail: "symbol_metadata_null",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: true,
+      lastAttemptClaimed: false
+    });
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker,
+      detail: "symbol_metadata_null",
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
     return {
       ok: false,
       submitted: false,
-      blockers: ["WAIT — SIZING METADATA UNAVAILABLE"],
-      signalId: opportunity.signalId
+      blockers: [blocker],
+      signalId: opportunityId
     };
   }
 
@@ -118,13 +549,172 @@ export async function runGoldHunterDemoAutoExecution(
   const isAdmin =
     depsOverride?.isAdmin ?? (await checkAdmin(ownerUid));
 
-  return attempt(ownerUid, opportunity, {
+  const result = await attempt(ownerUid, refreshed, {
     isAdmin,
     marketOpen: depsOverride?.marketOpen ?? marketOpen,
     feedFresh: depsOverride?.feedFresh ?? feedFresh,
     symbol,
     placeOrder: depsOverride?.placeOrder,
-    beforeBrokerSubmit: depsOverride?.beforeBrokerSubmit
+    beforeBrokerSubmit: depsOverride?.beforeBrokerSubmit,
+    assertFresh: depsOverride?.assertFresh,
+    onTelemetry: (ev) => {
+      applyOrchestratorTelemetry(ownerUid, opportunityId, opportunity, ev);
+    }
+  });
+
+  finalizeFromOrchestratorResult(ownerUid, opportunity, result);
+  return result;
+}
+
+type OrchestratorTelemetryEvent = {
+  phase: GoldHunterExecutionState;
+  blocker?: string | null;
+  detail?: string | null;
+  claimed?: boolean;
+  outcome?: string | null;
+  tradeId?: string | null;
+  brokerOrderId?: string | null;
+  brokerPositionId?: string | null;
+};
+
+function applyOrchestratorTelemetry(
+  ownerUid: string,
+  opportunityId: string,
+  opportunity: GoldHunterSelectedCandidate,
+  ev: OrchestratorTelemetryEvent
+): void {
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    state: ev.phase,
+    blocker: ev.blocker ?? null,
+    detail: ev.detail ?? null,
+    lastAttemptClaimed:
+      ev.claimed === true
+        ? true
+        : getGoldHunterExecutionTelemetry(ownerUid).lastAttemptClaimed,
+    outcome: ev.outcome ?? getGoldHunterExecutionTelemetry(ownerUid).outcome,
+    tradeId: ev.tradeId ?? getGoldHunterExecutionTelemetry(ownerUid).tradeId,
+    brokerOrderId: ev.brokerOrderId,
+    brokerPositionId: ev.brokerPositionId
+  });
+  if (ev.phase === "CLAIMED" || ev.phase === "CLAIMING") {
+    logGoldHunterExecutionEvent("gold_hunter_signal_claimed", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+  }
+  if (ev.phase === "SUBMITTING") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_submit_started", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side
+    });
+  }
+  if (ev.phase === "FILLED") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_filled", {
+      opportunityId,
+      tradeId: ev.tradeId ?? null
+    });
+  }
+  if (ev.phase === "BROKER_REJECTED") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_rejected", {
+      opportunityId,
+      blocker: ev.blocker ?? null
+    });
+  }
+  if (ev.phase === "PRECLAIM_BLOCKED") {
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: ev.blocker ?? null,
+      detail: ev.detail ?? null,
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+  }
+}
+
+function finalizeFromOrchestratorResult(
+  ownerUid: string,
+  opportunity: GoldHunterSelectedCandidate,
+  result: OrchestratorResult | { ok: false; skipped: string }
+): void {
+  const completedAt = new Date().toISOString();
+  const prior = getGoldHunterExecutionTelemetry(ownerUid);
+
+  if ("skipped" in result) {
+    const blocker = result.skipped;
+    const state = mapBlockerToState(blocker);
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state,
+      blocker,
+      detail: prior.detail ?? "skipped_before_orchestrator",
+      lastAttemptCompletedAt: completedAt,
+      lastRetryablePreclaim: isGoldHunterPreclaimFailureRetryable({
+        blocker,
+        detail: prior.detail,
+        claimed: false
+      }),
+      lastAttemptClaimed: false
+    });
+    return;
+  }
+
+  const orch: OrchestratorResult = result;
+
+  if (!orch.ok) {
+    const blocker = orch.blockers[0] ?? "WAIT — UNKNOWN";
+    const claimed =
+      prior.lastAttemptClaimed || blocker === "WAIT — DUPLICATE SIGNAL";
+    const detail = prior.detail ?? blocker;
+    // Post-claim broker gate failures must NEVER retry (claim is durable).
+    const retryable = claimed
+      ? false
+      : isGoldHunterPreclaimFailureRetryable({
+          blocker,
+          detail,
+          claimed: false
+        });
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: claimed
+        ? prior.state === "BROKER_SUBMIT_ERROR" ||
+          prior.state === "BROKER_REJECTED" ||
+          prior.state === "PENDING_RECONCILIATION" ||
+          prior.state === "DUPLICATE_ALREADY_CLAIMED"
+          ? prior.state
+          : "DUPLICATE_ALREADY_CLAIMED"
+        : mapBlockerToState(blocker),
+      blocker,
+      detail,
+      lastAttemptCompletedAt: completedAt,
+      lastRetryablePreclaim: retryable,
+      lastAttemptClaimed: claimed,
+      outcome: claimed ? prior.outcome ?? "CLAIMED_NO_FILL" : null
+    });
+    return;
+  }
+
+  // ok:true paths — claim obtained (or pending recon after claim).
+  const claimed = true;
+  let state: GoldHunterExecutionState = "CLAIMED";
+  if (orch.outcome === "FILLED") state = "FILLED";
+  else if (orch.outcome === "ACCEPTED_PENDING_FILL") state = "ACCEPTED_PENDING_FILL";
+  else if (orch.outcome === "BROKER_REJECTED") state = "BROKER_REJECTED";
+  else if (orch.outcome === "BROKER_SUBMIT_ERROR") state = "BROKER_SUBMIT_ERROR";
+  else if (orch.outcome === "PENDING_RECONCILIATION") {
+    state = "PENDING_RECONCILIATION";
+  }
+
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    state,
+    blocker: null,
+    detail: orch.detail ?? prior.detail,
+    outcome: orch.outcome,
+    tradeId: orch.tradeId,
+    lastAttemptCompletedAt: completedAt,
+    lastRetryablePreclaim: false,
+    lastAttemptClaimed: claimed
   });
 }
 

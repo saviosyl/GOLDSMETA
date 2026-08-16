@@ -101,6 +101,54 @@ export function GoldHunterMonitorPage() {
         )}
       </section>
 
+      <section className="gh-card" style={{ marginBottom: 12 }} data-testid="gh-execution">
+        <h3>Execution</h3>
+        {status.execution ? (
+          <div className="gh-hero-meta" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+            <span>
+              Last opportunity:{" "}
+              <strong>
+                {status.execution.lastSetup ?? "—"} {status.execution.lastSide ?? ""}
+              </strong>
+            </span>
+            <span>
+              Status: <strong>{status.execution.state}</strong>
+            </span>
+            {status.execution.blocker ? (
+              <span>
+                Reason: <strong>{status.execution.blocker}</strong>
+                {status.execution.detail ? ` (${status.execution.detail})` : ""}
+              </span>
+            ) : null}
+            <span>
+              Attempts: <strong>{status.execution.attemptCountForOpportunity}</strong>
+            </span>
+            <span>
+              Queue:{" "}
+              <strong>
+                {status.execution.queue.pending === 0 && status.execution.state !== "QUEUE_FULL"
+                  ? "OK"
+                  : `pending ${status.execution.queue.pending} / dropped ${status.execution.queue.dropped}`}
+              </strong>
+            </span>
+            {status.execution.tradeId ? (
+              <span>
+                Trade: <strong>{status.execution.tradeId}</strong>
+              </span>
+            ) : null}
+            {status.execution.lastOpportunityId ? (
+              <p className="hint" style={{ marginTop: 4 }}>
+                {status.execution.lastOpportunityId}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="gh-empty" style={{ padding: 12 }}>
+            No execution telemetry yet
+          </div>
+        )}
+      </section>
+
       <section className="gh-card" style={{ marginBottom: 12 }}>
         <h3>Order gates</h3>
         <div className="gh-health">
