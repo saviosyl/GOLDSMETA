@@ -2,8 +2,8 @@
 
 ## Base
 
-- `cursor/production-connection` @ `bd5c6a94135f20314ad67475b37cf679035552eb`
-- Branch: `cursor/gold-hunter-selector-demo-execution-ffd6`
+- `cursor/production-connection` @ `bd5c6a94135f20314ad67475b37cf679035552eb` (PR #131)
+- Lifecycle follow-up branch: `cursor/gold-hunter-demo-lifecycle-final-ffd6`
 - Does **not** merge PR #126 wholesale
 
 ## Reused pure components (ported under `goldHunterAdmin/abc/`)
@@ -17,7 +17,7 @@
 | `features.ts` | `FastFeatureEngine` |
 | `setups.ts` | `evaluateSetupsDetailed` A/B/C (thresholds unchanged) |
 | `frozenConfig.ts` / `defaults.ts` / `types.ts` / `versions.ts` | Frozen config identity |
-| `exits.ts` | GH open-trade exit helpers (for future position mgmt) |
+| `exits.ts` | `updateOpenTrade` / `evaluateOpenExit` (position manager) |
 | Feature pipeline pattern | Adapted from `researchFeaturePipeline` (no research collector) |
 
 ## Deliberately NOT imported
@@ -30,10 +30,11 @@
 - `GoldHunterFastEngine` / shadow `executionAdapter` / `liveBridge`
 - Fast AutoTrade (`FAST_AUTOTRADE_V1`) anything
 
-## Production additions (this PR)
+## Production additions
 
-- `GoldHunterStrategySelector` + durable Firestore signal claims
-- Truthful Demo broker fill/reject/timeout handling
-- Protection geometry from frozen `hardStop`
-- Quote worker additive Depth subscribe + GH feed hook
+- `GoldHunterStrategySelector` — display candidate vs `newOpportunity`
+- Durable opportunity id (`GH-OPP-…`) + Firestore signal claims
+- `demoAutoExecutionRuntime` — **production call site** for `attemptGoldHunterDemoExecution` (worker/feed, not UI)
+- `demoPositionManager` — frozen exits + broker close/tighten
+- Throttled selector runtime persistence + bounded exec/position queues
 - Demo AutoTrade remains **OFF** after deploy

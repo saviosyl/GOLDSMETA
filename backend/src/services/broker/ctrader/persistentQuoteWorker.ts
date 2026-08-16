@@ -435,7 +435,7 @@ export class PersistentXauUsdQuoteWorker {
       });
     });
 
-    notifyGoldHunterResync(ownerUid);
+    await notifyGoldHunterResync(ownerUid);
     await markGoldHunterSpotAttached(ownerUid, true);
 
     // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
