@@ -3,6 +3,7 @@
 FROM node:20-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
 RUN npm ci --omit=dev
 COPY tsconfig.json ./
 COPY src ./src
