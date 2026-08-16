@@ -286,7 +286,6 @@ export function GoldHunterDashboardPage() {
                 side: t.side,
                 status: t.status,
                 netPnlEur: t.netPnlEur,
-                lots: t.lots,
                 entry: t.entry,
                 stop: t.stop
               })),
