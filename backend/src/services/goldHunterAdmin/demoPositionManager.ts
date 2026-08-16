@@ -376,6 +376,31 @@ export async function tickGoldHunterPositionManager(args: {
   return result;
 }
 
+/**
+ * Resolve lots to close from broker-confirmed size only.
+ * Never invent a default 0.01 when volume is unknown.
+ */
+export function resolveGoldHunterCloseVolumeLots(args: {
+  filledVolumeLots: number | null | undefined;
+  brokerOpenVolumeLots?: number | null;
+}): { ok: true; lots: number } | { ok: false; reason: "CLOSE_VOLUME_UNKNOWN" } {
+  if (
+    args.filledVolumeLots != null &&
+    Number.isFinite(args.filledVolumeLots) &&
+    args.filledVolumeLots > 0
+  ) {
+    return { ok: true, lots: args.filledVolumeLots };
+  }
+  if (
+    args.brokerOpenVolumeLots != null &&
+    Number.isFinite(args.brokerOpenVolumeLots) &&
+    args.brokerOpenVolumeLots > 0
+  ) {
+    return { ok: true, lots: args.brokerOpenVolumeLots };
+  }
+  return { ok: false, reason: "CLOSE_VOLUME_UNKNOWN" };
+}
+
 export type CloseOutcome = "SETTLED" | "SETTLEMENT_PENDING" | false;
 
 export async function closeGoldHunterDemoPosition(args: {
@@ -385,11 +410,30 @@ export async function closeGoldHunterDemoPosition(args: {
   bid: number;
   ask: number;
   state: GhFastOpenTrade;
+  /** Optional live broker open volume when known from a successful reconcile. */
+  brokerOpenVolumeLots?: number | null;
 }): Promise<CloseOutcome> {
   const { trade } = args;
   if (!trade.brokerPositionId) return false;
-  const lots = trade.filledVolumeLots ?? 0.01;
-  const volumeUnits = lotsToOrderVolumeUnits(lots);
+
+  const volume = resolveGoldHunterCloseVolumeLots({
+    filledVolumeLots: trade.filledVolumeLots,
+    brokerOpenVolumeLots: args.brokerOpenVolumeLots
+  });
+  if (!volume.ok) {
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      status: "PENDING_RECONCILIATION",
+      exitReason: String(args.exitReason),
+      errorCode: "CLOSE_VOLUME_UNKNOWN",
+      mfe: args.state.mfe,
+      mae: args.state.mae,
+      netPnlEur: null,
+      grossPnlEur: null
+    });
+    return false;
+  }
+  const volumeUnits = lotsToOrderVolumeUnits(volume.lots);
   const closeFn =
     hooks.closePosition ??
     ((a: { ownerUid: string; positionId: string; volumeUnits: number }) =>
@@ -399,6 +443,7 @@ export async function closeGoldHunterDemoPosition(args: {
     ...trade,
     status: "CLOSE_REQUESTED",
     exitReason: String(args.exitReason),
+    filledVolumeLots: volume.lots,
     mfe: args.state.mfe,
     mae: args.state.mae,
     netPnlEur: null,
@@ -435,6 +480,7 @@ export async function closeGoldHunterDemoPosition(args: {
       result: null,
       netPnlEur: null,
       grossPnlEur: null,
+      filledVolumeLots: volume.lots,
       mfe: args.state.mfe,
       mae: args.state.mae,
       errorCode: "CLOSE_SETTLEMENT_PENDING"

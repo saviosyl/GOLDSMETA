@@ -319,6 +319,7 @@ describe("Entry / pending-fill reconciliation", () => {
     );
     const r = await reconcileGoldHunterPendingEntries({
       ownerUid: OWNER,
+      positionsReadOk: true,
       brokerPositions: [
         {
           positionId: "p-found",
@@ -371,6 +372,7 @@ describe("Entry / pending-fill reconciliation", () => {
     );
     const r = await reconcileGoldHunterPendingEntries({
       ownerUid: OWNER,
+      positionsReadOk: true,
       brokerPositions: [
         {
           positionId: "p-acc",
