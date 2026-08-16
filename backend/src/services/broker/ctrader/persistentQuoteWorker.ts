@@ -44,6 +44,10 @@ import {
   onGoldHunterSpotEvent
 } from "../../goldHunterAdmin/marketFeedHook";
 import {
+  enqueueGoldHunterReconcilePass,
+  runGoldHunterReconcilePass
+} from "../../goldHunterAdmin/reconciliationRuntime";
+import {
   DEFAULT_QUOTE_STALL_MS,
   DEFAULT_QUOTE_STALL_MS_MARKET_CLOSED,
   evaluateQuoteStreamHealth,
@@ -186,6 +190,8 @@ export class PersistentXauUsdQuoteWorker {
   private lastPersistAt = 0;
   private lock: WorkerLockHandle | null = null;
   private lockRenewTimer: ReturnType<typeof setInterval> | null = null;
+  /** Bounded Gold Hunter reconcile — never rapid-fire. */
+  private ghReconcileTimer: ReturnType<typeof setInterval> | null = null;
   /** Broker symbol schedule fetched once per WS session — recomputed over time. */
   private cachedSchedule: ScheduleInterval[] = [];
   private cachedScheduleTimeZone = "UTC";
@@ -267,12 +273,25 @@ export class PersistentXauUsdQuoteWorker {
         });
     }, LOCK_RENEW_MS);
 
+    // Gold Hunter lifecycle reconcile on worker startup (force once).
+    void runGoldHunterReconcilePass({ ownerUid, force: true }).catch(() => {
+      /* GH reconcile is best-effort; quote worker must stay up */
+    });
+    if (this.ghReconcileTimer) clearInterval(this.ghReconcileTimer);
+    this.ghReconcileTimer = setInterval(() => {
+      enqueueGoldHunterReconcilePass(ownerUid, false);
+    }, 30_000);
+
     await this.loop(ownerUid);
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     this.status.running = false;
+    if (this.ghReconcileTimer) {
+      clearInterval(this.ghReconcileTimer);
+      this.ghReconcileTimer = null;
+    }
     this.status.connected = false;
     if (this.lockRenewTimer) {
       clearInterval(this.lockRenewTimer);
@@ -437,6 +456,8 @@ export class PersistentXauUsdQuoteWorker {
 
     await notifyGoldHunterResync(ownerUid);
     await markGoldHunterSpotAttached(ownerUid, true);
+    // After reconnect / resync — force a safe GH reconcile pass (no order retry).
+    enqueueGoldHunterReconcilePass(ownerUid, true);
 
     // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
     try {

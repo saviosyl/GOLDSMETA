@@ -192,6 +192,8 @@ export async function assembleGoldHunterStatus(
         t.status === "PROTECTED" ||
         t.status === "ACCEPTED_PENDING_FILL" ||
         t.status === "PENDING_RECONCILIATION" ||
+        t.status === "CLOSE_REQUESTED" ||
+        t.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT" ||
         t.status === "SENT" ||
         t.status === "ORDER_CREATED")
   );

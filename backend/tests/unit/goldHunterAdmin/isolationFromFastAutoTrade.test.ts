@@ -18,6 +18,8 @@ describe("Gold Hunter isolation from Fast AutoTrade", () => {
       "backend/src/services/goldHunterAdmin/demoAutoExecutionRuntime.ts",
       "backend/src/services/goldHunterAdmin/demoPositionManager.ts",
       "backend/src/services/goldHunterAdmin/marketFeedHook.ts",
+      "backend/src/services/goldHunterAdmin/closeSettlement.ts",
+      "backend/src/services/goldHunterAdmin/reconciliationRuntime.ts",
       "backend/src/routes/goldHunterAdmin.ts"
     ];
     for (const f of files) {
