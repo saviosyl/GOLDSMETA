@@ -126,6 +126,30 @@ const status = {
     consumed: false,
     ageMs: null,
     note: "WAIT — NO SETUP SELECTED"
+  },
+  execution: {
+    autoTradeEnabled: false,
+    lastOpportunityId: null,
+    lastSignalId: null,
+    lastSetup: null,
+    lastSide: null,
+    lastOpportunityStartedAt: null,
+    lastAttemptAt: null,
+    lastAttemptCompletedAt: null,
+    state: "IDLE",
+    blocker: null,
+    detail: null,
+    outcome: null,
+    tradeId: null,
+    brokerOrderIdMaskedOrSafe: null,
+    brokerPositionIdMaskedOrSafe: null,
+    attemptCountForOpportunity: 0,
+    queue: {
+      pending: 0,
+      dropped: 0,
+      completed: 0,
+      maxPendingSeen: 0
+    }
   }
 };
 vi.mock("../../lib/auth", () => ({

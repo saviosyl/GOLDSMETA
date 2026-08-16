@@ -1,6 +1,11 @@
 /**
  * Candidate freshness at execution time — frozen sideFreshnessMs / depthFreshnessMs.
  * Do not invent new thresholds.
+ *
+ * IMPORTANT: bookGeneration may advance while a queued opportunity waits for the
+ * async execution queue (harmless Depth updates). Reject only when the active
+ * opportunity identity diverges, resync changes, Depth/spot is truly stale/invalid,
+ * or setup/side no longer matches.
  */
 import { frozenGhFastSoakConfig } from "./abc";
 import type { GoldHunterSelectedCandidate } from "./strategySelector";
@@ -27,6 +32,7 @@ export function assertGoldHunterCandidateFresh(args: {
   const sel = getGoldHunterStrategySelector(args.ownerUid);
   const snap = sel.getLastSnapshot();
   const c = args.candidate;
+  const opportunityId = c.opportunityId || c.signalId;
 
   if (c.resyncGeneration !== sel.getResyncGeneration()) {
     return {
@@ -42,13 +48,51 @@ export function assertGoldHunterCandidateFresh(args: {
       detail: "no_live_snapshot"
     };
   }
+
+  const activeId = sel.getActiveOpportunityId();
+  const live = sel.getExecutableCandidate();
+  const identityStillActive =
+    activeId === opportunityId &&
+    live != null &&
+    live.opportunityId === opportunityId &&
+    live.setup === c.setup &&
+    live.side === c.side &&
+    live.resyncGeneration === c.resyncGeneration;
+
   if (c.bookGeneration !== snap.bookGeneration) {
-    return {
-      ok: false,
-      blocker: "WAIT — SIGNAL STALE",
-      detail: "book_generation_mismatch"
-    };
+    // Harmless Depth advance while the SAME opportunity remains active+executable.
+    if (!identityStillActive) {
+      return {
+        ok: false,
+        blocker: "WAIT — SIGNAL STALE",
+        detail: "book_generation_mismatch"
+      };
+    }
+  } else if (!identityStillActive) {
+    // Book matches but opportunity ended / consumed / setup-side changed.
+    if (activeId == null || activeId !== opportunityId) {
+      return {
+        ok: false,
+        blocker: "WAIT — SIGNAL STALE",
+        detail: "opportunity_no_longer_active"
+      };
+    }
+    if (!live || live.consumed) {
+      return {
+        ok: false,
+        blocker: "WAIT — SIGNAL STALE",
+        detail: "opportunity_consumed_or_not_executable"
+      };
+    }
+    if (live.setup !== c.setup || live.side !== c.side) {
+      return {
+        ok: false,
+        blocker: "WAIT — SIGNAL STALE",
+        detail: "setup_or_side_changed"
+      };
+    }
   }
+
   if (!isDepthExecutableForOrder(snap.depthValidity)) {
     return {
       ok: false,
@@ -87,4 +131,37 @@ export function assertGoldHunterCandidateFresh(args: {
   }
 
   return { ok: true };
+}
+
+/**
+ * Refresh market fields from the live active opportunity while preserving
+ * opportunity identity (same opportunityId). Returns null if identity diverged.
+ */
+export function refreshGoldHunterCandidateAgainstLive(args: {
+  ownerUid: string;
+  candidate: GoldHunterSelectedCandidate;
+}): GoldHunterSelectedCandidate | null {
+  const sel = getGoldHunterStrategySelector(args.ownerUid);
+  const opportunityId =
+    args.candidate.opportunityId || args.candidate.signalId;
+  const live = sel.getExecutableCandidate();
+  if (!live) return null;
+  if (live.opportunityId !== opportunityId) return null;
+  if (live.setup !== args.candidate.setup || live.side !== args.candidate.side) {
+    return null;
+  }
+  if (live.resyncGeneration !== args.candidate.resyncGeneration) return null;
+  return {
+    ...args.candidate,
+    bid: live.bid,
+    ask: live.ask,
+    mid: live.mid,
+    spread: live.spread,
+    bookGeneration: live.bookGeneration,
+    depthValidity: live.depthValidity,
+    depthExecutable: live.depthExecutable,
+    receiveSeq: live.receiveSeq,
+    latestReceiveSeq: live.latestReceiveSeq,
+    consumed: live.consumed
+  };
 }

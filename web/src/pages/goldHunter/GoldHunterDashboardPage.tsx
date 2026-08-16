@@ -277,6 +277,20 @@ export function GoldHunterDashboardPage() {
               },
               strategyPipeline: status.strategyPipeline,
               arming: status.arming,
+              gates: status.gates,
+              signal: status.signal,
+              execution: status.execution,
+              openTrades: status.openTrades.map((t) => ({
+                goldHunterTradeId: t.goldHunterTradeId,
+                setup: t.setup,
+                side: t.side,
+                status: t.status,
+                netPnlEur: t.netPnlEur,
+                lots: t.lots,
+                entry: t.entry,
+                stop: t.stop
+              })),
+              performanceToday: status.performanceToday,
               feedAgeMs: status.market.ageMs,
               fastAutoTrade: "NOT_INCLUDED"
             },
