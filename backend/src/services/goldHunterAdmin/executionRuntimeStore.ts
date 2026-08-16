@@ -168,17 +168,21 @@ export function getGoldHunterExecutionDiagnostics(
 /**
  * Hydrate from Firestore when this process has no local worker state
  * (API Cloud Function serving Admin Diagnostics).
+ * Prefer Firestore when local is still IDLE / empty so API never invents truth.
  */
 export async function loadGoldHunterExecutionDiagnostics(
   ownerUid: string
 ): Promise<GoldHunterExecutionDiagnostics> {
   const local = getGoldHunterExecutionTelemetry(ownerUid);
-  if (local.state !== "IDLE" || local.lastOpportunityId != null) {
+  const localHasWorkerTruth =
+    local.lastOpportunityId != null ||
+    local.lastAttemptAt != null ||
+    (local.state !== "IDLE" && local.state !== "AUTOTRADE_OFF");
+
+  if (localHasWorkerTruth) {
     return toDiagnostics(local);
   }
-  if (hydratedFromStore.has(ownerUid)) {
-    return toDiagnostics(local);
-  }
+
   const ref = execDoc(ownerUid);
   if (!ref) return toDiagnostics(local);
   try {
@@ -193,6 +197,8 @@ export async function loadGoldHunterExecutionDiagnostics(
       lastRetryablePreclaim: Boolean(data.lastRetryablePreclaim),
       lastAttemptClaimed: Boolean(data.lastAttemptClaimed)
     };
+    // Keep hydrated view in memory for this request cycle, but do not mark as
+    // a worker writer — API must not schedulePersist over this.
     byOwner.set(ownerUid, merged);
     return toDiagnostics(merged);
   } catch {
