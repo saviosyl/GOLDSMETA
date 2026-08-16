@@ -1,7 +1,7 @@
 /**
  * Risk sizing from Gold Hunter allocated capital (not full broker equity).
  * Fail closed when protection distance or metadata is unsafe.
- * No martingale / grid / averaging.
+ * No martingale / grid / averaging. No default maxLots=100.
  */
 
 import type { GoldHunterAdminConfig } from "./types";
@@ -10,12 +10,13 @@ export type RiskSizeInput = {
   config: GoldHunterAdminConfig;
   entry: number;
   stop: number;
-  /** Broker-reported tick/pip value per 1.0 lot in account currency, when known. */
-  valuePerPointPerLot?: number | null;
-  /** Max lots allowed by broker / instrument. */
-  maxLots?: number | null;
-  minLots?: number | null;
-  lotStep?: number | null;
+  /** Broker-reported tick/pip value per 1.0 lot in account/quote currency. */
+  valuePerPointPerLot: number;
+  maxLots: number;
+  minLots: number;
+  lotStep: number;
+  /** Remaining GH allocation available for new risk. */
+  availableAllocationEur?: number | null;
 };
 
 export type RiskSizeResult =
@@ -41,7 +42,7 @@ export function plannedDailyLossBudgetEur(config: GoldHunterAdminConfig): number
 
 /**
  * Derive lots from allocation risk % and stop distance.
- * Requires a positive stop distance and a known EUR value-per-point-per-lot.
+ * Requires complete broker volume metadata — no invented max lots.
  */
 export function sizeGoldHunterDemoLots(input: RiskSizeInput): RiskSizeResult {
   const riskBudgetEur = plannedRiskBudgetEur(input.config);
@@ -56,11 +57,26 @@ export function sizeGoldHunterDemoLots(input: RiskSizeInput): RiskSizeResult {
   }
 
   const vpp = input.valuePerPointPerLot;
-  if (vpp == null || !Number.isFinite(vpp) || vpp <= 0) {
-    return {
-      ok: false,
-      blocker: "broker_value_per_point_unavailable"
-    };
+  if (!Number.isFinite(vpp) || vpp <= 0) {
+    return { ok: false, blocker: "WAIT — SIZING METADATA UNAVAILABLE" };
+  }
+  if (
+    !(input.minLots > 0) ||
+    !(input.maxLots > 0) ||
+    !(input.lotStep > 0) ||
+    !Number.isFinite(input.minLots) ||
+    !Number.isFinite(input.maxLots) ||
+    !Number.isFinite(input.lotStep)
+  ) {
+    return { ok: false, blocker: "WAIT — SIZING METADATA UNAVAILABLE" };
+  }
+
+  if (
+    input.availableAllocationEur != null &&
+    Number.isFinite(input.availableAllocationEur) &&
+    input.availableAllocationEur < riskBudgetEur
+  ) {
+    return { ok: false, blocker: "WAIT — CAPITAL LIMIT" };
   }
 
   const rawLots = riskBudgetEur / (stopDistance * vpp);
@@ -68,16 +84,12 @@ export function sizeGoldHunterDemoLots(input: RiskSizeInput): RiskSizeResult {
     return { ok: false, blocker: "lots_not_computable" };
   }
 
-  const minLots = input.minLots != null && input.minLots > 0 ? input.minLots : 0.01;
-  const maxLots = input.maxLots != null && input.maxLots > 0 ? input.maxLots : 100;
-  const step = input.lotStep != null && input.lotStep > 0 ? input.lotStep : 0.01;
-
-  let lots = Math.floor(rawLots / step) * step;
-  lots = Math.round(lots * 100) / 100;
-  if (lots < minLots) {
+  let lots = Math.floor(rawLots / input.lotStep) * input.lotStep;
+  lots = Math.round(lots * 1e8) / 1e8;
+  if (lots < input.minLots) {
     return { ok: false, blocker: "risk_budget_below_min_lot" };
   }
-  if (lots > maxLots) lots = maxLots;
+  if (lots > input.maxLots) lots = input.maxLots;
 
   return {
     ok: true,

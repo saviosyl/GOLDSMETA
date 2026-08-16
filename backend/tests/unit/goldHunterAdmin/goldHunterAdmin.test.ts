@@ -168,7 +168,10 @@ describe("Gold Hunter risk sizing", () => {
       },
       entry: 2400,
       stop: 2395,
-      valuePerPointPerLot: 1
+      valuePerPointPerLot: 1,
+      minLots: 0.01,
+      maxLots: 50,
+      lotStep: 0.01
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -177,7 +180,7 @@ describe("Gold Hunter risk sizing", () => {
     }
   });
 
-  it("fail-closed without broker value metadata", () => {
+  it("fail-closed without broker volume metadata", () => {
     const r = sizeGoldHunterDemoLots({
       config: {
         ...GH_ADMIN_DEFAULT_CONFIG,
@@ -186,7 +189,10 @@ describe("Gold Hunter risk sizing", () => {
       },
       entry: 2400,
       stop: 2395,
-      valuePerPointPerLot: null
+      valuePerPointPerLot: 1,
+      minLots: 0,
+      maxLots: 0,
+      lotStep: 0
     });
     expect(r.ok).toBe(false);
   });

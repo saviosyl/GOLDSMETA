@@ -1658,11 +1658,12 @@ export type GoldHunterStatusResponse = {
   };
   capital: {
     allocatedEur: number;
-    committedEur: number;
-    availableEur: number;
+    committedEur: number | null;
+    availableEur: number | null;
     todayPnlEur: number;
     riskBudgetEur: number;
     dailyLossBudgetEur: number;
+    committedKnown?: boolean;
   };
   health: {
     marketFeed: string;
@@ -1678,7 +1679,10 @@ export type GoldHunterStatusResponse = {
     depth: string;
     selector: string;
     state: string;
-    lastSelectedCandidate: null;
+    lastSelectedCandidate: Record<string, unknown> | null;
+    lastObservationAt?: string | null;
+    normalizationVersion?: string | null;
+    protectionGeometryConnected?: boolean;
   };
   arming?: {
     ready: boolean;
@@ -1703,6 +1707,12 @@ export type GoldHunterStatusResponse = {
     present: boolean;
     setup: "A" | "B" | "C" | null;
     side: "BUY" | "SELL" | null;
+    signalId?: string | null;
+    quality?: number | null;
+    signalTimestamp?: string | null;
+    depthValidity?: string | null;
+    consumed?: boolean;
+    ageMs?: number | null;
     note: string;
   };
 };

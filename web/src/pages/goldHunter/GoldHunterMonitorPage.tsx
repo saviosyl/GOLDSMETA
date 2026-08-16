@@ -58,11 +58,44 @@ export function GoldHunterMonitorPage() {
             <span className="gh-badge gh-badge--demo">SELECTED SIGNAL</span>
             <p className="hint" style={{ marginTop: 8 }}>
               Setup {status.signal.setup}
+              {status.signal.quality != null
+                ? ` · quality ${(status.signal.quality * 100).toFixed(0)}%`
+                : ""}
             </p>
+            {status.signal.signalId ? (
+              <p className="hint" data-testid="gh-signal-id">
+                Signal {status.signal.signalId}
+                {status.signal.consumed ? " · consumed" : " · unconsumed"}
+              </p>
+            ) : null}
+            <div className="gh-hero-meta" style={{ marginTop: 8 }}>
+              <span>
+                Depth <strong>{status.signal.depthValidity ?? status.health.depth}</strong>
+              </span>
+              <span>
+                Spread <strong>{status.market.spread?.toFixed(2) ?? "—"}</strong>
+              </span>
+              <span>
+                Age{" "}
+                <strong>
+                  {status.signal.ageMs != null
+                    ? `${Math.round(status.signal.ageMs / 1000)}s`
+                    : "—"}
+                </strong>
+              </span>
+              <span>
+                Gates{" "}
+                <strong>{status.gates.ok ? "READY" : status.gates.blockers[0] ?? "WAIT"}</strong>
+              </span>
+            </div>
           </div>
         ) : (
           <div className="gh-empty" style={{ padding: 12 }}>
-            <span className="gh-badge gh-badge--muted">RESEARCH OBSERVATION</span>
+            <span className="gh-badge gh-badge--muted">
+              {status.strategyPipeline?.selector === "CONNECTED"
+                ? "WAITING"
+                : "RESEARCH OBSERVATION"}
+            </span>
             <p style={{ marginTop: 8 }}>{status.signal.note}</p>
           </div>
         )}

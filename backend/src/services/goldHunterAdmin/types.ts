@@ -26,7 +26,10 @@ export type GoldHunterWaitReason =
   | "WAIT — UNAUTHORIZED"
   | "WAIT — CONFIG INVALID"
   | "WAIT — ACCOUNT SNAPSHOT INVALID"
-  | "WAIT — ACCOUNT ENVIRONMENT UNKNOWN";
+  | "WAIT — ACCOUNT ENVIRONMENT UNKNOWN"
+  | "WAIT — SIZING METADATA UNAVAILABLE"
+  | "WAIT — PROTECTION GEOMETRY NOT CONNECTED"
+  | "WAIT — COMMITTED CAPITAL UNKNOWN";
 
 export type GoldHunterAdminConfig = {
   allocatedCapitalEur: number;
@@ -90,7 +93,22 @@ export type GoldHunterDemoTrade = {
   exitReason: string | null;
   brokerOrderId: string | null;
   brokerPositionId: string | null;
-  status: "SIGNAL" | "ORDER_CREATED" | "SENT" | "FILLED" | "PROTECTED" | "CLOSED";
+  status:
+    | "SIGNAL"
+    | "ORDER_CREATED"
+    | "SENT"
+    | "FILLED"
+    | "PROTECTED"
+    | "CLOSED"
+    | "BROKER_REJECTED"
+    | "BROKER_SUBMIT_ERROR"
+    | "ACCEPTED_PENDING_FILL"
+    | "PENDING_RECONCILIATION";
+  signalId?: string | null;
+  clientOrderId?: string | null;
+  errorCode?: string | null;
+  filledVolumeLots?: number | null;
+  takeProfit?: number | null;
 };
 
 export type GoldHunterOrderGateResult = {

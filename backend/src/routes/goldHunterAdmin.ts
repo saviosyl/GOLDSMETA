@@ -16,8 +16,7 @@ import {
   resetGoldHunterAccountSnapshotCache
 } from "../services/goldHunterAdmin/accountSnapshot";
 import {
-  assembleGoldHunterStatus,
-  GH_STRATEGY_SELECTOR_CONNECTED
+  assembleGoldHunterStatus
 } from "../services/goldHunterAdmin/statusAssembler";
 import {
   computeDemoPerformance,
@@ -200,7 +199,9 @@ export const buildGoldHunterAdminRouter = (): Router => {
             },
             allocatedCapitalEur: status.config.allocatedCapitalEur,
             riskPerTradePct: status.config.riskPerTradePct,
-            strategySelectorConnected: GH_STRATEGY_SELECTOR_CONNECTED
+            strategySelectorConnected: status.arming.strategySelectorConnected,
+            protectionGeometryConnected:
+              status.strategyPipeline.protectionGeometryConnected
           });
           if (!arm.ok) {
             res.status(403).json({

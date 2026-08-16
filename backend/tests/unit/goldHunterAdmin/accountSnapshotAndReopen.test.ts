@@ -44,7 +44,8 @@ describe("Gold Hunter account snapshot arming", () => {
       snapshot: demoSnap(),
       allocatedCapitalEur: 2000,
       riskPerTradePct: 1,
-      strategySelectorConnected: true
+      strategySelectorConnected: true,
+      protectionGeometryConnected: true
     });
     expect(ok.ok).toBe(true);
 
@@ -52,7 +53,8 @@ describe("Gold Hunter account snapshot arming", () => {
       snapshot: demoSnap(),
       allocatedCapitalEur: 2000,
       riskPerTradePct: 1,
-      strategySelectorConnected: false
+      strategySelectorConnected: false,
+      protectionGeometryConnected: true
     });
     expect(noSelector.ok).toBe(false);
     expect(noSelector.blockers).toContain("STRATEGY_SELECTOR_NOT_CONNECTED");
@@ -64,7 +66,8 @@ describe("Gold Hunter account snapshot arming", () => {
         snapshot: demoSnap({ environment: "LIVE", authState: "LIVE_REFUSED", validForRisk: false }),
         allocatedCapitalEur: 2000,
         riskPerTradePct: 1,
-        strategySelectorConnected: true
+        strategySelectorConnected: true,
+      protectionGeometryConnected: true
       }).blockers
     ).toContain("LIVE_OR_NON_DEMO_ACCOUNT");
 
@@ -73,7 +76,8 @@ describe("Gold Hunter account snapshot arming", () => {
         snapshot: demoSnap({ environment: null, validForRisk: false }),
         allocatedCapitalEur: 2000,
         riskPerTradePct: 1,
-        strategySelectorConnected: true
+        strategySelectorConnected: true,
+      protectionGeometryConnected: true
       }).blockers
     ).toContain("ACCOUNT_ENVIRONMENT_UNKNOWN");
 
@@ -82,7 +86,8 @@ describe("Gold Hunter account snapshot arming", () => {
         snapshot: demoSnap({ balance: null, validForRisk: false }),
         allocatedCapitalEur: 2000,
         riskPerTradePct: 1,
-        strategySelectorConnected: true
+        strategySelectorConnected: true,
+      protectionGeometryConnected: true
       }).blockers
     ).toContain("ACCOUNT_SNAPSHOT_INVALID");
   });
