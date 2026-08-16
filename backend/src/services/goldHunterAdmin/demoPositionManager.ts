@@ -320,7 +320,7 @@ export async function tickGoldHunterPositionManager(args: {
 export async function closeGoldHunterDemoPosition(args: {
   ownerUid: string;
   trade: GoldHunterDemoTrade;
-  exitReason: GhFastExitReason | string;
+  exitReason: GhFastExitReason;
   bid: number;
   ask: number;
   state: GhFastOpenTrade;
