@@ -436,7 +436,7 @@ export class PersistentXauUsdQuoteWorker {
     });
 
     notifyGoldHunterResync(ownerUid);
-    markGoldHunterSpotAttached(ownerUid, true);
+    await markGoldHunterSpotAttached(ownerUid, true);
 
     // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
     try {
@@ -444,7 +444,7 @@ export class PersistentXauUsdQuoteWorker {
         ctidTraderAccountId: Number(fresh.selectedAccountId),
         symbolId: [Number(fresh.symbolId)]
       });
-      markGoldHunterDepthAttached(ownerUid, true);
+      await markGoldHunterDepthAttached(ownerUid, true);
       logWorker("quote_worker_depth_subscribed", {
         symbolId: this.status.symbolId
       });

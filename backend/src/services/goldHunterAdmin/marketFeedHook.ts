@@ -31,25 +31,27 @@ export function resetGoldHunterMarketFeedForTests(): void {
   spotAttached.clear();
 }
 
-export function markGoldHunterSpotAttached(ownerUid: string, v: boolean): void {
+export async function markGoldHunterSpotAttached(
+  ownerUid: string,
+  v: boolean
+): Promise<void> {
   spotAttached.set(ownerUid, v);
   getGoldHunterStrategySelector(ownerUid).markSpotSourceAttached(v);
-  void persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate()).catch(
-    () => undefined
-  );
+  await persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate());
 }
 
-export function markGoldHunterDepthAttached(ownerUid: string, v: boolean): void {
+export async function markGoldHunterDepthAttached(
+  ownerUid: string,
+  v: boolean
+): Promise<void> {
   depthAttached.set(ownerUid, v);
   getGoldHunterStrategySelector(ownerUid).markDepthSourceAttached(v);
-  void persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate()).catch(
-    () => undefined
-  );
+  await persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate());
 }
 
-export function notifyGoldHunterResync(ownerUid: string): void {
+export async function notifyGoldHunterResync(ownerUid: string): Promise<void> {
   getGoldHunterStrategySelector(ownerUid).clearForResync();
-  void persist(ownerUid, null).catch(() => undefined);
+  // Do not persist here — callers mark Spot/Depth attached next and persist once.
 }
 
 async function persist(ownerUid: string, candidate: GoldHunterSelectedCandidate | null): Promise<void> {
@@ -83,7 +85,7 @@ export async function onGoldHunterSpotEvent(
   }
   const norm = normalizeCTraderSpotPayload(descriptor);
   const sel = getGoldHunterStrategySelector(meta.ownerUid);
-  markGoldHunterSpotAttached(meta.ownerUid, true);
+  await markGoldHunterSpotAttached(meta.ownerUid, true);
   const now = Date.now();
   lastSpotAt.set(meta.ownerUid, now);
   const candidate = sel.onSpot({
@@ -110,7 +112,7 @@ export async function onGoldHunterDepthEvent(
   }
   const norm = normalizeCTraderDepthPayload(descriptor);
   const sel = getGoldHunterStrategySelector(meta.ownerUid);
-  markGoldHunterDepthAttached(meta.ownerUid, true);
+  await markGoldHunterDepthAttached(meta.ownerUid, true);
   const now = Date.now();
   lastDepthAt.set(meta.ownerUid, now);
   const candidate = sel.onDepth({
