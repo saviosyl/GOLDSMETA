@@ -34,15 +34,22 @@ export function resetGoldHunterMarketFeedForTests(): void {
 export function markGoldHunterSpotAttached(ownerUid: string, v: boolean): void {
   spotAttached.set(ownerUid, v);
   getGoldHunterStrategySelector(ownerUid).markSpotSourceAttached(v);
+  void persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate()).catch(
+    () => undefined
+  );
 }
 
 export function markGoldHunterDepthAttached(ownerUid: string, v: boolean): void {
   depthAttached.set(ownerUid, v);
   getGoldHunterStrategySelector(ownerUid).markDepthSourceAttached(v);
+  void persist(ownerUid, getGoldHunterStrategySelector(ownerUid).getLastCandidate()).catch(
+    () => undefined
+  );
 }
 
 export function notifyGoldHunterResync(ownerUid: string): void {
   getGoldHunterStrategySelector(ownerUid).clearForResync();
+  void persist(ownerUid, null).catch(() => undefined);
 }
 
 async function persist(ownerUid: string, candidate: GoldHunterSelectedCandidate | null): Promise<void> {
