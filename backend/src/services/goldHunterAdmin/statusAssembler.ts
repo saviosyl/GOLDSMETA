@@ -34,10 +34,12 @@ import {
   type GoldHunterDemoTrade
 } from "./types";
 import { isGoldHunterSignalDurablyConsumed } from "./signalClaimStore";
-import { getGoldHunterExecutionDiagnostics } from "./executionRuntimeStore";
+import {
+  loadGoldHunterExecutionDiagnostics,
+  patchGoldHunterExecutionTelemetry,
+  syncGoldHunterExecutionQueueStats
+} from "./executionRuntimeStore";
 import { goldHunterDemoExecQueueStats } from "./demoAutoExecutionRuntime";
-import { syncGoldHunterExecutionQueueStats } from "./executionRuntimeStore";
-import { patchGoldHunterExecutionTelemetry } from "./executionRuntimeStore";
 
 const FEED_STALE_MS = 45_000;
 const FEED_HARD_STALE_MS = 120_000;
@@ -140,7 +142,7 @@ export type GoldHunterStatusPayload = {
     ageMs: number | null;
     note: string;
   };
-  execution: ReturnType<typeof getGoldHunterExecutionDiagnostics>;
+  execution: Awaited<ReturnType<typeof loadGoldHunterExecutionDiagnostics>>;
 };
 
 function feedStateFromAge(
@@ -481,7 +483,7 @@ export async function assembleGoldHunterStatus(
       ageMs: candidateAgeMs,
       note: signalNote
     },
-    execution: (() => {
+    execution: await (async () => {
       syncGoldHunterExecutionQueueStats(
         ownerUid,
         goldHunterDemoExecQueueStats(ownerUid)
@@ -489,7 +491,7 @@ export async function assembleGoldHunterStatus(
       patchGoldHunterExecutionTelemetry(ownerUid, {
         autoTradeEnabled: config.demoAutoTradeEnabled
       });
-      return getGoldHunterExecutionDiagnostics(ownerUid);
+      return loadGoldHunterExecutionDiagnostics(ownerUid);
     })()
   };
 }

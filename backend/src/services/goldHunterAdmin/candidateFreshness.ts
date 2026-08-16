@@ -50,48 +50,35 @@ export function assertGoldHunterCandidateFresh(args: {
   }
 
   const activeId = sel.getActiveOpportunityId();
-  const live = sel.getExecutableCandidate();
-  const identityStillActive =
+  // Identity for book-race allowance does NOT require depthExecutable —
+  // Depth validity is checked separately below with the frozen thresholds.
+  const sameOpportunityIdentity =
     activeId === opportunityId &&
-    live != null &&
-    live.opportunityId === opportunityId &&
-    live.setup === c.setup &&
-    live.side === c.side &&
-    live.resyncGeneration === c.resyncGeneration;
+    c.resyncGeneration === sel.getResyncGeneration();
 
-  if (c.bookGeneration !== snap.bookGeneration) {
-    // Harmless Depth advance while the SAME opportunity remains active+executable.
-    if (!identityStillActive) {
-      return {
-        ok: false,
-        blocker: "WAIT — SIGNAL STALE",
-        detail: "book_generation_mismatch"
-      };
-    }
-  } else if (!identityStillActive) {
-    // Book matches but opportunity ended / consumed / setup-side changed.
-    if (activeId == null || activeId !== opportunityId) {
-      return {
-        ok: false,
-        blocker: "WAIT — SIGNAL STALE",
-        detail: "opportunity_no_longer_active"
-      };
-    }
-    if (!live || live.consumed) {
-      return {
-        ok: false,
-        blocker: "WAIT — SIGNAL STALE",
-        detail: "opportunity_consumed_or_not_executable"
-      };
-    }
-    if (live.setup !== c.setup || live.side !== c.side) {
-      return {
-        ok: false,
-        blocker: "WAIT — SIGNAL STALE",
-        detail: "setup_or_side_changed"
-      };
-    }
+  if (!sameOpportunityIdentity) {
+    return {
+      ok: false,
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_no_longer_active"
+    };
   }
+
+  const liveDisplay = sel.getLastCandidate();
+  if (
+    liveDisplay &&
+    liveDisplay.opportunityId === opportunityId &&
+    (liveDisplay.setup !== c.setup || liveDisplay.side !== c.side)
+  ) {
+    return {
+      ok: false,
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "setup_or_side_changed"
+    };
+  }
+
+  // Harmless Depth advance while the SAME opportunity remains active — OK.
+  // (Do not require exact bookGeneration match.)
 
   if (!isDepthExecutableForOrder(snap.depthValidity)) {
     return {
@@ -144,7 +131,12 @@ export function refreshGoldHunterCandidateAgainstLive(args: {
   const sel = getGoldHunterStrategySelector(args.ownerUid);
   const opportunityId =
     args.candidate.opportunityId || args.candidate.signalId;
-  const live = sel.getExecutableCandidate();
+  if (sel.getActiveOpportunityId() !== opportunityId) return null;
+  const live =
+    sel.getExecutableCandidate() ??
+    (sel.getLastCandidate()?.opportunityId === opportunityId
+      ? sel.getLastCandidate()
+      : null);
   if (!live) return null;
   if (live.opportunityId !== opportunityId) return null;
   if (live.setup !== args.candidate.setup || live.side !== args.candidate.side) {
