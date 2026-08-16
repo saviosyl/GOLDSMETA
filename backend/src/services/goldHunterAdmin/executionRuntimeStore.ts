@@ -226,16 +226,26 @@ function schedulePersist(ownerUid: string, force = false): void {
   const ref = execDoc(ownerUid);
   if (!ref) return;
   persistInFlight.set(ownerUid, true);
-  const payload = {
+  // Firestore rejects `undefined` field values — strip extras from patches.
+  const raw = {
     ...getGoldHunterExecutionTelemetry(ownerUid),
     updatedAt: new Date().toISOString()
   };
+  const payload = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
   void ref
     .set(payload, { merge: true })
     .then(() => {
       lastPersistAt.set(ownerUid, Date.now());
     })
-    .catch(() => undefined)
+    .catch((err) => {
+      console.warn(
+        JSON.stringify({
+          msg: "gold_hunter_execution_telemetry_persist_failed",
+          product: "GOLD_HUNTER",
+          error: err instanceof Error ? err.message.slice(0, 160) : "persist_failed"
+        })
+      );
+    })
     .finally(() => {
       persistInFlight.set(ownerUid, false);
       if (pendingPersist.get(ownerUid)) {
@@ -253,16 +263,21 @@ export function patchGoldHunterExecutionTelemetry(
   }
 ): GoldHunterExecutionTelemetry {
   const cur = getGoldHunterExecutionTelemetry(ownerUid);
+  const {
+    brokerOrderId: patchBrokerOrderId,
+    brokerPositionId: patchBrokerPositionId,
+    ...rest
+  } = patch;
   const next: GoldHunterExecutionTelemetry = {
     ...cur,
-    ...patch,
+    ...rest,
     queue: patch.queue ? { ...patch.queue } : cur.queue
   };
   if ("brokerOrderId" in patch) {
-    next.brokerOrderIdMaskedOrSafe = maskSafeId(patch.brokerOrderId);
+    next.brokerOrderIdMaskedOrSafe = maskSafeId(patchBrokerOrderId);
   }
   if ("brokerPositionId" in patch) {
-    next.brokerPositionIdMaskedOrSafe = maskSafeId(patch.brokerPositionId);
+    next.brokerPositionIdMaskedOrSafe = maskSafeId(patchBrokerPositionId);
   }
   byOwner.set(ownerUid, next);
   hydratedFromStore.add(ownerUid);
