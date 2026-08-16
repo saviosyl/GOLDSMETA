@@ -468,6 +468,34 @@ export async function runGoldHunterDemoAutoExecution(
     return { ok: false, skipped: "WAIT — AUTOTRADE OFF" };
   }
 
+  // Fast identity gate — drain dead queued work before symbol/account I/O.
+  const activeId =
+    getGoldHunterStrategySelector(ownerUid).getActiveOpportunityId();
+  if (activeId !== opportunityId) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "PRECLAIM_BLOCKED",
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_no_longer_active",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      lastAttemptClaimed: false
+    });
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_no_longer_active",
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+    return {
+      ok: false,
+      submitted: false,
+      blockers: ["WAIT — SIGNAL STALE"],
+      signalId: opportunityId
+    };
+  }
+
   // Durable claim already exists → never resubmit.
   if (await isGoldHunterSignalDurablyConsumed(ownerUid, opportunityId)) {
     getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
