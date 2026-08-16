@@ -406,38 +406,8 @@ export class PersistentXauUsdQuoteWorker {
       symbolId: [Number(fresh.symbolId)],
       subscribeToSpotTimestamp: true
     });
-    // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
-    try {
-      await connection.sendCommand("ProtoOASubscribeDepthQuotesReq", {
-        ctidTraderAccountId: Number(fresh.selectedAccountId),
-        symbolId: [Number(fresh.symbolId)]
-      });
-      notifyGoldHunterResync(ownerUid);
-      markGoldHunterSpotAttached(ownerUid, true);
-      markGoldHunterDepthAttached(ownerUid, true);
-    } catch (depthErr) {
-      logWorker("quote_worker_depth_subscribe_failed", {
-        error:
-          depthErr instanceof Error ? depthErr.message : "DEPTH_SUBSCRIBE_FAILED"
-      });
-    }
-    logWorker("quote_worker_xauusd_subscribed", {
-      symbolId: this.status.symbolId,
-      symbolName: this.status.symbolName,
-      marketStatus,
-      scheduleIntervalCount: this.cachedSchedule.length,
-      scheduleTimeZone: this.cachedScheduleTimeZone
-    });
 
-    this.status.connected = true;
-    this.status.reconnectAttempts = 0;
-    this.status.lastError = null;
-    // New session must prove stream health with fresh spots/persists.
-    // Keep lastQuote for partial bid/ask carry-forward only.
-    this.status.lastValidQuoteAtMs = null;
-    this.status.lastPersistedQuoteAtMs = null;
-    const sessionStartedAtMs = Date.now();
-
+    // Register handlers before Depth subscribe so the initial book snapshot is not missed.
     connection.on("ProtoOASpotEvent", (event: { descriptor?: Record<string, unknown> }) => {
       void this.onSpot(event?.descriptor ?? {}, {
         ownerUid,
@@ -464,6 +434,42 @@ export class PersistentXauUsdQuoteWorker {
         /* GH depth feed is best-effort; quote worker must stay up */
       });
     });
+
+    notifyGoldHunterResync(ownerUid);
+    markGoldHunterSpotAttached(ownerUid, true);
+
+    // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
+    try {
+      await connection.sendCommand("ProtoOASubscribeDepthQuotesReq", {
+        ctidTraderAccountId: Number(fresh.selectedAccountId),
+        symbolId: [Number(fresh.symbolId)]
+      });
+      markGoldHunterDepthAttached(ownerUid, true);
+      logWorker("quote_worker_depth_subscribed", {
+        symbolId: this.status.symbolId
+      });
+    } catch (depthErr) {
+      logWorker("quote_worker_depth_subscribe_failed", {
+        error:
+          depthErr instanceof Error ? depthErr.message : "DEPTH_SUBSCRIBE_FAILED"
+      });
+    }
+    logWorker("quote_worker_xauusd_subscribed", {
+      symbolId: this.status.symbolId,
+      symbolName: this.status.symbolName,
+      marketStatus,
+      scheduleIntervalCount: this.cachedSchedule.length,
+      scheduleTimeZone: this.cachedScheduleTimeZone
+    });
+
+    this.status.connected = true;
+    this.status.reconnectAttempts = 0;
+    this.status.lastError = null;
+    // New session must prove stream health with fresh spots/persists.
+    // Keep lastQuote for partial bid/ask carry-forward only.
+    this.status.lastValidQuoteAtMs = null;
+    this.status.lastPersistedQuoteAtMs = null;
+    const sessionStartedAtMs = Date.now();
 
     // Spotware requires protocol heartbeats. Stream health uses valid quotes only.
     // Market-status flips do NOT force reconnect — only a stalled quote stream does.
