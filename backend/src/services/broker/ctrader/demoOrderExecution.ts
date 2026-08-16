@@ -36,6 +36,8 @@ export type SubmitDemoMarketOrderArgs = {
   symbolId?: string | null;
   comment?: string;
   label?: string;
+  /** Optional durable client order id (e.g. Gold Hunter). */
+  clientOrderId?: string | null;
   /** When FAST_AUTOTRADE_V1, Live accounts are blocked even if other gates slip. */
   strategyId?: string | null;
 };
@@ -213,7 +215,10 @@ export async function submitDemoMarketOrder(
     volume,
     relativeStopLoss: protection.relativeStopLoss,
     relativeTakeProfit: protection.relativeTakeProfit,
-    clientOrderId: `gm_${randomBytes(8).toString("hex")}`.slice(0, 50),
+    clientOrderId: (
+      args.clientOrderId?.trim() ||
+      `gm_${randomBytes(8).toString("hex")}`
+    ).slice(0, 50),
     label: (args.label ?? "GoldMeta Demo").slice(0, 100),
     comment: (args.comment ?? "GoldMeta Demo AutoTrade").slice(0, 512)
   };

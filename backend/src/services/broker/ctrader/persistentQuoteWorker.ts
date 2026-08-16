@@ -37,6 +37,13 @@ import {
 } from "./accountAllowlist";
 import { acquireWorkerLock, type WorkerLockHandle } from "./workerLock";
 import {
+  markGoldHunterDepthAttached,
+  markGoldHunterSpotAttached,
+  notifyGoldHunterResync,
+  onGoldHunterDepthEvent,
+  onGoldHunterSpotEvent
+} from "../../goldHunterAdmin/marketFeedHook";
+import {
   DEFAULT_QUOTE_STALL_MS,
   DEFAULT_QUOTE_STALL_MS_MARKET_CLOSED,
   evaluateQuoteStreamHealth,
@@ -399,6 +406,21 @@ export class PersistentXauUsdQuoteWorker {
       symbolId: [Number(fresh.symbolId)],
       subscribeToSpotTimestamp: true
     });
+    // Gold Hunter Level-II (additive) — does not change Spot quote persist path.
+    try {
+      await connection.sendCommand("ProtoOASubscribeDepthQuotesReq", {
+        ctidTraderAccountId: Number(fresh.selectedAccountId),
+        symbolId: [Number(fresh.symbolId)]
+      });
+      notifyGoldHunterResync(ownerUid);
+      markGoldHunterSpotAttached(ownerUid, true);
+      markGoldHunterDepthAttached(ownerUid, true);
+    } catch (depthErr) {
+      logWorker("quote_worker_depth_subscribe_failed", {
+        error:
+          depthErr instanceof Error ? depthErr.message : "DEPTH_SUBSCRIBE_FAILED"
+      });
+    }
     logWorker("quote_worker_xauusd_subscribed", {
       symbolId: this.status.symbolId,
       symbolName: this.status.symbolName,
@@ -427,6 +449,19 @@ export class PersistentXauUsdQuoteWorker {
       }).catch((err) => {
         this.status.lastError =
           err instanceof Error ? err.message : "CTRADER_SPOT_HANDLE_FAILED";
+      });
+    });
+
+    connection.on("ProtoOADepthEvent", (event: { descriptor?: Record<string, unknown> }) => {
+      void onGoldHunterDepthEvent(
+        {
+          ownerUid,
+          symbolId: fresh.symbolId!,
+          environment: isLive ? "LIVE" : "DEMO"
+        },
+        event?.descriptor ?? {}
+      ).catch(() => {
+        /* GH depth feed is best-effort; quote worker must stay up */
       });
     });
 
@@ -564,6 +599,14 @@ export class PersistentXauUsdQuoteWorker {
         nowMs: now,
         thresholds: loadLiveQuoteThresholds()
       });
+      void onGoldHunterSpotEvent(
+        {
+          ownerUid: meta.ownerUid,
+          symbolId: meta.symbolId,
+          environment: meta.environment
+        },
+        spot
+      ).catch(() => undefined);
       return;
     }
 
@@ -591,6 +634,16 @@ export class PersistentXauUsdQuoteWorker {
     this.lastPersistAt = now;
     this.status.lastPersistedQuoteAtMs = now;
     this.status.lastQuote = quote;
+
+    // Forward normalized Spot into Gold Hunter selector (best-effort).
+    void onGoldHunterSpotEvent(
+      {
+        ownerUid: meta.ownerUid,
+        symbolId: meta.symbolId,
+        environment: meta.environment
+      },
+      spot
+    ).catch(() => undefined);
   }
 }
 

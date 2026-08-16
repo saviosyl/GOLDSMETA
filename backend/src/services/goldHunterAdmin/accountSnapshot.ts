@@ -386,8 +386,10 @@ export function evaluateGoldHunterArmingReadiness(args: {
   snapshot: GoldHunterAccountSnapshot;
   allocatedCapitalEur: number;
   riskPerTradePct: number;
-  /** True only when a Gold Hunter A/B/C selector is wired. */
+  /** True only when a Gold Hunter A/B/C selector is wired and operational. */
   strategySelectorConnected: boolean;
+  /** Frozen hardStop geometry available for initial protection. */
+  protectionGeometryConnected?: boolean;
 }): { ok: boolean; blockers: string[] } {
   const blockers: string[] = [];
   if (isCTraderLiveEnabled()) blockers.push("LIVE_EXECUTION_DISABLED");
@@ -417,6 +419,9 @@ export function evaluateGoldHunterArmingReadiness(args: {
   if (!(args.riskPerTradePct > 0)) blockers.push("RISK_PCT_INVALID");
   if (!args.strategySelectorConnected) {
     blockers.push("STRATEGY_SELECTOR_NOT_CONNECTED");
+  }
+  if (args.protectionGeometryConnected === false) {
+    blockers.push("PROTECTION_GEOMETRY_NOT_CONNECTED");
   }
   return { ok: blockers.length === 0, blockers };
 }

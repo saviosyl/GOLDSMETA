@@ -165,8 +165,20 @@ export function GoldHunterDashboardPage() {
               </strong>
             </div>
             <div>
+              <span>Committed</span>
+              <strong data-testid="gh-committed">
+                {status.capital.committedEur == null
+                  ? "—"
+                  : `€${status.capital.committedEur.toLocaleString()}`}
+              </strong>
+            </div>
+            <div>
               <span>Available</span>
-              <strong>€{status.capital.availableEur.toLocaleString()}</strong>
+              <strong>
+                {status.capital.availableEur == null
+                  ? "—"
+                  : `€${status.capital.availableEur.toLocaleString()}`}
+              </strong>
             </div>
             <div>
               <span>Risk / trade</span>
@@ -184,6 +196,9 @@ export function GoldHunterDashboardPage() {
           </div>
           <p className="hint" style={{ marginTop: 8 }}>
             Risk uses Gold Hunter allocation — not full Demo balance.
+            {status.capital.committedKnown === false
+              ? " Committed capital unavailable — new entries fail closed."
+              : ""}
           </p>
         </section>
       </div>

@@ -67,7 +67,8 @@ const status = {
     availableEur: 5000,
     todayPnlEur: 0,
     riskBudgetEur: 50,
-    dailyLossBudgetEur: 250
+    dailyLossBudgetEur: 250,
+    committedKnown: true
   },
   health: {
     marketFeed: "STALE",
@@ -82,8 +83,11 @@ const status = {
     spot: "CLOSED",
     depth: "UNAVAILABLE",
     selector: "NOT_CONNECTED",
-    state: "WAITING_FOR_MARKET",
-    lastSelectedCandidate: null
+    state: "SELECTOR_NOT_CONNECTED",
+    lastSelectedCandidate: null,
+    lastObservationAt: null,
+    normalizationVersion: "CTRADER_NORMALIZED_V1",
+    protectionGeometryConnected: true
   },
   arming: {
     ready: false,
@@ -115,10 +119,15 @@ const status = {
     present: false,
     setup: null,
     side: null,
+    signalId: null,
+    quality: null,
+    signalTimestamp: null,
+    depthValidity: null,
+    consumed: false,
+    ageMs: null,
     note: "WAIT — NO SETUP SELECTED"
   }
 };
-
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({
     account: { role: "OWNER", uid: "owner-1" },
