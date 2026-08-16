@@ -34,12 +34,7 @@ import {
   type GoldHunterDemoTrade
 } from "./types";
 import { isGoldHunterSignalDurablyConsumed } from "./signalClaimStore";
-import {
-  loadGoldHunterExecutionDiagnostics,
-  patchGoldHunterExecutionTelemetry,
-  syncGoldHunterExecutionQueueStats
-} from "./executionRuntimeStore";
-import { goldHunterDemoExecQueueStats } from "./demoAutoExecutionRuntime";
+import { loadGoldHunterExecutionDiagnostics } from "./executionRuntimeStore";
 
 const FEED_STALE_MS = 45_000;
 const FEED_HARD_STALE_MS = 120_000;
@@ -484,14 +479,14 @@ export async function assembleGoldHunterStatus(
       note: signalNote
     },
     execution: await (async () => {
-      syncGoldHunterExecutionQueueStats(
-        ownerUid,
-        goldHunterDemoExecQueueStats(ownerUid)
-      );
-      patchGoldHunterExecutionTelemetry(ownerUid, {
+      // Read-only hydrate from worker-persisted telemetry.
+      // Never patch/persist from the API process — that would overwrite the
+      // quote-worker execution truth with empty IDLE state.
+      const diag = await loadGoldHunterExecutionDiagnostics(ownerUid);
+      return {
+        ...diag,
         autoTradeEnabled: config.demoAutoTradeEnabled
-      });
-      return loadGoldHunterExecutionDiagnostics(ownerUid);
+      };
     })()
   };
 }
