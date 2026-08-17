@@ -268,15 +268,36 @@ async function initializeOwner(ownerUid: string): Promise<void> {
       }
       o.frozenSizing = frozen;
 
-      // If continuing epoch with different sizing hash → fail closed / new epoch
+      // If continuing epoch with different sizing hash → fail closed / new epoch.
+      // Never let a FALLBACK_DISCOVERY load (e.g. API cold status) fail-close an
+      // authoritative worker epoch that already snapped CTRADER symbol metadata.
+      const localFallback =
+        frozen.metadataSource === "FALLBACK_DISCOVERY" ||
+        String(frozen.symbolMetadataProvenance ?? "").includes(
+          "FALLBACK_DISCOVERY"
+        );
+      const persistedAuthoritative =
+        persisted?.frozenSizing != null &&
+        (String(persisted.frozenSizing.metadataSource ?? "").includes(
+          "CTRADER"
+        ) ||
+          String(
+            persisted.frozenSizing.symbolMetadataProvenance ?? ""
+          ).includes("CTRADER"));
       if (
         persisted?.frozenSizing &&
         sizingSnapshotChanged(persisted.frozenSizing, frozen)
       ) {
-        persisted.status = "DATA_QUALITY_FAILED";
-        persisted.dataIntegrityFailure = "sizing_config_changed";
-        persisted.updatedAt = new Date().toISOString();
-        await saveGhShadowEpoch(ownerUid, persisted);
+        if (localFallback && persistedAuthoritative) {
+          // Adopt the live epoch snapshot for this process; do not mutate it.
+          frozen = persisted.frozenSizing;
+          o.frozenSizing = frozen;
+        } else {
+          persisted.status = "DATA_QUALITY_FAILED";
+          persisted.dataIntegrityFailure = "sizing_config_changed";
+          persisted.updatedAt = new Date().toISOString();
+          await saveGhShadowEpoch(ownerUid, persisted);
+        }
       }
 
       o.engineGeneration = (persisted?.runtimeGeneration ?? 0) + 1;
@@ -894,8 +915,12 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
   };
 }
 
+/**
+ * Read-only status for admin/UI. Does NOT call initializeOwner.
+ * Initializing on the API with FALLBACK symbol metadata must never fail-close
+ * the quote-worker's authoritative live shadow epoch.
+ */
 export async function buildGhShadowQualificationStatus(ownerUid: string) {
-  await awaitGhShadowOwnerReady(ownerUid);
   const identity = getGhShadowStrategyConfigIdentity();
   const epoch = await loadGhShadowEpoch(ownerUid);
   const trades = epoch
@@ -906,21 +931,29 @@ export async function buildGhShadowQualificationStatus(ownerUid: string) {
     : [];
   const performance = computeGhShadowPerformanceReport(trades, epoch);
   const activity = computeGhShadowActivityReport(epoch);
-  const eng = getGhShadowEngine(ownerUid);
-  const o = getOrCreateOwner(ownerUid);
+  const lifecycle =
+    !isGhShadowQualificationEnabled()
+      ? "UNINITIALIZED"
+      : epoch == null
+        ? "UNINITIALIZED"
+        : epoch.status === "ACTIVE"
+          ? "READY"
+          : epoch.status === "DATA_QUALITY_FAILED"
+            ? "FAILED"
+            : "READY";
   return {
     enabled: isGhShadowQualificationEnabled(),
     version: GH_SHADOW_QUALIFICATION_VERSION,
     storagePath: GH_SHADOW_QUALIFICATION_STORAGE_PATH,
-    lifecycle: o.lifecycle,
+    lifecycle,
     identity,
-    frozenSizing: o.frozenSizing,
+    frozenSizing: epoch?.frozenSizing ?? null,
     epoch,
     performance,
     activity,
     mutationSurface: getGhShadowMutationSurfaceReport(),
-    openShadowTradeId: eng.getOpenTradeId(),
-    journalPending: eng.getJournal().stats().journalPending,
+    openShadowTradeId: epoch?.openShadowTradeId ?? null,
+    journalPending: epoch?.integrity?.journalPending ?? 0,
     demoAutoTradeNote:
       "Shadow qualification does not modify demoAutoTradeEnabled. No broker NewOrder."
   };
