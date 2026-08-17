@@ -91,3 +91,17 @@ export {
   nextLifecycleState,
   setupIdentityKey
 } from "./stateMachine";
+export { inspectCTraderLayerNewOrderContract } from "./ctraderLayerContract";
+export {
+  submitFastMarketOrder,
+  type BrokerOrderOutcome,
+  type FastOrderResult
+} from "./orderTransport";
+export {
+  generateFastClientOrderId,
+  reserveFastExecutionClaim,
+  resetFastExecutionClaimsForTests
+} from "./executionClaimStore";
+export { runAuthoritativeMarginSequence } from "./marginSequence";
+export { simulateFastScanSoak, runBoundedFastScanCycle } from "./scanScheduler";
+export { buildVolumeRoundingDiagnostics } from "./volumeDiagnostics";

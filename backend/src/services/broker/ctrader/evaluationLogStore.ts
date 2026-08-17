@@ -45,7 +45,13 @@ export type EvaluationRecord = {
     brokerSubmissionAttempted?: boolean;
     brokerOrderIdMasked?: string | null;
     brokerErrorCode?: string | null;
+    executionStage?: string | null;
+    clientOrderId?: string | null;
   } | null;
+  /** Terminal FAST execution stage for BUY/SELL (never silent). */
+  executionStage?: string | null;
+  clientOrderId?: string | null;
+  volumeDiagnostics?: Record<string, unknown> | null;
   /** One human-readable final reason when not submitted. */
   finalReason?: string | null;
   /** Optional overnight Demo run correlation id. */
@@ -178,7 +184,16 @@ export function reasonLabelFor(code: string): string {
     WAIT_M1_STALE: "Completed 1-minute candle is stale",
     WAIT_EXTENSION_VOLATILITY_UNAVAILABLE:
       "Local M1 volatility unavailable for extension test",
-    FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked"
+    FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked",
+    BROKER_OUTCOME_UNKNOWN: "Broker order outcome unknown — no duplicate submit",
+    BROKER_TIMEOUT_RECONCILED_FILLED: "Timeout reconciled to an existing broker order",
+    BROKER_TIMEOUT_RECONCILED_NOT_FOUND:
+      "Timeout reconciled — no matching clientOrderId",
+    BLOCKED_UNPERSISTED: "FAST BUY/SELL exited without a prior terminal persist",
+    BLOCKED_DUPLICATE_SIGNAL: "Duplicate FAST signal — no second order",
+    BLOCKED_SYMBOL_INCOMPLETE: "Broker symbol metadata incomplete",
+    BLOCKED_ORDERS_NOT_ALLOWED: "Demo order submission not allowed in this state",
+    BLOCKED_NO_ACCOUNT: "No Demo account selected for sizing"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
@@ -311,7 +326,10 @@ export async function appendEvaluation(
       partial.finalReason ??
       (partial.outcome === "QUALIFIED" ? null : reasonLabel),
     overnightRunId: partial.overnightRunId ?? null,
-    fastTelemetry: partial.fastTelemetry ?? null
+    fastTelemetry: partial.fastTelemetry ?? null,
+    executionStage: partial.executionStage ?? partial.pipeline?.executionStage ?? null,
+    clientOrderId: partial.clientOrderId ?? partial.pipeline?.clientOrderId ?? null,
+    volumeDiagnostics: partial.volumeDiagnostics ?? null
   }) as EvaluationRecord;
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).

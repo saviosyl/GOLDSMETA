@@ -31,6 +31,11 @@ import {
   safeInteger,
   safeWireAccountId
 } from "./openApiNumeric";
+import { withFastDemoSession } from "./fastAutoTrade/demoSession";
+import {
+  submitFastMarketOrder,
+  toDemoMarketOrderResult
+} from "./fastAutoTrade/orderTransport";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;
@@ -119,6 +124,17 @@ export type DemoMarketOrderResult = {
   filledVolumeLots: number | null;
   /** Account id the order was placed against. */
   ctidTraderAccountId: string | null;
+  /** FAST / Demo order outcome classification. */
+  outcome?:
+    | "BROKER_FILLED"
+    | "BROKER_ACCEPTED"
+    | "BROKER_REJECTED"
+    | "BROKER_SUBMIT_ERROR"
+    | "BROKER_OUTCOME_UNKNOWN"
+    | "BROKER_TIMEOUT_RECONCILED_FILLED"
+    | "BROKER_TIMEOUT_RECONCILED_NOT_FOUND";
+  requestSent?: boolean;
+  newOrderReqCount?: number;
   raw?: Record<string, unknown>;
 };
 
@@ -1043,7 +1059,7 @@ async function waitForDemoExecution(
   });
 }
 
-function extractFillFromExecution(
+function _extractFillFromExecution(
   execution: Record<string, unknown>
 ): {
   fillPrice: number | null;
@@ -1617,104 +1633,35 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
     },
 
     async placeDemoMarketOrder(args) {
-      return withDemoConnection(async (connection) => {
-        await connection.sendCommand("ProtoOAApplicationAuthReq", {
-          clientId: args.clientId,
-          clientSecret: args.clientSecret
-        });
-        await connection.sendCommand("ProtoOAAccountAuthReq", {
+      const clientOrderId = (
+        args.clientOrderId ?? `gm_${Date.now().toString(36)}`
+      ).slice(0, 50);
+      return withFastDemoSession(
+        {
           accessToken: args.accessToken,
-          ctidTraderAccountId: Number(args.ctidTraderAccountId)
-        });
-
-        const clientOrderId =
-          args.clientOrderId ?? `gm_${Date.now().toString(36)}`.slice(0, 50);
-
-        const executionPromise = waitForDemoExecution(connection);
-
-        // ProtoOAOrderType.MARKET = 1, ProtoOATradeSide BUY=1 SELL=2
-        await connection.sendCommand("ProtoOANewOrderReq", {
-          ctidTraderAccountId: Number(args.ctidTraderAccountId),
-          symbolId: Number(args.symbolId),
-          orderType: 1,
-          tradeSide: args.side === "BUY" ? 1 : 2,
-          volume: args.volume,
-          relativeStopLoss: args.relativeStopLoss,
-          relativeTakeProfit: args.relativeTakeProfit,
-          clientOrderId,
-          label: args.label ?? "GoldMeta Demo",
-          comment: args.comment ?? "GoldMeta Demo"
-        });
-
-        let execution = await executionPromise;
-        let order = (execution.order ?? {}) as Record<string, unknown>;
-        let position = (execution.position ?? {}) as Record<string, unknown>;
-        let positionId =
-          position.positionId != null ? String(position.positionId) : null;
-
-        // If the first execution wave lacked a position snapshot, reconcile once.
-        if (!positionId && !execution.errorCode) {
-          try {
-            const recon = (await connection.sendCommand("ProtoOAReconcileReq", {
-              ctidTraderAccountId: Number(args.ctidTraderAccountId)
-            })) as Record<string, unknown>;
-            const opens = parseBrokerOpenPositions(
-              recon.position ?? recon.positions
-            );
-            const match =
-              opens.find((p) => p.side === args.side) ??
-              opens[opens.length - 1] ??
-              null;
-            if (match?.positionId) {
-              positionId = match.positionId;
-              position = {
-                positionId: match.positionId,
-                price: match.entryPrice,
-                stopLoss: match.stopLoss,
-                takeProfit: match.takeProfit,
-                tradeData: {
-                  volume:
-                    match.volumeUnits != null
-                      ? match.volumeUnits
-                      : match.volumeLots != null
-                        ? match.volumeLots * 100
-                        : null
-                }
-              };
-              execution = { ...execution, position, reconcileMatched: true };
-            }
-          } catch {
-            /* keep execution as-is */
-          }
+          clientId: args.clientId,
+          clientSecret: args.clientSecret,
+          ctidTraderAccountId: args.ctidTraderAccountId
+        },
+        async (session) => {
+          const result = await submitFastMarketOrder({
+            request: {
+              ctidTraderAccountId: args.ctidTraderAccountId,
+              symbolId: args.symbolId,
+              side: args.side,
+              volume: args.volume,
+              relativeStopLoss: args.relativeStopLoss,
+              relativeTakeProfit: args.relativeTakeProfit,
+              clientOrderId,
+              label: args.label ?? "GoldMeta Demo",
+              comment: args.comment ?? "GoldMeta Demo"
+            },
+            transport: session,
+            reconcile: { reconcile: () => session.reconcile() }
+          });
+          return toDemoMarketOrderResult(result) satisfies DemoMarketOrderResult;
         }
-
-        const errorCode =
-          typeof execution.errorCode === "string" ? execution.errorCode : null;
-        const executionType =
-          execution.executionType != null
-            ? String(execution.executionType)
-            : null;
-        const fill = extractFillFromExecution(execution);
-        return {
-          accepted: !errorCode,
-          executionType,
-          orderId:
-            order.orderId != null
-              ? String(order.orderId)
-              : execution.orderId != null
-                ? String(execution.orderId)
-                : null,
-          positionId,
-          errorCode,
-          clientOrderId,
-          fillPrice: fill.fillPrice,
-          stopLoss: fill.stopLoss,
-          takeProfit: fill.takeProfit,
-          filledVolumeLots: fill.filledVolumeLots,
-          ctidTraderAccountId: String(args.ctidTraderAccountId),
-          raw: execution
-        } satisfies DemoMarketOrderResult;
-      });
+      );
     },
 
     async reconcileDemoOpenPositions(args) {

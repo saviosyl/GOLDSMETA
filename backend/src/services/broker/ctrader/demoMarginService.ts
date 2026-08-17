@@ -10,18 +10,14 @@ import {
   persistRotatedTokensAtomic
 } from "./connectionStore";
 import { refreshAccessToken } from "./oauth";
-import {
-  createOpenApiClient,
-  type CTraderOpenApiClient
-} from "./openApiClient";
+import { type CTraderOpenApiClient } from "./openApiClient";
 import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
-import {
-  evaluateMarginSafetyGate,
-  type AuthoritativeMarginSnapshot,
-  type MarginGateResult
-} from "./authoritativeMargin";
+import { type MarginGateResult } from "./authoritativeMargin";
 import { isCTraderLiveEnabled } from "./flags";
 import { denyCTraderMutation } from "./mutationGuard";
+import { runAuthoritativeMarginSequence } from "./fastAutoTrade/marginSequence";
+import { withFastDemoSession } from "./fastAutoTrade/demoSession";
+import { withBoundedOp } from "./fastAutoTrade/boundedOp";
 
 export type DemoMarginGateArgs = {
   ownerUid: string;
@@ -172,97 +168,73 @@ export async function assertDemoAuthoritativeMarginGate(
     };
   }
 
-  const api = args.openApiClient ?? createOpenApiClient();
-  if (
-    !api.fetchAuthoritativeDemoMarginSnapshot ||
-    !api.fetchDemoExpectedMargin
-  ) {
-    return {
-      ok: false,
-      reason: "MARGIN_UNAVAILABLE",
-      notes: ["Open API margin methods unavailable"],
-      marginSnapshot: null,
-      expectedMargin: null,
-      marginAgeMs: null
-    };
-  }
+  const api = args.openApiClient;
+  const creds = {
+    accessToken,
+    clientId,
+    clientSecret,
+    ctidTraderAccountId: connection.selectedAccountId
+  };
 
-  let snapshot: AuthoritativeMarginSnapshot | null = null;
-  try {
-    const snapRes = await api.fetchAuthoritativeDemoMarginSnapshot({
-      accessToken,
-      clientId,
-      clientSecret,
-      ctidTraderAccountId: connection.selectedAccountId
-    });
-    if (!snapRes.ok) {
+  // Injected test client: keep the same sequence (expected → snapshot LAST).
+  if (api) {
+    if (
+      !api.fetchAuthoritativeDemoMarginSnapshot ||
+      !api.fetchDemoExpectedMargin
+    ) {
       return {
         ok: false,
         reason: "MARGIN_UNAVAILABLE",
-        notes: snapRes.notes,
+        notes: ["Open API margin methods unavailable"],
         marginSnapshot: null,
         expectedMargin: null,
         marginAgeMs: null
       };
     }
-    snapshot = snapRes.snapshot;
-  } catch (err) {
-    return {
-      ok: false,
-      reason: "MARGIN_UNAVAILABLE",
-      notes: [
-        err instanceof Error
-          ? err.message
-          : "fetchAuthoritativeDemoMarginSnapshot failed"
-      ],
-      marginSnapshot: null,
-      expectedMargin: null,
-      marginAgeMs: null
-    };
-  }
-
-  let expectedMargin: number | null = null;
-  let expectedOk = false;
-  try {
-    const exp = await api.fetchDemoExpectedMargin({
-      accessToken,
-      clientId,
-      clientSecret,
-      ctidTraderAccountId: connection.selectedAccountId,
-      symbolId: args.symbolId,
-      volume: args.protocolVolume,
-      side: args.side
-    });
-    if (exp.ok) {
-      expectedMargin = exp.expectedMargin;
-      expectedOk = true;
-    } else {
-      return evaluateMarginSafetyGate({
-        snapshot,
-        expectedMargin: null,
-        expectedMarginOk: false,
-        nowMs: args.nowMs,
-        maxAgeMs: args.maxAgeMs,
-        selectedAccountIsLive: false
-      });
-    }
-  } catch {
-    return evaluateMarginSafetyGate({
-      snapshot,
-      expectedMargin: null,
-      expectedMarginOk: false,
+    return runAuthoritativeMarginSequence({
+      fetchExpectedMargin: () =>
+        api.fetchDemoExpectedMargin!({
+          ...creds,
+          symbolId: args.symbolId,
+          volume: args.protocolVolume,
+          side: args.side
+        }),
+      fetchAuthoritativeSnapshot: () =>
+        api.fetchAuthoritativeDemoMarginSnapshot!(creds),
       nowMs: args.nowMs,
       maxAgeMs: args.maxAgeMs,
       selectedAccountIsLive: false
     });
   }
 
-  return evaluateMarginSafetyGate({
-    snapshot,
-    expectedMargin,
-    expectedMarginOk: expectedOk,
-    nowMs: args.nowMs,
-    maxAgeMs: args.maxAgeMs,
-    selectedAccountIsLive: false
-  });
+  // Production: expected margin + snapshot on one authenticated Demo session.
+  try {
+    return await withBoundedOp("MARGIN_SEQUENCE", 20_000, () =>
+      withFastDemoSession(creds, (session) =>
+        runAuthoritativeMarginSequence({
+          fetchExpectedMargin: () =>
+            session.expectedMargin({
+              symbolId: args.symbolId,
+              volume: args.protocolVolume,
+              side: args.side
+            }),
+          fetchAuthoritativeSnapshot: () => session.authoritativeSnapshot(),
+          nowMs: args.nowMs,
+          maxAgeMs: args.maxAgeMs,
+          selectedAccountIsLive: false
+        })
+      )
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "MARGIN_UNAVAILABLE",
+      notes: [
+        err instanceof Error ? err.message : "margin sequence failed"
+      ],
+      marginSnapshot: null,
+      expectedMargin: null,
+      marginAgeMs: null
+    };
+  }
 }
