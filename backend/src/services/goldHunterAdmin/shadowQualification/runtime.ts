@@ -31,7 +31,6 @@ import {
   appendGhShadowDecision,
   GH_SHADOW_QUALIFICATION_STORAGE_PATH,
   listAllGhShadowCapturedEvents,
-  listGhShadowCapturedEvents,
   listGhShadowDecisions,
   listGhShadowTrades,
   loadGhShadowEpoch,
@@ -74,7 +73,6 @@ export type GhShadowPersistFailStage =
   | "before_decisions"
   | "mid_decisions";
 let persistFailStageForTests: GhShadowPersistFailStage | null = null;
-let persistFailStageArmed = false;
 let loadEpochDelayMsForTests = 0;
 let sizingOverridesForTests: Partial<GhShadowSizingInput> | undefined;
 /** When true, READY may use unit-test Pepperstone defaults (never for formal prod). */
@@ -103,7 +101,6 @@ export function setGhShadowPersistFailStageForTests(
   stage: GhShadowPersistFailStage | null
 ): void {
   persistFailStageForTests = stage;
-  persistFailStageArmed = stage != null;
 }
 
 export function setGhShadowSizingOverridesForTests(
@@ -736,7 +733,6 @@ export function resetGhShadowQualificationRuntimeForTests(): void {
   loadEpochDelayMsForTests = 0;
   persistFailHookForTests = null;
   persistFailStageForTests = null;
-  persistFailStageArmed = false;
   sizingOverridesForTests = undefined;
   allowUnitTestSizingDefaults = true; // unit tests default to isolated defaults
   authoritativeSizingLoaderForTests = null;
