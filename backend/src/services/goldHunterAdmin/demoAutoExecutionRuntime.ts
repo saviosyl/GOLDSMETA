@@ -8,7 +8,9 @@
  *   or QUEUE_FULL (never after durable claim / unknown broker outcome)
  * - Telemetry + structured logs; exceptions never crash the quote worker
  */
-import { loadDemoXauUsdSymbol } from "../broker/ctrader/demoPositionMutations";
+import { loadGoldHunterDemoXauUsdSymbol } from "../broker/ctrader/workerSymbolMetadataCache";
+import type { GoldHunterSymbolMetadataDiagnostics } from "../broker/ctrader/workerSymbolMetadataCache";
+import { resetWorkerSymbolMetadataCacheForTests } from "../broker/ctrader/workerSymbolMetadataCache";
 import { getSharedXauusdQuote } from "../marketFeed/sharedMarketData";
 import { loadOwnerAuthConfig } from "../auth/ownerAuthConfig";
 import { getOwnerQueue, resetOwnerQueuesForTests } from "./boundedQueue";
@@ -78,6 +80,13 @@ export type DemoAutoExecutionEnqueueResult = {
 type RuntimeHooks = {
   attempt?: typeof attemptGoldHunterDemoExecution;
   loadSymbol?: (ownerUid: string) => Promise<BrokerSymbol | null>;
+  /** Optional: override cache-aware loader (tests). */
+  loadSymbolWithDiagnostics?: (
+    ownerUid: string
+  ) => Promise<{
+    symbol: BrokerSymbol | null;
+    diagnostics: GoldHunterSymbolMetadataDiagnostics;
+  }>;
   isAdmin?: (ownerUid: string) => Promise<boolean>;
 };
 
@@ -93,6 +102,7 @@ export function resetGoldHunterDemoAutoExecutionForTests(): void {
   hooks = {};
   resetOwnerQueuesForTests();
   resetGoldHunterExecutionRuntimeForTests();
+  resetWorkerSymbolMetadataCacheForTests();
 }
 
 function syncQueue(ownerUid: string): void {
@@ -689,7 +699,6 @@ export async function runGoldHunterDemoAutoExecution(
   });
 
   const attempt = hooks.attempt ?? attemptGoldHunterDemoExecution;
-  const loadSymbol = hooks.loadSymbol ?? loadDemoXauUsdSymbol;
   const checkAdmin =
     hooks.isAdmin ??
     (async (uid: string) => isPinnedOwnerAdmin(uid));
@@ -699,15 +708,52 @@ export async function runGoldHunterDemoAutoExecution(
     attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
   });
   let symbol: BrokerSymbol | null;
+  let symbolDiagnostics: GoldHunterSymbolMetadataDiagnostics = {
+    available: false,
+    source: null,
+    loadedAt: null,
+    symbolId: null,
+    accountMatched: false,
+    environment: null
+  };
   try {
-    symbol =
-      depsOverride?.symbol ??
-      (await withGoldHunterPreclaimTimeout(
+    if (depsOverride?.symbol) {
+      symbol = depsOverride.symbol;
+      symbolDiagnostics = {
+        available: true,
+        source: "CTRADER_WORKER_SYMBOL_BY_ID",
+        loadedAt: new Date().toISOString(),
+        symbolId: String(symbol.symbolId),
+        accountMatched: true,
+        environment: symbol.environment === "LIVE" ? "LIVE" : "DEMO"
+      };
+    } else if (hooks.loadSymbolWithDiagnostics) {
+      const loaded = await withGoldHunterPreclaimTimeout(
+        "loadGoldHunterDemoXauUsdSymbol",
+        "SYMBOL_LOAD_START",
+        GH_PRECLAIM_BROKER_METADATA_TIMEOUT_MS,
+        () => hooks.loadSymbolWithDiagnostics!(ownerUid)
+      );
+      symbol = loaded.symbol;
+      symbolDiagnostics = loaded.diagnostics;
+    } else if (hooks.loadSymbol) {
+      // Legacy test hook — still wrapped; prefer cache-aware loader in production.
+      symbol = await withGoldHunterPreclaimTimeout(
         "loadDemoXauUsdSymbol",
         "SYMBOL_LOAD_START",
         GH_PRECLAIM_BROKER_METADATA_TIMEOUT_MS,
-        () => loadSymbol(ownerUid)
-      ));
+        () => hooks.loadSymbol!(ownerUid)
+      );
+    } else {
+      const loaded = await withGoldHunterPreclaimTimeout(
+        "loadGoldHunterDemoXauUsdSymbol",
+        "SYMBOL_LOAD_START",
+        GH_PRECLAIM_BROKER_METADATA_TIMEOUT_MS,
+        () => loadGoldHunterDemoXauUsdSymbol(ownerUid)
+      );
+      symbol = loaded.symbol;
+      symbolDiagnostics = loaded.diagnostics;
+    }
   } catch (e) {
     if (isGoldHunterPreclaimTimeout(e)) {
       timeoutGoldHunterExecutionStage(ownerUid, "SYMBOL_LOAD_START", {
@@ -716,6 +762,9 @@ export async function runGoldHunterDemoAutoExecution(
         op: e.op,
         attempt: getGoldHunterExecutionTelemetry(ownerUid)
           .attemptCountForOpportunity
+      });
+      patchGoldHunterExecutionTelemetry(ownerUid, {
+        symbolMetadata: symbolDiagnostics
       });
       return {
         ok: false,
@@ -726,6 +775,9 @@ export async function runGoldHunterDemoAutoExecution(
     }
     throw e;
   }
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    symbolMetadata: symbolDiagnostics
+  });
   completeGoldHunterExecutionStage(ownerUid, "SYMBOL_LOAD_DONE", stageCtx);
 
   if (!symbol) {
