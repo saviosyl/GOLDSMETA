@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { GoldHunterShell } from "./GoldHunterShell";
 import { GoldHunterDashboardPage } from "./GoldHunterDashboardPage";
 import { GoldHunterControlPage } from "./GoldHunterControlPage";
 import { GoldHunterMonitorPage } from "./GoldHunterMonitorPage";
 import { GoldHunterPerformancePage } from "./GoldHunterPerformancePage";
+
+const goldHunterUpdateConfig = vi.fn();
 
 const status = {
   product: "GOLD_HUNTER" as const,
@@ -163,11 +165,7 @@ vi.mock("../../lib/auth", () => ({
         executionMode: "DEMO_ONLY",
         liveExecutionEnabled: false
       })),
-      goldHunterUpdateConfig: vi.fn(async () => ({
-        config: status.config,
-        executionMode: "DEMO_ONLY",
-        liveExecutionEnabled: false
-      })),
+      goldHunterUpdateConfig,
       goldHunterTrades: vi.fn(async () => ({
         trades: [],
         strategy: "GOLD_HUNTER",
@@ -202,6 +200,26 @@ function renderAt(path: string) {
 describe("Gold Hunter UI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    status.config.demoAutoTradeEnabled = false;
+    status.arming = {
+      ready: false,
+      blockers: ["STRATEGY_SELECTOR_NOT_CONNECTED"],
+      strategySelectorConnected: false
+    };
+    status.gates = {
+      ok: false,
+      blockers: ["WAIT — AUTOTRADE OFF", "WAIT — MARKET CLOSED"],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    status.openTrades = [];
+    status.market.marketStatus = "CLOSED";
+    goldHunterUpdateConfig.mockImplementation(async () => ({
+      config: status.config,
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
   it("renders dashboard with allocation and market-closed wait", async () => {
@@ -212,6 +230,109 @@ describe("Gold Hunter UI", () => {
     expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
     expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
     expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
+  });
+
+  it("shows Demo AutoTrade card as NOT READY with LIVE LOCKED and exact blocker", async () => {
+    renderAt("/gold-hunter");
+    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-card")).toBeInTheDocument());
+    expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("NOT READY");
+    expect(screen.getByText("LIVE LOCKED")).toBeInTheDocument();
+    expect(screen.getByTestId("gh-demo-autotrade-card")).toHaveTextContent(
+      "Cannot start yet: STRATEGY_SELECTOR_NOT_CONNECTED"
+    );
+    expect(screen.getByTestId("gh-dashboard-start-demo-auto")).toBeInTheDocument();
+  });
+
+  it("shows READY TO START and arms via confirmDemoAutoTrade=true only", async () => {
+    status.arming = {
+      ready: true,
+      blockers: [],
+      strategySelectorConnected: true
+    };
+    renderAt("/gold-hunter");
+    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO START"));
+    fireEvent.click(screen.getByTestId("gh-dashboard-start-demo-auto"));
+    await waitFor(() => expect(goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
+    expect(goldHunterUpdateConfig).toHaveBeenCalledWith({
+      demoAutoTradeEnabled: true,
+      confirmDemoAutoTrade: true
+    });
+  });
+
+  it("shows ARMED — WAITING FOR VALID SIGNAL and can stop Demo AutoTrade", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.arming = {
+      ready: true,
+      blockers: [],
+      strategySelectorConnected: true
+    };
+    status.gates = {
+      ok: true,
+      blockers: [],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    status.market.marketStatus = "OPEN";
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "ARMED — WAITING FOR VALID SIGNAL"
+      )
+    );
+    fireEvent.click(screen.getByTestId("gh-dashboard-stop-demo-auto"));
+    await waitFor(() => expect(goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
+    expect(goldHunterUpdateConfig).toHaveBeenCalledWith({ demoAutoTradeEnabled: false });
+  });
+
+  it("shows ARMED — TEMPORARILY BLOCKED with exact gate blocker", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.gates = {
+      ok: false,
+      blockers: ["WAIT — SPREAD TOO WIDE"],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "ARMED — TEMPORARILY BLOCKED"
+      )
+    );
+    expect(screen.getByTestId("gh-demo-autotrade-card")).toHaveTextContent(
+      "No new order right now: WAIT — SPREAD TOO WIDE"
+    );
+  });
+
+  it("shows IN DEMO TRADE when an open Gold Hunter position exists", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.openTrades = [
+      {
+        goldHunterTradeId: "GH-D-1",
+        setup: "A",
+        side: "BUY",
+        status: "OPEN",
+        netPnlEur: 0,
+        entry: 2400,
+        stop: 2399.45
+      }
+    ] as typeof status.openTrades;
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("IN DEMO TRADE")
+    );
+  });
+
+  it("does not call updateConfig when Start confirmation is cancelled", async () => {
+    status.arming = {
+      ready: true,
+      blockers: [],
+      strategySelectorConnected: true
+    };
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderAt("/gold-hunter");
+    await waitFor(() => expect(screen.getByTestId("gh-dashboard-start-demo-auto")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("gh-dashboard-start-demo-auto"));
+    expect(goldHunterUpdateConfig).not.toHaveBeenCalled();
   });
 
   it("renders control with arm confirmation flow", async () => {
