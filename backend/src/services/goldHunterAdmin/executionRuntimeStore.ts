@@ -68,6 +68,15 @@ export type GoldHunterExecutionTelemetry = {
   lastStageCompletedAt: string | null;
   queueEnqueuedAt: string | null;
   queueStartedAt: string | null;
+  /** Authoritative XAUUSD symbol metadata source for last attempt. */
+  symbolMetadata: {
+    available: boolean;
+    source: "CTRADER_WORKER_SYMBOL_BY_ID" | "FALLBACK_DISCOVERY" | null;
+    loadedAt: string | null;
+    symbolId: string | null;
+    accountMatched: boolean;
+    environment: "DEMO" | "LIVE" | null;
+  } | null;
   updatedAt?: string;
 };
 
@@ -115,7 +124,8 @@ function emptyTelemetry(): GoldHunterExecutionTelemetry {
     stageStartedAt: null,
     lastStageCompletedAt: null,
     queueEnqueuedAt: null,
-    queueStartedAt: null
+    queueStartedAt: null,
+    symbolMetadata: null
   };
 }
 
@@ -171,6 +181,9 @@ function toDiagnostics(
     lastStageCompletedAt: t.lastStageCompletedAt,
     queueEnqueuedAt: t.queueEnqueuedAt,
     queueStartedAt: t.queueStartedAt,
+    symbolMetadata: t.symbolMetadata
+      ? { ...t.symbolMetadata }
+      : null,
     state: t.state,
     blocker: t.blocker,
     detail: t.detail,
@@ -224,6 +237,9 @@ export async function loadGoldHunterExecutionDiagnostics(
       lastStageCompletedAt: data.lastStageCompletedAt ?? null,
       queueEnqueuedAt: data.queueEnqueuedAt ?? null,
       queueStartedAt: data.queueStartedAt ?? null,
+      symbolMetadata: data.symbolMetadata
+        ? { ...data.symbolMetadata }
+        : null,
       lastRetryablePreclaim: Boolean(data.lastRetryablePreclaim),
       lastAttemptClaimed: Boolean(data.lastAttemptClaimed)
     };

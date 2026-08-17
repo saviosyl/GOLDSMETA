@@ -53,6 +53,11 @@ import {
   evaluateQuoteStreamHealth,
   isQuoteWorkerHealthy
 } from "./quoteStreamHealth";
+import { brokerSymbolFromProtoOASymbolById } from "./brokerSymbolFromProtoOASymbolById";
+import {
+  invalidateWorkerSymbolMetadataCache,
+  putWorkerSymbolMetadata
+} from "./workerSymbolMetadataCache";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const LIVE_HOST = "live.ctraderapi.com";
@@ -288,6 +293,12 @@ export class PersistentXauUsdQuoteWorker {
   async stop(): Promise<void> {
     this.stopping = true;
     this.status.running = false;
+    if (this.status.ownerUid) {
+      invalidateWorkerSymbolMetadataCache({
+        ownerUid: this.status.ownerUid,
+        reason: "worker_stop"
+      });
+    }
     if (this.ghReconcileTimer) {
       clearInterval(this.ghReconcileTimer);
       this.ghReconcileTimer = null;
@@ -350,6 +361,12 @@ export class PersistentXauUsdQuoteWorker {
   }
 
   private async connectAndSubscribe(ownerUid: string): Promise<void> {
+    // Invalidate prior session metadata before (re)connect — account/symbol/env may change.
+    invalidateWorkerSymbolMetadataCache({
+      ownerUid,
+      reason: "worker_reconnect"
+    });
+
     const stored = await getConnection(ownerUid);
     if (!stored?.selectedAccountId || !stored.symbolId) {
       throw new Error("CTRADER_ACCOUNT_OR_SYMBOL_REQUIRED");
@@ -412,6 +429,30 @@ export class PersistentXauUsdQuoteWorker {
       });
       if (typeof detail.symbolName === "string" && detail.symbolName.trim()) {
         this.status.symbolName = detail.symbolName.trim();
+      }
+
+      // Authoritative sizing metadata for Gold Hunter — same parse path as discoverXauUsd.
+      const env: "DEMO" | "LIVE" = isLive ? "LIVE" : "DEMO";
+      const brokerSymbol = brokerSymbolFromProtoOASymbolById({
+        detail,
+        symbolId: fresh.symbolId!,
+        symbolName: this.status.symbolName ?? fresh.symbolName ?? "XAUUSD",
+        baseAsset: "XAU",
+        quoteAsset: "USD",
+        environment: env
+      });
+      if (brokerSymbol) {
+        putWorkerSymbolMetadata({
+          ownerUid,
+          ctidTraderAccountId: String(fresh.selectedAccountId),
+          environment: env,
+          symbol: brokerSymbol,
+          source: "CTRADER_WORKER_SYMBOL_BY_ID"
+        });
+      } else {
+        logWorker("quote_worker_symbol_metadata_parse_failed", {
+          symbolId: fresh.symbolId
+        });
       }
     } catch {
       this.cachedSchedule = [];

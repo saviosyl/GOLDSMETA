@@ -16,8 +16,7 @@ import {
   marketStatusFromSchedule,
   parseScheduleIntervals
 } from "./marketSchedule";
-import { parseCTraderVolumeRules } from "./volumeUnits";
-import { normalizeSlDistanceToPrice } from "./ctraderStopDistance";
+import { brokerSymbolFromProtoOASymbolById } from "./brokerSymbolFromProtoOASymbolById";
 import {
   computeAuthoritativeMarginSnapshot,
   parseExpectedMarginEntries,
@@ -1364,91 +1363,21 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
             ? [detailRes.symbol]
             : [];
         const detail = detailList[0] ?? {};
-        const digits = asNumber(detail.digits);
-        let volumeRules: ReturnType<typeof parseCTraderVolumeRules> | null =
-          null;
-        try {
-          volumeRules = parseCTraderVolumeRules({
-            minVolume: detail.minVolume as number | string,
-            maxVolume: detail.maxVolume as number | string,
-            stepVolume: detail.stepVolume as number | string,
-            lotSize: detail.lotSize as number | string
-          });
-        } catch {
-          volumeRules = null;
-        }
-        const rawSlDistance = asNumber(detail.slDistance);
-        const distanceSetInRaw =
-          detail.distanceSetIn != null
-            ? (detail.distanceSetIn as string | number)
-            : undefined;
-        // POINTS normalize without a market price; PERCENTAGE left null until
-        // profit-lock supplies a reference price.
-        let normalizedMinStopPriceDistance: number | undefined;
-        if (rawSlDistance != null && digits != null) {
-          const norm = normalizeSlDistanceToPrice({
-            rawSlDistance,
-            distanceSetIn: distanceSetInRaw ?? 1,
-            digits
-          });
-          if (norm.ok) {
-            normalizedMinStopPriceDistance = norm.normalizedMinStopPriceDistance;
-          }
-        }
-        const enriched: RawCTraderSymbol = {
+        const enrichedCandidate = {
           symbolId: candidate.symbolId,
           symbolName: candidate.symbolName,
           description: candidate.description,
           baseAsset: candidate.baseAsset ?? "XAU",
-          quoteAsset: candidate.quoteAsset ?? "USD",
-          digits: digits ?? undefined,
-          pipPosition: asNumber(detail.pipPosition) ?? undefined,
-          tickSize: digits != null ? Math.pow(10, -digits) : undefined,
-          // Lots (not raw cents) — see volumeUnits.ts / Spotware "volume in cents".
-          minVolume: volumeRules?.minLots,
-          stepVolume: volumeRules?.stepLots,
-          maxVolume: volumeRules?.maxLots,
-          lotSize: volumeRules?.contractSize,
-          // Keep raw cTrader distance metadata; do not treat slDistance as price.
-          rawSlDistance: rawSlDistance ?? undefined,
-          distanceSetIn: distanceSetInRaw,
-          rawTpDistance: asNumber(detail.tpDistance) ?? undefined,
-          normalizedMinStopPriceDistance,
-          minStopDistance: normalizedMinStopPriceDistance,
-          commissionType:
-            typeof detail.commissionType === "string"
-              ? detail.commissionType
-              : undefined,
-          commission: asNumber(detail.commission) ?? undefined,
-          minCommission: asNumber(detail.minCommission) ?? undefined,
-          swapLong: asNumber(detail.swapLong) ?? undefined,
-          swapShort: asNumber(detail.swapShort) ?? undefined,
-          guaranteedStopAvailable:
-            typeof detail.guaranteedStopLoss === "boolean"
-              ? detail.guaranteedStopLoss
-              : undefined,
-          scheduleId:
-            typeof detail.scheduleTimeZone === "string"
-              ? detail.scheduleTimeZone
-              : detail.schedule != null
-                ? "schedule"
-                : undefined
+          quoteAsset: candidate.quoteAsset ?? "USD"
         };
-
-        const resolved = resolveXauUsdFromCatalogue(
-          [enriched],
-          "pepperstone_ctrader",
-          isLive ? "LIVE" : "DEMO"
-        );
-        if (!resolved) return null;
-        const tz =
-          typeof detail.scheduleTimeZone === "string"
-            ? detail.scheduleTimeZone
-            : null;
-        return {
-          ...resolved,
-          tradingScheduleId: tz ?? resolved.tradingScheduleId
-        } satisfies BrokerSymbol;
+        return brokerSymbolFromProtoOASymbolById({
+          detail,
+          symbolId: enrichedCandidate.symbolId!,
+          symbolName: enrichedCandidate.symbolName,
+          baseAsset: enrichedCandidate.baseAsset,
+          quoteAsset: enrichedCandidate.quoteAsset,
+          environment: isLive ? "LIVE" : "DEMO"
+        });
       });
     },
 
