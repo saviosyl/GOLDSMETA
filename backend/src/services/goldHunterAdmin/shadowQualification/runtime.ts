@@ -487,17 +487,10 @@ export function onGhShadowMarketTick(meta: GhShadowTickMeta): void {
   const depthBestAsk = snap?.bestAsk ?? null;
 
   // Entry can proceed from opportunity bid/ask without features.
-  // Open management requires features — still process the tick for seq/journal/
-  // activity, but engine.tickOpen no-ops when features are absent.
-  const hasOpportunity =
-    meta.tick.newOpportunity && meta.tick.opportunity != null;
-  if (!hasFeatures && !hasOpportunity) {
-    // Still need engine for open-path journaling / seq when a trade is open.
-    const engProbe = getGhShadowEngine(meta.ownerUid);
-    if (engProbe.getOpenTradeId() == null) {
-      return;
-    }
-  }
+  // Open management requires features — still process EVERY selector sequence for
+  // integrity (lastProcessedReceiveSeq). engine.tickOpen no-ops when features are
+  // absent. Never skip flat featureless ticks: that advances selector receiveSeq
+  // without eng.processEvent and falsely trips receive_seq_gap.
 
   const dataOk =
     snap != null &&
@@ -615,15 +608,9 @@ export function processGhShadowMarketEventSync(args: {
     args.features != null
       ? args.features.ask
       : args.strategySpotAsk ?? null;
-  // Formal management requires features. Entry may use opportunity without features.
-  // Do not fall back to legacy bid/ask when features are absent.
-  if (
-    args.features == null &&
-    !args.newOpportunity &&
-    getGhShadowEngine(args.ownerUid).getOpenTradeId() == null
-  ) {
-    return;
-  }
+  // Formal management requires features. Entry may use opportunity without
+  // features. Flat featureless ticks MUST still reach processEvent so receiveSeq
+  // integrity matches the selector sequence (tickOpen remains a no-op).
 
   const eng = getGhShadowEngine(args.ownerUid);
   eng.processEvent({

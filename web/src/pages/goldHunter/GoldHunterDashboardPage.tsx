@@ -17,16 +17,80 @@ function money(n: number | null | undefined, currency: string | null | undefined
   }
 }
 
+/** Expected / informational waits — not structural arming faults. */
+const PRE_ARM_INFORMATIONAL_BLOCKERS = new Set([
+  "WAIT — AUTOTRADE OFF",
+  "WAIT — NO SETUP SELECTED"
+]);
+
+/**
+ * When armed, NO SETUP SELECTED is the normal idle wait for the next A/B/C
+ * candidate — not a temporary fault. Real blockers are risk/feed/broker stops.
+ */
+const ARMED_NORMAL_SIGNAL_WAIT_BLOCKERS = new Set(["WAIT — NO SETUP SELECTED"]);
+
+function stripWaitPrefix(blocker: string): string {
+  return blocker.replace(/^WAIT —\s*/, "").trim();
+}
+
+/** Exported for unit tests — classify order-gate blockers for dashboard truthfulness. */
+export function selectMeaningfulOrderBlockers(
+  blockers: readonly string[],
+  demoAutoTradeEnabled: boolean
+): string[] {
+  return blockers.filter((b) => {
+    if (demoAutoTradeEnabled) {
+      return !ARMED_NORMAL_SIGNAL_WAIT_BLOCKERS.has(b);
+    }
+    return !PRE_ARM_INFORMATIONAL_BLOCKERS.has(b);
+  });
+}
+
 export function GoldHunterDashboardPage() {
   const { status, refresh } = useGoldHunter();
   const { api } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [demoActionBusy, setDemoActionBusy] = useState(false);
+  const [demoActionMessage, setDemoActionMessage] = useState<string | null>(null);
   if (!status) return null;
 
   const mid = status.market.mid;
   const today = status.capital.todayPnlEur;
   const pf = status.performanceToday;
   const cur = status.broker.currency;
+  const demoEnabled = status.config.demoAutoTradeEnabled;
+  const hasOpenTrade = status.openTrades.length > 0;
+  const armingBlockers = status.arming?.blockers ?? [];
+  const meaningfulGateBlockers = selectMeaningfulOrderBlockers(
+    status.gates.blockers,
+    demoEnabled
+  );
+  const firstRealGateBlocker = meaningfulGateBlockers[0] ?? null;
+  const marketClosed = status.market.marketStatus === "CLOSED";
+  const demoState = hasOpenTrade
+    ? "IN DEMO TRADE"
+    : demoEnabled
+      ? firstRealGateBlocker
+        ? "ARMED — TEMPORARILY BLOCKED"
+        : "ARMED — WAITING FOR VALID SIGNAL"
+      : !status.arming?.ready
+        ? "NOT READY"
+        : marketClosed && meaningfulGateBlockers.length === 0
+          ? "READY TO ARM — MARKET CLOSED"
+          : "READY TO ARM";
+  const demoHint = hasOpenTrade
+    ? "Gold Hunter has an active cTrader DEMO position and is managing it."
+    : demoEnabled
+      ? firstRealGateBlocker
+        ? `No new order right now: ${firstRealGateBlocker}`
+        : "The execution engine is live in DEMO mode and is waiting for the next valid A/B/C Gold Hunter setup."
+      : armingBlockers.length > 0
+        ? `Cannot start yet: ${armingBlockers.join(", ")}`
+        : firstRealGateBlocker
+          ? `Structurally ready to arm. Current trading status: BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
+          : marketClosed
+            ? "Structurally ready to arm when the market is open. Start Demo AutoTrade only when you intend cTrader DEMO orders."
+            : "Ready to arm. Start Demo AutoTrade to allow valid Gold Hunter setups to submit cTrader DEMO orders.";
 
   async function onRefresh() {
     setRefreshing(true);
@@ -37,6 +101,43 @@ export function GoldHunterDashboardPage() {
       await refresh();
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function startDemoAutoTrade() {
+    setDemoActionMessage(null);
+    setDemoActionBusy(true);
+    try {
+      await api.goldHunterUpdateConfig({
+        demoAutoTradeEnabled: true,
+        confirmDemoAutoTrade: true
+      });
+      await refresh();
+      setDemoActionMessage(
+        "Demo AutoTrade is armed. Gold Hunter will place a cTrader DEMO order only when a valid setup passes every safety gate."
+      );
+    } catch (e) {
+      setDemoActionMessage(
+        e instanceof Error ? e.message : "Gold Hunter Demo AutoTrade could not be started."
+      );
+    } finally {
+      setDemoActionBusy(false);
+    }
+  }
+
+  async function stopDemoAutoTrade() {
+    setDemoActionMessage(null);
+    setDemoActionBusy(true);
+    try {
+      await api.goldHunterUpdateConfig({ demoAutoTradeEnabled: false });
+      await refresh();
+      setDemoActionMessage("Demo AutoTrade is OFF. No new Gold Hunter broker entries will be submitted.");
+    } catch (e) {
+      setDemoActionMessage(
+        e instanceof Error ? e.message : "Gold Hunter Demo AutoTrade could not be stopped."
+      );
+    } finally {
+      setDemoActionBusy(false);
     }
   }
 
@@ -77,13 +178,81 @@ export function GoldHunterDashboardPage() {
         </div>
       </section>
 
-      {(status.gates.blockers[0] || status.signal.note) && (
+      <section className="gh-card" style={{ marginBottom: 12 }} data-testid="gh-demo-autotrade-card">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap"
+          }}
+        >
+          <div>
+            <div className="gh-kpi-label">Gold Hunter Demo AutoTrade</div>
+            <div className="gh-kpi-value" style={{ fontSize: "1.05rem", marginTop: 4 }} data-testid="gh-demo-autotrade-state">
+              {demoState}
+            </div>
+            <p className="hint" style={{ marginTop: 6, maxWidth: 760 }} data-testid="gh-demo-autotrade-hint">
+              {demoHint}
+            </p>
+          </div>
+          <div className="gh-btn-row">
+            {!demoEnabled ? (
+              <button
+                type="button"
+                className="gh-btn gh-btn-gold"
+                disabled={demoActionBusy}
+                data-testid="gh-dashboard-start-demo-auto"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Start Gold Hunter Demo AutoTrade? This can place orders only on the connected cTrader DEMO account. Live trading remains disabled."
+                    )
+                  ) {
+                    void startDemoAutoTrade();
+                  }
+                }}
+              >
+                {demoActionBusy ? "Starting…" : "Start Demo AutoTrade"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="gh-btn"
+                disabled={demoActionBusy}
+                data-testid="gh-dashboard-stop-demo-auto"
+                onClick={() => void stopDemoAutoTrade()}
+              >
+                {demoActionBusy ? "Stopping…" : "Stop Demo AutoTrade"}
+              </button>
+            )}
+            <span className="gh-badge gh-badge--muted">LIVE LOCKED</span>
+          </div>
+        </div>
+        {demoActionMessage ? (
+          <p className="hint" style={{ marginTop: 10 }} data-testid="gh-dashboard-demo-auto-message">
+            {demoActionMessage}
+          </p>
+        ) : null}
+      </section>
+
+      {(firstRealGateBlocker ||
+        status.signal.note ||
+        !status.config.demoAutoTradeEnabled ||
+        demoEnabled) && (
         <div className="gh-wait" data-testid="gh-primary-wait">
           {status.config.demoAutoTradeEnabled
-            ? status.gates.blockers[0] ?? status.signal.note
-            : status.market.marketStatus === "CLOSED"
-              ? "WAIT — MARKET CLOSED"
-              : "WAIT — AUTOTRADE OFF"}
+            ? firstRealGateBlocker ??
+              status.signal.note ??
+              "WAIT — VALID SETUP REQUIRED"
+            : !status.arming?.ready
+              ? `WAIT — AUTOTRADE OFF${armingBlockers[0] ? ` · ${armingBlockers[0]}` : ""}`
+              : firstRealGateBlocker
+                ? `READY TO ARM · CURRENTLY BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
+                : marketClosed
+                  ? "READY TO ARM — MARKET CLOSED"
+                  : "READY TO ARM — PRESS START DEMO AUTOTRADE"}
         </div>
       )}
 
