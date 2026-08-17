@@ -1699,12 +1699,13 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
-        // Spotware: toTimestamp - fromTimestamp <= 7 days.
+        // Spotware: toTimestamp - fromTimestamp <= 7 days; toTimestamp must not be future.
+        const nowMs = Date.now();
+        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
         const span = Math.min(
-          Math.max(args.toTimestampMs - args.fromTimestampMs, 1),
+          Math.max(toTimestamp - args.fromTimestampMs, 1),
           7 * 86_400_000
         );
-        const toTimestamp = args.toTimestampMs;
         const fromTimestamp = toTimestamp - span;
         const res = (await connection.sendCommand(
           "ProtoOADealListByPositionIdReq",
@@ -1729,11 +1730,13 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
+        // Spotware: toTimestamp - fromTimestamp <= 7 days; toTimestamp must not be future.
+        const nowMs = Date.now();
+        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
         const span = Math.min(
-          Math.max(args.toTimestampMs - args.fromTimestampMs, 1),
+          Math.max(toTimestamp - args.fromTimestampMs, 1),
           7 * 86_400_000
         );
-        const toTimestamp = args.toTimestampMs;
         const fromTimestamp = toTimestamp - span;
         const res = (await connection.sendCommand("ProtoOADealListReq", {
           ctidTraderAccountId: Number(args.ctidTraderAccountId),

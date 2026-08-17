@@ -202,8 +202,29 @@ export async function loadDemoXauUsdSymbol(
 }
 
 /**
+ * Spotware deal-list windows reject future toTimestamp values.
+ * Clamp to now and keep a bounded lookback (max 7 days).
+ */
+export function goldHunterCloseDealQueryWindow(args: {
+  openedAt: string;
+  nowMs?: number;
+}): { fromTimestampMs: number; toTimestampMs: number } {
+  const nowMs = args.nowMs ?? Date.now();
+  const openedMs = Date.parse(args.openedAt);
+  const fromTimestampMs = Number.isFinite(openedMs)
+    ? Math.max(0, openedMs - 60_000)
+    : nowMs - 7 * 86_400_000;
+  // Never send a future toTimestamp — Spotware rejects it.
+  const toTimestampMs = nowMs;
+  return { fromTimestampMs, toTimestampMs };
+}
+
+/**
  * Query broker closing deals for a position. Returns null when unavailable
  * (caller must mark CLOSE_RECONCILIATION_PENDING — never invent P/L = 0).
+ *
+ * Prefer ProtoOADealListByPositionIdReq; on empty/failure fall back to
+ * ProtoOADealListReq filtered by positionId (same authoritative P/L source).
  */
 export async function fetchConfirmedCloseForPosition(args: {
   ownerUid: string;
@@ -215,22 +236,46 @@ export async function fetchConfirmedCloseForPosition(args: {
   const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
   const accountId = assertDemoAccount(connection);
   const client = createOpenApiClient();
-  if (!client.fetchDemoDealsByPositionId) {
-    return null;
-  }
-  const openedMs = Date.parse(args.openedAt);
-  const fromTimestampMs = Number.isFinite(openedMs)
-    ? Math.max(0, openedMs - 60_000)
-    : Date.now() - 7 * 86_400_000;
-  const toTimestampMs = Date.now() + 60_000;
-  const deals = await client.fetchDemoDealsByPositionId({
-    accessToken,
-    clientId,
-    clientSecret,
-    ctidTraderAccountId: accountId,
-    positionId: args.positionId,
-    fromTimestampMs,
-    toTimestampMs
+  const { fromTimestampMs, toTimestampMs } = goldHunterCloseDealQueryWindow({
+    openedAt: args.openedAt
   });
+  const positionId = String(args.positionId);
+
+  let deals: BrokerClosedDeal[] = [];
+  if (client.fetchDemoDealsByPositionId) {
+    try {
+      deals = await client.fetchDemoDealsByPositionId({
+        accessToken,
+        clientId,
+        clientSecret,
+        ctidTraderAccountId: accountId,
+        positionId,
+        fromTimestampMs,
+        toTimestampMs
+      });
+    } catch {
+      deals = [];
+    }
+  }
+
+  if (
+    (!deals.length || aggregateClosingDeals(deals) == null) &&
+    client.fetchDemoDealList
+  ) {
+    try {
+      const listed = await client.fetchDemoDealList({
+        accessToken,
+        clientId,
+        clientSecret,
+        ctidTraderAccountId: accountId,
+        fromTimestampMs,
+        toTimestampMs
+      });
+      deals = listed.filter((d) => String(d.positionId) === positionId);
+    } catch {
+      /* keep prior deals / empty */
+    }
+  }
+
   return aggregateClosingDeals(deals);
 }
