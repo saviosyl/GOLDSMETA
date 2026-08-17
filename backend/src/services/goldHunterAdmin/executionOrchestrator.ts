@@ -20,6 +20,7 @@ import { deriveGoldHunterInitialProtection } from "./protectionGeometry";
 import { sizeGoldHunterDemoLots } from "./riskSizing";
 import {
   acquireGoldHunterSignalClaim,
+  getGoldHunterSignalClaim,
   updateGoldHunterSignalClaim
 } from "./signalClaimStore";
 import {
@@ -31,6 +32,14 @@ import type { BrokerSymbol } from "../broker/domain";
 import { GH_ADMIN_STRATEGY_ID } from "./types";
 import { frozenGhFastSoakConfig } from "./abc";
 import { plannedDailyLossBudgetEur } from "./riskSizing";
+
+import type { GoldHunterExecutionStage } from "./executionStages";
+import {
+  GH_PRECLAIM_ACCOUNT_TIMEOUT_MS,
+  GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+  isGoldHunterPreclaimTimeout,
+  withGoldHunterPreclaimTimeout
+} from "./preclaimBoundedOp";
 
 export type OrchestratorTelemetryHook = (ev: {
   phase:
@@ -55,6 +64,11 @@ export type OrchestratorTelemetryHook = (ev: {
   brokerPositionId?: string | null;
 }) => void;
 
+export type OrchestratorStageHook = (
+  stage: GoldHunterExecutionStage,
+  kind: "start" | "done" | "timeout"
+) => void;
+
 export type OrchestratorDeps = {
   isAdmin: boolean;
   marketOpen: boolean;
@@ -68,6 +82,8 @@ export type OrchestratorDeps = {
   assertFresh?: typeof assertGoldHunterCandidateFresh;
   /** Optional execution telemetry (Gold Hunter Admin diagnostics). */
   onTelemetry?: OrchestratorTelemetryHook;
+  /** Optional stage lifecycle hooks (hang diagnosis). */
+  onStage?: OrchestratorStageHook;
 };
 
 export type OrchestratorResult =
@@ -133,11 +149,29 @@ export async function attemptGoldHunterDemoExecution(
     ownerUid,
     candidate: { ...candidate, signalId: opportunityId, opportunityId }
   });
+  deps.onStage?.("FRESHNESS_CHECK_DONE", fresh.ok ? "done" : "done");
   if (!fresh.ok) {
     return block(fresh.blocker, fresh.detail);
   }
 
-  const config = await loadGoldHunterConfig(ownerUid);
+  deps.onStage?.("CONFIG_RELOAD_START", "start");
+  let config;
+  try {
+    config = await withGoldHunterPreclaimTimeout(
+      "loadGoldHunterConfig",
+      "CONFIG_RELOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () => loadGoldHunterConfig(ownerUid)
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("CONFIG_RELOAD_START", "timeout");
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("CONFIG_RELOAD_DONE", "done");
+
   const meta: GoldHunterInstrumentMetadata = metadataFromBrokerSymbol(deps.symbol);
   if (!meta.complete) {
     return block("WAIT — SIZING METADATA UNAVAILABLE", "metadata_incomplete");
@@ -154,10 +188,28 @@ export async function attemptGoldHunterDemoExecution(
     );
   }
 
-  const openTrades = await listGoldHunterDemoTrades(ownerUid, {
-    limit: 50,
-    openOnly: true
-  });
+  deps.onStage?.("OPEN_TRADES_LOAD_START", "start");
+  let openTrades;
+  try {
+    openTrades = await withGoldHunterPreclaimTimeout(
+      "listGoldHunterDemoTrades",
+      "OPEN_TRADES_LOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () =>
+        listGoldHunterDemoTrades(ownerUid, {
+          limit: 50,
+          openOnly: true
+        })
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("OPEN_TRADES_LOAD_START", "timeout");
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("OPEN_TRADES_LOAD_DONE", "done");
+
   const committed = computeGoldHunterCommittedCapital({
     config,
     openTrades
@@ -183,7 +235,24 @@ export async function attemptGoldHunterDemoExecution(
     return block(blocker, "sizing_refused");
   }
 
-  const account = await fetchGoldHunterAccountSnapshot({ ownerUid });
+  deps.onStage?.("ACCOUNT_SNAPSHOT_START", "start");
+  let account;
+  try {
+    account = await withGoldHunterPreclaimTimeout(
+      "fetchGoldHunterAccountSnapshot",
+      "ACCOUNT_SNAPSHOT_START",
+      GH_PRECLAIM_ACCOUNT_TIMEOUT_MS,
+      () => fetchGoldHunterAccountSnapshot({ ownerUid })
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("ACCOUNT_SNAPSHOT_START", "timeout");
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("ACCOUNT_SNAPSHOT_DONE", "done");
+
   if (
     account.freeMargin != null &&
     Number.isFinite(account.freeMargin) &&
@@ -201,15 +270,65 @@ export async function attemptGoldHunterDemoExecution(
     .slice(0, 50);
 
   tel?.({ phase: "CLAIMING", tradeId: goldHunterTradeId });
+  deps.onStage?.("CLAIM_CREATE_START", "start");
 
-  const claim = await acquireGoldHunterSignalClaim({
-    ownerUid,
-    signalId: opportunityId,
-    goldHunterTradeId,
-    clientOrderId,
-    setup: candidate.setup,
-    side: candidate.side
-  });
+  let claim;
+  try {
+    claim = await withGoldHunterPreclaimTimeout(
+      "acquireGoldHunterSignalClaim",
+      "CLAIM_CREATE_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () =>
+        acquireGoldHunterSignalClaim({
+          ownerUid,
+          signalId: opportunityId,
+          goldHunterTradeId,
+          clientOrderId,
+          setup: candidate.setup,
+          side: candidate.side
+        })
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("CLAIM_CREATE_START", "timeout");
+      // Underlying write may still complete — inspect claim before failing closed.
+      let existing = null;
+      try {
+        existing = await withGoldHunterPreclaimTimeout(
+          "getGoldHunterSignalClaim_after_timeout",
+          "CLAIM_CREATE_START",
+          GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+          () => getGoldHunterSignalClaim(ownerUid, opportunityId)
+        );
+      } catch {
+        existing = null;
+      }
+      if (existing) {
+        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
+          opportunityId
+        );
+        tel?.({
+          phase: "PENDING_RECONCILIATION",
+          claimed: true,
+          outcome: "PENDING_RECONCILIATION",
+          tradeId: existing.goldHunterTradeId,
+          detail: "claim_create_timeout_claim_present"
+        });
+        return {
+          ok: true,
+          submitted: false,
+          outcome: "PENDING_RECONCILIATION",
+          signalId: opportunityId,
+          tradeId: existing.goldHunterTradeId,
+          detail: "Claim create timed out with claim present — no blind resubmit"
+        };
+      }
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("CLAIM_CREATE_DONE", "done");
+
   if (!claim.ok) {
     getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
     tel?.({
@@ -234,6 +353,7 @@ export async function attemptGoldHunterDemoExecution(
   await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
     state: "SUBMITTING"
   });
+  deps.onStage?.("SUBMITTING", "start");
   tel?.({ phase: "SUBMITTING", claimed: true, tradeId: goldHunterTradeId });
 
   if (deps.beforeBrokerSubmit) {
@@ -262,10 +382,41 @@ export async function attemptGoldHunterDemoExecution(
     }
   }
 
-  const todayPnl = todayNetPnlEur(
-    await listGoldHunterDemoTrades(ownerUid, { limit: 200 })
-  );
-  const dailyLossOk = todayPnl > -plannedDailyLossBudgetEur(config);
+  let dailyLossOk = true;
+  try {
+    const todayPnl = todayNetPnlEur(
+      await withGoldHunterPreclaimTimeout(
+        "listGoldHunterDemoTrades_pnl",
+        "OPEN_TRADES_LOAD_START",
+        GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+        () => listGoldHunterDemoTrades(ownerUid, { limit: 200 })
+      )
+    );
+    dailyLossOk = todayPnl > -plannedDailyLossBudgetEur(config);
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+        state: "PENDING_RECONCILIATION",
+        errorCode: "POST_CLAIM_PNL_TIMEOUT"
+      });
+      tel?.({
+        phase: "PENDING_RECONCILIATION",
+        claimed: true,
+        outcome: "PENDING_RECONCILIATION",
+        tradeId: goldHunterTradeId,
+        detail: "post_claim_pnl_timeout"
+      });
+      return {
+        ok: true,
+        submitted: false,
+        outcome: "PENDING_RECONCILIATION",
+        signalId: opportunityId,
+        tradeId: goldHunterTradeId,
+        detail: "Post-claim read timed out — no blind resubmit"
+      };
+    }
+    throw e;
+  }
 
   try {
     const result = await submitGoldHunterDemoOrder({
