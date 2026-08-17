@@ -2,7 +2,7 @@
  * Shadow hot-path engine — synchronous state updates (no Firestore on critical path).
  *
  * MARKET EVENT → in-memory evaluate (MFE/MAE/lock/trail/exit) → journal append
- * → async persist separately.
+ * (formal trade path only) → async persist separately.
  *
  * Event loss / seq gap / journal overflow on formal open → DIAGNOSTIC_EXCLUDED
  * or epoch DATA_QUALITY_FAILED. Never silent FORMAL_ELIGIBLE.
@@ -26,14 +26,17 @@ import {
   shadowEntryPrice,
   shadowExitPrice,
   shadowInitialStop,
-  simulateGhShadowCashPnl,
-  type GhShadowSizingInput
+  simulateGhShadowCashPnl
 } from "./economics";
 import { GhShadowEventJournal } from "./journal";
 import type {
+  GhShadowActivityCounters,
   GhShadowCapturedEvent,
   GhShadowDecisionRecord,
   GhShadowEconomicExposure,
+  GhShadowFrozenSizingSnapshot,
+  GhShadowIntegrityCounters,
+  GhShadowLatencySensitivity,
   GhShadowQualificationEpoch,
   GhShadowTrade
 } from "./types";
@@ -50,6 +53,25 @@ type OpenState = {
   fast: GhFastOpenTrade;
 };
 
+type PendingLatencyCapture = {
+  tradeId: string;
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  economic: GhShadowEconomicExposure;
+  signalExitPrice: number;
+  signalTsMs: number;
+  signalReceiveSeq: number;
+  signalTickPnlQuote: number;
+  nextEventPrice: number | null;
+  nextEventReceiveSeq: number | null;
+  priceAt100ms: number | null;
+  priceAt250ms: number | null;
+  priceAt500ms: number | null;
+  saw100: boolean;
+  saw250: boolean;
+  saw500: boolean;
+};
+
 export type GhShadowEngineTickInput = {
   receiveSeq: number;
   eventTsMs: number;
@@ -63,8 +85,12 @@ export type GhShadowEngineTickInput = {
   newOpportunity: boolean;
   opportunity: GoldHunterSelectedCandidate | null;
   config: GoldHunterAdminConfig;
-  sizingOverrides?: Partial<GhShadowSizingInput>;
+  frozenSizing: GhShadowFrozenSizingSnapshot;
+  allowFormal: boolean;
 };
+
+const ACTIVE_MARKET_GAP_CLAMP_MS = 5 * 60 * 1000;
+const LATENCY_WINDOW_MS = 500;
 
 function setupIdFromLetter(letter: "A" | "B" | "C"): GhFastSetupId {
   if (letter === "A") return "A_MOMENTUM_IGNITION";
@@ -76,15 +102,47 @@ function isFinitePositive(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
 
-function emptyIntegrity() {
+function isDepthValid(depthValidity: string): boolean {
+  return depthValidity === "DEPTH_VALID";
+}
+
+function emptyIntegrity(): GhShadowIntegrityCounters {
   return {
     eventsSeen: 0,
     eventsProcessed: 0,
     eventsPersisted: 0,
     eventsDropped: 0,
     receiveSeqGaps: 0,
+    receiveSeqDuplicates: 0,
+    receiveSeqOutOfOrder: 0,
     journalOverflowCount: 0,
-    lastProcessedReceiveSeq: null as number | null
+    journalPending: 0,
+    journalHighWaterMark: 0,
+    persistAcknowledgedEvents: 0,
+    persistFailures: 0,
+    lastProcessedReceiveSeq: null,
+    lastResyncGeneration: null
+  };
+}
+
+function emptyActivity(): GhShadowActivityCounters {
+  return {
+    newOpportunitiesDetected: 0,
+    formalTradesOpened: 0,
+    formalTradesClosed: 0,
+    opportunitiesWhileAlreadyOpen: 0,
+    opportunitiesExcludedDataQuality: 0,
+    opportunitiesRejectedSizing: 0,
+    opportunitiesWarmupIgnored: 0,
+    otherRejectionReasons: {},
+    activeMarketMs: 0,
+    entryTimestampsMs: [],
+    openTradeDurationsMs: [],
+    flatIdleSegmentsMs: [],
+    lastActiveMarketAtMs: null,
+    lastEntryAtMs: null,
+    lastFlatStartMs: null,
+    bySetupOpened: { A: 0, B: 0, C: 0 }
   };
 }
 
@@ -93,11 +151,13 @@ export class GhShadowQualificationEngine {
   private epoch: GhShadowQualificationEpoch | null = null;
   private open: OpenState | null = null;
   private readonly journal: GhShadowEventJournal;
-  private pendingTrades = new Map<string, GhShadowTrade>();
-  private pendingEvents: GhShadowCapturedEvent[] = [];
-  private pendingDecisions: GhShadowDecisionRecord[] = [];
+  private readonly pendingTrades = new Map<string, GhShadowTrade>();
+  private readonly pendingDecisions: GhShadowDecisionRecord[] = [];
+  private readonly inFlightEventIds = new Set<string>();
   private runtimeGeneration: number;
-  private recovered = false;
+  private pendingLatency: PendingLatencyCapture | null = null;
+  /** Warmup counters before first formal-capable epoch exists. */
+  private preEpochWarmupIgnored = 0;
 
   constructor(args: {
     ownerUid: string;
@@ -117,6 +177,11 @@ export class GhShadowQualificationEngine {
     return this.open?.trade.tradeId ?? null;
   }
 
+  getJournal(): GhShadowEventJournal {
+    return this.journal;
+  }
+
+  /** @deprecated Prefer getJournal().list() */
   getJournalEvents(): readonly GhShadowCapturedEvent[] {
     return this.journal.list();
   }
@@ -126,24 +191,26 @@ export class GhShadowQualificationEngine {
   }
 
   /**
-   * Fail-safe restart recovery: if persisted open exists without memory state,
-   * exclude it — never invent trail/lock state.
+   * Fail-safe restart recovery: exclude interrupted open using persisted trade when available.
    */
   recoverAfterRestart(args: {
     persistedEpoch: GhShadowQualificationEpoch | null;
+    persistedOpenTrade: GhShadowTrade | null;
     reason?: string;
   }): { excludedTradeId: string | null } {
-    this.recovered = true;
     if (!args.persistedEpoch) {
       this.epoch = null;
       this.open = null;
+      this.pendingLatency = null;
       return { excludedTradeId: null };
     }
+
     this.epoch = { ...args.persistedEpoch };
     this.epoch.runtimeGeneration = this.runtimeGeneration;
     this.epoch.lastRestartReason =
       args.reason ?? "process_restart_state_lost";
     this.epoch.updatedAt = new Date().toISOString();
+    this.syncJournalStats();
 
     const openId = this.epoch.openShadowTradeId;
     if (!openId) {
@@ -151,95 +218,87 @@ export class GhShadowQualificationEngine {
       return { excludedTradeId: null };
     }
 
-    // Cannot restore exact engine state — exclude interrupted open.
+    const persisted = args.persistedOpenTrade;
+    if (!persisted || persisted.tradeId !== openId) {
+      this.epoch.dataIntegrityFailure = "restart_trade_load_failed";
+      this.epoch.status = "DATA_QUALITY_FAILED";
+      this.epoch.openShadowTradeId = null;
+      this.epoch.integrity = {
+        ...this.epoch.integrity,
+        lastProcessedReceiveSeq: null
+      };
+      this.open = null;
+      this.pushDecision({
+        kind: "INTEGRITY",
+        tradeId: openId,
+        receiveSeq: this.epoch.integrity.lastProcessedReceiveSeq ?? 0,
+        bid: 0,
+        ask: 0,
+        detail: "restart_trade_load_failed",
+        exitReason: null
+      });
+      return { excludedTradeId: null };
+    }
+
+    const now = new Date().toISOString();
     const excluded: GhShadowTrade = {
-      tradeId: openId,
-      qualificationId: this.epoch.qualificationId,
-      opportunityId: "restart-orphan",
-      signalId: "restart-orphan",
-      setup: "A",
-      setupId: "A_MOMENTUM_IGNITION",
-      side: "BUY",
+      ...persisted,
       status: "DIAGNOSTIC_EXCLUDED",
       dataQuality: "DIAGNOSTIC_EXCLUDED",
       exclusionReason: "runtime_restart_state_lost",
-      signalTs: new Date().toISOString(),
-      entryTs: null,
-      entryBid: null,
-      entryAsk: null,
-      entryPrice: null,
-      entrySpread: null,
-      initialStop: null,
-      exitTs: new Date().toISOString(),
-      exitBid: null,
-      exitAsk: null,
-      exitPrice: null,
-      exitReason: "INVALID_MARKET",
-      mfe: 0,
-      mae: 0,
-      durationMs: 0,
-      grossPriceMove: null,
-      frictionPrice: null,
-      netPriceMove: null,
-      simulatedGrossPnlQuote: null,
-      simulatedFrictionPnlQuote: null,
-      simulatedNetPnlQuote: null,
-      quoteCurrency: null,
-      simulatedGrossPnlEur: null,
-      simulatedFrictionEur: null,
-      simulatedNetPnlEur: null,
-      eurPnlAvailable: false,
-      economic: null,
-      profitLockActivatedAt: null,
-      trailActivatedAt: null,
-      trailUpdateCount: 0,
-      lockFloorAtActivation: null,
-      lockFloorLatest: null,
-      maxFavorableBeforeExit: null,
-      maxAdverseBeforeExit: null,
-      strategySha: this.epoch.strategySha,
-      configSha: this.epoch.configSha,
-      receiveSeqAtEntry: null,
-      receiveSeqAtExit: null,
-      bookGeneration: null,
-      resyncGeneration: null,
-      runtimeGeneration: this.runtimeGeneration,
-      path: {
-        profitLockActivateMfeAtActivation: null,
-        lockFloorAtActivation: null,
-        lockFloorAtExit: null,
-        bestExitAtExit: null
-      }
+      exitTs: now
     };
     this.pendingTrades.set(excluded.tradeId, excluded);
     this.epoch.openShadowTradeId = null;
     this.epoch.diagnosticExcludedTrades += 1;
-    // After restart exclusion, resume sequencing from next live event (no false gap).
     this.epoch.integrity = {
       ...this.epoch.integrity,
       lastProcessedReceiveSeq: null
     };
-    this.epoch.dataIntegrityFailure = null;
-    if (this.epoch.status === "DATA_QUALITY_FAILED") {
-      this.epoch.status = "ACTIVE";
+
+    const onlyOpenIssue =
+      this.epoch.dataIntegrityFailure === "open_trade_restart" ||
+      this.epoch.dataIntegrityFailure === "restart_trade_load_failed" ||
+      this.epoch.dataIntegrityFailure == null;
+    if (onlyOpenIssue) {
+      this.epoch.dataIntegrityFailure = null;
+      if (this.epoch.status === "DATA_QUALITY_FAILED") {
+        this.epoch.status = "ACTIVE";
+      }
     }
+
     this.open = null;
+    this.pendingLatency = null;
     this.pushDecision({
       kind: "EXCLUDE",
-      tradeId: openId,
-      receiveSeq: this.epoch.integrity.lastProcessedReceiveSeq ?? 0,
-      bid: 0,
-      ask: 0,
+      tradeId: excluded.tradeId,
+      opportunityId: excluded.opportunityId,
+      setup: excluded.setup,
+      side: excluded.side,
+      receiveSeq: excluded.receiveSeqAtEntry ?? 0,
+      bid: excluded.entryBid ?? 0,
+      ask: excluded.entryAsk ?? 0,
       detail: "runtime_restart_state_lost",
       exitReason: "INVALID_MARKET"
     });
-    return { excludedTradeId: openId };
+    this.epoch.updatedAt = now;
+    return { excludedTradeId: excluded.tradeId };
   }
 
-  ensureEpoch(receiveSeq: number): GhShadowQualificationEpoch {
-    if (this.epoch && this.epoch.status !== "COMPLETED") return this.epoch;
+  ensureEpoch(
+    receiveSeq: number,
+    frozenSizing: GhShadowFrozenSizingSnapshot
+  ): GhShadowQualificationEpoch {
+    if (this.epoch && this.epoch.status !== "COMPLETED") {
+      return this.epoch;
+    }
     const identity = getFrozenGhFastIdentity();
     const now = new Date().toISOString();
+    const activity = emptyActivity();
+    if (this.preEpochWarmupIgnored > 0) {
+      activity.opportunitiesWarmupIgnored = this.preEpochWarmupIgnored;
+      this.preEpochWarmupIgnored = 0;
+    }
     this.epoch = {
       qualificationId: `GH-SQ-${randomBytes(4).toString("hex")}`,
       qualificationStartTime: now,
@@ -249,19 +308,23 @@ export class GhShadowQualificationEngine {
       strategyVersion: identity.strategyVersion,
       engineVersion: identity.engineVersion,
       soakLabel: identity.soakLabel,
+      frozenSizing,
       formalQualificationTrades: 0,
       diagnosticExcludedTrades: 0,
       openShadowTradeId: null,
       status: "ACTIVE",
       dataIntegrityFailure: null,
+      persistFailureReason: null,
       runtimeGeneration: this.runtimeGeneration,
       lastRestartReason: null,
       integrity: emptyIntegrity(),
+      activity,
       lastReplayStatus: "NOT_RUN",
       lastReplayDetail: null,
       updatedAt: now
     };
     this.journal.clear();
+    this.syncJournalStats();
     return this.epoch;
   }
 
@@ -269,43 +332,36 @@ export class GhShadowQualificationEngine {
    * Synchronous market-event processing. Never awaits I/O.
    */
   processEvent(input: GhShadowEngineTickInput): void {
-    const epoch = this.ensureEpoch(input.receiveSeq);
+    if (!input.allowFormal) {
+      this.processWarmupEvent(input);
+      return;
+    }
+
+    const epoch = this.ensureEpoch(input.receiveSeq, input.frozenSizing);
     epoch.integrity.eventsSeen += 1;
 
-    // Sequence gap detection
-    const last = epoch.integrity.lastProcessedReceiveSeq;
-    if (last != null && input.receiveSeq > last + 1) {
-      epoch.integrity.receiveSeqGaps += 1;
-      if (this.open && this.open.trade.dataQuality === "FORMAL_ELIGIBLE") {
-        this.excludeOpen("receive_seq_gap", input);
-        return;
-      }
-      if (this.open) {
-        this.excludeOpen("receive_seq_gap", input);
-        return;
-      }
-      // No open trade: mark epoch integrity failure for formal gating
-      epoch.dataIntegrityFailure = "receive_seq_gap";
-      epoch.status = "DATA_QUALITY_FAILED";
+    if (this.checkSequenceIntegrity(input)) {
+      epoch.updatedAt = new Date().toISOString();
+      return;
     }
+
+    this.accumulateActiveMarketMs(input);
+    this.advanceLatencyCapture(input);
 
     const identity = getFrozenGhFastIdentity();
     const spread = Math.max(0, input.ask - input.bid);
-    const eventId = `ev-${input.receiveSeq}-${randomBytes(3).toString("hex")}`;
+    const inFormalPath = this.open != null;
 
     let openMarker: GhShadowCapturedEvent["openMarker"] = null;
-    // Pre-compute open marker id if we will open (after journal append checks)
+    let tradeIdForOpen: string | null = null;
     const willAttemptOpen =
       input.newOpportunity &&
       input.opportunity != null &&
       this.open == null &&
       epoch.status === "ACTIVE";
 
-    const tradeIdForOpen = willAttemptOpen
-      ? `GH-S-${randomBytes(4).toString("hex")}`
-      : null;
-
-    if (willAttemptOpen && tradeIdForOpen && input.opportunity) {
+    if (willAttemptOpen && input.opportunity) {
+      tradeIdForOpen = `GH-S-${randomBytes(4).toString("hex")}`;
       openMarker = {
         tradeId: tradeIdForOpen,
         opportunityId: input.opportunity.opportunityId,
@@ -316,9 +372,149 @@ export class GhShadowQualificationEngine {
       };
     }
 
-    const captured: GhShadowCapturedEvent = {
-      eventId,
-      qualificationId: epoch.qualificationId,
+    const shouldJournal = inFormalPath || openMarker != null;
+
+    if (shouldJournal) {
+      const captured = this.buildCapturedEvent({
+        input,
+        spread,
+        identity,
+        inFormalTradePath: true,
+        openMarker
+      });
+      if (!this.journal.tryAppend(captured)) {
+        this.onJournalAppendFailure(input, "journal_overflow");
+        epoch.updatedAt = new Date().toISOString();
+        return;
+      }
+      this.syncJournalStats();
+    }
+
+    epoch.integrity.eventsProcessed += 1;
+    epoch.integrity.lastProcessedReceiveSeq = input.receiveSeq;
+    epoch.integrity.lastResyncGeneration = input.resyncGeneration;
+
+    if (this.open) {
+      this.tickOpen(input);
+    }
+
+    if (input.newOpportunity) {
+      epoch.activity.newOpportunitiesDetected += 1;
+      if (this.open) {
+        epoch.activity.opportunitiesWhileAlreadyOpen += 1;
+      } else if (openMarker && tradeIdForOpen && input.opportunity) {
+        this.tryOpen(input, tradeIdForOpen, input.opportunity);
+      }
+    }
+
+    epoch.updatedAt = new Date().toISOString();
+  }
+
+  private processWarmupEvent(input: GhShadowEngineTickInput): void {
+    if (input.newOpportunity) {
+      this.preEpochWarmupIgnored += 1;
+      if (this.epoch) {
+        this.epoch.activity.opportunitiesWarmupIgnored += 1;
+      }
+      this.pushDecision({
+        kind: "WARMUP",
+        opportunityId: input.opportunity?.opportunityId ?? null,
+        setup: input.opportunity?.setup ?? null,
+        side: input.opportunity?.side ?? null,
+        receiveSeq: input.receiveSeq,
+        bid: input.bid,
+        ask: input.ask,
+        detail: "WARMUP_NOT_QUALIFICATION",
+        exitReason: null
+      });
+    }
+  }
+
+  private checkSequenceIntegrity(input: GhShadowEngineTickInput): boolean {
+    if (!this.epoch) return false;
+    const formalContext = this.open != null || input.allowFormal;
+    if (!formalContext) return false;
+
+    const last = this.epoch.integrity.lastProcessedReceiveSeq;
+    let failed = false;
+    let reason: string | null = null;
+
+    if (last != null) {
+      if (input.receiveSeq === last) {
+        this.epoch.integrity.receiveSeqDuplicates += 1;
+        failed = true;
+        reason = "receive_seq_duplicate";
+      } else if (input.receiveSeq < last) {
+        this.epoch.integrity.receiveSeqOutOfOrder += 1;
+        failed = true;
+        reason = "receive_seq_out_of_order";
+      } else if (input.receiveSeq > last + 1) {
+        this.epoch.integrity.receiveSeqGaps += 1;
+        failed = true;
+        reason = "receive_seq_gap";
+      }
+    }
+
+    if (
+      !failed &&
+      this.open &&
+      this.open.trade.dataQuality === "FORMAL_ELIGIBLE" &&
+      this.epoch.integrity.lastResyncGeneration != null &&
+      input.resyncGeneration !== this.epoch.integrity.lastResyncGeneration
+    ) {
+      failed = true;
+      reason = "resync_generation_change";
+    }
+
+    if (!failed) return false;
+
+    if (this.open) {
+      this.excludeOpen(reason!, input);
+    } else {
+      this.epoch.dataIntegrityFailure = reason;
+      this.epoch.status = "DATA_QUALITY_FAILED";
+      this.epoch.activity.opportunitiesExcludedDataQuality += 1;
+      this.pushDecision({
+        kind: "INTEGRITY",
+        receiveSeq: input.receiveSeq,
+        bid: input.bid,
+        ask: input.ask,
+        detail: reason,
+        exitReason: null
+      });
+    }
+    return true;
+  }
+
+  private accumulateActiveMarketMs(input: GhShadowEngineTickInput): void {
+    if (!this.epoch) return;
+    const active =
+      input.dataOk && isDepthValid(input.depthValidity);
+    const act = this.epoch.activity;
+    if (!active) {
+      act.lastActiveMarketAtMs = null;
+      return;
+    }
+    if (act.lastActiveMarketAtMs != null) {
+      const delta = input.eventTsMs - act.lastActiveMarketAtMs;
+      if (delta > 0 && delta <= ACTIVE_MARKET_GAP_CLAMP_MS) {
+        act.activeMarketMs += delta;
+      }
+    }
+    act.lastActiveMarketAtMs = input.eventTsMs;
+  }
+
+  private buildCapturedEvent(args: {
+    input: GhShadowEngineTickInput;
+    spread: number;
+    identity: ReturnType<typeof getFrozenGhFastIdentity>;
+    inFormalTradePath: boolean;
+    openMarker: GhShadowCapturedEvent["openMarker"];
+  }): GhShadowCapturedEvent {
+    const { input, spread, identity, inFormalTradePath, openMarker } = args;
+    return {
+      eventId: `ev-${input.receiveSeq}-${randomBytes(3).toString("hex")}`,
+      qualificationId: this.epoch!.qualificationId,
       receiveSeq: input.receiveSeq,
       eventTs: new Date(input.eventTsMs).toISOString(),
       eventTsMs: input.eventTsMs,
@@ -331,39 +527,38 @@ export class GhShadowQualificationEngine {
       bookGeneration: input.bookGeneration,
       resyncGeneration: input.resyncGeneration,
       newOpportunity: input.newOpportunity,
+      inFormalTradePath,
       openMarker,
       strategySha: identity.configSha256,
       configSha: identity.configSha256
     };
+  }
 
-    if (!this.journal.tryAppend(captured)) {
-      epoch.integrity.journalOverflowCount += 1;
-      epoch.integrity.eventsDropped += 1;
-      if (this.open) {
-        this.excludeOpen("journal_overflow", input);
-      } else {
-        epoch.dataIntegrityFailure = "journal_overflow";
-        epoch.status = "DATA_QUALITY_FAILED";
-      }
-      epoch.updatedAt = new Date().toISOString();
-      return;
-    }
-
-    this.pendingEvents.push(captured);
-    epoch.integrity.eventsProcessed += 1;
-    epoch.integrity.lastProcessedReceiveSeq = input.receiveSeq;
-
-    // Tick open position first
+  private onJournalAppendFailure(
+    input: GhShadowEngineTickInput,
+    reason: string
+  ): void {
+    if (!this.epoch) return;
+    this.epoch.integrity.journalOverflowCount += 1;
+    this.epoch.integrity.eventsDropped += 1;
+    this.syncJournalStats();
     if (this.open) {
-      this.tickOpen(input);
+      this.excludeOpen(reason, input);
+    } else {
+      this.epoch.dataIntegrityFailure = reason;
+      this.epoch.status = "DATA_QUALITY_FAILED";
+      this.epoch.activity.opportunitiesExcludedDataQuality += 1;
     }
+  }
 
-    // Open new shadow if marked
-    if (openMarker && input.opportunity && this.open == null) {
-      this.tryOpen(input, openMarker.tradeId, input.opportunity);
-    }
-
-    epoch.updatedAt = new Date().toISOString();
+  private syncJournalStats(): void {
+    if (!this.epoch) return;
+    const s = this.journal.stats();
+    this.epoch.integrity.journalPending = s.journalPending;
+    this.epoch.integrity.journalHighWaterMark = s.journalHighWaterMark;
+    this.epoch.integrity.journalOverflowCount = s.overflowCount;
+    this.epoch.integrity.persistAcknowledgedEvents = s.persistAcknowledgedEvents;
+    this.epoch.integrity.eventsPersisted = s.persistAcknowledgedEvents;
   }
 
   private tickOpen(input: GhShadowEngineTickInput): void {
@@ -425,16 +620,19 @@ export class GhShadowQualificationEngine {
     opp: GoldHunterSelectedCandidate
   ): void {
     if (!this.epoch || this.open) return;
+    this.finalizePendingLatencyIfAny("superseded_by_new_open");
+
     const identity = getFrozenGhFastIdentity();
     const cfg = frozenGhFastSoakConfig();
-    const signalTs = opp.signalTimestamp || new Date(input.eventTsMs).toISOString();
+    const signalTs =
+      opp.signalTimestamp || new Date(input.eventTsMs).toISOString();
 
     const marketOk =
       isFinitePositive(input.bid) &&
       isFinitePositive(input.ask) &&
       input.ask >= input.bid &&
       Number.isFinite(input.ask - input.bid) &&
-      input.depthValidity === "DEPTH_VALID" &&
+      isDepthValid(input.depthValidity) &&
       input.dataOk;
 
     const entry = shadowEntryPrice(opp.side, input.bid, input.ask);
@@ -442,10 +640,16 @@ export class GhShadowQualificationEngine {
       config: input.config,
       entryPrice: entry,
       side: opp.side,
-      ...input.sizingOverrides
+      frozenSizing: input.frozenSizing
     });
 
     if (!marketOk || !isFinitePositive(entry) || !sizing.ok) {
+      if (!sizing.ok) {
+        this.epoch.activity.opportunitiesRejectedSizing += 1;
+        this.bumpOtherRejection(sizing.blocker);
+      } else {
+        this.epoch.activity.opportunitiesExcludedDataQuality += 1;
+      }
       const excluded = this.buildExcludedTrade({
         tradeId,
         opp,
@@ -491,6 +695,17 @@ export class GhShadowQualificationEngine {
       trailDistance: cfg.trailDistance
     });
 
+    const act = this.epoch.activity;
+    if (act.lastFlatStartMs != null) {
+      const idle = Math.max(0, input.eventTsMs - act.lastFlatStartMs);
+      act.flatIdleSegmentsMs.push(idle);
+      act.lastFlatStartMs = null;
+    }
+    act.lastEntryAtMs = input.eventTsMs;
+    act.entryTimestampsMs.push(input.eventTsMs);
+    act.formalTradesOpened += 1;
+    act.bySetupOpened[opp.setup] += 1;
+
     const trade: GhShadowTrade = {
       tradeId,
       qualificationId: this.epoch.qualificationId,
@@ -524,11 +739,13 @@ export class GhShadowQualificationEngine {
       simulatedFrictionPnlQuote: null,
       simulatedNetPnlQuote: null,
       quoteCurrency: economic.quoteCurrency,
+      netR: null,
       simulatedGrossPnlEur: null,
       simulatedFrictionEur: null,
       simulatedNetPnlEur: null,
       eurPnlAvailable: economic.eurPnlAvailable,
       economic,
+      latency: null,
       profitLockActivatedAt: null,
       trailActivatedAt: null,
       trailUpdateCount: 0,
@@ -598,6 +815,7 @@ export class GhShadowQualificationEngine {
     trade.simulatedFrictionPnlQuote = pnl.frictionQuote;
     trade.simulatedNetPnlQuote = pnl.netQuote;
     trade.quoteCurrency = pnl.quoteCurrency;
+    trade.netR = pnl.netR;
     trade.simulatedGrossPnlEur = pnl.simulatedGrossPnlEur;
     trade.simulatedFrictionEur = pnl.simulatedFrictionEur;
     trade.simulatedNetPnlEur = pnl.simulatedNetPnlEur;
@@ -615,10 +833,16 @@ export class GhShadowQualificationEngine {
     this.epoch.openShadowTradeId = null;
     if (trade.dataQuality === "FORMAL_ELIGIBLE") {
       this.epoch.formalQualificationTrades += 1;
+      this.epoch.activity.formalTradesClosed += 1;
+      const duration = trade.durationMs ?? 0;
+      this.epoch.activity.openTradeDurationsMs.push(duration);
+      this.epoch.activity.lastFlatStartMs = input.eventTsMs;
     } else {
       this.epoch.diagnosticExcludedTrades += 1;
     }
+
     this.pendingTrades.set(trade.tradeId, { ...trade });
+    this.startLatencyCapture(trade, input, exitPrice, pnl.netQuote);
     this.pushDecision({
       kind: "EXIT",
       tradeId: trade.tradeId,
@@ -628,9 +852,104 @@ export class GhShadowQualificationEngine {
       receiveSeq: input.receiveSeq,
       bid: input.bid,
       ask: input.ask,
-      detail: `netQuote_${pnl.netQuote.toFixed(4)}_eur_${pnl.simulatedNetPnlEur ?? "NA"}`,
+      detail: `netQuote_${pnl.netQuote.toFixed(4)}_netR_${pnl.netR ?? "NA"}_eur_${pnl.simulatedNetPnlEur ?? "NA"}`,
       exitReason: reason
     });
+  }
+
+  private startLatencyCapture(
+    trade: GhShadowTrade,
+    input: GhShadowEngineTickInput,
+    signalExitPrice: number,
+    signalTickPnlQuote: number
+  ): void {
+    this.pendingLatency = {
+      tradeId: trade.tradeId,
+      side: trade.side,
+      entryPrice: trade.entryPrice!,
+      economic: trade.economic!,
+      signalExitPrice,
+      signalTsMs: input.eventTsMs,
+      signalReceiveSeq: input.receiveSeq,
+      signalTickPnlQuote,
+      nextEventPrice: null,
+      nextEventReceiveSeq: null,
+      priceAt100ms: null,
+      priceAt250ms: null,
+      priceAt500ms: null,
+      saw100: false,
+      saw250: false,
+      saw500: false
+    };
+  }
+
+  private advanceLatencyCapture(input: GhShadowEngineTickInput): void {
+    const cap = this.pendingLatency;
+    if (!cap) return;
+
+    const exec = shadowExitPrice(cap.side, input.bid, input.ask);
+    const elapsed = input.eventTsMs - cap.signalTsMs;
+
+    if (cap.nextEventPrice == null && input.receiveSeq > cap.signalReceiveSeq) {
+      cap.nextEventPrice = exec;
+      cap.nextEventReceiveSeq = input.receiveSeq;
+    }
+
+    if (!cap.saw100 && elapsed >= 100) {
+      cap.priceAt100ms = exec;
+      cap.saw100 = true;
+    }
+    if (!cap.saw250 && elapsed >= 250) {
+      cap.priceAt250ms = exec;
+      cap.saw250 = true;
+    }
+    if (!cap.saw500 && elapsed >= 500) {
+      cap.priceAt500ms = exec;
+      cap.saw500 = true;
+    }
+
+    if (elapsed >= LATENCY_WINDOW_MS) {
+      this.finalizePendingLatencyIfAny("window_complete");
+    }
+  }
+
+  private finalizePendingLatencyIfAny(_reason: string): void {
+    const cap = this.pendingLatency;
+    if (!cap) return;
+
+    const trade = this.pendingTrades.get(cap.tradeId);
+    if (trade) {
+      trade.latency = this.buildLatencySensitivity(cap);
+      this.pendingTrades.set(cap.tradeId, { ...trade });
+    }
+    this.pendingLatency = null;
+  }
+
+  private buildLatencySensitivity(
+    cap: PendingLatencyCapture
+  ): GhShadowLatencySensitivity {
+    const pnlAt = (price: number | null): number | null => {
+      if (price == null) return null;
+      return simulateGhShadowCashPnl({
+        side: cap.side,
+        entryPrice: cap.entryPrice,
+        exitPrice: price,
+        economic: cap.economic
+      }).netQuote;
+    };
+    return {
+      signalExitPrice: cap.signalExitPrice,
+      nextEventPrice: cap.nextEventPrice,
+      nextEventReceiveSeq: cap.nextEventReceiveSeq,
+      priceAt100ms: cap.priceAt100ms,
+      priceAt250ms: cap.priceAt250ms,
+      priceAt500ms: cap.priceAt500ms,
+      signalTickPnlQuote: cap.signalTickPnlQuote,
+      nextEventPnlQuote: pnlAt(cap.nextEventPrice),
+      pnl100msQuote: pnlAt(cap.priceAt100ms),
+      pnl250msQuote: pnlAt(cap.priceAt250ms),
+      pnl500msQuote: pnlAt(cap.priceAt500ms)
+    };
   }
 
   private excludeOpen(reason: string, input: GhShadowEngineTickInput): void {
@@ -646,11 +965,19 @@ export class GhShadowQualificationEngine {
     this.open = null;
     this.epoch.openShadowTradeId = null;
     this.epoch.diagnosticExcludedTrades += 1;
-    if (reason === "journal_overflow" || reason === "receive_seq_gap") {
+    this.epoch.activity.opportunitiesExcludedDataQuality += 1;
+    if (
+      reason === "journal_overflow" ||
+      reason === "receive_seq_gap" ||
+      reason === "receive_seq_duplicate" ||
+      reason === "receive_seq_out_of_order" ||
+      reason === "resync_generation_change"
+    ) {
       this.epoch.dataIntegrityFailure = reason;
       this.epoch.status = "DATA_QUALITY_FAILED";
     }
     this.pendingTrades.set(trade.tradeId, { ...trade });
+    this.finalizePendingLatencyIfAny("open_excluded");
     this.pushDecision({
       kind: "EXCLUDE",
       tradeId: trade.tradeId,
@@ -705,11 +1032,13 @@ export class GhShadowQualificationEngine {
       simulatedFrictionPnlQuote: null,
       simulatedNetPnlQuote: null,
       quoteCurrency: args.economic?.quoteCurrency ?? null,
+      netR: null,
       simulatedGrossPnlEur: null,
       simulatedFrictionEur: null,
       simulatedNetPnlEur: null,
       eurPnlAvailable: false,
       economic: args.economic,
+      latency: null,
       profitLockActivatedAt: null,
       trailActivatedAt: null,
       trailUpdateCount: 0,
@@ -733,7 +1062,13 @@ export class GhShadowQualificationEngine {
     };
   }
 
-  private pushDecision( partial: {
+  private bumpOtherRejection(reason: string): void {
+    if (!this.epoch) return;
+    const map = this.epoch.activity.otherRejectionReasons;
+    map[reason] = (map[reason] ?? 0) + 1;
+  }
+
+  private pushDecision(partial: {
     kind: GhShadowDecisionRecord["kind"];
     tradeId?: string | null;
     opportunityId?: string | null;
@@ -763,26 +1098,46 @@ export class GhShadowQualificationEngine {
     });
   }
 
-  /** Drain pending persistence batch (caller writes async). */
+  /** Drain pending persistence batch (caller writes async). Does not ACK journal. */
   drainPersistBatch(): GhShadowPersistBatch | null {
     if (!this.epoch) return null;
+    const events = this.journal
+      .snapshotPending()
+      .filter((e) => !this.inFlightEventIds.has(e.eventId));
+    for (const e of events) {
+      this.inFlightEventIds.add(e.eventId);
+    }
     const batch: GhShadowPersistBatch = {
       epoch: { ...this.epoch },
       trades: [...this.pendingTrades.values()].map((t) => ({ ...t })),
-      events: this.pendingEvents.splice(0, this.pendingEvents.length),
+      events,
       decisions: this.pendingDecisions.splice(0, this.pendingDecisions.length)
     };
     this.pendingTrades.clear();
-    // Count events as persisted when drained (actual write may be mocked in tests)
-    this.epoch.integrity.eventsPersisted += batch.events.length;
+    this.syncJournalStats();
     batch.epoch = { ...this.epoch };
     return batch;
+  }
+
+  acknowledgePersist(eventIds: string[]): void {
+    if (!this.epoch) return;
+    this.journal.acknowledge(eventIds);
+    for (const id of eventIds) {
+      this.inFlightEventIds.delete(id);
+    }
+    this.syncJournalStats();
+  }
+
+  requeuePersistFailure(): void {
+    if (!this.epoch) return;
+    this.epoch.integrity.persistFailures += 1;
+    this.inFlightEventIds.clear();
+    this.syncJournalStats();
   }
 
   /** Test helper: seed epoch without recovery. */
   seedEpochForTests(epoch: GhShadowQualificationEpoch): void {
     this.epoch = epoch;
-    this.recovered = true;
   }
 }
 
