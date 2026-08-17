@@ -45,7 +45,7 @@ export type GhShadowTrade = {
   opportunityId: string;
   signalId: string;
   setup: GoldHunterSetupLetter;
-  setupId: GhFastSetupId | string;
+  setupId: GhFastSetupId;
   side: "BUY" | "SELL";
   status: GhShadowTradeStatus;
   dataQuality: GhShadowDataQuality;

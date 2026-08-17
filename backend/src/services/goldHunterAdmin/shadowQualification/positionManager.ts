@@ -34,7 +34,6 @@ import type {
   GhShadowQualificationEpoch,
   GhShadowTrade
 } from "./types";
-import { GH_SHADOW_QUALIFICATION_VERSION } from "./types";
 
 type OpenState = {
   trade: GhShadowTrade;
@@ -161,7 +160,7 @@ export async function tryOpenGhShadowFromOpportunity(args: {
       opportunityId: opp.opportunityId,
       signalId: opp.signalId,
       setup: opp.setup,
-      setupId: opp.setupId || setupIdFromLetter(opp.setup),
+      setupId: setupIdFromLetter(opp.setup),
       side: opp.side,
       status: "DIAGNOSTIC_EXCLUDED",
       dataQuality: "DIAGNOSTIC_EXCLUDED",
@@ -256,7 +255,7 @@ export async function tryOpenGhShadowFromOpportunity(args: {
     opportunityId: opp.opportunityId,
     signalId: opp.signalId,
     setup: opp.setup,
-    setupId: opp.setupId || setupIdFromLetter(opp.setup),
+    setupId: setupIdFromLetter(opp.setup),
     side: opp.side,
     status: "OPEN",
     dataQuality: "FORMAL_ELIGIBLE",
