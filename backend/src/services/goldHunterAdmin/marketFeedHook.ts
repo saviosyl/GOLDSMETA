@@ -22,6 +22,7 @@ import {
   maybeReconsiderGoldHunterDemoAutoExecution
 } from "./demoAutoExecutionRuntime";
 import { enqueueGoldHunterPositionManagerTick } from "./demoPositionManager";
+import { enqueueGhShadowQualificationTick } from "./shadowQualification";
 
 export type GhMarketFeedMeta = {
   ownerUid: string;
@@ -167,6 +168,13 @@ function afterSelectorTick(
 
   // Position management — bounded async, never blocks quote path.
   enqueueGoldHunterPositionManagerTick(meta.ownerUid);
+
+  // Research shadow qualification — independent of Demo AutoTrade / broker.
+  // Default OFF via GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED. Never NewOrder.
+  enqueueGhShadowQualificationTick({
+    ownerUid: meta.ownerUid,
+    tick
+  });
 }
 
 /**
