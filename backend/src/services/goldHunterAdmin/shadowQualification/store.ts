@@ -6,6 +6,7 @@
  *     /trades | /events | /decisions
  *   users/{ownerUid}/goldHunterShadowQualification/__currentEpoch  (pointer)
  */
+import type { Firestore } from "firebase-admin/firestore";
 import { getFirestoreDb } from "../../firebaseAdmin";
 import type {
   GhShadowCapturedEvent,
@@ -29,9 +30,48 @@ type MemEpochBucket = {
 const memoryCurrent = new Map<string, string>();
 const memoryEpochs = new Map<string, Map<string, MemEpochBucket>>();
 
+/** Test override — forces Firestore path (e.g. emulator) instead of memory. */
+let firestoreOverrideForTests: Firestore | null = null;
+
+/**
+ * Test hook: runs AFTER the patch transaction/memory read of the epoch,
+ * BEFORE replay fields are committed. Used to inject ACK=N+1 for TOCTOU proof.
+ */
+let replayPatchAfterReadHookForTests:
+  | ((ctx: {
+      ownerUid: string;
+      qualificationId: string;
+      expectedEvents: number;
+      persistAcknowledgedEvents: number;
+    }) => void | Promise<void>)
+  | null = null;
+
+export function useGhShadowFirestoreForTests(db: Firestore | null): void {
+  firestoreOverrideForTests = db;
+}
+
+export function setGhShadowReplayPatchAfterReadHookForTests(
+  hook:
+    | ((ctx: {
+        ownerUid: string;
+        qualificationId: string;
+        expectedEvents: number;
+        persistAcknowledgedEvents: number;
+      }) => void | Promise<void>)
+    | null
+): void {
+  replayPatchAfterReadHookForTests = hook;
+}
+
 export function resetGhShadowQualificationMemoryForTests(): void {
   memoryCurrent.clear();
   memoryEpochs.clear();
+  replayPatchAfterReadHookForTests = null;
+  // Do not clear firestoreOverrideForTests here — emulator suites manage it.
+}
+
+function resolveFirestore(): Firestore | null {
+  return firestoreOverrideForTests ?? getFirestoreDb();
 }
 
 function ownerEpochs(ownerUid: string): Map<string, MemEpochBucket> {
@@ -63,7 +103,7 @@ function ensureBucket(
 }
 
 function rootCol(ownerUid: string) {
-  const db = getFirestoreDb();
+  const db = resolveFirestore();
   if (!db) return null;
   return db
     .collection("users")
@@ -383,30 +423,200 @@ export async function listAllGhShadowTrades(
     .sort((a, b) => (a.signalTs ?? "").localeCompare(b.signalTs ?? ""));
 }
 
+export type GhShadowReplayPatchCurrency = "CURRENT" | "STALE" | "MISSING";
+
+export type GhShadowReplayPatchResult = {
+  currency: GhShadowReplayPatchCurrency;
+  writtenStatus: GhShadowQualificationEpoch["lastReplayStatus"] | null;
+  epoch: GhShadowQualificationEpoch | null;
+  persistAcknowledgedEvents: number | null;
+  qualificationId: string | null;
+};
+
+const REPLAY_FIELD_KEYS = [
+  "lastReplayStatus",
+  "lastReplayDetail",
+  "updatedAt"
+] as const;
+
+function applyReplayFieldsOnly(
+  epoch: GhShadowQualificationEpoch,
+  status: GhShadowQualificationEpoch["lastReplayStatus"],
+  detail: GhShadowQualificationEpoch["lastReplayDetail"]
+): void {
+  epoch.lastReplayStatus = status;
+  epoch.lastReplayDetail = detail ? { ...detail } : null;
+  epoch.updatedAt = new Date().toISOString();
+}
+
 /**
- * Patch ONLY replay result fields on the CURRENT epoch.
- * Never rewrites integrity/activity/ACK counters from a stale snapshot.
+ * Atomic replay-field finalisation.
+ *
+ * Firestore: ONE transaction — read epoch, verify qualificationId (+ ACK when
+ * requireCurrentAck), then write ONLY lastReplayStatus / lastReplayDetail /
+ * updatedAt. Never writes integrity/activity/ACK from a stale snapshot.
+ *
+ * Memory: equivalent semantics (field-only mutate on the live bucket object;
+ * after-read hook can replace the bucket epoch to simulate concurrent ACK).
  */
 export async function patchGhShadowEpochReplayFields(
   ownerUid: string,
   args: {
     qualificationId: string;
+    /** ACK count the replay was computed against. */
+    expectedEvents: number;
+    /**
+     * When true, LIVE_REPLAY_OK / current writes require
+     * persistAcknowledgedEvents === expectedEvents. On mismatch write
+     * REPLAY_STALE instead and return currency=STALE.
+     */
+    requireCurrentAck: boolean;
     lastReplayStatus: GhShadowQualificationEpoch["lastReplayStatus"];
     lastReplayDetail: GhShadowQualificationEpoch["lastReplayDetail"];
   }
-): Promise<GhShadowQualificationEpoch | null> {
-  const current = await loadGhShadowEpoch(ownerUid);
-  if (!current) return null;
-  if (current.qualificationId !== args.qualificationId) {
-    return current;
-  }
-  current.lastReplayStatus = args.lastReplayStatus;
-  current.lastReplayDetail = args.lastReplayDetail
+): Promise<GhShadowReplayPatchResult> {
+  const intendedStatus = args.lastReplayStatus;
+  const intendedDetail = args.lastReplayDetail
     ? { ...args.lastReplayDetail }
     : null;
-  current.updatedAt = new Date().toISOString();
-  await saveGhShadowEpoch(ownerUid, current);
-  return current;
+
+  const doc = epochDoc(ownerUid, args.qualificationId);
+  const db = resolveFirestore();
+
+  if (doc && db) {
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(doc);
+      if (!snap.exists) {
+        return {
+          currency: "MISSING" as const,
+          writtenStatus: null,
+          epoch: null,
+          persistAcknowledgedEvents: null,
+          qualificationId: null
+        };
+      }
+      const current = snap.data() as GhShadowQualificationEpoch;
+      // NOTE: do NOT await same-document writes here (deadlocks the emulator /
+      // transactional lock). Memory path below supports the after-read hook for
+      // deterministic TOCTOU injection. Firestore concurrency is enforced by
+      // transaction retry on conflicting writes + field-only merge.
+
+      const ack = current.integrity?.persistAcknowledgedEvents ?? -1;
+      const qidOk = current.qualificationId === args.qualificationId;
+      const ackOk = ack === args.expectedEvents;
+      const stillCurrent = qidOk && (!args.requireCurrentAck || ackOk);
+
+      let writtenStatus = intendedStatus;
+      let writtenDetail = intendedDetail;
+      let currency: GhShadowReplayPatchCurrency = "CURRENT";
+
+      if (!stillCurrent) {
+        currency = "STALE";
+        writtenStatus = "REPLAY_STALE";
+        writtenDetail = {
+          capturedEvents: intendedDetail?.capturedEvents ?? 0,
+          replayedEvents: intendedDetail?.replayedEvents ?? 0,
+          expectedEvents: args.expectedEvents,
+          firstDivergenceSeq: null,
+          divergenceDetail: `replay_patch_stale expectedAck=${args.expectedEvents} nowAck=${ack} qidOk=${qidOk}`,
+          completedAt: new Date().toISOString()
+        };
+      }
+
+      const updatedAt = new Date().toISOString();
+      // FIELD-ONLY write — never pass the full epoch object.
+      tx.set(
+        doc,
+        {
+          lastReplayStatus: writtenStatus,
+          lastReplayDetail: writtenDetail,
+          updatedAt
+        },
+        { merge: true }
+      );
+
+      return {
+        currency,
+        writtenStatus,
+        epoch: {
+          ...current,
+          lastReplayStatus: writtenStatus,
+          lastReplayDetail: writtenDetail,
+          updatedAt
+        },
+        persistAcknowledgedEvents: ack,
+        qualificationId: current.qualificationId
+      };
+    });
+  }
+
+  // ---- memory path (equivalent field-only semantics) ----
+  const b = bucket(ownerUid, args.qualificationId);
+  if (!b) {
+    return {
+      currency: "MISSING",
+      writtenStatus: null,
+      epoch: null,
+      persistAcknowledgedEvents: null,
+      qualificationId: null
+    };
+  }
+
+  const ackAtRead = b.epoch.integrity.persistAcknowledgedEvents;
+  if (replayPatchAfterReadHookForTests) {
+    await replayPatchAfterReadHookForTests({
+      ownerUid,
+      qualificationId: args.qualificationId,
+      expectedEvents: args.expectedEvents,
+      persistAcknowledgedEvents: ackAtRead
+    });
+  }
+
+  // Hook may have replaced the bucket epoch with ACK=N+1.
+  const live = bucket(ownerUid, args.qualificationId)?.epoch;
+  if (!live) {
+    return {
+      currency: "MISSING",
+      writtenStatus: null,
+      epoch: null,
+      persistAcknowledgedEvents: null,
+      qualificationId: null
+    };
+  }
+
+  const ack = live.integrity.persistAcknowledgedEvents;
+  const qidOk = live.qualificationId === args.qualificationId;
+  const ackOk = ack === args.expectedEvents;
+  const stillCurrent = qidOk && (!args.requireCurrentAck || ackOk);
+
+  let writtenStatus = intendedStatus;
+  let writtenDetail = intendedDetail;
+  let currency: GhShadowReplayPatchCurrency = "CURRENT";
+
+  if (!stillCurrent) {
+    currency = "STALE";
+    writtenStatus = "REPLAY_STALE";
+    writtenDetail = {
+      capturedEvents: intendedDetail?.capturedEvents ?? 0,
+      replayedEvents: intendedDetail?.replayedEvents ?? 0,
+      expectedEvents: args.expectedEvents,
+      firstDivergenceSeq: null,
+      divergenceDetail: `replay_patch_stale expectedAck=${args.expectedEvents} nowAck=${ack} qidOk=${qidOk}`,
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  // Mutate ONLY replay fields on the live object — never replace integrity.
+  applyReplayFieldsOnly(live, writtenStatus, writtenDetail);
+  void REPLAY_FIELD_KEYS;
+
+  return {
+    currency,
+    writtenStatus,
+    epoch: live,
+    persistAcknowledgedEvents: live.integrity.persistAcknowledgedEvents,
+    qualificationId: live.qualificationId
+  };
 }
 
 export async function appendGhShadowCapturedEvent(

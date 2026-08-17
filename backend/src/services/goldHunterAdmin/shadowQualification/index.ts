@@ -47,9 +47,15 @@ export {
   listAllGhShadowReplayMarkerDecisions,
   listAllGhShadowTrades,
   patchGhShadowEpochReplayFields,
+  useGhShadowFirestoreForTests,
+  setGhShadowReplayPatchAfterReadHookForTests,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
   setCurrentQualificationId
+} from "./store";
+export type {
+  GhShadowReplayPatchResult,
+  GhShadowReplayPatchCurrency
 } from "./store";
 
 export { computeGhShadowPerformanceReport } from "./performance";

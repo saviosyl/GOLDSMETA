@@ -39,6 +39,7 @@ import {
   patchGhShadowEpochReplayFields,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
+  setGhShadowReplayPatchAfterReadHookForTests,
   upsertGhShadowTrade
 } from "./store";
 import type {
@@ -734,27 +735,32 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       divergenceDetail: `replay_count_mismatch have=${events.length} expected=${expectedEvents}`,
       completedAt: new Date().toISOString()
     };
-    await patchGhShadowEpochReplayFields(ownerUid, {
+    const patch = await patchGhShadowEpochReplayFields(ownerUid, {
       qualificationId,
+      expectedEvents,
+      requireCurrentAck: true,
       lastReplayStatus: "REPLAY_INCOMPLETE",
       lastReplayDetail: detail
     });
+    const written = patch.writtenStatus ?? "REPLAY_INCOMPLETE";
     await syncEngineReplayFields(
       ownerUid,
-      qualificationId,
-      "REPLAY_INCOMPLETE",
-      detail
+      patch.qualificationId ?? qualificationId,
+      written,
+      patch.epoch?.lastReplayDetail ?? detail
     );
     return {
-      status: "REPLAY_INCOMPLETE" as const,
+      status: written,
       capturedEvents: events.length,
       replayedEvents: 0,
       expectedEvents,
       firstDivergenceSeq: null,
-      divergenceDetail: detail.divergenceDetail,
+      divergenceDetail:
+        patch.epoch?.lastReplayDetail?.divergenceDetail ?? detail.divergenceDetail,
       livePoints: [],
       replayPoints: [],
-      replayCurrent: false
+      replayCurrent: false,
+      persistAcknowledgedEvents: patch.persistAcknowledgedEvents
     };
   }
 
@@ -780,14 +786,33 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       divergenceDetail: `replay_stale_during_run startExpected=${expectedEvents} nowAcknowledged=${finalAck} startQid=${qualificationId} nowQid=${finalQid}`,
       completedAt: new Date().toISOString()
     };
-    // Patch CURRENT epoch only — never overwrite newer ACK counters.
     if (finalQid) {
-      await patchGhShadowEpochReplayFields(ownerUid, {
+      const patch = await patchGhShadowEpochReplayFields(ownerUid, {
         qualificationId: finalQid,
+        expectedEvents,
+        requireCurrentAck: false,
         lastReplayStatus: "REPLAY_STALE",
         lastReplayDetail: detail
       });
-      await syncEngineReplayFields(ownerUid, finalQid, "REPLAY_STALE", detail);
+      await syncEngineReplayFields(
+        ownerUid,
+        finalQid,
+        patch.writtenStatus ?? "REPLAY_STALE",
+        patch.epoch?.lastReplayDetail ?? detail
+      );
+      return {
+        status: "REPLAY_STALE" as const,
+        capturedEvents: result.capturedEvents,
+        replayedEvents: result.replayedEvents,
+        expectedEvents,
+        firstDivergenceSeq: null,
+        divergenceDetail:
+          patch.epoch?.lastReplayDetail?.divergenceDetail ?? detail.divergenceDetail,
+        livePoints: result.livePoints,
+        replayPoints: result.replayPoints,
+        replayCurrent: false,
+        persistAcknowledgedEvents: patch.persistAcknowledgedEvents
+      };
     }
     return {
       status: "REPLAY_STALE" as const,
@@ -811,23 +836,41 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
     divergenceDetail: result.divergenceDetail,
     completedAt: new Date().toISOString()
   };
-  await patchGhShadowEpochReplayFields(ownerUid, {
+
+  // Atomic finalise — currency derives from the patch transaction result, not
+  // only this pre-patch check (covers TOCTOU between check and commit).
+  const patch = await patchGhShadowEpochReplayFields(ownerUid, {
     qualificationId,
+    expectedEvents,
+    requireCurrentAck: true,
     lastReplayStatus: result.status,
     lastReplayDetail: detail
   });
+
+  const writtenStatus = patch.writtenStatus ?? "REPLAY_STALE";
   await syncEngineReplayFields(
     ownerUid,
-    qualificationId,
-    result.status,
-    detail
+    patch.qualificationId ?? qualificationId,
+    writtenStatus,
+    patch.epoch?.lastReplayDetail ?? detail
   );
 
+  const replayCurrent =
+    patch.currency === "CURRENT" && writtenStatus === "LIVE_REPLAY_OK";
+
   return {
-    ...result,
+    status: writtenStatus,
+    capturedEvents: result.capturedEvents,
+    replayedEvents: result.replayedEvents,
     expectedEvents,
-    replayCurrent: result.status === "LIVE_REPLAY_OK",
-    persistAcknowledgedEvents: expectedEvents
+    firstDivergenceSeq:
+      writtenStatus === result.status ? result.firstDivergenceSeq : null,
+    divergenceDetail:
+      patch.epoch?.lastReplayDetail?.divergenceDetail ?? result.divergenceDetail,
+    livePoints: result.livePoints,
+    replayPoints: result.replayPoints,
+    replayCurrent,
+    persistAcknowledgedEvents: patch.persistAcknowledgedEvents
   };
 }
 
@@ -878,6 +921,7 @@ export function resetGhShadowQualificationRuntimeForTests(): void {
   authoritativeSizingLoaderForTests = null;
   autoPersistForTests = true;
   replayBeforeFinalizeHookForTests = null;
+  setGhShadowReplayPatchAfterReadHookForTests(null);
 }
 
 // silence unused import if hash not used
