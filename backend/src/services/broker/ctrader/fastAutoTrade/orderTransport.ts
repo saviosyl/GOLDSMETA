@@ -362,10 +362,12 @@ export async function submitFastMarketOrder(args: {
     }
   } catch (err) {
     unsubscribe();
-    if (err instanceof BoundedOpTimeoutError && !requestSent) {
+    if (err instanceof BoundedOpTimeoutError) {
+      // Outer send wait expired while underlying sendCommand may still be in
+      // flight (COMMAND_TIMEOUT_MS). Do NOT claim "not sent".
       return {
         accepted: false,
-        outcome: "BROKER_SUBMIT_ERROR",
+        outcome: "BROKER_OUTCOME_UNKNOWN",
         executionType: null,
         orderId: null,
         positionId: null,
@@ -378,7 +380,7 @@ export async function submitFastMarketOrder(args: {
         ctidTraderAccountId: args.request.ctidTraderAccountId,
         requestSent: false,
         newOrderReqCount: 0,
-        raw: { error: err.message }
+        raw: { error: err.message, uncertainSend: true }
       };
     }
     return {

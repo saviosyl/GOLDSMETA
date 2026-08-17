@@ -210,6 +210,15 @@ export async function attemptGoldHunterDemoExecution(
   }
   deps.onStage?.("OPEN_TRADES_LOAD_DONE", "done");
 
+  // Enforce maxOpen BEFORE durable claim — otherwise opportunities are burned
+  // as BROKER_SUBMIT_ERROR without ever transmitting ProtoOANewOrderReq.
+  if (openTrades.length >= config.maxOpenTrades) {
+    return block(
+      "WAIT — MAX OPEN TRADES",
+      `open_count_${openTrades.length}_max_${config.maxOpenTrades}`
+    );
+  }
+
   const committed = computeGoldHunterCommittedCapital({
     config,
     openTrades
@@ -350,12 +359,8 @@ export async function attemptGoldHunterDemoExecution(
   getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
   tel?.({ phase: "CLAIMED", claimed: true, tradeId: goldHunterTradeId });
 
-  await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-    state: "SUBMITTING"
-  });
-  deps.onStage?.("SUBMITTING", "start");
-  tel?.({ phase: "SUBMITTING", claimed: true, tradeId: goldHunterTradeId });
-
+  // Post-claim PnL / local gates run BEFORE claim state=SUBMITTING so
+  // gold_hunter_broker_submit_started means transport is about to start.
   if (deps.beforeBrokerSubmit) {
     try {
       await deps.beforeBrokerSubmit();
@@ -384,17 +389,20 @@ export async function attemptGoldHunterDemoExecution(
 
   let dailyLossOk = true;
   try {
+    deps.onStage?.("POST_CLAIM_PNL_START", "start");
     const todayPnl = todayNetPnlEur(
       await withGoldHunterPreclaimTimeout(
         "listGoldHunterDemoTrades_pnl",
-        "OPEN_TRADES_LOAD_START",
+        "POST_CLAIM_PNL_START",
         GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
         () => listGoldHunterDemoTrades(ownerUid, { limit: 200 })
       )
     );
     dailyLossOk = todayPnl > -plannedDailyLossBudgetEur(config);
+    deps.onStage?.("POST_CLAIM_PNL_DONE", "done");
   } catch (e) {
     if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("POST_CLAIM_PNL_START", "timeout");
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "PENDING_RECONCILIATION",
         errorCode: "POST_CLAIM_PNL_TIMEOUT"
@@ -442,10 +450,22 @@ export async function attemptGoldHunterDemoExecution(
       signalPresent: true,
       signalConsumed: false,
       accountSnapshotValid: account.validForRisk,
-      placeOrder: deps.placeOrder
+      placeOrder: deps.placeOrder,
+      onEnterBrokerTransport: async () => {
+        await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+          state: "SUBMITTING"
+        });
+        deps.onStage?.("SUBMITTING", "start");
+        tel?.({
+          phase: "SUBMITTING",
+          claimed: true,
+          tradeId: goldHunterTradeId
+        });
+      }
     });
 
     if (!result.ok) {
+      // Local gate failure after claim — no ProtoOANewOrderReq was sent.
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
@@ -455,6 +475,7 @@ export async function attemptGoldHunterDemoExecution(
         claimed: true,
         outcome: "BROKER_SUBMIT_ERROR",
         blocker: result.blockers[0] ?? "GATES_BLOCKED",
+        detail: "local_gate_before_transport",
         tradeId: goldHunterTradeId
       });
       return {
@@ -528,11 +549,27 @@ export async function attemptGoldHunterDemoExecution(
         brokerOrderId: result.trade?.brokerOrderId ?? null,
         brokerPositionId: result.trade?.brokerPositionId ?? null
       });
+    } else if (result.outcome === "PENDING_RECONCILIATION") {
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+        state: "PENDING_RECONCILIATION",
+        errorCode: result.errorCode,
+        brokerOrderId: result.trade?.brokerOrderId ?? null,
+        brokerPositionId: result.trade?.brokerPositionId ?? null
+      });
+      tel?.({
+        phase: "PENDING_RECONCILIATION",
+        claimed: true,
+        outcome: "PENDING_RECONCILIATION",
+        detail: result.errorCode ?? "broker_outcome_unknown",
+        tradeId: goldHunterTradeId,
+        brokerOrderId: result.trade?.brokerOrderId ?? null,
+        brokerPositionId: result.trade?.brokerPositionId ?? null
+      });
     }
 
     return {
       ok: true,
-      submitted: true,
+      submitted: result.outcome !== "BROKER_SUBMIT_ERROR",
       outcome: result.outcome,
       signalId: opportunityId,
       tradeId: result.trade?.goldHunterTradeId ?? goldHunterTradeId

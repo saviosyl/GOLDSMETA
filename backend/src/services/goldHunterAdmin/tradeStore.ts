@@ -23,6 +23,31 @@ function tradesCol(ownerUid: string) {
   return db.collection("users").doc(ownerUid).collection("goldHunterDemoTrades");
 }
 
+/**
+ * Trades that still occupy the maxOpenTrades slot.
+ * ACCEPTED_PENDING_FILL / uncertain PENDING_RECONCILIATION count (fail closed).
+ * CLOSE_ACCEPTED_PENDING_SETTLEMENT does not — close already accepted at broker.
+ */
+export function countsTowardGoldHunterMaxOpen(
+  trade: GoldHunterDemoTrade
+): boolean {
+  if (trade.strategy !== GH_ADMIN_STRATEGY_ID || trade.environment !== "DEMO") {
+    return false;
+  }
+  if (trade.status === "CLOSED") return false;
+  if (trade.status === "BROKER_REJECTED" || trade.status === "BROKER_SUBMIT_ERROR") {
+    return false;
+  }
+  if (trade.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT") return false;
+  if (trade.result === "OPEN") return true;
+  if (trade.status === "FILLED" || trade.status === "PROTECTED") return true;
+  if (trade.status === "ACCEPTED_PENDING_FILL") return true;
+  if (trade.status === "PENDING_RECONCILIATION") return true;
+  if (trade.status === "CLOSE_REQUESTED") return true;
+  if (trade.status === "ORDER_CREATED" || trade.status === "SENT") return true;
+  return false;
+}
+
 export async function listGoldHunterDemoTrades(
   ownerUid: string,
   opts?: { limit?: number; openOnly?: boolean }
@@ -35,7 +60,7 @@ export async function listGoldHunterDemoTrades(
       (r) => r.strategy === GH_ADMIN_STRATEGY_ID && r.environment === "DEMO"
     );
     if (opts?.openOnly) {
-      rows = rows.filter((r) => r.status !== "CLOSED" && r.result === "OPEN");
+      rows = rows.filter((r) => countsTowardGoldHunterMaxOpen(r));
     }
     return rows
       .sort((a, b) => (b.orderTs ?? "").localeCompare(a.orderTs ?? ""))
@@ -48,14 +73,18 @@ export async function listGoldHunterDemoTrades(
       (r) => r.strategy === GH_ADMIN_STRATEGY_ID && r.environment === "DEMO"
     );
     if (opts?.openOnly) {
-      rows = rows.filter((r) => r.status !== "CLOSED" && r.result === "OPEN");
+      rows = rows.filter((r) => countsTowardGoldHunterMaxOpen(r));
     }
     return rows;
   } catch {
     const snap = await col.limit(limit).get();
-    return snap.docs
+    let rows = snap.docs
       .map((d) => d.data() as GoldHunterDemoTrade)
       .filter((r) => r.strategy === GH_ADMIN_STRATEGY_ID && r.environment === "DEMO");
+    if (opts?.openOnly) {
+      rows = rows.filter((r) => countsTowardGoldHunterMaxOpen(r));
+    }
+    return rows;
   }
 }
 

@@ -49,6 +49,8 @@ export type GoldHunterDemoSubmitArgs = {
   signalPresent: boolean;
   signalConsumed: boolean;
   accountSnapshotValid: boolean;
+  /** Called only after local gates pass, immediately before ProtoOANewOrder transport. */
+  onEnterBrokerTransport?: () => Promise<void>;
   /** Injected for tests. */
   placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
 };
@@ -59,7 +61,8 @@ export type GoldHunterDemoSubmitOk = {
     | "FILLED"
     | "ACCEPTED_PENDING_FILL"
     | "BROKER_REJECTED"
-    | "BROKER_SUBMIT_ERROR";
+    | "BROKER_SUBMIT_ERROR"
+    | "PENDING_RECONCILIATION";
   trade: GoldHunterDemoTrade | null;
   broker: DemoMarketOrderResult | null;
   errorCode: string | null;
@@ -151,8 +154,25 @@ export async function submitGoldHunterDemoOrder(
     };
   }
 
+  // Local gates passed — only now enter broker transport / SUBMITTING telemetry.
+  if (args.onEnterBrokerTransport) {
+    await args.onEnterBrokerTransport();
+  }
+
   const now = new Date().toISOString();
   const place = args.placeOrder ?? submitDemoMarketOrder;
+
+  console.info(
+    JSON.stringify({
+      msg: "gold_hunter_broker_transport_enter",
+      product: "GOLD_HUNTER",
+      stage: "ENTERED_SUBMIT",
+      signalId: args.signalId ?? null,
+      goldHunterTradeId: args.goldHunterTradeId,
+      clientOrderId: args.clientOrderId,
+      ts: new Date().toISOString()
+    })
+  );
 
   let broker: DemoMarketOrderResult;
   try {
@@ -173,6 +193,7 @@ export async function submitGoldHunterDemoOrder(
   } catch (e) {
     const errorCode =
       e instanceof Error ? e.message.slice(0, 120) : "BROKER_SUBMIT_THREW";
+    // Thrown after transport entry — outcome uncertain; never blind-resubmit.
     const trade: GoldHunterDemoTrade = {
       goldHunterTradeId: args.goldHunterTradeId,
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -196,7 +217,7 @@ export async function submitGoldHunterDemoOrder(
       exitReason: null,
       brokerOrderId: null,
       brokerPositionId: null,
-      status: "BROKER_SUBMIT_ERROR",
+      status: "PENDING_RECONCILIATION",
       signalId: args.signalId ?? null,
       clientOrderId: args.clientOrderId,
       errorCode
@@ -213,15 +234,38 @@ export async function submitGoldHunterDemoOrder(
     });
     return {
       ok: true,
-      outcome: "BROKER_SUBMIT_ERROR",
+      outcome: "PENDING_RECONCILIATION",
       trade,
       broker: null,
       errorCode
     };
   }
 
-  if (!broker.accepted) {
-    const errorCode = broker.errorCode ?? "BROKER_REJECTED";
+  console.info(
+    JSON.stringify({
+      msg: "gold_hunter_broker_transport_result",
+      product: "GOLD_HUNTER",
+      stage: "FINAL_OUTCOME",
+      signalId: args.signalId ?? null,
+      goldHunterTradeId: args.goldHunterTradeId,
+      clientOrderId: args.clientOrderId,
+      outcome: broker.outcome ?? null,
+      requestSent: broker.requestSent ?? null,
+      newOrderReqCount: broker.newOrderReqCount ?? null,
+      errorCode: broker.errorCode ?? null,
+      orderId: broker.orderId ?? null,
+      positionId: broker.positionId ?? null,
+      ts: new Date().toISOString()
+    })
+  );
+
+  const uncertain =
+    broker.outcome === "BROKER_OUTCOME_UNKNOWN" ||
+    broker.outcome === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
+    broker.errorCode === "NEWORDER_SEND_TIMEOUT" ||
+    broker.errorCode === "CTRADER_ORDER_TIMEOUT";
+
+  if (uncertain) {
     const trade: GoldHunterDemoTrade = {
       goldHunterTradeId: args.goldHunterTradeId,
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -246,7 +290,61 @@ export async function submitGoldHunterDemoOrder(
       brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
       brokerPositionId:
         broker.positionId != null ? String(broker.positionId) : null,
-      status: "BROKER_REJECTED",
+      status: "PENDING_RECONCILIATION",
+      signalId: args.signalId ?? null,
+      clientOrderId: broker.clientOrderId ?? args.clientOrderId,
+      errorCode: String(broker.errorCode ?? "BROKER_OUTCOME_UNKNOWN").slice(0, 120),
+      filledVolumeLots: broker.filledVolumeLots ?? null
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      createdAt: now,
+      ownership: {
+        strategy: GH_ADMIN_STRATEGY_ID,
+        environment: "DEMO",
+        ownerUid: args.ownerUid,
+        signalId: args.signalId ?? null
+      }
+    });
+    return {
+      ok: true,
+      outcome: "PENDING_RECONCILIATION",
+      trade,
+      broker,
+      errorCode: trade.errorCode ?? null
+    };
+  }
+
+  if (!broker.accepted) {
+    const errorCode = broker.errorCode ?? "BROKER_REJECTED";
+    const isSubmitError =
+      broker.outcome === "BROKER_SUBMIT_ERROR" ||
+      broker.requestSent === false;
+    const trade: GoldHunterDemoTrade = {
+      goldHunterTradeId: args.goldHunterTradeId,
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      setup: args.setup ?? null,
+      side: args.side,
+      signalTs: now,
+      orderTs: now,
+      fillTs: null,
+      closeTs: null,
+      entry: null,
+      exit: null,
+      stop: args.stopLoss ?? null,
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: null,
+      exitReason: null,
+      brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
+      brokerPositionId:
+        broker.positionId != null ? String(broker.positionId) : null,
+      status: isSubmitError ? "BROKER_SUBMIT_ERROR" : "BROKER_REJECTED",
       signalId: args.signalId ?? null,
       clientOrderId: broker.clientOrderId ?? args.clientOrderId,
       errorCode: String(errorCode).slice(0, 120),
@@ -264,7 +362,7 @@ export async function submitGoldHunterDemoOrder(
     });
     return {
       ok: true,
-      outcome: "BROKER_REJECTED",
+      outcome: isSubmitError ? "BROKER_SUBMIT_ERROR" : "BROKER_REJECTED",
       trade,
       broker,
       errorCode: trade.errorCode ?? null

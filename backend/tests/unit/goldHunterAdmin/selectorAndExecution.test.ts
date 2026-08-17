@@ -418,7 +418,7 @@ describe("Durable claim + broker truth", () => {
     }
   });
 
-  it("broker throws → BROKER_SUBMIT_ERROR not FILLED", async () => {
+  it("broker throws after transport entry → PENDING_RECONCILIATION not FILLED", async () => {
     const result = await submitGoldHunterDemoOrder({
       ownerUid: OWNER,
       isAdmin: true,
@@ -444,8 +444,8 @@ describe("Durable claim + broker truth", () => {
       }
     });
     if (result.ok) {
-      expect(result.outcome).toBe("BROKER_SUBMIT_ERROR");
-      expect(result.trade?.status).toBe("BROKER_SUBMIT_ERROR");
+      expect(result.outcome).toBe("PENDING_RECONCILIATION");
+      expect(result.trade?.status).toBe("PENDING_RECONCILIATION");
     }
   });
 
