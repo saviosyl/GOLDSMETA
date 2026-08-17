@@ -37,6 +37,7 @@ import {
   reserveGoldHunterMaxOpenSlot
 } from "./maxOpenLease";
 import { countsTowardGoldHunterMaxOpen } from "./tradeStore";
+import { validateGoldHunterRiskConfig } from "./configValidation";
 
 import type { GoldHunterExecutionStage } from "./executionStages";
 import {
@@ -176,6 +177,14 @@ export async function attemptGoldHunterDemoExecution(
     throw e;
   }
   deps.onStage?.("CONFIG_RELOAD_DONE", "done");
+
+  const cfgOk = validateGoldHunterRiskConfig(config);
+  if (!cfgOk.ok) {
+    return block(
+      "WAIT — CONFIG INVALID",
+      cfgOk.detail ?? "risk_config_invalid"
+    );
+  }
 
   const meta: GoldHunterInstrumentMetadata = metadataFromBrokerSymbol(deps.symbol);
   if (!meta.complete) {

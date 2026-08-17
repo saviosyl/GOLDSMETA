@@ -106,7 +106,14 @@ export function evaluateGoldHunterOrderGates(
 
   if (
     !Number.isFinite(input.config.allocatedCapitalEur) ||
-    input.config.allocatedCapitalEur <= 0
+    input.config.allocatedCapitalEur <= 0 ||
+    !Number.isFinite(input.config.riskPerTradePct) ||
+    !(input.config.riskPerTradePct > 0) ||
+    !Number.isFinite(input.config.dailyLossLimitPct) ||
+    !(input.config.dailyLossLimitPct > 0) ||
+    !Number.isFinite(input.config.maxOpenTrades) ||
+    !Number.isInteger(input.config.maxOpenTrades) ||
+    input.config.maxOpenTrades !== 1
   ) {
     blockers.push("WAIT — CONFIG INVALID");
   }

@@ -184,6 +184,24 @@ export async function getGoldHunterSignalClaim(
   return snap.exists ? (snap.data() as GoldHunterSignalClaim) : null;
 }
 
+export async function listGoldHunterSignalClaims(
+  ownerUid: string,
+  limit = 200
+): Promise<GoldHunterSignalClaim[]> {
+  const n = Math.min(500, Math.max(1, limit));
+  const col = claimCol(ownerUid);
+  if (!col) {
+    return [...memMap(ownerUid).values()].slice(0, n);
+  }
+  try {
+    const snap = await col.orderBy("updatedAt", "desc").limit(n).get();
+    return snap.docs.map((d) => d.data() as GoldHunterSignalClaim);
+  } catch {
+    const snap = await col.limit(n).get();
+    return snap.docs.map((d) => d.data() as GoldHunterSignalClaim);
+  }
+}
+
 export async function isGoldHunterSignalDurablyConsumed(
   ownerUid: string,
   signalId: string

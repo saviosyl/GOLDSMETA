@@ -12,6 +12,10 @@ import {
   type GoldHunterAdminConfig,
   type GoldHunterAuditEntry
 } from "./types";
+import {
+  GH_DEMO_MAX_OPEN_TRADES_REQUIRED,
+  validateGoldHunterConfigPatch
+} from "./configValidation";
 
 const memoryConfig = new Map<string, GoldHunterAdminConfig>();
 const memoryAudit = new Map<string, GoldHunterAuditEntry[]>();
@@ -38,27 +42,43 @@ export function validateAllocationEur(value: number): {
   return { ok: true };
 }
 
+function finitePositiveOrDefault(
+  value: unknown,
+  fallback: number
+): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
+
 function normalizeConfig(
   d: Partial<GoldHunterAdminConfig> | undefined
 ): GoldHunterAdminConfig {
   const now = new Date().toISOString();
+  // Do not accept NaN/Infinity into runtime config. Defaults are safe placeholders;
+  // projected-risk / save validation still fail closed on invalid patches.
+  const maxOpenRaw = d?.maxOpenTrades;
+  const maxOpenTrades =
+    typeof maxOpenRaw === "number" &&
+    Number.isFinite(maxOpenRaw) &&
+    Number.isInteger(maxOpenRaw) &&
+    maxOpenRaw === GH_DEMO_MAX_OPEN_TRADES_REQUIRED
+      ? maxOpenRaw
+      : GH_DEMO_MAX_OPEN_TRADES_REQUIRED;
   return {
-    allocatedCapitalEur:
-      typeof d?.allocatedCapitalEur === "number"
-        ? d.allocatedCapitalEur
-        : GH_ADMIN_DEFAULT_CONFIG.allocatedCapitalEur,
-    riskPerTradePct:
-      typeof d?.riskPerTradePct === "number"
-        ? d.riskPerTradePct
-        : GH_ADMIN_DEFAULT_CONFIG.riskPerTradePct,
-    dailyLossLimitPct:
-      typeof d?.dailyLossLimitPct === "number"
-        ? d.dailyLossLimitPct
-        : GH_ADMIN_DEFAULT_CONFIG.dailyLossLimitPct,
-    maxOpenTrades:
-      typeof d?.maxOpenTrades === "number"
-        ? Math.max(1, Math.floor(d.maxOpenTrades))
-        : GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades,
+    allocatedCapitalEur: finitePositiveOrDefault(
+      d?.allocatedCapitalEur,
+      GH_ADMIN_DEFAULT_CONFIG.allocatedCapitalEur
+    ),
+    riskPerTradePct: finitePositiveOrDefault(
+      d?.riskPerTradePct,
+      GH_ADMIN_DEFAULT_CONFIG.riskPerTradePct
+    ),
+    dailyLossLimitPct: finitePositiveOrDefault(
+      d?.dailyLossLimitPct,
+      GH_ADMIN_DEFAULT_CONFIG.dailyLossLimitPct
+    ),
+    maxOpenTrades,
     demoAutoTradeEnabled: Boolean(d?.demoAutoTradeEnabled),
     pauseNewEntries: Boolean(d?.pauseNewEntries),
     emergencyStopActive: Boolean(d?.emergencyStopActive),
@@ -94,22 +114,18 @@ export async function saveGoldHunterConfig(
   updatedBy: string
 ): Promise<GoldHunterAdminConfig> {
   const current = await loadGoldHunterConfig(ownerUid);
+  const patchCheck = validateGoldHunterConfigPatch(patch);
+  if (!patchCheck.ok) {
+    throw Object.assign(new Error("INVALID_GOLD_HUNTER_CONFIG"), {
+      code: patchCheck.detail ?? "config_invalid",
+      issues: patchCheck.issues
+    });
+  }
   if (patch.allocatedCapitalEur != null) {
     const v = validateAllocationEur(patch.allocatedCapitalEur);
     if (!v.ok) {
       throw Object.assign(new Error("INVALID_ALLOCATION"), {
         code: v.reason
-      });
-    }
-  }
-  if (patch.riskPerTradePct != null) {
-    if (
-      !Number.isFinite(patch.riskPerTradePct) ||
-      patch.riskPerTradePct <= 0 ||
-      patch.riskPerTradePct > 10
-    ) {
-      throw Object.assign(new Error("INVALID_RISK_PCT"), {
-        code: "risk_pct_out_of_range"
       });
     }
   }
@@ -122,6 +138,13 @@ export async function saveGoldHunterConfig(
   const next: GoldHunterAdminConfig = {
     ...current,
     ...patch,
+    // Demo phase hard pin — never persist maxOpenTrades other than 1.
+    maxOpenTrades:
+      patch.maxOpenTrades !== undefined
+        ? GH_DEMO_MAX_OPEN_TRADES_REQUIRED
+        : current.maxOpenTrades === GH_DEMO_MAX_OPEN_TRADES_REQUIRED
+          ? current.maxOpenTrades
+          : GH_DEMO_MAX_OPEN_TRADES_REQUIRED,
     mode:
       patch.demoAutoTradeEnabled === true
         ? "DEMO_AUTO"
