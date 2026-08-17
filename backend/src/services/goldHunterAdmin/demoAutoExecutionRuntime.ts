@@ -713,6 +713,7 @@ export async function runGoldHunterDemoAutoExecution(
     source: null,
     loadedAt: null,
     symbolId: null,
+    ctidTraderAccountId: null,
     accountMatched: false,
     environment: null
   };
@@ -724,6 +725,7 @@ export async function runGoldHunterDemoAutoExecution(
         source: "CTRADER_WORKER_SYMBOL_BY_ID",
         loadedAt: new Date().toISOString(),
         symbolId: String(symbol.symbolId),
+        ctidTraderAccountId: null,
         accountMatched: true,
         environment: symbol.environment === "LIVE" ? "LIVE" : "DEMO"
       };
