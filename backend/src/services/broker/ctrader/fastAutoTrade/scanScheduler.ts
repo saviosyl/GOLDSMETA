@@ -5,9 +5,9 @@
 
 import { withBoundedOp, isBoundedOpTimeout } from "./boundedOp";
 
-export const FAST_SCAN_BUDGET_MS = 40_000;
+export const FAST_SCAN_BUDGET_MS = 100_000;
 export const FAST_MANAGE_BUDGET_MS = 80_000;
-export const FAST_OWNER_SCAN_BUDGET_MS = 35_000;
+export const FAST_OWNER_SCAN_BUDGET_MS = 90_000;
 export const FAST_BROKER_READ_BUDGET_MS = 12_000;
 
 export type BoundedCycleResult<S, M> = {
