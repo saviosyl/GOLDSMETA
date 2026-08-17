@@ -29,7 +29,7 @@ export type GoldHunterSymbolMetadataDiagnostics = {
   loadedAt: string | null;
   symbolId: string | null;
   /** Actual cTrader Open API account id when known. */
-  ctidTraderAccountId: string | null;
+  ctidTraderAccountId?: string | null;
   accountMatched: boolean;
   environment: "DEMO" | "LIVE" | null;
 };
