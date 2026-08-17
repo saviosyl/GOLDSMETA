@@ -1,6 +1,5 @@
 /**
- * Gold Hunter Clean Shadow Qualification V1 — types (integrity revision).
- * Research only. No broker mutation.
+ * Gold Hunter Clean Shadow Qualification — types (final integrity revision).
  */
 import type { GhFastExitReason, GhFastSetupId } from "../abc/types";
 import type { GoldHunterSetupLetter } from "../strategySelector";
@@ -9,9 +8,16 @@ import type { GhFastFeatureSnapshot } from "../abc/features";
 export const GH_SHADOW_QUALIFICATION_VERSION = "GH_SHADOW_QUAL_V1" as const;
 export const GH_SHADOW_QUALIFICATION_EPOCH_PREFIX = "GH-SQ" as const;
 
+export type GhShadowOwnerLifecycle =
+  | "UNINITIALIZED"
+  | "INITIALIZING"
+  | "READY"
+  | "FAILED";
+
 export type GhShadowDataQuality =
   | "FORMAL_ELIGIBLE"
-  | "DIAGNOSTIC_EXCLUDED";
+  | "DIAGNOSTIC_EXCLUDED"
+  | "WARMUP_NOT_QUALIFICATION";
 
 export type GhShadowTradeStatus =
   | "OPEN"
@@ -25,19 +31,33 @@ export type GhShadowExitReason =
   | "INVALID_ENTRY"
   | "INVALID_MARKET";
 
-/**
- * Economic exposure mirroring production Demo sizing (not the retired 0.18×100 model).
- * Spread is embedded via Ask/Bid executable prices; frictionPrice is ADDITIONAL
- * frozen commission/slippage in price units — never a second spread subtraction.
- */
+export type GhShadowFrozenSizingSnapshot = {
+  allocatedCapitalEur: number;
+  riskPerTradePct: number;
+  dailyLossLimitPct: number;
+  maxOpenTrades: number;
+  minLots: number;
+  maxLots: number;
+  lotStep: number;
+  ozPerLot: number;
+  valuePerPointPerLot: number;
+  protocolCentsPerLot: number;
+  mappingKey: string;
+  quoteCurrency: string;
+  depositCurrency: string;
+  quoteToDepositRate: number | null;
+  quoteToDepositRateSource: string | null;
+  symbolMetadataProvenance: string;
+  adminSizingConfigSha: string;
+  snappedAt: string;
+};
+
 export type GhShadowEconomicExposure = {
   riskBudgetEur: number;
   stopDistance: number;
   hardStopPrice: number;
-  /** Displayed lots from sizeGoldHunterDemoLots (production helper). */
   displayedLots: number;
   ozPerLot: number;
-  /** displayedLots × ozPerLot */
   economicXauOz: number;
   rawProtocolVolumeEquivalent: number;
   quoteCurrency: string;
@@ -50,28 +70,25 @@ export type GhShadowEconomicExposure = {
   lotStep: number;
   sizingProvenance: string;
   mappingKey: string;
-  /** Frozen strategy friction in price units (extra vs spread). */
+  adminSizingConfigSha: string;
   frictionPrice: number;
-  frictionSemantics:
-    "ADDITIONAL_COMMISSION_SLIPPAGE_PRICE_UNITS_NOT_SPREAD";
+  frictionSemantics: "ADDITIONAL_COMMISSION_SLIPPAGE_PRICE_UNITS_NOT_SPREAD";
   formula: string;
   eurPnlAvailable: boolean;
 };
 
-export type GhShadowCashPnl = {
-  signedPriceMove: number;
-  frictionPrice: number;
-  netPriceMove: number;
-  grossQuote: number;
-  frictionQuote: number;
-  netQuote: number;
-  quoteCurrency: string;
-  /** null when quote→deposit conversion unavailable — never invent EUR. */
-  simulatedGrossPnlEur: number | null;
-  simulatedFrictionEur: number | null;
-  simulatedNetPnlEur: number | null;
-  eurPnlAvailable: boolean;
-  quoteToDepositRate: number | null;
+export type GhShadowLatencySensitivity = {
+  signalExitPrice: number;
+  nextEventPrice: number | null;
+  nextEventReceiveSeq: number | null;
+  priceAt100ms: number | null;
+  priceAt250ms: number | null;
+  priceAt500ms: number | null;
+  signalTickPnlQuote: number;
+  nextEventPnlQuote: number | null;
+  pnl100msQuote: number | null;
+  pnl250msQuote: number | null;
+  pnl500msQuote: number | null;
 };
 
 export type GhShadowTrade = {
@@ -107,18 +124,22 @@ export type GhShadowTrade = {
   grossPriceMove: number | null;
   frictionPrice: number | null;
   netPriceMove: number | null;
-  /** Quote-currency cash (always when closed cleanly). */
+
+  /** Primary formal unit: quote currency (USD). */
   simulatedGrossPnlQuote: number | null;
   simulatedFrictionPnlQuote: number | null;
   simulatedNetPnlQuote: number | null;
   quoteCurrency: string | null;
-  /** EUR only when authoritative FX known. */
+  /** R-multiple vs planned risk (quote / riskBudget when FX maps, else quote/risk in mixed note). */
+  netR: number | null;
+
   simulatedGrossPnlEur: number | null;
   simulatedFrictionEur: number | null;
   simulatedNetPnlEur: number | null;
   eurPnlAvailable: boolean;
 
   economic: GhShadowEconomicExposure | null;
+  latency: GhShadowLatencySensitivity | null;
 
   profitLockActivatedAt: string | null;
   trailActivatedAt: string | null;
@@ -150,8 +171,34 @@ export type GhShadowIntegrityCounters = {
   eventsPersisted: number;
   eventsDropped: number;
   receiveSeqGaps: number;
+  receiveSeqDuplicates: number;
+  receiveSeqOutOfOrder: number;
   journalOverflowCount: number;
+  journalPending: number;
+  journalHighWaterMark: number;
+  persistAcknowledgedEvents: number;
+  persistFailures: number;
   lastProcessedReceiveSeq: number | null;
+  lastResyncGeneration: number | null;
+};
+
+export type GhShadowActivityCounters = {
+  newOpportunitiesDetected: number;
+  formalTradesOpened: number;
+  formalTradesClosed: number;
+  opportunitiesWhileAlreadyOpen: number;
+  opportunitiesExcludedDataQuality: number;
+  opportunitiesRejectedSizing: number;
+  opportunitiesWarmupIgnored: number;
+  otherRejectionReasons: Record<string, number>;
+  activeMarketMs: number;
+  entryTimestampsMs: number[];
+  openTradeDurationsMs: number[];
+  flatIdleSegmentsMs: number[];
+  lastActiveMarketAtMs: number | null;
+  lastEntryAtMs: number | null;
+  lastFlatStartMs: number | null;
+  bySetupOpened: Record<"A" | "B" | "C", number>;
 };
 
 export type GhShadowQualificationEpoch = {
@@ -163,18 +210,26 @@ export type GhShadowQualificationEpoch = {
   strategyVersion: string;
   engineVersion: string;
   soakLabel: string;
+  frozenSizing: GhShadowFrozenSizingSnapshot;
   formalQualificationTrades: number;
   diagnosticExcludedTrades: number;
   openShadowTradeId: string | null;
   status: "ACTIVE" | "PAUSED" | "COMPLETED" | "DATA_QUALITY_FAILED";
   dataIntegrityFailure: string | null;
+  persistFailureReason: string | null;
   runtimeGeneration: number;
   lastRestartReason: string | null;
   integrity: GhShadowIntegrityCounters;
-  lastReplayStatus: "LIVE_REPLAY_OK" | "LIVE_REPLAY_DIVERGENCE" | "NOT_RUN";
+  activity: GhShadowActivityCounters;
+  lastReplayStatus:
+    | "LIVE_REPLAY_OK"
+    | "LIVE_REPLAY_DIVERGENCE"
+    | "REPLAY_INCOMPLETE"
+    | "NOT_RUN";
   lastReplayDetail: {
     capturedEvents: number;
     replayedEvents: number;
+    expectedEvents: number | null;
     firstDivergenceSeq: number | null;
     divergenceDetail: string | null;
   } | null;
@@ -185,7 +240,14 @@ export type GhShadowDecisionRecord = {
   decisionId: string;
   qualificationId: string;
   at: string;
-  kind: "OPEN" | "HOLD" | "EXIT" | "EXCLUDE" | "INTEGRITY";
+  kind:
+    | "OPEN"
+    | "HOLD"
+    | "EXIT"
+    | "EXCLUDE"
+    | "INTEGRITY"
+    | "WARMUP"
+    | "CONFIG";
   opportunityId: string | null;
   tradeId: string | null;
   setup: GoldHunterSetupLetter | null;
@@ -197,10 +259,6 @@ export type GhShadowDecisionRecord = {
   detail: string | null;
 };
 
-/**
- * Normalized market event journal entry — enough to replay openTrade /
- * updateOpenTrade / evaluateOpenExit deterministically.
- */
 export type GhShadowCapturedEvent = {
   eventId: string;
   qualificationId: string;
@@ -216,6 +274,8 @@ export type GhShadowCapturedEvent = {
   bookGeneration: number;
   resyncGeneration: number;
   newOpportunity: boolean;
+  /** Only true for events that belong to a formal open→exit path (replay scope). */
+  inFormalTradePath: boolean;
   openMarker: {
     tradeId: string;
     opportunityId: string;

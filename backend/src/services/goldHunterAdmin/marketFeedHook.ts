@@ -22,7 +22,7 @@ import {
   maybeReconsiderGoldHunterDemoAutoExecution
 } from "./demoAutoExecutionRuntime";
 import { enqueueGoldHunterPositionManagerTick } from "./demoPositionManager";
-import { enqueueGhShadowQualificationTick } from "./shadowQualification";
+import { onGhShadowMarketTick } from "./shadowQualification";
 
 export type GhMarketFeedMeta = {
   ownerUid: string;
@@ -170,11 +170,20 @@ function afterSelectorTick(
   enqueueGoldHunterPositionManagerTick(meta.ownerUid);
 
   // Research shadow qualification — independent of Demo AutoTrade / broker.
-  // Default OFF via GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED. Never NewOrder.
-  enqueueGhShadowQualificationTick({
-    ownerUid: meta.ownerUid,
-    tick
-  });
+  // Default OFF. Pass authoritative receiveSeq / resync / receivedAtMs.
+  {
+    const sel = getGoldHunterStrategySelector(meta.ownerUid);
+    const snap = sel.getLastSnapshot();
+    onGhShadowMarketTick({
+      ownerUid: meta.ownerUid,
+      tick,
+      receiveSeq: sel.getReceiveSeq(),
+      receivedAtMs:
+        sel.getLastSpotAtMs() ?? sel.getLastDepthAtMs() ?? Date.now(),
+      resyncGeneration: sel.getResyncGeneration(),
+      bookGeneration: snap?.bookGeneration ?? 0
+    });
+  }
 }
 
 /**

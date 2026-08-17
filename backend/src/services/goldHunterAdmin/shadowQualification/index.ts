@@ -15,8 +15,11 @@ export type {
   GhShadowDataQuality,
   GhShadowExitReason,
   GhShadowCapturedEvent,
-  GhShadowCashPnl,
-  GhShadowIntegrityCounters
+  GhShadowIntegrityCounters,
+  GhShadowFrozenSizingSnapshot,
+  GhShadowOwnerLifecycle,
+  GhShadowActivityCounters,
+  GhShadowLatencySensitivity
 } from "./types";
 
 export {
@@ -29,9 +32,11 @@ export {
   provenGrossPnlEurExample,
   PEPPERSTONE_CTRADER_XAUUSD_DEMO
 } from "./economics";
+export type { GhShadowCashPnl } from "./economics";
 
 export {
   loadGhShadowEpoch,
+  loadGhShadowTrade,
   listGhShadowTrades,
   listGhShadowDecisions,
   listGhShadowCapturedEvents,
@@ -45,6 +50,9 @@ export type {
   GhShadowPerformanceReport,
   GhShadowPayoffDiagnostics
 } from "./performance";
+
+export { computeGhShadowActivityReport } from "./activity";
+export type { GhShadowActivityReport } from "./activity";
 
 export {
   GhShadowQualificationEngine,
@@ -64,6 +72,7 @@ export {
   isGhShadowQualificationEnabled,
   enqueueGhShadowQualificationTick,
   onGhShadowSelectorTick,
+  onGhShadowMarketTick,
   processGhShadowMarketEventSync,
   drainGhShadowQualificationForTests,
   flushGhShadowPersistenceForTests,
@@ -72,7 +81,13 @@ export {
   resetGhShadowQualificationRuntimeForTests,
   runGhShadowReplayAndGate,
   setGhShadowPersistDelayMsForTests,
-  setGhShadowSizingOverridesForTests
+  setGhShadowSizingOverridesForTests,
+  setGhShadowLoadEpochDelayMsForTests,
+  setGhShadowPersistFailHookForTests,
+  getGhShadowOwnerLifecycle,
+  getGhShadowConfigReadCount,
+  awaitGhShadowOwnerReady,
+  ensureGhShadowOwnerReady
 } from "./runtime";
 
 export {
@@ -85,3 +100,4 @@ export type {
 } from "./replay";
 
 export { GhShadowEventJournal } from "./journal";
+export { buildFrozenSizingSnapshot } from "./frozenSizing";

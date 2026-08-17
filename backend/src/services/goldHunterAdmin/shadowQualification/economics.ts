@@ -16,7 +16,7 @@ import {
   sizeGoldHunterDemoLots
 } from "../riskSizing";
 import type { GoldHunterAdminConfig } from "../types";
-import type { GhShadowCashPnl, GhShadowEconomicExposure } from "./types";
+import type { GhShadowEconomicExposure, GhShadowFrozenSizingSnapshot } from "./types";
 
 /** Pepperstone Demo XAU proven volume defaults when live catalogue unavailable. */
 export const GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS = {
@@ -30,12 +30,28 @@ export const GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS = {
     "PEPPERSTONE_CTRADER_XAUUSD_DEMO_PROVEN_DEFAULTS (min=1 step=1 max=5000; ozPerLot=1)"
 } as const;
 
+export type GhShadowCashPnl = {
+  signedPriceMove: number;
+  frictionPrice: number;
+  netPriceMove: number;
+  grossQuote: number;
+  frictionQuote: number;
+  netQuote: number;
+  quoteCurrency: string;
+  netR: number | null;
+  simulatedGrossPnlEur: number | null;
+  simulatedFrictionEur: number | null;
+  simulatedNetPnlEur: number | null;
+  eurPnlAvailable: boolean;
+  quoteToDepositRate: number | null;
+};
+
 export type GhShadowSizingInput = {
   config: GoldHunterAdminConfig;
   entryPrice: number;
-  /** Optional override; default = entry ± frozen hardStop. */
   stopPrice?: number;
   side: "BUY" | "SELL";
+  frozenSizing?: GhShadowFrozenSizingSnapshot;
   minLots?: number;
   maxLots?: number;
   lotStep?: number;
@@ -45,6 +61,7 @@ export type GhShadowSizingInput = {
   quoteToDepositRate?: number | null;
   quoteToDepositRateSource?: string | null;
   sizingProvenance?: string;
+  adminSizingConfigSha?: string;
 };
 
 export type GhShadowSizingResult =
@@ -62,13 +79,24 @@ export function computeGhShadowEconomicExposure(
       ? args.entryPrice - hardStopPrice
       : args.entryPrice + hardStopPrice);
 
-  const minLots = args.minLots ?? GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.minLots;
-  const maxLots = args.maxLots ?? GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.maxLots;
-  const lotStep = args.lotStep ?? GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.lotStep;
+  const minLots =
+    args.frozenSizing?.minLots ??
+    args.minLots ??
+    GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.minLots;
+  const maxLots =
+    args.frozenSizing?.maxLots ??
+    args.maxLots ??
+    GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.maxLots;
+  const lotStep =
+    args.frozenSizing?.lotStep ??
+    args.lotStep ??
+    GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.lotStep;
   const valuePerPointPerLot =
+    args.frozenSizing?.valuePerPointPerLot ??
     args.valuePerPointPerLot ??
     GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.valuePerPointPerLot;
-  const ozPerLot = PEPPERSTONE_CTRADER_XAUUSD_DEMO.ozPerLot;
+  const ozPerLot =
+    args.frozenSizing?.ozPerLot ?? PEPPERSTONE_CTRADER_XAUUSD_DEMO.ozPerLot;
 
   const sized = sizeGoldHunterDemoLots({
     config: args.config,
@@ -87,12 +115,20 @@ export function computeGhShadowEconomicExposure(
   const economicXauOz = displayedLots * ozPerLot;
   const rawProtocolVolumeEquivalent = protocolVolumeFromLots(displayedLots);
   const quoteToDepositRate =
-    args.quoteToDepositRate != null &&
+    (args.frozenSizing?.quoteToDepositRate != null &&
+    args.frozenSizing.quoteToDepositRate > 0
+      ? args.frozenSizing.quoteToDepositRate
+      : null) ??
+    (args.quoteToDepositRate != null &&
     Number.isFinite(args.quoteToDepositRate) &&
     args.quoteToDepositRate > 0
       ? args.quoteToDepositRate
-      : null;
+      : null);
   const eurPnlAvailable = quoteToDepositRate != null;
+  const adminSizingConfigSha =
+    args.frozenSizing?.adminSizingConfigSha ??
+    args.adminSizingConfigSha ??
+    "unfrozen";
 
   return {
     ok: true,
@@ -105,22 +141,30 @@ export function computeGhShadowEconomicExposure(
       economicXauOz,
       rawProtocolVolumeEquivalent,
       quoteCurrency:
-        args.quoteCurrency ?? GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.quoteCurrency,
+        args.frozenSizing?.quoteCurrency ??
+        args.quoteCurrency ??
+        GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.quoteCurrency,
       depositCurrency:
+        args.frozenSizing?.depositCurrency ??
         args.depositCurrency ??
         GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.depositCurrency,
       quoteToDepositRate,
       quoteToDepositRateSource: quoteToDepositRate
-        ? args.quoteToDepositRateSource ?? "provided"
+        ? args.frozenSizing?.quoteToDepositRateSource ??
+          args.quoteToDepositRateSource ??
+          "provided"
         : null,
       valuePerPointPerLot,
       minLots,
       maxLots,
       lotStep,
       sizingProvenance:
+        args.frozenSizing?.symbolMetadataProvenance ??
         args.sizingProvenance ??
         GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.provenance,
-      mappingKey: PEPPERSTONE_CTRADER_XAUUSD_DEMO.key,
+      mappingKey:
+        args.frozenSizing?.mappingKey ?? PEPPERSTONE_CTRADER_XAUUSD_DEMO.key,
+      adminSizingConfigSha,
       frictionPrice: cfg.friction,
       frictionSemantics:
         "ADDITIONAL_COMMISSION_SLIPPAGE_PRICE_UNITS_NOT_SPREAD",
@@ -129,6 +173,7 @@ export function computeGhShadowEconomicExposure(
         "displayedLots = sizeGoldHunterDemoLots(...); " +
         "economicXauOz = displayedLots * ozPerLot; " +
         "grossQuote = signedPriceMove * displayedLots * ozPerLot; " +
+        "netR = netQuote / riskBudgetEur (when riskBudgetEur>0; quote USD primary); " +
         "grossEur = quoteToDepositRate != null ? grossQuote * quoteToDepositRate : UNAVAILABLE; " +
         "friction is ADDITIONAL price friction (spread already in Ask/Bid)"
     }
@@ -182,6 +227,20 @@ export function simulateGhShadowCashPnl(args: {
   const rate = args.economic.quoteToDepositRate;
   const eurOk =
     rate != null && Number.isFinite(rate) && rate > 0 && args.economic.eurPnlAvailable;
+  const risk = args.economic.riskBudgetEur;
+  // R-multiple: quote net / riskBudgetEur. When FX known, risk is EUR and net
+  // quote is USD — convert risk to quote for consistent R: riskQuote = risk/rate.
+  let netR: number | null = null;
+  if (risk > 0) {
+    if (eurOk && rate!) {
+      const riskQuote = risk / rate!;
+      netR = riskQuote > 0 ? netQuote / riskQuote : null;
+    } else {
+      // No FX: treat riskBudgetEur numerically as risk unit matching historical GH
+      // sizing input (same production helper) — document as risk-budget units.
+      netR = netQuote / risk;
+    }
+  }
 
   return {
     signedPriceMove,
@@ -191,6 +250,7 @@ export function simulateGhShadowCashPnl(args: {
     frictionQuote,
     netQuote,
     quoteCurrency: args.economic.quoteCurrency,
+    netR,
     simulatedGrossPnlEur: eurOk ? grossQuote * rate! : null,
     simulatedFrictionEur: eurOk ? frictionQuote * rate! : null,
     simulatedNetPnlEur: eurOk ? netQuote * rate! : null,
