@@ -484,3 +484,19 @@ describe("Exit-side PENDING_RECONCILIATION reconcile", () => {
     expect(text).toContain("reconcileGoldHunterPendingExitReconciliations");
   });
 });
+
+describe("Close deal query window", () => {
+  it("never uses a future toTimestamp (Spotware reject)", async () => {
+    const { goldHunterCloseDealQueryWindow } = await import(
+      "../../../src/services/broker/ctrader/demoPositionMutations"
+    );
+    const nowMs = Date.parse("2026-08-17T09:00:00.000Z");
+    const w = goldHunterCloseDealQueryWindow({
+      openedAt: "2026-08-17T07:21:03.779Z",
+      nowMs
+    });
+    expect(w.toTimestampMs).toBe(nowMs);
+    expect(w.toTimestampMs).toBeLessThanOrEqual(nowMs);
+    expect(w.fromTimestampMs).toBeLessThan(w.toTimestampMs);
+  });
+});
