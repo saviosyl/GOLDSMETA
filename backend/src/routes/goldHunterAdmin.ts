@@ -35,7 +35,7 @@ import { assertGoldHunterDemoOnlyEnvironment } from "../services/goldHunterAdmin
 import {
   buildGhShadowQualificationStatus,
   listGhShadowTrades,
-  getGhShadowBrokerMutationProof,
+  getGhShadowMutationSurfaceReport,
   getGhShadowStrategyConfigIdentity
 } from "../services/goldHunterAdmin/shadowQualification";
 
@@ -387,7 +387,7 @@ export const buildGoldHunterAdminRouter = (): Router => {
         trades,
         formalOnly,
         identity: getGhShadowStrategyConfigIdentity(),
-        brokerMutationProof: getGhShadowBrokerMutationProof(),
+        mutationSurface: getGhShadowMutationSurfaceReport(),
         strategy: GH_ADMIN_STRATEGY_ID
       });
     }

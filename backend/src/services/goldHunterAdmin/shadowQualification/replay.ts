@@ -1,8 +1,6 @@
 /**
- * Deterministic replay for shadow qualification decisions.
- *
- * For a fixed captured event sequence, live-shadow decisions and replay
- * decisions must match → LIVE_REPLAY_OK, else LIVE_REPLAY_DIVERGENCE.
+ * Captured-event journal replay for shadow qualification.
+ * Reads actual journal events in receiveSeq order — NOT synthetic entry+exit.
  */
 import {
   evaluateOpenExit,
@@ -10,169 +8,237 @@ import {
   updateOpenTrade
 } from "../abc/exits";
 import { frozenGhFastSoakConfig } from "../abc/frozenConfig";
-import type { GhFastFeatureSnapshot } from "../abc/features";
-import type { GhFastExitReason, GhFastOpenTrade, GhFastSetupId } from "../abc/types";
-import type { GhShadowDecisionRecord, GhShadowTrade } from "./types";
+import type { GhFastOpenTrade } from "../abc/types";
+import type {
+  GhShadowCapturedEvent,
+  GhShadowDecisionRecord,
+  GhShadowTrade
+} from "./types";
 
-export type GhShadowReplayMarketEvent = {
+export type GhShadowReplayComparePoint = {
+  kind: "OPEN" | "EXIT";
   receiveSeq: number;
-  bid: number;
-  ask: number;
-  features: GhFastFeatureSnapshot | null;
-  dataOk: boolean;
-  /** When set, attempt open (same as live newOpportunity). */
-  open?: {
-    tradeId: string;
-    side: "BUY" | "SELL";
-    setup: GhFastSetupId;
-    entryTs: number;
-  };
+  tradeId: string | null;
+  side: "BUY" | "SELL" | null;
+  setup: string | null;
+  exitReason: string | null;
+  mfe: number | null;
+  mae: number | null;
+  profitLockActive: boolean | null;
+  trailActivated: boolean | null;
+  lockFloor: number | null;
+  netPriceMove: number | null;
 };
 
 export type GhShadowReplayResult = {
   status: "LIVE_REPLAY_OK" | "LIVE_REPLAY_DIVERGENCE";
-  liveDecisions: Array<{ kind: string; tradeId: string | null; exitReason: string | null; receiveSeq: number }>;
-  replayDecisions: Array<{ kind: string; tradeId: string | null; exitReason: string | null; receiveSeq: number }>;
+  capturedEvents: number;
+  replayedEvents: number;
+  firstDivergenceSeq: number | null;
   divergenceDetail: string | null;
+  livePoints: GhShadowReplayComparePoint[];
+  replayPoints: GhShadowReplayComparePoint[];
 };
 
-function setupId(letter: string): GhFastSetupId {
-  if (letter === "A" || letter.startsWith("A_")) return "A_MOMENTUM_IGNITION";
-  if (letter === "B" || letter.startsWith("B_")) return "B_FAST_BREAKOUT";
-  return "C_PULLBACK_REACCEL";
+function pointsEqual(
+  a: GhShadowReplayComparePoint,
+  b: GhShadowReplayComparePoint
+): boolean {
+  const near = (x: number | null, y: number | null) => {
+    if (x == null && y == null) return true;
+    if (x == null || y == null) return false;
+    return Math.abs(x - y) < 1e-9;
+  };
+  return (
+    a.kind === b.kind &&
+    a.receiveSeq === b.receiveSeq &&
+    a.tradeId === b.tradeId &&
+    a.side === b.side &&
+    a.setup === b.setup &&
+    a.exitReason === b.exitReason &&
+    near(a.mfe, b.mfe) &&
+    near(a.mae, b.mae) &&
+    a.profitLockActive === b.profitLockActive &&
+    a.trailActivated === b.trailActivated &&
+    near(a.lockFloor, b.lockFloor) &&
+    near(a.netPriceMove, b.netPriceMove)
+  );
 }
 
 /**
- * Replay market events through the same exit geometry; compare to live decisions.
+ * Replay captured journal through the same exit geometry.
  */
-export function replayGhShadowEventSequence(args: {
-  events: GhShadowReplayMarketEvent[];
+export function replayGhShadowCapturedEvents(args: {
+  events: GhShadowCapturedEvent[];
   liveDecisions: GhShadowDecisionRecord[];
+  liveTrades: GhShadowTrade[];
 }): GhShadowReplayResult {
   const cfg = frozenGhFastSoakConfig();
+  const sorted = [...args.events].sort((a, b) => a.receiveSeq - b.receiveSeq);
   let fast: GhFastOpenTrade | null = null;
-  const replayDecisions: GhShadowReplayResult["replayDecisions"] = [];
+  let openSide: "BUY" | "SELL" | null = null;
+  let openSetup: string | null = null;
+  let profitLockSeen = false;
+  let trailSeen = false;
+  const replayPoints: GhShadowReplayComparePoint[] = [];
+  let replayed = 0;
 
-  for (const ev of args.events) {
-    if (ev.open && !fast) {
+  for (const ev of sorted) {
+    replayed += 1;
+    if (ev.openMarker && !fast) {
+      const m = ev.openMarker;
       fast = openTrade({
-        tradeId: ev.open.tradeId,
-        side: ev.open.side,
-        setup: ev.open.setup,
-        entryTs: ev.open.entryTs,
+        tradeId: m.tradeId,
+        side: m.side,
+        setup: m.setupId,
+        entryTs: ev.eventTsMs,
         bid: ev.bid,
         ask: ev.ask,
         trailDistance: cfg.trailDistance
       });
-      replayDecisions.push({
+      openSide = m.side;
+      openSetup = m.setup;
+      profitLockSeen = false;
+      trailSeen = false;
+      replayPoints.push({
         kind: "OPEN",
-        tradeId: ev.open.tradeId,
+        receiveSeq: ev.receiveSeq,
+        tradeId: m.tradeId,
+        side: m.side,
+        setup: m.setup,
         exitReason: null,
-        receiveSeq: ev.receiveSeq
+        mfe: 0,
+        mae: 0,
+        profitLockActive: false,
+        trailActivated: false,
+        lockFloor: null,
+        netPriceMove: null
       });
       continue;
     }
+
     if (!fast) continue;
     if (!Number.isFinite(ev.bid) || !Number.isFinite(ev.ask)) continue;
     updateOpenTrade(fast, ev.bid, ev.ask, cfg);
+    if (fast.profitLockActive) {
+      profitLockSeen = true;
+      trailSeen = true;
+    }
     if (!ev.features) continue;
     const reason = evaluateOpenExit({
       trade: fast,
       f: ev.features,
       cfg,
       dataOk: ev.dataOk
-    }) as GhFastExitReason | null;
-    if (reason) {
-      replayDecisions.push({
-        kind: "EXIT",
-        tradeId: fast.tradeId,
-        exitReason: reason,
-        receiveSeq: ev.receiveSeq
+    });
+    if (!reason) continue;
+
+    const entry = fast.entryPrice;
+    const exitPx = fast.side === "BUY" ? ev.bid : ev.ask;
+    const netMove =
+      fast.side === "BUY" ? exitPx - entry - cfg.friction : entry - exitPx - cfg.friction;
+
+    replayPoints.push({
+      kind: "EXIT",
+      receiveSeq: ev.receiveSeq,
+      tradeId: fast.tradeId,
+      side: openSide,
+      setup: openSetup,
+      exitReason: reason,
+      mfe: fast.mfe,
+      mae: fast.mae,
+      profitLockActive: profitLockSeen,
+      trailActivated: trailSeen,
+      lockFloor: fast.lockFloor,
+      netPriceMove: netMove
+    });
+    fast = null;
+  }
+
+  // Build live compare points from decisions + closed trades
+  const tradeById = new Map(args.liveTrades.map((t) => [t.tradeId, t]));
+  const livePoints: GhShadowReplayComparePoint[] = [];
+  for (const d of args.liveDecisions) {
+    if (d.kind !== "OPEN" && d.kind !== "EXIT") continue;
+    const t = d.tradeId ? tradeById.get(d.tradeId) : undefined;
+    if (d.kind === "OPEN") {
+      livePoints.push({
+        kind: "OPEN",
+        receiveSeq: d.receiveSeq,
+        tradeId: d.tradeId,
+        side: d.side,
+        setup: d.setup,
+        exitReason: null,
+        mfe: 0,
+        mae: 0,
+        profitLockActive: false,
+        trailActivated: false,
+        lockFloor: null,
+        netPriceMove: null
       });
-      fast = null;
+    } else {
+      livePoints.push({
+        kind: "EXIT",
+        receiveSeq: d.receiveSeq,
+        tradeId: d.tradeId,
+        side: d.side,
+        setup: d.setup,
+        exitReason: d.exitReason,
+        mfe: t?.mfe ?? null,
+        mae: t?.mae ?? null,
+        profitLockActive: t?.profitLockActivatedAt != null,
+        trailActivated: t?.trailActivatedAt != null || t?.profitLockActivatedAt != null,
+        lockFloor: t?.path.lockFloorAtExit ?? t?.lockFloorLatest ?? null,
+        netPriceMove: t?.netPriceMove ?? null
+      });
     }
   }
 
-  const live = args.liveDecisions
-    .filter((d) => d.kind === "OPEN" || d.kind === "EXIT")
-    .map((d) => ({
-      kind: d.kind,
-      tradeId: d.tradeId,
-      exitReason: d.exitReason,
-      receiveSeq: d.receiveSeq
-    }));
-
-  if (live.length !== replayDecisions.length) {
+  if (livePoints.length !== replayPoints.length) {
     return {
       status: "LIVE_REPLAY_DIVERGENCE",
-      liveDecisions: live,
-      replayDecisions,
-      divergenceDetail: `count_mismatch live=${live.length} replay=${replayDecisions.length}`
+      capturedEvents: sorted.length,
+      replayedEvents: replayed,
+      firstDivergenceSeq: replayPoints[0]?.receiveSeq ?? livePoints[0]?.receiveSeq ?? null,
+      divergenceDetail: `count_mismatch live=${livePoints.length} replay=${replayPoints.length}`,
+      livePoints,
+      replayPoints
     };
   }
 
-  for (let i = 0; i < live.length; i++) {
-    const a = live[i]!;
-    const b = replayDecisions[i]!;
-    if (
-      a.kind !== b.kind ||
-      a.exitReason !== b.exitReason ||
-      a.receiveSeq !== b.receiveSeq
-    ) {
+  for (let i = 0; i < livePoints.length; i++) {
+    const a = livePoints[i]!;
+    const b = replayPoints[i]!;
+    if (!pointsEqual(a, b)) {
       return {
         status: "LIVE_REPLAY_DIVERGENCE",
-        liveDecisions: live,
-        replayDecisions,
-        divergenceDetail: `idx=${i} live=${JSON.stringify(a)} replay=${JSON.stringify(b)}`
+        capturedEvents: sorted.length,
+        replayedEvents: replayed,
+        firstDivergenceSeq: a.receiveSeq,
+        divergenceDetail: `idx=${i} live=${JSON.stringify(a)} replay=${JSON.stringify(b)}`,
+        livePoints,
+        replayPoints
       };
     }
   }
 
   return {
     status: "LIVE_REPLAY_OK",
-    liveDecisions: live,
-    replayDecisions,
-    divergenceDetail: null
+    capturedEvents: sorted.length,
+    replayedEvents: replayed,
+    firstDivergenceSeq: null,
+    divergenceDetail: null,
+    livePoints,
+    replayPoints
   };
 }
 
 /**
- * Build a minimal event stream from a completed formal trade forensics
- * (entry + synthetic exit tick) — useful for unit proof of determinism.
+ * Unit-only helper — NOT valid as LIVE_REPLAY qualification proof.
+ * @deprecated Do not use for formal LIVE_REPLAY_OK.
  */
-export function buildMinimalReplayEventsFromTrade(
-  trade: GhShadowTrade,
-  featuresAtExit: GhFastFeatureSnapshot
-): GhShadowReplayMarketEvent[] {
-  if (
-    trade.entryBid == null ||
-    trade.entryAsk == null ||
-    trade.exitBid == null ||
-    trade.exitAsk == null ||
-    trade.entryTs == null
-  ) {
-    return [];
-  }
-  return [
-    {
-      receiveSeq: trade.receiveSeqAtEntry ?? 1,
-      bid: trade.entryBid,
-      ask: trade.entryAsk,
-      features: null,
-      dataOk: true,
-      open: {
-        tradeId: trade.tradeId,
-        side: trade.side,
-        setup: setupId(String(trade.setupId || trade.setup)),
-        entryTs: Date.parse(trade.entryTs)
-      }
-    },
-    {
-      receiveSeq: trade.receiveSeqAtExit ?? (trade.receiveSeqAtEntry ?? 1) + 1,
-      bid: trade.exitBid,
-      ask: trade.exitAsk,
-      features: featuresAtExit,
-      dataOk: trade.exitReason !== "DATA_STALE"
-    }
-  ];
+export function buildMinimalReplayEventsFromTrade(): never {
+  throw new Error(
+    "buildMinimalReplayEventsFromTrade is not valid for LIVE_REPLAY qualification proof — use captured event journal"
+  );
 }

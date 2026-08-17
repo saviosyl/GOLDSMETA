@@ -1,7 +1,13 @@
 /**
  * Formal performance + payoff diagnostics for clean shadow trades only.
+ * formalDecisionReady requires LIVE_REPLAY_OK + integrity clean.
  */
-import type { GhShadowExitReason, GhShadowTrade } from "./types";
+import type {
+  GhShadowExitReason,
+  GhShadowIntegrityCounters,
+  GhShadowQualificationEpoch,
+  GhShadowTrade
+} from "./types";
 
 function avg(nums: number[]): number | null {
   if (!nums.length) return null;
@@ -27,6 +33,17 @@ function maxDrawdown(pnls: number[]): number {
   return maxDd;
 }
 
+/** Prefer EUR net when available; else quote net (still formal for counts). */
+function formalNet(t: GhShadowTrade): number | null {
+  if (t.eurPnlAvailable && t.simulatedNetPnlEur != null) {
+    return t.simulatedNetPnlEur;
+  }
+  if (t.simulatedNetPnlQuote != null && Number.isFinite(t.simulatedNetPnlQuote)) {
+    return t.simulatedNetPnlQuote;
+  }
+  return null;
+}
+
 export type GhShadowSetupStats = {
   trades: number;
   wins: number;
@@ -34,7 +51,7 @@ export type GhShadowSetupStats = {
   winRate: number | null;
   profitFactor: number | null;
   expectancy: number | null;
-  netPnlEur: number;
+  netPnl: number;
 };
 
 export type GhShadowExitReasonStats = {
@@ -48,10 +65,9 @@ export type GhShadowExitReasonStats = {
 };
 
 export type GhShadowPayoffDiagnostics = {
-  avgWinEur: number | null;
-  avgLossEur: number | null;
+  avgWin: number | null;
+  avgLoss: number | null;
   avgWinOverAvgLoss: number | null;
-  /** Average (netPnl / (mfe * scale)) for winners with mfe>0 — capture of favorable excursion in cash terms approximates net/maxFavorable cash. */
   mfeCaptureRatioWinners: number | null;
   losersWithPriorPositiveMfePct: number | null;
   harvestFadePaths: Array<{
@@ -68,18 +84,22 @@ export type GhShadowPayoffDiagnostics = {
   }>;
   hardProtectionMae: Array<{ tradeId: string; mae: number }>;
   lossSourceHints: string[];
+  pnlUnitNote: string;
 };
 
 export type GhShadowPerformanceReport = {
+  qualificationId: string | null;
   completedTrades: number;
   wins: number;
   losses: number;
   winRate: number | null;
-  grossPnlEur: number;
-  frictionEur: number;
-  netSimulatedPnlEur: number;
+  grossPnl: number;
+  friction: number;
+  netSimulatedPnl: number;
+  eurPnlTrades: number;
+  quoteOnlyPnlTrades: number;
   profitFactor: number | null;
-  expectancyEurPerTrade: number | null;
+  expectancyPerTrade: number | null;
   averageWinner: number | null;
   averageLoser: number | null;
   averageWinLossRatio: number | null;
@@ -92,6 +112,7 @@ export type GhShadowPerformanceReport = {
   bySetup: Record<"A" | "B" | "C", GhShadowSetupStats>;
   byExitReason: GhShadowExitReasonStats[];
   payoff: GhShadowPayoffDiagnostics;
+  integrity: GhShadowIntegrityCounters | null;
   checkpoint: {
     at50: "DATA_QUALITY_ONLY" | "NOT_REACHED";
     at100: "EARLY_OBSERVATION" | "NOT_REACHED";
@@ -106,7 +127,7 @@ export type GhShadowPerformanceReport = {
 
 function setupStats(trades: GhShadowTrade[]): GhShadowSetupStats {
   const nets = trades
-    .map((t) => t.simulatedNetPnlEur)
+    .map(formalNet)
     .filter((n): n is number => n != null && Number.isFinite(n));
   const wins = nets.filter((n) => n > 0);
   const losses = nets.filter((n) => n <= 0);
@@ -120,58 +141,61 @@ function setupStats(trades: GhShadowTrade[]): GhShadowSetupStats {
     winRate: trades.length ? wins.length / trades.length : null,
     profitFactor: grossLossAbs > 0 ? grossWin / grossLossAbs : wins.length ? Infinity : null,
     expectancy: trades.length ? net / trades.length : null,
-    netPnlEur: net
+    netPnl: net
   };
 }
 
-function classifyAt250(report: {
-  completedTrades: number;
-  profitFactor: number | null;
-  expectancyEurPerTrade: number | null;
-  netSimulatedPnlEur: number;
-}): GhShadowPerformanceReport["checkpoint"]["at250"] {
-  if (report.completedTrades < 250) return "NOT_REACHED";
-  if (report.profitFactor == null || report.expectancyEurPerTrade == null) {
-    return "INSUFFICIENT / DATA QUALITY FAILURE";
-  }
-  const promising =
-    report.netSimulatedPnlEur > 0 &&
-    report.profitFactor >= 1.15 &&
-    report.expectancyEurPerTrade > 0;
-  if (promising) return "PROMISING — CONTINUE TO 500";
-  if (report.netSimulatedPnlEur < 0 || report.profitFactor < 1) {
-    return "NEGATIVE EDGE — STRATEGY REDESIGN REQUIRED";
-  }
-  return "INSUFFICIENT / DATA QUALITY FAILURE";
+function integrityClean(epoch: GhShadowQualificationEpoch | null): boolean {
+  if (!epoch) return false;
+  if (epoch.status === "DATA_QUALITY_FAILED") return false;
+  if (epoch.dataIntegrityFailure) return false;
+  if (epoch.integrity.eventsDropped > 0) return false;
+  if (epoch.integrity.receiveSeqGaps > 0) return false;
+  if (epoch.integrity.journalOverflowCount > 0) return false;
+  return true;
 }
 
 export function computeGhShadowPerformanceReport(
-  tradesIn: GhShadowTrade[]
+  tradesIn: GhShadowTrade[],
+  epoch: GhShadowQualificationEpoch | null
 ): GhShadowPerformanceReport {
+  const qid = epoch?.qualificationId ?? null;
   const trades = tradesIn.filter(
     (t) =>
+      (qid == null || t.qualificationId === qid) &&
       t.dataQuality === "FORMAL_ELIGIBLE" &&
       t.status === "CLOSED" &&
       t.entryPrice != null &&
       t.entryPrice > 0 &&
-      t.simulatedNetPnlEur != null &&
-      Number.isFinite(t.simulatedNetPnlEur)
+      formalNet(t) != null
   );
 
-  const nets = trades.map((t) => t.simulatedNetPnlEur!);
-  const wins = trades.filter((t) => (t.simulatedNetPnlEur ?? 0) > 0);
-  const losses = trades.filter((t) => (t.simulatedNetPnlEur ?? 0) <= 0);
-  const winNets = wins.map((t) => t.simulatedNetPnlEur!);
-  const lossNets = losses.map((t) => t.simulatedNetPnlEur!);
-  const grossPnlEur = trades.reduce(
-    (s, t) => s + (t.simulatedGrossPnlEur ?? 0),
+  const nets = trades.map((t) => formalNet(t)!);
+  const wins = trades.filter((t) => (formalNet(t) ?? 0) > 0);
+  const losses = trades.filter((t) => (formalNet(t) ?? 0) <= 0);
+  const winNets = wins.map((t) => formalNet(t)!);
+  const lossNets = losses.map((t) => formalNet(t)!);
+
+  const eurTrades = trades.filter((t) => t.eurPnlAvailable);
+  const quoteOnly = trades.filter((t) => !t.eurPnlAvailable);
+
+  const grossPnl = trades.reduce(
+    (s, t) =>
+      s +
+      (t.eurPnlAvailable
+        ? t.simulatedGrossPnlEur ?? 0
+        : t.simulatedGrossPnlQuote ?? 0),
     0
   );
-  const frictionEur = trades.reduce(
-    (s, t) => s + (t.simulatedFrictionEur ?? 0),
+  const friction = trades.reduce(
+    (s, t) =>
+      s +
+      (t.eurPnlAvailable
+        ? t.simulatedFrictionEur ?? 0
+        : t.simulatedFrictionPnlQuote ?? 0),
     0
   );
-  const netSimulatedPnlEur = nets.reduce((a, b) => a + b, 0);
+  const netSimulatedPnl = nets.reduce((a, b) => a + b, 0);
   const grossWin = winNets.reduce((a, b) => a + b, 0);
   const grossLossAbs = Math.abs(lossNets.reduce((a, b) => a + b, 0));
   const averageWinner = avg(winNets);
@@ -196,27 +220,26 @@ export function computeGhShadowPerformanceReport(
   }
   const byExitReason: GhShadowExitReasonStats[] = [...reasonMap.entries()].map(
     ([exitReason, list]) => {
-      const w = list.filter((t) => (t.simulatedNetPnlEur ?? 0) > 0);
-      const l = list.filter((t) => (t.simulatedNetPnlEur ?? 0) <= 0);
+      const w = list.filter((t) => (formalNet(t) ?? 0) > 0);
+      const l = list.filter((t) => (formalNet(t) ?? 0) <= 0);
       return {
         exitReason,
         n: list.length,
         wins: w.length,
         losses: l.length,
-        net: list.reduce((s, t) => s + (t.simulatedNetPnlEur ?? 0), 0),
+        net: list.reduce((s, t) => s + (formalNet(t) ?? 0), 0),
         avgMfe: avg(list.map((t) => t.mfe)),
         avgMae: avg(list.map((t) => t.mae))
       };
     }
   );
 
-  // Payoff diagnostics
   const mfeCapture: number[] = [];
   for (const t of wins) {
-    if (t.mfe > 0 && t.economic && t.simulatedGrossPnlEur != null) {
-      const mfeCash =
-        t.mfe * t.economic.economicXauOz * t.economic.valuePerPointPerOzEur;
-      if (mfeCash > 0) mfeCapture.push(t.simulatedNetPnlEur! / mfeCash);
+    if (t.mfe > 0 && t.economic) {
+      const mfeCash = t.mfe * t.economic.displayedLots * t.economic.ozPerLot;
+      const net = formalNet(t);
+      if (mfeCash > 0 && net != null) mfeCapture.push(net / mfeCash);
     }
   }
   const losersWithMfe = losses.filter((t) => t.mfe > 0);
@@ -228,38 +251,53 @@ export function computeGhShadowPerformanceReport(
   ) {
     lossSourceHints.push("asymmetric_payoff_avg_loss_dominates_avg_win");
   }
-  const hardN = trades.filter((t) => t.exitReason === "HARD_PROTECTION").length;
-  const harvestN = trades.filter((t) => t.exitReason === "HARVEST_FADE").length;
-  const trailN = trades.filter((t) => t.exitReason === "TRAIL_HIT").length;
-  if (hardN > trades.length * 0.4) {
-    lossSourceHints.push("hard_stop_distance_frequent");
-  }
-  if (harvestN + trailN > 0 && losersWithMfe.length > losses.length * 0.5) {
-    lossSourceHints.push("profit_give_back_after_positive_mfe");
-  }
 
   const profitFactor =
     grossLossAbs > 0 ? grossWin / grossLossAbs : wins.length ? Infinity : null;
-  const expectancyEurPerTrade =
-    trades.length > 0 ? netSimulatedPnlEur / trades.length : null;
+  const expectancyPerTrade =
+    trades.length > 0 ? netSimulatedPnl / trades.length : null;
 
-  const base = {
-    completedTrades: trades.length,
-    profitFactor,
-    expectancyEurPerTrade,
-    netSimulatedPnlEur
-  };
+  const clean = integrityClean(epoch);
+  const replayOk = epoch?.lastReplayStatus === "LIVE_REPLAY_OK";
+  const n = trades.length;
+
+  let at250: GhShadowPerformanceReport["checkpoint"]["at250"] = "NOT_REACHED";
+  let formalDecisionReady = false;
+  if (n >= 250) {
+    if (!clean || !replayOk) {
+      at250 = "INSUFFICIENT / DATA QUALITY FAILURE";
+      formalDecisionReady = false;
+    } else if (
+      profitFactor != null &&
+      expectancyPerTrade != null &&
+      netSimulatedPnl > 0 &&
+      profitFactor >= 1.15 &&
+      expectancyPerTrade > 0
+    ) {
+      at250 = "PROMISING — CONTINUE TO 500";
+      formalDecisionReady = true;
+    } else if (netSimulatedPnl < 0 || (profitFactor != null && profitFactor < 1)) {
+      at250 = "NEGATIVE EDGE — STRATEGY REDESIGN REQUIRED";
+      formalDecisionReady = true;
+    } else {
+      at250 = "INSUFFICIENT / DATA QUALITY FAILURE";
+      formalDecisionReady = false;
+    }
+  }
 
   return {
+    qualificationId: qid,
     completedTrades: trades.length,
     wins: wins.length,
     losses: losses.length,
     winRate: trades.length ? wins.length / trades.length : null,
-    grossPnlEur,
-    frictionEur,
-    netSimulatedPnlEur,
+    grossPnl,
+    friction,
+    netSimulatedPnl,
+    eurPnlTrades: eurTrades.length,
+    quoteOnlyPnlTrades: quoteOnly.length,
     profitFactor,
-    expectancyEurPerTrade,
+    expectancyPerTrade,
     averageWinner,
     averageLoser,
     averageWinLossRatio,
@@ -276,8 +314,8 @@ export function computeGhShadowPerformanceReport(
     bySetup,
     byExitReason,
     payoff: {
-      avgWinEur: averageWinner,
-      avgLossEur: averageLoser,
+      avgWin: averageWinner,
+      avgLoss: averageLoser,
       avgWinOverAvgLoss: averageWinLossRatio,
       mfeCaptureRatioWinners: avg(mfeCapture),
       losersWithPriorPositiveMfePct: losses.length
@@ -302,13 +340,20 @@ export function computeGhShadowPerformanceReport(
       hardProtectionMae: trades
         .filter((t) => t.exitReason === "HARD_PROTECTION")
         .map((t) => ({ tradeId: t.tradeId, mae: t.mae })),
-      lossSourceHints
+      lossSourceHints,
+      pnlUnitNote:
+        eurTrades.length === trades.length
+          ? "EUR (quoteToDeposit applied)"
+          : quoteOnly.length === trades.length
+            ? "QUOTE currency only (EUR unavailable)"
+            : "MIXED EUR + quote"
     },
+    integrity: epoch?.integrity ?? null,
     checkpoint: {
-      at50: trades.length >= 50 ? "DATA_QUALITY_ONLY" : "NOT_REACHED",
-      at100: trades.length >= 100 ? "EARLY_OBSERVATION" : "NOT_REACHED",
-      at250: classifyAt250(base),
-      formalDecisionReady: trades.length >= 250
+      at50: n >= 50 ? "DATA_QUALITY_ONLY" : "NOT_REACHED",
+      at100: n >= 100 ? "EARLY_OBSERVATION" : "NOT_REACHED",
+      at250,
+      formalDecisionReady
     }
   };
 }

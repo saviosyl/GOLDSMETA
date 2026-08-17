@@ -6,49 +6,54 @@ export {
   GH_SHADOW_QUALIFICATION_VERSION,
   GH_SHADOW_QUALIFICATION_EPOCH_PREFIX
 } from "./types";
+export { GH_SHADOW_QUALIFICATION_STORAGE_PATH } from "./store";
 export type {
   GhShadowTrade,
   GhShadowQualificationEpoch,
   GhShadowDecisionRecord,
   GhShadowEconomicExposure,
   GhShadowDataQuality,
-  GhShadowExitReason
+  GhShadowExitReason,
+  GhShadowCapturedEvent,
+  GhShadowCashPnl,
+  GhShadowIntegrityCounters
 } from "./types";
 
 export {
-  GH_SHADOW_VALUE_PER_POINT_PER_OZ_EUR,
+  GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS,
   computeGhShadowEconomicExposure,
   simulateGhShadowCashPnl,
   shadowEntryPrice,
   shadowExitPrice,
-  shadowInitialStop
+  shadowInitialStop,
+  provenGrossPnlEurExample,
+  PEPPERSTONE_CTRADER_XAUUSD_DEMO
 } from "./economics";
 
 export {
-  GH_SHADOW_QUALIFICATION_STORAGE_PATH,
   loadGhShadowEpoch,
   listGhShadowTrades,
   listGhShadowDecisions,
-  resetGhShadowQualificationMemoryForTests
+  listGhShadowCapturedEvents,
+  resetGhShadowQualificationMemoryForTests,
+  saveGhShadowEpoch,
+  setCurrentQualificationId
 } from "./store";
 
-export {
-  computeGhShadowPerformanceReport
-} from "./performance";
+export { computeGhShadowPerformanceReport } from "./performance";
 export type {
   GhShadowPerformanceReport,
   GhShadowPayoffDiagnostics
 } from "./performance";
 
 export {
-  tryOpenGhShadowFromOpportunity,
-  tickGhShadowPosition,
-  closeGhShadowTrade,
-  resetGhShadowPositionManagerForTests,
-  getGhShadowOpenTradeId
-} from "./positionManager";
+  GhShadowQualificationEngine,
+  getGhShadowEngine,
+  resetGhShadowEnginesForTests
+} from "./engine";
 
 export {
+  getGhShadowMutationSurfaceReport,
   getGhShadowBrokerMutationProof,
   refuseGhShadowBrokerMutation,
   resetGhShadowBrokerMutationProofForTests,
@@ -58,18 +63,25 @@ export {
 export {
   isGhShadowQualificationEnabled,
   enqueueGhShadowQualificationTick,
+  onGhShadowSelectorTick,
+  processGhShadowMarketEventSync,
   drainGhShadowQualificationForTests,
+  flushGhShadowPersistenceForTests,
   buildGhShadowQualificationStatus,
   getGhShadowStrategyConfigIdentity,
   resetGhShadowQualificationRuntimeForTests,
-  updateGhShadowReplayStatus
+  runGhShadowReplayAndGate,
+  setGhShadowPersistDelayMsForTests,
+  setGhShadowSizingOverridesForTests
 } from "./runtime";
 
 export {
-  replayGhShadowEventSequence,
+  replayGhShadowCapturedEvents,
   buildMinimalReplayEventsFromTrade
 } from "./replay";
 export type {
-  GhShadowReplayMarketEvent,
-  GhShadowReplayResult
+  GhShadowReplayResult,
+  GhShadowReplayComparePoint
 } from "./replay";
+
+export { GhShadowEventJournal } from "./journal";

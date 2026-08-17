@@ -1,42 +1,55 @@
 /**
- * Gold Hunter Clean Shadow Qualification V1 — runtime.
+ * Gold Hunter Clean Shadow Qualification — runtime wiring.
  *
- * Mirrors live A/B/C opportunity + openTrade/evaluateOpenExit without broker mutation.
- * Gated by GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED (default OFF).
- *
- * Independent of Demo AutoTrade gates (pause / emergency / demoAutoTradeEnabled).
- * NEVER places ProtoOANewOrderReq.
+ * Hot path: sync engine.processEvent (no Firestore).
+ * Persistence: async batched drain (may lag; does not gate MFE/MAE/exit).
  */
-
-import { getOwnerQueue } from "../boundedQueue";
-import { loadGoldHunterConfig } from "../configStore";
 import { getFrozenGhFastIdentity } from "../abc/frozenConfig";
+import { loadGoldHunterConfig } from "../configStore";
 import { getGoldHunterStrategySelector } from "../strategySelector";
-import type { GoldHunterSelectedCandidate } from "../strategySelector";
 import type { GoldHunterSelectorTickResult } from "../strategySelector";
 import {
-  getGhShadowBrokerMutationProof,
+  getGhShadowMutationSurfaceReport,
   refuseGhShadowBrokerMutation
 } from "./brokerMutationGuard";
 import {
-  computeGhShadowPerformanceReport,
-  type GhShadowPerformanceReport
-} from "./performance";
+  getGhShadowEngine,
+  resetGhShadowEnginesForTests,
+  type GhShadowPersistBatch
+} from "./engine";
+import { computeGhShadowPerformanceReport } from "./performance";
+import { replayGhShadowCapturedEvents } from "./replay";
 import {
-  getGhShadowOpenTradeId,
-  resetGhShadowPositionManagerForTests,
-  tickGhShadowPosition,
-  tryOpenGhShadowFromOpportunity
-} from "./positionManager";
-import {
+  appendGhShadowCapturedEvent,
+  appendGhShadowDecision,
   GH_SHADOW_QUALIFICATION_STORAGE_PATH,
+  listGhShadowCapturedEvents,
+  listGhShadowDecisions,
   listGhShadowTrades,
   loadGhShadowEpoch,
   resetGhShadowQualificationMemoryForTests,
-  saveGhShadowEpoch
+  saveGhShadowEpoch,
+  upsertGhShadowTrade
 } from "./store";
-import type { GhShadowQualificationEpoch } from "./types";
 import { GH_SHADOW_QUALIFICATION_VERSION } from "./types";
+import type { GhShadowSizingInput } from "./economics";
+
+const persistBusy = new Map<string, boolean>();
+const recoveryDone = new Map<string, boolean>();
+
+/** Optional slow persist hook for stress tests. */
+let persistDelayMsForTests = 0;
+let sizingOverridesForTests: Partial<GhShadowSizingInput> | undefined;
+
+export function setGhShadowPersistDelayMsForTests(ms: number): void {
+  persistDelayMsForTests = Math.max(0, ms);
+}
+
+export function setGhShadowSizingOverridesForTests(
+  over: Partial<GhShadowSizingInput> | undefined
+): void {
+  sizingOverridesForTests = over;
+}
 
 export function isGhShadowQualificationEnabled(): boolean {
   return (
@@ -46,18 +59,7 @@ export function isGhShadowQualificationEnabled(): boolean {
   );
 }
 
-export function getGhShadowStrategyConfigIdentity(): {
-  strategySha: string;
-  configSha: string;
-  strategyVersion: string;
-  engineVersion: string;
-  soakLabel: string;
-  hardStop: number;
-  profitLockActivateMfe: number;
-  profitLockFraction: number;
-  trailDistance: number;
-  friction: number;
-} {
+export function getGhShadowStrategyConfigIdentity() {
   const id = getFrozenGhFastIdentity();
   const c = id.config;
   return {
@@ -74,25 +76,107 @@ export function getGhShadowStrategyConfigIdentity(): {
   };
 }
 
-async function runShadowTick(args: {
+async function ensureRecovery(ownerUid: string): Promise<void> {
+  if (recoveryDone.get(ownerUid)) return;
+  recoveryDone.set(ownerUid, true);
+  const persisted = await loadGhShadowEpoch(ownerUid);
+  const eng = getGhShadowEngine(ownerUid, {
+    runtimeGeneration: (persisted?.runtimeGeneration ?? 0) + 1,
+    forceNew: true
+  });
+  const { excludedTradeId } = eng.recoverAfterRestart({
+    persistedEpoch: persisted,
+    reason: "process_restart_or_first_attach"
+  });
+  if (excludedTradeId || eng.getEpoch()) {
+    schedulePersist(ownerUid);
+  }
+}
+
+async function writeBatch(
+  ownerUid: string,
+  batch: GhShadowPersistBatch
+): Promise<void> {
+  if (persistDelayMsForTests > 0) {
+    await new Promise((r) => setTimeout(r, persistDelayMsForTests));
+  }
+  await saveGhShadowEpoch(ownerUid, batch.epoch);
+  for (const t of batch.trades) {
+    await upsertGhShadowTrade(ownerUid, t);
+  }
+  for (const e of batch.events) {
+    await appendGhShadowCapturedEvent(ownerUid, e);
+  }
+  for (const d of batch.decisions) {
+    await appendGhShadowDecision(ownerUid, d);
+  }
+}
+
+function schedulePersist(ownerUid: string): void {
+  if (persistBusy.get(ownerUid)) return;
+  persistBusy.set(ownerUid, true);
+  void (async () => {
+    try {
+      for (;;) {
+        const eng = getGhShadowEngine(ownerUid);
+        const batch = eng.drainPersistBatch();
+        if (
+          !batch ||
+          (batch.trades.length === 0 &&
+            batch.events.length === 0 &&
+            batch.decisions.length === 0)
+        ) {
+          // Still persist epoch counters periodically
+          if (batch?.epoch) await saveGhShadowEpoch(ownerUid, batch.epoch);
+          break;
+        }
+        await writeBatch(ownerUid, batch);
+      }
+    } finally {
+      persistBusy.set(ownerUid, false);
+      const eng = getGhShadowEngine(ownerUid);
+      const leftover = eng.drainPersistBatch();
+      if (
+        leftover &&
+        (leftover.trades.length ||
+          leftover.events.length ||
+          leftover.decisions.length)
+      ) {
+        schedulePersist(ownerUid);
+      }
+    }
+  })();
+}
+
+/**
+ * Hot-path entry from marketFeedHook — synchronous engine update.
+ * Never blocks on Firestore. Never calls Demo/broker submit.
+ */
+export function onGhShadowSelectorTick(args: {
   ownerUid: string;
   tick: GoldHunterSelectorTickResult;
-}): Promise<void> {
+}): void {
   if (!isGhShadowQualificationEnabled()) return;
+  if (!args.ownerUid.trim()) return;
 
-  // Hard surface: shadow must never reach order submission.
-  // If a future caller wires submitDemoMarketOrder here, refuse.
   const forbidden = (globalThis as { __ghShadowBrokerSubmitHook?: unknown })
     .__ghShadowBrokerSubmitHook;
   if (typeof forbidden === "function") {
     refuseGhShadowBrokerMutation("shadow_runtime_broker_submit_hook");
   }
 
+  // Kick recovery async once; still process this tick on in-memory engine.
+  if (!recoveryDone.get(args.ownerUid)) {
+    void ensureRecovery(args.ownerUid).catch(() => undefined);
+  }
+
   const sel = getGoldHunterStrategySelector(args.ownerUid);
   const snap = sel.getLastSnapshot();
   const bid = snap?.bestBid ?? snap?.lastSpotBid;
   const ask = snap?.bestAsk ?? snap?.lastSpotAsk;
-  if (bid == null || ask == null) return;
+  if (bid == null || ask == null || !Number.isFinite(bid) || !Number.isFinite(ask)) {
+    return;
+  }
 
   const dataOk =
     snap != null &&
@@ -100,82 +184,185 @@ async function runShadowTick(args: {
     !snap.derivedDataContaminated &&
     snap.depthValidity === "DEPTH_VALID";
 
-  // Always tick open shadow first (mirror Demo position manager cadence).
-  if (getGhShadowOpenTradeId(args.ownerUid)) {
-    await tickGhShadowPosition({
-      ownerUid: args.ownerUid,
-      bid,
-      ask,
-      features: snap?.features ?? null,
-      dataOk,
-      receiveSeq:
-        args.tick.opportunity?.latestReceiveSeq ??
-        args.tick.candidate?.latestReceiveSeq ??
-        0
-    });
+  const receiveSeq =
+    args.tick.opportunity?.latestReceiveSeq ??
+    args.tick.candidate?.latestReceiveSeq ??
+    0;
+
+  const eng = getGhShadowEngine(args.ownerUid);
+
+  // Config load is async — use last-known via fire-and-forget cache
+  void loadGoldHunterConfig(args.ownerUid)
+    .then((config) => {
+      // If this tick already processed with default, subsequent ticks use real config.
+      (eng as unknown as { _lastConfig?: typeof config })._lastConfig = config;
+    })
+    .catch(() => undefined);
+
+  const cachedConfig = (eng as unknown as { _lastConfig?: Awaited<ReturnType<typeof loadGoldHunterConfig>> })
+    ._lastConfig;
+
+  // For first ticks before config resolves, use a sync path with defaults from store memory.
+  // processEvent must stay sync — load config outside hot path when possible.
+  if (!cachedConfig) {
+    // Defer this tick's open until config ready; still need config for sizing.
+    // Use ensureRecovery + async process for opens only when config missing.
+    void (async () => {
+      await ensureRecovery(args.ownerUid);
+      const config = await loadGoldHunterConfig(args.ownerUid);
+      (eng as unknown as { _lastConfig?: typeof config })._lastConfig = config;
+      eng.processEvent({
+        receiveSeq,
+        eventTsMs: Date.now(),
+        bid,
+        ask,
+        features: snap?.features ?? null,
+        dataOk,
+        depthValidity: String(snap?.depthValidity ?? "DEPTH_UNKNOWN"),
+        bookGeneration: snap?.bookGeneration ?? 0,
+        resyncGeneration: 0,
+        newOpportunity: args.tick.newOpportunity,
+        opportunity: args.tick.opportunity,
+        config,
+        sizingOverrides: sizingOverridesForTests
+      });
+      schedulePersist(args.ownerUid);
+    })();
+    return;
   }
 
-  // Open only on NEW executable opportunity — same signal Demo would see.
-  if (args.tick.newOpportunity && args.tick.opportunity) {
-    const config = await loadGoldHunterConfig(args.ownerUid);
-    await tryOpenGhShadowFromOpportunity({
-      ownerUid: args.ownerUid,
-      opportunity: args.tick.opportunity,
-      config,
-      marketFresh: dataOk && snap?.features != null
-    });
-  }
+  eng.processEvent({
+    receiveSeq,
+    eventTsMs: Date.now(),
+    bid,
+    ask,
+    features: snap?.features ?? null,
+    dataOk,
+    depthValidity: String(snap?.depthValidity ?? "DEPTH_UNKNOWN"),
+    bookGeneration: snap?.bookGeneration ?? 0,
+    resyncGeneration: 0,
+    newOpportunity: args.tick.newOpportunity,
+    opportunity: args.tick.opportunity,
+    config: cachedConfig,
+    sizingOverrides: sizingOverridesForTests
+  });
+  schedulePersist(args.ownerUid);
 }
 
 /**
- * Enqueue shadow work off the quote hot path. Never blocks Spot/Depth ingestion.
- * Never calls Demo execution / broker mutation paths.
+ * Direct sync API for tests / deterministic feeds (preferred over selector hook).
  */
-export function enqueueGhShadowQualificationTick(args: {
+export function processGhShadowMarketEventSync(args: {
   ownerUid: string;
-  tick: GoldHunterSelectorTickResult;
-}): boolean {
-  if (!isGhShadowQualificationEnabled()) return false;
-  if (args.ownerUid.trim() === "") return false;
-  const q = getOwnerQueue("gh-shadow-qual", args.ownerUid, 2);
-  const oppId =
-    args.tick.opportunity?.opportunityId ??
-    args.tick.candidate?.opportunityId ??
-    null;
-  return q.enqueue(
-    async () => {
-      await runShadowTick(args);
-    },
-    { opportunityId: oppId }
-  );
+  receiveSeq: number;
+  eventTsMs: number;
+  bid: number;
+  ask: number;
+  features: import("../abc/features").GhFastFeatureSnapshot | null;
+  dataOk: boolean;
+  depthValidity: string;
+  bookGeneration?: number;
+  resyncGeneration?: number;
+  newOpportunity: boolean;
+  opportunity: import("../strategySelector").GoldHunterSelectedCandidate | null;
+  config: import("../types").GoldHunterAdminConfig;
+  sizingOverrides?: Partial<GhShadowSizingInput>;
+}): void {
+  const eng = getGhShadowEngine(args.ownerUid);
+  eng.processEvent({
+    receiveSeq: args.receiveSeq,
+    eventTsMs: args.eventTsMs,
+    bid: args.bid,
+    ask: args.ask,
+    features: args.features,
+    dataOk: args.dataOk,
+    depthValidity: args.depthValidity,
+    bookGeneration: args.bookGeneration ?? 0,
+    resyncGeneration: args.resyncGeneration ?? 0,
+    newOpportunity: args.newOpportunity,
+    opportunity: args.opportunity,
+    config: args.config,
+    sizingOverrides: args.sizingOverrides ?? sizingOverridesForTests
+  });
+  schedulePersist(args.ownerUid);
 }
 
-export async function drainGhShadowQualificationForTests(
+export async function flushGhShadowPersistenceForTests(
   ownerUid: string
 ): Promise<void> {
-  await getOwnerQueue("gh-shadow-qual", ownerUid, 2).drainForTests();
+  // Drain until idle
+  for (let i = 0; i < 50; i++) {
+    schedulePersist(ownerUid);
+    await new Promise((r) => setTimeout(r, persistDelayMsForTests + 5));
+    if (!persistBusy.get(ownerUid)) {
+      const eng = getGhShadowEngine(ownerUid);
+      const batch = eng.drainPersistBatch();
+      if (
+        batch &&
+        (batch.trades.length || batch.events.length || batch.decisions.length)
+      ) {
+        await writeBatch(ownerUid, batch);
+        continue;
+      }
+      break;
+    }
+  }
 }
 
-export async function buildGhShadowQualificationStatus(
+export async function runGhShadowReplayAndGate(
   ownerUid: string
-): Promise<{
-  enabled: boolean;
-  version: typeof GH_SHADOW_QUALIFICATION_VERSION;
-  storagePath: typeof GH_SHADOW_QUALIFICATION_STORAGE_PATH;
-  identity: ReturnType<typeof getGhShadowStrategyConfigIdentity>;
-  epoch: GhShadowQualificationEpoch | null;
-  performance: GhShadowPerformanceReport;
-  brokerMutationProof: ReturnType<typeof getGhShadowBrokerMutationProof>;
-  openShadowTradeId: string | null;
-  demoAutoTradeNote: string;
-}> {
-  const identity = getGhShadowStrategyConfigIdentity();
+): Promise<ReturnType<typeof replayGhShadowCapturedEvents>> {
   const epoch = await loadGhShadowEpoch(ownerUid);
+  if (!epoch) {
+    return {
+      status: "LIVE_REPLAY_DIVERGENCE",
+      capturedEvents: 0,
+      replayedEvents: 0,
+      firstDivergenceSeq: null,
+      divergenceDetail: "no_epoch",
+      livePoints: [],
+      replayPoints: []
+    };
+  }
+  const events = await listGhShadowCapturedEvents(ownerUid, {
+    qualificationId: epoch.qualificationId
+  });
+  const decisions = await listGhShadowDecisions(ownerUid, {
+    qualificationId: epoch.qualificationId
+  });
   const trades = await listGhShadowTrades(ownerUid, {
-    formalOnly: false,
+    qualificationId: epoch.qualificationId,
     limit: 2000
   });
-  const performance = computeGhShadowPerformanceReport(trades);
+  const result = replayGhShadowCapturedEvents({
+    events,
+    liveDecisions: decisions,
+    liveTrades: trades
+  });
+  epoch.lastReplayStatus = result.status;
+  epoch.lastReplayDetail = {
+    capturedEvents: result.capturedEvents,
+    replayedEvents: result.replayedEvents,
+    firstDivergenceSeq: result.firstDivergenceSeq,
+    divergenceDetail: result.divergenceDetail
+  };
+  epoch.updatedAt = new Date().toISOString();
+  await saveGhShadowEpoch(ownerUid, epoch);
+  return result;
+}
+
+export async function buildGhShadowQualificationStatus(ownerUid: string) {
+  await ensureRecovery(ownerUid);
+  const identity = getGhShadowStrategyConfigIdentity();
+  const epoch = await loadGhShadowEpoch(ownerUid);
+  const trades = epoch
+    ? await listGhShadowTrades(ownerUid, {
+        qualificationId: epoch.qualificationId,
+        limit: 2000
+      })
+    : [];
+  const performance = computeGhShadowPerformanceReport(trades, epoch);
+  const eng = getGhShadowEngine(ownerUid);
   return {
     enabled: isGhShadowQualificationEnabled(),
     version: GH_SHADOW_QUALIFICATION_VERSION,
@@ -183,30 +370,34 @@ export async function buildGhShadowQualificationStatus(
     identity,
     epoch,
     performance,
-    brokerMutationProof: getGhShadowBrokerMutationProof(),
-    openShadowTradeId: getGhShadowOpenTradeId(ownerUid),
+    mutationSurface: getGhShadowMutationSurfaceReport(),
+    openShadowTradeId: eng.getOpenTradeId(),
+    journalSize: eng.getJournalEvents().length,
     demoAutoTradeNote:
-      "Shadow qualification is independent of Demo AutoTrade. " +
-      "demoAutoTradeEnabled / pauseNewEntries / emergencyStopActive are NOT " +
-      "modified by this research path. Broker NewOrder count remains 0."
+      "Shadow qualification does not modify demoAutoTradeEnabled / pauseNewEntries / emergencyStopActive. No broker NewOrder from this path."
   };
 }
 
-export async function updateGhShadowReplayStatus(
-  ownerUid: string,
-  status: "LIVE_REPLAY_OK" | "LIVE_REPLAY_DIVERGENCE"
-): Promise<void> {
-  const epoch = await loadGhShadowEpoch(ownerUid);
-  if (!epoch) return;
-  epoch.lastReplayStatus = status;
-  epoch.updatedAt = new Date().toISOString();
-  await saveGhShadowEpoch(ownerUid, epoch);
-}
-
-/** Test helpers */
 export function resetGhShadowQualificationRuntimeForTests(): void {
-  resetGhShadowPositionManagerForTests();
+  resetGhShadowEnginesForTests();
   resetGhShadowQualificationMemoryForTests();
+  persistBusy.clear();
+  recoveryDone.clear();
+  persistDelayMsForTests = 0;
+  sizingOverridesForTests = undefined;
 }
 
-export type { GoldHunterSelectedCandidate };
+/** Compatibility aliases used by older tests / routes. */
+export const enqueueGhShadowQualificationTick = (args: {
+  ownerUid: string;
+  tick: GoldHunterSelectorTickResult;
+}): boolean => {
+  onGhShadowSelectorTick(args);
+  return true;
+};
+
+export async function drainGhShadowQualificationForTests(
+  ownerUid: string
+): Promise<void> {
+  await flushGhShadowPersistenceForTests(ownerUid);
+}

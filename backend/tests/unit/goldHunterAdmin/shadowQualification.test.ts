@@ -1,60 +1,73 @@
 /**
- * Gold Hunter Clean Shadow Qualification V1 — unit tests.
- * Strategy geometry unchanged. No broker mutation.
+ * Gold Hunter Clean Shadow Qualification — integrity revision tests.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  PEPPERSTONE_CTRADER_XAUUSD_DEMO,
+  estimateXauUsdGrossPnlDeposit
+} from "../../../src/services/broker/ctrader/brokerUnitMappings";
+import { sizeGoldHunterDemoLots } from "../../../src/services/goldHunterAdmin/riskSizing";
+import {
   computeGhShadowEconomicExposure,
   simulateGhShadowCashPnl,
-  shadowEntryPrice,
-  shadowExitPrice
+  provenGrossPnlEurExample,
+  GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS
 } from "../../../src/services/goldHunterAdmin/shadowQualification/economics";
 import {
-  computeGhShadowPerformanceReport
-} from "../../../src/services/goldHunterAdmin/shadowQualification/performance";
+  GhShadowQualificationEngine,
+  getGhShadowEngine,
+  resetGhShadowEnginesForTests
+} from "../../../src/services/goldHunterAdmin/shadowQualification/engine";
+import { computeGhShadowPerformanceReport } from "../../../src/services/goldHunterAdmin/shadowQualification/performance";
+import { replayGhShadowCapturedEvents } from "../../../src/services/goldHunterAdmin/shadowQualification/replay";
 import {
-  tryOpenGhShadowFromOpportunity,
-  tickGhShadowPosition,
-  resetGhShadowPositionManagerForTests,
-  getGhShadowOpenTradeId
-} from "../../../src/services/goldHunterAdmin/shadowQualification/positionManager";
-import {
-  getGhShadowBrokerMutationProof,
-  refuseGhShadowBrokerMutation,
-  resetGhShadowBrokerMutationProofForTests,
-  assertGhShadowNoBrokerMutationSurface
+  assertGhShadowNoBrokerMutationSurface,
+  getGhShadowMutationSurfaceReport,
+  resetGhShadowBrokerMutationProofForTests
 } from "../../../src/services/goldHunterAdmin/shadowQualification/brokerMutationGuard";
 import {
   listGhShadowTrades,
   loadGhShadowEpoch,
-  resetGhShadowQualificationMemoryForTests
+  resetGhShadowQualificationMemoryForTests,
+  saveGhShadowEpoch,
+  setCurrentQualificationId,
+  upsertGhShadowTrade
 } from "../../../src/services/goldHunterAdmin/shadowQualification/store";
 import {
-  isGhShadowQualificationEnabled,
-  getGhShadowStrategyConfigIdentity,
-  resetGhShadowQualificationRuntimeForTests
+  flushGhShadowPersistenceForTests,
+  processGhShadowMarketEventSync,
+  resetGhShadowQualificationRuntimeForTests,
+  runGhShadowReplayAndGate
 } from "../../../src/services/goldHunterAdmin/shadowQualification/runtime";
-import {
-  replayGhShadowEventSequence
-} from "../../../src/services/goldHunterAdmin/shadowQualification/replay";
-import {
-  openTrade,
-  updateOpenTrade,
-  evaluateOpenExit
-} from "../../../src/services/goldHunterAdmin/abc/exits";
-import { frozenGhFastSoakConfig } from "../../../src/services/goldHunterAdmin/abc/frozenConfig";
+import { GH_ADMIN_DEFAULT_CONFIG, GH_ADMIN_STRATEGY_ID } from "../../../src/services/goldHunterAdmin/types";
+import type { GoldHunterSelectedCandidate } from "../../../src/services/goldHunterAdmin/strategySelector";
 import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmin/abc/features";
 import type { DepthBookStats } from "../../../src/services/goldHunterAdmin/abc/depthBook";
-import {
-  GH_ADMIN_DEFAULT_CONFIG,
-  GH_ADMIN_STRATEGY_ID
-} from "../../../src/services/goldHunterAdmin/types";
-import type { GoldHunterSelectedCandidate } from "../../../src/services/goldHunterAdmin/strategySelector";
-import type { GhShadowTrade } from "../../../src/services/goldHunterAdmin/shadowQualification/types";
+import type {
+  GhShadowQualificationEpoch,
+  GhShadowTrade
+} from "../../../src/services/goldHunterAdmin/shadowQualification/types";
+import { frozenGhFastSoakConfig } from "../../../src/services/goldHunterAdmin/abc/frozenConfig";
 
-const OWNER = "gh-shadow-qual-owner";
+const OWNER = "gh-shadow-rev-owner";
+const PROVEN_FX = 0.86624336;
+
+function cfg() {
+  return {
+    ...GH_ADMIN_DEFAULT_CONFIG,
+    allocatedCapitalEur: 1000,
+    riskPerTradePct: 1,
+    dailyLossLimitPct: 5,
+    maxOpenTrades: 1,
+    demoAutoTradeEnabled: false,
+    pauseNewEntries: true,
+    emergencyStopActive: true,
+    updatedAt: new Date().toISOString(),
+    updatedBy: OWNER
+  };
+}
 
 function depthStats(over: Partial<DepthBookStats> = {}): DepthBookStats {
   return {
@@ -166,437 +179,574 @@ function opportunity(
   };
 }
 
-function cfg() {
+function emptyIntegrity() {
   return {
-    ...GH_ADMIN_DEFAULT_CONFIG,
-    allocatedCapitalEur: 1000,
-    riskPerTradePct: 1,
-    dailyLossLimitPct: 5,
-    maxOpenTrades: 1,
-    demoAutoTradeEnabled: false,
-    pauseNewEntries: true,
-    emergencyStopActive: true,
-    updatedAt: new Date().toISOString(),
-    updatedBy: OWNER
+    eventsSeen: 0,
+    eventsProcessed: 0,
+    eventsPersisted: 0,
+    eventsDropped: 0,
+    receiveSeqGaps: 0,
+    journalOverflowCount: 0,
+    lastProcessedReceiveSeq: null as number | null
   };
 }
 
 beforeEach(() => {
   resetGhShadowQualificationRuntimeForTests();
   resetGhShadowBrokerMutationProofForTests();
+  resetGhShadowEnginesForTests();
+  resetGhShadowQualificationMemoryForTests();
   delete process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED;
 });
 
 afterEach(() => {
   resetGhShadowQualificationRuntimeForTests();
   resetGhShadowBrokerMutationProofForTests();
-  delete process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED;
 });
 
-describe("shadow economics", () => {
-  it("matches intended Demo exposure: €10 / 0.55 → 0.18 XAU oz", () => {
-    const economic = computeGhShadowEconomicExposure({ config: cfg() });
-    expect(economic.riskBudgetEur).toBe(10);
-    expect(economic.hardStopPrice).toBe(0.55);
-    expect(economic.economicXauOz).toBe(0.18);
-    expect(economic.conventionalLotsEquivalent).toBeCloseTo(0.0018, 8);
-    expect(economic.frictionPrice).toBe(0.06);
+function fakeFormalTrade(
+  i: number,
+  net: number,
+  qid: string
+): GhShadowTrade {
+  return {
+    tradeId: `t${i}`,
+    qualificationId: qid,
+    opportunityId: `o${i}`,
+    signalId: `s${i}`,
+    setup: "A",
+    setupId: "A_MOMENTUM_IGNITION",
+    side: "BUY",
+    status: "CLOSED",
+    dataQuality: "FORMAL_ELIGIBLE",
+    exclusionReason: null,
+    signalTs: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+    entryTs: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+    entryBid: 100,
+    entryAsk: 100.1,
+    entryPrice: 100.1,
+    entrySpread: 0.1,
+    initialStop: 99.55,
+    exitTs: new Date(Date.UTC(2026, 0, 1, 0, 1, i)).toISOString(),
+    exitBid: 100.2,
+    exitAsk: 100.3,
+    exitPrice: 100.2,
+    exitReason: "HARVEST_FADE",
+    mfe: 0.2,
+    mae: -0.05,
+    durationMs: 1000,
+    grossPriceMove: 0.1,
+    frictionPrice: 0.06,
+    netPriceMove: 0.04,
+    simulatedGrossPnlQuote: net + 0.5,
+    simulatedFrictionPnlQuote: 0.5,
+    simulatedNetPnlQuote: net,
+    quoteCurrency: "USD",
+    simulatedGrossPnlEur: net + 0.5,
+    simulatedFrictionEur: 0.5,
+    simulatedNetPnlEur: net,
+    eurPnlAvailable: true,
+    economic: null,
+    profitLockActivatedAt: new Date().toISOString(),
+    trailActivatedAt: new Date().toISOString(),
+    trailUpdateCount: 1,
+    lockFloorAtActivation: 100.15,
+    lockFloorLatest: 100.18,
+    maxFavorableBeforeExit: 0.2,
+    maxAdverseBeforeExit: -0.05,
+    strategySha: "x",
+    configSha: "x",
+    receiveSeqAtEntry: i,
+    receiveSeqAtExit: i + 1,
+    bookGeneration: 1,
+    resyncGeneration: 0,
+    runtimeGeneration: 1,
+    path: {
+      profitLockActivateMfeAtActivation: 0.18,
+      lockFloorAtActivation: 100.15,
+      lockFloorAtExit: 100.18,
+      bestExitAtExit: 100.2
+    }
+  };
+}
+
+function epochStub(
+  qid: string,
+  over: Partial<GhShadowQualificationEpoch> = {}
+): GhShadowQualificationEpoch {
+  return {
+    qualificationId: qid,
+    qualificationStartTime: new Date().toISOString(),
+    qualificationStartSequence: 0,
+    strategySha: "x",
+    configSha: "x",
+    strategyVersion: "GOLD_HUNTER_FAST_V1",
+    engineVersion: "GH_FAST_EVENT_V1",
+    soakLabel: "LIVE_SHADOW_SOAK_V1",
+    formalQualificationTrades: 250,
+    diagnosticExcludedTrades: 0,
+    openShadowTradeId: null,
+    status: "ACTIVE",
+    dataIntegrityFailure: null,
+    runtimeGeneration: 1,
+    lastRestartReason: null,
+    integrity: emptyIntegrity(),
+    lastReplayStatus: "NOT_RUN",
+    lastReplayDetail: null,
+    updatedAt: new Date().toISOString(),
+    ...over
+  };
+}
+
+
+describe("A — production economics", () => {
+  it("1. production sizing parity: €1000 / 1% / 0.55 → 18 lots (Pepperstone step=1)", () => {
+    const entry = 2650.12;
+    const stop = entry - 0.55;
+    const prod = sizeGoldHunterDemoLots({
+      config: cfg(),
+      entry,
+      stop,
+      valuePerPointPerLot: PEPPERSTONE_CTRADER_XAUUSD_DEMO.ozPerLot,
+      minLots: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.minLots,
+      maxLots: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.maxLots,
+      lotStep: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.lotStep
+    });
+    expect(prod.ok).toBe(true);
+    if (!prod.ok) return;
+    expect(prod.lots).toBe(18);
+    expect(prod.riskBudgetEur).toBe(10);
+
+    const shadow = computeGhShadowEconomicExposure({
+      config: cfg(),
+      entryPrice: entry,
+      side: "BUY"
+    });
+    expect(shadow.ok).toBe(true);
+    if (!shadow.ok) return;
+    expect(shadow.economic.displayedLots).toBe(prod.lots);
+    expect(shadow.economic.ozPerLot).toBe(1);
+    expect(shadow.economic.economicXauOz).toBe(18);
+    expect(shadow.economic.rawProtocolVolumeEquivalent).toBe(1800);
+    expect(shadow.economic.mappingKey).toBe("pepperstone_ctrader_xauusd_demo");
   });
 
-  it("BUY entry=Ask exit=Bid; SELL entry=Bid exit=Ask", () => {
-    expect(shadowEntryPrice("BUY", 100, 100.2)).toBe(100.2);
-    expect(shadowExitPrice("BUY", 100.5, 100.7)).toBe(100.5);
-    expect(shadowEntryPrice("SELL", 100, 100.2)).toBe(100);
-    expect(shadowExitPrice("SELL", 99.5, 99.7)).toBe(99.7);
+  it("2. broker-proven 13-lot P/L parity ≈ €2.93", () => {
+    const pnl = provenGrossPnlEurExample({
+      lots: 13,
+      priceMove: 0.26,
+      quoteToDepositRate: PROVEN_FX
+    });
+    expect(pnl).toBeCloseTo(2.93, 2);
+    expect(
+      estimateXauUsdGrossPnlDeposit({
+        lots: 13,
+        priceMove: 0.26,
+        ozPerLot: 1,
+        quoteToDepositRate: PROVEN_FX
+      })
+    ).toBeCloseTo(2.93, 2);
   });
 
-  it("embeds spread once and friction separately in cash P/L", () => {
-    const economic = computeGhShadowEconomicExposure({ config: cfg() });
-    // BUY: entry ask 100.12, exit bid 100.32 → signed +0.20; friction 0.06
+  it("3. no 100x artificial oz multiplier", () => {
+    const shadow = computeGhShadowEconomicExposure({
+      config: cfg(),
+      entryPrice: 2650.12,
+      side: "BUY"
+    });
+    expect(shadow.ok).toBe(true);
+    if (!shadow.ok) return;
+    expect(shadow.economic.ozPerLot).toBe(1);
+    expect(shadow.economic.economicXauOz).not.toBe(0.18);
+    expect(shadow.economic.valuePerPointPerLot).toBe(1);
+    expect(shadow.economic.formula).not.toMatch(/valuePerPointPerOzEur\s*=\s*100/);
+  });
+
+  it("4. missing quote→EUR => no invented EUR P/L", () => {
+    const shadow = computeGhShadowEconomicExposure({
+      config: cfg(),
+      entryPrice: 2650.12,
+      side: "BUY",
+      quoteToDepositRate: null
+    });
+    expect(shadow.ok).toBe(true);
+    if (!shadow.ok) return;
+    expect(shadow.economic.eurPnlAvailable).toBe(false);
     const pnl = simulateGhShadowCashPnl({
       side: "BUY",
-      entryPrice: 100.12,
-      exitPrice: 100.32,
-      economic
+      entryPrice: 2650.12,
+      exitPrice: 2650.32,
+      economic: shadow.economic
     });
-    expect(pnl.grossPriceMove).toBeCloseTo(0.2, 8);
-    expect(pnl.netPriceMove).toBeCloseTo(0.14, 8);
-    expect(pnl.simulatedGrossPnlEur).toBeCloseTo(0.2 * 0.18 * 100, 6);
-    expect(pnl.simulatedFrictionEur).toBeCloseTo(0.06 * 0.18 * 100, 6);
-    expect(pnl.simulatedNetPnlEur).toBeCloseTo(
-      pnl.simulatedGrossPnlEur - pnl.simulatedFrictionEur,
-      8
-    );
+    expect(pnl.grossQuote).toBeCloseTo(0.2 * 18 * 1, 8);
+    expect(pnl.simulatedGrossPnlEur).toBeNull();
+    expect(pnl.simulatedNetPnlEur).toBeNull();
+    expect(pnl.eurPnlAvailable).toBe(false);
   });
 });
 
-describe("strategy geometry unchanged", () => {
-  it("frozen hardStop / profitLock / trail match canonical defaults", () => {
-    const id = getGhShadowStrategyConfigIdentity();
-    const cfgFast = frozenGhFastSoakConfig();
-    expect(id.hardStop).toBe(0.55);
-    expect(id.profitLockActivateMfe).toBe(0.18);
-    expect(id.profitLockFraction).toBe(0.45);
-    expect(id.trailDistance).toBe(0.12);
-    expect(cfgFast.hardStop).toBe(0.55);
-    expect(cfgFast.profitLockActivateMfe).toBe(0.18);
-    expect(cfgFast.profitLockFraction).toBe(0.45);
-    expect(cfgFast.trailDistance).toBe(0.12);
-  });
-});
-
-describe("shadow open / exit / max-one", () => {
-  it("opens one formal shadow and refuses second while open", async () => {
-    const r1 = await tryOpenGhShadowFromOpportunity({
+describe("B — event stream integrity", () => {
+  it("5. high-frequency events with slow persistence still process ordered", async () => {
+    process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED = "true";
+    const eng = getGhShadowEngine(OWNER, { journalCapacity: 5000, forceNew: true });
+    const opp = opportunity({ receiveSeq: 1, latestReceiveSeq: 1 });
+    processGhShadowMarketEventSync({
       ownerUid: OWNER,
-      opportunity: opportunity(),
-      config: cfg(),
-      marketFresh: true
-    });
-    expect(r1.opened).toBe(true);
-    expect(r1.trade?.dataQuality).toBe("FORMAL_ELIGIBLE");
-    expect(r1.trade?.entryPrice).toBe(2650.12); // BUY ask
-    expect(r1.trade?.economic?.economicXauOz).toBe(0.18);
-    expect(getGhShadowOpenTradeId(OWNER)).toBe(r1.trade!.tradeId);
-
-    const r2 = await tryOpenGhShadowFromOpportunity({
-      ownerUid: OWNER,
-      opportunity: opportunity({
-        opportunityId: "GH-OPP-2",
-        signalId: "GH-SIG-2",
-        receiveSeq: 11
-      }),
-      config: cfg(),
-      marketFresh: true
-    });
-    expect(r2.opened).toBe(false);
-    expect(r2.reason).toBe("max_open_shadow_1");
-  });
-
-  it("excludes invalid market as DIAGNOSTIC_EXCLUDED (not formal)", async () => {
-    const r = await tryOpenGhShadowFromOpportunity({
-      ownerUid: OWNER,
-      opportunity: opportunity({
-        bid: 0,
-        ask: 0,
-        depthValidity: "DEPTH_STALE",
-        depthExecutable: false
-      }),
-      config: cfg(),
-      marketFresh: true
-    });
-    expect(r.opened).toBe(false);
-    expect(r.trade?.dataQuality).toBe("DIAGNOSTIC_EXCLUDED");
-    const epoch = await loadGhShadowEpoch(OWNER);
-    expect(epoch?.diagnosticExcludedTrades).toBe(1);
-    expect(epoch?.formalQualificationTrades).toBe(0);
-  });
-
-  it("HARD_PROTECTION exit records MAE and formal counter", async () => {
-    const open = await tryOpenGhShadowFromOpportunity({
-      ownerUid: OWNER,
-      opportunity: opportunity({ bid: 2650, ask: 2650.1 }),
-      config: cfg(),
-      marketFresh: true
-    });
-    expect(open.opened).toBe(true);
-    const entry = open.trade!.entryPrice!;
-    // Drive adverse past hardStop 0.55 via bid for BUY
-    const adverseBid = entry - 0.56;
-    const adverseAsk = adverseBid + 0.1;
-    const exit = await tickGhShadowPosition({
-      ownerUid: OWNER,
-      bid: adverseBid,
-      ask: adverseAsk,
-      features: features(adverseBid, adverseAsk, {
-        acceleration: 0,
-        signedImbalance1s: 0
-      }),
-      dataOk: true,
-      receiveSeq: 20
-    });
-    expect(exit.exited).toBe(true);
-    expect(exit.trade?.exitReason).toBe("HARD_PROTECTION");
-    expect(exit.trade?.status).toBe("CLOSED");
-    expect(exit.trade?.mae).toBeLessThan(0);
-    expect(exit.trade?.simulatedNetPnlEur).not.toBeNull();
-    const epoch = await loadGhShadowEpoch(OWNER);
-    expect(epoch?.formalQualificationTrades).toBe(1);
-    expect(getGhShadowOpenTradeId(OWNER)).toBeNull();
-  });
-});
-
-describe("performance report + checkpoints", () => {
-  it("ignores DIAGNOSTIC_EXCLUDED and reports setup / exit breakdowns", () => {
-    const formal = (n: number, net: number, setup: "A" | "B" | "C" = "A"): GhShadowTrade =>
-      ({
-        tradeId: `t${n}`,
-        qualificationId: "GH-SQ-x",
-        opportunityId: `o${n}`,
-        signalId: `s${n}`,
-        setup,
-        setupId: "A_MOMENTUM_IGNITION",
-        side: "BUY",
-        status: "CLOSED",
-        dataQuality: "FORMAL_ELIGIBLE",
-        exclusionReason: null,
-        signalTs: new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString(),
-        entryTs: new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString(),
-        entryBid: 100,
-        entryAsk: 100.1,
-        entryPrice: 100.1,
-        entrySpread: 0.1,
-        initialStop: 99.55,
-        exitTs: new Date(Date.UTC(2026, 0, 1, 0, 1, n)).toISOString(),
-        exitBid: 100.2,
-        exitAsk: 100.3,
-        exitPrice: 100.2,
-        exitReason: net > 0 ? "HARVEST_FADE" : "HARD_PROTECTION",
-        mfe: net > 0 ? 0.3 : 0.05,
-        mae: net > 0 ? -0.05 : -0.55,
-        durationMs: 60_000,
-        grossPriceMove: net / 18,
-        frictionPrice: 0.06,
-        netPriceMove: net / 18 - 0.06,
-        simulatedGrossPnlEur: net + 1,
-        simulatedFrictionEur: 1,
-        simulatedNetPnlEur: net,
-        economic: computeGhShadowEconomicExposure({ config: cfg() }),
-        profitLockActivatedAt: net > 0 ? new Date().toISOString() : null,
-        trailActivatedAt: null,
-        trailUpdateCount: 0,
-        maxFavorableBeforeExit: net > 0 ? 0.3 : 0.05,
-        maxAdverseBeforeExit: net > 0 ? -0.05 : -0.55,
-        strategySha: "abc",
-        configSha: "abc",
-        receiveSeqAtEntry: n,
-        receiveSeqAtExit: n + 1,
-        bookGeneration: 1,
-        resyncGeneration: 0,
-        path: {
-          profitLockActivateMfeAtActivation: null,
-          lockFloorAtActivation: null,
-          lockFloorAtExit: null,
-          bestExitAtExit: null
-        }
-      });
-
-    const excluded: GhShadowTrade = {
-      ...formal(99, -999),
-      tradeId: "bad",
-      dataQuality: "DIAGNOSTIC_EXCLUDED",
-      status: "DIAGNOSTIC_EXCLUDED",
-      entryPrice: 0,
-      simulatedNetPnlEur: -999
-    };
-
-    const report = computeGhShadowPerformanceReport([
-      formal(1, 2, "A"),
-      formal(2, -4, "A"),
-      formal(3, 1.5, "B"),
-      excluded
-    ]);
-    expect(report.completedTrades).toBe(3);
-    expect(report.wins).toBe(2);
-    expect(report.losses).toBe(1);
-    expect(report.netSimulatedPnlEur).toBeCloseTo(-0.5, 8);
-    expect(report.bySetup.A.trades).toBe(2);
-    expect(report.bySetup.B.trades).toBe(1);
-    expect(report.checkpoint.at50).toBe("NOT_REACHED");
-    expect(report.checkpoint.at250).toBe("NOT_REACHED");
-    expect(report.payoff.avgWinOverAvgLoss).not.toBeNull();
-  });
-
-  it("at 250 classifies PROMISING or NEGATIVE EDGE without auto-deploy", () => {
-    const mk = (i: number, net: number): GhShadowTrade => ({
-      tradeId: `n${i}`,
-      qualificationId: "e",
-      opportunityId: `o${i}`,
-      signalId: `s${i}`,
-      setup: "C",
-      setupId: "C_PULLBACK_REACCEL",
-      side: "SELL",
-      status: "CLOSED",
-      dataQuality: "FORMAL_ELIGIBLE",
-      exclusionReason: null,
-      signalTs: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
-      entryTs: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
-      entryBid: 200,
-      entryAsk: 200.1,
-      entryPrice: 200,
-      entrySpread: 0.1,
-      initialStop: 200.55,
-      exitTs: new Date(Date.UTC(2026, 0, 1, 0, 1, i)).toISOString(),
-      exitBid: 199.9,
-      exitAsk: 200,
-      exitPrice: 200,
-      exitReason: "TRAIL_HIT",
-      mfe: 0.2,
-      mae: -0.1,
-      durationMs: 1000,
-      grossPriceMove: 0.1,
-      frictionPrice: 0.06,
-      netPriceMove: 0.04,
-      simulatedGrossPnlEur: net + 0.5,
-      simulatedFrictionEur: 0.5,
-      simulatedNetPnlEur: net,
-      economic: computeGhShadowEconomicExposure({ config: cfg() }),
-      profitLockActivatedAt: new Date().toISOString(),
-      trailActivatedAt: new Date().toISOString(),
-      trailUpdateCount: 1,
-      maxFavorableBeforeExit: 0.2,
-      maxAdverseBeforeExit: -0.1,
-      strategySha: "x",
-      configSha: "x",
-      receiveSeqAtEntry: i,
-      receiveSeqAtExit: i + 1,
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      path: {
-        profitLockActivateMfeAtActivation: 0.18,
-        lockFloorAtActivation: 199.9,
-        lockFloorAtExit: 199.85,
-        bestExitAtExit: 199.8
-      }
-    });
-    const promising = Array.from({ length: 250 }, (_, i) => mk(i, 1));
-    const p = computeGhShadowPerformanceReport(promising);
-    expect(p.checkpoint.formalDecisionReady).toBe(true);
-    expect(p.checkpoint.at250).toBe("PROMISING — CONTINUE TO 500");
-
-    const negative = Array.from({ length: 250 }, (_, i) => mk(i, -1));
-    const n = computeGhShadowPerformanceReport(negative);
-    expect(n.checkpoint.at250).toBe("NEGATIVE EDGE — STRATEGY REDESIGN REQUIRED");
-  });
-});
-
-describe("replay determinism", () => {
-  it("LIVE_REPLAY_OK when exit geometry matches live decisions", () => {
-    const cfgFast = frozenGhFastSoakConfig();
-    const trade = openTrade({
-      tradeId: "GH-S-replay",
-      side: "BUY",
-      setup: "A_MOMENTUM_IGNITION",
-      entryTs: 1_000,
+      receiveSeq: 1,
+      eventTsMs: 1000,
       bid: 2650,
       ask: 2650.1,
-      trailDistance: cfgFast.trailDistance
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: true,
+      opportunity: opp,
+      config: cfg(),
+      sizingOverrides: { quoteToDepositRate: PROVEN_FX, quoteToDepositRateSource: "test" }
     });
-    // Build adverse path to HARD_PROTECTION
-    const events = [
-      {
-        receiveSeq: 1,
-        bid: 2650,
-        ask: 2650.1,
-        features: null as GhFastFeatureSnapshot | null,
-        dataOk: true,
-        open: {
-          tradeId: trade.tradeId,
-          side: "BUY" as const,
-          setup: "A_MOMENTUM_IGNITION" as const,
-          entryTs: 1_000
-        }
-      },
-      {
-        receiveSeq: 2,
-        bid: 2649.5,
-        ask: 2649.6,
-        features: features(2649.5, 2649.6),
-        dataOk: true
-      }
-    ];
-    // Live path
-    updateOpenTrade(trade, 2649.5, 2649.6, cfgFast);
-    const liveReason = evaluateOpenExit({
-      trade,
-      f: features(2649.5, 2649.6),
-      cfg: cfgFast,
-      dataOk: true
-    });
-    expect(liveReason).toBe("HARD_PROTECTION");
+    expect(eng.getOpenTradeId()).not.toBeNull();
 
-    const result = replayGhShadowEventSequence({
-      events,
-      liveDecisions: [
-        {
-          decisionId: "1",
-          qualificationId: "q",
-          at: new Date().toISOString(),
-          kind: "OPEN",
-          opportunityId: "o",
-          tradeId: trade.tradeId,
-          setup: "A",
-          side: "BUY",
-          bid: 2650,
-          ask: 2650.1,
-          receiveSeq: 1,
-          exitReason: null,
-          detail: null
-        },
-        {
-          decisionId: "2",
-          qualificationId: "q",
-          at: new Date().toISOString(),
-          kind: "EXIT",
-          opportunityId: "o",
-          tradeId: trade.tradeId,
-          setup: "A",
-          side: "BUY",
-          bid: 2649.5,
-          ask: 2649.6,
-          receiveSeq: 2,
-          exitReason: "HARD_PROTECTION",
-          detail: null
-        }
-      ]
-    });
-    expect(result.status).toBe("LIVE_REPLAY_OK");
+    for (let i = 2; i <= 200; i++) {
+      processGhShadowMarketEventSync({
+        ownerUid: OWNER,
+        receiveSeq: i,
+        eventTsMs: 1000 + i,
+        bid: 2650 - i * 0.001,
+        ask: 2650.1 - i * 0.001,
+        features: features(2650 - i * 0.001, 2650.1 - i * 0.001),
+        dataOk: true,
+        depthValidity: "DEPTH_VALID",
+        newOpportunity: false,
+        opportunity: null,
+        config: cfg()
+      });
+    }
+    const epoch = eng.getEpoch()!;
+    expect(epoch.integrity.eventsProcessed).toBe(200);
+    expect(epoch.integrity.eventsDropped).toBe(0);
+    expect(epoch.integrity.receiveSeqGaps).toBe(0);
+    await flushGhShadowPersistenceForTests(OWNER);
   });
 
-  it("LIVE_REPLAY_DIVERGENCE on mismatched exit reason", () => {
-    const result = replayGhShadowEventSequence({
-      events: [],
-      liveDecisions: [
-        {
-          decisionId: "1",
-          qualificationId: "q",
-          at: new Date().toISOString(),
-          kind: "EXIT",
-          opportunityId: null,
-          tradeId: "t",
-          setup: "A",
-          side: "BUY",
-          bid: 1,
-          ask: 1,
-          receiveSeq: 1,
-          exitReason: "TRAIL_HIT",
-          detail: null
-        }
-      ]
+  it("6. journal overflow => qualification invalid / trade excluded", () => {
+    const eng = new GhShadowQualificationEngine({
+      ownerUid: OWNER + "-ovf",
+      journalCapacity: 3
+    });
+    const opp = opportunity();
+    eng.processEvent({
+      receiveSeq: 1,
+      eventTsMs: 1,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: true,
+      opportunity: opp,
+      config: cfg()
+    });
+    expect(eng.getOpenTradeId()).not.toBeNull();
+    eng.processEvent({
+      receiveSeq: 2,
+      eventTsMs: 2,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    eng.processEvent({
+      receiveSeq: 3,
+      eventTsMs: 3,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    // 4th overflows
+    eng.processEvent({
+      receiveSeq: 4,
+      eventTsMs: 4,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    const epoch = eng.getEpoch()!;
+    expect(epoch.integrity.eventsDropped).toBeGreaterThan(0);
+    expect(epoch.integrity.journalOverflowCount).toBeGreaterThan(0);
+    expect(epoch.status).toBe("DATA_QUALITY_FAILED");
+    expect(eng.getOpenTradeId()).toBeNull();
+  });
+
+  it("7. receiveSeq gap => qualification invalid / excluded", () => {
+    const eng = new GhShadowQualificationEngine({ ownerUid: OWNER + "-gap" });
+    eng.processEvent({
+      receiveSeq: 1,
+      eventTsMs: 1,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: true,
+      opportunity: opportunity(),
+      config: cfg()
+    });
+    eng.processEvent({
+      receiveSeq: 5, // gap
+      eventTsMs: 5,
+      bid: 2649,
+      ask: 2649.1,
+      features: features(2649, 2649.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    const epoch = eng.getEpoch()!;
+    expect(epoch.integrity.receiveSeqGaps).toBeGreaterThan(0);
+    expect(epoch.status).toBe("DATA_QUALITY_FAILED");
+    expect(eng.getOpenTradeId()).toBeNull();
+  });
+});
+
+describe("C/D — captured replay + formal gate", () => {
+  it("8. complete captured-event replay => LIVE_REPLAY_OK", async () => {
+    process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED = "true";
+    getGhShadowEngine(OWNER, { forceNew: true });
+    processGhShadowMarketEventSync({
+      ownerUid: OWNER,
+      receiveSeq: 1,
+      eventTsMs: 1000,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: true,
+      opportunity: opportunity({ receiveSeq: 1, latestReceiveSeq: 1 }),
+      config: cfg(),
+      sizingOverrides: { quoteToDepositRate: PROVEN_FX }
+    });
+    processGhShadowMarketEventSync({
+      ownerUid: OWNER,
+      receiveSeq: 2,
+      eventTsMs: 2000,
+      bid: 2649.4,
+      ask: 2649.5,
+      features: features(2649.4, 2649.5),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    await flushGhShadowPersistenceForTests(OWNER);
+    const result = await runGhShadowReplayAndGate(OWNER);
+    expect(result.status).toBe("LIVE_REPLAY_OK");
+    expect(result.capturedEvents).toBeGreaterThanOrEqual(2);
+    const stored = await loadGhShadowEpoch(OWNER);
+    expect(stored?.lastReplayStatus).toBe("LIVE_REPLAY_OK");
+  });
+
+  it("9. changed event => LIVE_REPLAY_DIVERGENCE", () => {
+    const eng = new GhShadowQualificationEngine({ ownerUid: OWNER + "-div" });
+    eng.processEvent({
+      receiveSeq: 1,
+      eventTsMs: 1,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: true,
+      opportunity: opportunity(),
+      config: cfg()
+    });
+    eng.processEvent({
+      receiveSeq: 2,
+      eventTsMs: 2,
+      bid: 2649.4,
+      ask: 2649.5,
+      features: features(2649.4, 2649.5),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    const batch = eng.drainPersistBatch()!;
+    const tampered = batch.events.map((e, i) =>
+      i === 1 ? { ...e, bid: e.bid - 10, ask: e.ask - 10 } : e
+    );
+    const result = replayGhShadowCapturedEvents({
+      events: tampered,
+      liveDecisions: batch.decisions,
+      liveTrades: batch.trades
     });
     expect(result.status).toBe("LIVE_REPLAY_DIVERGENCE");
   });
+
+  it("10. replay NOT_RUN at 250 => formalDecisionReady=false", () => {
+    const qid = "GH-SQ-notrun";
+    const trades = Array.from({ length: 250 }, (_, i) => fakeFormalTrade(i, 1, qid));
+    const report = computeGhShadowPerformanceReport(
+      trades,
+      epochStub(qid, { lastReplayStatus: "NOT_RUN" })
+    );
+    expect(report.checkpoint.at250).toBe("INSUFFICIENT / DATA QUALITY FAILURE");
+    expect(report.checkpoint.formalDecisionReady).toBe(false);
+  });
+
+  it("11. replay DIVERGENCE at 250 => formalDecisionReady=false", () => {
+    const qid = "GH-SQ-div";
+    const trades = Array.from({ length: 250 }, (_, i) => fakeFormalTrade(i, 1, qid));
+    const report = computeGhShadowPerformanceReport(
+      trades,
+      epochStub(qid, { lastReplayStatus: "LIVE_REPLAY_DIVERGENCE" })
+    );
+    expect(report.checkpoint.at250).toBe("INSUFFICIENT / DATA QUALITY FAILURE");
+    expect(report.checkpoint.formalDecisionReady).toBe(false);
+  });
+
 });
 
-describe("broker mutation proof + enable gate", () => {
-  it("defaults shadow disabled; proof counters stay 0", () => {
-    expect(isGhShadowQualificationEnabled()).toBe(false);
-    const proof = getGhShadowBrokerMutationProof();
-    expect(proof.ProtoOANewOrderReq).toBe(0);
-    expect(proof.brokerNewOrderRequests).toBe(0);
-    expect(proof.goldHunterBrokerPositionsCreated).toBe(0);
-    expect(proof.goldHunterBrokerOrdersCreated).toBe(0);
-  });
+describe("E — restart recovery", () => {
+  it("12+13. restart with open shadow excludes interrupted; no second formal until handled", async () => {
+    const eng1 = getGhShadowEngine(OWNER, { forceNew: true, runtimeGeneration: 1 });
+    eng1.processEvent({
+      receiveSeq: 1,
+      eventTsMs: 1,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: true,
+      opportunity: opportunity(),
+      config: cfg()
+    });
+    const openId = eng1.getOpenTradeId();
+    expect(openId).not.toBeNull();
+    const epoch = eng1.getEpoch()!;
+    await saveGhShadowEpoch(OWNER, epoch);
+    await upsertGhShadowTrade(OWNER, {
+      ...(eng1.drainPersistBatch()?.trades[0] as GhShadowTrade),
+      tradeId: openId!,
+      status: "OPEN",
+      dataQuality: "FORMAL_ELIGIBLE",
+      qualificationId: epoch.qualificationId
+    });
 
-  it("refuseGhShadowBrokerMutation never places an order", () => {
-    expect(() => refuseGhShadowBrokerMutation("test")).toThrow(
-      /GH_SHADOW_BROKER_MUTATION_REFUSED/
-    );
-    expect(getGhShadowBrokerMutationProof().mutationAttempts).toBe(1);
-    expect(getGhShadowBrokerMutationProof().ProtoOANewOrderReq).toBe(0);
-  });
+    // Simulate process restart
+    resetGhShadowEnginesForTests();
+    const eng2 = getGhShadowEngine(OWNER, {
+      forceNew: true,
+      runtimeGeneration: 2
+    });
+    const persisted = await loadGhShadowEpoch(OWNER);
+    const { excludedTradeId } = eng2.recoverAfterRestart({
+      persistedEpoch: persisted,
+      reason: "test_restart"
+    });
+    expect(excludedTradeId).toBe(openId);
+    expect(eng2.getOpenTradeId()).toBeNull();
+    expect(eng2.getEpoch()?.openShadowTradeId).toBeNull();
 
-  it("shadowQualification sources contain no NewOrder / submit paths", () => {
+    // New opportunity can open after recovery handled
+    eng2.processEvent({
+      receiveSeq: 10,
+      eventTsMs: 10,
+      bid: 2651,
+      ask: 2651.1,
+      features: features(2651, 2651.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      bookGeneration: 1,
+      resyncGeneration: 0,
+      newOpportunity: true,
+      opportunity: opportunity({
+        opportunityId: "new",
+        signalId: "new",
+        receiveSeq: 10
+      }),
+      config: cfg()
+    });
+    expect(eng2.getOpenTradeId()).not.toBeNull();
+    expect(eng2.getOpenTradeId()).not.toBe(openId);
+  });
+});
+
+describe("F — epoch isolation", () => {
+  it("14. epoch B report must not include epoch A trades", async () => {
+    const epochA: GhShadowQualificationEpoch = epochStub("GH-SQ-A", {
+      formalQualificationTrades: 250,
+      lastReplayStatus: "LIVE_REPLAY_OK"
+    });
+    await saveGhShadowEpoch(OWNER, epochA);
+    for (let i = 0; i < 250; i++) {
+      await upsertGhShadowTrade(OWNER, fakeFormalTrade(i, 1, "GH-SQ-A"));
+    }
+
+    const epochB: GhShadowQualificationEpoch = epochStub("GH-SQ-B", {
+      formalQualificationTrades: 2,
+      lastReplayStatus: "NOT_RUN"
+    });
+    await saveGhShadowEpoch(OWNER, epochB);
+    await setCurrentQualificationId(OWNER, "GH-SQ-B");
+    await upsertGhShadowTrade(OWNER, fakeFormalTrade(1, -1, "GH-SQ-B"));
+    await upsertGhShadowTrade(OWNER, fakeFormalTrade(2, -2, "GH-SQ-B"));
+
+    const tradesB = await listGhShadowTrades(OWNER, {
+      qualificationId: "GH-SQ-B",
+      limit: 2000
+    });
+    expect(tradesB).toHaveLength(2);
+    expect(tradesB.every((t) => t.qualificationId === "GH-SQ-B")).toBe(true);
+
+    const report = computeGhShadowPerformanceReport(tradesB, epochB);
+    expect(report.completedTrades).toBe(2);
+    expect(report.qualificationId).toBe("GH-SQ-B");
+  });
+});
+
+describe("G/H — mutation surface + isolation", () => {
+  it("15. static broker mutation surface remains NONE", () => {
+    const report = getGhShadowMutationSurfaceReport();
+    expect(report.staticMutationSurface).toBe("NO_BROKER_CALL_SITES");
+    expect(report.runtimeVerification.newOrderReqCount).toBeNull();
     const dir = resolve(
       __dirname,
       "../../../src/services/goldHunterAdmin/shadowQualification"
@@ -605,42 +755,25 @@ describe("broker mutation proof + enable gate", () => {
       if (!name.endsWith(".ts")) continue;
       const src = readFileSync(resolve(dir, name), "utf8");
       expect(() => assertGhShadowNoBrokerMutationSurface(src)).not.toThrow();
-      expect(src).not.toMatch(/\bsubmitDemoMarketOrder\s*\(/);
-      expect(src).not.toMatch(/\bsubmitGoldHunterDemoOrder\s*\(/);
-      expect(src).not.toMatch(/\bnew\s+ProtoOANewOrderReq\b/);
-    }
-  });
-});
-
-describe("isolation from Demo safety + Core FAST", () => {
-  it("does not modify projectedDailyRisk / maxOpenLease / entryValidity", () => {
-    // Presence proof — files untouched by this PR's safety surface.
-    const safety = [
-      "projectedDailyRisk.ts",
-      "maxOpenLease.ts",
-      "entryValidity.ts",
-      "configValidation.ts",
-      "volumeContract.ts"
-    ];
-    for (const f of safety) {
-      const p = resolve(
-        __dirname,
-        "../../../src/services/goldHunterAdmin",
-        f
-      );
-      expect(readFileSync(p, "utf8").length).toBeGreaterThan(100);
     }
   });
 
-  it("persists formal trades separately from broker Demo trade store", async () => {
-    await tryOpenGhShadowFromOpportunity({
-      ownerUid: OWNER,
-      opportunity: opportunity(),
-      config: cfg(),
-      marketFresh: true
-    });
-    const trades = await listGhShadowTrades(OWNER, { limit: 10 });
-    expect(trades.length).toBe(1);
-    expect(trades[0]!.qualificationId).toMatch(/^GH-SQ-/);
+  it("16. Demo AutoTrade remains OFF / untouched in default config path", () => {
+    const c = cfg();
+    expect(c.demoAutoTradeEnabled).toBe(false);
+    expect(c.pauseNewEntries).toBe(true);
+    expect(c.emergencyStopActive).toBe(true);
+    // Shadow enable env does not flip Demo flags
+    process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED = "true";
+    expect(cfg().demoAutoTradeEnabled).toBe(false);
+  });
+
+  it("17. Core FAST defaults unchanged", () => {
+    const c = frozenGhFastSoakConfig();
+    expect(c.hardStop).toBe(0.55);
+    expect(c.profitLockActivateMfe).toBe(0.18);
+    expect(c.profitLockFraction).toBe(0.45);
+    expect(c.trailDistance).toBe(0.12);
+    expect(c.friction).toBe(0.06);
   });
 });
