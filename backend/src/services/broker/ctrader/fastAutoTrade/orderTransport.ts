@@ -24,7 +24,8 @@ export type BrokerOrderOutcome =
   | "BROKER_SUBMIT_ERROR"
   | "BROKER_OUTCOME_UNKNOWN"
   | "BROKER_TIMEOUT_RECONCILED_FILLED"
-  | "BROKER_TIMEOUT_RECONCILED_NOT_FOUND";
+  | "BROKER_TIMEOUT_RECONCILED_NOT_FOUND"
+  | "BROKER_ACCEPTED_PENDING_FILL";
 
 export type FastOrderRequest = {
   ctidTraderAccountId: string;
@@ -250,14 +251,19 @@ function classifyKnownPayload(
     };
   }
 
-  if (
-    ids.executionType === "ORDER_ACCEPTED" ||
-    ids.orderId != null ||
-    ids.positionId != null
-  ) {
+  if (ids.positionId != null && ids.executionType !== "ORDER_REJECTED") {
     return {
-      outcome: ids.positionId ? "BROKER_FILLED" : "BROKER_ACCEPTED",
+      outcome: "BROKER_FILLED",
       accepted: true,
+      errorCode: null,
+      executionType: ids.executionType ?? "ORDER_FILLED"
+    };
+  }
+
+  if (ids.executionType === "ORDER_ACCEPTED" || ids.orderId != null) {
+    return {
+      outcome: "BROKER_ACCEPTED",
+      accepted: false,
       errorCode: null,
       executionType: ids.executionType ?? "ORDER_ACCEPTED"
     };
@@ -312,6 +318,10 @@ export async function submitFastMarketOrder(args: {
     if (!next) return false;
     latest = { ...latest, ...unwrapDescriptor(payload) };
     classified = next as Classified;
+    const ids = extractIds(unwrapDescriptor(payload));
+    if (next.outcome === "BROKER_ACCEPTED" && !ids.positionId) {
+      return false;
+    }
     settled = true;
     return true;
   };
@@ -402,7 +412,7 @@ export async function submitFastMarketOrder(args: {
   unsubscribe();
 
   const known = classified as Classified | null;
-  if (known !== null) {
+  if (known !== null && known.outcome !== "BROKER_ACCEPTED") {
     const ids = extractIds(latest);
     const fill = extractFill(latest);
     return {
@@ -444,8 +454,29 @@ export async function submitFastMarketOrder(args: {
     };
   }
 
-  // Request left the process; broker outcome is unknown until reconcile.
+  const acceptedIds = extractIds(latest);
+  const acceptedKnown = known?.outcome === "BROKER_ACCEPTED";
+
   if (!args.reconcile) {
+    if (acceptedKnown) {
+      return {
+        accepted: false,
+        outcome: "BROKER_ACCEPTED",
+        executionType: acceptedIds.executionType ?? "ORDER_ACCEPTED",
+        orderId: acceptedIds.orderId,
+        positionId: null,
+        errorCode: null,
+        clientOrderId,
+        fillPrice: null,
+        stopLoss: null,
+        takeProfit: null,
+        filledVolumeLots: null,
+        ctidTraderAccountId: args.request.ctidTraderAccountId,
+        requestSent: true,
+        newOrderReqCount,
+        raw: latest
+      };
+    }
     return {
       accepted: false,
       outcome: "BROKER_OUTCOME_UNKNOWN",
@@ -471,7 +502,7 @@ export async function submitFastMarketOrder(args: {
     try {
       const snapshot = await args.reconcile.reconcile();
       const match = matchReconcileByClientOrderId({ clientOrderId, snapshot });
-      if (match.matched) {
+      if (match.matched && match.positionId) {
         return {
           accepted: true,
           outcome: "BROKER_TIMEOUT_RECONCILED_FILLED",
@@ -496,6 +527,26 @@ export async function submitFastMarketOrder(args: {
     if (i < attempts - 1) await sleep(gap);
   }
 
+  if (acceptedKnown) {
+    return {
+      accepted: false,
+      outcome: "BROKER_ACCEPTED",
+      executionType: acceptedIds.executionType ?? "ORDER_ACCEPTED",
+      orderId: acceptedIds.orderId,
+      positionId: null,
+      errorCode: null,
+      clientOrderId,
+      fillPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      filledVolumeLots: null,
+      ctidTraderAccountId: args.request.ctidTraderAccountId,
+      requestSent: true,
+      newOrderReqCount,
+      raw: latest
+    };
+  }
+
   return {
     accepted: false,
     outcome: "BROKER_TIMEOUT_RECONCILED_NOT_FOUND",
@@ -513,6 +564,24 @@ export async function submitFastMarketOrder(args: {
     newOrderReqCount,
     raw: sendResponse
   };
+}
+
+export function hasBrokerFillEvidence(result: {
+  outcome?: string | null;
+  positionId?: string | null;
+  executionType?: string | null;
+}): boolean {
+  if (!result.positionId) return false;
+  const outcome = result.outcome ?? "";
+  if (outcome === "BROKER_ACCEPTED" || outcome === "BROKER_ACCEPTED_PENDING_FILL") {
+    return false;
+  }
+  return (
+    outcome === "BROKER_FILLED" ||
+    outcome === "BROKER_TIMEOUT_RECONCILED_FILLED" ||
+    result.executionType === "ORDER_FILLED" ||
+    result.executionType === "RECONCILED"
+  );
 }
 
 export function toDemoMarketOrderResult(
@@ -535,7 +604,7 @@ export function toDemoMarketOrderResult(
   raw?: Record<string, unknown>;
 } {
   return {
-    accepted: result.accepted,
+    accepted: hasBrokerFillEvidence(result),
     executionType: result.executionType,
     orderId: result.orderId,
     positionId: result.positionId,

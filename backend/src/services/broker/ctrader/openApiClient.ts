@@ -131,7 +131,8 @@ export type DemoMarketOrderResult = {
     | "BROKER_SUBMIT_ERROR"
     | "BROKER_OUTCOME_UNKNOWN"
     | "BROKER_TIMEOUT_RECONCILED_FILLED"
-    | "BROKER_TIMEOUT_RECONCILED_NOT_FOUND";
+    | "BROKER_TIMEOUT_RECONCILED_NOT_FOUND"
+    | "BROKER_ACCEPTED_PENDING_FILL";
   requestSent?: boolean;
   newOrderReqCount?: number;
   raw?: Record<string, unknown>;

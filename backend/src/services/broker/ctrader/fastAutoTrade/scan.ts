@@ -12,6 +12,7 @@ import { isFastAutoTradeV1Enabled } from "./config";
 import { logger } from "../../../logging/logger";
 import { withBoundedOp } from "./boundedOp";
 import { FAST_OWNER_SCAN_BUDGET_MS } from "./scanScheduler";
+import { promotePendingFastFills } from "./pendingFillReconcile";
 
 export async function runFastAutoTradeScanPass(opts?: {
   limit?: number;
@@ -38,6 +39,7 @@ export async function runFastAutoTradeScanPass(opts?: {
       if (!authority.submissionAuthorized || authority.label === "LOCKED_LIVE") {
         continue;
       }
+      await promotePendingFastFills(uid).catch(() => undefined);
       const latest = await store.latestDecision(uid);
       if (!latest) continue;
       scanned += 1;

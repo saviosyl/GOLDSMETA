@@ -140,8 +140,13 @@ import {
   blocksAutomaticResubmit,
   generateFastClientOrderId,
   reserveFastExecutionClaim,
-  updateFastExecutionClaim
+  shouldReconcileInsteadOfResubmit,
+  updateFastExecutionClaim,
+  type FastExecutionClaimState,
+  type FastPendingOpenSnapshot
 } from "./fastAutoTrade/executionClaimStore";
+import { hasBrokerFillEvidence } from "./fastAutoTrade/orderTransport";
+import { tryReconcileExistingFastClaim } from "./fastAutoTrade/pendingFillReconcile";
 import { buildVolumeRoundingDiagnostics } from "./fastAutoTrade/volumeDiagnostics";
 import { getPositionLifecycle } from "./positionLifecycleStore";
 
@@ -151,6 +156,37 @@ function buildSha(): string | null {
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
+}
+
+function classifyFastDemoOrderOutcome(result: {
+  outcome?: string | null;
+  accepted?: boolean;
+  executionType?: string | null;
+  positionId?: string | null;
+}): string {
+  if (result.outcome) return result.outcome;
+  if (hasBrokerFillEvidence(result)) return "BROKER_FILLED";
+  if (result.executionType === "ORDER_ACCEPTED") return "BROKER_ACCEPTED";
+  if (result.accepted) return "BROKER_ACCEPTED";
+  return "BROKER_REJECTED";
+}
+
+function claimStateForOutcome(outcome: string): FastExecutionClaimState {
+  if (outcome === "BROKER_FILLED") return "BROKER_SUBMITTED";
+  if (outcome === "BROKER_TIMEOUT_RECONCILED_FILLED") {
+    return "BROKER_TIMEOUT_RECONCILED_FILLED";
+  }
+  if (outcome === "BROKER_ACCEPTED" || outcome === "BROKER_ACCEPTED_PENDING_FILL") {
+    return "BROKER_ACCEPTED_PENDING_FILL";
+  }
+  if (outcome === "BROKER_REJECTED") return "BROKER_REJECTED";
+  if (
+    outcome === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
+    outcome === "BROKER_OUTCOME_UNKNOWN"
+  ) {
+    return "BROKER_OUTCOME_UNKNOWN";
+  }
+  return "BROKER_SUBMIT_ERROR";
 }
 
 export async function loadSetupSnapshot(uid: string): Promise<SetupSnapshot> {
@@ -1667,8 +1703,10 @@ export async function processDecisionForQualification(args: {
       reasonCode === "BROKER_REJECTED" ||
       reasonCode === "BROKER_SUBMIT_ERROR" ||
       reasonCode === "BROKER_OUTCOME_UNKNOWN" ||
+      reasonCode === "BROKER_ACCEPTED_PENDING_FILL" ||
       reasonCode === "BROKER_TIMEOUT_RECONCILED_FILLED" ||
-      reasonCode === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND"
+      reasonCode === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
+      reasonCode === "FIRESTORE_UNAVAILABLE"
     ) {
       return reasonCode;
     }
@@ -2399,65 +2437,169 @@ export async function processDecisionForQualification(args: {
           return { handled: true, message: "FAST_AUTOTRADE_V1_DEMO_ONLY" };
         }
       }
+      const pendingSnapshot: FastPendingOpenSnapshot = {
+        direction: direction as "BUY" | "SELL",
+        entry: entryPx,
+        stopLoss,
+        takeProfit,
+        lots: sizedLots,
+        correlationId,
+        decisionId
+      };
+      let result: Awaited<ReturnType<typeof submitDemoMarketOrder>>;
       if (fastExecution && fastClientOrderId) {
-        const reserved = reserveFastExecutionClaim({
+        const reserved = await reserveFastExecutionClaim({
           ownerUid: uid,
           signalId,
           clientOrderId: fastClientOrderId
         });
-        if (!reserved.ok || blocksAutomaticResubmit(reserved.claim)) {
-          await logEval(
-            "REJECTED",
-            reserved.claim.state === "BROKER_OUTCOME_UNKNOWN"
-              ? "BROKER_OUTCOME_UNKNOWN"
-              : "BLOCKED_DUPLICATE_SIGNAL",
-            ["DUPLICATE_SIGNAL", reserved.claim.state],
-            candidate.passed,
-            {
-              brokerSubmissionAttempted: reserved.claim.requestSent,
-              brokerErrorCode: reserved.claim.errorCode,
-              executionAuthority: "ON",
-              clientOrderId: reserved.claim.clientOrderId,
-              executionStage: reserved.claim.state
+        if (!reserved.ok) {
+          if (reserved.reason === "FIRESTORE_UNAVAILABLE") {
+            await logEval(
+              "REJECTED",
+              "FIRESTORE_UNAVAILABLE",
+              ["FIRESTORE_UNAVAILABLE"],
+              candidate.passed,
+              {
+                brokerSubmissionAttempted: false,
+                executionAuthority: "ON",
+                clientOrderId: fastClientOrderId,
+                executionStage: "FIRESTORE_UNAVAILABLE"
+              }
+            );
+            return { handled: true, message: "fast_claim_unavailable" };
+          }
+          const existing = reserved.claim;
+          if (
+            existing &&
+            !existing.tradeCreated &&
+            (shouldReconcileInsteadOfResubmit(existing) ||
+              blocksAutomaticResubmit(existing))
+          ) {
+            const promoted = await tryReconcileExistingFastClaim({
+              ownerUid: uid,
+              claim: existing
+            });
+            if (promoted.filled && promoted.positionId) {
+              result = {
+                accepted: true,
+                outcome: "BROKER_TIMEOUT_RECONCILED_FILLED",
+                executionType: "RECONCILED",
+                orderId: promoted.orderId,
+                positionId: promoted.positionId,
+                errorCode: null,
+                clientOrderId: existing.clientOrderId,
+                fillPrice: null,
+                stopLoss: null,
+                takeProfit: null,
+                filledVolumeLots: null,
+                ctidTraderAccountId: null,
+                requestSent: existing.requestSent,
+                newOrderReqCount: existing.newOrderReqCount
+              };
+            } else {
+              const stage =
+                existing.state === "BROKER_ACCEPTED_PENDING_FILL"
+                  ? "BROKER_ACCEPTED_PENDING_FILL"
+                  : existing.state === "BROKER_OUTCOME_UNKNOWN" ||
+                      existing.requestSent
+                    ? "BROKER_OUTCOME_UNKNOWN"
+                    : "BLOCKED_DUPLICATE_SIGNAL";
+              await logEval(
+                "REJECTED",
+                stage,
+                ["DUPLICATE_SIGNAL", existing.state],
+                candidate.passed,
+                {
+                  brokerSubmissionAttempted: existing.requestSent,
+                  brokerErrorCode: existing.errorCode,
+                  executionAuthority: "ON",
+                  clientOrderId: existing.clientOrderId,
+                  executionStage: stage
+                }
+              );
+              return { handled: true, message: "fast_duplicate_or_pending_fill" };
             }
-          );
-          return { handled: true, message: "fast_duplicate_or_unknown" };
+          } else {
+            await logEval(
+              "REJECTED",
+              "BLOCKED_DUPLICATE_SIGNAL",
+              ["DUPLICATE_SIGNAL", existing?.state ?? "ALREADY_CLAIMED"],
+              candidate.passed,
+              {
+                brokerSubmissionAttempted: existing?.requestSent ?? false,
+                brokerErrorCode: existing?.errorCode ?? null,
+                executionAuthority: "ON",
+                clientOrderId: existing?.clientOrderId ?? fastClientOrderId,
+                executionStage: existing?.state ?? "BLOCKED_DUPLICATE_SIGNAL"
+              }
+            );
+            return { handled: true, message: "fast_duplicate_or_unknown" };
+          }
+        } else {
+          await updateFastExecutionClaim(uid, signalId, {
+            state: "SUBMITTING",
+            pendingOpenSnapshot: pendingSnapshot
+          });
+          result = await submitDemoMarketOrder({
+            ownerUid: uid,
+            side: direction as "BUY" | "SELL",
+            lots: sizedLots,
+            stopLoss,
+            takeProfit: brokerOrderTakeProfit,
+            entryHint: entryPx,
+            comment: `GMQ ${correlationId}`,
+            label: correlationId.slice(0, 30),
+            strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null,
+            clientOrderId: fastClientOrderId
+          });
         }
-        updateFastExecutionClaim(uid, signalId, { state: "SUBMITTING" });
+      } else {
+        result = await submitDemoMarketOrder({
+          ownerUid: uid,
+          side: direction as "BUY" | "SELL",
+          lots: sizedLots,
+          stopLoss,
+          takeProfit: brokerOrderTakeProfit,
+          entryHint: entryPx,
+          comment: `GMQ ${correlationId}`,
+          label: correlationId.slice(0, 30),
+          strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null,
+          clientOrderId: fastClientOrderId
+        });
       }
-      const result = await submitDemoMarketOrder({
-        ownerUid: uid,
-        side: direction as "BUY" | "SELL",
-        lots: sizedLots,
-        stopLoss,
-        takeProfit: brokerOrderTakeProfit,
-        entryHint: entryPx,
-        comment: `GMQ ${correlationId}`,
-        label: correlationId.slice(0, 30),
-        strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null,
-        clientOrderId: fastClientOrderId
-      });
-      const orderOutcome =
-        result.outcome ??
-        (result.accepted ? "BROKER_FILLED" : "BROKER_REJECTED");
+      const orderOutcome = classifyFastDemoOrderOutcome(result);
+      const filled = hasBrokerFillEvidence(result);
       if (fastExecution && fastClientOrderId) {
-        updateFastExecutionClaim(uid, signalId, {
-          state:
-            orderOutcome === "BROKER_FILLED" ||
-            orderOutcome === "BROKER_ACCEPTED" ||
-            orderOutcome === "BROKER_TIMEOUT_RECONCILED_FILLED"
-              ? "BROKER_SUBMITTED"
-              : orderOutcome === "BROKER_REJECTED"
-                ? "BROKER_REJECTED"
-                : orderOutcome === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
-                    orderOutcome === "BROKER_OUTCOME_UNKNOWN"
-                  ? "BROKER_OUTCOME_UNKNOWN"
-                  : "BROKER_SUBMIT_ERROR",
+        await updateFastExecutionClaim(uid, signalId, {
+          state: claimStateForOutcome(orderOutcome),
           requestSent: result.requestSent ?? true,
           newOrderReqCount: result.newOrderReqCount ?? 1,
           errorCode: result.errorCode,
-          clientOrderId: result.clientOrderId ?? fastClientOrderId
+          clientOrderId: result.clientOrderId ?? fastClientOrderId,
+          orderId: result.orderId ?? null,
+          positionId: result.positionId ?? null,
+          pendingOpenSnapshot: pendingSnapshot
         });
+      }
+
+      if (
+        orderOutcome === "BROKER_ACCEPTED" ||
+        orderOutcome === "BROKER_ACCEPTED_PENDING_FILL"
+      ) {
+        await logEval(
+          "REJECTED",
+          "BROKER_ACCEPTED_PENDING_FILL",
+          ["BROKER_ACCEPTED_PENDING_FILL"],
+          candidate.passed,
+          {
+            brokerSubmissionAttempted: result.requestSent ?? true,
+            executionAuthority: "ON",
+            clientOrderId: result.clientOrderId ?? fastClientOrderId,
+            executionStage: "BROKER_ACCEPTED_PENDING_FILL"
+          }
+        );
+        return { handled: true, message: "order_accepted_pending_fill" };
       }
 
       if (
@@ -2488,7 +2630,7 @@ export async function processDecisionForQualification(args: {
         return { handled: true, message: "order_unknown_or_error" };
       }
 
-      if (!result.accepted) {
+      if (!filled) {
         doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
         await saveQualificationDoc(doc);
         const rejectedCode = sanitizeBrokerErrorCode(result.errorCode);
@@ -2548,7 +2690,8 @@ export async function processDecisionForQualification(args: {
       const fillPrice = result.fillPrice ?? null;
       const brokerStopLoss = result.stopLoss ?? null;
       const brokerTakeProfit = result.takeProfit ?? null;
-      const filledVolumeLots = result.filledVolumeLots ?? sizedLots;
+      const filledVolumeLots = result.filledVolumeLots ?? null;
+      const lotsForLifecycle = filledVolumeLots ?? sizedLots;
       // Prefer broker fill/SL/TP for lifecycle authority; keep decision geometry as fallback.
       const lifecycleEntry = fillPrice ?? entryPx;
       const lifecycleSl = brokerStopLoss ?? stopLoss;
@@ -2564,7 +2707,7 @@ export async function processDecisionForQualification(args: {
         entry: lifecycleEntry,
         stopLoss: lifecycleSl,
         takeProfit: lifecycleTp,
-        lots: filledVolumeLots,
+        lots: lotsForLifecycle,
         brokerOrderId: result.orderId ?? null,
         brokerPositionId: result.positionId ?? null,
         ctidTraderAccountId,
@@ -2668,7 +2811,7 @@ export async function processDecisionForQualification(args: {
           outcome: "QUALIFIED",
           reasonCode: "BROKER_SUBMITTED",
           reasonLabel: submitLabel,
-          passed: [...candidate.passed, "ORDER_ACCEPTED"],
+          passed: [...candidate.passed, "ORDER_FILLED"],
           failed: [],
           pipeline: {
             confirmation: confirmationState,
@@ -2798,7 +2941,7 @@ export async function processDecisionForQualification(args: {
             managementPolicy === "PROFIT_LOCK_V1"
               ? brokerTakeProfit ?? tp3
               : null,
-          lots: filledVolumeLots,
+          lots: lotsForLifecycle,
           qualificationStage: state,
           decisionId: signalId,
           source:
@@ -2813,6 +2956,17 @@ export async function processDecisionForQualification(args: {
           uid,
           correlationId: trade.correlationId,
           error: lifeErr instanceof Error ? lifeErr.message : "unknown"
+        });
+      }
+      if (fastExecution && fastClientOrderId) {
+        await updateFastExecutionClaim(uid, signalId, {
+          state:
+            orderOutcome === "BROKER_TIMEOUT_RECONCILED_FILLED"
+              ? "BROKER_TIMEOUT_RECONCILED_FILLED"
+              : "BROKER_SUBMITTED",
+          tradeCreated: true,
+          orderId: result.orderId ?? null,
+          positionId: result.positionId ?? null
         });
       }
       return { handled: true, message: "order_submitted" };

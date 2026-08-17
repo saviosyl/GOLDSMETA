@@ -94,14 +94,31 @@ export {
 export { inspectCTraderLayerNewOrderContract } from "./ctraderLayerContract";
 export {
   submitFastMarketOrder,
+  hasBrokerFillEvidence,
   type BrokerOrderOutcome,
   type FastOrderResult
 } from "./orderTransport";
 export {
   generateFastClientOrderId,
   reserveFastExecutionClaim,
-  resetFastExecutionClaimsForTests
+  resetFastExecutionClaimsForTests,
+  getFastExecutionClaim,
+  updateFastExecutionClaim,
+  createAtomicMemoryClaimBackend,
+  createFirestoreClaimBackend,
+  useFastExecutionClaimBackendForTests,
+  dropFastExecutionClaimCacheForTests,
+  blocksAutomaticResubmit
 } from "./executionClaimStore";
+export {
+  promotePendingFastFills,
+  tryReconcileExistingFastClaim,
+  setFastReconcileForTests
+} from "./pendingFillReconcile";
 export { runAuthoritativeMarginSequence } from "./marginSequence";
-export { simulateFastScanSoak, runBoundedFastScanCycle } from "./scanScheduler";
+export {
+  simulateFastScanSoak,
+  runBoundedFastScanCycle,
+  runOverlappingBoundedScans
+} from "./scanScheduler";
 export { buildVolumeRoundingDiagnostics } from "./volumeDiagnostics";

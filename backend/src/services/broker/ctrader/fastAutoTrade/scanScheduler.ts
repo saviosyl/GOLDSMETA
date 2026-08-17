@@ -21,6 +21,46 @@ export type BoundedCycleResult<S, M> = {
   manageError: string | null;
 };
 
+export async function runOverlappingBoundedScans<S>(args: {
+  scan: (invocation: 1 | 2) => Promise<S>;
+  firstBudgetMs?: number;
+  secondBudgetMs?: number;
+  secondStartDelayMs?: number;
+}): Promise<{
+  first: BoundedCycleResult<S, unknown>;
+  second: BoundedCycleResult<S, unknown>;
+  queueHighWater: number;
+  deadlock: boolean;
+}> {
+  let inflight = 0;
+  let queueHighWater = 0;
+  const wrap = (invocation: 1 | 2) => async () => {
+    inflight += 1;
+    queueHighWater = Math.max(queueHighWater, inflight);
+    try {
+      return await args.scan(invocation);
+    } finally {
+      inflight = Math.max(0, inflight - 1);
+    }
+  };
+  const firstP = runBoundedFastScanCycle({
+    scan: wrap(1),
+    scanBudgetMs: args.firstBudgetMs ?? FAST_OWNER_SCAN_BUDGET_MS
+  });
+  await new Promise((r) => setTimeout(r, args.secondStartDelayMs ?? 20));
+  const secondP = runBoundedFastScanCycle({
+    scan: wrap(2),
+    scanBudgetMs: args.secondBudgetMs ?? FAST_OWNER_SCAN_BUDGET_MS
+  });
+  const [first, second] = await Promise.all([firstP, secondP]);
+  return {
+    first,
+    second,
+    queueHighWater,
+    deadlock: false
+  };
+}
+
 export async function runBoundedFastScanCycle<S, M>(args: {
   scan: () => Promise<S>;
   manage?: () => Promise<M>;

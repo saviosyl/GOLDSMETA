@@ -99,7 +99,71 @@ describe("FAST order transport", () => {
     });
     expect(result.accepted).toBe(true);
     expect(result.newOrderReqCount).toBe(1);
-    expect(["BROKER_ACCEPTED", "BROKER_FILLED"]).toContain(result.outcome);
+    expect(result.outcome).toBe("BROKER_FILLED");
+    expect(result.positionId).toBe("p2");
+  });
+
+  it("ORDER_ACCEPTED with no position → not filled, no invented ids", async () => {
+    const transport = fakeTransport({
+      send: async () => ({
+        confirmedSent: true,
+        response: {
+          executionType: "ORDER_ACCEPTED",
+          order: { orderId: "o_acc", clientOrderId: CLIENT }
+        }
+      })
+    });
+    const result = await submitFastMarketOrder({
+      request: request(),
+      transport,
+      eventWaitMs: 30,
+      reconcileAttempts: 1,
+      reconcile: {
+        async reconcile(): Promise<ReconcileSnapshot> {
+          return { orders: [], positions: [] };
+        }
+      }
+    });
+    expect(result.outcome).toBe("BROKER_ACCEPTED");
+    expect(result.accepted).toBe(false);
+    expect(result.positionId).toBeNull();
+    expect(result.fillPrice).toBeNull();
+    expect(result.filledVolumeLots).toBeNull();
+    expect(result.newOrderReqCount).toBe(1);
+  });
+
+  it("ORDER_ACCEPTED then reconcile finds clientOrderId + position → filled once", async () => {
+    const transport = fakeTransport({
+      send: async () => ({
+        confirmedSent: true,
+        response: {
+          executionType: "ORDER_ACCEPTED",
+          order: { orderId: "o_rec", clientOrderId: CLIENT }
+        }
+      })
+    });
+    const result = await submitFastMarketOrder({
+      request: request(),
+      transport,
+      eventWaitMs: 20,
+      reconcileAttempts: 1,
+      reconcile: {
+        async reconcile(): Promise<ReconcileSnapshot> {
+          return {
+            orders: [
+              { orderId: "o_rec", positionId: "p_rec", clientOrderId: CLIENT }
+            ],
+            positions: [
+              { positionId: "p_rec", clientOrderId: CLIENT, orderId: "o_rec" }
+            ]
+          };
+        }
+      }
+    });
+    expect(result.outcome).toBe("BROKER_TIMEOUT_RECONCILED_FILLED");
+    expect(result.accepted).toBe(true);
+    expect(result.positionId).toBe("p_rec");
+    expect(result.newOrderReqCount).toBe(1);
   });
 
   it("3. ProtoOAExecutionEvent FILLED maps correctly", async () => {
@@ -257,19 +321,19 @@ describe("FAST order transport", () => {
   });
 
   it("10. duplicate FAST signal after unknown outcome → ZERO second NewOrderReq", async () => {
-    resetFastExecutionClaimsForTests();
-    const first = reserveFastExecutionClaim({
+    await resetFastExecutionClaimsForTests();
+    const first = await reserveFastExecutionClaim({
       ownerUid: "u1",
       signalId: SIGNAL,
       clientOrderId: CLIENT
     });
     expect(first.ok).toBe(true);
-    updateFastExecutionClaim("u1", SIGNAL, {
+    await updateFastExecutionClaim("u1", SIGNAL, {
       state: "BROKER_OUTCOME_UNKNOWN",
       requestSent: true,
       newOrderReqCount: 1
     });
-    const second = reserveFastExecutionClaim({
+    const second = await reserveFastExecutionClaim({
       ownerUid: "u1",
       signalId: SIGNAL,
       clientOrderId: generateFastClientOrderId(SIGNAL)
