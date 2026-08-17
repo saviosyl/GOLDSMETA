@@ -18,6 +18,7 @@ import {
   type GhShadowPersistBatch
 } from "./engine";
 import { computeGhShadowPerformanceReport } from "./performance";
+import { buildFrozenSizingSnapshot } from "./frozenSizing";
 import { replayGhShadowCapturedEvents } from "./replay";
 import {
   appendGhShadowCapturedEvent,
@@ -27,12 +28,15 @@ import {
   listGhShadowDecisions,
   listGhShadowTrades,
   loadGhShadowEpoch,
+  loadGhShadowTrade,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
   upsertGhShadowTrade
 } from "./store";
 import { GH_SHADOW_QUALIFICATION_VERSION } from "./types";
+import type { GhShadowFrozenSizingSnapshot } from "./types";
 import type { GhShadowSizingInput } from "./economics";
+import type { GoldHunterAdminConfig } from "../types";
 
 const persistBusy = new Map<string, boolean>();
 const recoveryDone = new Map<string, boolean>();
@@ -80,12 +84,18 @@ async function ensureRecovery(ownerUid: string): Promise<void> {
   if (recoveryDone.get(ownerUid)) return;
   recoveryDone.set(ownerUid, true);
   const persisted = await loadGhShadowEpoch(ownerUid);
+  const openId = persisted?.openShadowTradeId ?? null;
+  const persistedOpenTrade =
+    openId != null
+      ? await loadGhShadowTrade(ownerUid, openId, persisted?.qualificationId)
+      : null;
   const eng = getGhShadowEngine(ownerUid, {
     runtimeGeneration: (persisted?.runtimeGeneration ?? 0) + 1,
     forceNew: true
   });
   const { excludedTradeId } = eng.recoverAfterRestart({
     persistedEpoch: persisted,
+    persistedOpenTrade,
     reason: "process_restart_or_first_attach"
   });
   if (excludedTradeId || eng.getEpoch()) {
@@ -93,22 +103,50 @@ async function ensureRecovery(ownerUid: string): Promise<void> {
   }
 }
 
+function buildFrozenSizingForRuntime(
+  config: GoldHunterAdminConfig,
+  epoch: { frozenSizing?: GhShadowFrozenSizingSnapshot } | null,
+  over?: Partial<GhShadowSizingInput>
+): GhShadowFrozenSizingSnapshot {
+  const sizingOver = over ?? sizingOverridesForTests ?? {};
+  if (epoch?.frozenSizing && sizingOver.quoteToDepositRate == null) {
+    return epoch.frozenSizing;
+  }
+  return buildFrozenSizingSnapshot({
+    config,
+    quoteToDepositRate:
+      sizingOver.quoteToDepositRate ?? epoch?.frozenSizing?.quoteToDepositRate ?? null,
+    quoteToDepositRateSource:
+      sizingOver.quoteToDepositRateSource ??
+      epoch?.frozenSizing?.quoteToDepositRateSource ??
+      null
+  });
+}
+
 async function writeBatch(
   ownerUid: string,
   batch: GhShadowPersistBatch
 ): Promise<void> {
-  if (persistDelayMsForTests > 0) {
-    await new Promise((r) => setTimeout(r, persistDelayMsForTests));
-  }
-  await saveGhShadowEpoch(ownerUid, batch.epoch);
-  for (const t of batch.trades) {
-    await upsertGhShadowTrade(ownerUid, t);
-  }
-  for (const e of batch.events) {
-    await appendGhShadowCapturedEvent(ownerUid, e);
-  }
-  for (const d of batch.decisions) {
-    await appendGhShadowDecision(ownerUid, d);
+  const eng = getGhShadowEngine(ownerUid);
+  const eventIds = batch.events.map((e) => e.eventId);
+  try {
+    if (persistDelayMsForTests > 0) {
+      await new Promise((r) => setTimeout(r, persistDelayMsForTests));
+    }
+    await saveGhShadowEpoch(ownerUid, batch.epoch);
+    for (const t of batch.trades) {
+      await upsertGhShadowTrade(ownerUid, t);
+    }
+    for (const e of batch.events) {
+      await appendGhShadowCapturedEvent(ownerUid, e);
+    }
+    for (const d of batch.decisions) {
+      await appendGhShadowDecision(ownerUid, d);
+    }
+    eng.acknowledgePersist(eventIds);
+  } catch {
+    eng.requeuePersistFailure();
+    throw new Error("gh_shadow_persist_failed");
   }
 }
 
@@ -224,7 +262,8 @@ export function onGhShadowSelectorTick(args: {
         newOpportunity: args.tick.newOpportunity,
         opportunity: args.tick.opportunity,
         config,
-        sizingOverrides: sizingOverridesForTests
+        frozenSizing: buildFrozenSizingForRuntime(config, eng.getEpoch()),
+        allowFormal: true
       });
       schedulePersist(args.ownerUid);
     })();
@@ -244,7 +283,8 @@ export function onGhShadowSelectorTick(args: {
     newOpportunity: args.tick.newOpportunity,
     opportunity: args.tick.opportunity,
     config: cachedConfig,
-    sizingOverrides: sizingOverridesForTests
+    frozenSizing: buildFrozenSizingForRuntime(cachedConfig, eng.getEpoch()),
+    allowFormal: true
   });
   schedulePersist(args.ownerUid);
 }
@@ -267,6 +307,7 @@ export function processGhShadowMarketEventSync(args: {
   opportunity: import("../strategySelector").GoldHunterSelectedCandidate | null;
   config: import("../types").GoldHunterAdminConfig;
   sizingOverrides?: Partial<GhShadowSizingInput>;
+  allowFormal?: boolean;
 }): void {
   const eng = getGhShadowEngine(args.ownerUid);
   eng.processEvent({
@@ -282,7 +323,12 @@ export function processGhShadowMarketEventSync(args: {
     newOpportunity: args.newOpportunity,
     opportunity: args.opportunity,
     config: args.config,
-    sizingOverrides: args.sizingOverrides ?? sizingOverridesForTests
+    frozenSizing: buildFrozenSizingForRuntime(
+      args.config,
+      eng.getEpoch(),
+      args.sizingOverrides ?? sizingOverridesForTests
+    ),
+    allowFormal: args.allowFormal ?? true
   });
   schedulePersist(args.ownerUid);
 }

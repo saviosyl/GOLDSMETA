@@ -30,6 +30,7 @@ import {
 import {
   listGhShadowTrades,
   loadGhShadowEpoch,
+  loadGhShadowTrade,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
   setCurrentQualificationId,
@@ -50,6 +51,8 @@ import type {
   GhShadowTrade
 } from "../../../src/services/goldHunterAdmin/shadowQualification/types";
 import { frozenGhFastSoakConfig } from "../../../src/services/goldHunterAdmin/abc/frozenConfig";
+import { buildFrozenSizingSnapshot } from "../../../src/services/goldHunterAdmin/shadowQualification/frozenSizing";
+import type { GhShadowEngineTickInput } from "../../../src/services/goldHunterAdmin/shadowQualification/engine";
 
 const OWNER = "gh-shadow-rev-owner";
 const PROVEN_FX = 0.86624336;
@@ -179,6 +182,33 @@ function opportunity(
   };
 }
 
+function frozenSizing(over: { quoteToDepositRate?: number | null } = {}) {
+  return buildFrozenSizingSnapshot({
+    config: cfg(),
+    quoteToDepositRate: over.quoteToDepositRate ?? null,
+    quoteToDepositRateSource: over.quoteToDepositRate != null ? "test" : null
+  });
+}
+
+function tickInput(
+  over: Partial<GhShadowEngineTickInput> & Pick<GhShadowEngineTickInput, "receiveSeq" | "eventTsMs" | "bid" | "ask">
+): GhShadowEngineTickInput {
+  const baseFrozen = frozenSizing();
+  return {
+    features: features(over.bid, over.ask),
+    dataOk: true,
+    depthValidity: "DEPTH_VALID",
+    bookGeneration: 1,
+    resyncGeneration: 0,
+    newOpportunity: false,
+    opportunity: null,
+    config: cfg(),
+    frozenSizing: over.frozenSizing ?? baseFrozen,
+    allowFormal: over.allowFormal ?? true,
+    ...over
+  };
+}
+
 function emptyIntegrity() {
   return {
     eventsSeen: 0,
@@ -186,8 +216,15 @@ function emptyIntegrity() {
     eventsPersisted: 0,
     eventsDropped: 0,
     receiveSeqGaps: 0,
+    receiveSeqDuplicates: 0,
+    receiveSeqOutOfOrder: 0,
     journalOverflowCount: 0,
-    lastProcessedReceiveSeq: null as number | null
+    journalPending: 0,
+    journalHighWaterMark: 0,
+    persistAcknowledgedEvents: 0,
+    persistFailures: 0,
+    lastProcessedReceiveSeq: null as number | null,
+    lastResyncGeneration: null as number | null
   };
 }
 
@@ -242,11 +279,13 @@ function fakeFormalTrade(
     simulatedFrictionPnlQuote: 0.5,
     simulatedNetPnlQuote: net,
     quoteCurrency: "USD",
+    netR: net / 10,
     simulatedGrossPnlEur: net + 0.5,
     simulatedFrictionEur: 0.5,
     simulatedNetPnlEur: net,
     eurPnlAvailable: true,
     economic: null,
+    latency: null,
     profitLockActivatedAt: new Date().toISOString(),
     trailActivatedAt: new Date().toISOString(),
     trailUpdateCount: 1,
@@ -283,14 +322,34 @@ function epochStub(
     strategyVersion: "GOLD_HUNTER_FAST_V1",
     engineVersion: "GH_FAST_EVENT_V1",
     soakLabel: "LIVE_SHADOW_SOAK_V1",
+    frozenSizing: frozenSizing(),
     formalQualificationTrades: 250,
     diagnosticExcludedTrades: 0,
     openShadowTradeId: null,
     status: "ACTIVE",
     dataIntegrityFailure: null,
+    persistFailureReason: null,
     runtimeGeneration: 1,
     lastRestartReason: null,
     integrity: emptyIntegrity(),
+    activity: {
+      newOpportunitiesDetected: 0,
+      formalTradesOpened: 0,
+      formalTradesClosed: 0,
+      opportunitiesWhileAlreadyOpen: 0,
+      opportunitiesExcludedDataQuality: 0,
+      opportunitiesRejectedSizing: 0,
+      opportunitiesWarmupIgnored: 0,
+      otherRejectionReasons: {},
+      activeMarketMs: 0,
+      entryTimestampsMs: [],
+      openTradeDurationsMs: [],
+      flatIdleSegmentsMs: [],
+      lastActiveMarketAtMs: null,
+      lastEntryAtMs: null,
+      lastFlatStartMs: null,
+      bySetupOpened: { A: 0, B: 0, C: 0 }
+    },
     lastReplayStatus: "NOT_RUN",
     lastReplayDetail: null,
     updatedAt: new Date().toISOString(),
@@ -434,64 +493,42 @@ describe("B — event stream integrity", () => {
       journalCapacity: 3
     });
     const opp = opportunity();
-    eng.processEvent({
-      receiveSeq: 1,
-      eventTsMs: 1,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: true,
-      opportunity: opp,
-      config: cfg()
-    });
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 1,
+        eventTsMs: 1,
+        bid: 2650,
+        ask: 2650.1,
+        newOpportunity: true,
+        opportunity: opp
+      })
+    );
     expect(eng.getOpenTradeId()).not.toBeNull();
-    eng.processEvent({
-      receiveSeq: 2,
-      eventTsMs: 2,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: false,
-      opportunity: null,
-      config: cfg()
-    });
-    eng.processEvent({
-      receiveSeq: 3,
-      eventTsMs: 3,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: false,
-      opportunity: null,
-      config: cfg()
-    });
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 2,
+        eventTsMs: 2,
+        bid: 2650,
+        ask: 2650.1
+      })
+    );
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 3,
+        eventTsMs: 3,
+        bid: 2650,
+        ask: 2650.1
+      })
+    );
     // 4th overflows
-    eng.processEvent({
-      receiveSeq: 4,
-      eventTsMs: 4,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: false,
-      opportunity: null,
-      config: cfg()
-    });
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 4,
+        eventTsMs: 4,
+        bid: 2650,
+        ask: 2650.1
+      })
+    );
     const epoch = eng.getEpoch()!;
     expect(epoch.integrity.eventsDropped).toBeGreaterThan(0);
     expect(epoch.integrity.journalOverflowCount).toBeGreaterThan(0);
@@ -501,34 +538,24 @@ describe("B — event stream integrity", () => {
 
   it("7. receiveSeq gap => qualification invalid / excluded", () => {
     const eng = new GhShadowQualificationEngine({ ownerUid: OWNER + "-gap" });
-    eng.processEvent({
-      receiveSeq: 1,
-      eventTsMs: 1,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: true,
-      opportunity: opportunity(),
-      config: cfg()
-    });
-    eng.processEvent({
-      receiveSeq: 5, // gap
-      eventTsMs: 5,
-      bid: 2649,
-      ask: 2649.1,
-      features: features(2649, 2649.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: false,
-      opportunity: null,
-      config: cfg()
-    });
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 1,
+        eventTsMs: 1,
+        bid: 2650,
+        ask: 2650.1,
+        newOpportunity: true,
+        opportunity: opportunity()
+      })
+    );
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 5,
+        eventTsMs: 5,
+        bid: 2649,
+        ask: 2649.1
+      })
+    );
     const epoch = eng.getEpoch()!;
     expect(epoch.integrity.receiveSeqGaps).toBeGreaterThan(0);
     expect(epoch.status).toBe("DATA_QUALITY_FAILED");
@@ -577,34 +604,24 @@ describe("C/D — captured replay + formal gate", () => {
 
   it("9. changed event => LIVE_REPLAY_DIVERGENCE", () => {
     const eng = new GhShadowQualificationEngine({ ownerUid: OWNER + "-div" });
-    eng.processEvent({
-      receiveSeq: 1,
-      eventTsMs: 1,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: true,
-      opportunity: opportunity(),
-      config: cfg()
-    });
-    eng.processEvent({
-      receiveSeq: 2,
-      eventTsMs: 2,
-      bid: 2649.4,
-      ask: 2649.5,
-      features: features(2649.4, 2649.5),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: false,
-      opportunity: null,
-      config: cfg()
-    });
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 1,
+        eventTsMs: 1,
+        bid: 2650,
+        ask: 2650.1,
+        newOpportunity: true,
+        opportunity: opportunity()
+      })
+    );
+    eng.processEvent(
+      tickInput({
+        receiveSeq: 2,
+        eventTsMs: 2,
+        bid: 2649.4,
+        ask: 2649.5
+      })
+    );
     const batch = eng.drainPersistBatch()!;
     const tampered = batch.events.map((e, i) =>
       i === 1 ? { ...e, bid: e.bid - 10, ask: e.ask - 10 } : e
@@ -644,20 +661,16 @@ describe("C/D — captured replay + formal gate", () => {
 describe("E — restart recovery", () => {
   it("12+13. restart with open shadow excludes interrupted; no second formal until handled", async () => {
     const eng1 = getGhShadowEngine(OWNER, { forceNew: true, runtimeGeneration: 1 });
-    eng1.processEvent({
-      receiveSeq: 1,
-      eventTsMs: 1,
-      bid: 2650,
-      ask: 2650.1,
-      features: features(2650, 2650.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: true,
-      opportunity: opportunity(),
-      config: cfg()
-    });
+    eng1.processEvent(
+      tickInput({
+        receiveSeq: 1,
+        eventTsMs: 1,
+        bid: 2650,
+        ask: 2650.1,
+        newOpportunity: true,
+        opportunity: opportunity()
+      })
+    );
     const openId = eng1.getOpenTradeId();
     expect(openId).not.toBeNull();
     const epoch = eng1.getEpoch()!;
@@ -677,8 +690,10 @@ describe("E — restart recovery", () => {
       runtimeGeneration: 2
     });
     const persisted = await loadGhShadowEpoch(OWNER);
+    const persistedOpenTrade = await loadGhShadowTrade(OWNER, openId!, persisted?.qualificationId);
     const { excludedTradeId } = eng2.recoverAfterRestart({
       persistedEpoch: persisted,
+      persistedOpenTrade,
       reason: "test_restart"
     });
     expect(excludedTradeId).toBe(openId);
@@ -686,24 +701,20 @@ describe("E — restart recovery", () => {
     expect(eng2.getEpoch()?.openShadowTradeId).toBeNull();
 
     // New opportunity can open after recovery handled
-    eng2.processEvent({
-      receiveSeq: 10,
-      eventTsMs: 10,
-      bid: 2651,
-      ask: 2651.1,
-      features: features(2651, 2651.1),
-      dataOk: true,
-      depthValidity: "DEPTH_VALID",
-      bookGeneration: 1,
-      resyncGeneration: 0,
-      newOpportunity: true,
-      opportunity: opportunity({
-        opportunityId: "new",
-        signalId: "new",
-        receiveSeq: 10
-      }),
-      config: cfg()
-    });
+    eng2.processEvent(
+      tickInput({
+        receiveSeq: 10,
+        eventTsMs: 10,
+        bid: 2651,
+        ask: 2651.1,
+        newOpportunity: true,
+        opportunity: opportunity({
+          opportunityId: "new",
+          signalId: "new",
+          receiveSeq: 10
+        })
+      })
+    );
     expect(eng2.getOpenTradeId()).not.toBeNull();
     expect(eng2.getOpenTradeId()).not.toBe(openId);
   });

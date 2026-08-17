@@ -130,6 +130,22 @@ export async function saveGhShadowEpoch(
   await setCurrentQualificationId(ownerUid, epoch.qualificationId);
 }
 
+export async function loadGhShadowTrade(
+  ownerUid: string,
+  tradeId: string,
+  qualificationId?: string
+): Promise<GhShadowTrade | null> {
+  const qid =
+    qualificationId ?? (await getCurrentQualificationId(ownerUid));
+  if (!qid) return null;
+  const doc = epochDoc(ownerUid, qid);
+  if (!doc) {
+    return bucket(ownerUid, qid)?.trades.get(tradeId) ?? null;
+  }
+  const snap = await doc.collection("trades").doc(tradeId).get();
+  return snap.exists ? (snap.data() as GhShadowTrade) : null;
+}
+
 export async function upsertGhShadowTrade(
   ownerUid: string,
   trade: GhShadowTrade
