@@ -3,12 +3,14 @@
  * openCount===0 and submit two NewOrders when maxOpenTrades=1.
  *
  * Demo phase: maxOpenTrades MUST equal 1. Orphan leases are released only with
- * authoritative broker + local proof — never by time-only expiry.
+ * authoritative broker + local + exact claim proof — never by time-only expiry
+ * and never by capped claim-list absence.
  */
 import { getFirestoreDb } from "../firebaseAdmin";
 import { GH_DEMO_MAX_OPEN_TRADES_REQUIRED } from "./configValidation";
 import type { GoldHunterDemoTrade } from "./types";
 import type { GoldHunterSignalClaim } from "./signalClaimStore";
+import { getGoldHunterSignalClaim } from "./signalClaimStore";
 import { countsTowardGoldHunterMaxOpen } from "./tradeStore";
 
 export type MaxOpenReserveResult =
@@ -21,15 +23,51 @@ export type LeaseOrphanReconcileResult = {
   brokerReadOk: boolean;
 };
 
+/** Durable max-open lease holder identity. */
+export type GoldHunterMaxOpenLeaseHolder = {
+  /** goldHunterTradeId */
+  reservationId: string;
+  /** Exact claim doc id (opportunity / signalId). Required for new reservations. */
+  signalId?: string | null;
+  clientOrderId?: string | null;
+  at: string;
+};
+
 type LeaseDoc = {
-  holders: Array<{ reservationId: string; at: string }>;
+  holders: GoldHunterMaxOpenLeaseHolder[];
   updatedAt: string;
 };
 
+export type ExactClaimLookupResult =
+  | { ok: true; claim: GoldHunterSignalClaim | null; via: "signalId" | "tradeId" }
+  | {
+      ok: false;
+      reason: "claim_authority_unknown" | "claim_lookup_timeout" | "legacy_lease_missing_signal_id";
+    };
+
+export type LeaseClaimLookupHooks = {
+  getBySignalId?: (
+    ownerUid: string,
+    signalId: string
+  ) => Promise<GoldHunterSignalClaim | null>;
+  getByTradeId?: (
+    ownerUid: string,
+    goldHunterTradeId: string
+  ) => Promise<GoldHunterSignalClaim | null>;
+};
+
 const memoryLeases = new Map<string, LeaseDoc>();
+let claimLookupHooks: LeaseClaimLookupHooks = {};
 
 export function resetGoldHunterMaxOpenLeaseForTests(): void {
   memoryLeases.clear();
+  claimLookupHooks = {};
+}
+
+export function setGoldHunterLeaseClaimLookupHooksForTests(
+  h: LeaseClaimLookupHooks
+): void {
+  claimLookupHooks = h;
 }
 
 function leaseRef(ownerUid: string) {
@@ -66,10 +104,56 @@ async function writeLease(ownerUid: string, doc: LeaseDoc): Promise<void> {
   await ref.set(doc, { merge: true });
 }
 
+function isClaimLookupTimeout(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const any = e as { code?: string; name?: string; message?: string };
+  const msg = String(any.message ?? any.code ?? any.name ?? "").toLowerCase();
+  return (
+    any.code === "claim_lookup_timeout" ||
+    msg.includes("timeout") ||
+    msg.includes("timed out")
+  );
+}
+
+/**
+ * Exact claim authority for one lease holder.
+ * Never uses capped recent claim lists as absence proof.
+ */
+export async function lookupExactClaimForLeaseHolder(args: {
+  ownerUid: string;
+  holder: GoldHunterMaxOpenLeaseHolder;
+}): Promise<ExactClaimLookupResult> {
+  const signalId =
+    typeof args.holder.signalId === "string" && args.holder.signalId.trim()
+      ? args.holder.signalId.trim()
+      : null;
+
+  if (signalId) {
+    try {
+      const getBySignal =
+        claimLookupHooks.getBySignalId ?? getGoldHunterSignalClaim;
+      const claim = await getBySignal(args.ownerUid, signalId);
+      return { ok: true, claim, via: "signalId" };
+    } catch (e) {
+      if (isClaimLookupTimeout(e)) {
+        return { ok: false, reason: "claim_lookup_timeout" };
+      }
+      return { ok: false, reason: "claim_authority_unknown" };
+    }
+  }
+
+  // Legacy holder without signalId: never treat list absence as proof.
+  // Fail closed until signalId is present on the lease row.
+  return { ok: false, reason: "legacy_lease_missing_signal_id" };
+}
+
 export async function reserveGoldHunterMaxOpenSlot(args: {
   ownerUid: string;
   maxOpenTrades: number;
   reservationId: string;
+  /** Opportunity / signal identity for exact claim lookup. */
+  signalId: string;
+  clientOrderId?: string | null;
   /** Additional occupancy already known (local open + broker open). */
   knownOccupancy?: number;
 }): Promise<MaxOpenReserveResult> {
@@ -85,6 +169,13 @@ export async function reserveGoldHunterMaxOpenSlot(args: {
       holders: []
     };
   }
+  if (!args.signalId || !String(args.signalId).trim()) {
+    return {
+      ok: false,
+      reason: "lease_signal_id_required",
+      holders: []
+    };
+  }
   const max = GH_DEMO_MAX_OPEN_TRADES_REQUIRED;
   const known = Math.max(0, args.knownOccupancy ?? 0);
   if (known >= max) {
@@ -94,6 +185,13 @@ export async function reserveGoldHunterMaxOpenSlot(args: {
       holders: []
     };
   }
+
+  const holder: GoldHunterMaxOpenLeaseHolder = {
+    reservationId: args.reservationId,
+    signalId: String(args.signalId).trim(),
+    clientOrderId: args.clientOrderId ?? null,
+    at: new Date().toISOString()
+  };
 
   const ref = leaseRef(args.ownerUid);
   if (!ref) {
@@ -111,10 +209,7 @@ export async function reserveGoldHunterMaxOpenSlot(args: {
         holders: holders.map((h) => h.reservationId)
       };
     }
-    holders.push({
-      reservationId: args.reservationId,
-      at: new Date().toISOString()
-    });
+    holders.push(holder);
     memoryLeases.set(args.ownerUid, {
       holders,
       updatedAt: new Date().toISOString()
@@ -138,10 +233,7 @@ export async function reserveGoldHunterMaxOpenSlot(args: {
         holders: holders.map((h) => h.reservationId)
       };
     }
-    holders.push({
-      reservationId: args.reservationId,
-      at: new Date().toISOString()
-    });
+    holders.push(holder);
     tx.set(
       ref,
       { holders, updatedAt: new Date().toISOString() },
@@ -151,6 +243,30 @@ export async function reserveGoldHunterMaxOpenSlot(args: {
       ok: true as const,
       holders: holders.map((h) => h.reservationId)
     };
+  });
+}
+
+/**
+ * Test / recovery helper: insert a legacy holder without signalId.
+ * Production orchestrator always persists signalId.
+ */
+export async function seedGoldHunterLegacyMaxOpenLeaseForTests(args: {
+  ownerUid: string;
+  reservationId: string;
+}): Promise<void> {
+  const cur = await readLease(args.ownerUid);
+  const holders = cur.holders.filter(
+    (h) => h.reservationId !== args.reservationId
+  );
+  holders.push({
+    reservationId: args.reservationId,
+    signalId: null,
+    clientOrderId: null,
+    at: new Date().toISOString()
+  });
+  await writeLease(args.ownerUid, {
+    holders,
+    updatedAt: new Date().toISOString()
   });
 }
 
@@ -194,6 +310,13 @@ export async function listGoldHunterMaxOpenLeaseHolders(
   return (doc.holders ?? []).map((h) => h.reservationId);
 }
 
+export async function listGoldHunterMaxOpenLeaseHolderRecords(
+  ownerUid: string
+): Promise<GoldHunterMaxOpenLeaseHolder[]> {
+  const doc = await readLease(ownerUid);
+  return [...(doc.holders ?? [])];
+}
+
 function claimIndicatesPossibleBrokerTransmission(
   claim: GoldHunterSignalClaim
 ): boolean {
@@ -207,6 +330,12 @@ function claimIndicatesPossibleBrokerTransmission(
   );
 }
 
+function claimIsTerminalSafeForNoExposure(
+  claim: GoldHunterSignalClaim
+): boolean {
+  return claim.state === "CLOSED" || claim.state === "BROKER_REJECTED";
+}
+
 function tradeIndicatesLeaseUncertainty(trade: GoldHunterDemoTrade): boolean {
   if (countsTowardGoldHunterMaxOpen(trade)) return true;
   if (trade.status === "CLOSE_REQUESTED") return true;
@@ -217,7 +346,7 @@ function tradeIndicatesLeaseUncertainty(trade: GoldHunterDemoTrade): boolean {
 }
 
 /**
- * Decide whether a single lease holder may be released.
+ * Pure decision given an already-resolved exact claim lookup.
  * Fail closed unless every required proof is present.
  */
 export function evaluateGoldHunterLeaseOrphanRelease(args: {
@@ -225,7 +354,7 @@ export function evaluateGoldHunterLeaseOrphanRelease(args: {
   positionsReadOk: boolean;
   brokerGhPositionIds: string[];
   trades: GoldHunterDemoTrade[];
-  claims: GoldHunterSignalClaim[];
+  claimLookup: ExactClaimLookupResult;
 }): { mayRelease: boolean; reason: string } {
   if (!args.positionsReadOk) {
     return { mayRelease: false, reason: "broker_positions_read_failed" };
@@ -246,25 +375,28 @@ export function evaluateGoldHunterLeaseOrphanRelease(args: {
     }
   }
 
-  const relatedClaims = args.claims.filter(
-    (c) => c.goldHunterTradeId === args.reservationId
-  );
-  for (const c of relatedClaims) {
-    if (claimIndicatesPossibleBrokerTransmission(c)) {
-      return { mayRelease: false, reason: `claim_uncertain_${c.state}` };
+  if (args.brokerGhPositionIds.length > 0) {
+    return { mayRelease: false, reason: "broker_gh_position_exists" };
+  }
+
+  if (!args.claimLookup.ok) {
+    return { mayRelease: false, reason: args.claimLookup.reason };
+  }
+
+  const claim = args.claimLookup.claim;
+  if (claim) {
+    if (claimIndicatesPossibleBrokerTransmission(claim)) {
+      return { mayRelease: false, reason: `claim_uncertain_${claim.state}` };
     }
     if (
-      c.brokerPositionId &&
-      args.brokerGhPositionIds.includes(String(c.brokerPositionId))
+      claim.brokerPositionId &&
+      args.brokerGhPositionIds.includes(String(claim.brokerPositionId))
     ) {
       return { mayRelease: false, reason: "broker_position_linked_to_claim" };
     }
-  }
-
-  // Label / comment ownership: any open GH broker position blocks all orphan cleanup
-  // when we cannot prove the lease is unrelated — with maxOpen=1 any GH open keeps leases.
-  if (args.brokerGhPositionIds.length > 0) {
-    return { mayRelease: false, reason: "broker_gh_position_exists" };
+    if (!claimIsTerminalSafeForNoExposure(claim)) {
+      return { mayRelease: false, reason: `claim_state_not_terminal_${claim.state}` };
+    }
   }
 
   return { mayRelease: true, reason: "authoritative_zero_exposure" };
@@ -272,13 +404,13 @@ export function evaluateGoldHunterLeaseOrphanRelease(args: {
 
 /**
  * Reconciliation-based orphan cleanup. Never time-only expiry.
+ * Uses exact claim lookup per holder — never capped claim-list absence.
  */
 export async function reconcileGoldHunterMaxOpenLeaseOrphans(args: {
   ownerUid: string;
   positionsReadOk: boolean;
   brokerGhPositionIds: string[];
   trades: GoldHunterDemoTrade[];
-  claims: GoldHunterSignalClaim[];
 }): Promise<LeaseOrphanReconcileResult> {
   const released: string[] = [];
   const retained: Array<{ reservationId: string; reason: string }> = [];
@@ -295,14 +427,18 @@ export async function reconcileGoldHunterMaxOpenLeaseOrphans(args: {
   }
 
   const doc = await readLease(args.ownerUid);
-  const keep: LeaseDoc["holders"] = [];
+  const keep: GoldHunterMaxOpenLeaseHolder[] = [];
   for (const h of doc.holders ?? []) {
+    const claimLookup = await lookupExactClaimForLeaseHolder({
+      ownerUid: args.ownerUid,
+      holder: h
+    });
     const decision = evaluateGoldHunterLeaseOrphanRelease({
       reservationId: h.reservationId,
       positionsReadOk: args.positionsReadOk,
       brokerGhPositionIds: args.brokerGhPositionIds,
       trades: args.trades,
-      claims: args.claims
+      claimLookup
     });
     if (decision.mayRelease) {
       released.push(h.reservationId);

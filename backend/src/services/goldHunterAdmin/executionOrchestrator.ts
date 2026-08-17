@@ -354,6 +354,8 @@ export async function attemptGoldHunterDemoExecution(
     ownerUid,
     maxOpenTrades: config.maxOpenTrades,
     reservationId: goldHunterTradeId,
+    signalId: opportunityId,
+    clientOrderId,
     knownOccupancy
   });
   if (!lease.ok) {

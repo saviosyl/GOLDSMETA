@@ -24,9 +24,6 @@ import {
   runGoldHunterReconcilePass
 } from "./reconciliationRuntime";
 import { validateGoldHunterRiskConfig } from "./configValidation";
-import {
-  listGoldHunterSignalClaims
-} from "./signalClaimStore";
 import { reconcileGoldHunterMaxOpenLeaseOrphans } from "./maxOpenLease";
 import {
   GH_ADMIN_STRATEGY_ID,
@@ -482,9 +479,6 @@ export type PreClaimProjectedRiskHooks = {
     brokerOpenGoldHunterPositions: GoldHunterBrokerOpenPositionLite[];
   }>;
   listTrades?: (ownerUid: string) => Promise<GoldHunterDemoTrade[]>;
-  listClaims?: (
-    ownerUid: string
-  ) => Promise<import("./signalClaimStore").GoldHunterSignalClaim[]>;
 };
 
 let preClaimHooks: PreClaimProjectedRiskHooks = {};
@@ -570,9 +564,6 @@ export async function evaluateGoldHunterPreClaimProjectedDailyRisk(args: {
   const list =
     preClaimHooks.listTrades ??
     ((ownerUid: string) => listGoldHunterDemoTrades(ownerUid, { limit: 200 }));
-  const listClaims =
-    preClaimHooks.listClaims ??
-    ((ownerUid: string) => listGoldHunterSignalClaims(ownerUid));
 
   let positionsReadOk = false;
   let brokerOpenGoldHunterPositions: GoldHunterBrokerOpenPositionLite[] = [];
@@ -591,17 +582,17 @@ export async function evaluateGoldHunterPreClaimProjectedDailyRisk(args: {
   }
 
   const trades = await list(args.ownerUid);
-  const claims = await listClaims(args.ownerUid).catch(() => []);
 
-  // Reconciliation-based lease orphan cleanup (never time-only).
+  // Lease orphan cleanup uses exact per-holder claim lookup (getBySignalId /
+  // getByTradeId) — never a capped claims list, and never treat lookup
+  // failure as empty claims.
   await reconcileGoldHunterMaxOpenLeaseOrphans({
     ownerUid: args.ownerUid,
     positionsReadOk,
     brokerGhPositionIds: brokerOpenGoldHunterPositions.map((p) =>
       String(p.positionId)
     ),
-    trades,
-    claims
+    trades
   }).catch(() => undefined);
 
   return buildGoldHunterProjectedDailyRiskSnapshot({

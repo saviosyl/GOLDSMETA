@@ -20,7 +20,9 @@ import {
   listGoldHunterMaxOpenLeaseHolders,
   reconcileGoldHunterMaxOpenLeaseOrphans,
   reserveGoldHunterMaxOpenSlot,
-  resetGoldHunterMaxOpenLeaseForTests
+  resetGoldHunterMaxOpenLeaseForTests,
+  seedGoldHunterLegacyMaxOpenLeaseForTests,
+  setGoldHunterLeaseClaimLookupHooksForTests
 } from "../../../src/services/goldHunterAdmin/maxOpenLease";
 import {
   countsTowardGoldHunterMaxOpen,
@@ -455,12 +457,14 @@ describe("Max-open occupancy + concurrency", () => {
         ownerUid: OWNER,
         maxOpenTrades: 1,
         reservationId: "GH-D-a",
+        signalId: "sig-a",
         knownOccupancy: 0
       }),
       reserveGoldHunterMaxOpenSlot({
         ownerUid: OWNER,
         maxOpenTrades: 1,
         reservationId: "GH-D-b",
+        signalId: "sig-b",
         knownOccupancy: 0
       })
     ]);
@@ -486,7 +490,6 @@ describe("Max-open occupancy + concurrency", () => {
       proposedTradeRiskEur: 10,
       now: new Date("2026-08-17T09:00:00.000Z")
     });
-    // Each alone fits (€45 ≤ €50) — concurrency must be gated by maxOpen lease.
     expect(snapA.projectedWorstCaseLossEur).toBe(45);
     expect(snapA.allowed).toBe(true);
 
@@ -495,110 +498,310 @@ describe("Max-open occupancy + concurrency", () => {
         ownerUid: OWNER,
         maxOpenTrades: 1,
         reservationId: "GH-D-opp1",
+        signalId: "sig-opp1",
         knownOccupancy: 0
       }),
       reserveGoldHunterMaxOpenSlot({
         ownerUid: OWNER,
         maxOpenTrades: 1,
         reservationId: "GH-D-opp2",
+        signalId: "sig-opp2",
         knownOccupancy: 0
       })
     ]);
     expect([a, b].filter((r) => r.ok)).toHaveLength(1);
-    // Dual projected €35+10+10 = 55 must never both reserve.
     expect(35 + 10 + 10).toBe(55);
   });
 });
 
-describe("Max-open lease crash recovery", () => {
-  it("1: crash before claim + broker zero → reconciliation may release", async () => {
+describe("Max-open lease crash recovery (exact claim lookup)", () => {
+  it("crash before claim + broker zero + exact claim absent → may release", async () => {
     await reserveGoldHunterMaxOpenSlot({
       ownerUid: OWNER,
       maxOpenTrades: 1,
       reservationId: "GH-D-crash1",
+      signalId: "sig-crash1",
+      clientOrderId: "gh_crash1",
       knownOccupancy: 0
     });
-    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual([
-      "GH-D-crash1"
-    ]);
     const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
       ownerUid: OWNER,
       positionsReadOk: true,
       brokerGhPositionIds: [],
-      trades: [],
-      claims: []
+      trades: []
     });
     expect(result.released).toEqual(["GH-D-crash1"]);
     expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual([]);
   });
 
-  it("2: broker outcome unknown → lease MUST remain", async () => {
+  it("1: exact claim lookup THROWS → lease retained", async () => {
     await reserveGoldHunterMaxOpenSlot({
       ownerUid: OWNER,
       maxOpenTrades: 1,
-      reservationId: "GH-D-unk",
+      reservationId: "GH-D-throw",
+      signalId: "sig-throw",
       knownOccupancy: 0
     });
-    const claim: GoldHunterSignalClaim = {
-      signalId: "sig-unk",
-      strategy: GH_ADMIN_STRATEGY_ID,
-      environment: "DEMO",
-      ownerUid: OWNER,
-      state: "SUBMITTING",
-      goldHunterTradeId: "GH-D-unk",
-      clientOrderId: "gh_unk",
-      brokerOrderId: null,
-      brokerPositionId: null,
-      errorCode: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      claimedAt: new Date().toISOString(),
-      setup: "A",
-      side: "BUY"
-    };
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () => {
+        throw new Error("firestore_unavailable");
+      }
+    });
     const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
       ownerUid: OWNER,
       positionsReadOk: true,
       brokerGhPositionIds: [],
-      trades: [],
-      claims: [claim]
+      trades: []
     });
     expect(result.released).toEqual([]);
-    expect(result.retained[0]?.reason).toContain("claim_uncertain");
-    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual(["GH-D-unk"]);
+    expect(result.retained[0]?.reason).toBe("claim_authority_unknown");
+    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual([
+      "GH-D-throw"
+    ]);
   });
 
-  it("3: broker position exists → lease MUST remain", async () => {
+  it("2: exact claim lookup TIMES OUT → lease retained", async () => {
     await reserveGoldHunterMaxOpenSlot({
       ownerUid: OWNER,
       maxOpenTrades: 1,
-      reservationId: "GH-D-pos",
+      reservationId: "GH-D-timeout",
+      signalId: "sig-timeout",
       knownOccupancy: 0
     });
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () => {
+        throw Object.assign(new Error("claim lookup timed out"), {
+          code: "claim_lookup_timeout"
+        });
+      }
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual([]);
+    expect(result.retained[0]?.reason).toBe("claim_lookup_timeout");
+  });
+
+  it("3: claim older than 500 others — exact signalId finds SUBMITTING → retain", async () => {
+    // Simulate: capped list would miss this claim; exact getBySignalId still finds it.
+    await reserveGoldHunterMaxOpenSlot({
+      ownerUid: OWNER,
+      maxOpenTrades: 1,
+      reservationId: "GH-D-old",
+      signalId: "sig-old-submitting",
+      knownOccupancy: 0
+    });
+    const oldClaim: GoldHunterSignalClaim = {
+      signalId: "sig-old-submitting",
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      ownerUid: OWNER,
+      state: "SUBMITTING",
+      goldHunterTradeId: "GH-D-old",
+      clientOrderId: "gh_old",
+      brokerOrderId: null,
+      brokerPositionId: null,
+      errorCode: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      claimedAt: "2026-01-01T00:00:00.000Z",
+      setup: "A",
+      side: "BUY"
+    };
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async (_owner, signalId) => {
+        if (signalId === "sig-old-submitting") return oldClaim;
+        return null;
+      }
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual([]);
+    expect(result.retained[0]?.reason).toBe("claim_uncertain_SUBMITTING");
+  });
+
+  it("4: legacy lease with no signalId → retain", async () => {
+    await seedGoldHunterLegacyMaxOpenLeaseForTests({
+      ownerUid: OWNER,
+      reservationId: "GH-D-legacy"
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual([]);
+    expect(result.retained[0]?.reason).toBe("legacy_lease_missing_signal_id");
+  });
+
+  it("5: exact claim lookup returns no claim + broker zero → release", async () => {
+    await reserveGoldHunterMaxOpenSlot({
+      ownerUid: OWNER,
+      maxOpenTrades: 1,
+      reservationId: "GH-D-noclaim",
+      signalId: "sig-noclaim",
+      knownOccupancy: 0
+    });
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () => null
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual(["GH-D-noclaim"]);
+  });
+
+  it("6: exact claim CLOSED + broker zero → release", async () => {
+    await reserveGoldHunterMaxOpenSlot({
+      ownerUid: OWNER,
+      maxOpenTrades: 1,
+      reservationId: "GH-D-closed",
+      signalId: "sig-closed",
+      knownOccupancy: 0
+    });
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () =>
+        ({
+          signalId: "sig-closed",
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          ownerUid: OWNER,
+          state: "CLOSED",
+          goldHunterTradeId: "GH-D-closed",
+          clientOrderId: "gh_closed",
+          brokerOrderId: null,
+          brokerPositionId: null,
+          errorCode: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          claimedAt: new Date().toISOString(),
+          setup: "A",
+          side: "BUY"
+        }) satisfies GoldHunterSignalClaim
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual(["GH-D-closed"]);
+  });
+
+  it("7: claim SUBMITTING → retain", async () => {
+    await reserveGoldHunterMaxOpenSlot({
+      ownerUid: OWNER,
+      maxOpenTrades: 1,
+      reservationId: "GH-D-sub",
+      signalId: "sig-sub",
+      knownOccupancy: 0
+    });
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () =>
+        ({
+          signalId: "sig-sub",
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          ownerUid: OWNER,
+          state: "SUBMITTING",
+          goldHunterTradeId: "GH-D-sub",
+          clientOrderId: "gh_sub",
+          brokerOrderId: null,
+          brokerPositionId: null,
+          errorCode: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          claimedAt: new Date().toISOString(),
+          setup: "A",
+          side: "BUY"
+        }) satisfies GoldHunterSignalClaim
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual([]);
+    expect(result.retained[0]?.reason).toBe("claim_uncertain_SUBMITTING");
+  });
+
+  it("8: claim BROKER_SUBMIT_ERROR → retain", async () => {
+    await reserveGoldHunterMaxOpenSlot({
+      ownerUid: OWNER,
+      maxOpenTrades: 1,
+      reservationId: "GH-D-err",
+      signalId: "sig-err",
+      knownOccupancy: 0
+    });
+    setGoldHunterLeaseClaimLookupHooksForTests({
+      getBySignalId: async () =>
+        ({
+          signalId: "sig-err",
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          ownerUid: OWNER,
+          state: "BROKER_SUBMIT_ERROR",
+          goldHunterTradeId: "GH-D-err",
+          clientOrderId: "gh_err",
+          brokerOrderId: null,
+          brokerPositionId: null,
+          errorCode: "NETWORK",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          claimedAt: new Date().toISOString(),
+          setup: "A",
+          side: "BUY"
+        }) satisfies GoldHunterSignalClaim
+    });
+    const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
+      ownerUid: OWNER,
+      positionsReadOk: true,
+      brokerGhPositionIds: [],
+      trades: []
+    });
+    expect(result.released).toEqual([]);
+    expect(result.retained[0]?.reason).toBe(
+      "claim_uncertain_BROKER_SUBMIT_ERROR"
+    );
+  });
+
+  it("broker position exists → lease MUST remain", async () => {
     const decision = evaluateGoldHunterLeaseOrphanRelease({
       reservationId: "GH-D-pos",
       positionsReadOk: true,
       brokerGhPositionIds: ["54326887"],
       trades: [],
-      claims: []
+      claimLookup: { ok: true, claim: null, via: "signalId" }
     });
     expect(decision.mayRelease).toBe(false);
     expect(decision.reason).toBe("broker_gh_position_exists");
   });
 
-  it("4: lease cleanup broker read fails → lease MUST remain", async () => {
+  it("lease cleanup broker read fails → lease MUST remain", async () => {
     await reserveGoldHunterMaxOpenSlot({
       ownerUid: OWNER,
       maxOpenTrades: 1,
       reservationId: "GH-D-readfail",
+      signalId: "sig-readfail",
       knownOccupancy: 0
     });
     const result = await reconcileGoldHunterMaxOpenLeaseOrphans({
       ownerUid: OWNER,
       positionsReadOk: false,
       brokerGhPositionIds: [],
-      trades: [],
-      claims: []
+      trades: []
     });
     expect(result.released).toEqual([]);
     expect(result.brokerReadOk).toBe(false);

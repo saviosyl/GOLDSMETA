@@ -184,6 +184,44 @@ export async function getGoldHunterSignalClaim(
   return snap.exists ? (snap.data() as GoldHunterSignalClaim) : null;
 }
 
+/**
+ * Exact claim lookup by goldHunterTradeId (legacy lease recovery).
+ * Not a capped recent-list scan — targeted equality query / full memory scan.
+ * Throws on ambiguous multi-match (fail closed at caller).
+ */
+export async function getGoldHunterSignalClaimByGoldHunterTradeId(
+  ownerUid: string,
+  goldHunterTradeId: string
+): Promise<GoldHunterSignalClaim | null> {
+  const tradeId = String(goldHunterTradeId ?? "").trim();
+  if (!tradeId) return null;
+
+  const col = claimCol(ownerUid);
+  if (!col) {
+    const matches = [...memMap(ownerUid).values()].filter(
+      (c) => c.goldHunterTradeId === tradeId
+    );
+    if (matches.length > 1) {
+      throw Object.assign(new Error("CLAIM_TRADE_ID_AMBIGUOUS"), {
+        code: "claim_authority_unknown"
+      });
+    }
+    return matches[0] ?? null;
+  }
+
+  const snap = await col
+    .where("goldHunterTradeId", "==", tradeId)
+    .limit(2)
+    .get();
+  if (snap.size > 1) {
+    throw Object.assign(new Error("CLAIM_TRADE_ID_AMBIGUOUS"), {
+      code: "claim_authority_unknown"
+    });
+  }
+  if (snap.empty) return null;
+  return snap.docs[0]!.data() as GoldHunterSignalClaim;
+}
+
 export async function listGoldHunterSignalClaims(
   ownerUid: string,
   limit = 200
