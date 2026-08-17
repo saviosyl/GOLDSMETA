@@ -226,7 +226,7 @@ describe("Gold Hunter UI", () => {
     renderAt("/gold-hunter");
     await waitFor(() => expect(screen.getByTestId("gh-dashboard")).toBeInTheDocument());
     expect(screen.getByTestId("gh-allocation")).toHaveTextContent("5,000");
-    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("MARKET CLOSED");
+    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("AUTOTRADE OFF");
     expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
     expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
     expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
@@ -243,20 +243,50 @@ describe("Gold Hunter UI", () => {
     expect(screen.getByTestId("gh-dashboard-start-demo-auto")).toBeInTheDocument();
   });
 
-  it("shows READY TO START and arms via confirmDemoAutoTrade=true only", async () => {
+  it("shows READY TO ARM and arms via confirmDemoAutoTrade=true only", async () => {
     status.arming = {
       ready: true,
       blockers: [],
       strategySelectorConnected: true
     };
+    status.gates = {
+      ok: false,
+      blockers: ["WAIT — AUTOTRADE OFF"],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    status.market.marketStatus = "OPEN";
     renderAt("/gold-hunter");
-    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO START"));
+    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO ARM"));
     fireEvent.click(screen.getByTestId("gh-dashboard-start-demo-auto"));
     await waitFor(() => expect(goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
     expect(goldHunterUpdateConfig).toHaveBeenCalledWith({
       demoAutoTradeEnabled: true,
       confirmDemoAutoTrade: true
     });
+  });
+
+  it("treats NO SETUP SELECTED as ARMED — WAITING FOR VALID SIGNAL", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.arming = {
+      ready: true,
+      blockers: [],
+      strategySelectorConnected: true
+    };
+    status.gates = {
+      ok: false,
+      blockers: ["WAIT — NO SETUP SELECTED"],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    status.market.marketStatus = "OPEN";
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "ARMED — WAITING FOR VALID SIGNAL"
+      )
+    );
+    expect(screen.queryByText(/TEMPORARILY BLOCKED/)).not.toBeInTheDocument();
   });
 
   it("shows ARMED — WAITING FOR VALID SIGNAL and can stop Demo AutoTrade", async () => {
@@ -301,6 +331,35 @@ describe("Gold Hunter UI", () => {
     expect(screen.getByTestId("gh-demo-autotrade-card")).toHaveTextContent(
       "No new order right now: WAIT — SPREAD TOO WIDE"
     );
+  });
+
+  it("surfaces DAILY LOSS LIMIT before arming even when arming.ready=true", async () => {
+    status.config.demoAutoTradeEnabled = false;
+    status.arming = {
+      ready: true,
+      blockers: [],
+      strategySelectorConnected: true
+    };
+    status.gates = {
+      ok: false,
+      blockers: [
+        "WAIT — AUTOTRADE OFF",
+        "WAIT — DAILY LOSS LIMIT",
+        "WAIT — NO SETUP SELECTED"
+      ],
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    };
+    status.market.marketStatus = "OPEN";
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO ARM")
+    );
+    expect(screen.getByTestId("gh-demo-autotrade-hint")).toHaveTextContent(
+      "BLOCKED — DAILY LOSS LIMIT"
+    );
+    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("DAILY LOSS LIMIT");
+    expect(screen.getByTestId("gh-demo-autotrade-hint")).not.toHaveTextContent("AUTOTRADE OFF");
   });
 
   it("shows IN DEMO TRADE when an open Gold Hunter position exists", async () => {

@@ -570,6 +570,70 @@ describe("B — event stream integrity", () => {
     expect(epoch.status).toBe("DATA_QUALITY_FAILED");
     expect(eng.getOpenTradeId()).toBeNull();
   });
+
+  it("7b. flat featureless seq must not invent receive_seq_gap", () => {
+    process.env.GOLD_HUNTER_SHADOW_QUALIFICATION_ENABLED = "true";
+    const owner = OWNER + "-featless-flat";
+    const eng = getGhShadowEngine(owner, { forceNew: true });
+
+    processGhShadowMarketEventSync({
+      ownerUid: owner,
+      receiveSeq: 100,
+      eventTsMs: 10_000,
+      bid: 2650,
+      ask: 2650.1,
+      features: features(2650, 2650.1),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    expect(eng.getOpenTradeId()).toBeNull();
+    expect(eng.getEpoch()!.integrity.lastProcessedReceiveSeq).toBe(100);
+
+    // Intentionally featureless + no opportunity + flat — previously skipped by
+    // runtime early-return, which advanced selector seq without processEvent.
+    processGhShadowMarketEventSync({
+      ownerUid: owner,
+      receiveSeq: 101,
+      eventTsMs: 10_100,
+      strategySpotBid: 2650,
+      strategySpotAsk: 2650.1,
+      depthBestBid: 2650,
+      depthBestAsk: 2650.1,
+      features: null,
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    expect(eng.getEpoch()!.status).toBe("ACTIVE");
+    expect(eng.getEpoch()!.dataIntegrityFailure).toBeNull();
+    expect(eng.getEpoch()!.integrity.receiveSeqGaps).toBe(0);
+    expect(eng.getEpoch()!.integrity.lastProcessedReceiveSeq).toBe(101);
+
+    processGhShadowMarketEventSync({
+      ownerUid: owner,
+      receiveSeq: 102,
+      eventTsMs: 10_200,
+      bid: 2650.02,
+      ask: 2650.12,
+      features: features(2650.02, 2650.12),
+      dataOk: true,
+      depthValidity: "DEPTH_VALID",
+      newOpportunity: false,
+      opportunity: null,
+      config: cfg()
+    });
+    const epoch = eng.getEpoch()!;
+    expect(epoch.status).toBe("ACTIVE");
+    expect(epoch.dataIntegrityFailure).toBeNull();
+    expect(epoch.integrity.receiveSeqGaps).toBe(0);
+    expect(epoch.integrity.lastProcessedReceiveSeq).toBe(102);
+    expect(epoch.integrity.eventsProcessed).toBe(3);
+  });
 });
 
 describe("C/D — captured replay + formal gate", () => {
