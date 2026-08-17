@@ -23,6 +23,7 @@ import { runDemoPositionManagementPass } from "./services/broker/ctrader/demoPos
 import { runWeeklyReportPass } from "./services/broker/ctrader/weeklyReportService";
 import { isFastAutoTradeV1Enabled } from "./services/broker/ctrader/fastAutoTrade/config";
 import { runFastAutoTradeScanPass } from "./services/broker/ctrader/fastAutoTrade/scan";
+import { runBoundedFastScanCycle } from "./services/broker/ctrader/fastAutoTrade/scanScheduler";
 import {
   applyCanonicalDemoFastRuntimeEnv,
   CTRADER_DEMO_FUNCTION_SECRETS
@@ -249,15 +250,26 @@ export const manageDemoAutoTradePositions = onSchedule(
       );
       return;
     }
-    const result = await runDemoPositionManagementPass();
-    const fastScan = isFastAutoTradeV1Enabled()
-      ? await runFastAutoTradeScanPass()
-      : { scanned: 0, handled: 0 };
+    const cycle = await runBoundedFastScanCycle({
+      scan: () =>
+        isFastAutoTradeV1Enabled()
+          ? runFastAutoTradeScanPass()
+          : Promise.resolve({ scanned: 0, handled: 0 }),
+      manage: () => runDemoPositionManagementPass()
+    });
+    const result = cycle.manageResult ?? { owners: 0, managed: 0, closed: 0 };
+    const fastScan = cycle.scanResult ?? { scanned: 0, handled: 0 };
     console.log(
       JSON.stringify({
         event: "manage_demo_positions_pass",
         ...result,
         fastScan,
+        scanRan: cycle.scanRan,
+        scanTimedOut: cycle.scanTimedOut,
+        manageRan: cycle.manageRan,
+        manageTimedOut: cycle.manageTimedOut,
+        scanError: cycle.scanError,
+        manageError: cycle.manageError,
         ts: new Date().toISOString()
       })
     );

@@ -474,7 +474,11 @@ async function runQual(d: Record<string, unknown> = decision()) {
 }
 
 describe("FAST_AUTOTRADE_V1 execution integration", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { resetFastExecutionClaimsForTests } = await import(
+      "../../../../../src/services/broker/ctrader/fastAutoTrade/executionClaimStore"
+    );
+    resetFastExecutionClaimsForTests();
     submitDemoMarketOrder.mockClear();
     submitDemoMarketOrder.mockResolvedValue({
       accepted: true,

@@ -10,6 +10,8 @@ import { listOwnersNeedingQuoteRefresh } from "../quoteStore";
 import { resolveDemoAutoAuthorityForUser } from "../demoAutoExecutionAuthority";
 import { isFastAutoTradeV1Enabled } from "./config";
 import { logger } from "../../../logging/logger";
+import { withBoundedOp } from "./boundedOp";
+import { FAST_OWNER_SCAN_BUDGET_MS } from "./scanScheduler";
 
 export async function runFastAutoTradeScanPass(opts?: {
   limit?: number;
@@ -39,11 +41,16 @@ export async function runFastAutoTradeScanPass(opts?: {
       const latest = await store.latestDecision(uid);
       if (!latest) continue;
       scanned += 1;
-      const result = await processDecisionForQualification({
-        uid,
-        decisionId: latest.decisionId,
-        store
-      });
+      const result = await withBoundedOp(
+        "FAST_OWNER_SCAN",
+        FAST_OWNER_SCAN_BUDGET_MS,
+        () =>
+          processDecisionForQualification({
+            uid,
+            decisionId: latest.decisionId,
+            store
+          })
+      );
       if (result.handled) handled += 1;
     } catch (err) {
       logger.warn("FAST_AUTOTRADE_V1 scan failed for owner", {
