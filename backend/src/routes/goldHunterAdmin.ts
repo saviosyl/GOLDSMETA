@@ -36,7 +36,8 @@ import {
   buildGhShadowQualificationStatus,
   listGhShadowTrades,
   getGhShadowMutationSurfaceReport,
-  getGhShadowStrategyConfigIdentity
+  getGhShadowStrategyConfigIdentity,
+  runGhShadowReplayAndGate
 } from "../services/goldHunterAdmin/shadowQualification";
 
 const adminGate = [requireAuth, requireAdmin] as const;
@@ -390,6 +391,45 @@ export const buildGoldHunterAdminRouter = (): Router => {
         mutationSurface: getGhShadowMutationSurfaceReport(),
         strategy: GH_ADMIN_STRATEGY_ID
       });
+    }
+  );
+
+  /**
+   * Research-only shadow replay trigger (admin-protected).
+   * Runs captured-event replay, persists replay status, returns detail.
+   * Does NOT place/amend/cancel/close broker orders, enable Demo/Live,
+   * change strategy, or run on the market-tick hot path.
+   */
+  router.post(
+    "/v1/gold-hunter/shadow-qualification/replay",
+    ...adminGate,
+    async (req, res) => {
+      const uid = getAuthenticatedUserId(req);
+      if (!uid) {
+        res.status(401).json({ error: { code: "UNAUTHENTICATED" } });
+        return;
+      }
+      try {
+        const result = await runGhShadowReplayAndGate(uid);
+        res.status(200).json({
+          ...result,
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          liveExecutionEnabled: false,
+          brokerOrders: 0,
+          demoAutoTradeEnabled: false,
+          note:
+            "Research-only shadow replay. No broker mutation. " +
+            "Replay is current only when expectedEvents matches persistAcknowledgedEvents."
+        });
+      } catch (e) {
+        res.status(500).json({
+          error: {
+            code: "GH_SHADOW_REPLAY_FAILED",
+            message: e instanceof Error ? e.message : "shadow_replay_failed"
+          }
+        });
+      }
     }
   );
 

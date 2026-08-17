@@ -118,13 +118,17 @@ export function replayGhShadowCapturedEvents(args: {
     }
 
     if (!fast) continue;
-    if (!Number.isFinite(ev.bid) || !Number.isFinite(ev.ask)) continue;
-    updateOpenTrade(fast, ev.bid, ev.ask, cfg);
+    // Mirror live Demo/shadow open management: featureless ticks are NO-OPS.
+    // Depth / generic bid/ask must NEVER update MFE/MAE/lock/trail/exit state.
+    if (!ev.features) continue;
+    const featBid = ev.features.bid;
+    const featAsk = ev.features.ask;
+    if (!Number.isFinite(featBid) || !Number.isFinite(featAsk)) continue;
+    updateOpenTrade(fast, featBid, featAsk, cfg);
     if (fast.profitLockActive) {
       profitLockSeen = true;
       trailSeen = true;
     }
-    if (!ev.features) continue;
     const reason = evaluateOpenExit({
       trade: fast,
       f: ev.features,
@@ -134,7 +138,7 @@ export function replayGhShadowCapturedEvents(args: {
     if (!reason) continue;
 
     const entry = fast.entryPrice;
-    const exitPx = fast.side === "BUY" ? ev.bid : ev.ask;
+    const exitPx = fast.side === "BUY" ? featBid : featAsk;
     const netMove =
       fast.side === "BUY" ? exitPx - entry - cfg.friction : entry - exitPx - cfg.friction;
 

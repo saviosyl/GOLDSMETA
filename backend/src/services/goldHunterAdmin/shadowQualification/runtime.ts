@@ -31,17 +31,20 @@ import {
   appendGhShadowDecision,
   GH_SHADOW_QUALIFICATION_STORAGE_PATH,
   listAllGhShadowCapturedEvents,
-  listGhShadowDecisions,
+  listAllGhShadowReplayMarkerDecisions,
+  listAllGhShadowTrades,
   listGhShadowTrades,
   loadGhShadowEpoch,
   loadGhShadowTrade,
+  patchGhShadowEpochReplayFields,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
   upsertGhShadowTrade
 } from "./store";
 import type {
   GhShadowFrozenSizingSnapshot,
-  GhShadowOwnerLifecycle
+  GhShadowOwnerLifecycle,
+  GhShadowQualificationEpoch
 } from "./types";
 import { GH_SHADOW_QUALIFICATION_VERSION } from "./types";
 import type { GhShadowSizingInput } from "./economics";
@@ -83,8 +86,32 @@ let authoritativeSizingLoaderForTests:
 /** When false, processGhShadowMarketEventSync does not auto-schedule persist. */
 let autoPersistForTests = true;
 
+/**
+ * Test hook: runs after replay start snapshot / event load, before finalise.
+ * Used to simulate concurrent ACK while a long replay is in progress.
+ */
+let replayBeforeFinalizeHookForTests:
+  | ((ctx: {
+      ownerUid: string;
+      qualificationId: string;
+      expectedEvents: number;
+    }) => void | Promise<void>)
+  | null = null;
+
 export function setGhShadowPersistDelayMsForTests(ms: number): void {
   persistDelayMsForTests = Math.max(0, ms);
+}
+
+export function setGhShadowReplayBeforeFinalizeHookForTests(
+  hook:
+    | ((ctx: {
+        ownerUid: string;
+        qualificationId: string;
+        expectedEvents: number;
+      }) => void | Promise<void>)
+    | null
+): void {
+  replayBeforeFinalizeHookForTests = hook;
 }
 
 export function setGhShadowLoadEpochDelayMsForTests(ms: number): void {
@@ -631,9 +658,30 @@ export async function drainGhShadowQualificationForTests(
   await flushGhShadowPersistenceForTests(ownerUid);
 }
 
+async function syncEngineReplayFields(
+  ownerUid: string,
+  qualificationId: string,
+  status: GhShadowQualificationEpoch["lastReplayStatus"],
+  detail: GhShadowQualificationEpoch["lastReplayDetail"]
+): Promise<void> {
+  const eng = getGhShadowEngine(ownerUid);
+  const live = eng.getEpoch();
+  if (live && live.qualificationId === qualificationId) {
+    live.lastReplayStatus = status;
+    live.lastReplayDetail = detail ? { ...detail } : null;
+  }
+}
+
+/**
+ * Research-only replay + gate. Must NOT mutate broker / Demo / strategy.
+ *
+ * Concurrency invariant: LIVE_REPLAY_OK is written ONLY if the CURRENT epoch
+ * still matches the replay-start (qualificationId, persistAcknowledgedEvents).
+ * Newer ACKs during a long replay ⇒ REPLAY_STALE; ACK counters never roll back.
+ */
 export async function runGhShadowReplayAndGate(ownerUid: string) {
-  const epoch = await loadGhShadowEpoch(ownerUid);
-  if (!epoch) {
+  const startEpoch = await loadGhShadowEpoch(ownerUid);
+  if (!startEpoch) {
     return {
       status: "LIVE_REPLAY_DIVERGENCE" as const,
       capturedEvents: 0,
@@ -642,45 +690,72 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       firstDivergenceSeq: null,
       divergenceDetail: "no_epoch",
       livePoints: [],
-      replayPoints: []
+      replayPoints: [],
+      replayCurrent: false
     };
   }
-  // Page beyond any fixed ceiling until all expected events are retrieved.
+
+  const qualificationId = startEpoch.qualificationId;
+  const expectedEvents = startEpoch.integrity.persistAcknowledgedEvents;
+
+  // Page beyond any fixed ceiling until all expected events / markers retrieved.
   const events = await listAllGhShadowCapturedEvents(ownerUid, {
-    qualificationId: epoch.qualificationId,
+    qualificationId,
     pageSize: 5_000
   });
-  const decisions = await listGhShadowDecisions(ownerUid, {
-    qualificationId: epoch.qualificationId
+  const decisions = await listAllGhShadowReplayMarkerDecisions(ownerUid, {
+    qualificationId,
+    pageSize: 5_000
   });
-  const trades = await listGhShadowTrades(ownerUid, {
-    qualificationId: epoch.qualificationId,
-    limit: 2000
-  });
+  const trades = await listAllGhShadowTrades(ownerUid, { qualificationId });
 
-  const expectedEvents = epoch.integrity.persistAcknowledgedEvents;
-  if (events.length !== expectedEvents && expectedEvents > 0) {
-    const incomplete = {
+  if (replayBeforeFinalizeHookForTests) {
+    await replayBeforeFinalizeHookForTests({
+      ownerUid,
+      qualificationId,
+      expectedEvents
+    });
+  }
+
+  // Reload CURRENT epoch before finalising — never save the start snapshot.
+  const currentBeforeResult = await loadGhShadowEpoch(ownerUid);
+  const currentAck =
+    currentBeforeResult?.integrity.persistAcknowledgedEvents ?? -1;
+  const currentQid = currentBeforeResult?.qualificationId ?? null;
+  const datasetMoved =
+    currentQid !== qualificationId || currentAck !== expectedEvents;
+
+  if (events.length !== expectedEvents && expectedEvents > 0 && !datasetMoved) {
+    const detail = {
+      capturedEvents: events.length,
+      replayedEvents: 0,
+      expectedEvents,
+      firstDivergenceSeq: null as number | null,
+      divergenceDetail: `replay_count_mismatch have=${events.length} expected=${expectedEvents}`,
+      completedAt: new Date().toISOString()
+    };
+    await patchGhShadowEpochReplayFields(ownerUid, {
+      qualificationId,
+      lastReplayStatus: "REPLAY_INCOMPLETE",
+      lastReplayDetail: detail
+    });
+    await syncEngineReplayFields(
+      ownerUid,
+      qualificationId,
+      "REPLAY_INCOMPLETE",
+      detail
+    );
+    return {
       status: "REPLAY_INCOMPLETE" as const,
       capturedEvents: events.length,
       replayedEvents: 0,
       expectedEvents,
       firstDivergenceSeq: null,
-      divergenceDetail: `replay_count_mismatch have=${events.length} expected=${expectedEvents}`,
+      divergenceDetail: detail.divergenceDetail,
       livePoints: [],
-      replayPoints: []
+      replayPoints: [],
+      replayCurrent: false
     };
-    epoch.lastReplayStatus = "REPLAY_INCOMPLETE";
-    epoch.lastReplayDetail = {
-      capturedEvents: events.length,
-      replayedEvents: 0,
-      expectedEvents,
-      firstDivergenceSeq: null,
-      divergenceDetail: incomplete.divergenceDetail,
-      completedAt: new Date().toISOString()
-    };
-    await saveGhShadowEpoch(ownerUid, epoch);
-    return incomplete;
   }
 
   const result = replayGhShadowCapturedEvents({
@@ -688,8 +763,47 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
     liveDecisions: decisions,
     liveTrades: trades
   });
-  epoch.lastReplayStatus = result.status;
-  epoch.lastReplayDetail = {
+
+  // Final currency check AFTER replay computation (ACK may have arrived mid-run).
+  const current = await loadGhShadowEpoch(ownerUid);
+  const finalAck = current?.integrity.persistAcknowledgedEvents ?? -1;
+  const finalQid = current?.qualificationId ?? null;
+  const stillCurrent =
+    finalQid === qualificationId && finalAck === expectedEvents;
+
+  if (!stillCurrent) {
+    const detail = {
+      capturedEvents: result.capturedEvents,
+      replayedEvents: result.replayedEvents,
+      expectedEvents,
+      firstDivergenceSeq: null as number | null,
+      divergenceDetail: `replay_stale_during_run startExpected=${expectedEvents} nowAcknowledged=${finalAck} startQid=${qualificationId} nowQid=${finalQid}`,
+      completedAt: new Date().toISOString()
+    };
+    // Patch CURRENT epoch only — never overwrite newer ACK counters.
+    if (finalQid) {
+      await patchGhShadowEpochReplayFields(ownerUid, {
+        qualificationId: finalQid,
+        lastReplayStatus: "REPLAY_STALE",
+        lastReplayDetail: detail
+      });
+      await syncEngineReplayFields(ownerUid, finalQid, "REPLAY_STALE", detail);
+    }
+    return {
+      status: "REPLAY_STALE" as const,
+      capturedEvents: result.capturedEvents,
+      replayedEvents: result.replayedEvents,
+      expectedEvents,
+      firstDivergenceSeq: null,
+      divergenceDetail: detail.divergenceDetail,
+      livePoints: result.livePoints,
+      replayPoints: result.replayPoints,
+      replayCurrent: false,
+      persistAcknowledgedEvents: finalAck >= 0 ? finalAck : null
+    };
+  }
+
+  const detail = {
     capturedEvents: result.capturedEvents,
     replayedEvents: result.replayedEvents,
     expectedEvents,
@@ -697,23 +811,23 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
     divergenceDetail: result.divergenceDetail,
     completedAt: new Date().toISOString()
   };
-  epoch.updatedAt = new Date().toISOString();
-  await saveGhShadowEpoch(ownerUid, epoch);
-  // Keep in-memory engine epoch in sync for subsequent ACK freshness checks.
-  const eng = getGhShadowEngine(ownerUid);
-  const live = eng.getEpoch();
-  if (live && live.qualificationId === epoch.qualificationId) {
-    live.lastReplayStatus = epoch.lastReplayStatus;
-    live.lastReplayDetail = epoch.lastReplayDetail
-      ? { ...epoch.lastReplayDetail }
-      : null;
-  }
+  await patchGhShadowEpochReplayFields(ownerUid, {
+    qualificationId,
+    lastReplayStatus: result.status,
+    lastReplayDetail: detail
+  });
+  await syncEngineReplayFields(
+    ownerUid,
+    qualificationId,
+    result.status,
+    detail
+  );
+
   return {
     ...result,
     expectedEvents,
-    replayCurrent:
-      result.status === "LIVE_REPLAY_OK" &&
-      expectedEvents === epoch.integrity.persistAcknowledgedEvents
+    replayCurrent: result.status === "LIVE_REPLAY_OK",
+    persistAcknowledgedEvents: expectedEvents
   };
 }
 
@@ -763,6 +877,7 @@ export function resetGhShadowQualificationRuntimeForTests(): void {
   allowUnitTestSizingDefaults = true; // unit tests default to isolated defaults
   authoritativeSizingLoaderForTests = null;
   autoPersistForTests = true;
+  replayBeforeFinalizeHookForTests = null;
 }
 
 // silence unused import if hash not used

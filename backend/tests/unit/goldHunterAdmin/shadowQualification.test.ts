@@ -632,8 +632,18 @@ describe("C/D — captured replay + formal gate", () => {
       })
     );
     const batch = eng.drainPersistBatch()!;
-    const tampered = batch.events.map((e, i) =>
-      i === 1 ? { ...e, bid: e.bid - 10, ask: e.ask - 10 } : e
+    expect(batch.events.length).toBeGreaterThanOrEqual(2);
+    // Corrupt formal management Spot on the non-open event: clear features so
+    // replay cannot exit (features-only), while live decisions still have EXIT.
+    const tampered = batch.events.map((e) =>
+      e.openMarker
+        ? e
+        : {
+            ...e,
+            features: null,
+            bid: e.bid - 50,
+            ask: e.ask - 50
+          }
     );
     const result = replayGhShadowCapturedEvents({
       events: tampered,

@@ -228,31 +228,185 @@ export async function listGhShadowDecisions(
   ownerUid: string,
   opts?: { qualificationId?: string; limit?: number }
 ): Promise<GhShadowDecisionRecord[]> {
+  // Legacy bounded helper for status/UI. Formal replay must use
+  // listAllGhShadowDecisions (paginated, no silent 2000 ceiling).
   const n = Math.min(5000, Math.max(1, opts?.limit ?? 2000));
+  const all = await listAllGhShadowDecisions(ownerUid, {
+    qualificationId: opts?.qualificationId,
+    pageSize: Math.min(5_000, n)
+  });
+  return all.slice(0, n);
+}
+
+export type GhShadowDecisionPageCursor = {
+  receiveSeq: number;
+  decisionId: string;
+};
+
+function decisionSortKey(d: GhShadowDecisionRecord): string {
+  return `${String(d.receiveSeq).padStart(16, "0")}:${d.decisionId}`;
+}
+
+/**
+ * One page of decisions ordered by (receiveSeq, decisionId).
+ * Deterministic pagination — no silent 2000 ceiling for formal replay markers.
+ */
+export async function listGhShadowDecisionsPage(
+  ownerUid: string,
+  opts: {
+    qualificationId?: string;
+    pageSize?: number;
+    startAfter?: GhShadowDecisionPageCursor | null;
+    /** When set, only these kinds are returned (still paginated over full set). */
+    kinds?: Array<GhShadowDecisionRecord["kind"]>;
+  }
+): Promise<{
+  decisions: GhShadowDecisionRecord[];
+  nextCursor: GhShadowDecisionPageCursor | null;
+}> {
+  const pageSize = Math.max(1, Math.min(10_000, opts.pageSize ?? 5_000));
+  const qid =
+    opts.qualificationId ?? (await getCurrentQualificationId(ownerUid));
+  if (!qid) return { decisions: [], nextCursor: null };
+
+  const after = opts.startAfter ?? null;
+  const kindSet =
+    opts.kinds && opts.kinds.length > 0 ? new Set(opts.kinds) : null;
+  const doc = epochDoc(ownerUid, qid);
+
+  const filterRow = (d: GhShadowDecisionRecord) =>
+    d.qualificationId === qid && (kindSet == null || kindSet.has(d.kind));
+
+  if (!doc) {
+    let rows = (bucket(ownerUid, qid)?.decisions ?? [])
+      .filter(filterRow)
+      .sort((a, b) => decisionSortKey(a).localeCompare(decisionSortKey(b)));
+    if (after) {
+      const afterKey = `${String(after.receiveSeq).padStart(16, "0")}:${after.decisionId}`;
+      rows = rows.filter((d) => decisionSortKey(d) > afterKey);
+    }
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
+    return {
+      decisions: page,
+      nextCursor:
+        page.length === pageSize && last
+          ? { receiveSeq: last.receiveSeq, decisionId: last.decisionId }
+          : null
+    };
+  }
+
+  // Firestore may lack composite index; load + sort + page for determinism.
+  try {
+    const snap = await doc.collection("decisions").get();
+    let rows = snap.docs
+      .map((d) => d.data() as GhShadowDecisionRecord)
+      .filter(filterRow)
+      .sort((a, b) => decisionSortKey(a).localeCompare(decisionSortKey(b)));
+    if (after) {
+      const afterKey = `${String(after.receiveSeq).padStart(16, "0")}:${after.decisionId}`;
+      rows = rows.filter((d) => decisionSortKey(d) > afterKey);
+    }
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
+    return {
+      decisions: page,
+      nextCursor:
+        page.length === pageSize && last
+          ? { receiveSeq: last.receiveSeq, decisionId: last.decisionId }
+          : null
+    };
+  } catch {
+    return { decisions: [], nextCursor: null };
+  }
+}
+
+/** Retrieve ALL decisions via deterministic pagination (no 2000 ceiling). */
+export async function listAllGhShadowDecisions(
+  ownerUid: string,
+  opts?: {
+    qualificationId?: string;
+    pageSize?: number;
+    kinds?: Array<GhShadowDecisionRecord["kind"]>;
+    fetchPage?: typeof listGhShadowDecisionsPage;
+  }
+): Promise<GhShadowDecisionRecord[]> {
+  const fetchPage = opts?.fetchPage ?? listGhShadowDecisionsPage;
+  const out: GhShadowDecisionRecord[] = [];
+  let cursor: GhShadowDecisionPageCursor | null = null;
+  for (;;) {
+    const page = await fetchPage(ownerUid, {
+      qualificationId: opts?.qualificationId,
+      pageSize: opts?.pageSize ?? 5_000,
+      startAfter: cursor,
+      kinds: opts?.kinds
+    });
+    out.push(...page.decisions);
+    if (!page.nextCursor || page.decisions.length === 0) break;
+    cursor = page.nextCursor;
+  }
+  return out;
+}
+
+/**
+ * All OPEN/EXIT replay markers — paginated, no silent ceiling.
+ */
+export async function listAllGhShadowReplayMarkerDecisions(
+  ownerUid: string,
+  opts?: { qualificationId?: string; pageSize?: number }
+): Promise<GhShadowDecisionRecord[]> {
+  return listAllGhShadowDecisions(ownerUid, {
+    qualificationId: opts?.qualificationId,
+    pageSize: opts?.pageSize,
+    kinds: ["OPEN", "EXIT"]
+  });
+}
+
+/** Retrieve ALL trades for formal replay (no silent 2000 ceiling). */
+export async function listAllGhShadowTrades(
+  ownerUid: string,
+  opts?: { qualificationId?: string }
+): Promise<GhShadowTrade[]> {
   const qid =
     opts?.qualificationId ?? (await getCurrentQualificationId(ownerUid));
   if (!qid) return [];
   const doc = epochDoc(ownerUid, qid);
+  let rows: GhShadowTrade[];
   if (!doc) {
-    return (bucket(ownerUid, qid)?.decisions ?? [])
-      .filter((d) => d.qualificationId === qid)
-      .slice(-n);
+    rows = [...(bucket(ownerUid, qid)?.trades.values() ?? [])];
+  } else {
+    const snap = await doc.collection("trades").get();
+    rows = snap.docs.map((d) => d.data() as GhShadowTrade);
   }
-  try {
-    const snap = await doc
-      .collection("decisions")
-      .orderBy("at", "asc")
-      .limit(n)
-      .get();
-    return snap.docs
-      .map((d) => d.data() as GhShadowDecisionRecord)
-      .filter((d) => d.qualificationId === qid);
-  } catch {
-    const snap = await doc.collection("decisions").limit(n).get();
-    return snap.docs
-      .map((d) => d.data() as GhShadowDecisionRecord)
-      .filter((d) => d.qualificationId === qid);
+  return rows
+    .filter((t) => t.qualificationId === qid)
+    .sort((a, b) => (a.signalTs ?? "").localeCompare(b.signalTs ?? ""));
+}
+
+/**
+ * Patch ONLY replay result fields on the CURRENT epoch.
+ * Never rewrites integrity/activity/ACK counters from a stale snapshot.
+ */
+export async function patchGhShadowEpochReplayFields(
+  ownerUid: string,
+  args: {
+    qualificationId: string;
+    lastReplayStatus: GhShadowQualificationEpoch["lastReplayStatus"];
+    lastReplayDetail: GhShadowQualificationEpoch["lastReplayDetail"];
   }
+): Promise<GhShadowQualificationEpoch | null> {
+  const current = await loadGhShadowEpoch(ownerUid);
+  if (!current) return null;
+  if (current.qualificationId !== args.qualificationId) {
+    return current;
+  }
+  current.lastReplayStatus = args.lastReplayStatus;
+  current.lastReplayDetail = args.lastReplayDetail
+    ? { ...args.lastReplayDetail }
+    : null;
+  current.updatedAt = new Date().toISOString();
+  await saveGhShadowEpoch(ownerUid, current);
+  return current;
 }
 
 export async function appendGhShadowCapturedEvent(
