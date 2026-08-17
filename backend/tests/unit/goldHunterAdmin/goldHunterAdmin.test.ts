@@ -78,6 +78,30 @@ describe("Gold Hunter Admin API", () => {
     expect(res.body.error.liveExecutionEnabled).toBe(false);
   });
 
+  it("rejects non-admin shadow replay", async () => {
+    const res = await request(app)
+      .post("/v1/gold-hunter/shadow-qualification/replay")
+      .set({ "x-test-user-id": "user-1", "x-test-role": "USER_APPROVED" });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("allows OWNER research-only shadow replay endpoint", async () => {
+    const { resetGhShadowQualificationRuntimeForTests } = await import(
+      "../../../src/services/goldHunterAdmin/shadowQualification/runtime"
+    );
+    resetGhShadowQualificationRuntimeForTests();
+    const res = await request(app)
+      .post("/v1/gold-hunter/shadow-qualification/replay")
+      .set({ "x-test-user-id": "owner-shadow-replay", "x-test-role": "OWNER" });
+    expect(res.status).toBe(200);
+    expect(res.body.liveExecutionEnabled).toBe(false);
+    expect(res.body.brokerOrders).toBe(0);
+    expect(res.body.demoAutoTradeEnabled).toBe(false);
+    expect(res.body).toHaveProperty("status");
+    expect(res.body).toHaveProperty("expectedEvents");
+  });
+
   it("refuses Live mode in config body", async () => {
     const res = await request(app)
       .put("/v1/gold-hunter/config")

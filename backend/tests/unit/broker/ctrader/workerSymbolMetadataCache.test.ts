@@ -414,6 +414,7 @@ describe("Worker symbol metadata cache A–J", () => {
             source: null,
             loadedAt: null,
             symbolId: null,
+            ctidTraderAccountId: null,
             accountMatched: false,
             environment: null
           }

@@ -32,6 +32,13 @@ import {
   type GoldHunterAdminConfig
 } from "../services/goldHunterAdmin/types";
 import { assertGoldHunterDemoOnlyEnvironment } from "../services/goldHunterAdmin/orderGates";
+import {
+  buildGhShadowQualificationStatus,
+  listGhShadowTrades,
+  getGhShadowMutationSurfaceReport,
+  getGhShadowStrategyConfigIdentity,
+  runGhShadowReplayAndGate
+} from "../services/goldHunterAdmin/shadowQualification";
 
 const adminGate = [requireAuth, requireAdmin] as const;
 
@@ -326,6 +333,105 @@ export const buildGoldHunterAdminRouter = (): Router => {
       }
     });
   });
+
+  /**
+   * Clean Shadow Qualification V1 — research telemetry only.
+   * Does not enable Demo AutoTrade. Does not place broker orders.
+   */
+  router.get(
+    "/v1/gold-hunter/shadow-qualification",
+    ...adminGate,
+    async (req, res) => {
+      const uid = getAuthenticatedUserId(req);
+      if (!uid) {
+        res.status(401).json({ error: { code: "UNAUTHENTICATED" } });
+        return;
+      }
+      try {
+        const status = await buildGhShadowQualificationStatus(uid);
+        res.status(200).json({
+          ...status,
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          liveExecutionEnabled: false,
+          brokerOrders: 0,
+          note:
+            "FORMAL metrics exclude DIAGNOSTIC_EXCLUDED and historical broker trades. " +
+            "Do not judge edge before 250 clean trades."
+        });
+      } catch (e) {
+        res.status(500).json({
+          error: {
+            code: "GH_SHADOW_QUALIFICATION_FAILED",
+            message: e instanceof Error ? e.message : "shadow_status_failed"
+          }
+        });
+      }
+    }
+  );
+
+  router.get(
+    "/v1/gold-hunter/shadow-qualification/trades",
+    ...adminGate,
+    async (req, res) => {
+      const uid = getAuthenticatedUserId(req);
+      if (!uid) {
+        res.status(401).json({ error: { code: "UNAUTHENTICATED" } });
+        return;
+      }
+      const formalOnly = String(req.query.formal ?? "1") !== "0";
+      const trades = await listGhShadowTrades(uid, {
+        formalOnly,
+        limit: 500
+      });
+      res.status(200).json({
+        trades,
+        formalOnly,
+        identity: getGhShadowStrategyConfigIdentity(),
+        mutationSurface: getGhShadowMutationSurfaceReport(),
+        strategy: GH_ADMIN_STRATEGY_ID
+      });
+    }
+  );
+
+  /**
+   * Research-only shadow replay trigger (admin-protected).
+   * Runs captured-event replay, persists replay status, returns detail.
+   * Does NOT place/amend/cancel/close broker orders, enable Demo/Live,
+   * change strategy, or run on the market-tick hot path.
+   */
+  router.post(
+    "/v1/gold-hunter/shadow-qualification/replay",
+    ...adminGate,
+    async (req, res) => {
+      const uid = getAuthenticatedUserId(req);
+      if (!uid) {
+        res.status(401).json({ error: { code: "UNAUTHENTICATED" } });
+        return;
+      }
+      try {
+        const result = await runGhShadowReplayAndGate(uid);
+        res.status(200).json({
+          ...result,
+          strategy: GH_ADMIN_STRATEGY_ID,
+          environment: "DEMO",
+          liveExecutionEnabled: false,
+          brokerOrders: 0,
+          demoAutoTradeEnabled: false,
+          note:
+            "Research-only shadow replay. No broker mutation. " +
+            "Replay is current only when expectedEvents matches persistAcknowledgedEvents."
+        });
+      } catch (e) {
+        res.status(500).json({
+          error: {
+            code: "GH_SHADOW_REPLAY_FAILED",
+            message: e instanceof Error ? e.message : "shadow_replay_failed"
+          }
+        });
+      }
+    }
+  );
 
   return router;
 };

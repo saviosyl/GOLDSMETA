@@ -28,6 +28,8 @@ export type GoldHunterSymbolMetadataDiagnostics = {
   source: WorkerSymbolMetadataSource | null;
   loadedAt: string | null;
   symbolId: string | null;
+  /** Actual cTrader Open API account id when known. */
+  ctidTraderAccountId?: string | null;
   accountMatched: boolean;
   environment: "DEMO" | "LIVE" | null;
 };
@@ -247,6 +249,7 @@ export async function loadGoldHunterDemoXauUsdSymbol(ownerUid: string): Promise<
     source: null,
     loadedAt: null,
     symbolId: null,
+    ctidTraderAccountId: null,
     accountMatched: false,
     environment: null
   });
@@ -281,6 +284,9 @@ export async function loadGoldHunterDemoXauUsdSymbol(ownerUid: string): Promise<
         source: null,
         loadedAt: null,
         symbolId: String(connection.symbolId),
+        ctidTraderAccountId: connection.selectedAccountId
+          ? String(connection.selectedAccountId)
+          : null,
         accountMatched: false,
         environment: "LIVE"
       }
@@ -317,6 +323,7 @@ export async function loadGoldHunterDemoXauUsdSymbol(ownerUid: string): Promise<
           source: cached.source,
           loadedAt: cached.loadedAt,
           symbolId,
+          ctidTraderAccountId: accountId,
           accountMatched: true,
           environment: "DEMO"
         }
@@ -374,6 +381,7 @@ export async function loadGoldHunterDemoXauUsdSymbol(ownerUid: string): Promise<
         source: null,
         loadedAt: null,
         symbolId,
+        ctidTraderAccountId: accountId,
         accountMatched: true,
         environment: "DEMO"
       }
@@ -387,6 +395,7 @@ export async function loadGoldHunterDemoXauUsdSymbol(ownerUid: string): Promise<
       source: entry.source,
       loadedAt: entry.loadedAt,
       symbolId: entry.symbolId,
+      ctidTraderAccountId: accountId,
       accountMatched: true,
       environment: "DEMO"
     }
