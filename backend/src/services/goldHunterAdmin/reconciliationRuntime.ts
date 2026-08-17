@@ -309,6 +309,91 @@ export async function reconcileGoldHunterDisappearedOpenPositions(args: {
 }
 
 /**
+ * Exit-side PENDING_RECONCILIATION (e.g. CLOSE_VOLUME_UNKNOWN after exit
+ * decision) with a known brokerPositionId.
+ *
+ * These are excluded from pending-entry reconcile (exitReason present) and
+ * from disappeared-open reconcile (not FILLED/PROTECTED / result OPEN).
+ * Without this path they orphan forever and block maxOpen.
+ *
+ * Only runs when positionsReadOk === true. Broker read failure → leave alone.
+ */
+export function isGoldHunterExitPendingReconciliation(
+  t: GoldHunterDemoTrade
+): boolean {
+  if (t.strategy !== GH_ADMIN_STRATEGY_ID || t.environment !== "DEMO") {
+    return false;
+  }
+  if (t.status !== "PENDING_RECONCILIATION") return false;
+  if (!t.exitReason || String(t.exitReason).trim() === "") return false;
+  if (!t.brokerPositionId || String(t.brokerPositionId).trim() === "") {
+    return false;
+  }
+  return true;
+}
+
+export async function reconcileGoldHunterPendingExitReconciliations(args: {
+  ownerUid: string;
+  brokerPositions: BrokerDemoPositionLite[];
+  positionsReadOk: boolean;
+}): Promise<{
+  skipped: boolean;
+  stillOpen: number;
+  settled: number;
+  settlementPending: number;
+}> {
+  if (!args.positionsReadOk) {
+    return {
+      skipped: true,
+      stillOpen: 0,
+      settled: 0,
+      settlementPending: 0
+    };
+  }
+
+  const openIds = new Set(
+    args.brokerPositions.map((p) => String(p.positionId))
+  );
+  const trades = await listGoldHunterDemoTrades(args.ownerUid, { limit: 200 });
+  const pending = trades.filter(isGoldHunterExitPendingReconciliation);
+  const settle = hooks.settleClose ?? settleGoldHunterCloseFromBroker;
+
+  let stillOpen = 0;
+  let settled = 0;
+  let settlementPending = 0;
+
+  for (const trade of pending) {
+    const posId = String(trade.brokerPositionId);
+    if (openIds.has(posId)) {
+      // Broker still shows exposure — keep PENDING_RECONCILIATION (maxOpen blocks).
+      stillOpen += 1;
+      continue;
+    }
+
+    // Broker proven absent — do NOT issue another close mutation.
+    // Transition to close-settlement and apply closing deal when available.
+    const pendingSettle: GoldHunterDemoTrade = {
+      ...trade,
+      status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+      result: null,
+      netPnlEur: null,
+      grossPnlEur: null,
+      errorCode: "BROKER_POSITION_ABSENT_SETTLEMENT_PENDING"
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, pendingSettle);
+
+    const r = await settle({ ownerUid: args.ownerUid, trade: pendingSettle });
+    if (r.settled) {
+      settled += 1;
+    } else {
+      settlementPending += 1;
+    }
+  }
+
+  return { skipped: false, stillOpen, settled, settlementPending };
+}
+
+/**
  * Retry settlement for closes awaiting broker deal P/L.
  */
 export async function reconcileGoldHunterCloseSettlements(args: {
@@ -338,6 +423,9 @@ export type GoldHunterReconcilePassResult = {
   recoveredOpen: number;
   disappearedSettled: number;
   disappearedPending: number;
+  exitPendingSettled: number;
+  exitPendingSettlementPending: number;
+  exitPendingStillOpen: number;
   closesSettled: number;
   closesPending: number;
 };
@@ -362,6 +450,9 @@ export async function runGoldHunterReconcilePass(args: {
       recoveredOpen: 0,
       disappearedSettled: 0,
       disappearedPending: 0,
+      exitPendingSettled: 0,
+      exitPendingSettlementPending: 0,
+      exitPendingStillOpen: 0,
       closesSettled: 0,
       closesPending: 0
     };
@@ -378,6 +469,9 @@ export async function runGoldHunterReconcilePass(args: {
   let recoveredOpen = 0;
   let disappearedSettled = 0;
   let disappearedPending = 0;
+  let exitPendingSettled = 0;
+  let exitPendingSettlementPending = 0;
+  let exitPendingStillOpen = 0;
 
   if (positionsReadOk) {
     const pos = await reconcileGoldHunterDemoPositions({
@@ -402,6 +496,15 @@ export async function runGoldHunterReconcilePass(args: {
     disappearedSettled = disappeared.settled;
     disappearedPending = disappeared.settlementPending;
 
+    const exitPending = await reconcileGoldHunterPendingExitReconciliations({
+      ownerUid: args.ownerUid,
+      brokerPositions: lite,
+      positionsReadOk: true
+    });
+    exitPendingSettled = exitPending.settled;
+    exitPendingSettlementPending = exitPending.settlementPending;
+    exitPendingStillOpen = exitPending.stillOpen;
+
     await restoreGoldHunterPositionManager(args.ownerUid);
   }
   // positionsReadOk === false → do NOT treat as empty account; leave opens alone.
@@ -418,6 +521,9 @@ export async function runGoldHunterReconcilePass(args: {
     recoveredOpen,
     disappearedSettled,
     disappearedPending,
+    exitPendingSettled,
+    exitPendingSettlementPending,
+    exitPendingStillOpen,
     closesSettled: closes.settled,
     closesPending: closes.stillPending
   };
