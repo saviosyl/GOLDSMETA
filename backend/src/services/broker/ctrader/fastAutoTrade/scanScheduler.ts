@@ -27,8 +27,8 @@ export async function runOverlappingBoundedScans<S>(args: {
   secondBudgetMs?: number;
   secondStartDelayMs?: number;
 }): Promise<{
-  first: BoundedCycleResult<S, never>;
-  second: BoundedCycleResult<S, never>;
+  first: BoundedCycleResult<S, unknown>;
+  second: BoundedCycleResult<S, unknown>;
   queueHighWater: number;
   deadlock: boolean;
 }> {

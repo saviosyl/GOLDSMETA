@@ -21,8 +21,8 @@ export type FastExecutionClaimState =
 
 export type FastPendingOpenSnapshot = {
   direction: "BUY" | "SELL";
-  entry: number;
-  stopLoss: number;
+  entry: number | null;
+  stopLoss: number | null;
   takeProfit: number | null;
   lots: number;
   correlationId: string;
