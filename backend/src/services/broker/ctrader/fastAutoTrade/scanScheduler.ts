@@ -124,11 +124,7 @@ export async function simulateFastScanSoak(args: {
   for (let minute = 1; minute <= minutes; minute += 1) {
     const kind = kindForMinute(minute);
     const latencyMs =
-      kind === "normal"
-        ? 80
-        : kind === "slow"
-          ? 8_000
-          : 60_000;
+      kind === "normal" ? 5 : kind === "slow" ? 20 : 1_000;
     const started = Date.now();
     queueDepth += 1;
     if (queueDepth > 1) {

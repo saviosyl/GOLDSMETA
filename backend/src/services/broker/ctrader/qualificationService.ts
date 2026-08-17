@@ -1672,7 +1672,8 @@ export async function processDecisionForQualification(args: {
     ) {
       return reasonCode;
     }
-    return reasonCode.startsWith("BLOCKED_") ? reasonCode : `BLOCKED_${reasonCode}`;
+    const code = String(reasonCode || "UNPERSISTED");
+    return code.startsWith("BLOCKED_") ? code : `BLOCKED_${code}`;
   };
   const logEval = async (
     outcome: "QUALIFIED" | "REJECTED",

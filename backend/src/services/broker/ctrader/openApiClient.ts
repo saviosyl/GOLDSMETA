@@ -1059,7 +1059,7 @@ async function waitForDemoExecution(
   });
 }
 
-function extractFillFromExecution(
+function _extractFillFromExecution(
   execution: Record<string, unknown>
 ): {
   fillPrice: number | null;
