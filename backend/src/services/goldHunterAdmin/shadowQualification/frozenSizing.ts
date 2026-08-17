@@ -13,10 +13,38 @@ import type { GoldHunterAdminConfig } from "../types";
 import type { GhShadowFrozenSizingSnapshot } from "./types";
 import { GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS } from "./economics";
 
+/**
+ * Volatile audit fields — kept on the snapshot but NEVER part of the stable
+ * sizing identity hash (harmless reload timestamps must not fail-closed).
+ */
+const VOLATILE_SIZING_HASH_KEYS = new Set([
+  "metadataLoadedAt",
+  "snappedAt",
+  "adminSizingConfigSha"
+]);
+
+export type GhShadowStableSizingIdentity = Omit<
+  GhShadowFrozenSizingSnapshot,
+  "adminSizingConfigSha" | "snappedAt" | "metadataLoadedAt"
+>;
+
+export function extractStableSizingIdentity(
+  snap: Partial<GhShadowFrozenSizingSnapshot> &
+    Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(snap).sort()) {
+    if (VOLATILE_SIZING_HASH_KEYS.has(key)) continue;
+    out[key] = snap[key];
+  }
+  return out;
+}
+
 export function hashAdminSizingConfig(
   snap: Omit<GhShadowFrozenSizingSnapshot, "adminSizingConfigSha" | "snappedAt">
 ): string {
-  const canonical = JSON.stringify(snap, Object.keys(snap).sort());
+  const stable = extractStableSizingIdentity(snap);
+  const canonical = JSON.stringify(stable);
   return createHash("sha256").update(canonical).digest("hex");
 }
 
@@ -33,6 +61,7 @@ export function buildFrozenSizingSnapshot(args: {
   quoteToDepositRateSource?: string | null;
   symbolMetadataProvenance?: string;
   symbolId?: string | null;
+  ctidTraderAccountId?: string | null;
   metadataSource?: string | null;
   metadataLoadedAt?: string | null;
   accountMatched?: boolean;
@@ -68,6 +97,7 @@ export function buildFrozenSizingSnapshot(args: {
       args.symbolMetadataProvenance ??
       GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.provenance,
     symbolId: args.symbolId ?? null,
+    ctidTraderAccountId: args.ctidTraderAccountId ?? null,
     metadataSource: args.metadataSource ?? null,
     metadataLoadedAt: args.metadataLoadedAt ?? null,
     accountMatched: args.accountMatched ?? false,
@@ -90,6 +120,8 @@ export function buildUnitTestFrozenSizingSnapshot(args: {
   lotStep?: number;
   valuePerPointPerLot?: number;
   sizingProvenance?: string;
+  ctidTraderAccountId?: string | null;
+  symbolId?: string | null;
 }): GhShadowFrozenSizingSnapshot {
   return buildFrozenSizingSnapshot({
     config: args.config,
@@ -102,7 +134,8 @@ export function buildUnitTestFrozenSizingSnapshot(args: {
     symbolMetadataProvenance:
       args.sizingProvenance ??
       "UNIT_TEST_DEFAULTS_ONLY — not formal authoritative metadata",
-    symbolId: "UNIT_TEST",
+    symbolId: args.symbolId ?? "UNIT_TEST",
+    ctidTraderAccountId: args.ctidTraderAccountId ?? "UNIT_TEST_ACCOUNT",
     metadataSource: "UNIT_TEST_DEFAULTS",
     metadataLoadedAt: new Date().toISOString(),
     accountMatched: true,
@@ -130,16 +163,22 @@ export async function loadAndFreezeAuthoritativeSizing(args: {
 }): Promise<GhShadowAuthoritativeSizingLoadResult> {
   const loaded = await loadGoldHunterDemoXauUsdSymbol(args.ownerUid);
   const diag = loaded.diagnostics;
+  const accountId =
+    typeof diag.ctidTraderAccountId === "string" &&
+    diag.ctidTraderAccountId.trim().length > 0
+      ? diag.ctidTraderAccountId.trim()
+      : null;
   if (
     !loaded.symbol ||
     !diag.available ||
     diag.accountMatched !== true ||
-    diag.environment !== "DEMO"
+    diag.environment !== "DEMO" ||
+    !accountId
   ) {
     return {
       ok: false,
       blocker: "SIZING_METADATA_UNAVAILABLE",
-      detail: `symbol=${loaded.symbol != null} available=${diag.available} accountMatched=${diag.accountMatched} env=${diag.environment}`
+      detail: `symbol=${loaded.symbol != null} available=${diag.available} accountMatched=${diag.accountMatched} env=${diag.environment} ctidTraderAccountId=${accountId}`
     };
   }
   const meta = metadataFromBrokerSymbol(loaded.symbol);
@@ -164,6 +203,7 @@ export async function loadAndFreezeAuthoritativeSizing(args: {
       quoteToDepositRateSource: args.quoteToDepositRateSource ?? null,
       symbolMetadataProvenance: `AUTHORITATIVE:${diag.source ?? "unknown"}`,
       symbolId: meta.symbolId,
+      ctidTraderAccountId: accountId,
       metadataSource: diag.source,
       metadataLoadedAt: diag.loadedAt ?? new Date().toISOString(),
       accountMatched: true,

@@ -77,10 +77,11 @@ export type GhShadowEngineTickInput = {
   eventTsMs: number;
   /**
    * Strategy Spot executable prices (Demo open-management path):
-   * snap.features.bid / snap.features.ask.
+   * snap.features.bid / snap.features.ask ONLY.
+   * Null when features are absent — formal open management must not run.
    */
-  strategySpotBid: number;
-  strategySpotAsk: number;
+  strategySpotBid: number | null;
+  strategySpotAsk: number | null;
   /** Depth book best — diagnostic / persistence only. */
   depthBestBid: number | null;
   depthBestAsk: number | null;
@@ -95,8 +96,7 @@ export type GhShadowEngineTickInput = {
   frozenSizing: GhShadowFrozenSizingSnapshot;
   allowFormal: boolean;
   /**
-   * @deprecated Prefer strategySpotBid/Ask. Kept for older unit callers —
-   * mapped to strategySpot when strategy fields omitted via normalizeTickInput.
+   * @deprecated Prefer strategySpotBid/Ask from features. Legacy unit callers only.
    */
   bid?: number;
   ask?: number;
@@ -163,20 +163,25 @@ function emptyActivity(): GhShadowActivityCounters {
 
 function normalizeTickInput(
   input: GhShadowEngineTickInput
-): GhShadowEngineTickInput & {
-  strategySpotBid: number;
-  strategySpotAsk: number;
-} {
-  const strategySpotBid =
-    input.strategySpotBid ??
-    input.features?.bid ??
-    input.bid ??
-    Number.NaN;
-  const strategySpotAsk =
-    input.strategySpotAsk ??
-    input.features?.ask ??
-    input.ask ??
-    Number.NaN;
+): GhShadowEngineTickInput {
+  // Formal management prices come ONLY from features (Demo parity).
+  // Legacy bid/ask are accepted solely when features are present or as explicit strategySpot.
+  const fromFeatures =
+    input.features != null &&
+    Number.isFinite(input.features.bid) &&
+    Number.isFinite(input.features.ask);
+  const strategySpotBid = fromFeatures
+    ? input.features!.bid
+    : input.strategySpotBid != null && Number.isFinite(input.strategySpotBid)
+      ? input.strategySpotBid
+      : null;
+  const strategySpotAsk = fromFeatures
+    ? input.features!.ask
+    : input.strategySpotAsk != null && Number.isFinite(input.strategySpotAsk)
+      ? input.strategySpotAsk
+      : null;
+  // Do NOT fall back to raw bid/ask when features are absent — that would
+  // violate Demo management parity (demoPositionManager returns early).
   return {
     ...input,
     strategySpotBid,
@@ -217,6 +222,11 @@ export class GhShadowQualificationEngine {
 
   getOpenTradeId(): string | null {
     return this.open?.trade.tradeId ?? null;
+  }
+
+  /** Test helper: snapshot of in-memory open formal trade (management state). */
+  getOpenTradeSnapshotForTests(): GhShadowTrade | null {
+    return this.open ? { ...this.open.trade } : null;
   }
 
   getJournal(): GhShadowEventJournal {
@@ -415,15 +425,25 @@ export class GhShadowQualificationEngine {
 
     // Executable prices for this event:
     // - new open: opportunity.bid/ask (Demo entry path)
-    // - otherwise: strategy Spot features.bid/ask (Demo open management)
+    // - open management: features.bid/ask only (Demo open management)
+    const hasManagePrices =
+      input.features != null &&
+      input.strategySpotBid != null &&
+      input.strategySpotAsk != null &&
+      Number.isFinite(input.strategySpotBid) &&
+      Number.isFinite(input.strategySpotAsk);
     const execBid =
       willAttemptOpen && input.opportunity
         ? input.opportunity.bid
-        : input.strategySpotBid;
+        : hasManagePrices
+          ? input.strategySpotBid!
+          : input.depthBestBid ?? 0;
     const execAsk =
       willAttemptOpen && input.opportunity
         ? input.opportunity.ask
-        : input.strategySpotAsk;
+        : hasManagePrices
+          ? input.strategySpotAsk!
+          : input.depthBestAsk ?? 0;
     const spread = Math.max(0, execAsk - execBid);
 
     if (willAttemptOpen && input.opportunity) {
@@ -490,8 +510,8 @@ export class GhShadowQualificationEngine {
         setup: input.opportunity?.setup ?? null,
         side: input.opportunity?.side ?? null,
         receiveSeq: input.receiveSeq,
-        bid: input.opportunity?.bid ?? input.strategySpotBid,
-        ask: input.opportunity?.ask ?? input.strategySpotAsk,
+        bid: input.opportunity?.bid ?? input.strategySpotBid ?? 0,
+        ask: input.opportunity?.ask ?? input.strategySpotAsk ?? 0,
         detail: "WARMUP_NOT_QUALIFICATION",
         exitReason: null
       });
@@ -545,8 +565,8 @@ export class GhShadowQualificationEngine {
       this.pushDecision({
         kind: "INTEGRITY",
         receiveSeq: input.receiveSeq,
-        bid: input.strategySpotBid,
-        ask: input.strategySpotAsk,
+        bid: input.strategySpotBid ?? 0,
+        ask: input.strategySpotAsk ?? 0,
         detail: reason,
         exitReason: null
       });
@@ -672,11 +692,12 @@ export class GhShadowQualificationEngine {
 
   private tickOpen(input: GhShadowEngineTickInput): void {
     if (!this.open || !this.epoch) return;
+    // Mirror Demo demoPositionManager: if snap.features is missing, do NOT manage.
+    if (!input.features) return;
     const cfg = frozenGhFastSoakConfig();
     const { trade, fast } = this.open;
-    // Mirror Demo demoPositionManager: feat.bid / feat.ask
-    const bid = input.strategySpotBid;
-    const ask = input.strategySpotAsk;
+    const bid = input.features.bid;
+    const ask = input.features.ask;
 
     if (
       !isFinitePositive(bid) ||
@@ -712,8 +733,6 @@ export class GhShadowQualificationEngine {
     }
 
     this.pendingTrades.set(trade.tradeId, { ...trade });
-
-    if (!input.features) return;
 
     const reason = evaluateOpenExit({
       trade: fast,
@@ -915,8 +934,16 @@ export class GhShadowQualificationEngine {
     if (!this.open || !this.epoch) return;
     const { trade, fast } = this.open;
     // Mirror Demo close: bid/ask = feat.bid / feat.ask
-    const bid = input.strategySpotBid;
-    const ask = input.strategySpotAsk;
+    const bid = input.features?.bid ?? input.strategySpotBid;
+    const ask = input.features?.ask ?? input.strategySpotAsk;
+    if (
+      bid == null ||
+      ask == null ||
+      !Number.isFinite(bid) ||
+      !Number.isFinite(ask)
+    ) {
+      return;
+    }
     const exitPrice = shadowExitPrice(trade.side, bid, ask);
     const exitTs = new Date(input.eventTsMs).toISOString();
     const entryTsMs = trade.entryTs ? Date.parse(trade.entryTs) : input.eventTsMs;
@@ -1018,11 +1045,19 @@ export class GhShadowQualificationEngine {
   private advanceLatencyCapture(input: GhShadowEngineTickInput): void {
     const cap = this.pendingLatency;
     if (!cap) return;
+    // Latency uses formal Demo management prices only (features).
+    if (
+      !input.features ||
+      !Number.isFinite(input.features.bid) ||
+      !Number.isFinite(input.features.ask)
+    ) {
+      return;
+    }
 
     const exec = shadowExitPrice(
       cap.side,
-      input.strategySpotBid,
-      input.strategySpotAsk
+      input.features.bid,
+      input.features.ask
     );
     const elapsed = input.eventTsMs - cap.signalTsMs;
 
@@ -1095,8 +1130,8 @@ export class GhShadowQualificationEngine {
     trade.dataQuality = "DIAGNOSTIC_EXCLUDED";
     trade.exclusionReason = reason;
     trade.exitTs = new Date(input.eventTsMs).toISOString();
-    trade.exitBid = input.strategySpotBid;
-    trade.exitAsk = input.strategySpotAsk;
+    trade.exitBid = input.features?.bid ?? input.strategySpotBid;
+    trade.exitAsk = input.features?.ask ?? input.strategySpotAsk;
     trade.exitReason = "INVALID_MARKET";
     this.open = null;
     this.epoch.openShadowTradeId = null;
@@ -1118,8 +1153,8 @@ export class GhShadowQualificationEngine {
       kind: "EXCLUDE",
       tradeId: trade.tradeId,
       receiveSeq: input.receiveSeq,
-      bid: input.strategySpotBid,
-      ask: input.strategySpotAsk,
+      bid: input.features?.bid ?? input.strategySpotBid ?? 0,
+      ask: input.features?.ask ?? input.strategySpotAsk ?? 0,
       detail: reason,
       exitReason: "INVALID_MARKET"
     });
@@ -1293,6 +1328,24 @@ export class GhShadowQualificationEngine {
     this.epoch.integrity.persistAcknowledgedEvents += n;
     this.epoch.integrity.eventsPersisted += n;
     this.inFlightBatch = null;
+    // New ACK'd data invalidates any prior successful replay currency.
+    if (
+      n > 0 &&
+      (this.epoch.lastReplayStatus === "LIVE_REPLAY_OK" ||
+        this.epoch.lastReplayStatus === "LIVE_REPLAY_DIVERGENCE" ||
+        this.epoch.lastReplayStatus === "REPLAY_INCOMPLETE")
+    ) {
+      const priorExpected = this.epoch.lastReplayDetail?.expectedEvents ?? null;
+      this.epoch.lastReplayStatus = "REPLAY_STALE";
+      this.epoch.lastReplayDetail = {
+        capturedEvents: this.epoch.lastReplayDetail?.capturedEvents ?? 0,
+        replayedEvents: this.epoch.lastReplayDetail?.replayedEvents ?? 0,
+        expectedEvents: priorExpected,
+        firstDivergenceSeq: null,
+        divergenceDetail: `replay_stale_after_ack priorExpected=${priorExpected} nowAcknowledged=${this.epoch.integrity.persistAcknowledgedEvents}`,
+        completedAt: this.epoch.lastReplayDetail?.completedAt ?? null
+      };
+    }
     this.syncJournalStats({ preserveCumulative: true });
   }
 

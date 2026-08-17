@@ -50,11 +50,15 @@ export type GhShadowFrozenSizingSnapshot = {
   symbolMetadataProvenance: string;
   /** Authoritative broker symbol id when loaded; null for unit-test defaults only. */
   symbolId: string | null;
+  /** Actual cTrader account identity (ctidTraderAccountId). Required for formal READY. */
+  ctidTraderAccountId: string | null;
   metadataSource: string | null;
+  /** Audit only — excluded from stable sizing identity hash. */
   metadataLoadedAt: string | null;
   accountMatched: boolean;
   environment: "DEMO" | "LIVE" | null;
   adminSizingConfigSha: string;
+  /** Audit only — excluded from stable sizing identity hash. */
   snappedAt: string;
 };
 
@@ -251,13 +255,17 @@ export type GhShadowQualificationEpoch = {
     | "LIVE_REPLAY_OK"
     | "LIVE_REPLAY_DIVERGENCE"
     | "REPLAY_INCOMPLETE"
+    | "REPLAY_STALE"
     | "NOT_RUN";
   lastReplayDetail: {
     capturedEvents: number;
     replayedEvents: number;
+    /** Acknowledged event count at the moment replay completed. */
     expectedEvents: number | null;
     firstDivergenceSeq: number | null;
     divergenceDetail: string | null;
+    /** ISO timestamp when this replay result was produced. */
+    completedAt?: string | null;
   } | null;
   updatedAt: string;
 };

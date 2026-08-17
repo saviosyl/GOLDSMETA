@@ -299,7 +299,12 @@ export function computeGhShadowPerformanceReport(
   }
 
   const clean = integrityClean(epoch);
-  const replayOk = epoch?.lastReplayStatus === "LIVE_REPLAY_OK";
+  const replayCurrent =
+    epoch?.lastReplayStatus === "LIVE_REPLAY_OK" &&
+    epoch.lastReplayDetail?.expectedEvents != null &&
+    epoch.lastReplayDetail.expectedEvents ===
+      epoch.integrity.persistAcknowledgedEvents;
+  const replayOk = Boolean(replayCurrent);
   const n = trades.length;
 
   let at250: GhShadowPerformanceReport["checkpoint"]["at250"] = "NOT_REACHED";

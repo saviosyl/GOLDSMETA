@@ -321,6 +321,11 @@ async function writeBatch(
     }
     // FULL ACK only after complete successful batch.
     eng.acknowledgePersist(eventIds);
+    // Persist post-ACK epoch mutations (e.g. REPLAY_STALE after new ACKs).
+    const postAck = eng.getEpoch();
+    if (postAck) {
+      await saveGhShadowEpoch(ownerUid, postAck);
+    }
     persistRetryCounts.set(ownerUid, 0);
   } catch (e) {
     eng.requeuePersistFailure();
@@ -424,26 +429,25 @@ export function onGhShadowMarketTick(meta: GhShadowTickMeta): void {
 
   const sel = getGoldHunterStrategySelector(meta.ownerUid);
   const snap = sel.getLastSnapshot();
-  // Demo open-management Spot: features.bid/ask (NOT depth bestBid/bestAsk).
-  const strategySpotBid =
-    snap?.features?.bid ??
-    snap?.lastFeatureSpot?.bid ??
-    snap?.lastSpotBid ??
-    null;
-  const strategySpotAsk =
-    snap?.features?.ask ??
-    snap?.lastFeatureSpot?.ask ??
-    snap?.lastSpotAsk ??
-    null;
+  // Demo open-management Spot: features.bid/ask ONLY (NOT lastSpot / lastFeatureSpot /
+  // depth best). Missing features ⇒ no formal open-trade management this tick.
+  const hasFeatures = snap?.features != null;
+  const strategySpotBid = hasFeatures ? snap!.features!.bid : null;
+  const strategySpotAsk = hasFeatures ? snap!.features!.ask : null;
   const depthBestBid = snap?.bestBid ?? null;
   const depthBestAsk = snap?.bestAsk ?? null;
-  if (
-    strategySpotBid == null ||
-    strategySpotAsk == null ||
-    !Number.isFinite(strategySpotBid) ||
-    !Number.isFinite(strategySpotAsk)
-  ) {
-    return;
+
+  // Entry can proceed from opportunity bid/ask without features.
+  // Open management requires features — still process the tick for seq/journal/
+  // activity, but engine.tickOpen no-ops when features are absent.
+  const hasOpportunity =
+    meta.tick.newOpportunity && meta.tick.opportunity != null;
+  if (!hasFeatures && !hasOpportunity) {
+    // Still need engine for open-path journaling / seq when a trade is open.
+    const engProbe = getGhShadowEngine(meta.ownerUid);
+    if (engProbe.getOpenTradeId() == null) {
+      return;
+    }
   }
 
   const dataOk =
@@ -555,14 +559,19 @@ export function processGhShadowMarketEventSync(args: {
   }
 
   const strategySpotBid =
-    args.strategySpotBid ?? args.features?.bid ?? args.bid;
+    args.features != null
+      ? args.features.bid
+      : args.strategySpotBid ?? null;
   const strategySpotAsk =
-    args.strategySpotAsk ?? args.features?.ask ?? args.ask;
+    args.features != null
+      ? args.features.ask
+      : args.strategySpotAsk ?? null;
+  // Formal management requires features. Entry may use opportunity without features.
+  // Do not fall back to legacy bid/ask when features are absent.
   if (
-    strategySpotBid == null ||
-    strategySpotAsk == null ||
-    !Number.isFinite(strategySpotBid) ||
-    !Number.isFinite(strategySpotAsk)
+    args.features == null &&
+    !args.newOpportunity &&
+    getGhShadowEngine(args.ownerUid).getOpenTradeId() == null
   ) {
     return;
   }
@@ -667,7 +676,8 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       replayedEvents: 0,
       expectedEvents,
       firstDivergenceSeq: null,
-      divergenceDetail: incomplete.divergenceDetail
+      divergenceDetail: incomplete.divergenceDetail,
+      completedAt: new Date().toISOString()
     };
     await saveGhShadowEpoch(ownerUid, epoch);
     return incomplete;
@@ -684,11 +694,27 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
     replayedEvents: result.replayedEvents,
     expectedEvents,
     firstDivergenceSeq: result.firstDivergenceSeq,
-    divergenceDetail: result.divergenceDetail
+    divergenceDetail: result.divergenceDetail,
+    completedAt: new Date().toISOString()
   };
   epoch.updatedAt = new Date().toISOString();
   await saveGhShadowEpoch(ownerUid, epoch);
-  return { ...result, expectedEvents };
+  // Keep in-memory engine epoch in sync for subsequent ACK freshness checks.
+  const eng = getGhShadowEngine(ownerUid);
+  const live = eng.getEpoch();
+  if (live && live.qualificationId === epoch.qualificationId) {
+    live.lastReplayStatus = epoch.lastReplayStatus;
+    live.lastReplayDetail = epoch.lastReplayDetail
+      ? { ...epoch.lastReplayDetail }
+      : null;
+  }
+  return {
+    ...result,
+    expectedEvents,
+    replayCurrent:
+      result.status === "LIVE_REPLAY_OK" &&
+      expectedEvents === epoch.integrity.persistAcknowledgedEvents
+  };
 }
 
 export async function buildGhShadowQualificationStatus(ownerUid: string) {

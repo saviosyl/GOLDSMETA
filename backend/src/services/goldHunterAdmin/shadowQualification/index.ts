@@ -110,5 +110,8 @@ export { GhShadowEventJournal } from "./journal";
 export {
   buildFrozenSizingSnapshot,
   buildUnitTestFrozenSizingSnapshot,
-  loadAndFreezeAuthoritativeSizing
+  loadAndFreezeAuthoritativeSizing,
+  hashAdminSizingConfig,
+  extractStableSizingIdentity,
+  sizingSnapshotChanged
 } from "./frozenSizing";

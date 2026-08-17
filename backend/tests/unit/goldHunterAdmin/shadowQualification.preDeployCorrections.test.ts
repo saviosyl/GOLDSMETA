@@ -587,6 +587,7 @@ describe("5 — authoritative broker symbol metadata", () => {
         ozPerLot: 1,
         valuePerPointPerLot: 1,
         symbolId: "42",
+        ctidTraderAccountId: "48014710",
         metadataSource: "CTRADER_WORKER_SYMBOL_BY_ID",
         metadataLoadedAt: "2026-08-17T00:00:00.000Z",
         accountMatched: true,
@@ -968,7 +969,14 @@ describe("8 — activity + productGoalReady", () => {
         bySetupOpened: { A: 250, B: 0, C: 0 }
       },
       lastReplayStatus: "LIVE_REPLAY_OK",
-      lastReplayDetail: null,
+      lastReplayDetail: {
+        capturedEvents: 250,
+        replayedEvents: 250,
+        expectedEvents: 250,
+        firstDivergenceSeq: null,
+        divergenceDetail: null,
+        completedAt: "2026-08-17T00:00:00.000Z"
+      },
       updatedAt: new Date().toISOString()
     };
     const report = computeGhShadowPerformanceReport(trades, epoch);
