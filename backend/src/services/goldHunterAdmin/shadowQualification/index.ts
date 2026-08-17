@@ -40,6 +40,8 @@ export {
   listGhShadowTrades,
   listGhShadowDecisions,
   listGhShadowCapturedEvents,
+  listAllGhShadowCapturedEvents,
+  listGhShadowCapturedEventsPage,
   resetGhShadowQualificationMemoryForTests,
   saveGhShadowEpoch,
   setCurrentQualificationId
@@ -84,11 +86,16 @@ export {
   setGhShadowSizingOverridesForTests,
   setGhShadowLoadEpochDelayMsForTests,
   setGhShadowPersistFailHookForTests,
+  setGhShadowPersistFailStageForTests,
+  setGhShadowAllowUnitTestSizingDefaultsForTests,
+  setGhShadowAuthoritativeSizingLoaderForTests,
+  setGhShadowAutoPersistForTests,
   getGhShadowOwnerLifecycle,
   getGhShadowConfigReadCount,
   awaitGhShadowOwnerReady,
   ensureGhShadowOwnerReady
 } from "./runtime";
+export type { GhShadowPersistFailStage } from "./runtime";
 
 export {
   replayGhShadowCapturedEvents,
@@ -100,4 +107,8 @@ export type {
 } from "./replay";
 
 export { GhShadowEventJournal } from "./journal";
-export { buildFrozenSizingSnapshot } from "./frozenSizing";
+export {
+  buildFrozenSizingSnapshot,
+  buildUnitTestFrozenSizingSnapshot,
+  loadAndFreezeAuthoritativeSizing
+} from "./frozenSizing";

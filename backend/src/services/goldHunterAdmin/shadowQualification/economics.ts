@@ -38,7 +38,18 @@ export type GhShadowCashPnl = {
   frictionQuote: number;
   netQuote: number;
   quoteCurrency: string;
+  /**
+   * netQuoteUsd / riskBudgetQuoteUsd when FX converts EUR risk budget → quote USD.
+   * Null when quoteToDepositRate unavailable — never USD/EUR mixed R.
+   */
+  plannedRiskR: number | null;
+  /** Alias of plannedRiskR (legacy field name). */
   netR: number | null;
+  /** stopDistance × displayedLots × ozPerLot (quote USD). */
+  geometryRiskQuote: number | null;
+  /** netQuoteUsd / geometryRiskQuote — valid without EUR FX. */
+  geometryR: number | null;
+  riskBudgetQuoteUsd: number | null;
   simulatedGrossPnlEur: number | null;
   simulatedFrictionEur: number | null;
   simulatedNetPnlEur: number | null;
@@ -173,7 +184,8 @@ export function computeGhShadowEconomicExposure(
         "displayedLots = sizeGoldHunterDemoLots(...); " +
         "economicXauOz = displayedLots * ozPerLot; " +
         "grossQuote = signedPriceMove * displayedLots * ozPerLot; " +
-        "netR = netQuote / riskBudgetEur (when riskBudgetEur>0; quote USD primary); " +
+        "plannedRiskR = netQuoteUsd / (riskBudgetEur / quoteToDepositRate) when FX available else null; " +
+        "geometryR = netQuoteUsd / (stopDistance * displayedLots * ozPerLot); " +
         "grossEur = quoteToDepositRate != null ? grossQuote * quoteToDepositRate : UNAVAILABLE; " +
         "friction is ADDITIONAL price friction (spread already in Ask/Bid)"
     }
@@ -227,20 +239,23 @@ export function simulateGhShadowCashPnl(args: {
   const rate = args.economic.quoteToDepositRate;
   const eurOk =
     rate != null && Number.isFinite(rate) && rate > 0 && args.economic.eurPnlAvailable;
-  const risk = args.economic.riskBudgetEur;
-  // R-multiple: quote net / riskBudgetEur. When FX known, risk is EUR and net
-  // quote is USD — convert risk to quote for consistent R: riskQuote = risk/rate.
-  let netR: number | null = null;
-  if (risk > 0) {
-    if (eurOk && rate!) {
-      const riskQuote = risk / rate!;
-      netR = riskQuote > 0 ? netQuote / riskQuote : null;
-    } else {
-      // No FX: treat riskBudgetEur numerically as risk unit matching historical GH
-      // sizing input (same production helper) — document as risk-budget units.
-      netR = netQuote / risk;
-    }
+  const riskEur = args.economic.riskBudgetEur;
+  // plannedRiskR only when EUR risk can be converted consistently into quote USD.
+  let riskBudgetQuoteUsd: number | null = null;
+  let plannedRiskR: number | null = null;
+  if (eurOk && rate! > 0 && riskEur > 0) {
+    riskBudgetQuoteUsd = riskEur / rate!;
+    plannedRiskR =
+      riskBudgetQuoteUsd > 0 ? netQuote / riskBudgetQuoteUsd : null;
   }
+  const geometryRiskQuote =
+    args.economic.stopDistance > 0 && scale > 0
+      ? args.economic.stopDistance * scale
+      : null;
+  const geometryR =
+    geometryRiskQuote != null && geometryRiskQuote > 0
+      ? netQuote / geometryRiskQuote
+      : null;
 
   return {
     signedPriceMove,
@@ -250,7 +265,11 @@ export function simulateGhShadowCashPnl(args: {
     frictionQuote,
     netQuote,
     quoteCurrency: args.economic.quoteCurrency,
-    netR,
+    plannedRiskR,
+    netR: plannedRiskR,
+    geometryRiskQuote,
+    geometryR,
+    riskBudgetQuoteUsd,
     simulatedGrossPnlEur: eurOk ? grossQuote * rate! : null,
     simulatedFrictionEur: eurOk ? frictionQuote * rate! : null,
     simulatedNetPnlEur: eurOk ? netQuote * rate! : null,

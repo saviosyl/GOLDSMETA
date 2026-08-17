@@ -148,7 +148,19 @@ export type GhShadowPerformanceReport = {
       | "INSUFFICIENT"
       | "NOT_REACHED";
     activityClassification: GhShadowActivityClassification;
+    /** @deprecated Prefer edgeDecisionReady. */
     formalDecisionReady: boolean;
+    /**
+     * Edge decision gate: 250+ clean + replay OK + integrity clean +
+     * edge classification resolved (PROMISING or NEGATIVE).
+     */
+    edgeDecisionReady: boolean;
+    /**
+     * Product goal: edgeDecisionReady AND EDGE==PROMISING AND
+     * activityClassification==MEETS_DESIRED_OPERATING_CHARACTER.
+     */
+    productGoalReady: boolean;
+    productGoalDetail: string | null;
   };
 };
 
@@ -293,12 +305,12 @@ export function computeGhShadowPerformanceReport(
   let at250: GhShadowPerformanceReport["checkpoint"]["at250"] = "NOT_REACHED";
   let edgeClassification: GhShadowPerformanceReport["checkpoint"]["edgeClassification"] =
     "NOT_REACHED";
-  let formalDecisionReady = false;
+  let edgeDecisionReady = false;
   if (n >= 250) {
     if (!clean || !replayOk) {
       at250 = "INSUFFICIENT / DATA QUALITY FAILURE";
       edgeClassification = "INSUFFICIENT";
-      formalDecisionReady = false;
+      edgeDecisionReady = false;
     } else if (
       profitFactorQuote != null &&
       expectancyQuote != null &&
@@ -308,20 +320,37 @@ export function computeGhShadowPerformanceReport(
     ) {
       at250 = "PROMISING — CONTINUE TO 500";
       edgeClassification = "PROMISING";
-      // Ready for edge decision; activity is independent classification
-      formalDecisionReady = true;
+      edgeDecisionReady = true;
     } else if (
       netPnlQuoteUsd < 0 ||
       (profitFactorQuote != null && profitFactorQuote < 1)
     ) {
       at250 = "NEGATIVE EDGE — STRATEGY REDESIGN REQUIRED";
       edgeClassification = "NEGATIVE";
-      formalDecisionReady = true;
+      edgeDecisionReady = true;
     } else {
       at250 = "INSUFFICIENT / DATA QUALITY FAILURE";
       edgeClassification = "INSUFFICIENT";
-      formalDecisionReady = false;
+      edgeDecisionReady = false;
     }
+  }
+
+  const productGoalReady =
+    edgeDecisionReady &&
+    edgeClassification === "PROMISING" &&
+    activity.activityClassification === "MEETS_DESIRED_OPERATING_CHARACTER";
+
+  let productGoalDetail: string | null = null;
+  if (edgeDecisionReady && edgeClassification === "PROMISING" && !productGoalReady) {
+    if (activity.activityClassification === "LOW_ACTIVITY") {
+      productGoalDetail = "PRODUCT GOAL NOT MET — LOW ACTIVITY";
+    } else if (activity.activityClassification === "INSUFFICIENT_ACTIVE_TIME") {
+      productGoalDetail = "PRODUCT GOAL NOT MET — INSUFFICIENT ACTIVE TIME";
+    } else {
+      productGoalDetail = "PRODUCT GOAL NOT MET";
+    }
+  } else if (productGoalReady) {
+    productGoalDetail = "PRODUCT GOAL MET";
   }
 
   return {
@@ -422,7 +451,10 @@ export function computeGhShadowPerformanceReport(
       at250,
       edgeClassification,
       activityClassification: activity.activityClassification,
-      formalDecisionReady
+      formalDecisionReady: edgeDecisionReady,
+      edgeDecisionReady,
+      productGoalReady,
+      productGoalDetail
     }
   };
 }

@@ -97,6 +97,12 @@ export function computeGhShadowActivityReport(
     C: hours > 0 ? a.bySetupOpened.C / hours : null
   };
 
+  // Include in-progress active flat segment (initial READY→first trade or post-exit).
+  const flatSegments = [...a.flatIdleSegmentsMs];
+  if (a.currentFlatIdleActiveMs > 0) {
+    flatSegments.push(a.currentFlatIdleActiveMs);
+  }
+
   return {
     newOpportunitiesDetected: a.newOpportunitiesDetected,
     formalTradesOpened: a.formalTradesOpened,
@@ -111,8 +117,8 @@ export function computeGhShadowActivityReport(
     opportunitiesPerActiveMarketHour: oppsPerHour,
     medianTimeBetweenEntriesMs: median(gaps),
     p95TimeBetweenEntriesMs: percentile(gaps, 0.95),
-    longestFlatIdleDuringActiveMarketMs: a.flatIdleSegmentsMs.length
-      ? Math.max(...a.flatIdleSegmentsMs)
+    longestFlatIdleDuringActiveMarketMs: flatSegments.length
+      ? Math.max(...flatSegments)
       : null,
     longestOpenTradeDurationMs: a.openTradeDurationsMs.length
       ? Math.max(...a.openTradeDurationsMs)

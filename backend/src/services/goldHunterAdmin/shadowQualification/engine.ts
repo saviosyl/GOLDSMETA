@@ -75,8 +75,15 @@ type PendingLatencyCapture = {
 export type GhShadowEngineTickInput = {
   receiveSeq: number;
   eventTsMs: number;
-  bid: number;
-  ask: number;
+  /**
+   * Strategy Spot executable prices (Demo open-management path):
+   * snap.features.bid / snap.features.ask.
+   */
+  strategySpotBid: number;
+  strategySpotAsk: number;
+  /** Depth book best — diagnostic / persistence only. */
+  depthBestBid: number | null;
+  depthBestAsk: number | null;
   features: GhFastFeatureSnapshot | null;
   dataOk: boolean;
   depthValidity: string;
@@ -87,6 +94,12 @@ export type GhShadowEngineTickInput = {
   config: GoldHunterAdminConfig;
   frozenSizing: GhShadowFrozenSizingSnapshot;
   allowFormal: boolean;
+  /**
+   * @deprecated Prefer strategySpotBid/Ask. Kept for older unit callers —
+   * mapped to strategySpot when strategy fields omitted via normalizeTickInput.
+   */
+  bid?: number;
+  ask?: number;
 };
 
 const ACTIVE_MARKET_GAP_CLAMP_MS = 5 * 60 * 1000;
@@ -141,8 +154,35 @@ function emptyActivity(): GhShadowActivityCounters {
     flatIdleSegmentsMs: [],
     lastActiveMarketAtMs: null,
     lastEntryAtMs: null,
+    lastFlatActiveAtMs: null,
+    currentFlatIdleActiveMs: 0,
     lastFlatStartMs: null,
     bySetupOpened: { A: 0, B: 0, C: 0 }
+  };
+}
+
+function normalizeTickInput(
+  input: GhShadowEngineTickInput
+): GhShadowEngineTickInput & {
+  strategySpotBid: number;
+  strategySpotAsk: number;
+} {
+  const strategySpotBid =
+    input.strategySpotBid ??
+    input.features?.bid ??
+    input.bid ??
+    Number.NaN;
+  const strategySpotAsk =
+    input.strategySpotAsk ??
+    input.features?.ask ??
+    input.ask ??
+    Number.NaN;
+  return {
+    ...input,
+    strategySpotBid,
+    strategySpotAsk,
+    depthBestBid: input.depthBestBid ?? null,
+    depthBestAsk: input.depthBestAsk ?? null
   };
 }
 
@@ -154,6 +194,8 @@ export class GhShadowQualificationEngine {
   private readonly pendingTrades = new Map<string, GhShadowTrade>();
   private readonly pendingDecisions: GhShadowDecisionRecord[] = [];
   private readonly inFlightEventIds = new Set<string>();
+  /** Full batch retained until FULL ACK — trades/decisions/events retry as one. */
+  private inFlightBatch: GhShadowPersistBatch | null = null;
   private runtimeGeneration: number;
   private pendingLatency: PendingLatencyCapture | null = null;
   /** Warmup counters before first formal-capable epoch exists. */
@@ -210,7 +252,18 @@ export class GhShadowQualificationEngine {
     this.epoch.lastRestartReason =
       args.reason ?? "process_restart_state_lost";
     this.epoch.updatedAt = new Date().toISOString();
-    this.syncJournalStats();
+    // Normalize activity fields added in integrity revisions.
+    const act = this.epoch.activity ?? ({} as GhShadowActivityCounters);
+    this.epoch.activity = {
+      ...emptyActivity(),
+      ...act,
+      currentFlatIdleActiveMs: act.currentFlatIdleActiveMs ?? 0,
+      lastFlatActiveAtMs: act.lastFlatActiveAtMs ?? null,
+      flatIdleSegmentsMs: act.flatIdleSegmentsMs ?? [],
+      lastFlatStartMs: act.lastFlatStartMs ?? null
+    };
+    // Preserve CUMULATIVE epoch counters — do NOT overwrite with fresh journal zeros.
+    this.syncJournalStats({ preserveCumulative: true });
 
     const openId = this.epoch.openShadowTradeId;
     if (!openId) {
@@ -331,7 +384,8 @@ export class GhShadowQualificationEngine {
   /**
    * Synchronous market-event processing. Never awaits I/O.
    */
-  processEvent(input: GhShadowEngineTickInput): void {
+  processEvent(rawInput: GhShadowEngineTickInput): void {
+    const input = normalizeTickInput(rawInput);
     if (!input.allowFormal) {
       this.processWarmupEvent(input);
       return;
@@ -349,7 +403,6 @@ export class GhShadowQualificationEngine {
     this.advanceLatencyCapture(input);
 
     const identity = getFrozenGhFastIdentity();
-    const spread = Math.max(0, input.ask - input.bid);
     const inFormalPath = this.open != null;
 
     let openMarker: GhShadowCapturedEvent["openMarker"] = null;
@@ -359,6 +412,19 @@ export class GhShadowQualificationEngine {
       input.opportunity != null &&
       this.open == null &&
       epoch.status === "ACTIVE";
+
+    // Executable prices for this event:
+    // - new open: opportunity.bid/ask (Demo entry path)
+    // - otherwise: strategy Spot features.bid/ask (Demo open management)
+    const execBid =
+      willAttemptOpen && input.opportunity
+        ? input.opportunity.bid
+        : input.strategySpotBid;
+    const execAsk =
+      willAttemptOpen && input.opportunity
+        ? input.opportunity.ask
+        : input.strategySpotAsk;
+    const spread = Math.max(0, execAsk - execBid);
 
     if (willAttemptOpen && input.opportunity) {
       tradeIdForOpen = `GH-S-${randomBytes(4).toString("hex")}`;
@@ -377,6 +443,8 @@ export class GhShadowQualificationEngine {
     if (shouldJournal) {
       const captured = this.buildCapturedEvent({
         input,
+        execBid,
+        execAsk,
         spread,
         identity,
         inFormalTradePath: true,
@@ -387,7 +455,7 @@ export class GhShadowQualificationEngine {
         epoch.updatedAt = new Date().toISOString();
         return;
       }
-      this.syncJournalStats();
+      this.syncJournalStats({ preserveCumulative: true });
     }
 
     epoch.integrity.eventsProcessed += 1;
@@ -422,8 +490,8 @@ export class GhShadowQualificationEngine {
         setup: input.opportunity?.setup ?? null,
         side: input.opportunity?.side ?? null,
         receiveSeq: input.receiveSeq,
-        bid: input.bid,
-        ask: input.ask,
+        bid: input.opportunity?.bid ?? input.strategySpotBid,
+        ask: input.opportunity?.ask ?? input.strategySpotAsk,
         detail: "WARMUP_NOT_QUALIFICATION",
         exitReason: null
       });
@@ -477,8 +545,8 @@ export class GhShadowQualificationEngine {
       this.pushDecision({
         kind: "INTEGRITY",
         receiveSeq: input.receiveSeq,
-        bid: input.bid,
-        ask: input.ask,
+        bid: input.strategySpotBid,
+        ask: input.strategySpotAsk,
         detail: reason,
         exitReason: null
       });
@@ -491,36 +559,62 @@ export class GhShadowQualificationEngine {
     const active =
       input.dataOk && isDepthValid(input.depthValidity);
     const act = this.epoch.activity;
+    const flat = this.open == null;
+
     if (!active) {
+      // Pause active-market accumulation — do not count wall-clock stale/disconnect.
       act.lastActiveMarketAtMs = null;
+      act.lastFlatActiveAtMs = null;
       return;
     }
+
     if (act.lastActiveMarketAtMs != null) {
       const delta = input.eventTsMs - act.lastActiveMarketAtMs;
       if (delta > 0 && delta <= ACTIVE_MARKET_GAP_CLAMP_MS) {
         act.activeMarketMs += delta;
+        // Active-only flat idle (includes initial READY→first trade).
+        if (flat) {
+          act.currentFlatIdleActiveMs += delta;
+        }
+      }
+    } else if (flat && act.lastFlatStartMs == null) {
+      // First valid active-market interval while flat — start idle tracking.
+      act.lastFlatStartMs = input.eventTsMs;
+    }
+
+    act.lastActiveMarketAtMs = input.eventTsMs;
+    if (flat) {
+      act.lastFlatActiveAtMs = input.eventTsMs;
+      if (act.lastFlatStartMs == null) {
+        act.lastFlatStartMs = input.eventTsMs;
       }
     }
-    act.lastActiveMarketAtMs = input.eventTsMs;
   }
 
   private buildCapturedEvent(args: {
     input: GhShadowEngineTickInput;
+    execBid: number;
+    execAsk: number;
     spread: number;
     identity: ReturnType<typeof getFrozenGhFastIdentity>;
     inFormalTradePath: boolean;
     openMarker: GhShadowCapturedEvent["openMarker"];
   }): GhShadowCapturedEvent {
-    const { input, spread, identity, inFormalTradePath, openMarker } = args;
+    const { input, execBid, execAsk, spread, identity, inFormalTradePath, openMarker } =
+      args;
     return {
       eventId: `ev-${input.receiveSeq}-${randomBytes(3).toString("hex")}`,
       qualificationId: this.epoch!.qualificationId,
       receiveSeq: input.receiveSeq,
       eventTs: new Date(input.eventTsMs).toISOString(),
       eventTsMs: input.eventTsMs,
-      bid: input.bid,
-      ask: input.ask,
+      bid: execBid,
+      ask: execAsk,
       spread,
+      strategySpotBid: input.strategySpotBid,
+      strategySpotAsk: input.strategySpotAsk,
+      depthBestBid: input.depthBestBid,
+      depthBestAsk: input.depthBestAsk,
       features: input.features,
       dataOk: input.dataOk,
       depthValidity: input.depthValidity,
@@ -541,7 +635,7 @@ export class GhShadowQualificationEngine {
     if (!this.epoch) return;
     this.epoch.integrity.journalOverflowCount += 1;
     this.epoch.integrity.eventsDropped += 1;
-    this.syncJournalStats();
+    this.syncJournalStats({ preserveCumulative: true });
     if (this.open) {
       this.excludeOpen(reason, input);
     } else {
@@ -551,32 +645,50 @@ export class GhShadowQualificationEngine {
     }
   }
 
-  private syncJournalStats(): void {
+  /**
+   * Sync RUNTIME journal counters into epoch.
+   * When preserveCumulative=true (default after recover / ACK path), never
+   * overwrite cumulative eventsPersisted / persistAcknowledgedEvents /
+   * persistFailures / historical journalHighWaterMark with fresh-process zeros.
+   */
+  private syncJournalStats(opts?: { preserveCumulative?: boolean }): void {
     if (!this.epoch) return;
     const s = this.journal.stats();
     this.epoch.integrity.journalPending = s.journalPending;
-    this.epoch.integrity.journalHighWaterMark = s.journalHighWaterMark;
-    this.epoch.integrity.journalOverflowCount = s.overflowCount;
-    this.epoch.integrity.persistAcknowledgedEvents = s.persistAcknowledgedEvents;
-    this.epoch.integrity.eventsPersisted = s.persistAcknowledgedEvents;
+    this.epoch.integrity.journalHighWaterMark = Math.max(
+      this.epoch.integrity.journalHighWaterMark,
+      s.journalHighWaterMark
+    );
+    // overflowCount on journal is process-local; take max with epoch
+    this.epoch.integrity.journalOverflowCount = Math.max(
+      this.epoch.integrity.journalOverflowCount,
+      s.overflowCount
+    );
+    if (!opts?.preserveCumulative) {
+      this.epoch.integrity.persistAcknowledgedEvents = s.persistAcknowledgedEvents;
+      this.epoch.integrity.eventsPersisted = s.persistAcknowledgedEvents;
+    }
   }
 
   private tickOpen(input: GhShadowEngineTickInput): void {
     if (!this.open || !this.epoch) return;
     const cfg = frozenGhFastSoakConfig();
     const { trade, fast } = this.open;
+    // Mirror Demo demoPositionManager: feat.bid / feat.ask
+    const bid = input.strategySpotBid;
+    const ask = input.strategySpotAsk;
 
     if (
-      !isFinitePositive(input.bid) ||
-      !isFinitePositive(input.ask) ||
-      input.ask < input.bid
+      !isFinitePositive(bid) ||
+      !isFinitePositive(ask) ||
+      ask < bid
     ) {
       return;
     }
 
     const wasLocked = fast.profitLockActive;
     const prevFloor = fast.lockFloor;
-    updateOpenTrade(fast, input.bid, input.ask, cfg);
+    updateOpenTrade(fast, bid, ask, cfg);
     trade.mfe = fast.mfe;
     trade.mae = fast.mae;
     trade.maxFavorableBeforeExit = fast.mfe;
@@ -627,15 +739,19 @@ export class GhShadowQualificationEngine {
     const signalTs =
       opp.signalTimestamp || new Date(input.eventTsMs).toISOString();
 
+    // Mirror Demo entry: BUY=candidate.ask, SELL=candidate.bid
+    const entryBid = opp.bid;
+    const entryAsk = opp.ask;
+
     const marketOk =
-      isFinitePositive(input.bid) &&
-      isFinitePositive(input.ask) &&
-      input.ask >= input.bid &&
-      Number.isFinite(input.ask - input.bid) &&
+      isFinitePositive(entryBid) &&
+      isFinitePositive(entryAsk) &&
+      entryAsk >= entryBid &&
+      Number.isFinite(entryAsk - entryBid) &&
       isDepthValid(input.depthValidity) &&
       input.dataOk;
 
-    const entry = shadowEntryPrice(opp.side, input.bid, input.ask);
+    const entry = shadowEntryPrice(opp.side, entryBid, entryAsk);
     const sizing = computeGhShadowEconomicExposure({
       config: input.config,
       entryPrice: entry,
@@ -656,6 +772,8 @@ export class GhShadowQualificationEngine {
         signalTs,
         entry,
         input,
+        entryBid,
+        entryAsk,
         economic: sizing.ok ? sizing.economic : null,
         reason: !marketOk
           ? "invalid_market"
@@ -674,8 +792,8 @@ export class GhShadowQualificationEngine {
         setup: opp.setup,
         side: opp.side,
         receiveSeq: input.receiveSeq,
-        bid: input.bid,
-        ask: input.ask,
+        bid: entryBid,
+        ask: entryAsk,
         detail: excluded.exclusionReason,
         exitReason: "INVALID_MARKET"
       });
@@ -690,17 +808,19 @@ export class GhShadowQualificationEngine {
       side: opp.side,
       setup: setupIdFromLetter(opp.setup),
       entryTs: input.eventTsMs,
-      bid: input.bid,
-      ask: input.ask,
+      bid: entryBid,
+      ask: entryAsk,
       trailDistance: cfg.trailDistance
     });
 
     const act = this.epoch.activity;
-    if (act.lastFlatStartMs != null) {
-      const idle = Math.max(0, input.eventTsMs - act.lastFlatStartMs);
-      act.flatIdleSegmentsMs.push(idle);
-      act.lastFlatStartMs = null;
+    // Close current active-flat idle segment (includes initial READY→first trade).
+    if (act.currentFlatIdleActiveMs > 0 || act.lastFlatStartMs != null) {
+      act.flatIdleSegmentsMs.push(act.currentFlatIdleActiveMs);
     }
+    act.currentFlatIdleActiveMs = 0;
+    act.lastFlatActiveAtMs = null;
+    act.lastFlatStartMs = null;
     act.lastEntryAtMs = input.eventTsMs;
     act.entryTimestampsMs.push(input.eventTsMs);
     act.formalTradesOpened += 1;
@@ -719,10 +839,10 @@ export class GhShadowQualificationEngine {
       exclusionReason: null,
       signalTs,
       entryTs,
-      entryBid: input.bid,
-      entryAsk: input.ask,
+      entryBid,
+      entryAsk,
       entryPrice: entry,
-      entrySpread: Math.max(0, input.ask - input.bid),
+      entrySpread: Math.max(0, entryAsk - entryBid),
       initialStop,
       exitTs: null,
       exitBid: null,
@@ -739,7 +859,10 @@ export class GhShadowQualificationEngine {
       simulatedFrictionPnlQuote: null,
       simulatedNetPnlQuote: null,
       quoteCurrency: economic.quoteCurrency,
+      plannedRiskR: null,
       netR: null,
+      geometryR: null,
+      geometryRiskQuote: null,
       simulatedGrossPnlEur: null,
       simulatedFrictionEur: null,
       simulatedNetPnlEur: null,
@@ -778,8 +901,8 @@ export class GhShadowQualificationEngine {
       setup: opp.setup,
       side: opp.side,
       receiveSeq: input.receiveSeq,
-      bid: input.bid,
-      ask: input.ask,
+      bid: entryBid,
+      ask: entryAsk,
       detail: `lots_${economic.displayedLots}_oz_${economic.economicXauOz}`,
       exitReason: null
     });
@@ -791,7 +914,10 @@ export class GhShadowQualificationEngine {
   ): void {
     if (!this.open || !this.epoch) return;
     const { trade, fast } = this.open;
-    const exitPrice = shadowExitPrice(trade.side, input.bid, input.ask);
+    // Mirror Demo close: bid/ask = feat.bid / feat.ask
+    const bid = input.strategySpotBid;
+    const ask = input.strategySpotAsk;
+    const exitPrice = shadowExitPrice(trade.side, bid, ask);
     const exitTs = new Date(input.eventTsMs).toISOString();
     const entryTsMs = trade.entryTs ? Date.parse(trade.entryTs) : input.eventTsMs;
     const pnl = simulateGhShadowCashPnl({
@@ -803,8 +929,8 @@ export class GhShadowQualificationEngine {
 
     trade.status = "CLOSED";
     trade.exitTs = exitTs;
-    trade.exitBid = input.bid;
-    trade.exitAsk = input.ask;
+    trade.exitBid = bid;
+    trade.exitAsk = ask;
     trade.exitPrice = exitPrice;
     trade.exitReason = reason;
     trade.durationMs = Math.max(0, input.eventTsMs - entryTsMs);
@@ -815,7 +941,10 @@ export class GhShadowQualificationEngine {
     trade.simulatedFrictionPnlQuote = pnl.frictionQuote;
     trade.simulatedNetPnlQuote = pnl.netQuote;
     trade.quoteCurrency = pnl.quoteCurrency;
-    trade.netR = pnl.netR;
+    trade.plannedRiskR = pnl.plannedRiskR;
+    trade.netR = pnl.plannedRiskR;
+    trade.geometryR = pnl.geometryR;
+    trade.geometryRiskQuote = pnl.geometryRiskQuote;
     trade.simulatedGrossPnlEur = pnl.simulatedGrossPnlEur;
     trade.simulatedFrictionEur = pnl.simulatedFrictionEur;
     trade.simulatedNetPnlEur = pnl.simulatedNetPnlEur;
@@ -836,7 +965,10 @@ export class GhShadowQualificationEngine {
       this.epoch.activity.formalTradesClosed += 1;
       const duration = trade.durationMs ?? 0;
       this.epoch.activity.openTradeDurationsMs.push(duration);
+      // Start next flat idle segment (active-market only).
+      this.epoch.activity.currentFlatIdleActiveMs = 0;
       this.epoch.activity.lastFlatStartMs = input.eventTsMs;
+      this.epoch.activity.lastFlatActiveAtMs = input.eventTsMs;
     } else {
       this.epoch.diagnosticExcludedTrades += 1;
     }
@@ -850,9 +982,9 @@ export class GhShadowQualificationEngine {
       setup: trade.setup,
       side: trade.side,
       receiveSeq: input.receiveSeq,
-      bid: input.bid,
-      ask: input.ask,
-      detail: `netQuote_${pnl.netQuote.toFixed(4)}_netR_${pnl.netR ?? "NA"}_eur_${pnl.simulatedNetPnlEur ?? "NA"}`,
+      bid,
+      ask,
+      detail: `netQuote_${pnl.netQuote.toFixed(4)}_plannedR_${pnl.plannedRiskR ?? "NA"}_geomR_${pnl.geometryR ?? "NA"}_eur_${pnl.simulatedNetPnlEur ?? "NA"}`,
       exitReason: reason
     });
   }
@@ -887,7 +1019,11 @@ export class GhShadowQualificationEngine {
     const cap = this.pendingLatency;
     if (!cap) return;
 
-    const exec = shadowExitPrice(cap.side, input.bid, input.ask);
+    const exec = shadowExitPrice(
+      cap.side,
+      input.strategySpotBid,
+      input.strategySpotAsk
+    );
     const elapsed = input.eventTsMs - cap.signalTsMs;
 
     if (cap.nextEventPrice == null && input.receiveSeq > cap.signalReceiveSeq) {
@@ -959,8 +1095,8 @@ export class GhShadowQualificationEngine {
     trade.dataQuality = "DIAGNOSTIC_EXCLUDED";
     trade.exclusionReason = reason;
     trade.exitTs = new Date(input.eventTsMs).toISOString();
-    trade.exitBid = input.bid;
-    trade.exitAsk = input.ask;
+    trade.exitBid = input.strategySpotBid;
+    trade.exitAsk = input.strategySpotAsk;
     trade.exitReason = "INVALID_MARKET";
     this.open = null;
     this.epoch.openShadowTradeId = null;
@@ -982,8 +1118,8 @@ export class GhShadowQualificationEngine {
       kind: "EXCLUDE",
       tradeId: trade.tradeId,
       receiveSeq: input.receiveSeq,
-      bid: input.bid,
-      ask: input.ask,
+      bid: input.strategySpotBid,
+      ask: input.strategySpotAsk,
       detail: reason,
       exitReason: "INVALID_MARKET"
     });
@@ -995,6 +1131,8 @@ export class GhShadowQualificationEngine {
     signalTs: string;
     entry: number;
     input: GhShadowEngineTickInput;
+    entryBid: number;
+    entryAsk: number;
     economic: GhShadowEconomicExposure | null;
     reason: string;
   }): GhShadowTrade {
@@ -1012,10 +1150,10 @@ export class GhShadowQualificationEngine {
       exclusionReason: args.reason,
       signalTs: args.signalTs,
       entryTs: null,
-      entryBid: args.input.bid,
-      entryAsk: args.input.ask,
+      entryBid: args.entryBid,
+      entryAsk: args.entryAsk,
       entryPrice: isFinitePositive(args.entry) ? args.entry : null,
-      entrySpread: Math.max(0, args.input.ask - args.input.bid),
+      entrySpread: Math.max(0, args.entryAsk - args.entryBid),
       initialStop: null,
       exitTs: new Date(args.input.eventTsMs).toISOString(),
       exitBid: null,
@@ -1032,11 +1170,14 @@ export class GhShadowQualificationEngine {
       simulatedFrictionPnlQuote: null,
       simulatedNetPnlQuote: null,
       quoteCurrency: args.economic?.quoteCurrency ?? null,
+      plannedRiskR: null,
       netR: null,
+      geometryR: null,
+      geometryRiskQuote: null,
       simulatedGrossPnlEur: null,
       simulatedFrictionEur: null,
       simulatedNetPnlEur: null,
-      eurPnlAvailable: false,
+      eurPnlAvailable: args.economic?.eurPnlAvailable ?? false,
       economic: args.economic,
       latency: null,
       profitLockActivatedAt: null,
@@ -1044,12 +1185,12 @@ export class GhShadowQualificationEngine {
       trailUpdateCount: 0,
       lockFloorAtActivation: null,
       lockFloorLatest: null,
-      maxFavorableBeforeExit: null,
-      maxAdverseBeforeExit: null,
+      maxFavorableBeforeExit: 0,
+      maxAdverseBeforeExit: 0,
       strategySha: identity.configSha256,
       configSha: identity.configSha256,
       receiveSeqAtEntry: args.input.receiveSeq,
-      receiveSeqAtExit: args.input.receiveSeq,
+      receiveSeqAtExit: null,
       bookGeneration: args.input.bookGeneration,
       resyncGeneration: args.input.resyncGeneration,
       runtimeGeneration: this.runtimeGeneration,
@@ -1098,41 +1239,74 @@ export class GhShadowQualificationEngine {
     });
   }
 
-  /** Drain pending persistence batch (caller writes async). Does not ACK journal. */
+  /**
+   * Drain pending persistence batch.
+   * Retains the SAME in-flight batch until FULL ACK — trades/decisions/events
+   * are not released on partial failure. Decision IDs are stable across retries.
+   */
   drainPersistBatch(): GhShadowPersistBatch | null {
     if (!this.epoch) return null;
+    if (this.inFlightBatch) {
+      this.inFlightBatch.epoch = { ...this.epoch };
+      return this.inFlightBatch;
+    }
     const events = this.journal
       .snapshotPending()
       .filter((e) => !this.inFlightEventIds.has(e.eventId));
     for (const e of events) {
       this.inFlightEventIds.add(e.eventId);
     }
-    const batch: GhShadowPersistBatch = {
-      epoch: { ...this.epoch },
-      trades: [...this.pendingTrades.values()].map((t) => ({ ...t })),
-      events,
-      decisions: this.pendingDecisions.splice(0, this.pendingDecisions.length)
-    };
+    const trades = [...this.pendingTrades.values()].map((t) => ({ ...t }));
+    const decisions = this.pendingDecisions.splice(0, this.pendingDecisions.length);
     this.pendingTrades.clear();
-    this.syncJournalStats();
-    batch.epoch = { ...this.epoch };
-    return batch;
+    if (
+      trades.length === 0 &&
+      events.length === 0 &&
+      decisions.length === 0
+    ) {
+      this.syncJournalStats({ preserveCumulative: true });
+      return {
+        epoch: { ...this.epoch },
+        trades: [],
+        events: [],
+        decisions: []
+      };
+    }
+    this.inFlightBatch = {
+      epoch: { ...this.epoch },
+      trades,
+      events,
+      decisions
+    };
+    this.syncJournalStats({ preserveCumulative: true });
+    this.inFlightBatch.epoch = { ...this.epoch };
+    return this.inFlightBatch;
   }
 
   acknowledgePersist(eventIds: string[]): void {
     if (!this.epoch) return;
-    this.journal.acknowledge(eventIds);
+    const n = this.journal.acknowledge(eventIds);
     for (const id of eventIds) {
       this.inFlightEventIds.delete(id);
     }
-    this.syncJournalStats();
+    // Cumulative epoch counters — add ACK delta; never reset from fresh journal.
+    this.epoch.integrity.persistAcknowledgedEvents += n;
+    this.epoch.integrity.eventsPersisted += n;
+    this.inFlightBatch = null;
+    this.syncJournalStats({ preserveCumulative: true });
   }
 
   requeuePersistFailure(): void {
     if (!this.epoch) return;
     this.epoch.integrity.persistFailures += 1;
-    this.inFlightEventIds.clear();
-    this.syncJournalStats();
+    // Keep inFlightBatch intact for retry of the SAME logical batch.
+    // Journal events remain pending until ACK; inFlightEventIds stay set.
+    this.syncJournalStats({ preserveCumulative: true });
+  }
+
+  /** Peek in-flight batch (tests). */
+  getInFlightPersistBatchForTests(): GhShadowPersistBatch | null {
+    return this.inFlightBatch;
   }
 
   /** Test helper: seed epoch without recovery. */

@@ -20,12 +20,17 @@ import {
   type GhShadowPersistBatch
 } from "./engine";
 import { computeGhShadowPerformanceReport } from "./performance";
-import { buildFrozenSizingSnapshot, sizingSnapshotChanged } from "./frozenSizing";
+import {
+  buildUnitTestFrozenSizingSnapshot,
+  loadAndFreezeAuthoritativeSizing,
+  sizingSnapshotChanged
+} from "./frozenSizing";
 import { replayGhShadowCapturedEvents } from "./replay";
 import {
   appendGhShadowCapturedEvent,
   appendGhShadowDecision,
   GH_SHADOW_QUALIFICATION_STORAGE_PATH,
+  listAllGhShadowCapturedEvents,
   listGhShadowCapturedEvents,
   listGhShadowDecisions,
   listGhShadowTrades,
@@ -62,8 +67,23 @@ const MAX_PERSIST_RETRIES = 5;
 let persistDelayMsForTests = 0;
 let persistFailHookForTests: ((batch: GhShadowPersistBatch) => void) | null =
   null;
+export type GhShadowPersistFailStage =
+  | "after_epoch"
+  | "after_first_trade"
+  | "after_first_event"
+  | "before_decisions"
+  | "mid_decisions";
+let persistFailStageForTests: GhShadowPersistFailStage | null = null;
+let persistFailStageArmed = false;
 let loadEpochDelayMsForTests = 0;
 let sizingOverridesForTests: Partial<GhShadowSizingInput> | undefined;
+/** When true, READY may use unit-test Pepperstone defaults (never for formal prod). */
+let allowUnitTestSizingDefaults = false;
+let authoritativeSizingLoaderForTests:
+  | (() => ReturnType<typeof loadAndFreezeAuthoritativeSizing>)
+  | null = null;
+/** When false, processGhShadowMarketEventSync does not auto-schedule persist. */
+let autoPersistForTests = true;
 
 export function setGhShadowPersistDelayMsForTests(ms: number): void {
   persistDelayMsForTests = Math.max(0, ms);
@@ -79,10 +99,39 @@ export function setGhShadowPersistFailHookForTests(
   persistFailHookForTests = hook;
 }
 
+export function setGhShadowPersistFailStageForTests(
+  stage: GhShadowPersistFailStage | null
+): void {
+  persistFailStageForTests = stage;
+  persistFailStageArmed = stage != null;
+}
+
 export function setGhShadowSizingOverridesForTests(
   over: Partial<GhShadowSizingInput> | undefined
 ): void {
   sizingOverridesForTests = over;
+}
+
+export function setGhShadowAllowUnitTestSizingDefaultsForTests(
+  allow: boolean
+): void {
+  allowUnitTestSizingDefaults = allow;
+}
+
+export function setGhShadowAuthoritativeSizingLoaderForTests(
+  loader: (() => ReturnType<typeof loadAndFreezeAuthoritativeSizing>) | null
+): void {
+  authoritativeSizingLoaderForTests = loader;
+}
+
+export function setGhShadowAutoPersistForTests(enabled: boolean): void {
+  autoPersistForTests = enabled;
+}
+
+function throwIfPersistStage(stage: GhShadowPersistFailStage): void {
+  if (persistFailStageForTests === stage) {
+    throw new Error(`persist_fail_injected_${stage}`);
+  }
 }
 
 export function getGhShadowOwnerLifecycle(
@@ -159,17 +208,39 @@ async function initializeOwner(ownerUid: string): Promise<void> {
       const config = await loadGoldHunterConfig(ownerUid);
       o.config = config;
 
-      const frozen = buildFrozenSizingSnapshot({
-        config,
-        quoteToDepositRate: sizingOverridesForTests?.quoteToDepositRate ?? null,
-        quoteToDepositRateSource:
-          sizingOverridesForTests?.quoteToDepositRateSource ?? null,
-        minLots: sizingOverridesForTests?.minLots,
-        maxLots: sizingOverridesForTests?.maxLots,
-        lotStep: sizingOverridesForTests?.lotStep,
-        valuePerPointPerLot: sizingOverridesForTests?.valuePerPointPerLot,
-        symbolMetadataProvenance: sizingOverridesForTests?.sizingProvenance
-      });
+      let frozen;
+      if (allowUnitTestSizingDefaults) {
+        frozen = buildUnitTestFrozenSizingSnapshot({
+          config,
+          quoteToDepositRate: sizingOverridesForTests?.quoteToDepositRate ?? null,
+          quoteToDepositRateSource:
+            sizingOverridesForTests?.quoteToDepositRateSource ?? null,
+          minLots: sizingOverridesForTests?.minLots,
+          maxLots: sizingOverridesForTests?.maxLots,
+          lotStep: sizingOverridesForTests?.lotStep,
+          valuePerPointPerLot: sizingOverridesForTests?.valuePerPointPerLot,
+          sizingProvenance: sizingOverridesForTests?.sizingProvenance
+        });
+      } else {
+        const loader =
+          authoritativeSizingLoaderForTests ??
+          (() =>
+            loadAndFreezeAuthoritativeSizing({
+              ownerUid,
+              config,
+              quoteToDepositRate:
+                sizingOverridesForTests?.quoteToDepositRate ?? null,
+              quoteToDepositRateSource:
+                sizingOverridesForTests?.quoteToDepositRateSource ?? null
+            }));
+        const loaded = await loader();
+        if (!loaded.ok) {
+          o.lifecycle = "FAILED";
+          o.failReason = `WAIT / INITIALIZATION FAILED: ${loaded.blocker}`;
+          return;
+        }
+        frozen = loaded.frozen;
+      }
       o.frozenSizing = frozen;
 
       // If continuing epoch with different sizing hash → fail closed / new epoch
@@ -237,15 +308,21 @@ async function writeBatch(
       await new Promise((r) => setTimeout(r, persistDelayMsForTests));
     }
     await saveGhShadowEpoch(ownerUid, batch.epoch);
-    for (const t of batch.trades) {
-      await upsertGhShadowTrade(ownerUid, t);
+    throwIfPersistStage("after_epoch");
+    for (let i = 0; i < batch.trades.length; i++) {
+      await upsertGhShadowTrade(ownerUid, batch.trades[i]!);
+      if (i === 0) throwIfPersistStage("after_first_trade");
     }
-    for (const e of batch.events) {
-      await appendGhShadowCapturedEvent(ownerUid, e);
+    for (let i = 0; i < batch.events.length; i++) {
+      await appendGhShadowCapturedEvent(ownerUid, batch.events[i]!);
+      if (i === 0) throwIfPersistStage("after_first_event");
     }
-    for (const d of batch.decisions) {
-      await appendGhShadowDecision(ownerUid, d);
+    throwIfPersistStage("before_decisions");
+    for (let i = 0; i < batch.decisions.length; i++) {
+      if (i === 1) throwIfPersistStage("mid_decisions");
+      await appendGhShadowDecision(ownerUid, batch.decisions[i]!);
     }
+    // FULL ACK only after complete successful batch.
     eng.acknowledgePersist(eventIds);
     persistRetryCounts.set(ownerUid, 0);
   } catch (e) {
@@ -259,6 +336,7 @@ async function writeBatch(
         e instanceof Error ? e.message : "persist_exhausted";
       epoch.dataIntegrityFailure = "persist_failure";
       epoch.updatedAt = new Date().toISOString();
+      // Do NOT pretend the in-flight batch was persisted — leave it retryable.
       try {
         await saveGhShadowEpoch(ownerUid, epoch);
       } catch {
@@ -349,9 +427,25 @@ export function onGhShadowMarketTick(meta: GhShadowTickMeta): void {
 
   const sel = getGoldHunterStrategySelector(meta.ownerUid);
   const snap = sel.getLastSnapshot();
-  const bid = snap?.bestBid ?? snap?.lastSpotBid;
-  const ask = snap?.bestAsk ?? snap?.lastSpotAsk;
-  if (bid == null || ask == null || !Number.isFinite(bid) || !Number.isFinite(ask)) {
+  // Demo open-management Spot: features.bid/ask (NOT depth bestBid/bestAsk).
+  const strategySpotBid =
+    snap?.features?.bid ??
+    snap?.lastFeatureSpot?.bid ??
+    snap?.lastSpotBid ??
+    null;
+  const strategySpotAsk =
+    snap?.features?.ask ??
+    snap?.lastFeatureSpot?.ask ??
+    snap?.lastSpotAsk ??
+    null;
+  const depthBestBid = snap?.bestBid ?? null;
+  const depthBestAsk = snap?.bestAsk ?? null;
+  if (
+    strategySpotBid == null ||
+    strategySpotAsk == null ||
+    !Number.isFinite(strategySpotBid) ||
+    !Number.isFinite(strategySpotAsk)
+  ) {
     return;
   }
 
@@ -370,8 +464,10 @@ export function onGhShadowMarketTick(meta: GhShadowTickMeta): void {
   eng.processEvent({
     receiveSeq: meta.receiveSeq,
     eventTsMs: meta.receivedAtMs,
-    bid,
-    ask,
+    strategySpotBid,
+    strategySpotAsk,
+    depthBestBid,
+    depthBestAsk,
     features: snap?.features ?? null,
     dataOk,
     depthValidity: String(snap?.depthValidity ?? "DEPTH_UNKNOWN"),
@@ -393,11 +489,13 @@ export function onGhShadowSelectorTick(args: {
 }): void {
   const sel = getGoldHunterStrategySelector(args.ownerUid);
   const snap = sel.getLastSnapshot();
+  // Compatibility only — prefer onGhShadowMarketTick with THIS event receivedAtMs.
+  // When used without an event clock, last observation is the least-wrong fallback.
   onGhShadowMarketTick({
     ownerUid: args.ownerUid,
     tick: args.tick,
     receiveSeq: sel.getReceiveSeq(),
-    receivedAtMs: sel.getLastSpotAtMs() ?? sel.getLastDepthAtMs() ?? Date.now(),
+    receivedAtMs: Date.now(),
     resyncGeneration: sel.getResyncGeneration(),
     bookGeneration: snap?.bookGeneration ?? 0
   });
@@ -415,8 +513,13 @@ export function processGhShadowMarketEventSync(args: {
   ownerUid: string;
   receiveSeq: number;
   eventTsMs: number;
-  bid: number;
-  ask: number;
+  /** Strategy Spot (Demo open-management). Also accepts legacy bid/ask. */
+  strategySpotBid?: number;
+  strategySpotAsk?: number;
+  bid?: number;
+  ask?: number;
+  depthBestBid?: number | null;
+  depthBestAsk?: number | null;
   features: import("../abc/features").GhFastFeatureSnapshot | null;
   dataOk: boolean;
   depthValidity: string;
@@ -431,13 +534,13 @@ export function processGhShadowMarketEventSync(args: {
 }): void {
   const o = getOrCreateOwner(args.ownerUid);
   if (o.lifecycle !== "READY") {
-    // Test helper: force READY with provided config
+    // Test helper: force READY with unit-test sizing defaults
     o.lifecycle = "READY";
     o.config = args.config;
     o.configReads = Math.max(o.configReads, 1);
     o.frozenSizing =
       args.frozenSizing ??
-      buildFrozenSizingSnapshot({
+      buildUnitTestFrozenSizingSnapshot({
         config: args.config,
         quoteToDepositRate:
           args.sizingOverrides?.quoteToDepositRate ??
@@ -448,19 +551,33 @@ export function processGhShadowMarketEventSync(args: {
           sizingOverridesForTests?.quoteToDepositRateSource ??
           null
       });
-    // Reuse existing engine if present; never replace mid-test unexpectedly.
     const existing = getGhShadowEngine(args.ownerUid);
     if (o.engineGeneration === 0) {
       o.engineGeneration = existing.getRuntimeGeneration() || 1;
     }
   }
 
+  const strategySpotBid =
+    args.strategySpotBid ?? args.features?.bid ?? args.bid;
+  const strategySpotAsk =
+    args.strategySpotAsk ?? args.features?.ask ?? args.ask;
+  if (
+    strategySpotBid == null ||
+    strategySpotAsk == null ||
+    !Number.isFinite(strategySpotBid) ||
+    !Number.isFinite(strategySpotAsk)
+  ) {
+    return;
+  }
+
   const eng = getGhShadowEngine(args.ownerUid);
   eng.processEvent({
     receiveSeq: args.receiveSeq,
     eventTsMs: args.eventTsMs,
-    bid: args.bid,
-    ask: args.ask,
+    strategySpotBid,
+    strategySpotAsk,
+    depthBestBid: args.depthBestBid ?? null,
+    depthBestAsk: args.depthBestAsk ?? null,
     features: args.features,
     dataOk: args.dataOk,
     depthValidity: args.depthValidity,
@@ -472,7 +589,9 @@ export function processGhShadowMarketEventSync(args: {
     frozenSizing: o.frozenSizing!,
     allowFormal: args.allowFormal ?? true
   });
-  schedulePersist(args.ownerUid);
+  if (autoPersistForTests) {
+    schedulePersist(args.ownerUid);
+  }
 }
 
 export async function flushGhShadowPersistenceForTests(
@@ -520,9 +639,10 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       replayPoints: []
     };
   }
-  const events = await listGhShadowCapturedEvents(ownerUid, {
+  // Page beyond any fixed ceiling until all expected events are retrieved.
+  const events = await listAllGhShadowCapturedEvents(ownerUid, {
     qualificationId: epoch.qualificationId,
-    limit: 50_000
+    pageSize: 5_000
   });
   const decisions = await listGhShadowDecisions(ownerUid, {
     qualificationId: epoch.qualificationId
@@ -533,14 +653,14 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
   });
 
   const expectedEvents = epoch.integrity.persistAcknowledgedEvents;
-  if (events.length < expectedEvents && expectedEvents > 0) {
+  if (events.length !== expectedEvents && expectedEvents > 0) {
     const incomplete = {
       status: "REPLAY_INCOMPLETE" as const,
       capturedEvents: events.length,
       replayedEvents: 0,
       expectedEvents,
       firstDivergenceSeq: null,
-      divergenceDetail: `truncated_replay have=${events.length} expected=${expectedEvents}`,
+      divergenceDetail: `replay_count_mismatch have=${events.length} expected=${expectedEvents}`,
       livePoints: [],
       replayPoints: []
     };
@@ -615,7 +735,12 @@ export function resetGhShadowQualificationRuntimeForTests(): void {
   persistDelayMsForTests = 0;
   loadEpochDelayMsForTests = 0;
   persistFailHookForTests = null;
+  persistFailStageForTests = null;
+  persistFailStageArmed = false;
   sizingOverridesForTests = undefined;
+  allowUnitTestSizingDefaults = true; // unit tests default to isolated defaults
+  authoritativeSizingLoaderForTests = null;
+  autoPersistForTests = true;
 }
 
 // silence unused import if hash not used

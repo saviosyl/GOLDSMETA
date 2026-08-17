@@ -211,13 +211,13 @@ export async function appendGhShadowDecision(
   decision: GhShadowDecisionRecord
 ): Promise<void> {
   const doc = epochDoc(ownerUid, decision.qualificationId);
+  // Idempotent upsert by decisionId (retries must not duplicate).
   if (!doc) {
     const b = bucket(ownerUid, decision.qualificationId);
     if (b) {
-      b.decisions.push(decision);
-      if (b.decisions.length > 5000) {
-        b.decisions.splice(0, b.decisions.length - 5000);
-      }
+      const idx = b.decisions.findIndex((d) => d.decisionId === decision.decisionId);
+      if (idx >= 0) b.decisions[idx] = decision;
+      else b.decisions.push(decision);
     }
     return;
   }
@@ -263,45 +263,148 @@ export async function appendGhShadowCapturedEvent(
   if (!doc) {
     const b = bucket(ownerUid, event.qualificationId);
     if (b) {
-      b.events.push(event);
-      if (b.events.length > 50_000) {
-        b.events.splice(0, b.events.length - 50_000);
-      }
+      // Idempotent upsert by eventId (retries must not duplicate).
+      const idx = b.events.findIndex((e) => e.eventId === event.eventId);
+      if (idx >= 0) b.events[idx] = event;
+      else b.events.push(event);
     }
     return;
   }
   await doc.collection("events").doc(event.eventId).set(event);
 }
 
+export type GhShadowEventPageCursor = {
+  receiveSeq: number;
+  eventId: string;
+};
+
+/**
+ * One page of captured events ordered by (receiveSeq, eventId).
+ * Deterministic pagination — no fixed 50k ceiling for formal completeness.
+ */
+export async function listGhShadowCapturedEventsPage(
+  ownerUid: string,
+  opts: {
+    qualificationId?: string;
+    pageSize?: number;
+    startAfter?: GhShadowEventPageCursor | null;
+  }
+): Promise<{
+  events: GhShadowCapturedEvent[];
+  nextCursor: GhShadowEventPageCursor | null;
+}> {
+  const pageSize = Math.max(1, Math.min(10_000, opts.pageSize ?? 5_000));
+  const qid =
+    opts.qualificationId ?? (await getCurrentQualificationId(ownerUid));
+  if (!qid) return { events: [], nextCursor: null };
+
+  const after = opts.startAfter ?? null;
+  const doc = epochDoc(ownerUid, qid);
+
+  const sortKey = (e: GhShadowCapturedEvent) =>
+    `${String(e.receiveSeq).padStart(16, "0")}:${e.eventId}`;
+
+  if (!doc) {
+    let rows = (bucket(ownerUid, qid)?.events ?? [])
+      .filter((e) => e.qualificationId === qid)
+      .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    if (after) {
+      const afterKey = `${String(after.receiveSeq).padStart(16, "0")}:${after.eventId}`;
+      rows = rows.filter((e) => sortKey(e) > afterKey);
+    }
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
+    return {
+      events: page,
+      nextCursor:
+        page.length === pageSize && last
+          ? { receiveSeq: last.receiveSeq, eventId: last.eventId }
+          : null
+    };
+  }
+
+  try {
+    let q = doc
+      .collection("events")
+      .orderBy("receiveSeq", "asc")
+      .orderBy("eventId", "asc")
+      .limit(pageSize) as {
+      startAfter: (...args: unknown[]) => typeof q;
+      get: () => Promise<{ docs: Array<{ data: () => unknown }> }>;
+    };
+    if (after) {
+      q = q.startAfter(after.receiveSeq, after.eventId);
+    }
+    const snap = await q.get();
+    const events = snap.docs
+      .map((d) => d.data() as GhShadowCapturedEvent)
+      .filter((e) => e.qualificationId === qid);
+    const last = events[events.length - 1];
+    return {
+      events,
+      nextCursor:
+        events.length === pageSize && last
+          ? { receiveSeq: last.receiveSeq, eventId: last.eventId }
+          : null
+    };
+  } catch {
+    // Fallback: load + sort in memory (still pages via cursor filter).
+    const snap = await doc.collection("events").get();
+    let rows = snap.docs
+      .map((d) => d.data() as GhShadowCapturedEvent)
+      .filter((e) => e.qualificationId === qid)
+      .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    if (after) {
+      const afterKey = `${String(after.receiveSeq).padStart(16, "0")}:${after.eventId}`;
+      rows = rows.filter((e) => sortKey(e) > afterKey);
+    }
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
+    return {
+      events: page,
+      nextCursor:
+        page.length === pageSize && last
+          ? { receiveSeq: last.receiveSeq, eventId: last.eventId }
+          : null
+    };
+  }
+}
+
+/** Retrieve ALL captured events via deterministic pagination (no 50k ceiling). */
+export async function listAllGhShadowCapturedEvents(
+  ownerUid: string,
+  opts?: {
+    qualificationId?: string;
+    pageSize?: number;
+    /** Test/mock hook: override page fetcher. */
+    fetchPage?: typeof listGhShadowCapturedEventsPage;
+  }
+): Promise<GhShadowCapturedEvent[]> {
+  const fetchPage = opts?.fetchPage ?? listGhShadowCapturedEventsPage;
+  const out: GhShadowCapturedEvent[] = [];
+  let cursor: GhShadowEventPageCursor | null = null;
+  for (;;) {
+    const page = await fetchPage(ownerUid, {
+      qualificationId: opts?.qualificationId,
+      pageSize: opts?.pageSize ?? 5_000,
+      startAfter: cursor
+    });
+    out.push(...page.events);
+    if (!page.nextCursor || page.events.length === 0) break;
+    cursor = page.nextCursor;
+  }
+  return out;
+}
+
 export async function listGhShadowCapturedEvents(
   ownerUid: string,
   opts?: { qualificationId?: string; limit?: number }
 ): Promise<GhShadowCapturedEvent[]> {
-  const n = Math.min(50_000, Math.max(1, opts?.limit ?? 10_000));
-  const qid =
-    opts?.qualificationId ?? (await getCurrentQualificationId(ownerUid));
-  if (!qid) return [];
-  const doc = epochDoc(ownerUid, qid);
-  if (!doc) {
-    return (bucket(ownerUid, qid)?.events ?? [])
-      .filter((e) => e.qualificationId === qid)
-      .sort((a, b) => a.receiveSeq - b.receiveSeq)
-      .slice(0, n);
-  }
-  try {
-    const snap = await doc
-      .collection("events")
-      .orderBy("receiveSeq", "asc")
-      .limit(n)
-      .get();
-    return snap.docs
-      .map((d) => d.data() as GhShadowCapturedEvent)
-      .filter((e) => e.qualificationId === qid);
-  } catch {
-    const snap = await doc.collection("events").limit(n).get();
-    return snap.docs
-      .map((d) => d.data() as GhShadowCapturedEvent)
-      .filter((e) => e.qualificationId === qid)
-      .sort((a, b) => a.receiveSeq - b.receiveSeq);
-  }
+  // Legacy single-shot helper — prefer listAllGhShadowCapturedEvents for replay.
+  const n = Math.max(1, opts?.limit ?? 10_000);
+  const all = await listAllGhShadowCapturedEvents(ownerUid, {
+    qualificationId: opts?.qualificationId,
+    pageSize: Math.min(5_000, n)
+  });
+  return all.slice(0, n);
 }

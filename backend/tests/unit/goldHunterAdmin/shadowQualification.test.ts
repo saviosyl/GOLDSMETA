@@ -279,7 +279,10 @@ function fakeFormalTrade(
     simulatedFrictionPnlQuote: 0.5,
     simulatedNetPnlQuote: net,
     quoteCurrency: "USD",
+    plannedRiskR: net / 10,
     netR: net / 10,
+    geometryR: net / (0.55 * 18),
+    geometryRiskQuote: 0.55 * 18,
     simulatedGrossPnlEur: net + 0.5,
     simulatedFrictionEur: 0.5,
     simulatedNetPnlEur: net,
@@ -347,6 +350,8 @@ function epochStub(
       flatIdleSegmentsMs: [],
       lastActiveMarketAtMs: null,
       lastEntryAtMs: null,
+      lastFlatActiveAtMs: null,
+      currentFlatIdleActiveMs: 0,
       lastFlatStartMs: null,
       bySetupOpened: { A: 0, B: 0, C: 0 }
     },
@@ -441,6 +446,10 @@ describe("A — production economics", () => {
     expect(pnl.simulatedGrossPnlEur).toBeNull();
     expect(pnl.simulatedNetPnlEur).toBeNull();
     expect(pnl.eurPnlAvailable).toBe(false);
+    expect(pnl.plannedRiskR).toBeNull();
+    expect(pnl.netR).toBeNull();
+    expect(pnl.geometryR).not.toBeNull();
+    expect(pnl.geometryRiskQuote).toBeCloseTo(0.55 * 18 * 1, 8);
   });
 });
 

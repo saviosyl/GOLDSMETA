@@ -48,6 +48,12 @@ export type GhShadowFrozenSizingSnapshot = {
   quoteToDepositRate: number | null;
   quoteToDepositRateSource: string | null;
   symbolMetadataProvenance: string;
+  /** Authoritative broker symbol id when loaded; null for unit-test defaults only. */
+  symbolId: string | null;
+  metadataSource: string | null;
+  metadataLoadedAt: string | null;
+  accountMatched: boolean;
+  environment: "DEMO" | "LIVE" | null;
   adminSizingConfigSha: string;
   snappedAt: string;
 };
@@ -130,8 +136,19 @@ export type GhShadowTrade = {
   simulatedFrictionPnlQuote: number | null;
   simulatedNetPnlQuote: number | null;
   quoteCurrency: string | null;
-  /** R-multiple vs planned risk (quote / riskBudget when FX maps, else quote/risk in mixed note). */
+  /**
+   * plannedRiskR = netQuoteUsd / riskBudgetQuoteUsd when FX converts EUR risk → quote USD.
+   * Null when quoteToDepositRate unavailable (never mix USD net / EUR risk).
+   * Alias: netR mirrors plannedRiskR for legacy report fields.
+   */
+  plannedRiskR: number | null;
   netR: number | null;
+  /**
+   * geometryR = netQuoteUsd / (stopDistance × displayedLots × ozPerLot).
+   * Valid without EUR FX — setup payoff geometry only.
+   */
+  geometryR: number | null;
+  geometryRiskQuote: number | null;
 
   simulatedGrossPnlEur: number | null;
   simulatedFrictionEur: number | null;
@@ -194,9 +211,18 @@ export type GhShadowActivityCounters = {
   activeMarketMs: number;
   entryTimestampsMs: number[];
   openTradeDurationsMs: number[];
+  /** Completed flat-idle segments measured in ACTIVE market time only. */
   flatIdleSegmentsMs: number[];
   lastActiveMarketAtMs: number | null;
   lastEntryAtMs: number | null;
+  /**
+   * Last active-market timestamp while flat (null when inactive / in trade).
+   * Used to accumulate active-only flat idle without wall-clock gaps.
+   */
+  lastFlatActiveAtMs: number | null;
+  /** Accumulated ACTIVE-market ms in the current flat segment (includes initial READY→first trade). */
+  currentFlatIdleActiveMs: number;
+  /** @deprecated Prefer lastFlatActiveAtMs / currentFlatIdleActiveMs. Kept for forensics. */
   lastFlatStartMs: number | null;
   bySetupOpened: Record<"A" | "B" | "C", number>;
 };
@@ -265,9 +291,19 @@ export type GhShadowCapturedEvent = {
   receiveSeq: number;
   eventTs: string;
   eventTsMs: number;
+  /**
+   * Executable prices used for formal economics on this event
+   * (opportunity bid/ask on entry open-marker; strategy Spot otherwise).
+   */
   bid: number;
   ask: number;
   spread: number;
+  /** Demo open-management Spot source: snap.features.bid/ask. */
+  strategySpotBid: number | null;
+  strategySpotAsk: number | null;
+  /** Depth book best — diagnostic only; not formal executable unless Demo uses it. */
+  depthBestBid: number | null;
+  depthBestAsk: number | null;
   features: GhFastFeatureSnapshot | null;
   dataOk: boolean;
   depthValidity: string;

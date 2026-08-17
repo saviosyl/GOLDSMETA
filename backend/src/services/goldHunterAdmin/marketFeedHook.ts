@@ -145,7 +145,8 @@ async function persistRuntime(
 
 function afterSelectorTick(
   meta: GhMarketFeedMeta,
-  tick: GoldHunterSelectorTickResult
+  tick: GoldHunterSelectorTickResult,
+  receivedAtMs: number
 ): void {
   // Opportunity / consume transitions → immediate monitoring persist.
   if (tick.newOpportunity) {
@@ -170,7 +171,7 @@ function afterSelectorTick(
   enqueueGoldHunterPositionManagerTick(meta.ownerUid);
 
   // Research shadow qualification — independent of Demo AutoTrade / broker.
-  // Default OFF. Pass authoritative receiveSeq / resync / receivedAtMs.
+  // Default OFF. Pass THIS event's receivedAtMs (not lastSpot ?? lastDepth).
   {
     const sel = getGoldHunterStrategySelector(meta.ownerUid);
     const snap = sel.getLastSnapshot();
@@ -178,8 +179,7 @@ function afterSelectorTick(
       ownerUid: meta.ownerUid,
       tick,
       receiveSeq: sel.getReceiveSeq(),
-      receivedAtMs:
-        sel.getLastSpotAtMs() ?? sel.getLastDepthAtMs() ?? Date.now(),
+      receivedAtMs,
       resyncGeneration: sel.getResyncGeneration(),
       bookGeneration: snap?.bookGeneration ?? 0
     });
@@ -211,7 +211,7 @@ export async function onGoldHunterSpotEvent(
     symbolId: meta.symbolId,
     brokerTimestampMs: norm.brokerTimestampMs
   });
-  afterSelectorTick(meta, tick);
+  afterSelectorTick(meta, tick, now);
   return tick;
 }
 
@@ -238,6 +238,6 @@ export async function onGoldHunterDepthEvent(
     newQuotes: norm.newQuotes,
     deletedQuotes: norm.deletedQuotes
   });
-  afterSelectorTick(meta, tick);
+  afterSelectorTick(meta, tick, now);
   return tick;
 }
