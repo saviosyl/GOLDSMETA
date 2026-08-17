@@ -5,6 +5,7 @@
  */
 
 import { getFirestoreDb } from "../firebaseAdmin";
+import type { GoldHunterExecutionStage } from "./executionStages";
 
 export type GoldHunterExecutionState =
   | "IDLE"
@@ -33,6 +34,10 @@ export type GoldHunterExecutionQueueTelemetry = {
   dropped: number;
   completed: number;
   maxPendingSeen: number;
+  activeOpportunityId: string | null;
+  activeStartedAt: string | null;
+  oldestPendingAgeMs: number | null;
+  queueStuck: boolean;
 };
 
 export type GoldHunterExecutionTelemetry = {
@@ -57,6 +62,12 @@ export type GoldHunterExecutionTelemetry = {
   /** Internal: last attempt obtained durable claim. */
   lastAttemptClaimed: boolean;
   queue: GoldHunterExecutionQueueTelemetry;
+  /** Current / last execution stage (hang diagnosis). */
+  currentStage: GoldHunterExecutionStage | null;
+  stageStartedAt: string | null;
+  lastStageCompletedAt: string | null;
+  queueEnqueuedAt: string | null;
+  queueStartedAt: string | null;
   updatedAt?: string;
 };
 
@@ -69,7 +80,11 @@ const DEFAULT_QUEUE: GoldHunterExecutionQueueTelemetry = {
   pending: 0,
   dropped: 0,
   completed: 0,
-  maxPendingSeen: 0
+  maxPendingSeen: 0,
+  activeOpportunityId: null,
+  activeStartedAt: null,
+  oldestPendingAgeMs: null,
+  queueStuck: false
 };
 
 /** Coalesce Firestore writes — never per Depth event. */
@@ -95,7 +110,12 @@ function emptyTelemetry(): GoldHunterExecutionTelemetry {
     attemptCountForOpportunity: 0,
     lastRetryablePreclaim: false,
     lastAttemptClaimed: false,
-    queue: { ...DEFAULT_QUEUE }
+    queue: { ...DEFAULT_QUEUE },
+    currentStage: null,
+    stageStartedAt: null,
+    lastStageCompletedAt: null,
+    queueEnqueuedAt: null,
+    queueStartedAt: null
   };
 }
 
@@ -146,6 +166,11 @@ function toDiagnostics(
     lastOpportunityStartedAt: t.lastOpportunityStartedAt,
     lastAttemptAt: t.lastAttemptAt,
     lastAttemptCompletedAt: t.lastAttemptCompletedAt,
+    currentStage: t.currentStage,
+    stageStartedAt: t.stageStartedAt,
+    lastStageCompletedAt: t.lastStageCompletedAt,
+    queueEnqueuedAt: t.queueEnqueuedAt,
+    queueStartedAt: t.queueStartedAt,
     state: t.state,
     blocker: t.blocker,
     detail: t.detail,
@@ -194,6 +219,11 @@ export async function loadGoldHunterExecutionDiagnostics(
       ...emptyTelemetry(),
       ...data,
       queue: { ...DEFAULT_QUEUE, ...(data.queue ?? {}) },
+      currentStage: data.currentStage ?? null,
+      stageStartedAt: data.stageStartedAt ?? null,
+      lastStageCompletedAt: data.lastStageCompletedAt ?? null,
+      queueEnqueuedAt: data.queueEnqueuedAt ?? null,
+      queueStartedAt: data.queueStartedAt ?? null,
       lastRetryablePreclaim: Boolean(data.lastRetryablePreclaim),
       lastAttemptClaimed: Boolean(data.lastAttemptClaimed)
     };
@@ -303,6 +333,104 @@ export function syncGoldHunterExecutionQueueStats(
   stats: GoldHunterExecutionQueueTelemetry
 ): void {
   patchGoldHunterExecutionTelemetry(ownerUid, { queue: { ...stats } });
+}
+
+export function beginGoldHunterExecutionStage(
+  ownerUid: string,
+  stage: GoldHunterExecutionStage,
+  fields: {
+    opportunityId: string;
+    setup: "A" | "B" | "C" | null;
+    side: "BUY" | "SELL" | null;
+    attempt?: number;
+    claimed?: boolean;
+    tradeId?: string | null;
+  }
+): void {
+  const now = new Date().toISOString();
+  const prior = getGoldHunterExecutionTelemetry(ownerUid);
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    currentStage: stage,
+    stageStartedAt: now,
+    lastOpportunityId: fields.opportunityId,
+    lastSetup: fields.setup,
+    lastSide: fields.side,
+    ...(fields.tradeId !== undefined ? { tradeId: fields.tradeId } : {}),
+    ...(fields.claimed === true ? { lastAttemptClaimed: true } : {})
+  });
+  logGoldHunterExecutionEvent("gold_hunter_execution_stage_started", {
+    opportunityId: fields.opportunityId,
+    setup: fields.setup,
+    side: fields.side,
+    stage,
+    attempt: fields.attempt ?? prior.attemptCountForOpportunity,
+    claimed: fields.claimed === true || prior.lastAttemptClaimed,
+    tradeId: fields.tradeId ?? prior.tradeId
+  });
+}
+
+export function completeGoldHunterExecutionStage(
+  ownerUid: string,
+  stage: GoldHunterExecutionStage,
+  fields: {
+    opportunityId: string;
+    setup: "A" | "B" | "C" | null;
+    side: "BUY" | "SELL" | null;
+    attempt?: number;
+    claimed?: boolean;
+    tradeId?: string | null;
+  }
+): void {
+  const now = new Date().toISOString();
+  const prior = getGoldHunterExecutionTelemetry(ownerUid);
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    currentStage: stage,
+    lastStageCompletedAt: now,
+    stageStartedAt: prior.stageStartedAt
+  });
+  logGoldHunterExecutionEvent("gold_hunter_execution_stage_completed", {
+    opportunityId: fields.opportunityId,
+    setup: fields.setup,
+    side: fields.side,
+    stage,
+    attempt: fields.attempt ?? prior.attemptCountForOpportunity,
+    claimed: fields.claimed === true || prior.lastAttemptClaimed,
+    tradeId: fields.tradeId ?? prior.tradeId
+  });
+}
+
+export function timeoutGoldHunterExecutionStage(
+  ownerUid: string,
+  stage: GoldHunterExecutionStage,
+  fields: {
+    opportunityId: string;
+    setup: "A" | "B" | "C" | null;
+    side: "BUY" | "SELL" | null;
+    timeoutMs: number;
+    op: string;
+    attempt?: number;
+  }
+): void {
+  const prior = getGoldHunterExecutionTelemetry(ownerUid);
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    state: "PRECLAIM_BLOCKED",
+    blocker: "WAIT — RUNTIME TIMEOUT",
+    detail: `${fields.op}_timeout_at_${stage}`,
+    currentStage: stage,
+    lastAttemptCompletedAt: new Date().toISOString(),
+    lastRetryablePreclaim: true,
+    lastAttemptClaimed: false
+  });
+  logGoldHunterExecutionEvent("gold_hunter_execution_stage_timeout", {
+    opportunityId: fields.opportunityId,
+    setup: fields.setup,
+    side: fields.side,
+    stage,
+    timeoutMs: fields.timeoutMs,
+    op: fields.op,
+    attempt: fields.attempt ?? prior.attemptCountForOpportunity,
+    claimed: false
+  });
 }
 
 export function logGoldHunterExecutionEvent(

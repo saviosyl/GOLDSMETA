@@ -27,6 +27,9 @@ import {
   patchGoldHunterExecutionTelemetry,
   resetGoldHunterExecutionRuntimeForTests,
   syncGoldHunterExecutionQueueStats,
+  beginGoldHunterExecutionStage,
+  completeGoldHunterExecutionStage,
+  timeoutGoldHunterExecutionStage,
   type GoldHunterExecutionState
 } from "./executionRuntimeStore";
 import {
@@ -38,6 +41,12 @@ import {
   type GoldHunterSelectedCandidate
 } from "./strategySelector";
 import type { BrokerSymbol } from "../broker/domain";
+import {
+  GH_PRECLAIM_BROKER_METADATA_TIMEOUT_MS,
+  GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+  isGoldHunterPreclaimTimeout,
+  withGoldHunterPreclaimTimeout
+} from "./preclaimBoundedOp";
 
 function isPinnedOwnerAdmin(ownerUid: string): boolean {
   const pinned = loadOwnerAuthConfig().pinnedOwnerUid;
@@ -163,6 +172,7 @@ export function isGoldHunterPreclaimFailureRetryable(args: {
   if (b === "WAIT — SIZING METADATA UNAVAILABLE") return true;
   if (b === "WAIT — ACCOUNT SNAPSHOT INVALID") return true;
   if (b === "WAIT — COMMITTED CAPITAL UNKNOWN") return true;
+  if (b === "WAIT — RUNTIME TIMEOUT") return true;
   if (b === "QUEUE_FULL" || b === "RUNTIME_ERROR") return true;
   if (b.startsWith("RUNTIME_ERROR")) return true;
 
@@ -306,7 +316,7 @@ export function enqueueGoldHunterDemoAutoExecution(args: {
     } finally {
       syncQueue(args.ownerUid);
     }
-  });
+  }, { opportunityId: id });
 
   syncQueue(args.ownerUid);
 
@@ -328,15 +338,20 @@ export function enqueueGoldHunterDemoAutoExecution(args: {
       setup: opportunity.setup,
       side: opportunity.side,
       pending: q.stats().pending,
-      dropped: q.stats().dropped
+      dropped: q.stats().dropped,
+      queueStuck: q.stats().queueStuck,
+      oldestPendingAgeMs: q.stats().oldestPendingAgeMs,
+      activeOpportunityId: q.stats().activeOpportunityId
     });
     return { enqueued: false, reason: "QUEUE_FULL" };
   }
 
+  const enqueuedAt = new Date().toISOString();
   patchGoldHunterExecutionTelemetry(args.ownerUid, {
     state: "QUEUED",
     blocker: null,
-    detail: source === "RETRY" ? "retry_enqueued" : "new_opportunity_enqueued"
+    detail: source === "RETRY" ? "retry_enqueued" : "new_opportunity_enqueued",
+    queueEnqueuedAt: enqueuedAt
   });
   logGoldHunterExecutionEvent(
     source === "RETRY"
@@ -401,6 +416,7 @@ export function maybeReconsiderGoldHunterDemoAutoExecution(
 
 /**
  * Production body: load config → OFF means no order → else orchestrator.
+ * All pre-claim external I/O is bounded so a hung read cannot stall the queue.
  */
 export async function runGoldHunterDemoAutoExecution(
   ownerUid: string,
@@ -408,7 +424,45 @@ export async function runGoldHunterDemoAutoExecution(
   depsOverride?: Partial<OrchestratorDeps>
 ): Promise<OrchestratorResult | { ok: false; skipped: string }> {
   const opportunityId = opportunity.opportunityId || opportunity.signalId;
-  const config = await loadGoldHunterConfig(ownerUid);
+  const stageCtx = {
+    opportunityId,
+    setup: opportunity.setup,
+    side: opportunity.side
+  };
+
+  const startedAt = new Date().toISOString();
+  patchGoldHunterExecutionTelemetry(ownerUid, {
+    queueStartedAt: startedAt
+  });
+  beginGoldHunterExecutionStage(ownerUid, "QUEUE_DEQUEUED", stageCtx);
+  completeGoldHunterExecutionStage(ownerUid, "QUEUE_DEQUEUED", stageCtx);
+
+  beginGoldHunterExecutionStage(ownerUid, "CONFIG_LOAD_START", stageCtx);
+  let config;
+  try {
+    config = await withGoldHunterPreclaimTimeout(
+      "loadGoldHunterConfig",
+      "CONFIG_LOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () => loadGoldHunterConfig(ownerUid)
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      timeoutGoldHunterExecutionStage(ownerUid, "CONFIG_LOAD_START", {
+        ...stageCtx,
+        timeoutMs: e.timeoutMs,
+        op: e.op
+      });
+      return {
+        ok: false,
+        submitted: false,
+        blockers: ["WAIT — RUNTIME TIMEOUT"],
+        signalId: opportunityId
+      };
+    }
+    throw e;
+  }
+  completeGoldHunterExecutionStage(ownerUid, "CONFIG_LOAD_DONE", stageCtx);
 
   patchGoldHunterExecutionTelemetry(ownerUid, {
     autoTradeEnabled: config.demoAutoTradeEnabled,
@@ -468,10 +522,15 @@ export async function runGoldHunterDemoAutoExecution(
     return { ok: false, skipped: "WAIT — AUTOTRADE OFF" };
   }
 
+  beginGoldHunterExecutionStage(ownerUid, "IDENTITY_CHECK_START", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
   // Fast identity gate — drain dead queued work before symbol/account I/O.
   const activeId =
     getGoldHunterStrategySelector(ownerUid).getActiveOpportunityId();
   if (activeId !== opportunityId) {
+    completeGoldHunterExecutionStage(ownerUid, "IDENTITY_CHECK_DONE", stageCtx);
     patchGoldHunterExecutionTelemetry(ownerUid, {
       state: "PRECLAIM_BLOCKED",
       blocker: "WAIT — SIGNAL STALE",
@@ -495,11 +554,71 @@ export async function runGoldHunterDemoAutoExecution(
       signalId: opportunityId
     };
   }
+  completeGoldHunterExecutionStage(ownerUid, "IDENTITY_CHECK_DONE", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
 
   // Durable claim already exists → never resubmit.
-  if (await isGoldHunterSignalDurablyConsumed(ownerUid, opportunityId)) {
+  beginGoldHunterExecutionStage(ownerUid, "CLAIM_LOOKUP_START", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
+  let alreadyClaimed = false;
+  try {
+    alreadyClaimed = await withGoldHunterPreclaimTimeout(
+      "isGoldHunterSignalDurablyConsumed",
+      "CLAIM_LOOKUP_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () => isGoldHunterSignalDurablyConsumed(ownerUid, opportunityId)
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      timeoutGoldHunterExecutionStage(ownerUid, "CLAIM_LOOKUP_START", {
+        ...stageCtx,
+        timeoutMs: e.timeoutMs,
+        op: e.op,
+        attempt: getGoldHunterExecutionTelemetry(ownerUid)
+          .attemptCountForOpportunity
+      });
+      return {
+        ok: false,
+        submitted: false,
+        blockers: ["WAIT — RUNTIME TIMEOUT"],
+        signalId: opportunityId
+      };
+    }
+    throw e;
+  }
+  if (alreadyClaimed) {
     getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
-    const claim = await getGoldHunterSignalClaim(ownerUid, opportunityId);
+    let claim = null;
+    try {
+      claim = await withGoldHunterPreclaimTimeout(
+        "getGoldHunterSignalClaim",
+        "CLAIM_LOOKUP_START",
+        GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+        () => getGoldHunterSignalClaim(ownerUid, opportunityId)
+      );
+    } catch (e) {
+      if (isGoldHunterPreclaimTimeout(e)) {
+        timeoutGoldHunterExecutionStage(ownerUid, "CLAIM_LOOKUP_START", {
+          ...stageCtx,
+          timeoutMs: e.timeoutMs,
+          op: e.op,
+          attempt: getGoldHunterExecutionTelemetry(ownerUid)
+            .attemptCountForOpportunity
+        });
+        return {
+          ok: false,
+          submitted: false,
+          blockers: ["WAIT — RUNTIME TIMEOUT"],
+          signalId: opportunityId
+        };
+      }
+      throw e;
+    }
+    completeGoldHunterExecutionStage(ownerUid, "CLAIM_LOOKUP_DONE", stageCtx);
     patchGoldHunterExecutionTelemetry(ownerUid, {
       state: "DUPLICATE_ALREADY_CLAIMED",
       blocker: "WAIT — DUPLICATE SIGNAL",
@@ -519,11 +638,49 @@ export async function runGoldHunterDemoAutoExecution(
       signalId: opportunityId
     };
   }
+  completeGoldHunterExecutionStage(ownerUid, "CLAIM_LOOKUP_DONE", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
 
   // Refresh market fields against live active opportunity (same identity).
+  beginGoldHunterExecutionStage(ownerUid, "CANDIDATE_REFRESH_START", stageCtx);
   const refreshed =
     refreshGoldHunterCandidateAgainstLive({ ownerUid, candidate: opportunity }) ??
     opportunity;
+  completeGoldHunterExecutionStage(ownerUid, "CANDIDATE_REFRESH_DONE", stageCtx);
+
+  // Re-validate opportunity still active after any slow I/O above.
+  const activeAfterIo =
+    getGoldHunterStrategySelector(ownerUid).getActiveOpportunityId();
+  if (
+    activeAfterIo !== opportunityId ||
+    !refreshed.depthExecutable ||
+    refreshed.consumed
+  ) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "PRECLAIM_BLOCKED",
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_no_longer_active_after_preclaim_io",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      lastAttemptClaimed: false
+    });
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_no_longer_active_after_preclaim_io",
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+    return {
+      ok: false,
+      submitted: false,
+      blockers: ["WAIT — SIGNAL STALE"],
+      signalId: opportunityId
+    };
+  }
 
   patchGoldHunterExecutionTelemetry(ownerUid, {
     state: "PRECLAIM_CHECK",
@@ -537,8 +694,40 @@ export async function runGoldHunterDemoAutoExecution(
     hooks.isAdmin ??
     (async (uid: string) => isPinnedOwnerAdmin(uid));
 
-  const symbol =
-    depsOverride?.symbol ?? (await loadSymbol(ownerUid));
+  beginGoldHunterExecutionStage(ownerUid, "SYMBOL_LOAD_START", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
+  let symbol: BrokerSymbol | null;
+  try {
+    symbol =
+      depsOverride?.symbol ??
+      (await withGoldHunterPreclaimTimeout(
+        "loadDemoXauUsdSymbol",
+        "SYMBOL_LOAD_START",
+        GH_PRECLAIM_BROKER_METADATA_TIMEOUT_MS,
+        () => loadSymbol(ownerUid)
+      ));
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      timeoutGoldHunterExecutionStage(ownerUid, "SYMBOL_LOAD_START", {
+        ...stageCtx,
+        timeoutMs: e.timeoutMs,
+        op: e.op,
+        attempt: getGoldHunterExecutionTelemetry(ownerUid)
+          .attemptCountForOpportunity
+      });
+      return {
+        ok: false,
+        submitted: false,
+        blockers: ["WAIT — RUNTIME TIMEOUT"],
+        signalId: opportunityId
+      };
+    }
+    throw e;
+  }
+  completeGoldHunterExecutionStage(ownerUid, "SYMBOL_LOAD_DONE", stageCtx);
+
   if (!symbol) {
     const blocker = "WAIT — SIZING METADATA UNAVAILABLE";
     patchGoldHunterExecutionTelemetry(ownerUid, {
@@ -565,7 +754,35 @@ export async function runGoldHunterDemoAutoExecution(
     };
   }
 
-  const quote = await getSharedXauusdQuote();
+  beginGoldHunterExecutionStage(ownerUid, "QUOTE_LOAD_START", stageCtx);
+  let quote;
+  try {
+    quote = await withGoldHunterPreclaimTimeout(
+      "getSharedXauusdQuote",
+      "QUOTE_LOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () => getSharedXauusdQuote()
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      timeoutGoldHunterExecutionStage(ownerUid, "QUOTE_LOAD_START", {
+        ...stageCtx,
+        timeoutMs: e.timeoutMs,
+        op: e.op,
+        attempt: getGoldHunterExecutionTelemetry(ownerUid)
+          .attemptCountForOpportunity
+      });
+      return {
+        ok: false,
+        submitted: false,
+        blockers: ["WAIT — RUNTIME TIMEOUT"],
+        signalId: opportunityId
+      };
+    }
+    throw e;
+  }
+  completeGoldHunterExecutionStage(ownerUid, "QUOTE_LOAD_DONE", stageCtx);
+
   const marketOpen = quote?.marketStatus === "OPEN";
   const ageMs =
     quote?.updatedAt != null
@@ -574,8 +791,49 @@ export async function runGoldHunterDemoAutoExecution(
   const feedFresh =
     ageMs != null && Number.isFinite(ageMs) && ageMs <= FEED_STALE_MS;
 
+  beginGoldHunterExecutionStage(ownerUid, "ADMIN_CHECK_START", stageCtx);
   const isAdmin =
     depsOverride?.isAdmin ?? (await checkAdmin(ownerUid));
+  completeGoldHunterExecutionStage(ownerUid, "ADMIN_CHECK_DONE", stageCtx);
+
+  // Final relevance check before orchestrator / claim.
+  const liveBeforeOrch =
+    getGoldHunterStrategySelector(ownerUid).getExecutableCandidate();
+  if (
+    !liveBeforeOrch ||
+    (liveBeforeOrch.opportunityId || liveBeforeOrch.signalId) !== opportunityId ||
+    liveBeforeOrch.resyncGeneration !== refreshed.resyncGeneration ||
+    !liveBeforeOrch.depthExecutable ||
+    liveBeforeOrch.consumed
+  ) {
+    patchGoldHunterExecutionTelemetry(ownerUid, {
+      state: "PRECLAIM_BLOCKED",
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_stale_before_orchestrator",
+      lastAttemptCompletedAt: new Date().toISOString(),
+      lastRetryablePreclaim: false,
+      lastAttemptClaimed: false
+    });
+    logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: "WAIT — SIGNAL STALE",
+      detail: "opportunity_stale_before_orchestrator",
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+    return {
+      ok: false,
+      submitted: false,
+      blockers: ["WAIT — SIGNAL STALE"],
+      signalId: opportunityId
+    };
+  }
+
+  beginGoldHunterExecutionStage(ownerUid, "ORCHESTRATOR_START", {
+    ...stageCtx,
+    attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+  });
 
   const result = await attempt(ownerUid, refreshed, {
     isAdmin,
@@ -587,6 +845,29 @@ export async function runGoldHunterDemoAutoExecution(
     assertFresh: depsOverride?.assertFresh,
     onTelemetry: (ev) => {
       applyOrchestratorTelemetry(ownerUid, opportunityId, opportunity, ev);
+    },
+    onStage: (stage, kind) => {
+      if (kind === "start") {
+        beginGoldHunterExecutionStage(ownerUid, stage, {
+          ...stageCtx,
+          attempt: getGoldHunterExecutionTelemetry(ownerUid)
+            .attemptCountForOpportunity
+        });
+      } else if (kind === "done") {
+        completeGoldHunterExecutionStage(ownerUid, stage, {
+          ...stageCtx,
+          attempt: getGoldHunterExecutionTelemetry(ownerUid)
+            .attemptCountForOpportunity
+        });
+      } else if (kind === "timeout") {
+        timeoutGoldHunterExecutionStage(ownerUid, stage, {
+          ...stageCtx,
+          timeoutMs: GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+          op: `orchestrator_${stage}`,
+          attempt: getGoldHunterExecutionTelemetry(ownerUid)
+            .attemptCountForOpportunity
+        });
+      }
     }
   });
 
