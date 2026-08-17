@@ -233,11 +233,11 @@ describe("FAST order transport", () => {
     expect(result.accepted).toBe(false);
   });
 
-  it("6. command times out BEFORE confirmed send → safe failure, zero NewOrder count", async () => {
+  it("6. command times out BEFORE confirmed send → UNKNOWN (uncertain, not proven non-send)", async () => {
     const transport = fakeTransport({
       send: () =>
         new Promise(() => {
-          /* never confirms send */
+          /* never confirms send — underlying may still be in flight */
         })
     });
     const result = await submitFastMarketOrder({
@@ -246,7 +246,8 @@ describe("FAST order transport", () => {
       sendTimeoutMs: 30,
       eventWaitMs: 10
     });
-    expect(result.outcome).toBe("BROKER_SUBMIT_ERROR");
+    expect(result.outcome).toBe("BROKER_OUTCOME_UNKNOWN");
+    expect(result.errorCode).toBe("NEWORDER_SEND_TIMEOUT");
     expect(result.requestSent).toBe(false);
     expect(result.newOrderReqCount).toBe(0);
   });

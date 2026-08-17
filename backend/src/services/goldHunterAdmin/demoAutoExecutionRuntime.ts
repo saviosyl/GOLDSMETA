@@ -984,6 +984,32 @@ function applyOrchestratorTelemetry(
       blocker: ev.blocker ?? null
     });
   }
+  if (ev.phase === "BROKER_SUBMIT_ERROR") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_submit_error", {
+      opportunityId,
+      setup: opportunity.setup,
+      side: opportunity.side,
+      blocker: ev.blocker ?? null,
+      detail: ev.detail ?? null,
+      attempt: getGoldHunterExecutionTelemetry(ownerUid).attemptCountForOpportunity
+    });
+  }
+  if (ev.phase === "ACCEPTED_PENDING_FILL") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_accepted", {
+      opportunityId,
+      tradeId: ev.tradeId ?? null,
+      brokerOrderId: ev.brokerOrderId ?? null,
+      brokerPositionId: ev.brokerPositionId ?? null
+    });
+  }
+  if (ev.phase === "PENDING_RECONCILIATION") {
+    logGoldHunterExecutionEvent("gold_hunter_broker_pending_reconciliation", {
+      opportunityId,
+      tradeId: ev.tradeId ?? null,
+      detail: ev.detail ?? null,
+      blocker: ev.blocker ?? null
+    });
+  }
   if (ev.phase === "PRECLAIM_BLOCKED") {
     logGoldHunterExecutionEvent("gold_hunter_preclaim_blocked", {
       opportunityId,
