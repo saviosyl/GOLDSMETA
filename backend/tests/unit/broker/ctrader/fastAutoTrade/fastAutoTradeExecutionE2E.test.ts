@@ -348,6 +348,7 @@ vi.mock("../../../../../src/services/broker/ctrader/openApiClient", () => ({
 }));
 
 import { createArmedCandidate } from "../../../../../src/services/broker/ctrader/armedCandidate";
+import { setFastReconcileForTests } from "../../../../../src/services/broker/ctrader/fastAutoTrade/pendingFillReconcile";
 import { processDecisionForQualification } from "../../../../../src/services/broker/ctrader/qualificationService";
 import { getQualificationDoc } from "../../../../../src/services/broker/ctrader/qualificationStore";
 import { assertEntryAllowed } from "../../../../../src/services/broker/ctrader/dailySafetyService";
@@ -478,7 +479,8 @@ describe("FAST_AUTOTRADE_V1 execution integration", () => {
     const { resetFastExecutionClaimsForTests } = await import(
       "../../../../../src/services/broker/ctrader/fastAutoTrade/executionClaimStore"
     );
-    resetFastExecutionClaimsForTests();
+    await resetFastExecutionClaimsForTests();
+    setFastReconcileForTests(null);
     submitDemoMarketOrder.mockClear();
     submitDemoMarketOrder.mockResolvedValue({
       accepted: true,
@@ -569,6 +571,7 @@ describe("FAST_AUTOTRADE_V1 execution integration", () => {
   });
 
   afterEach(() => {
+    setFastReconcileForTests(null);
     vi.useRealTimers();
     delete process.env.FAST_AUTOTRADE_V1_ENABLED;
     process.env.DEMO_OPPORTUNITY_MODE = "ACTIVE_DEMO";
@@ -956,5 +959,119 @@ describe("FAST_AUTOTRADE_V1 execution integration", () => {
     evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
     await runQual(decision({ takeProfits: [{ price: 3415 }] }));
     expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("4. ORDER_ACCEPTED with no position → NO local OPEN trade", async () => {
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: false,
+      outcome: "BROKER_ACCEPTED",
+      orderId: "o_acc",
+      positionId: null,
+      executionType: "ORDER_ACCEPTED",
+      errorCode: null,
+      clientOrderId: "c_acc",
+      fillPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      filledVolumeLots: null,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
+    const result = await runQual();
+    expect(result.message).toBe("order_accepted_pending_fill");
+    expect(createDemoPositionLifecycle).not.toHaveBeenCalled();
+    expect(
+      appendEvaluation.mock.calls.some((c) => c[0].reasonCode === "BROKER_SUBMITTED")
+    ).toBe(false);
+    expect(
+      appendEvaluation.mock.calls.some(
+        (c) => c[0].reasonCode === "BROKER_ACCEPTED_PENDING_FILL"
+      )
+    ).toBe(true);
+  });
+
+  it("5. ORDER_ACCEPTED then ORDER_FILLED evidence → one OPEN trade", async () => {
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: true,
+      outcome: "BROKER_FILLED",
+      orderId: "o_fill",
+      positionId: "p_fill",
+      executionType: "ORDER_FILLED",
+      errorCode: null,
+      clientOrderId: "c_fill",
+      fillPrice: 3400.2,
+      stopLoss: 3390,
+      takeProfit: 3415,
+      filledVolumeLots: 0.05,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
+    await runQual();
+    expect(createDemoPositionLifecycle).toHaveBeenCalledTimes(1);
+    expect(
+      appendEvaluation.mock.calls.some((c) => c[0].reasonCode === "BROKER_SUBMITTED")
+    ).toBe(true);
+  });
+
+  it("6. ORDER_ACCEPTED then reconcile finds clientOrderId + position → one OPEN trade", async () => {
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: false,
+      outcome: "BROKER_ACCEPTED",
+      orderId: "o_rec",
+      positionId: null,
+      executionType: "ORDER_ACCEPTED",
+      errorCode: null,
+      clientOrderId: "c_rec",
+      fillPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      filledVolumeLots: null,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
+    await runQual();
+    expect(createDemoPositionLifecycle).not.toHaveBeenCalled();
+    setFastReconcileForTests(async () => ({
+      matched: true,
+      by: "ORDER_CLIENT_ORDER_ID",
+      orderId: "o_rec",
+      positionId: "p_rec",
+      clientOrderId: "c_rec"
+    }));
+    await runQual();
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    expect(createDemoPositionLifecycle).toHaveBeenCalledTimes(1);
+    setFastReconcileForTests(null);
+  });
+
+  it("7. ORDER_ACCEPTED no fill → pending fill, second pass sends zero NewOrder", async () => {
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: false,
+      outcome: "BROKER_ACCEPTED",
+      orderId: "o_pend",
+      positionId: null,
+      executionType: "ORDER_ACCEPTED",
+      errorCode: null,
+      clientOrderId: "c_pend",
+      fillPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      filledVolumeLots: null,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
+    await runQual();
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    await runQual();
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    expect(createDemoPositionLifecycle).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   runBoundedFastScanCycle,
+  runOverlappingBoundedScans,
   simulateFastScanSoak
 } from "../../../../../src/services/broker/ctrader/fastAutoTrade/scanScheduler";
+import {
+  createAtomicMemoryClaimBackend,
+  generateFastClientOrderId,
+  reserveFastExecutionClaim,
+  resetFastExecutionClaimsForTests,
+  updateFastExecutionClaim,
+  useFastExecutionClaimBackendForTests
+} from "../../../../../src/services/broker/ctrader/fastAutoTrade/executionClaimStore";
 import { BoundedOpTimeoutError } from "../../../../../src/services/broker/ctrader/fastAutoTrade/boundedOp";
 
 describe("FAST scanner soak", () => {
@@ -47,6 +56,43 @@ describe("FAST scanner soak", () => {
       }
     });
     expect(seen).toEqual([2, 3]);
+  });
+
+  it("overlapping one-minute invocations do not duplicate FAST orders", async () => {
+    const backend = createAtomicMemoryClaimBackend();
+    useFastExecutionClaimBackendForTests(backend);
+    await resetFastExecutionClaimsForTests();
+    const signalId = "fast_overlap_minute";
+    const clientOrderId = generateFastClientOrderId(signalId);
+    let newOrderReqCount = 0;
+    const overlap = await runOverlappingBoundedScans({
+      firstBudgetMs: 90,
+      secondBudgetMs: 90,
+      secondStartDelayMs: 20,
+      scan: async () => {
+        const reserved = await reserveFastExecutionClaim({
+          ownerUid: "soak_owner",
+          signalId,
+          clientOrderId
+        });
+        if (reserved.ok) {
+          newOrderReqCount += 1;
+          await updateFastExecutionClaim("soak_owner", signalId, {
+            state: "BROKER_ACCEPTED_PENDING_FILL",
+            requestSent: true,
+            newOrderReqCount: 1
+          });
+        }
+        await new Promise((r) => setTimeout(r, 35));
+        return { evaluated: true };
+      }
+    });
+    useFastExecutionClaimBackendForTests(null);
+    expect(newOrderReqCount).toBe(1);
+    expect(overlap.first.scanRan).toBe(true);
+    expect(overlap.second.scanRan).toBe(true);
+    expect(overlap.queueHighWater).toBeLessThanOrEqual(2);
+    expect(overlap.deadlock).toBe(false);
   });
 
   it("BoundedOpTimeoutError is distinct from a hang", async () => {

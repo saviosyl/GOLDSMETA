@@ -186,9 +186,12 @@ export function reasonLabelFor(code: string): string {
       "Local M1 volatility unavailable for extension test",
     FAST_AUTOTRADE_V1_DEMO_ONLY: "FAST_AUTOTRADE_V1 is Demo-only — Live order blocked",
     BROKER_OUTCOME_UNKNOWN: "Broker order outcome unknown — no duplicate submit",
+    BROKER_ACCEPTED_PENDING_FILL:
+      "Broker accepted order — waiting for fill evidence",
     BROKER_TIMEOUT_RECONCILED_FILLED: "Timeout reconciled to an existing broker order",
     BROKER_TIMEOUT_RECONCILED_NOT_FOUND:
       "Timeout reconciled — no matching clientOrderId",
+    FIRESTORE_UNAVAILABLE: "FAST claim store unavailable — no order sent",
     BLOCKED_UNPERSISTED: "FAST BUY/SELL exited without a prior terminal persist",
     BLOCKED_DUPLICATE_SIGNAL: "Duplicate FAST signal — no second order",
     BLOCKED_SYMBOL_INCOMPLETE: "Broker symbol metadata incomplete",

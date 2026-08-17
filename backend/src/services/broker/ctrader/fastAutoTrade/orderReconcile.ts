@@ -134,3 +134,27 @@ export function matchReconcileByClientOrderId(args: {
 
   return { matched: false, reason: "NOT_FOUND" };
 }
+
+let reconcileLookupOverride:
+  | ((clientOrderId: string) => Promise<ReconcileLookup>)
+  | null = null;
+
+export function setFastReconcileForTests(
+  fn: ((clientOrderId: string) => Promise<ReconcileLookup>) | null
+): void {
+  reconcileLookupOverride = fn;
+}
+
+export async function lookupReconcileByClientOrderId(
+  clientOrderId: string,
+  snapshotLoader?: () => Promise<ReconcileSnapshot>
+): Promise<ReconcileLookup> {
+  if (reconcileLookupOverride) {
+    return reconcileLookupOverride(clientOrderId);
+  }
+  if (!snapshotLoader) {
+    return { matched: false, reason: "NOT_FOUND" };
+  }
+  const snapshot = await snapshotLoader();
+  return matchReconcileByClientOrderId({ clientOrderId, snapshot });
+}
