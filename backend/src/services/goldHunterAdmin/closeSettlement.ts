@@ -73,6 +73,8 @@ export function applyBrokerSettledClose(args: {
     result: resultFromNetPnl(deal.netPnl),
     exit: deal.closePrice ?? trade.exit,
     closeTs,
+    brokerSettlementTs: closeTs,
+    closeAcceptedTs: trade.closeAcceptedTs ?? closeTs,
     exitReason: args.exitReason ?? trade.exitReason,
     durationMs: durationMs ?? null,
     grossPnlEur: deal.grossPnl,

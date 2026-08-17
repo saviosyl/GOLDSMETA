@@ -27,11 +27,16 @@ import {
   getGoldHunterStrategySelector,
   type GoldHunterSelectedCandidate
 } from "./strategySelector";
-import { listGoldHunterDemoTrades, todayNetPnlEur } from "./tradeStore";
+import { listGoldHunterDemoTrades } from "./tradeStore";
 import type { BrokerSymbol } from "../broker/domain";
 import { GH_ADMIN_STRATEGY_ID } from "./types";
 import { frozenGhFastSoakConfig } from "./abc";
-import { plannedDailyLossBudgetEur } from "./riskSizing";
+import { evaluateGoldHunterPreClaimProjectedDailyRisk } from "./projectedDailyRisk";
+import {
+  releaseGoldHunterMaxOpenSlot,
+  reserveGoldHunterMaxOpenSlot
+} from "./maxOpenLease";
+import { countsTowardGoldHunterMaxOpen } from "./tradeStore";
 
 import type { GoldHunterExecutionStage } from "./executionStages";
 import {
@@ -244,6 +249,64 @@ export async function attemptGoldHunterDemoExecution(
     return block(blocker, "sizing_refused");
   }
 
+  deps.onStage?.("PROJECTED_DAILY_RISK_START", "start");
+  let projectedRisk;
+  try {
+    projectedRisk = await withGoldHunterPreclaimTimeout(
+      "evaluateGoldHunterPreClaimProjectedDailyRisk",
+      "PROJECTED_DAILY_RISK_START",
+      GH_PRECLAIM_ACCOUNT_TIMEOUT_MS + GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () =>
+        evaluateGoldHunterPreClaimProjectedDailyRisk({
+          ownerUid,
+          config,
+          proposedTradeRiskEur: sized.riskBudgetEur
+        })
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("PROJECTED_DAILY_RISK_START", "timeout");
+      return block("WAIT — DAILY RISK UNKNOWN", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("PROJECTED_DAILY_RISK_DONE", "done");
+  if (!projectedRisk.allowed || !projectedRisk.authoritative) {
+    return block(
+      projectedRisk.blocker ?? "WAIT — DAILY RISK UNKNOWN",
+      projectedRisk.detail ??
+        `projected_${projectedRisk.projectedWorstCaseLossEur}_budget_${projectedRisk.dailyLossBudgetEur}`
+    );
+  }
+
+  // Re-read open occupancy after reconcile inside projected-risk eval.
+  try {
+    openTrades = await withGoldHunterPreclaimTimeout(
+      "listGoldHunterDemoTrades_after_risk",
+      "OPEN_TRADES_LOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () =>
+        listGoldHunterDemoTrades(ownerUid, {
+          limit: 50,
+          openOnly: true
+        })
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  const brokerOpen = projectedRisk.brokerOpenGoldHunterCount;
+  const localOpen = openTrades.filter(countsTowardGoldHunterMaxOpen).length;
+  const knownOccupancy = Math.max(localOpen, brokerOpen);
+  if (knownOccupancy >= config.maxOpenTrades) {
+    return block(
+      "WAIT — MAX OPEN TRADES",
+      `open_count_${knownOccupancy}_max_${config.maxOpenTrades}_broker_${brokerOpen}_local_${localOpen}`
+    );
+  }
+
   deps.onStage?.("ACCOUNT_SNAPSHOT_START", "start");
   let account;
   try {
@@ -278,6 +341,16 @@ export async function attemptGoldHunterDemoExecution(
     .replace(/[^a-zA-Z0-9_]/g, "")
     .slice(0, 50);
 
+  const lease = await reserveGoldHunterMaxOpenSlot({
+    ownerUid,
+    maxOpenTrades: config.maxOpenTrades,
+    reservationId: goldHunterTradeId,
+    knownOccupancy
+  });
+  if (!lease.ok) {
+    return block("WAIT — MAX OPEN TRADES", lease.reason);
+  }
+
   tel?.({ phase: "CLAIMING", tradeId: goldHunterTradeId });
   deps.onStage?.("CLAIM_CREATE_START", "start");
 
@@ -298,6 +371,10 @@ export async function attemptGoldHunterDemoExecution(
         })
     );
   } catch (e) {
+    await releaseGoldHunterMaxOpenSlot({
+      ownerUid,
+      reservationId: goldHunterTradeId
+    }).catch(() => undefined);
     if (isGoldHunterPreclaimTimeout(e)) {
       deps.onStage?.("CLAIM_CREATE_START", "timeout");
       // Underlying write may still complete — inspect claim before failing closed.
@@ -339,6 +416,10 @@ export async function attemptGoldHunterDemoExecution(
   deps.onStage?.("CLAIM_CREATE_DONE", "done");
 
   if (!claim.ok) {
+    await releaseGoldHunterMaxOpenSlot({
+      ownerUid,
+      reservationId: goldHunterTradeId
+    }).catch(() => undefined);
     getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
     tel?.({
       phase: "DUPLICATE_ALREADY_CLAIMED",
@@ -365,6 +446,10 @@ export async function attemptGoldHunterDemoExecution(
     try {
       await deps.beforeBrokerSubmit();
     } catch {
+      await releaseGoldHunterMaxOpenSlot({
+        ownerUid,
+        reservationId: goldHunterTradeId
+      }).catch(() => undefined);
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "PENDING_RECONCILIATION",
         errorCode: "BROKER_TIMEOUT_UNKNOWN"
@@ -387,43 +472,35 @@ export async function attemptGoldHunterDemoExecution(
     }
   }
 
-  let dailyLossOk = true;
-  try {
-    deps.onStage?.("POST_CLAIM_PNL_START", "start");
-    const todayPnl = todayNetPnlEur(
-      await withGoldHunterPreclaimTimeout(
-        "listGoldHunterDemoTrades_pnl",
-        "POST_CLAIM_PNL_START",
-        GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
-        () => listGoldHunterDemoTrades(ownerUid, { limit: 200 })
-      )
-    );
-    dailyLossOk = todayPnl > -plannedDailyLossBudgetEur(config);
-    deps.onStage?.("POST_CLAIM_PNL_DONE", "done");
-  } catch (e) {
-    if (isGoldHunterPreclaimTimeout(e)) {
-      deps.onStage?.("POST_CLAIM_PNL_START", "timeout");
-      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-        state: "PENDING_RECONCILIATION",
-        errorCode: "POST_CLAIM_PNL_TIMEOUT"
-      });
-      tel?.({
-        phase: "PENDING_RECONCILIATION",
-        claimed: true,
-        outcome: "PENDING_RECONCILIATION",
-        tradeId: goldHunterTradeId,
-        detail: "post_claim_pnl_timeout"
-      });
-      return {
-        ok: true,
-        submitted: false,
-        outcome: "PENDING_RECONCILIATION",
-        signalId: opportunityId,
-        tradeId: goldHunterTradeId,
-        detail: "Post-claim read timed out — no blind resubmit"
-      };
-    }
-    throw e;
+  deps.onStage?.("POST_CLAIM_PNL_START", "start");
+  const dailyLossOk = projectedRisk.allowed && projectedRisk.authoritative;
+  deps.onStage?.("POST_CLAIM_PNL_DONE", "done");
+  if (!dailyLossOk) {
+    await releaseGoldHunterMaxOpenSlot({
+      ownerUid,
+      reservationId: goldHunterTradeId
+    }).catch(() => undefined);
+    await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+      state: "BROKER_SUBMIT_ERROR",
+      errorCode:
+        projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"
+    });
+    tel?.({
+      phase: "BROKER_SUBMIT_ERROR",
+      claimed: true,
+      outcome: "BROKER_SUBMIT_ERROR",
+      blocker: projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT",
+      detail: "post_claim_projected_risk_recheck_failed",
+      tradeId: goldHunterTradeId
+    });
+    return {
+      ok: false,
+      submitted: false,
+      blockers: [
+        projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"
+      ],
+      signalId: opportunityId
+    };
   }
 
   try {
@@ -466,6 +543,10 @@ export async function attemptGoldHunterDemoExecution(
 
     if (!result.ok) {
       // Local gate failure after claim — no ProtoOANewOrderReq was sent.
+      await releaseGoldHunterMaxOpenSlot({
+        ownerUid,
+        reservationId: goldHunterTradeId
+      }).catch(() => undefined);
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
@@ -510,6 +591,10 @@ export async function attemptGoldHunterDemoExecution(
         brokerPositionId: result.trade?.brokerPositionId ?? null
       });
     } else if (result.outcome === "BROKER_REJECTED") {
+      await releaseGoldHunterMaxOpenSlot({
+        ownerUid,
+        reservationId: goldHunterTradeId
+      }).catch(() => undefined);
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_REJECTED",
         errorCode: result.errorCode,
@@ -524,6 +609,7 @@ export async function attemptGoldHunterDemoExecution(
         brokerOrderId: result.trade?.brokerOrderId ?? null
       });
     } else if (result.outcome === "BROKER_SUBMIT_ERROR") {
+      // Uncertain transport — keep max-open lease until reconcile clears it.
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "BROKER_SUBMIT_ERROR",
         errorCode: result.errorCode
@@ -539,7 +625,8 @@ export async function attemptGoldHunterDemoExecution(
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "ACCEPTED",
         brokerOrderId: result.trade?.brokerOrderId ?? null,
-        brokerPositionId: result.trade?.brokerPositionId ?? null
+        brokerPositionId: result.trade?.brokerPositionId ?? null,
+        goldHunterTradeId
       });
       tel?.({
         phase: "ACCEPTED_PENDING_FILL",
@@ -565,6 +652,14 @@ export async function attemptGoldHunterDemoExecution(
         brokerOrderId: result.trade?.brokerOrderId ?? null,
         brokerPositionId: result.trade?.brokerPositionId ?? null
       });
+    }
+
+    // Durable trade row now owns max-open occupancy — release claim-time lease.
+    if (result.outcome !== "BROKER_REJECTED") {
+      await releaseGoldHunterMaxOpenSlot({
+        ownerUid,
+        reservationId: goldHunterTradeId
+      }).catch(() => undefined);
     }
 
     return {

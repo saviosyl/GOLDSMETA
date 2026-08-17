@@ -16,7 +16,10 @@ export type GoldHunterWaitReason =
   | "WAIT — SPREAD TOO WIDE"
   | "WAIT — CAPITAL LIMIT"
   | "WAIT — DAILY LOSS LIMIT"
+  | "WAIT — PROJECTED DAILY LOSS LIMIT"
+  | "WAIT — DAILY RISK UNKNOWN"
   | "WAIT — MAX OPEN TRADES"
+  | "WAIT — RUNTIME TIMEOUT"
   | "WAIT — DUPLICATE SIGNAL"
   | "WAIT — BROKER DISCONNECTED"
   | "WAIT — LIVE ENVIRONMENT REFUSED"
@@ -118,6 +121,19 @@ export type GoldHunterDemoTrade = {
   errorCode?: string | null;
   filledVolumeLots?: number | null;
   takeProfit?: number | null;
+  /** Exit decision time (local strategy). */
+  exitSignalTs?: string | null;
+  /** Local close mutation request time. */
+  closeRequestTs?: string | null;
+  /** Broker accepted close / position proven absent. */
+  closeAcceptedTs?: string | null;
+  /** Authoritative closing-deal settlement time. */
+  brokerSettlementTs?: string | null;
+  /**
+   * Additive diagnostic only — never invents P/L or fill prices.
+   * Historical corrupt rows may be tagged without rewriting economics.
+   */
+  dataQuality?: "ENTRY_INVALID" | "MFE_MAE_CORRUPT" | null;
 };
 
 export type GoldHunterOrderGateResult = {

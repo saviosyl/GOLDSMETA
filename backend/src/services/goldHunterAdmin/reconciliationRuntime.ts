@@ -174,23 +174,44 @@ export async function reconcileGoldHunterPendingEntries(args: {
 
     if (match && isProvenGhPosition(match, trade)) {
       const now = new Date().toISOString();
+      const entryPrice = match.entryPrice;
+      if (
+        entryPrice == null ||
+        !Number.isFinite(entryPrice) ||
+        entryPrice <= 0
+      ) {
+        // Broker position exists but entry still invalid — do not mark FILLED.
+        await upsertGoldHunterDemoTrade(args.ownerUid, {
+          ...trade,
+          brokerPositionId: match.positionId,
+          status: "PENDING_RECONCILIATION",
+          dataQuality: "ENTRY_INVALID",
+          errorCode: "ENTRY_PRICE_INVALID",
+          entry: null,
+          mfe: null,
+          mae: null
+        });
+        stillPending += 1;
+        continue;
+      }
       const recovered: GoldHunterDemoTrade = {
         ...trade,
         status: "FILLED",
         result: "OPEN",
         brokerPositionId: match.positionId,
-        entry: match.entryPrice ?? trade.entry,
+        entry: entryPrice,
         stop: match.stopLoss ?? trade.stop,
         fillTs: trade.fillTs ?? now,
         filledVolumeLots: match.volumeLots ?? trade.filledVolumeLots,
-        errorCode: null
+        errorCode: null,
+        dataQuality: null
       };
       await upsertGoldHunterDemoTrade(args.ownerUid, recovered);
       registerGoldHunterOpenPositionForOwner({
         ownerUid: args.ownerUid,
         trade: recovered,
-        bid: recovered.entry ?? 0,
-        ask: recovered.entry ?? 0
+        bid: recovered.entry!,
+        ask: recovered.entry!
       });
       if (trade.signalId) {
         await updateGoldHunterSignalClaim(args.ownerUid, trade.signalId, {

@@ -11,6 +11,10 @@ import {
 import { lotsToOrderVolumeUnits } from "../broker/ctrader/volumeUnits";
 import type { DemoPositionMutationResult } from "../broker/ctrader/openApiClient";
 import {
+  isCorruptGoldHunterMfeMae,
+  isValidGoldHunterEntryPrice
+} from "./entryValidity";
+import {
   evaluateOpenExit,
   openTrade,
   updateOpenTrade
@@ -99,17 +103,20 @@ function toSetupId(setup: "A" | "B" | "C" | null): GhFastSetupId {
   return "A_MOMENTUM_IGNITION";
 }
 
-function seedOpenTradeFromPersisted(t: GoldHunterDemoTrade): GhFastOpenTrade {
+function seedOpenTradeFromPersisted(t: GoldHunterDemoTrade): GhFastOpenTrade | null {
+  if (!isValidGoldHunterEntryPrice(t.entry)) {
+    return null;
+  }
   const cfg = frozenGhFastSoakConfig();
   const entryTs = Date.parse(t.fillTs ?? t.orderTs ?? "") || Date.now();
   const bid =
     t.side === "BUY"
-      ? (t.entry ?? 0) - (t.entrySpread ?? 0.05)
-      : (t.entry ?? 0);
+      ? t.entry! - (t.entrySpread ?? 0.05)
+      : t.entry!;
   const ask =
     t.side === "SELL"
-      ? (t.entry ?? 0) + (t.entrySpread ?? 0.05)
-      : (t.entry ?? 0);
+      ? t.entry! + (t.entrySpread ?? 0.05)
+      : t.entry!;
   const state = openTrade({
     tradeId: t.goldHunterTradeId,
     side: t.side,
@@ -119,10 +126,19 @@ function seedOpenTradeFromPersisted(t: GoldHunterDemoTrade): GhFastOpenTrade {
     ask,
     trailDistance: cfg.trailDistance
   });
-  if (t.entry != null) state.entryPrice = t.entry;
-  // Restore only proven MFE/MAE; do not invent trail/lock that could widen stops.
-  if (t.mfe != null && Number.isFinite(t.mfe)) state.mfe = t.mfe;
-  if (t.mae != null && Number.isFinite(t.mae)) state.mae = t.mae;
+  state.entryPrice = t.entry!;
+  // Restore only proven MFE/MAE; never invent trail/lock that could widen stops.
+  // Skip corrupt MFE/MAE (entry contamination artifacts).
+  if (
+    !isCorruptGoldHunterMfeMae({
+      mfe: t.mfe,
+      mae: t.mae,
+      hardStop: cfg.hardStop
+    })
+  ) {
+    if (t.mfe != null && Number.isFinite(t.mfe)) state.mfe = t.mfe;
+    if (t.mae != null && Number.isFinite(t.mae)) state.mae = t.mae;
+  }
   return state;
 }
 
@@ -141,7 +157,16 @@ export async function restoreGoldHunterPositionManager(
   map.clear();
   for (const t of open) {
     if (t.strategy !== GH_ADMIN_STRATEGY_ID || t.environment !== "DEMO") continue;
-    if (!t.brokerPositionId || t.entry == null) continue;
+    if (!t.brokerPositionId || !isValidGoldHunterEntryPrice(t.entry)) {
+      if (t.brokerPositionId && !isValidGoldHunterEntryPrice(t.entry)) {
+        await upsertGoldHunterDemoTrade(ownerUid, {
+          ...t,
+          dataQuality: "ENTRY_INVALID",
+          errorCode: t.errorCode ?? "ENTRY_PRICE_INVALID"
+        });
+      }
+      continue;
+    }
     if (
       t.status !== "FILLED" &&
       t.status !== "PROTECTED" &&
@@ -149,7 +174,8 @@ export async function restoreGoldHunterPositionManager(
     ) {
       continue;
     }
-    map.set(t.goldHunterTradeId, seedOpenTradeFromPersisted(t));
+    const seeded = seedOpenTradeFromPersisted(t);
+    if (seeded) map.set(t.goldHunterTradeId, seeded);
   }
   return { restored: map.size };
 }
@@ -169,21 +195,25 @@ export function registerGoldHunterOpenPositionForOwner(args: {
   ) {
     return;
   }
-  if (!args.trade.brokerPositionId || args.trade.entry == null) return;
+  if (
+    !args.trade.brokerPositionId ||
+    !isValidGoldHunterEntryPrice(args.trade.entry)
+  ) {
+    return;
+  }
   const cfg = frozenGhFastSoakConfig();
   const entryTs = Date.parse(args.trade.fillTs ?? "") || Date.now();
-  ownerMap(args.ownerUid).set(
-    args.trade.goldHunterTradeId,
-    openTrade({
-      tradeId: args.trade.goldHunterTradeId,
-      side: args.trade.side,
-      setup: toSetupId(args.trade.setup),
-      entryTs,
-      bid: args.bid,
-      ask: args.ask,
-      trailDistance: cfg.trailDistance
-    })
-  );
+  const state = openTrade({
+    tradeId: args.trade.goldHunterTradeId,
+    side: args.trade.side,
+    setup: toSetupId(args.trade.setup),
+    entryTs,
+    bid: args.bid,
+    ask: args.ask,
+    trailDistance: cfg.trailDistance
+  });
+  state.entryPrice = args.trade.entry!;
+  ownerMap(args.ownerUid).set(args.trade.goldHunterTradeId, state);
 }
 
 /**
@@ -283,7 +313,7 @@ export async function tickGoldHunterPositionManager(args: {
 
   for (const trade of openTrades) {
     if (trade.strategy !== GH_ADMIN_STRATEGY_ID) continue;
-    if (!trade.brokerPositionId || trade.entry == null) continue;
+    if (!trade.brokerPositionId) continue;
     if (
       trade.status === "CLOSE_REQUESTED" ||
       trade.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT" ||
@@ -291,11 +321,28 @@ export async function tickGoldHunterPositionManager(args: {
     ) {
       continue;
     }
+
+    // Never dynamically manage invalid entry — retain broker hard protection only.
+    if (!isValidGoldHunterEntryPrice(trade.entry)) {
+      if (trade.dataQuality !== "ENTRY_INVALID") {
+        await upsertGoldHunterDemoTrade(args.ownerUid, {
+          ...trade,
+          dataQuality: "ENTRY_INVALID",
+          errorCode: trade.errorCode ?? "ENTRY_PRICE_INVALID",
+          mfe: null,
+          mae: null
+        });
+      }
+      continue;
+    }
+
     result.evaluated += 1;
 
     let state = map.get(trade.goldHunterTradeId);
     if (!state) {
-      state = seedOpenTradeFromPersisted(trade);
+      const seeded = seedOpenTradeFromPersisted(trade);
+      if (!seeded) continue;
+      state = seeded;
       map.set(trade.goldHunterTradeId, state);
     }
 
@@ -307,7 +354,7 @@ export async function tickGoldHunterPositionManager(args: {
       currentStop: trade.stop,
       proposedLockFloor: state.lockFloor,
       hardStop: cfg.hardStop,
-      entry: trade.entry
+      entry: trade.entry!
     });
     if (tightened != null && trade.brokerPositionId) {
       try {
@@ -421,10 +468,12 @@ export async function closeGoldHunterDemoPosition(args: {
     brokerOpenVolumeLots: args.brokerOpenVolumeLots
   });
   if (!volume.ok) {
+    const exitSignalTs = new Date().toISOString();
     await upsertGoldHunterDemoTrade(args.ownerUid, {
       ...trade,
       status: "PENDING_RECONCILIATION",
       exitReason: String(args.exitReason),
+      exitSignalTs,
       errorCode: "CLOSE_VOLUME_UNKNOWN",
       mfe: args.state.mfe,
       mae: args.state.mae,
@@ -439,10 +488,14 @@ export async function closeGoldHunterDemoPosition(args: {
     ((a: { ownerUid: string; positionId: string; volumeUnits: number }) =>
       closeDemoBrokerPosition(a));
 
+  const exitSignalTs = trade.exitSignalTs ?? new Date().toISOString();
+  const closeRequestTs = new Date().toISOString();
   await upsertGoldHunterDemoTrade(args.ownerUid, {
     ...trade,
     status: "CLOSE_REQUESTED",
     exitReason: String(args.exitReason),
+    exitSignalTs,
+    closeRequestTs,
     filledVolumeLots: volume.lots,
     mfe: args.state.mfe,
     mae: args.state.mae,
@@ -471,10 +524,14 @@ export async function closeGoldHunterDemoPosition(args: {
       return false;
     }
 
+    const closeAcceptedTs = new Date().toISOString();
     const pending: GoldHunterDemoTrade = {
       ...trade,
       status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
       exitReason: String(args.exitReason),
+      exitSignalTs,
+      closeRequestTs,
+      closeAcceptedTs,
       exit: null,
       closeTs: null,
       result: null,

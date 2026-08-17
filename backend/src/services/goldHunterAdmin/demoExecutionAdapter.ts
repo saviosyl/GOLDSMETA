@@ -375,8 +375,10 @@ export async function submitGoldHunterDemoOrder(
       : null;
   const hasPosition =
     broker.positionId != null && String(broker.positionId).length > 0;
+  // Zero / non-positive fill prices must NEVER become FILLED.
   const filled =
     fillPrice != null &&
+    fillPrice > 0 &&
     hasPosition &&
     (broker.filledVolumeLots == null || broker.filledVolumeLots > 0);
 
@@ -391,7 +393,7 @@ export async function submitGoldHunterDemoOrder(
       orderTs: now,
       fillTs: null,
       closeTs: null,
-      entry: fillPrice,
+      entry: fillPrice != null && fillPrice > 0 ? fillPrice : null,
       exit: null,
       stop: broker.stopLoss ?? args.stopLoss ?? null,
       entrySpread: null,
@@ -405,11 +407,22 @@ export async function submitGoldHunterDemoOrder(
       brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
       brokerPositionId:
         broker.positionId != null ? String(broker.positionId) : null,
-      status: "ACCEPTED_PENDING_FILL",
+      status:
+        hasPosition && (fillPrice == null || fillPrice <= 0)
+          ? "PENDING_RECONCILIATION"
+          : "ACCEPTED_PENDING_FILL",
       signalId: args.signalId ?? null,
       clientOrderId: broker.clientOrderId ?? args.clientOrderId,
       filledVolumeLots: broker.filledVolumeLots ?? null,
-      takeProfit: broker.takeProfit ?? args.takeProfit ?? null
+      takeProfit: broker.takeProfit ?? args.takeProfit ?? null,
+      errorCode:
+        hasPosition && (fillPrice == null || fillPrice <= 0)
+          ? "ENTRY_PRICE_INVALID"
+          : null,
+      dataQuality:
+        hasPosition && (fillPrice == null || fillPrice <= 0)
+          ? "ENTRY_INVALID"
+          : null
     };
     await upsertGoldHunterDemoTrade(args.ownerUid, {
       ...trade,
@@ -423,10 +436,13 @@ export async function submitGoldHunterDemoOrder(
     });
     return {
       ok: true,
-      outcome: "ACCEPTED_PENDING_FILL",
+      outcome:
+        trade.status === "PENDING_RECONCILIATION"
+          ? "PENDING_RECONCILIATION"
+          : "ACCEPTED_PENDING_FILL",
       trade,
       broker,
-      errorCode: null
+      errorCode: trade.errorCode ?? null
     };
   }
 
