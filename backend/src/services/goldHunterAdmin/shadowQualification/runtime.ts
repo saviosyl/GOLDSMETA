@@ -786,9 +786,29 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       divergenceDetail: `replay_stale_during_run startExpected=${expectedEvents} nowAcknowledged=${finalAck} startQid=${qualificationId} nowQid=${finalQid}`,
       completedAt: new Date().toISOString()
     };
-    if (finalQid) {
+
+    // Qualification rollover: current is a different epoch (Q2). The old Q1
+    // replay must NOT patch Q2 replay fields or sync into the Q2 engine.
+    if (finalQid != null && finalQid !== qualificationId) {
+      return {
+        status: "REPLAY_STALE" as const,
+        capturedEvents: result.capturedEvents,
+        replayedEvents: result.replayedEvents,
+        expectedEvents,
+        firstDivergenceSeq: null,
+        divergenceDetail: `replay_stale_qualification_rollover startQid=${qualificationId} nowQid=${finalQid}`,
+        livePoints: result.livePoints,
+        replayPoints: result.replayPoints,
+        replayCurrent: false,
+        persistAcknowledgedEvents: finalAck >= 0 ? finalAck : null
+      };
+    }
+
+    // Same qualification, ACK advanced (or epoch missing): field-only STALE
+    // patch on the replay-start qualification only — never a different QID.
+    if (finalQid && finalQid === qualificationId) {
       const patch = await patchGhShadowEpochReplayFields(ownerUid, {
-        qualificationId: finalQid,
+        qualificationId,
         expectedEvents,
         requireCurrentAck: false,
         lastReplayStatus: "REPLAY_STALE",
@@ -796,7 +816,7 @@ export async function runGhShadowReplayAndGate(ownerUid: string) {
       });
       await syncEngineReplayFields(
         ownerUid,
-        finalQid,
+        qualificationId,
         patch.writtenStatus ?? "REPLAY_STALE",
         patch.epoch?.lastReplayDetail ?? detail
       );
