@@ -361,17 +361,20 @@ describe("FIX2 — account ID + stable sizing hash", () => {
       metadataLoadedAt: "2026-08-17T12:00:00.000Z"
     });
     expect(a.metadataLoadedAt).not.toBe(b.metadataLoadedAt);
-    expect(a.snappedAt).not.toBe(b.snappedAt);
+    // snappedAt may collide within the same ms; hash must still ignore it.
     expect(a.adminSizingConfigSha).toBe(b.adminSizingConfigSha);
     expect(sizingSnapshotChanged(a, b)).toBe(false);
-    // Hash helper also excludes volatiles even if present on object
-    expect(
-      hashAdminSizingConfig({
-        ...a,
-        metadataLoadedAt: "different",
-        snappedAt: undefined as unknown as string
-      } as Omit<typeof a, "adminSizingConfigSha" | "snappedAt">)
-    ).toBe(a.adminSizingConfigSha);
+    // Explicitly prove timestamps are excluded even when present on the object
+    const h1 = hashAdminSizingConfig({
+      ...a,
+      metadataLoadedAt: "2020-01-01T00:00:00.000Z"
+    });
+    const h2 = hashAdminSizingConfig({
+      ...a,
+      metadataLoadedAt: "2099-12-31T23:59:59.999Z"
+    });
+    expect(h1).toBe(h2);
+    expect(h1).toBe(a.adminSizingConfigSha);
   });
 
   it("TEST B: different cTrader account ID changes hash", () => {
