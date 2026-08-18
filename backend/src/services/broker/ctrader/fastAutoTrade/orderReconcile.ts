@@ -3,6 +3,8 @@
  * Never treat "same side" or "last position" as this order.
  */
 
+import { isLegacyTruncatedFastClientOrderId } from "./clientOrderId";
+
 export type ReconcileOrderRow = {
   orderId: string | null;
   positionId: string | null;
@@ -34,7 +36,10 @@ export type ReconcileMatch = {
 
 export type ReconcileMiss = {
   matched: false;
-  reason: "NOT_FOUND" | "CLIENT_ORDER_ID_MISSING";
+  reason:
+    | "NOT_FOUND"
+    | "CLIENT_ORDER_ID_MISSING"
+    | "AMBIGUOUS_LEGACY_CLIENT_ORDER_ID";
 };
 
 export type ReconcileLookup = ReconcileMatch | ReconcileMiss;
@@ -100,17 +105,33 @@ export function parseReconcileSnapshot(raw: Record<string, unknown>): ReconcileS
 /**
  * Match this FAST order by durable clientOrderId.
  * Unrelated open positions (even same side) never match.
+ * Legacy truncated IDs fail closed when more than one claim/order shares the ID.
  */
 export function matchReconcileByClientOrderId(args: {
   clientOrderId: string;
   snapshot: ReconcileSnapshot;
+  /** Other outstanding FAST claims that share this clientOrderId (legacy only). */
+  outstandingClaimClientOrderIds?: string[];
 }): ReconcileLookup {
   const want = asText(args.clientOrderId);
   if (!want) {
     return { matched: false, reason: "CLIENT_ORDER_ID_MISSING" };
   }
 
-  const order = args.snapshot.orders.find((o) => o.clientOrderId === want);
+  const orders = args.snapshot.orders.filter((o) => o.clientOrderId === want);
+  const positions = args.snapshot.positions.filter((p) => p.clientOrderId === want);
+  if (orders.length > 1 || positions.length > 1) {
+    return { matched: false, reason: "AMBIGUOUS_LEGACY_CLIENT_ORDER_ID" };
+  }
+
+  if (isLegacyTruncatedFastClientOrderId(want)) {
+    const peers = (args.outstandingClaimClientOrderIds ?? []).filter((id) => id === want);
+    if (peers.length > 1) {
+      return { matched: false, reason: "AMBIGUOUS_LEGACY_CLIENT_ORDER_ID" };
+    }
+  }
+
+  const order = orders[0];
   if (order) {
     return {
       matched: true,
@@ -121,7 +142,7 @@ export function matchReconcileByClientOrderId(args: {
     };
   }
 
-  const position = args.snapshot.positions.find((p) => p.clientOrderId === want);
+  const position = positions[0];
   if (position) {
     return {
       matched: true,

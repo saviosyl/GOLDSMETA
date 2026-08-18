@@ -306,6 +306,31 @@ export async function saveQualificationDoc(doc: QualificationDocument): Promise<
   await setActiveQualificationAccount(doc.uid, accountId, doc.accountMasked);
 }
 
+/**
+ * Increment the reject counter without rewriting trade arrays.
+ * Concurrent FAST fills must not be clobbered by a later blocked-attempt save.
+ */
+export async function incrementQualificationBlockedAttempts(
+  uid: string,
+  accountId: string | number | null | undefined,
+  extras?: { lastError?: string | null }
+): Promise<void> {
+  const id = normalizeAccountId(accountId);
+  if (!id) return;
+  try {
+    await docRef(uid, id).set(
+      {
+        controlledBlockedAttempts: FieldValue.increment(1),
+        updatedAt: new Date().toISOString(),
+        ...(extras?.lastError != null ? { lastError: extras.lastError } : {})
+      },
+      { merge: true }
+    );
+  } catch {
+    /* best-effort counter — never block fill persistence */
+  }
+}
+
 export async function appendTransition(
   doc: QualificationDocument,
   to: QualificationState,
@@ -364,6 +389,123 @@ export function recountDemoAuto(doc: QualificationDocument): QualificationDocume
     ...doc,
     demoAutoTradeCount: counted.length
   };
+}
+
+export function qualificationTradeKeysMatch(
+  existing: { signalId?: string | null; correlationId?: string | null; brokerOrderId?: string | null; brokerPositionId?: string | null; clientOrderId?: string | null },
+  incoming: { signalId?: string | null; correlationId?: string | null; brokerOrderId?: string | null; brokerPositionId?: string | null; clientOrderId?: string | null }
+): boolean {
+  if (incoming.correlationId && existing.correlationId === incoming.correlationId) return true;
+  if (incoming.signalId && existing.signalId === incoming.signalId) return true;
+  if (incoming.brokerPositionId && existing.brokerPositionId === incoming.brokerPositionId) return true;
+  if (incoming.brokerOrderId && existing.brokerOrderId === incoming.brokerOrderId) return true;
+  if (incoming.clientOrderId && existing.clientOrderId === incoming.clientOrderId) return true;
+  return false;
+}
+
+function preferEconomic(
+  current: number | null | undefined,
+  incoming: number | null | undefined
+): number | null | undefined {
+  if (incoming === 0) return current === 0 ? null : current;
+  if (incoming != null) return incoming;
+  if (current === 0) return null;
+  return current;
+}
+
+export function mergeQualificationOpenTrade<
+  T extends ControlledDemoTradeRecord | DemoAutoTradeRecord
+>(existing: T, incoming: T): T {
+  const existingDemo = existing as DemoAutoTradeRecord;
+  const incomingDemo = incoming as DemoAutoTradeRecord;
+  return {
+    ...existing,
+    ...incoming,
+    entry: preferEconomic(existing.entry, incoming.entry) ?? null,
+    lots: preferEconomic(existing.lots, incoming.lots) ?? null,
+    fillPrice: preferEconomic(existingDemo.fillPrice, incomingDemo.fillPrice) ?? null,
+    filledVolumeLots:
+      preferEconomic(existingDemo.filledVolumeLots, incomingDemo.filledVolumeLots) ??
+      null,
+    brokerOrderId: existing.brokerOrderId ?? incoming.brokerOrderId,
+    brokerPositionId: existing.brokerPositionId ?? incoming.brokerPositionId,
+    clientOrderId: existingDemo.clientOrderId ?? incomingDemo.clientOrderId,
+    correlationId: existing.correlationId || incoming.correlationId
+  };
+}
+
+export function applyQualificationOpenTrade(
+  doc: QualificationDocument,
+  trade: ControlledDemoTradeRecord | DemoAutoTradeRecord,
+  bucket: "controlled" | "demoAuto"
+): QualificationDocument {
+  if (bucket === "controlled") {
+    const idx = doc.controlledTrades.findIndex((t) =>
+      qualificationTradeKeysMatch(t, trade)
+    );
+    const next =
+      idx >= 0
+        ? doc.controlledTrades.map((t, i) =>
+            i === idx
+              ? mergeQualificationOpenTrade(t, trade as ControlledDemoTradeRecord)
+              : t
+          )
+        : [...doc.controlledTrades, trade as ControlledDemoTradeRecord];
+    return recountControlled({
+      ...doc,
+      controlledTrades: next,
+      firstControlledDemoTradeAt: doc.firstControlledDemoTradeAt ?? trade.at
+    });
+  }
+  const idx = doc.demoAutoTrades.findIndex((t) =>
+    qualificationTradeKeysMatch(t, trade)
+  );
+  const next =
+    idx >= 0
+      ? doc.demoAutoTrades.map((t, i) =>
+          i === idx ? mergeQualificationOpenTrade(t, trade as DemoAutoTradeRecord) : t
+        )
+      : [...doc.demoAutoTrades, trade as DemoAutoTradeRecord];
+  return recountDemoAuto({
+    ...doc,
+    demoAutoTrades: next,
+    firstDemoAutoTradeAt: doc.firstDemoAutoTradeAt ?? trade.at
+  });
+}
+
+/**
+ * Transactional open-trade write. One confirmed FAST fill → one record.
+ * Concurrent reject increments cannot clobber the new trade array.
+ */
+export async function upsertQualificationOpenTrade(args: {
+  uid: string;
+  accountId: string;
+  trade: ControlledDemoTradeRecord | DemoAutoTradeRecord;
+  bucket: "controlled" | "demoAuto";
+}): Promise<QualificationDocument | null> {
+  const accountId = normalizeAccountId(args.accountId);
+  if (!accountId) return null;
+  const ref = docRef(args.uid, accountId);
+  try {
+    return await getFirestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const current = normalize(snap.data() ?? {}, args.uid, accountId);
+      const next = applyQualificationOpenTrade(current, args.trade, args.bucket);
+      tx.set(
+        ref,
+        { ...next, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+      return next;
+    });
+  } catch {
+    const current = await getQualificationDoc(args.uid, accountId);
+    if (!current) return null;
+    const next = applyQualificationOpenTrade(current, args.trade, args.bucket);
+    await saveQualificationDoc(next);
+    return next;
+  }
 }
 
 export { FieldValue, QUALIFICATION_GATES };

@@ -139,7 +139,25 @@ export async function createDemoPositionLifecycle(args: {
       : policy === "PROFIT_LOCK_V1" && tps.tp3 != null
         ? tps.tp3
         : null;
-  const initialRisk = riskDistance(args.entry, args.stopLoss);
+  const entry =
+    args.entry != null && Number.isFinite(args.entry) && args.entry !== 0
+      ? args.entry
+      : null;
+  const lots =
+    args.lots != null && Number.isFinite(args.lots) && args.lots !== 0
+      ? args.lots
+      : null;
+  const initialRisk = riskDistance(entry, args.stopLoss);
+  const tpInvalidVsFill =
+    entry != null &&
+    args.side === "BUY" &&
+    tps.tp1 != null &&
+    tps.tp1 <= entry
+      ? true
+      : entry != null &&
+          args.side === "SELL" &&
+          tps.tp1 != null &&
+          tps.tp1 >= entry;
   const doc: DemoPositionLifecycle = {
     id: args.correlationId,
     uid: args.uid,
@@ -151,15 +169,15 @@ export async function createDemoPositionLifecycle(args: {
     accountMasked: args.accountMasked,
     symbol: "XAUUSD",
     side: args.side,
-    entry: args.entry,
-    currentPrice: args.entry,
-    lots: args.lots,
-    remainingLots: args.lots,
+    entry,
+    currentPrice: entry,
+    lots,
+    remainingLots: lots,
     initialSl: args.stopLoss,
     currentSl: args.stopLoss,
-    tp1: tps.tp1,
-    tp2: tps.tp2,
-    tp3: tps.tp3,
+    tp1: tpInvalidVsFill ? null : tps.tp1,
+    tp2: tpInvalidVsFill ? null : tps.tp2,
+    tp3: tpInvalidVsFill ? null : tps.tp3,
     ...emptyTpStatuses(),
     openedAt: args.openedAt,
     closedAt: null,
@@ -208,9 +226,14 @@ export async function createDemoPositionLifecycle(args: {
 function tpHit(
   side: "BUY" | "SELL",
   price: number | null,
-  level: number | null
+  level: number | null,
+  fill?: number | null
 ): boolean {
   if (price == null || level == null) return false;
+  if (fill != null && Number.isFinite(fill) && fill !== 0) {
+    if (side === "BUY" && level <= fill) return false;
+    if (side === "SELL" && level >= fill) return false;
+  }
   return side === "BUY" ? price >= level : price <= level;
 }
 
@@ -691,7 +714,7 @@ export async function manageOpenDemoPosition(
   };
 
   // TP lifecycle tracking (recommendation / hit flags — no invented exits)
-  if (tpHit(doc.side, currentPrice, doc.tp1) && doc.tp1Status === "PENDING") {
+  if (tpHit(doc.side, currentPrice, doc.tp1, doc.entry) && doc.tp1Status === "PENDING") {
     const hit = appendLifecycleEvent(doc, {
       at: new Date().toISOString(),
       kind: "TP1",
@@ -706,7 +729,7 @@ export async function manageOpenDemoPosition(
       };
     }
   }
-  if (tpHit(doc.side, currentPrice, doc.tp2) && doc.tp2Status === "PENDING") {
+  if (tpHit(doc.side, currentPrice, doc.tp2, doc.entry) && doc.tp2Status === "PENDING") {
     const hit = appendLifecycleEvent(doc, {
       at: new Date().toISOString(),
       kind: "TP2",
@@ -717,7 +740,7 @@ export async function manageOpenDemoPosition(
       doc = { ...hit.doc, tp2Status: "HIT", managementState: "TP2_HIT" };
     }
   }
-  if (tpHit(doc.side, currentPrice, doc.tp3) && doc.tp3Status === "PENDING") {
+  if (tpHit(doc.side, currentPrice, doc.tp3, doc.entry) && doc.tp3Status === "PENDING") {
     const hit = appendLifecycleEvent(doc, {
       at: new Date().toISOString(),
       kind: "TP3",

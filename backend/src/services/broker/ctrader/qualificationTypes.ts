@@ -77,6 +77,7 @@ export type ControlledDemoTradeRecord = {
   closePrice?: number | null;
   closeReason?: string | null;
   brokerDealId?: string | null;
+  clientOrderId?: string | null;
 };
 
 export type DemoAutoTradeRecord = {
@@ -116,6 +117,7 @@ export type DemoAutoTradeRecord = {
   closePrice?: number | null;
   closeReason?: string | null;
   brokerDealId?: string | null;
+  clientOrderId?: string | null;
 };
 
 export type SafetyCheckId =

@@ -95,6 +95,8 @@ export type DemoPositionLifecycle = {
   swap: number | null;
   netPnl: number | null;
   brokerDealId: string | null;
+  /** Measurement-only close diagnostics. Stops are not guaranteed. */
+  closeDiagnostics?: Record<string, unknown> | null;
   initialRisk: number | null;
   currentRisk: number | null;
   qualificationStage: string | null;

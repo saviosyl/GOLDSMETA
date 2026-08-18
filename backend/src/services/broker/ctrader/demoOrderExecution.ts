@@ -23,8 +23,8 @@ import { denyCTraderMutation } from "./mutationGuard";
 import { assertFastAutoTradeDemoOnly } from "./fastAutoTrade/demoLock";
 import { isFastAutoTradeV1Enabled } from "./fastAutoTrade/config";
 import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
-
-const SPOT_PRICE_SCALE = 100_000;
+import { relativeProtectionFromGeometry } from "./fastAutoTrade/newOrderPayload";
+import { FAST_CLIENT_ORDER_ID_MAX_LEN } from "./fastAutoTrade/clientOrderId";
 
 export type SubmitDemoMarketOrderArgs = {
   ownerUid: string;
@@ -48,20 +48,11 @@ function relativeProtection(args: {
   stopLoss?: number | null;
   takeProfit?: number | null;
 }): { relativeStopLoss?: number; relativeTakeProfit?: number } {
-  const entry = args.entry;
-  if (entry == null || !Number.isFinite(entry)) return {};
-  const out: { relativeStopLoss?: number; relativeTakeProfit?: number } = {};
-  if (args.stopLoss != null && Number.isFinite(args.stopLoss)) {
-    const dist =
-      args.side === "BUY" ? entry - args.stopLoss : args.stopLoss - entry;
-    if (dist > 0) out.relativeStopLoss = Math.round(dist * SPOT_PRICE_SCALE);
-  }
-  if (args.takeProfit != null && Number.isFinite(args.takeProfit)) {
-    const dist =
-      args.side === "BUY" ? args.takeProfit - entry : entry - args.takeProfit;
-    if (dist > 0) out.relativeTakeProfit = Math.round(dist * SPOT_PRICE_SCALE);
-  }
-  return out;
+  const out = relativeProtectionFromGeometry(args);
+  return {
+    relativeStopLoss: out.relativeStopLoss,
+    relativeTakeProfit: out.relativeTakeProfit
+  };
 }
 
 async function decryptAccessToken(ownerUid: string): Promise<{
@@ -218,7 +209,7 @@ export async function submitDemoMarketOrder(
     clientOrderId: (
       args.clientOrderId?.trim() ||
       `gm_${randomBytes(8).toString("hex")}`
-    ).slice(0, 50),
+    ).slice(0, FAST_CLIENT_ORDER_ID_MAX_LEN),
     label: (args.label ?? "GoldMeta Demo").slice(0, 100),
     comment: (args.comment ?? "GoldMeta Demo AutoTrade").slice(0, 512)
   };

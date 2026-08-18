@@ -26,6 +26,7 @@ import {
 import { getPositionLifecycle, savePositionLifecycle } from "./positionLifecycleStore";
 import { updateAutoTradeJournalOnClose } from "./autoTradeJournal";
 import { logger } from "../../logging/logger";
+import { computeCloseDiagnostics } from "./fastAutoTrade/closeDiagnostics";
 
 export type DemoCloseRepairResult = {
   examined: number;
@@ -206,6 +207,17 @@ export async function applyConfirmedDemoBrokerClose(args: {
   }
 
   if (life.status !== "CLOSED" || !life.brokerPnlConfirmed) {
+    const diagnostics = computeCloseDiagnostics({
+      side: life.side,
+      brokerStopLoss: life.currentSl ?? life.initialSl,
+      closePrice: args.deal.closePrice,
+      fillPrice: life.entry,
+      filledLots: life.lots ?? life.remainingLots,
+      grossPnl: args.deal.grossPnl,
+      commission: args.deal.commission,
+      swap: args.deal.swap,
+      netPnl: args.deal.netPnl
+    });
     const next = {
       ...life,
       brokerPositionId: life.brokerPositionId ?? args.brokerPositionId,
@@ -221,7 +233,8 @@ export async function applyConfirmedDemoBrokerClose(args: {
       brokerDealId: args.deal.dealId,
       managementState: "CLOSED" as const,
       currentRisk: 0,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      closeDiagnostics: diagnostics
     };
     await savePositionLifecycle(next);
   }

@@ -22,9 +22,7 @@ import {
 import {
   getActiveQualificationAccountId,
   getQualificationDoc,
-  recountControlled,
-  recountDemoAuto,
-  saveQualificationDoc
+  upsertQualificationOpenTrade
 } from "../qualificationStore";
 import { createDemoPositionLifecycle } from "../demoPositionLifecycle";
 import { FAST_AUTOTRADE_STRATEGY_ID } from "./types";
@@ -165,27 +163,22 @@ async function appendPromotedOpenTrade(
     brokerOrderId: claim.orderId,
     brokerPositionId: claim.positionId,
     requestedVolumeLots: snap.lots,
-    filledVolumeLots: null,
-    requestedEntry: snap.entry,
+    filledVolumeLots: snap.lots && snap.lots !== 0 ? snap.lots : null,
+    requestedEntry: snap.entry && snap.entry !== 0 ? snap.entry : null,
     fillPrice: null,
     openTimestamp: openedAt,
     status: "OPEN" as const,
     pnl: null,
-    counted: false
+    counted: false,
+    clientOrderId: claim.clientOrderId
   };
-  if (doc.state === "CONTROLLED_DEMO_QUALIFICATION") {
-    const next = recountControlled({
-      ...doc,
-      controlledTrades: [...doc.controlledTrades, trade]
-    });
-    await saveQualificationDoc(next);
-  } else {
-    const next = recountDemoAuto({
-      ...doc,
-      demoAutoTrades: [...doc.demoAutoTrades, trade]
-    });
-    await saveQualificationDoc(next);
-  }
+  await upsertQualificationOpenTrade({
+    uid: ownerUid,
+    accountId,
+    trade,
+    bucket:
+      doc.state === "CONTROLLED_DEMO_QUALIFICATION" ? "controlled" : "demoAuto"
+  });
   await createDemoPositionLifecycle({
     uid: ownerUid,
     correlationId: snap.correlationId,
