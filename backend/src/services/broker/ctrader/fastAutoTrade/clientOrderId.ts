@@ -32,7 +32,11 @@ export function isLegacyTruncatedFastClientOrderId(id: string): boolean {
 
 function shortReadablePrefix(signalId: string): string {
   const raw = String(signalId || "");
-  const dir = /\bSELL\b/i.test(raw) ? "SELL" : /\bBUY\b/i.test(raw) ? "BUY" : "NA";
+  const dir = /(?:^|_|:)SELL(?:_|:|$)/i.test(raw)
+    ? "SELL"
+    : /(?:^|_|:)BUY(?:_|:|$)/i.test(raw)
+      ? "BUY"
+      : "NA";
   let setup = "sig";
   if (/BREAKOUT/i.test(raw)) setup = "brk";
   else if (/PULLBACK/i.test(raw)) setup = "pbk";
