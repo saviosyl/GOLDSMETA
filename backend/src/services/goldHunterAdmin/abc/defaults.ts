@@ -31,6 +31,15 @@ export function defaultGhFastConfig(
     trailDistance: 0.12,
     depthTopN: 5,
     minSetupQuality: 0.55,
+    // Brain V2 B floor: mid of 0.68–0.72. Above A/C (0.55) so B must earn quality
+    // from displacement/velocity/efficiency/depth — not a large base contribution.
+    minSetupQualityB: 0.7,
+    // Mid of 0.40–0.50: reject alternating noise while allowing directional paths.
+    breakoutMinEfficiency1s: 0.45,
+    breakoutImbalanceMin: 0.15,
+    breakoutDepthImbalanceMin: 0.05,
+    // Mid of 5–15s secondary B re-arm guard (structural reset is primary).
+    breakoutBRearmFloorMs: 8_000,
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
     pullbackRetraceMax: 0.45

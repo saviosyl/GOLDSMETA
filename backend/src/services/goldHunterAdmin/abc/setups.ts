@@ -1,6 +1,9 @@
 /**
  * Three FAST specialists — interpretable setup-quality scores.
  * Phase 0B: always expose raw A/B/C eligibility separately from best-of selection.
+ *
+ * Brain V2: Setup B uses prior-only breakout references + stronger confirmation.
+ * Setup A and C specialist logic is intentionally unchanged from V1.
  */
 import type {
   GhFastConfig,
@@ -9,12 +12,34 @@ import type {
   GhFastSpecialistRawEval
 } from "./types";
 import type { GhFastFeatureSnapshot } from "./features";
+import { GOLD_HUNTER_BRAIN_VERSION } from "./versions";
+
+/** Brain V2 breakout / selection diagnostics (additive; never invents fills). */
+export type GhBreakoutDiagnostics = {
+  brainVersion: typeof GOLD_HUNTER_BRAIN_VERSION;
+  breakoutReference: number;
+  breakoutDistance: number;
+  requiredBreakoutDistance: number;
+  spread: number;
+  midVel250: number;
+  midVel500: number;
+  midVel1s: number;
+  acceleration: number;
+  efficiency1s: number;
+  signedImbalance1s: number;
+  depthImbalance: number;
+  removeRateAsk: number;
+  removeRateBid: number;
+  rejectionReasons: string[];
+};
 
 export type SetupHit = {
   setup: GhFastSetupId;
   side: GhFastSide;
   quality: number;
   reasons: string[];
+  /** Present on B hits (Brain V2); optional for A/C. */
+  diagnostics?: GhBreakoutDiagnostics;
 };
 
 export type EvaluateSetupsResult = {
@@ -63,7 +88,97 @@ type SpecialistEvalInternal = {
   candidateSide: GhFastSide | null;
 };
 
-/** A — Momentum ignition */
+/** Cost/spread-aware minimum clearance beyond the prior extreme. */
+export function requiredBreakoutDistance(
+  f: GhFastFeatureSnapshot,
+  cfg: GhFastConfig
+): number {
+  const spread = Math.max(0, f.spread);
+  const costFloor = Math.max(0, cfg.friction + cfg.safetyBuffer);
+  return Math.max(spread, costFloor);
+}
+
+function bDiagnostics(
+  f: GhFastFeatureSnapshot,
+  args: {
+    breakoutReference: number;
+    breakoutDistance: number;
+    required: number;
+    rejectionReasons: string[];
+  }
+): GhBreakoutDiagnostics {
+  return {
+    brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+    breakoutReference: args.breakoutReference,
+    breakoutDistance: args.breakoutDistance,
+    requiredBreakoutDistance: args.required,
+    spread: f.spread,
+    midVel250: f.midVel250,
+    midVel500: f.midVel500,
+    midVel1s: f.midVel1s,
+    acceleration: f.acceleration,
+    efficiency1s: f.efficiency1s,
+    signedImbalance1s: f.signedImbalance1s,
+    depthImbalance: f.depth.depthImbalance,
+    removeRateAsk: f.depth.removeRateAsk,
+    removeRateBid: f.depth.removeRateBid,
+    rejectionReasons: args.rejectionReasons
+  };
+}
+
+/** Earned B quality — no large unconditional base. */
+function scoreBreakoutQualityB(
+  f: GhFastFeatureSnapshot,
+  side: GhFastSide,
+  breakoutDistance: number,
+  required: number
+): number {
+  const disp = clamp01(breakoutDistance / Math.max(required * 3, 1e-9));
+  const velAgree =
+    side === "BUY"
+      ? clamp01(
+          (Number(f.midVel250 > 0) +
+            Number(f.midVel500 > 0) +
+            Number(f.midVel1s > 0)) /
+            3
+        )
+      : clamp01(
+          (Number(f.midVel250 < 0) +
+            Number(f.midVel500 < 0) +
+            Number(f.midVel1s < 0)) /
+            3
+        );
+  // Magnitude scale aligned with A's momentumVelMin * 3 (~0.00024).
+  const velMagNorm = clamp01(Math.abs(f.midVel1s) / 0.00024);
+  const eff = clamp01(f.efficiency1s);
+  const imb =
+    side === "BUY"
+      ? clamp01(f.signedImbalance1s)
+      : clamp01(-f.signedImbalance1s);
+  const depth =
+    side === "BUY"
+      ? clamp01(0.5 + f.depth.depthImbalance)
+      : clamp01(0.5 - f.depth.depthImbalance);
+  const remove =
+    side === "BUY"
+      ? clamp01(
+          f.depth.removeRateAsk / Math.max(1, f.depth.removeRateBid + 1)
+        )
+      : clamp01(
+          f.depth.removeRateBid / Math.max(1, f.depth.removeRateAsk + 1)
+        );
+  return clamp01(
+    0.22 * disp +
+      0.18 * velAgree +
+      0.15 * velMagNorm +
+      0.15 * eff +
+      0.12 * imb +
+      0.1 * depth +
+      0.08 * remove
+  );
+}
+
+/** A — Momentum ignition (V1 — DO NOT redesign in Brain V2). */
 export function scoreMomentumIgnition(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
@@ -181,7 +296,11 @@ function evaluateMomentumIgnition(
   };
 }
 
-/** B — Fast breakout pressure */
+/**
+ * B — Fast breakout pressure (Brain V2).
+ * Prior-only reference, cost-aware clearance, multi-horizon momentum,
+ * efficiency + supportive depth. Quality is earned (no large base score).
+ */
 export function scoreFastBreakout(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
@@ -194,89 +313,159 @@ function evaluateFastBreakout(
   cfg: GhFastConfig
 ): SpecialistEvalInternal {
   const failed: string[] = [];
-  const nearHigh = f.distHigh5s <= f.spread * 1.5;
-  const nearLow = f.distLow5s <= f.spread * 1.5;
-  const brokeHigh = f.mid >= f.high5s - 1e-9 && f.midVel250 > 0;
-  const brokeLow = f.mid <= f.low5s + 1e-9 && f.midVel250 < 0;
+  const required = requiredBreakoutDistance(f, cfg);
+  const priorHigh = f.priorHigh5s;
+  const priorLow = f.priorLow5s;
+  const buyClearance = f.mid - priorHigh;
+  const sellClearance = priorLow - f.mid;
+  const brokeHigh = buyClearance > required;
+  const brokeLow = sellClearance > required;
+
+  const buyMomentum =
+    f.midVel250 > 0 &&
+    f.midVel500 > 0 &&
+    f.midVel1s > 0 &&
+    f.acceleration > 0 &&
+    f.signedImbalance1s > cfg.breakoutImbalanceMin;
+  const sellMomentum =
+    f.midVel250 < 0 &&
+    f.midVel500 < 0 &&
+    f.midVel1s < 0 &&
+    f.acceleration < 0 &&
+    f.signedImbalance1s < -cfg.breakoutImbalanceMin;
+
+  const buyDepth =
+    f.depth.depthImbalance >= cfg.breakoutDepthImbalanceMin &&
+    f.depth.removeRateAsk >= f.depth.removeRateBid;
+  const sellDepth =
+    f.depth.depthImbalance <= -cfg.breakoutDepthImbalanceMin &&
+    f.depth.removeRateBid >= f.depth.removeRateAsk;
+
+  const effOk = f.efficiency1s >= cfg.breakoutMinEfficiency1s;
+  const rateOk = f.updateRate1s >= 3;
+
   const candidateSide: GhFastSide | null =
-    nearHigh && brokeHigh ? "BUY" : nearLow && brokeLow ? "SELL" : null;
+    brokeHigh && buyMomentum ? "BUY" : brokeLow && sellMomentum ? "SELL" : null;
 
-  if (!nearHigh && !nearLow) failed.push("not_near_5s_extreme");
-  if ((nearHigh || nearLow) && !(brokeHigh || brokeLow)) {
-    failed.push("breakout_not_confirmed");
+  if (!brokeHigh && !brokeLow) {
+    if (buyClearance > 0 && buyClearance <= required) {
+      failed.push("breakout_clearance_insufficient");
+    } else if (sellClearance > 0 && sellClearance <= required) {
+      failed.push("breakout_clearance_insufficient");
+    } else {
+      failed.push("no_prior_extreme_clearance");
+    }
   }
-  if (f.updateRate1s < 3) failed.push("update_rate_insufficient");
+  if (!rateOk) failed.push("update_rate_insufficient");
+  if ((brokeHigh || brokeLow) && !effOk) failed.push("efficiency1s_too_low");
 
-  if (
-    nearHigh &&
-    brokeHigh &&
-    f.upTouches5s >= cfg.breakoutTouchCount &&
-    f.updateRate1s >= 3 &&
-    f.depth.depthImbalance >= -0.05
-  ) {
-    const quality = clamp01(
-      0.3 +
-        0.25 * clamp01(f.upTouches5s / 5) +
-        0.25 * clamp01(f.updateRate1s / 10) +
-        0.2 * clamp01(0.5 + f.depth.depthImbalance)
-    );
-    if (quality >= cfg.minSetupQuality) {
+  if (brokeHigh) {
+    if (!(f.midVel250 > 0 && f.midVel500 > 0 && f.midVel1s > 0)) {
+      failed.push("multi_horizon_velocity_disagree");
+    }
+    if (!(f.acceleration > 0)) failed.push("acceleration_not_aligned");
+    if (!(f.signedImbalance1s > cfg.breakoutImbalanceMin)) {
+      failed.push("imbalance_too_weak");
+    }
+    if (!buyDepth) {
+      if (f.depth.depthImbalance < cfg.breakoutDepthImbalanceMin) {
+        failed.push("depth_not_supportive");
+      }
+      if (f.depth.removeRateAsk < f.depth.removeRateBid) {
+        failed.push("ask_liquidity_not_consumed");
+      }
+    }
+  }
+  if (brokeLow) {
+    if (!(f.midVel250 < 0 && f.midVel500 < 0 && f.midVel1s < 0)) {
+      failed.push("multi_horizon_velocity_disagree");
+    }
+    if (!(f.acceleration < 0)) failed.push("acceleration_not_aligned");
+    if (!(f.signedImbalance1s < -cfg.breakoutImbalanceMin)) {
+      failed.push("imbalance_too_weak");
+    }
+    if (!sellDepth) {
+      if (f.depth.depthImbalance > -cfg.breakoutDepthImbalanceMin) {
+        failed.push("depth_not_supportive");
+      }
+      if (f.depth.removeRateBid < f.depth.removeRateAsk) {
+        failed.push("bid_liquidity_not_consumed");
+      }
+    }
+  }
+
+  if (brokeHigh && buyMomentum && buyDepth && effOk && rateOk) {
+    const quality = scoreBreakoutQualityB(f, "BUY", buyClearance, required);
+    const diag = bDiagnostics(f, {
+      breakoutReference: priorHigh,
+      breakoutDistance: buyClearance,
+      required,
+      rejectionReasons: []
+    });
+    if (quality >= cfg.minSetupQualityB) {
       return {
         hit: {
           setup: "B_FAST_BREAKOUT",
           side: "BUY",
           quality,
-          reasons: ["breakout_high", "repeated_up_attacks"]
+          reasons: [
+            "breakout_prior_high",
+            "multi_horizon_momentum",
+            "depth_supportive",
+            "efficiency_ok"
+          ],
+          diagnostics: diag
         },
         failed: [],
         softQuality: quality,
         candidateSide: "BUY"
       };
     }
-    failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
+    failed.push("quality_below_min_b");
+    return {
+      hit: null,
+      failed: [...new Set(failed)],
+      softQuality: quality,
+      candidateSide: "BUY"
+    };
   }
-  if (
-    nearLow &&
-    brokeLow &&
-    f.downTouches5s >= cfg.breakoutTouchCount &&
-    f.updateRate1s >= 3 &&
-    f.depth.depthImbalance <= 0.05
-  ) {
-    const quality = clamp01(
-      0.3 +
-        0.25 * clamp01(f.downTouches5s / 5) +
-        0.25 * clamp01(f.updateRate1s / 10) +
-        0.2 * clamp01(0.5 - f.depth.depthImbalance)
-    );
-    if (quality >= cfg.minSetupQuality) {
+
+  if (brokeLow && sellMomentum && sellDepth && effOk && rateOk) {
+    const quality = scoreBreakoutQualityB(f, "SELL", sellClearance, required);
+    const diag = bDiagnostics(f, {
+      breakoutReference: priorLow,
+      breakoutDistance: sellClearance,
+      required,
+      rejectionReasons: []
+    });
+    if (quality >= cfg.minSetupQualityB) {
       return {
         hit: {
           setup: "B_FAST_BREAKOUT",
           side: "SELL",
           quality,
-          reasons: ["breakout_low", "repeated_down_attacks"]
+          reasons: [
+            "breakout_prior_low",
+            "multi_horizon_momentum",
+            "depth_supportive",
+            "efficiency_ok"
+          ],
+          diagnostics: diag
         },
         failed: [],
         softQuality: quality,
         candidateSide: "SELL"
       };
     }
-    failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
+    failed.push("quality_below_min_b");
+    return {
+      hit: null,
+      failed: [...new Set(failed)],
+      softQuality: quality,
+      candidateSide: "SELL"
+    };
   }
-  if (brokeHigh && f.upTouches5s < cfg.breakoutTouchCount) {
-    failed.push("up_touches_insufficient");
-  }
-  if (brokeLow && f.downTouches5s < cfg.breakoutTouchCount) {
-    failed.push("down_touches_insufficient");
-  }
-  if (brokeHigh && f.depth.depthImbalance < -0.05) {
-    failed.push("depth_imbalance_against_breakout_buy");
-  }
-  if (brokeLow && f.depth.depthImbalance > 0.05) {
-    failed.push("depth_imbalance_against_breakout_sell");
-  }
+
   return {
     hit: null,
     failed: failed.length ? [...new Set(failed)] : ["no_breakout_pressure"],
@@ -285,7 +474,7 @@ function evaluateFastBreakout(
   };
 }
 
-/** C — Pullback re-acceleration */
+/** C — Pullback re-acceleration (V1 — DO NOT redesign in Brain V2). */
 export function scorePullbackReaccel(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig

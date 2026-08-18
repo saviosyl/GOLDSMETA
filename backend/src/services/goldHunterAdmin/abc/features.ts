@@ -44,10 +44,20 @@ export type GhFastFeatureSnapshot = {
   low15s: number;
   high30s: number;
   low30s: number;
+  /**
+   * Past-only extremes EXCLUDING the current observation.
+   * Breakout references must use these — never high5s/low5s which include now.
+   */
+  priorHigh5s: number;
+  priorLow5s: number;
+  priorHigh10s: number;
+  priorLow10s: number;
   distHigh1s: number;
   distLow1s: number;
   distHigh5s: number;
   distLow5s: number;
+  distPriorHigh5s: number;
+  distPriorLow5s: number;
   upTouches5s: number;
   downTouches5s: number;
   depth: DepthBookStats;
@@ -140,6 +150,25 @@ export class FastFeatureEngine {
     return { hi, lo };
   }
 
+  /**
+   * Rolling high/low over [now-windowMs, now) — STRICTLY excludes the current
+   * (latest) sample so a tick cannot self-confirm its own breakout.
+   */
+  private priorHl(windowMs: number, now: number): { hi: number; lo: number } {
+    let hi = Number.NEGATIVE_INFINITY;
+    let lo = Number.POSITIVE_INFINITY;
+    const from = now - windowMs;
+    const lastIdx = this.samples.length - 1;
+    for (let i = lastIdx - 1; i >= 0; i--) {
+      const s = this.samples[i]!;
+      if (s.t < from) break;
+      if (s.t > now) continue;
+      if (s.mid > hi) hi = s.mid;
+      if (s.mid < lo) lo = s.mid;
+    }
+    return { hi, lo };
+  }
+
   private pathEfficiency(windowMs: number, now: number): number {
     const from = now - windowMs;
     const pts: number[] = [];
@@ -187,6 +216,12 @@ export class FastFeatureEngine {
     const h10 = this.hl(10_000, now);
     const h15 = this.hl(15_000, now);
     const h30 = this.hl(30_000, now);
+    const p5 = this.priorHl(5000, now);
+    const p10 = this.priorHl(10_000, now);
+    const priorHigh5s = Number.isFinite(p5.hi) ? p5.hi : cur.mid;
+    const priorLow5s = Number.isFinite(p5.lo) ? p5.lo : cur.mid;
+    const priorHigh10s = Number.isFinite(p10.hi) ? p10.hi : cur.mid;
+    const priorLow10s = Number.isFinite(p10.lo) ? p10.lo : cur.mid;
 
     return {
       bid: cur.bid,
@@ -221,10 +256,16 @@ export class FastFeatureEngine {
       low15s: h15.lo,
       high30s: h30.hi,
       low30s: h30.lo,
+      priorHigh5s,
+      priorLow5s,
+      priorHigh10s,
+      priorLow10s,
       distHigh1s: h1.hi - cur.mid,
       distLow1s: cur.mid - h1.lo,
       distHigh5s: h5.hi - cur.mid,
       distLow5s: cur.mid - h5.lo,
+      distPriorHigh5s: priorHigh5s - cur.mid,
+      distPriorLow5s: cur.mid - priorLow5s,
       upTouches5s: this.upTouches,
       downTouches5s: this.downTouches,
       depth
