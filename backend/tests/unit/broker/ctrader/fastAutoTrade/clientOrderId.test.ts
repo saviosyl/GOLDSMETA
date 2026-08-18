@@ -36,6 +36,15 @@ describe("FAST clientOrderId", () => {
     expect(seen.size).toBe(100_000);
   });
 
+  it("encodes setup and direction from underscore-delimited FAST signalIds", () => {
+    const id = generateFastClientOrderId(
+      "fast_BUY_BREAKOUT_BREAKOUT:BULLISH:4393_2_1:4396_37",
+      "owner"
+    );
+    expect(id.startsWith("fa_brk_BUY_")).toBe(true);
+    expect(id).toMatch(/^fa_brk_BUY_[a-f0-9]{16}$/);
+  });
+
   it("marks the production truncated pattern as legacy", () => {
     expect(
       isLegacyTruncatedFastClientOrderId("fa_fast_BUY_PULLBACK_CONTINUATION_PULLBACK_")
