@@ -85,16 +85,20 @@ export function classifyGoldHunterDemoLifecycle(args: {
   const hasSettlementPending = openTrades.some(
     (t) => t.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
   );
-  const hasBrokerManagedLocal = openTrades.some(
+  const hasEntryPendingReconcile = openTrades.some(
+    (t) => t.status === "PENDING_RECONCILIATION"
+  );
+  const hasActiveManagedLocal = openTrades.some(
     (t) =>
       t.status === "FILLED" ||
       t.status === "PROTECTED" ||
       t.status === "ACCEPTED_PENDING_FILL" ||
-      t.status === "PENDING_RECONCILIATION" ||
       t.status === "SENT" ||
       t.status === "ORDER_CREATED" ||
       t.status === "OPEN"
   );
+  const hasBrokerManagedLocal =
+    hasActiveManagedLocal || hasEntryPendingReconcile;
 
   if (hasCloseRequested) {
     return {
@@ -109,6 +113,20 @@ export function classifyGoldHunterDemoLifecycle(args: {
     return {
       state: "CLOSE SETTLEMENT PENDING",
       hint: "Broker exposure is closed. Waiting for the broker closing deal before recording P/L — not managing an active position."
+    };
+  }
+
+  if (hasActiveManagedLocal && brokerConfirmedOpen) {
+    return {
+      state: "IN DEMO TRADE",
+      hint: "Gold Hunter has an active cTrader DEMO position and is managing it."
+    };
+  }
+
+  if (hasEntryPendingReconcile && !brokerConfirmedOpen) {
+    return {
+      state: "RECONCILING DEMO ENTRY",
+      hint: "Order transmission outcome is being verified with cTrader. No new order will be sent until broker state is confirmed."
     };
   }
 

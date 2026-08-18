@@ -219,6 +219,42 @@ export type BrokerClosedDeal = {
   swap: number | null;
   netPnl: number | null;
   closedVolumeLots: number | null;
+  /** From closePositionDetail.entryPrice when present. */
+  entryPrice?: number | null;
+};
+
+/**
+ * Historical order row from ProtoOAOrderListRes (Demo read-only).
+ * Correlation key is exact clientOrderId — never "latest" / side-only.
+ */
+export type BrokerHistoricalOrder = {
+  orderId: string;
+  positionId: string | null;
+  clientOrderId: string | null;
+  orderStatus: string | null;
+  orderStatusCode: number | null;
+  tradeSide: "BUY" | "SELL" | null;
+  symbolId: string | null;
+  label: string | null;
+  comment: string | null;
+  executionPrice: number | null;
+  executedVolumeLots: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  closingOrder: boolean;
+};
+
+/** Any deal row (opening or closing) for correlation by orderId/positionId. */
+export type BrokerDealEvidence = {
+  dealId: string;
+  orderId: string | null;
+  positionId: string | null;
+  executionPrice: number | null;
+  executedAt: string | null;
+  filledVolumeLots: number | null;
+  tradeSide: "BUY" | "SELL" | null;
+  isClosing: boolean;
+  close: BrokerClosedDeal | null;
 };
 
 /** Display-only OHLC bar from ProtoOAGetTrendbarsRes. */
@@ -363,6 +399,27 @@ export interface CTraderOpenApiClient {
     toTimestampMs: number;
   }): Promise<BrokerClosedDeal[]>;
   /**
+   * Demo host only — full deal evidence (opening + closing) in a time window.
+   * Used for entry PENDING_RECONCILIATION correlation by orderId/positionId.
+   */
+  fetchDemoDealEvidenceList?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    fromTimestampMs: number;
+    toTimestampMs: number;
+  }): Promise<BrokerDealEvidence[]>;
+  /** Demo host only — ProtoOAOrderListReq historical orders (max 7 days). */
+  fetchDemoOrderList?(args: {
+    accessToken: string;
+    clientId: string;
+    clientSecret: string;
+    ctidTraderAccountId: string;
+    fromTimestampMs: number;
+    toTimestampMs: number;
+  }): Promise<BrokerHistoricalOrder[]>;
+  /**
    * Demo host — derive freeMargin/equity from Trader + Reconcile + UnrealizedPnL.
    * Never invents freeMargin when open-position state is unknown.
    */
@@ -431,10 +488,142 @@ export function parseBrokerClosedDeals(raw: unknown): BrokerClosedDeal[] {
       swap,
       netPnl,
       closedVolumeLots:
-        closedVol != null ? Number((closedVol / 100).toFixed(2)) : null
+        closedVol != null ? Number((closedVol / 100).toFixed(2)) : null,
+      entryPrice: asNumber(close.entryPrice)
     });
   }
   return out;
+}
+
+function normalizeOrderStatus(value: unknown): {
+  code: number | null;
+  name: string | null;
+} {
+  if (value == null) return { code: null, name: null };
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const code = Math.trunc(value);
+    const names: Record<number, string> = {
+      1: "ORDER_STATUS_ACCEPTED",
+      2: "ORDER_STATUS_FILLED",
+      3: "ORDER_STATUS_REJECTED",
+      4: "ORDER_STATUS_EXPIRED",
+      5: "ORDER_STATUS_CANCELLED"
+    };
+    return { code, name: names[code] ?? `ORDER_STATUS_${code}` };
+  }
+  const raw = String(value).trim().toUpperCase();
+  if (!raw) return { code: null, name: null };
+  if (raw === "1" || raw.includes("ACCEPTED")) {
+    return { code: 1, name: "ORDER_STATUS_ACCEPTED" };
+  }
+  if (raw === "2" || raw.includes("FILLED")) {
+    return { code: 2, name: "ORDER_STATUS_FILLED" };
+  }
+  if (raw === "3" || raw.includes("REJECTED")) {
+    return { code: 3, name: "ORDER_STATUS_REJECTED" };
+  }
+  if (raw === "4" || raw.includes("EXPIRED")) {
+    return { code: 4, name: "ORDER_STATUS_EXPIRED" };
+  }
+  if (raw === "5" || raw.includes("CANCELLED") || raw.includes("CANCELED")) {
+    return { code: 5, name: "ORDER_STATUS_CANCELLED" };
+  }
+  return { code: null, name: raw };
+}
+
+export function parseBrokerHistoricalOrders(raw: unknown): BrokerHistoricalOrder[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: BrokerHistoricalOrder[] = [];
+  for (const item of list) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const trade = (row.tradeData ?? {}) as Record<string, unknown>;
+    const orderId =
+      row.orderId != null
+        ? String(row.orderId)
+        : trade.orderId != null
+          ? String(trade.orderId)
+          : "";
+    if (!orderId) continue;
+    const status = normalizeOrderStatus(row.orderStatus);
+    const sideNum = asNumber(trade.tradeSide ?? row.tradeSide);
+    const executedVol = asNumber(row.executedVolume ?? trade.volume);
+    const createdTs = asNumber(trade.openTimestamp ?? row.openTimestamp);
+    const updatedTs = asNumber(row.utcLastUpdateTimestamp);
+    out.push({
+      orderId,
+      positionId:
+        row.positionId != null
+          ? String(row.positionId)
+          : trade.positionId != null
+            ? String(trade.positionId)
+            : null,
+      clientOrderId:
+        row.clientOrderId != null
+          ? String(row.clientOrderId)
+          : trade.clientOrderId != null
+            ? String(trade.clientOrderId)
+            : null,
+      orderStatus: status.name,
+      orderStatusCode: status.code,
+      tradeSide: sideNum === 2 ? "SELL" : sideNum === 1 ? "BUY" : null,
+      symbolId:
+        trade.symbolId != null
+          ? String(trade.symbolId)
+          : row.symbolId != null
+            ? String(row.symbolId)
+            : null,
+      label: typeof trade.label === "string" ? trade.label : null,
+      comment: typeof trade.comment === "string" ? trade.comment : null,
+      executionPrice: asNumber(row.executionPrice),
+      executedVolumeLots:
+        executedVol != null ? Number((executedVol / 100).toFixed(8)) : null,
+      createdAt: createdTs != null ? new Date(createdTs).toISOString() : null,
+      updatedAt: updatedTs != null ? new Date(updatedTs).toISOString() : null,
+      closingOrder: row.closingOrder === true
+    });
+  }
+  return out;
+}
+
+export function parseBrokerDealEvidence(raw: unknown): BrokerDealEvidence[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: BrokerDealEvidence[] = [];
+  for (const item of list) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const dealId = row.dealId != null ? String(row.dealId) : "";
+    if (!dealId) continue;
+    const closeRaw = (row.closePositionDetail ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    const closing = parseBrokerClosedDeals([row]);
+    const sideNum = asNumber(row.tradeSide);
+    const filledVol = asNumber(row.filledVolume ?? row.volume);
+    const execTs = asNumber(row.executionTimestamp ?? row.utcLastUpdateTimestamp);
+    out.push({
+      dealId,
+      orderId: row.orderId != null ? String(row.orderId) : null,
+      positionId: row.positionId != null ? String(row.positionId) : null,
+      executionPrice: asNumber(row.executionPrice),
+      executedAt: execTs != null ? new Date(execTs).toISOString() : null,
+      filledVolumeLots:
+        filledVol != null ? Number((filledVol / 100).toFixed(8)) : null,
+      tradeSide: sideNum === 2 ? "SELL" : sideNum === 1 ? "BUY" : null,
+      isClosing: closeRaw != null,
+      close: closing[0] ?? null
+    });
+  }
+  return out;
+}
+
+/** Exact clientOrderId match — never fall back to newest / same-side. */
+export function findHistoricalOrderByClientOrderId(
+  orders: readonly BrokerHistoricalOrder[],
+  clientOrderId: string
+): BrokerHistoricalOrder | null {
+  const want = clientOrderId.trim();
+  if (!want) return null;
+  return orders.find((o) => o.clientOrderId === want) ?? null;
 }
 
 /** Aggregate closing deals for one position into a single confirmed result. */
@@ -1748,6 +1937,59 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
       });
     },
 
+    async fetchDemoDealEvidenceList(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        const nowMs = Date.now();
+        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
+        const span = Math.min(
+          Math.max(toTimestamp - args.fromTimestampMs, 1),
+          7 * 86_400_000
+        );
+        const fromTimestamp = toTimestamp - span;
+        const res = (await connection.sendCommand("ProtoOADealListReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          fromTimestamp,
+          toTimestamp
+        })) as Record<string, unknown>;
+        return parseBrokerDealEvidence(res.deal ?? res.deals);
+      });
+    },
+
+    async fetchDemoOrderList(args) {
+      return withDemoConnection(async (connection) => {
+        await connection.sendCommand("ProtoOAApplicationAuthReq", {
+          clientId: args.clientId,
+          clientSecret: args.clientSecret
+        });
+        await connection.sendCommand("ProtoOAAccountAuthReq", {
+          accessToken: args.accessToken,
+          ctidTraderAccountId: Number(args.ctidTraderAccountId)
+        });
+        // Spotware: ProtoOAOrderListReq window <= 7 days; toTimestamp must not be future.
+        const nowMs = Date.now();
+        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
+        const span = Math.min(
+          Math.max(toTimestamp - args.fromTimestampMs, 1),
+          7 * 86_400_000
+        );
+        const fromTimestamp = toTimestamp - span;
+        const res = (await connection.sendCommand("ProtoOAOrderListReq", {
+          ctidTraderAccountId: Number(args.ctidTraderAccountId),
+          fromTimestamp,
+          toTimestamp
+        })) as Record<string, unknown>;
+        return parseBrokerHistoricalOrders(res.order ?? res.orders);
+      });
+    },
+
     async fetchAuthoritativeDemoMarginSnapshot(args) {
       return withDemoConnection((connection) =>
         fetchAuthoritativeDemoMarginSnapshotImpl(connection, args)
@@ -1972,6 +2214,25 @@ export function createMockOpenApiClient(opts?: {
         ...args,
         positionId: "mock-pos-1"
       });
+    },
+
+    async fetchDemoDealEvidenceList(args) {
+      const closed = await this.fetchDemoDealList!(args);
+      return closed.map((d) => ({
+        dealId: d.dealId,
+        orderId: d.orderId,
+        positionId: d.positionId,
+        executionPrice: d.closePrice,
+        executedAt: d.closedAt,
+        filledVolumeLots: d.closedVolumeLots,
+        tradeSide: null,
+        isClosing: true,
+        close: d
+      }));
+    },
+
+    async fetchDemoOrderList(_args) {
+      return [] as BrokerHistoricalOrder[];
     },
 
     async fetchAuthoritativeDemoMarginSnapshot() {

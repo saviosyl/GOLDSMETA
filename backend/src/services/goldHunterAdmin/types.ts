@@ -134,6 +134,20 @@ export type GoldHunterDemoTrade = {
    * Historical corrupt rows may be tagged without rewriting economics.
    */
   dataQuality?: "ENTRY_INVALID" | "MFE_MAE_CORRUPT" | null;
+  /**
+   * Forensic counters for ENTRY PENDING_RECONCILIATION watchdog.
+   * Never used as sole proof of broker outcome — only to gate terminal not-found.
+   */
+  entryReconcileEvidence?: {
+    reconciliationAttempts: number;
+    firstReconcileAt: string;
+    lastReconcileAt: string;
+    openPositionChecks: number;
+    orderHistoryChecks: number;
+    dealHistoryChecks: number;
+    lastBrokerReadOk: boolean;
+    terminalReason?: string | null;
+  } | null;
 };
 
 export type GoldHunterOrderGateResult = {
