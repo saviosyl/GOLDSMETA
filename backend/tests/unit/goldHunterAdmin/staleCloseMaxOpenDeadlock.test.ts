@@ -425,4 +425,45 @@ describe("Stale CLOSE_REQUESTED / max-open deadlock", () => {
       evaluateGoldHunterOrderGates(gateInput(open.length)).blockers
     ).not.toContain("WAIT — MAX OPEN TRADES");
   });
+
+  it("PENDING_RECONCILIATION ENTRY_INVALID with broker position absent settles via disappeared path", async () => {
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      closeRequestedTrade({
+        goldHunterTradeId: "GH-D-entry-invalid",
+        status: "PENDING_RECONCILIATION",
+        result: null,
+        entry: null,
+        exitReason: null,
+        errorCode: "ENTRY_PRICE_INVALID",
+        dataQuality: "ENTRY_INVALID",
+        closeRequestTs: null,
+        brokerPositionId: "54373411"
+      })
+    );
+
+    setGoldHunterReconcileHooksForTests({
+      listPositions: async () => [],
+      settleClose: async ({ trade }) => {
+        const settled = applyBrokerSettledClose({
+          trade,
+          deal: dealFor("54373411", -5.5)
+        });
+        await upsertGoldHunterDemoTrade(OWNER, settled);
+        return { settled: true, trade: settled };
+      }
+    });
+
+    const pass = await runGoldHunterReconcilePass({
+      ownerUid: OWNER,
+      force: true
+    });
+    expect(pass.disappearedSettled).toBe(1);
+    const t = (await listGoldHunterDemoTrades(OWNER, { limit: 5 })).find(
+      (r) => r.goldHunterTradeId === "GH-D-entry-invalid"
+    )!;
+    expect(t.status).toBe("CLOSED");
+    expect(t.netPnlEur).toBe(-5.5);
+    expect(countsTowardGoldHunterMaxOpen(t)).toBe(false);
+  });
 });

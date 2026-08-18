@@ -107,6 +107,7 @@ function isLocallyOpenGhTrade(t: GoldHunterDemoTrade): boolean {
   return (
     t.status === "FILLED" ||
     t.status === "PROTECTED" ||
+    t.status === "PENDING_RECONCILIATION" ||
     (t.result === "OPEN" &&
       t.status !== "BROKER_REJECTED" &&
       t.status !== "BROKER_SUBMIT_ERROR")
