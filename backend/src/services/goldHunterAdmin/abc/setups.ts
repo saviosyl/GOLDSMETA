@@ -131,7 +131,8 @@ function scoreBreakoutQualityB(
   f: GhFastFeatureSnapshot,
   side: GhFastSide,
   breakoutDistance: number,
-  required: number
+  required: number,
+  cfg: GhFastConfig
 ): number {
   const disp = clamp01(breakoutDistance / Math.max(required * 3, 1e-9));
   const velAgree =
@@ -148,8 +149,9 @@ function scoreBreakoutQualityB(
             Number(f.midVel1s < 0)) /
             3
         );
-  // Magnitude scale aligned with A's momentumVelMin * 3 (~0.00024).
-  const velMagNorm = clamp01(Math.abs(f.midVel1s) / 0.00024);
+  // Same scale as Setup A: momentumVelMin * 3 (default 0.00024). Guard denom.
+  const velMagDenom = Math.max(cfg.momentumVelMin * 3, 1e-12);
+  const velMagNorm = clamp01(Math.abs(f.midVel1s) / velMagDenom);
   const eff = clamp01(f.efficiency1s);
   const imb =
     side === "BUY"
@@ -395,7 +397,7 @@ function evaluateFastBreakout(
   }
 
   if (brokeHigh && buyMomentum && buyDepth && effOk && rateOk) {
-    const quality = scoreBreakoutQualityB(f, "BUY", buyClearance, required);
+    const quality = scoreBreakoutQualityB(f, "BUY", buyClearance, required, cfg);
     const diag = bDiagnostics(f, {
       breakoutReference: priorHigh,
       breakoutDistance: buyClearance,
@@ -431,7 +433,13 @@ function evaluateFastBreakout(
   }
 
   if (brokeLow && sellMomentum && sellDepth && effOk && rateOk) {
-    const quality = scoreBreakoutQualityB(f, "SELL", sellClearance, required);
+    const quality = scoreBreakoutQualityB(
+      f,
+      "SELL",
+      sellClearance,
+      required,
+      cfg
+    );
     const diag = bDiagnostics(f, {
       breakoutReference: priorLow,
       breakoutDistance: sellClearance,

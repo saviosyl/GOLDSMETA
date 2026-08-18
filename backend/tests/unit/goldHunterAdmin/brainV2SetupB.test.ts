@@ -596,6 +596,37 @@ describe("Gold Hunter Brain V2 — A/C regression control group", () => {
     expect(cfg.minSetupQuality).toBe(0.55);
     expect(cfg.minSetupQualityB).toBe(0.7);
   });
+
+  it("B velocity magnitude normalization follows cfg.momentumVelMin (not a magic constant)", () => {
+    // Default: momentumVelMin * 3 === 0.00024 — mathematically equivalent to prior hard-code.
+    expect(cfg.momentumVelMin * 3).toBeCloseTo(0.00024, 12);
+
+    const f = strongBBuy();
+    // Fix midVel1s at the default full-scale value so velMagNorm is 1.0 under default cfg.
+    f.midVel1s = cfg.momentumVelMin * 3;
+
+    const qDefault = scoreFastBreakout(f, cfg);
+    expect(qDefault).not.toBeNull();
+
+    // Doubling momentumVelMin doubles the denom → velMagNorm halves → quality must drop.
+    // Thresholds otherwise identical so only the magnitude term moves.
+    const cfgWider = defaultGhFastConfig({
+      momentumVelMin: cfg.momentumVelMin * 2
+    });
+    expect(cfgWider.momentumVelMin * 3).toBeCloseTo(0.00048, 12);
+    const qWider = scoreFastBreakout(f, cfgWider);
+    expect(qWider).not.toBeNull();
+    expect(qWider!.quality).toBeLessThan(qDefault!.quality);
+
+    // Halving momentumVelMin cannot raise velMagNorm above 1 (already saturated),
+    // so quality stays equal under default full-scale midVel1s.
+    const cfgTighter = defaultGhFastConfig({
+      momentumVelMin: cfg.momentumVelMin / 2
+    });
+    const qTighter = scoreFastBreakout(f, cfgTighter);
+    expect(qTighter).not.toBeNull();
+    expect(qTighter!.quality).toBeCloseTo(qDefault!.quality, 10);
+  });
 });
 
 describe("Gold Hunter Brain V2 — safety invariants", () => {
