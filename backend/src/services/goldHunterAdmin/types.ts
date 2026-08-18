@@ -136,17 +136,24 @@ export type GoldHunterDemoTrade = {
   dataQuality?: "ENTRY_INVALID" | "MFE_MAE_CORRUPT" | null;
   /**
    * Forensic counters for ENTRY PENDING_RECONCILIATION watchdog.
-   * Never used as sole proof of broker outcome — only to gate terminal not-found.
+   * Terminal never-found uses successfulEmptyProofCycles only.
    */
   entryReconcileEvidence?: {
     reconciliationAttempts: number;
-    firstReconcileAt: string;
     lastReconcileAt: string;
-    openPositionChecks: number;
-    orderHistoryChecks: number;
-    dealHistoryChecks: number;
     lastBrokerReadOk: boolean;
+    /** Complete empty-proof cycles in the SAME attempt (open+order+deal). */
+    successfulEmptyProofCycles: number;
+    firstSuccessfulEmptyProofAt: string | null;
+    lastSuccessfulEmptyProofAt: string | null;
+    /** Last history walk was exhaustive (hasMore fully resolved). */
+    lastHistoryComplete?: boolean;
     terminalReason?: string | null;
+    /** Legacy diagnostic counters (not used for terminal gating). */
+    openPositionChecks?: number;
+    orderHistoryChecks?: number;
+    dealHistoryChecks?: number;
+    firstReconcileAt?: string;
   } | null;
 };
 

@@ -393,6 +393,8 @@ export async function submitFastMarketOrder(args: {
 
   let requestSent = false;
   let newOrderReqCount = 0;
+  /** True once sendNewOrder is invoked (even if outer wait times out). */
+  let sendInvoked = false;
   let sendResponse: Record<string, unknown> = {};
   const sendStartedAt = Date.now();
   const uncertaintyMs =
@@ -403,6 +405,11 @@ export async function submitFastMarketOrder(args: {
     if (known === null || known.outcome === "BROKER_ACCEPTED") return null;
     const ids = extractIds(latest);
     const fill = extractFill(latest);
+    // Broker-proven execution after an uncertain send → transmission proven.
+    const proven =
+      known.outcome === "BROKER_FILLED" ||
+      known.outcome === "BROKER_REJECTED" ||
+      known.accepted;
     return {
       accepted: known.accepted,
       outcome: known.outcome,
@@ -416,8 +423,9 @@ export async function submitFastMarketOrder(args: {
       takeProfit: fill.takeProfit,
       filledVolumeLots: fill.filledVolumeLots,
       ctidTraderAccountId: args.request.ctidTraderAccountId,
-      requestSent,
-      newOrderReqCount,
+      requestSent: proven && sendInvoked ? true : requestSent,
+      newOrderReqCount:
+        proven && sendInvoked ? Math.max(newOrderReqCount, 1) : newOrderReqCount,
       raw: latest
     };
   };
@@ -434,6 +442,7 @@ export async function submitFastMarketOrder(args: {
         const snapshot = await args.reconcile.reconcile();
         const match = matchReconcileByClientOrderId({ clientOrderId, snapshot });
         if (match.matched && match.positionId) {
+          // Exact clientOrderId match proves the NewOrder reached the broker.
           return {
             accepted: true,
             outcome: "BROKER_TIMEOUT_RECONCILED_FILLED",
@@ -447,8 +456,10 @@ export async function submitFastMarketOrder(args: {
             takeProfit: null,
             filledVolumeLots: null,
             ctidTraderAccountId: args.request.ctidTraderAccountId,
-            requestSent,
-            newOrderReqCount,
+            requestSent: sendInvoked ? true : requestSent,
+            newOrderReqCount: sendInvoked
+              ? Math.max(newOrderReqCount, 1)
+              : newOrderReqCount,
             raw: { reconcile: match, afterSendTimeout: true }
           };
         }
@@ -461,6 +472,7 @@ export async function submitFastMarketOrder(args: {
   };
 
   try {
+    sendInvoked = true;
     const sent = await withBoundedOp(
       "NEWORDER_SEND",
       args.sendTimeoutMs ?? DEFAULT_SEND_WAIT_MS,
@@ -502,10 +514,11 @@ export async function submitFastMarketOrder(args: {
         takeProfit: null,
         filledVolumeLots: null,
         ctidTraderAccountId: args.request.ctidTraderAccountId,
+        // Still unknown — do not invent requestSent=true.
         requestSent: false,
         newOrderReqCount: 0,
         payloadShape: built.shape,
-        raw: { error: err.message, uncertainSend: true }
+        raw: { error: err.message, uncertainSend: true, sendInvoked }
       };
     }
     unsubscribe();

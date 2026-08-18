@@ -257,6 +257,49 @@ export type BrokerDealEvidence = {
   close: BrokerClosedDeal | null;
 };
 
+/** Single ProtoOAOrderList / DealList response page. */
+export type BrokerHistoryPage<T> = {
+  items: T[];
+  /** Spotware hasMore — true means this page is NOT exhaustive for the window. */
+  hasMore: boolean;
+  fromTimestampMs: number;
+  toTimestampMs: number;
+};
+
+/**
+ * Clamp a history window without sliding away from an orderTs-anchored `from`.
+ * Previous to-anchored clamp could drop the investigated order outside the window.
+ */
+export function clampOrderTsAnchoredHistoryWindow(args: {
+  fromTimestampMs: number;
+  toTimestampMs: number;
+  nowMs?: number;
+  maxSpanMs?: number;
+}): { fromTimestampMs: number; toTimestampMs: number } {
+  const nowMs = args.nowMs ?? Date.now();
+  const maxSpanMs = args.maxSpanMs ?? 7 * 86_400_000;
+  let to = Math.min(args.toTimestampMs, nowMs);
+  let from = Math.max(0, args.fromTimestampMs);
+  if (from > to) from = to;
+  if (to - from > maxSpanMs) {
+    // Keep from (order-anchored); shrink to.
+    to = from + maxSpanMs;
+    if (to > nowMs) {
+      to = nowMs;
+      from = Math.max(0, to - maxSpanMs);
+    }
+  }
+  return { fromTimestampMs: from, toTimestampMs: to };
+}
+
+export function parseHistoryHasMore(raw: unknown): boolean {
+  if (raw === true || raw === 1 || raw === "true" || raw === "1") return true;
+  if (raw === false || raw === 0 || raw === "false" || raw === "0") return false;
+  // Missing hasMore → treat as incomplete (fail closed).
+  if (raw == null) return true;
+  return Boolean(raw);
+}
+
 /** Display-only OHLC bar from ProtoOAGetTrendbarsRes. */
 export type TrendbarCandle = {
   /** Unix seconds (bar open). */
@@ -401,6 +444,7 @@ export interface CTraderOpenApiClient {
   /**
    * Demo host only — full deal evidence (opening + closing) in a time window.
    * Used for entry PENDING_RECONCILIATION correlation by orderId/positionId.
+   * Returns hasMore so callers can prove exhaustiveness before terminal not-found.
    */
   fetchDemoDealEvidenceList?(args: {
     accessToken: string;
@@ -409,7 +453,7 @@ export interface CTraderOpenApiClient {
     ctidTraderAccountId: string;
     fromTimestampMs: number;
     toTimestampMs: number;
-  }): Promise<BrokerDealEvidence[]>;
+  }): Promise<BrokerHistoryPage<BrokerDealEvidence>>;
   /** Demo host only — ProtoOAOrderListReq historical orders (max 7 days). */
   fetchDemoOrderList?(args: {
     accessToken: string;
@@ -418,7 +462,7 @@ export interface CTraderOpenApiClient {
     ctidTraderAccountId: string;
     fromTimestampMs: number;
     toTimestampMs: number;
-  }): Promise<BrokerHistoricalOrder[]>;
+  }): Promise<BrokerHistoryPage<BrokerHistoricalOrder>>;
   /**
    * Demo host — derive freeMargin/equity from Trader + Reconcile + UnrealizedPnL.
    * Never invents freeMargin when open-position state is unknown.
@@ -1947,19 +1991,21 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
-        const nowMs = Date.now();
-        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
-        const span = Math.min(
-          Math.max(toTimestamp - args.fromTimestampMs, 1),
-          7 * 86_400_000
-        );
-        const fromTimestamp = toTimestamp - span;
+        const clamped = clampOrderTsAnchoredHistoryWindow({
+          fromTimestampMs: args.fromTimestampMs,
+          toTimestampMs: args.toTimestampMs
+        });
         const res = (await connection.sendCommand("ProtoOADealListReq", {
           ctidTraderAccountId: Number(args.ctidTraderAccountId),
-          fromTimestamp,
-          toTimestamp
+          fromTimestamp: clamped.fromTimestampMs,
+          toTimestamp: clamped.toTimestampMs
         })) as Record<string, unknown>;
-        return parseBrokerDealEvidence(res.deal ?? res.deals);
+        return {
+          items: parseBrokerDealEvidence(res.deal ?? res.deals),
+          hasMore: parseHistoryHasMore(res.hasMore),
+          fromTimestampMs: clamped.fromTimestampMs,
+          toTimestampMs: clamped.toTimestampMs
+        };
       });
     },
 
@@ -1973,20 +2019,21 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
-        // Spotware: ProtoOAOrderListReq window <= 7 days; toTimestamp must not be future.
-        const nowMs = Date.now();
-        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
-        const span = Math.min(
-          Math.max(toTimestamp - args.fromTimestampMs, 1),
-          7 * 86_400_000
-        );
-        const fromTimestamp = toTimestamp - span;
+        const clamped = clampOrderTsAnchoredHistoryWindow({
+          fromTimestampMs: args.fromTimestampMs,
+          toTimestampMs: args.toTimestampMs
+        });
         const res = (await connection.sendCommand("ProtoOAOrderListReq", {
           ctidTraderAccountId: Number(args.ctidTraderAccountId),
-          fromTimestamp,
-          toTimestamp
+          fromTimestamp: clamped.fromTimestampMs,
+          toTimestamp: clamped.toTimestampMs
         })) as Record<string, unknown>;
-        return parseBrokerHistoricalOrders(res.order ?? res.orders);
+        return {
+          items: parseBrokerHistoricalOrders(res.order ?? res.orders),
+          hasMore: parseHistoryHasMore(res.hasMore),
+          fromTimestampMs: clamped.fromTimestampMs,
+          toTimestampMs: clamped.toTimestampMs
+        };
       });
     },
 
@@ -2218,21 +2265,31 @@ export function createMockOpenApiClient(opts?: {
 
     async fetchDemoDealEvidenceList(args) {
       const closed = await this.fetchDemoDealList!(args);
-      return closed.map((d) => ({
-        dealId: d.dealId,
-        orderId: d.orderId,
-        positionId: d.positionId,
-        executionPrice: d.closePrice,
-        executedAt: d.closedAt,
-        filledVolumeLots: d.closedVolumeLots,
-        tradeSide: null,
-        isClosing: true,
-        close: d
-      }));
+      return {
+        items: closed.map((d) => ({
+          dealId: d.dealId,
+          orderId: d.orderId,
+          positionId: d.positionId,
+          executionPrice: d.closePrice,
+          executedAt: d.closedAt,
+          filledVolumeLots: d.closedVolumeLots,
+          tradeSide: null,
+          isClosing: true,
+          close: d
+        })),
+        hasMore: false,
+        fromTimestampMs: args.fromTimestampMs,
+        toTimestampMs: args.toTimestampMs
+      };
     },
 
-    async fetchDemoOrderList(_args) {
-      return [] as BrokerHistoricalOrder[];
+    async fetchDemoOrderList(args) {
+      return {
+        items: [] as BrokerHistoricalOrder[],
+        hasMore: false,
+        fromTimestampMs: args.fromTimestampMs,
+        toTimestampMs: args.toTimestampMs
+      };
     },
 
     async fetchAuthoritativeDemoMarginSnapshot() {

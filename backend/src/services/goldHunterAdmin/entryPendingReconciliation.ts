@@ -11,12 +11,14 @@
 import {
   dealsMatchingOrderOrPosition,
   fetchDemoClosingDealForPosition,
-  fetchDemoHistoricalDealEvidence,
+  fetchDemoHistoricalDealEvidenceExhaustive,
   goldHunterEntryHistoryQueryWindow,
-  lookupDemoOrderByClientOrderId
+  lookupDemoOrderByClientOrderId,
+  resolvePositionIdFromDeals
 } from "../broker/ctrader/demoBrokerHistory";
 import type {
   BrokerClosedDeal,
+  BrokerDealEvidence,
   BrokerHistoricalOrder,
   BrokerOpenPosition
 } from "../broker/ctrader/openApiClient";
@@ -36,11 +38,15 @@ import {
 /** Underlying cTrader sendCommand timeout is ~12s; outer wait ~8s. */
 export const GH_ENTRY_SEND_UNCERTAINTY_MS = 15_000;
 
-/** Conservative multi-read confirmation before terminal never-found. */
-export const GH_ENTRY_NOT_FOUND_MIN_SUCCESSFUL_READS = 3;
+/** Complete empty-proof cycles required before terminal never-found. */
+export const GH_ENTRY_NOT_FOUND_MIN_EMPTY_PROOF_CYCLES = 3;
 
-/** Successful empty reads must span at least this long after grace. */
+/** Complete empty-proof span across first→last successful cycle. */
 export const GH_ENTRY_NOT_FOUND_MIN_SPAN_MS = 90_000;
+
+/** @deprecated Use GH_ENTRY_NOT_FOUND_MIN_EMPTY_PROOF_CYCLES. */
+export const GH_ENTRY_NOT_FOUND_MIN_SUCCESSFUL_READS =
+  GH_ENTRY_NOT_FOUND_MIN_EMPTY_PROOF_CYCLES;
 
 const ENTRY_UNCERTAINTY_CODES = new Set([
   "NEWORDER_SEND_TIMEOUT",
@@ -67,13 +73,34 @@ export type EntryPendingWatchdogResult = {
 function emptyEvidence(nowIso: string): EntryReconcileEvidence {
   return {
     reconciliationAttempts: 0,
-    firstReconcileAt: nowIso,
     lastReconcileAt: nowIso,
-    openPositionChecks: 0,
-    orderHistoryChecks: 0,
-    dealHistoryChecks: 0,
     lastBrokerReadOk: false,
+    successfulEmptyProofCycles: 0,
+    firstSuccessfulEmptyProofAt: null,
+    lastSuccessfulEmptyProofAt: null,
+    lastHistoryComplete: false,
     terminalReason: null
+  };
+}
+
+function normalizeEvidence(
+  prior: GoldHunterDemoTrade["entryReconcileEvidence"] | null | undefined,
+  nowIso: string
+): EntryReconcileEvidence {
+  const base = prior ?? emptyEvidence(nowIso);
+  return {
+    reconciliationAttempts: base.reconciliationAttempts ?? 0,
+    lastReconcileAt: nowIso,
+    lastBrokerReadOk: base.lastBrokerReadOk ?? false,
+    successfulEmptyProofCycles: base.successfulEmptyProofCycles ?? 0,
+    firstSuccessfulEmptyProofAt: base.firstSuccessfulEmptyProofAt ?? null,
+    lastSuccessfulEmptyProofAt: base.lastSuccessfulEmptyProofAt ?? null,
+    lastHistoryComplete: base.lastHistoryComplete ?? false,
+    terminalReason: base.terminalReason ?? null,
+    openPositionChecks: base.openPositionChecks,
+    orderHistoryChecks: base.orderHistoryChecks,
+    dealHistoryChecks: base.dealHistoryChecks,
+    firstReconcileAt: base.firstReconcileAt
   };
 }
 
@@ -90,14 +117,12 @@ export function isGoldHunterEntryTransmissionUncertainty(
   if (trade.status !== "PENDING_RECONCILIATION") return false;
   if (trade.exitReason) return false;
   if (trade.dataQuality === "ENTRY_INVALID" && trade.brokerPositionId) {
-    // Broker position known; disappeared-open / entry-invalid path owns this.
     return false;
   }
   const code = trade.errorCode ?? "BROKER_OUTCOME_UNKNOWN";
   if (!ENTRY_UNCERTAINTY_CODES.has(code) && trade.brokerPositionId) {
     return false;
   }
-  // Null-position PENDING with known uncertainty codes, or generic unknown.
   if (trade.brokerPositionId) return false;
   return (
     ENTRY_UNCERTAINTY_CODES.has(code) ||
@@ -133,20 +158,28 @@ function isProvenGhOpenMatch(
   return false;
 }
 
+function matchOpenByPositionId(
+  positions: readonly BrokerDemoPositionLite[],
+  positionId: string | null | undefined
+): BrokerDemoPositionLite | null {
+  if (!positionId) return null;
+  return positions.find((p) => p.positionId === String(positionId)) ?? null;
+}
+
 function matchOpenByClientOrderId(
   positions: readonly BrokerDemoPositionLite[],
   trade: GoldHunterDemoTrade,
-  order: BrokerHistoricalOrder | null
+  order: BrokerHistoricalOrder | null,
+  resolvedPositionId: string | null
 ): BrokerDemoPositionLite | null {
+  const byResolved = matchOpenByPositionId(positions, resolvedPositionId);
+  if (byResolved) return byResolved;
   if (order?.positionId) {
-    const byId = positions.find((p) => p.positionId === String(order.positionId));
-    if (byId && isProvenGhOpenMatch(byId, trade)) return byId;
-    if (byId) return byId; // exact positionId from order history is authoritative
+    const byId = matchOpenByPositionId(positions, order.positionId);
+    if (byId) return byId;
   }
   if (trade.brokerPositionId) {
-    const byId = positions.find(
-      (p) => p.positionId === String(trade.brokerPositionId)
-    );
+    const byId = matchOpenByPositionId(positions, trade.brokerPositionId);
     if (byId) return byId;
   }
   return (
@@ -168,6 +201,23 @@ async function persistEvidence(
     ...trade,
     entryReconcileEvidence: evidence
   });
+}
+
+function recordEmptyProofCycle(
+  evidence: EntryReconcileEvidence,
+  nowIso: string
+): EntryReconcileEvidence {
+  const cycles = (evidence.successfulEmptyProofCycles ?? 0) + 1;
+  return {
+    ...evidence,
+    successfulEmptyProofCycles: cycles,
+    firstSuccessfulEmptyProofAt:
+      evidence.firstSuccessfulEmptyProofAt ?? nowIso,
+    lastSuccessfulEmptyProofAt: nowIso,
+    lastBrokerReadOk: true,
+    lastHistoryComplete: true,
+    terminalReason: null
+  };
 }
 
 async function recoverOpenFromPosition(args: {
@@ -271,6 +321,7 @@ async function persistClosedFromDeals(args: {
   trade: GoldHunterDemoTrade;
   order: BrokerHistoricalOrder;
   deal: BrokerClosedDeal;
+  positionId: string;
   evidence: EntryReconcileEvidence;
 }): Promise<void> {
   const entry =
@@ -281,8 +332,7 @@ async function persistClosedFromDeals(args: {
   const base: GoldHunterDemoTrade = {
     ...args.trade,
     brokerOrderId: args.order.orderId,
-    brokerPositionId:
-      args.order.positionId ?? args.deal.positionId ?? args.trade.brokerPositionId,
+    brokerPositionId: args.positionId,
     entry,
     fillTs:
       args.trade.fillTs ??
@@ -342,18 +392,55 @@ async function persistNeverFound(args: {
   }
 }
 
-function canTerminalNeverFound(evidence: EntryReconcileEvidence): boolean {
-  if (
-    evidence.openPositionChecks < GH_ENTRY_NOT_FOUND_MIN_SUCCESSFUL_READS ||
-    evidence.orderHistoryChecks < GH_ENTRY_NOT_FOUND_MIN_SUCCESSFUL_READS ||
-    evidence.dealHistoryChecks < GH_ENTRY_NOT_FOUND_MIN_SUCCESSFUL_READS
-  ) {
-    return false;
-  }
-  const first = Date.parse(evidence.firstReconcileAt);
-  const last = Date.parse(evidence.lastReconcileAt);
+export function canTerminalNeverFound(
+  evidence: EntryReconcileEvidence
+): boolean {
+  const cycles = evidence.successfulEmptyProofCycles ?? 0;
+  if (cycles < GH_ENTRY_NOT_FOUND_MIN_EMPTY_PROOF_CYCLES) return false;
+  const first = evidence.firstSuccessfulEmptyProofAt
+    ? Date.parse(evidence.firstSuccessfulEmptyProofAt)
+    : NaN;
+  const last = evidence.lastSuccessfulEmptyProofAt
+    ? Date.parse(evidence.lastSuccessfulEmptyProofAt)
+    : NaN;
   if (!Number.isFinite(first) || !Number.isFinite(last)) return false;
   return last - first >= GH_ENTRY_NOT_FOUND_MIN_SPAN_MS;
+}
+
+async function resolveClosingDeal(args: {
+  ownerUid: string;
+  order: BrokerHistoricalOrder;
+  positionId: string;
+  deals: readonly BrokerDealEvidence[];
+  window: { fromTimestampMs: number; toTimestampMs: number };
+}): Promise<
+  | { ok: true; deal: BrokerClosedDeal }
+  | { ok: false; unavailable: boolean }
+> {
+  const matched = dealsMatchingOrderOrPosition({
+    deals: args.deals,
+    orderId: args.order.orderId,
+    positionId: args.positionId
+  });
+  const closingFromEvidence = matched
+    .map((d) => d.close)
+    .filter((c): c is BrokerClosedDeal => c != null && c.netPnl != null);
+  if (closingFromEvidence.length > 0) {
+    const last = closingFromEvidence.sort(
+      (a, b) => Date.parse(a.closedAt ?? "") - Date.parse(b.closedAt ?? "")
+    )[closingFromEvidence.length - 1]!;
+    return { ok: true, deal: last };
+  }
+  const byPos = await fetchDemoClosingDealForPosition({
+    ownerUid: args.ownerUid,
+    positionId: args.positionId,
+    ...args.window
+  });
+  if (!byPos.ok) return { ok: false, unavailable: true };
+  if (byPos.value && byPos.value.netPnl != null) {
+    return { ok: true, deal: byPos.value };
+  }
+  return { ok: false, unavailable: false };
 }
 
 /**
@@ -365,7 +452,6 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
   brokerPositions: BrokerDemoPositionLite[];
   positionsReadOk: boolean;
   nowMs?: number;
-  /** Test override — default GH_ENTRY_SEND_UNCERTAINTY_MS. */
   graceMs?: number;
 }): Promise<EntryPendingWatchdogResult> {
   const nowMs = args.nowMs ?? Date.now();
@@ -395,164 +481,215 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
 
     const clientOrderId = String(trade.clientOrderId ?? "").trim();
     if (!clientOrderId) {
-      // Cannot correlate without clientOrderId — fail closed.
       result.stillPending += 1;
       continue;
     }
 
-    let evidence: EntryReconcileEvidence = {
-      ...(trade.entryReconcileEvidence ?? emptyEvidence(nowIso)),
-      reconciliationAttempts:
-        (trade.entryReconcileEvidence?.reconciliationAttempts ?? 0) + 1,
-      lastReconcileAt: nowIso,
-      firstReconcileAt:
-        trade.entryReconcileEvidence?.firstReconcileAt ?? nowIso
+    let evidence = normalizeEvidence(trade.entryReconcileEvidence, nowIso);
+    evidence = {
+      ...evidence,
+      reconciliationAttempts: evidence.reconciliationAttempts + 1
     };
 
-    // --- Open positions (Case A) ---
-    let openCheckOk = args.positionsReadOk;
-    let openMatch: BrokerDemoPositionLite | null = null;
+    const window = goldHunterEntryHistoryQueryWindow({
+      orderTs: trade.orderTs,
+      nowMs
+    });
 
+    // --- Authoritative historical order by exact clientOrderId ---
     const orderLookup = await lookupDemoOrderByClientOrderId({
       ownerUid: args.ownerUid,
       clientOrderId,
       orderTs: trade.orderTs,
       nowMs
     });
-    const orderOk = orderLookup.ok;
-    const order = orderOk ? orderLookup.value.order : null;
-    if (orderOk) {
+
+    if (!orderLookup.ok) {
+      // Partial / failed — do NOT increment empty-proof cycles.
       evidence = {
         ...evidence,
-        orderHistoryChecks: evidence.orderHistoryChecks + 1
+        lastBrokerReadOk: false,
+        lastHistoryComplete: false
       };
-    }
-
-    if (openCheckOk) {
-      evidence = {
-        ...evidence,
-        openPositionChecks: evidence.openPositionChecks + 1
-      };
-      openMatch = matchOpenByClientOrderId(
-        args.brokerPositions,
-        trade,
-        order
-      );
-      if (openMatch && (order || isProvenGhOpenMatch(openMatch, trade))) {
-        await recoverOpenFromPosition({
-          ownerUid: args.ownerUid,
-          trade,
-          match: openMatch,
-          order,
-          evidence: { ...evidence, lastBrokerReadOk: true }
-        });
-        result.recoveredOpen += 1;
-        continue;
-      }
-    }
-
-    // --- Historical order (Cases B / C / D) ---
-    if (!orderOk) {
-      evidence = { ...evidence, lastBrokerReadOk: false };
       await persistEvidence(args.ownerUid, trade, evidence);
       result.brokerUnavailable += 1;
       result.stillPending += 1;
       continue;
     }
 
+    const order = orderLookup.value.order;
+    const orderHistoryComplete = orderLookup.value.complete;
+
     if (order && order.orderStatusCode === 3) {
-      // CASE B — ORDER_STATUS_REJECTED
       await persistRejected({
         ownerUid: args.ownerUid,
         trade,
         order,
-        evidence
+        evidence: { ...evidence, lastBrokerReadOk: true, lastHistoryComplete: true }
       });
       result.rejected += 1;
       continue;
     }
 
-    if (
-      order &&
-      (order.orderStatusCode === 1 || order.orderStatusCode === 2) &&
-      openMatch == null
-    ) {
-      // Order accepted/filled but no open position — try closed reconstruction.
-      const window = goldHunterEntryHistoryQueryWindow({
-        orderTs: trade.orderTs,
-        nowMs
-      });
-      const dealsRead = await fetchDemoHistoricalDealEvidence({
+    // Resolve positionId: order.positionId OR opening deal.orderId match.
+    let resolvedPositionId = order?.positionId
+      ? String(order.positionId)
+      : null;
+    let deals: BrokerDealEvidence[] = [];
+    let dealsComplete = false;
+
+    if (order && !resolvedPositionId) {
+      const dealsRead = await fetchDemoHistoricalDealEvidenceExhaustive({
         ownerUid: args.ownerUid,
-        ...window
+        ...window,
+        stopOnOrderId: order.orderId
       });
       if (!dealsRead.ok) {
-        evidence = { ...evidence, lastBrokerReadOk: false };
+        evidence = {
+          ...evidence,
+          lastBrokerReadOk: false,
+          lastHistoryComplete: false
+        };
         await persistEvidence(args.ownerUid, trade, evidence);
         result.brokerUnavailable += 1;
         result.stillPending += 1;
         continue;
       }
-      evidence = {
-        ...evidence,
-        dealHistoryChecks: evidence.dealHistoryChecks + 1,
-        lastBrokerReadOk: true
-      };
-
-      const matchedDeals = dealsMatchingOrderOrPosition({
-        deals: dealsRead.value,
+      deals = dealsRead.items;
+      dealsComplete = dealsRead.complete;
+      resolvedPositionId = resolvePositionIdFromDeals({
         orderId: order.orderId,
-        positionId: order.positionId
+        deals
       });
-      const closingFromEvidence = matchedDeals
-        .map((d) => d.close)
-        .filter((c): c is BrokerClosedDeal => c != null && c.netPnl != null);
+      // Finding the opening deal is enough even if the rest of the window
+      // was truncated — we have exact orderId→positionId correlation.
+      if (resolvedPositionId) {
+        dealsComplete = true;
+      } else if (!dealsComplete) {
+        evidence = {
+          ...evidence,
+          lastBrokerReadOk: false,
+          lastHistoryComplete: false
+        };
+        await persistEvidence(args.ownerUid, trade, evidence);
+        result.brokerUnavailable += 1;
+        result.stillPending += 1;
+        continue;
+      }
+    }
 
-      let closing: BrokerClosedDeal | null =
-        closingFromEvidence.length > 0
-          ? closingFromEvidence.sort(
-              (a, b) =>
-                Date.parse(a.closedAt ?? "") - Date.parse(b.closedAt ?? "")
-            )[closingFromEvidence.length - 1]!
-          : null;
-
-      if (!closing && order.positionId) {
-        const byPos = await fetchDemoClosingDealForPosition({
+    // --- Current open positions (Case A) ---
+    if (args.positionsReadOk) {
+      const openMatch = matchOpenByClientOrderId(
+        args.brokerPositions,
+        trade,
+        order,
+        resolvedPositionId
+      );
+      if (
+        openMatch &&
+        (order ||
+          resolvedPositionId === openMatch.positionId ||
+          isProvenGhOpenMatch(openMatch, trade))
+      ) {
+        await recoverOpenFromPosition({
           ownerUid: args.ownerUid,
-          positionId: order.positionId,
-          ...window
+          trade,
+          match: openMatch,
+          order,
+          evidence: {
+            ...evidence,
+            lastBrokerReadOk: true,
+            lastHistoryComplete: orderHistoryComplete
+          }
         });
-        if (!byPos.ok) {
-          evidence = { ...evidence, lastBrokerReadOk: false };
+        result.recoveredOpen += 1;
+        continue;
+      }
+    }
+
+    if (order && (order.orderStatusCode === 1 || order.orderStatusCode === 2)) {
+      // CASE C / D — order known; try closed reconstruction when no open match.
+      if (deals.length === 0) {
+        const dealsRead = await fetchDemoHistoricalDealEvidenceExhaustive({
+          ownerUid: args.ownerUid,
+          ...window,
+          stopOnOrderId: order.orderId,
+          stopOnPositionId: resolvedPositionId ?? undefined
+        });
+        if (!dealsRead.ok) {
+          evidence = {
+            ...evidence,
+            lastBrokerReadOk: false,
+            lastHistoryComplete: false
+          };
           await persistEvidence(args.ownerUid, trade, evidence);
           result.brokerUnavailable += 1;
           result.stillPending += 1;
           continue;
         }
-        evidence = {
-          ...evidence,
-          dealHistoryChecks: evidence.dealHistoryChecks + 1
-        };
-        closing = byPos.value;
+        deals = dealsRead.items;
+        dealsComplete = dealsRead.complete;
+        if (!resolvedPositionId) {
+          resolvedPositionId = resolvePositionIdFromDeals({
+            orderId: order.orderId,
+            deals
+          });
+        }
       }
 
-      if (closing && closing.netPnl != null) {
-        // CASE C — filled and closed
+      if (!resolvedPositionId) {
+        // Order exists but position still unknown — keep pending (Case D).
+        await persistEvidence(args.ownerUid, trade, {
+          ...evidence,
+          lastBrokerReadOk: true,
+          lastHistoryComplete: orderHistoryComplete && dealsComplete,
+          terminalReason: null
+        });
+        result.stillPending += 1;
+        continue;
+      }
+
+      const closing = await resolveClosingDeal({
+        ownerUid: args.ownerUid,
+        order,
+        positionId: resolvedPositionId,
+        deals,
+        window
+      });
+      if (closing.ok) {
         await persistClosedFromDeals({
           ownerUid: args.ownerUid,
           trade,
           order,
-          deal: closing,
-          evidence
+          deal: closing.deal,
+          positionId: resolvedPositionId,
+          evidence: {
+            ...evidence,
+            lastBrokerReadOk: true,
+            lastHistoryComplete: true
+          }
         });
         result.recoveredClosed += 1;
         continue;
       }
+      if (closing.unavailable) {
+        evidence = {
+          ...evidence,
+          lastBrokerReadOk: false,
+          lastHistoryComplete: false
+        };
+        await persistEvidence(args.ownerUid, trade, evidence);
+        result.brokerUnavailable += 1;
+        result.stillPending += 1;
+        continue;
+      }
 
-      // CASE D — order exists / accepted but not yet resolved
+      // CASE D — order/position known, not yet closed / no closing deal yet.
       await persistEvidence(args.ownerUid, trade, {
         ...evidence,
         lastBrokerReadOk: true,
+        lastHistoryComplete: orderHistoryComplete && dealsComplete,
         terminalReason: null
       });
       result.stillPending += 1;
@@ -560,57 +697,71 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
     }
 
     if (order) {
-      // Order present with non-terminal / non-fill status — keep pending.
+      // Non-rejected, non-fill status — keep pending.
       await persistEvidence(args.ownerUid, trade, {
         ...evidence,
         lastBrokerReadOk: true,
+        lastHistoryComplete: orderHistoryComplete,
         terminalReason: null
       });
       result.stillPending += 1;
       continue;
     }
 
-    // No order found for exact clientOrderId — deal history must also be empty.
-    const window = goldHunterEntryHistoryQueryWindow({
-      orderTs: trade.orderTs,
-      nowMs
-    });
-    const dealsRead = await fetchDemoHistoricalDealEvidence({
+    // --- No exact order found ---
+    // Incomplete history must NOT count toward empty-proof cycles (P3).
+    if (!orderHistoryComplete) {
+      evidence = {
+        ...evidence,
+        lastBrokerReadOk: false,
+        lastHistoryComplete: false
+      };
+      await persistEvidence(args.ownerUid, trade, evidence);
+      result.brokerUnavailable += 1;
+      result.stillPending += 1;
+      continue;
+    }
+
+    if (!args.positionsReadOk) {
+      // E2: open read failed — no complete proof cycle.
+      evidence = {
+        ...evidence,
+        lastBrokerReadOk: false,
+        lastHistoryComplete: orderHistoryComplete
+      };
+      await persistEvidence(args.ownerUid, trade, evidence);
+      result.brokerUnavailable += 1;
+      result.stillPending += 1;
+      continue;
+    }
+
+    const dealsRead = await fetchDemoHistoricalDealEvidenceExhaustive({
       ownerUid: args.ownerUid,
       ...window
     });
-    if (!dealsRead.ok) {
-      evidence = { ...evidence, lastBrokerReadOk: false };
+    if (!dealsRead.ok || !dealsRead.complete) {
+      // E1 / incomplete deals — no empty-proof increment.
+      evidence = {
+        ...evidence,
+        lastBrokerReadOk: false,
+        lastHistoryComplete: false
+      };
       await persistEvidence(args.ownerUid, trade, evidence);
       result.brokerUnavailable += 1;
       result.stillPending += 1;
       continue;
     }
-    evidence = {
-      ...evidence,
-      dealHistoryChecks: evidence.dealHistoryChecks + 1,
-      lastBrokerReadOk: openCheckOk && orderOk
-    };
 
-    // Any deal that could belong to this clientOrderId requires orderId —
-    // without an order we cannot correlate deals by clientOrderId alone.
-    // Empty successful deal list + empty order + empty open = candidate for Case F.
-    if (!openCheckOk) {
-      evidence = { ...evidence, lastBrokerReadOk: false };
-      await persistEvidence(args.ownerUid, trade, evidence);
-      result.brokerUnavailable += 1;
-      result.stillPending += 1;
-      continue;
-    }
+    // Same-cycle complete empty proof:
+    // open OK + no match, order exhaustive empty, deal exhaustive empty.
+    evidence = recordEmptyProofCycle(evidence, nowIso);
 
     if (canTerminalNeverFound(evidence)) {
-      // CASE F — authoritative multi-read never-found
       await persistNeverFound({ ownerUid: args.ownerUid, trade, evidence });
       result.terminalNotFound += 1;
       continue;
     }
 
-    // CASE E / incomplete confirmation — keep pending
     await persistEvidence(args.ownerUid, trade, evidence);
     result.stillPending += 1;
   }
@@ -618,7 +769,6 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
   return result;
 }
 
-/** Test helper — map BrokerOpenPosition → lite. */
 export function toEntryWatchdogPositionLite(
   p: BrokerOpenPosition
 ): BrokerDemoPositionLite {

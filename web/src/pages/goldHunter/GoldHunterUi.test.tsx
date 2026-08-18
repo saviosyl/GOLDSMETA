@@ -374,7 +374,8 @@ describe("Gold Hunter UI", () => {
         status: "PENDING_RECONCILIATION",
         netPnlEur: null,
         entry: null,
-        stop: null
+        stop: null,
+        brokerPositionId: null
       }
     ] as typeof status.openTrades;
     renderAt("/gold-hunter");
@@ -385,6 +386,33 @@ describe("Gold Hunter UI", () => {
     );
     expect(screen.getByTestId("gh-demo-autotrade-hint")).toHaveTextContent(
       "Order transmission outcome is being verified with cTrader"
+    );
+    expect(screen.getByTestId("gh-demo-autotrade-state")).not.toHaveTextContent(
+      "IN DEMO TRADE"
+    );
+  });
+
+  it("keeps RECONCILING DEMO ENTRY when account has unrelated open positions", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.broker.openPositionCount = 1;
+    status.broker.marginUsed = 50;
+    status.openTrades = [
+      {
+        goldHunterTradeId: "GH-D-ac23097e",
+        setup: "A",
+        side: "SELL",
+        status: "PENDING_RECONCILIATION",
+        netPnlEur: null,
+        entry: null,
+        stop: null,
+        brokerPositionId: null
+      }
+    ] as typeof status.openTrades;
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "RECONCILING DEMO ENTRY"
+      )
     );
     expect(screen.getByTestId("gh-demo-autotrade-state")).not.toHaveTextContent(
       "IN DEMO TRADE"
@@ -403,7 +431,8 @@ describe("Gold Hunter UI", () => {
         status: "FILLED",
         netPnlEur: 0,
         entry: 2400,
-        stop: 2399.45
+        stop: 2399.45,
+        brokerPositionId: "pos-matched-1"
       }
     ] as typeof status.openTrades;
     renderAt("/gold-hunter");
