@@ -38,6 +38,7 @@ import {
 } from "./maxOpenLease";
 import { countsTowardGoldHunterMaxOpen } from "./tradeStore";
 import { validateGoldHunterRiskConfig } from "./configValidation";
+import { runGoldHunterReconcilePass } from "./reconciliationRuntime";
 
 import type { GoldHunterExecutionStage } from "./executionStages";
 import {
@@ -224,13 +225,67 @@ export async function attemptGoldHunterDemoExecution(
   }
   deps.onStage?.("OPEN_TRADES_LOAD_DONE", "done");
 
-  // Enforce maxOpen BEFORE durable claim — otherwise opportunities are burned
-  // as BROKER_SUBMIT_ERROR without ever transmitting ProtoOANewOrderReq.
+  // Local occupancy can include stale CLOSE_REQUESTED ghosts. Repair from
+  // authoritative broker state BEFORE a permanent local-only max-open deadlock.
+  // Do not delete this gate — fail closed when broker open state is unknown.
   if (openTrades.length >= config.maxOpenTrades) {
-    return block(
-      "WAIT — MAX OPEN TRADES",
-      `open_count_${openTrades.length}_max_${config.maxOpenTrades}`
-    );
+    deps.onStage?.("PRE_MAXOPEN_RECONCILE_START", "start");
+    let preMaxReconcile: Awaited<ReturnType<typeof runGoldHunterReconcilePass>>;
+    try {
+      preMaxReconcile = await withGoldHunterPreclaimTimeout(
+        "runGoldHunterReconcilePass_preMaxOpen",
+        "PRE_MAXOPEN_RECONCILE_START",
+        GH_PRECLAIM_ACCOUNT_TIMEOUT_MS + GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+        () =>
+          runGoldHunterReconcilePass({
+            ownerUid,
+            force: true
+          })
+      );
+    } catch (e) {
+      if (isGoldHunterPreclaimTimeout(e)) {
+        deps.onStage?.("PRE_MAXOPEN_RECONCILE_START", "timeout");
+        return block(
+          "WAIT — MAX OPEN TRADES",
+          "pre_maxopen_reconcile_timeout_fail_closed"
+        );
+      }
+      throw e;
+    }
+    deps.onStage?.("PRE_MAXOPEN_RECONCILE_DONE", "done");
+
+    if (!preMaxReconcile.positionsReadOk) {
+      return block(
+        "WAIT — MAX OPEN TRADES",
+        "broker_positions_read_failed_fail_closed"
+      );
+    }
+
+    try {
+      openTrades = await withGoldHunterPreclaimTimeout(
+        "listGoldHunterDemoTrades_after_pre_maxopen_reconcile",
+        "OPEN_TRADES_LOAD_START",
+        GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+        () =>
+          listGoldHunterDemoTrades(ownerUid, {
+            limit: 50,
+            openOnly: true
+          })
+      );
+    } catch (e) {
+      if (isGoldHunterPreclaimTimeout(e)) {
+        return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+      }
+      throw e;
+    }
+
+    const localOpen = openTrades.filter(countsTowardGoldHunterMaxOpen).length;
+    if (localOpen >= config.maxOpenTrades) {
+      return block(
+        "WAIT — MAX OPEN TRADES",
+        `open_count_${localOpen}_max_${config.maxOpenTrades}_after_reconcile`
+      );
+    }
   }
 
   const committed = computeGoldHunterCommittedCapital({

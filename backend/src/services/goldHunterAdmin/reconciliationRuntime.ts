@@ -11,6 +11,7 @@ import type {
 } from "../broker/ctrader/openApiClient";
 import { getOwnerQueue } from "./boundedQueue";
 import {
+  isGoldHunterCloseAcceptedPendingSettlement,
   isGoldHunterCloseSettlementPending,
   settleGoldHunterCloseFromBroker
 } from "./closeSettlement";
@@ -44,6 +45,12 @@ let hooks: ReconcileRuntimeHooks = {};
 
 /** Min interval between full reconcile passes per owner (ms). */
 export const GH_RECONCILE_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * CLOSE_REQUESTED older than this triggers a forced authoritative reconcile.
+ * Must not rely on a new trading opportunity to unblock max-open.
+ */
+export const GH_CLOSE_REQUESTED_STALE_MS = 45_000;
 
 const lastReconcileAt = new Map<string, number>();
 
@@ -353,6 +360,91 @@ export function isGoldHunterExitPendingReconciliation(
   return true;
 }
 
+/**
+ * Local CLOSE_REQUESTED with a known brokerPositionId.
+ *
+ * Process interruption / broker ack loss can leave trades here forever.
+ * They occupy maxOpen and are skipped by the position manager — so they must
+ * be repaired from authoritative broker open-position state, independently of
+ * new entry opportunities.
+ *
+ * Only runs when positionsReadOk === true. Fail closed on broker read failure.
+ */
+export function isGoldHunterCloseRequestedOccupying(
+  t: GoldHunterDemoTrade
+): boolean {
+  if (t.strategy !== GH_ADMIN_STRATEGY_ID || t.environment !== "DEMO") {
+    return false;
+  }
+  if (t.status !== "CLOSE_REQUESTED") return false;
+  if (!t.brokerPositionId || String(t.brokerPositionId).trim() === "") {
+    return false;
+  }
+  return true;
+}
+
+export async function reconcileGoldHunterCloseRequested(args: {
+  ownerUid: string;
+  brokerPositions: BrokerDemoPositionLite[];
+  positionsReadOk: boolean;
+}): Promise<{
+  skipped: boolean;
+  stillOpen: number;
+  settled: number;
+  settlementPending: number;
+}> {
+  if (!args.positionsReadOk) {
+    return {
+      skipped: true,
+      stillOpen: 0,
+      settled: 0,
+      settlementPending: 0
+    };
+  }
+
+  const openIds = new Set(
+    args.brokerPositions.map((p) => String(p.positionId))
+  );
+  const trades = await listGoldHunterDemoTrades(args.ownerUid, { limit: 200 });
+  const pending = trades.filter(isGoldHunterCloseRequestedOccupying);
+  const settle = hooks.settleClose ?? settleGoldHunterCloseFromBroker;
+
+  let stillOpen = 0;
+  let settled = 0;
+  let settlementPending = 0;
+
+  for (const trade of pending) {
+    const posId = String(trade.brokerPositionId);
+    if (openIds.has(posId)) {
+      // Broker still shows exposure — keep CLOSE_REQUESTED (maxOpen blocks).
+      // Do not duplicate a close mutation; do not fabricate settlement.
+      stillOpen += 1;
+      continue;
+    }
+
+    // Persist absence-proven settlement state BEFORE deal fetch so a hung
+    // deal query cannot leave CLOSE_REQUESTED occupying max-open forever.
+    const pendingSettle: GoldHunterDemoTrade = {
+      ...trade,
+      status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+      result: null,
+      netPnlEur: null,
+      grossPnlEur: null,
+      errorCode: "BROKER_POSITION_ABSENT_SETTLEMENT_PENDING"
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, pendingSettle);
+
+    const r = await settle({ ownerUid: args.ownerUid, trade: pendingSettle });
+    if (r.settled) {
+      settled += 1;
+    } else {
+      settlementPending += 1;
+    }
+  }
+
+  return { skipped: false, stillOpen, settled, settlementPending };
+}
+
 export async function reconcileGoldHunterPendingExitReconciliations(args: {
   ownerUid: string;
   brokerPositions: BrokerDemoPositionLite[];
@@ -416,13 +508,15 @@ export async function reconcileGoldHunterPendingExitReconciliations(args: {
 
 /**
  * Retry settlement for closes awaiting broker deal P/L.
+ * Only CLOSE_ACCEPTED_PENDING_SETTLEMENT — never CLOSE_REQUESTED without
+ * prior authoritative proof that the broker position is absent.
  */
 export async function reconcileGoldHunterCloseSettlements(args: {
   ownerUid: string;
 }): Promise<{ settled: number; stillPending: number }> {
   const trades = await listGoldHunterDemoTrades(args.ownerUid, { limit: 200 });
   const pending = trades.filter((t) =>
-    isGoldHunterCloseSettlementPending(t.status)
+    isGoldHunterCloseAcceptedPendingSettlement(t.status)
   );
   let settled = 0;
   let stillPending = 0;
@@ -447,6 +541,9 @@ export type GoldHunterReconcilePassResult = {
   exitPendingSettled: number;
   exitPendingSettlementPending: number;
   exitPendingStillOpen: number;
+  closeRequestedSettled: number;
+  closeRequestedSettlementPending: number;
+  closeRequestedStillOpen: number;
   closesSettled: number;
   closesPending: number;
 };
@@ -474,6 +571,9 @@ export async function runGoldHunterReconcilePass(args: {
       exitPendingSettled: 0,
       exitPendingSettlementPending: 0,
       exitPendingStillOpen: 0,
+      closeRequestedSettled: 0,
+      closeRequestedSettlementPending: 0,
+      closeRequestedStillOpen: 0,
       closesSettled: 0,
       closesPending: 0
     };
@@ -493,6 +593,9 @@ export async function runGoldHunterReconcilePass(args: {
   let exitPendingSettled = 0;
   let exitPendingSettlementPending = 0;
   let exitPendingStillOpen = 0;
+  let closeRequestedSettled = 0;
+  let closeRequestedSettlementPending = 0;
+  let closeRequestedStillOpen = 0;
 
   if (positionsReadOk) {
     const pos = await reconcileGoldHunterDemoPositions({
@@ -526,6 +629,15 @@ export async function runGoldHunterReconcilePass(args: {
     exitPendingSettlementPending = exitPending.settlementPending;
     exitPendingStillOpen = exitPending.stillOpen;
 
+    const closeRequested = await reconcileGoldHunterCloseRequested({
+      ownerUid: args.ownerUid,
+      brokerPositions: lite,
+      positionsReadOk: true
+    });
+    closeRequestedSettled = closeRequested.settled;
+    closeRequestedSettlementPending = closeRequested.settlementPending;
+    closeRequestedStillOpen = closeRequested.stillOpen;
+
     await restoreGoldHunterPositionManager(args.ownerUid);
   }
   // positionsReadOk === false → do NOT treat as empty account; leave opens alone.
@@ -545,9 +657,51 @@ export async function runGoldHunterReconcilePass(args: {
     exitPendingSettled,
     exitPendingSettlementPending,
     exitPendingStillOpen,
+    closeRequestedSettled,
+    closeRequestedSettlementPending,
+    closeRequestedStillOpen,
     closesSettled: closes.settled,
     closesPending: closes.stillPending
   };
+}
+
+/**
+ * Age of a CLOSE_REQUESTED trade from closeRequestTs / orderTs / updated fields.
+ */
+export function goldHunterCloseRequestedAgeMs(
+  trade: GoldHunterDemoTrade,
+  nowMs = Date.now()
+): number | null {
+  if (trade.status !== "CLOSE_REQUESTED") return null;
+  const raw =
+    trade.closeRequestTs ?? trade.exitSignalTs ?? trade.fillTs ?? trade.orderTs;
+  if (!raw) return null;
+  const ts = Date.parse(raw);
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, nowMs - ts);
+}
+
+/**
+ * If any CLOSE_REQUESTED trade is older than the stale threshold, force a
+ * reconcile pass. Independent of new entry opportunities / max-open gates.
+ */
+export async function maybeEnqueueStaleCloseRequestedWatchdog(
+  ownerUid: string,
+  opts?: { nowMs?: number; staleMs?: number }
+): Promise<{ enqueued: boolean; staleCount: number }> {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const staleMs = opts?.staleMs ?? GH_CLOSE_REQUESTED_STALE_MS;
+  const trades = await listGoldHunterDemoTrades(ownerUid, { limit: 100 });
+  const stale = trades.filter((t) => {
+    if (!isGoldHunterCloseRequestedOccupying(t)) return false;
+    const age = goldHunterCloseRequestedAgeMs(t, nowMs);
+    return age != null && age >= staleMs;
+  });
+  if (stale.length === 0) {
+    return { enqueued: false, staleCount: 0 };
+  }
+  const enqueued = enqueueGoldHunterReconcilePass(ownerUid, true);
+  return { enqueued, staleCount: stale.length };
 }
 
 /** Enqueue reconcile off the quote hot path. */

@@ -30,6 +30,10 @@ export function resetGoldHunterCloseSettlementHooksForTests(): void {
   hooks = {};
 }
 
+/**
+ * Close-side states that may still need broker deal P/L (unresolved daily risk).
+ * CLOSE_REQUESTED still occupies max-open until broker absence is proven.
+ */
 export function isGoldHunterCloseSettlementPending(
   status: GoldHunterDemoTrade["status"]
 ): boolean {
@@ -37,6 +41,16 @@ export function isGoldHunterCloseSettlementPending(
     status === "CLOSE_REQUESTED" ||
     status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
   );
+}
+
+/**
+ * Broker close already accepted / position proven absent — deal P/L retry only.
+ * Safe to settle without re-checking open positions (does not occupy max-open).
+ */
+export function isGoldHunterCloseAcceptedPendingSettlement(
+  status: GoldHunterDemoTrade["status"]
+): boolean {
+  return status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT";
 }
 
 export function resultFromNetPnl(net: number): "WIN" | "LOSS" | "BREAKEVEN" {
