@@ -17,6 +17,28 @@ export function resetGoldHunterTradeMemory(): void {
   memoryTrades.clear();
 }
 
+/**
+ * Firestore rejects `undefined` field values. Strip them recursively before
+ * any trade document write so optional evidence / diagnostic keys cannot
+ * abort entry PENDING_RECONCILIATION persistence.
+ */
+export function stripUndefinedForFirestore<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedForFirestore(item)) as T;
+  }
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      if (nested === undefined) continue;
+      out[key] = stripUndefinedForFirestore(nested);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 function tradesCol(ownerUid: string) {
   const db = getFirestoreDb();
   if (!db) return null;
@@ -105,7 +127,8 @@ export async function upsertGoldHunterDemoTrade(
     map.set(trade.goldHunterTradeId, trade);
     return;
   }
-  await col.doc(trade.goldHunterTradeId).set(trade, { merge: true });
+  const sanitized = stripUndefinedForFirestore(trade);
+  await col.doc(trade.goldHunterTradeId).set(sanitized, { merge: true });
 }
 
 export type PerformanceBucket = {
