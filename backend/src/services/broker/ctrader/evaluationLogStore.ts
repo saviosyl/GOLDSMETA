@@ -52,6 +52,9 @@ export type EvaluationRecord = {
   executionStage?: string | null;
   clientOrderId?: string | null;
   volumeDiagnostics?: Record<string, unknown> | null;
+  entryGeometry?: Record<string, unknown> | null;
+  payloadShape?: Record<string, unknown> | null;
+  commissionDiagnostics?: Record<string, unknown> | null;
   /** One human-readable final reason when not submitted. */
   finalReason?: string | null;
   /** Optional overnight Demo run correlation id. */
@@ -196,7 +199,14 @@ export function reasonLabelFor(code: string): string {
     BLOCKED_DUPLICATE_SIGNAL: "Duplicate FAST signal — no second order",
     BLOCKED_SYMBOL_INCOMPLETE: "Broker symbol metadata incomplete",
     BLOCKED_ORDERS_NOT_ALLOWED: "Demo order submission not allowed in this state",
-    BLOCKED_NO_ACCOUNT: "No Demo account selected for sizing"
+    BLOCKED_NO_ACCOUNT: "No Demo account selected for sizing",
+    BLOCK_ENTRY_TARGET_ALREADY_PASSED:
+      "Fresh executable price already at or beyond strategy take-profit",
+    BLOCK_ENTRY_DRIFT_EXCESS: "Entry drift consumed a full planned stop (1R)",
+    BLOCK_ENTRY_RR_CONSUMED: "Fresh entry consumed intended reward/risk",
+    BLOCK_ENTRY_GEOMETRY_INVALID: "Fresh executable price is outside valid SL/TP geometry",
+    BLOCK_ENTRY_QUOTE_INVALID: "Fresh executable quote missing for final geometry check",
+    BROKER_FILL_INCOMPLETE: "Broker fill missing price or lots — not persisted as zero"
   };
   return map[code] ?? code.replace(/_/g, " ").toLowerCase();
 }
@@ -332,7 +342,10 @@ export async function appendEvaluation(
     fastTelemetry: partial.fastTelemetry ?? null,
     executionStage: partial.executionStage ?? partial.pipeline?.executionStage ?? null,
     clientOrderId: partial.clientOrderId ?? partial.pipeline?.clientOrderId ?? null,
-    volumeDiagnostics: partial.volumeDiagnostics ?? null
+    volumeDiagnostics: partial.volumeDiagnostics ?? null,
+    entryGeometry: partial.entryGeometry ?? null,
+    payloadShape: partial.payloadShape ?? null,
+    commissionDiagnostics: partial.commissionDiagnostics ?? null
   }) as EvaluationRecord;
   await col(partial.uid).doc(id).set(row);
   // Best-effort prune marker (no hard delete of qualification).

@@ -16,6 +16,16 @@ import {
   matchReconcileByClientOrderId,
   type ReconcileSnapshot
 } from "./orderReconcile";
+import {
+  buildProtoMarketNewOrder,
+  type SanitizedNewOrderShape
+} from "./newOrderPayload";
+import {
+  normalizeBrokerPrice,
+  normalizeFilledLots,
+  presentEconomicNumber
+} from "./brokerFillEconomics";
+import { FAST_CLIENT_ORDER_ID_MAX_LEN } from "./clientOrderId";
 
 export type BrokerOrderOutcome =
   | "BROKER_FILLED"
@@ -37,6 +47,14 @@ export type FastOrderRequest = {
   clientOrderId: string;
   label?: string;
   comment?: string;
+  symbolDigits?: number | null;
+  pipPosition?: number | null;
+  minStopDistancePrice?: number | null;
+  minTpDistancePrice?: number | null;
+  minVolumeCents?: number | null;
+  stepVolumeCents?: number | null;
+  stopDistancePrice?: number | null;
+  tpDistancePrice?: number | null;
 };
 
 export type FastOrderResult = {
@@ -54,6 +72,7 @@ export type FastOrderResult = {
   ctidTraderAccountId: string;
   requestSent: boolean;
   newOrderReqCount: number;
+  payloadShape?: SanitizedNewOrderShape | null;
   raw?: Record<string, unknown>;
 };
 
@@ -78,15 +97,6 @@ const DEFAULT_EVENT_WAIT_MS = 8_000;
 const DEFAULT_SEND_WAIT_MS = 8_000;
 const DEFAULT_RECONCILE_ATTEMPTS = 2;
 const DEFAULT_RECONCILE_GAP_MS = 250;
-
-function asNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
 
 function asText(value: unknown): string | null {
   if (value == null) return null;
@@ -166,25 +176,27 @@ function extractFill(payload: Record<string, unknown>): {
   >;
   const deal = (row.deal ?? {}) as Record<string, unknown>;
   const volUnits =
-    asNumber(deal.filledVolume) ??
-    asNumber(trade.volume) ??
-    asNumber(position.volume);
+    presentEconomicNumber(deal.filledVolume) ??
+    presentEconomicNumber(trade.volume) ??
+    presentEconomicNumber(position.volume);
   return {
     fillPrice:
-      asNumber(deal.executionPrice) ??
-      asNumber(position.price) ??
-      asNumber(trade.price) ??
-      asNumber(row.price),
+      normalizeBrokerPrice(deal.executionPrice) ??
+      normalizeBrokerPrice(position.price) ??
+      normalizeBrokerPrice(trade.price) ??
+      normalizeBrokerPrice(row.price),
     stopLoss:
-      asNumber(position.stopLoss) ??
-      asNumber(trade.stopLoss) ??
-      asNumber(row.stopLoss),
+      normalizeBrokerPrice(position.stopLoss) ??
+      normalizeBrokerPrice(trade.stopLoss) ??
+      normalizeBrokerPrice(row.stopLoss),
     takeProfit:
-      asNumber(position.takeProfit) ??
-      asNumber(trade.takeProfit) ??
-      asNumber(row.takeProfit),
-    filledVolumeLots:
-      volUnits != null ? Number((volUnits / 100).toFixed(8)) : null
+      normalizeBrokerPrice(position.takeProfit) ??
+      normalizeBrokerPrice(trade.takeProfit) ??
+      normalizeBrokerPrice(row.takeProfit),
+    filledVolumeLots: normalizeFilledLots({
+      filledVolumeLots: null,
+      filledVolumeCents: volUnits
+    })
   };
 }
 
@@ -285,7 +297,45 @@ export async function submitFastMarketOrder(args: {
   reconcileAttempts?: number;
   reconcileGapMs?: number;
 }): Promise<FastOrderResult> {
-  const clientOrderId = args.request.clientOrderId.trim().slice(0, 50);
+  const clientOrderId = args.request.clientOrderId.trim().slice(0, FAST_CLIENT_ORDER_ID_MAX_LEN);
+  const built = buildProtoMarketNewOrder({
+    ctidTraderAccountId: args.request.ctidTraderAccountId,
+    symbolId: args.request.symbolId,
+    side: args.request.side,
+    volumeCents: args.request.volume,
+    relativeStopLoss: args.request.relativeStopLoss,
+    relativeTakeProfit: args.request.relativeTakeProfit,
+    clientOrderId,
+    label: args.request.label,
+    comment: args.request.comment,
+    symbolDigits: args.request.symbolDigits,
+    pipPosition: args.request.pipPosition,
+    minStopDistancePrice: args.request.minStopDistancePrice,
+    minTpDistancePrice: args.request.minTpDistancePrice,
+    minVolumeCents: args.request.minVolumeCents,
+    stepVolumeCents: args.request.stepVolumeCents,
+    stopDistancePrice: args.request.stopDistancePrice,
+    tpDistancePrice: args.request.tpDistancePrice
+  });
+  if (!built.ok) {
+    return {
+      accepted: false,
+      outcome: "BROKER_SUBMIT_ERROR",
+      executionType: null,
+      orderId: null,
+      positionId: null,
+      errorCode: `PAYLOAD_${built.reason}`,
+      clientOrderId,
+      fillPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      filledVolumeLots: null,
+      ctidTraderAccountId: args.request.ctidTraderAccountId,
+      requestSent: false,
+      newOrderReqCount: 0,
+      payloadShape: built.shape
+    };
+  }
   if (!clientOrderId) {
     return {
       accepted: false,
@@ -331,18 +381,7 @@ export async function submitFastMarketOrder(args: {
     finishKnown(event.name, event.payload);
   });
 
-  const payload = {
-    ctidTraderAccountId: Number(args.request.ctidTraderAccountId),
-    symbolId: Number(args.request.symbolId),
-    orderType: 1,
-    tradeSide: args.request.side === "BUY" ? 1 : 2,
-    volume: args.request.volume,
-    relativeStopLoss: args.request.relativeStopLoss,
-    relativeTakeProfit: args.request.relativeTakeProfit,
-    clientOrderId,
-    label: args.request.label ?? "GoldMeta FAST Demo",
-    comment: args.request.comment ?? "GoldMeta FAST Demo"
-  };
+  const payload = built.payload;
 
   let requestSent = false;
   let newOrderReqCount = 0;
@@ -380,6 +419,7 @@ export async function submitFastMarketOrder(args: {
         ctidTraderAccountId: args.request.ctidTraderAccountId,
         requestSent: false,
         newOrderReqCount: 0,
+        payloadShape: built.shape,
         raw: { error: err.message, uncertainSend: true }
       };
     }
@@ -432,7 +472,11 @@ export async function submitFastMarketOrder(args: {
       ctidTraderAccountId: args.request.ctidTraderAccountId,
       requestSent,
       newOrderReqCount,
-      raw: latest
+      payloadShape: built.shape,
+      raw: {
+        ...latest,
+        payloadShape: built.shape
+      }
     };
   }
 
@@ -603,6 +647,7 @@ export function toDemoMarketOrderResult(
   outcome: BrokerOrderOutcome;
   requestSent: boolean;
   newOrderReqCount: number;
+  payloadShape?: SanitizedNewOrderShape | null;
   raw?: Record<string, unknown>;
 } {
   return {
@@ -620,6 +665,7 @@ export function toDemoMarketOrderResult(
     outcome: result.outcome,
     requestSent: result.requestSent,
     newOrderReqCount: result.newOrderReqCount,
+    payloadShape: result.payloadShape ?? null,
     raw: result.raw
   };
 }

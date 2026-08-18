@@ -8,6 +8,13 @@
 import { createHash } from "crypto";
 import { getFirestoreDb } from "../../../firebaseAdmin";
 
+export {
+  generateFastClientOrderId,
+  generateFastClientOrderIdForOwner,
+  isLegacyTruncatedFastClientOrderId,
+  FAST_CLIENT_ORDER_ID_MAX_LEN
+} from "./clientOrderId";
+
 export type FastExecutionClaimState =
   | "RESERVED"
   | "SUBMITTING"
@@ -81,18 +88,6 @@ let defaultTestBackend: FastClaimBackend | null = null;
 
 function cacheKey(ownerUid: string, signalId: string): string {
   return `${ownerUid}::${signalId}`;
-}
-
-export function generateFastClientOrderId(signalId: string): string {
-  const compact = String(signalId || "")
-    .replace(/[^a-zA-Z0-9_]/g, "")
-    .slice(0, 40);
-  if (compact.length >= 8) return `fa_${compact}`.slice(0, 50);
-  const hash = createHash("sha1")
-    .update(String(signalId || "unknown"))
-    .digest("hex")
-    .slice(0, 16);
-  return `fa_${hash}`.slice(0, 50);
 }
 
 export function claimDocId(signalId: string): string {

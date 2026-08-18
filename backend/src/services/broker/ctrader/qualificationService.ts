@@ -66,8 +66,10 @@ import {
   normalizeAccountId,
   recountControlled,
   recountDemoAuto,
+  incrementQualificationBlockedAttempts,
   saveQualificationDoc,
-  tryAddPreview
+  tryAddPreview,
+  upsertQualificationOpenTrade
 } from "./qualificationStore";
 import {
   backfillOwnershipFromStartedQualification,
@@ -148,10 +150,24 @@ import {
 import { hasBrokerFillEvidence } from "./fastAutoTrade/orderTransport";
 import { tryReconcileExistingFastClaim } from "./fastAutoTrade/pendingFillReconcile";
 import { buildVolumeRoundingDiagnostics } from "./fastAutoTrade/volumeDiagnostics";
+import { evaluateEntryGeometryGuard } from "./fastAutoTrade/entryGeometryGuard";
+import { resolveBrokerFillEconomics } from "./fastAutoTrade/brokerFillEconomics";
+import { estimateCommissionRoundTrip } from "./fastAutoTrade/newOrderPayload";
+import { getExecutableQuoteForAutoTrade } from "./quoteService";
 import { getPositionLifecycle } from "./positionLifecycleStore";
 
 function buildSha(): string | null {
   return (process.env.GOLD_META_COMMIT_SHA || process.env.VITE_GOLD_META_COMMIT_SHA || "").trim() || null;
+}
+
+async function bumpControlledBlocked(
+  doc: QualificationDocument
+): Promise<QualificationDocument> {
+  await incrementQualificationBlockedAttempts(doc.uid, doc.accountId);
+  return {
+    ...doc,
+    controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
+  };
 }
 
 function newId(prefix: string): string {
@@ -1694,7 +1710,7 @@ export async function processDecisionForQualification(args: {
   });
 
   const fastClientOrderId = fastExecution
-    ? generateFastClientOrderId(fastExecution.signalId)
+    ? generateFastClientOrderId(fastExecution.signalId, uid)
     : null;
   let fastTerminalWritten = false;
   const fastExecutionStage = (reasonCode: string): string => {
@@ -1726,6 +1742,9 @@ export async function processDecisionForQualification(args: {
       executionStage?: string | null;
       clientOrderId?: string | null;
       volumeDiagnostics?: Record<string, unknown> | null;
+      entryGeometry?: Record<string, unknown> | null;
+      payloadShape?: Record<string, unknown> | null;
+      commissionDiagnostics?: Record<string, unknown> | null;
     }
   ) => {
     if (fastExecution) fastTerminalWritten = true;
@@ -1773,6 +1792,9 @@ export async function processDecisionForQualification(args: {
         executionStage,
         clientOrderId: extras?.clientOrderId ?? fastClientOrderId,
         volumeDiagnostics: extras?.volumeDiagnostics ?? null,
+        entryGeometry: extras?.entryGeometry ?? null,
+        payloadShape: extras?.payloadShape ?? null,
+        commissionDiagnostics: extras?.commissionDiagnostics ?? null,
         fastTelemetry: fastDecision
           ? {
               strategyId: FAST_AUTOTRADE_STRATEGY_ID,
@@ -1876,8 +1898,7 @@ export async function processDecisionForQualification(args: {
     }
     // DEMO overnight overlay: block NEW entries after cutoff (lifecycle may continue).
     if (!overnight.entriesAllowed) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval(
         "REJECTED",
         "OVERNIGHT_WINDOW_ENDED",
@@ -1898,8 +1919,7 @@ export async function processDecisionForQualification(args: {
         : settings
     });
     if (!entryGate.allowed) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval(
         "REJECTED",
         entryGate.code ?? "ENTRIES_PAUSED",
@@ -1922,8 +1942,7 @@ export async function processDecisionForQualification(args: {
           config: oppCfg
         });
     if (!isFastAutoTradeV1Enabled() && oppCfg.mode === "ACTIVE_DEMO" && setupTier === "BELOW") {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval(
         "REJECTED",
         "TIER_BELOW_A",
@@ -1945,20 +1964,17 @@ export async function processDecisionForQualification(args: {
         ? activeDemoSession.ok
         : session.ok;
     if (!sessionOk) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval("REJECTED", "SESSION_BLOCKED", ["SESSION_BLOCKED"], candidate.passed);
       return { handled: true, message: "controlled_blocked:SESSION_BLOCKED" };
     }
     if (news.active) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval("REJECTED", "NEWS_GUARD", ["NEWS_GUARD"], candidate.passed);
       return { handled: true, message: "controlled_blocked:NEWS_GUARD" };
     }
     if (!candidate.ok) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       logger.info("AutoTrade final safety check failed", {
         uid,
         signalId,
@@ -1995,8 +2011,7 @@ export async function processDecisionForQualification(args: {
 
     const symbol = diagnostics.symbol;
     if (!symbol?.metadataComplete) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       if (fastExecution) {
         await logEval(
           "REJECTED",
@@ -2029,8 +2044,7 @@ export async function processDecisionForQualification(args: {
     if (unitMapping) {
       const connection = await getConnection(uid);
       if (!connection?.selectedAccountId) {
-        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         if (fastExecution) {
           await logEval(
             "REJECTED",
@@ -2061,11 +2075,7 @@ export async function processDecisionForQualification(args: {
         const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
         const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
         if (!clientId || !clientSecret) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           await logEval(
             "REJECTED",
             "CURRENCY_CONVERSION_UNAVAILABLE",
@@ -2088,11 +2098,7 @@ export async function processDecisionForQualification(args: {
           isLive: Boolean(freshConn.selectedAccountIsLive)
         });
         if (!fx.ok) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           await logEval(
             "REJECTED",
             fx.reason,
@@ -2103,11 +2109,7 @@ export async function processDecisionForQualification(args: {
         }
         quoteToDepositRate = fx.rate;
       } catch (fxErr) {
-        doc = {
-          ...doc,
-          controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-        };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         logger.info("AutoTrade FX conversion failed closed", {
           uid,
           signalId,
@@ -2136,11 +2138,7 @@ export async function processDecisionForQualification(args: {
       if (oppCfg.mode === "ACTIVE_DEMO") {
         // Fail closed — never fall back to base risk via `riskMult || 1`.
         if (!isValidDemoRiskMultiplier(riskMult)) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           await logEval(
             "REJECTED",
             "RISK_MULTIPLIER_INVALID",
@@ -2157,11 +2155,7 @@ export async function processDecisionForQualification(args: {
           riskCapReasons.push("TIER_A_RISK_MULT");
         }
         if (!(effectiveRisk > 0)) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           await logEval(
             "REJECTED",
             "RISK_MULTIPLIER_INVALID",
@@ -2204,8 +2198,7 @@ export async function processDecisionForQualification(args: {
 
       if (!xauSizing.ok || xauSizing.volumeLots == null || xauSizing.volumeLots <= 0) {
         const reason = xauSizing.rejectionReason ?? "LOTS_INVALID";
-        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         logger.info("AutoTrade XAUUSD Demo sizing rejected", {
           uid,
           signalId,
@@ -2235,11 +2228,7 @@ export async function processDecisionForQualification(args: {
           xauSizing.protocolVolume ?? lotsToOrderVolumeUnits(sizedLots);
         const symbolId = symbol.symbolId ?? connection.symbolId;
         if (!symbolId) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           await logEval(
             "REJECTED",
             "MARGIN_UNAVAILABLE",
@@ -2255,11 +2244,7 @@ export async function processDecisionForQualification(args: {
           symbolId: String(symbolId)
         });
         if (!marginGate.ok) {
-          doc = {
-            ...doc,
-            controlledBlockedAttempts: doc.controlledBlockedAttempts + 1
-          };
-          await saveQualificationDoc(doc);
+          doc = await bumpControlledBlocked(doc);
           logger.info("AutoTrade authoritative margin gate rejected", {
             uid,
             signalId,
@@ -2293,8 +2278,7 @@ export async function processDecisionForQualification(args: {
     } else if (oppCfg.mode === "ACTIVE_DEMO") {
       // ACTIVE_DEMO is Pepperstone Demo XAUUSD — never fall back to full-risk
       // generic sizing when the proven unit mapping is missing/unproven.
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       await logEval(
         "REJECTED",
         "BROKER_UNIT_MAPPING_REQUIRED",
@@ -2325,16 +2309,14 @@ export async function processDecisionForQualification(args: {
         manualLotSize: settings.manualLotSize
       });
       if (!sizing.ok || sizing.volume == null || sizing.volume <= 0) {
-        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         return { handled: true, message: sizingRejectMessage };
       }
       sizedLots = sizing.volume;
     }
 
     if (sizedLots == null || !(sizedLots > 0)) {
-      doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-      await saveQualificationDoc(doc);
+      doc = await bumpControlledBlocked(doc);
       return { handled: true, message: sizingRejectMessage };
     }
 
@@ -2437,9 +2419,73 @@ export async function processDecisionForQualification(args: {
           return { handled: true, message: "FAST_AUTOTRADE_V1_DEMO_ONLY" };
         }
       }
+
+      let freshAsk = quote?.ask ?? null;
+      let freshBid = quote?.bid ?? null;
+      let entryGeometryDiagnostics: Record<string, unknown> | null = null;
+      const symbolCommission = diagnostics.symbol as
+        | { commission?: number | null; commissionType?: string | null; preciseTradingCommissionRate?: number | null }
+        | undefined;
+      const estimatedCommissionRoundTrip = estimateCommissionRoundTrip({
+        lots: sizedLots ?? 0,
+        entryPrice: entryPx,
+        commission: symbolCommission?.commission,
+        commissionType: symbolCommission?.commissionType,
+        preciseTradingCommissionRate: symbolCommission?.preciseTradingCommissionRate
+      });
+      const commissionDiagnostics = {
+        effectiveRiskAmount: effectiveRiskAmountDeposit,
+        estimatedCommissionRoundTrip,
+        estimatedRiskIncludingCommission:
+          effectiveRiskAmountDeposit != null && estimatedCommissionRoundTrip != null
+            ? Number((effectiveRiskAmountDeposit + estimatedCommissionRoundTrip).toFixed(2))
+            : null
+      };
+      if (fastExecution) {
+        try {
+          const fresh = await getExecutableQuoteForAutoTrade({ ownerUid: uid });
+          if (typeof fresh.ask === "number") freshAsk = fresh.ask;
+          if (typeof fresh.bid === "number") freshBid = fresh.bid;
+        } catch {
+          /* use diagnostics quote — geometry guard fail-closes if still missing */
+        }
+        const freshExecutionPrice =
+          direction === "BUY" ? freshAsk : direction === "SELL" ? freshBid : null;
+        const strategyTp = brokerOrderTakeProfit ?? takeProfit;
+        const geometry = evaluateEntryGeometryGuard({
+          side: direction as "BUY" | "SELL",
+          strategyEntry: entry as number,
+          strategyStopLoss: stopLoss as number,
+          strategyTakeProfit: strategyTp as number,
+          freshExecutionPrice: freshExecutionPrice as number,
+          minRiskReward:
+            fastSubmitCfg?.minRiskReward ??
+            settings.minRiskReward ??
+            1
+        });
+        entryGeometryDiagnostics = geometry.diagnostics;
+        if (!geometry.ok) {
+          doc = await bumpControlledBlocked(doc);
+          await logEval(
+            "REJECTED",
+            geometry.code,
+            [geometry.code],
+            candidate.passed,
+            {
+              brokerSubmissionAttempted: false,
+              clientOrderId: fastClientOrderId,
+              executionStage: geometry.code,
+              entryGeometry: geometry.diagnostics,
+              commissionDiagnostics
+            }
+          );
+          return { handled: true, message: geometry.code.toLowerCase() };
+        }
+      }
+
       const pendingSnapshot: FastPendingOpenSnapshot = {
         direction: direction as "BUY" | "SELL",
-        entry: entryPx,
+        entry: fastExecution ? entry : entryPx,
         stopLoss,
         takeProfit,
         lots: sizedLots,
@@ -2547,7 +2593,7 @@ export async function processDecisionForQualification(args: {
             lots: sizedLots,
             stopLoss,
             takeProfit: brokerOrderTakeProfit,
-            entryHint: entryPx,
+            entryHint: entry,
             comment: `GMQ ${correlationId}`,
             label: correlationId.slice(0, 30),
             strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null,
@@ -2561,7 +2607,7 @@ export async function processDecisionForQualification(args: {
           lots: sizedLots,
           stopLoss,
           takeProfit: brokerOrderTakeProfit,
-          entryHint: entryPx,
+          entryHint: fastExecution ? entry : entryPx,
           comment: `GMQ ${correlationId}`,
           label: correlationId.slice(0, 30),
           strategyId: fastSubmitCfg ? FAST_AUTOTRADE_STRATEGY_ID : null,
@@ -2607,8 +2653,7 @@ export async function processDecisionForQualification(args: {
         orderOutcome === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
         orderOutcome === "BROKER_SUBMIT_ERROR"
       ) {
-        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         const unknownCode = sanitizeBrokerErrorCode(
           result.errorCode ?? orderOutcome
         );
@@ -2624,15 +2669,17 @@ export async function processDecisionForQualification(args: {
             brokerErrorCode: unknownCode,
             executionAuthority: "ON",
             clientOrderId: result.clientOrderId ?? fastClientOrderId,
-            executionStage: orderOutcome
+            executionStage: orderOutcome,
+            payloadShape: result.payloadShape ?? null,
+            entryGeometry: entryGeometryDiagnostics,
+            commissionDiagnostics
           }
         );
         return { handled: true, message: "order_unknown_or_error" };
       }
 
       if (!filled) {
-        doc = { ...doc, controlledBlockedAttempts: doc.controlledBlockedAttempts + 1 };
-        await saveQualificationDoc(doc);
+        doc = await bumpControlledBlocked(doc);
         const rejectedCode = sanitizeBrokerErrorCode(result.errorCode);
         logger.info("AutoTrade order rejected", {
           uid,
@@ -2649,7 +2696,10 @@ export async function processDecisionForQualification(args: {
             brokerSubmissionAttempted: true,
             brokerErrorCode: rejectedCode,
             executionAuthority: "ON",
-            clientOrderId: result.clientOrderId ?? fastClientOrderId
+            clientOrderId: result.clientOrderId ?? fastClientOrderId,
+            payloadShape: result.payloadShape ?? null,
+            entryGeometry: entryGeometryDiagnostics,
+            commissionDiagnostics
           }
         );
         return { handled: true, message: "order_rejected" };
@@ -2687,13 +2737,21 @@ export async function processDecisionForQualification(args: {
         setup.accountId ??
         null;
       const traderLogin = connSnap?.selectedTraderLogin ?? null;
-      const fillPrice = result.fillPrice ?? null;
-      const brokerStopLoss = result.stopLoss ?? null;
-      const brokerTakeProfit = result.takeProfit ?? null;
-      const filledVolumeLots = result.filledVolumeLots ?? null;
-      const lotsForLifecycle = filledVolumeLots ?? sizedLots;
-      // Prefer broker fill/SL/TP for lifecycle authority; keep decision geometry as fallback.
-      const lifecycleEntry = fillPrice ?? entryPx;
+      const economics = resolveBrokerFillEconomics({
+        fillPrice: result.fillPrice,
+        filledVolumeLots: result.filledVolumeLots,
+        brokerOrderId: result.orderId,
+        brokerPositionId: result.positionId,
+        stopLoss: result.stopLoss,
+        takeProfit: result.takeProfit
+      });
+      const fillPrice = economics.fillPrice;
+      const brokerStopLoss = economics.brokerStopLoss;
+      const brokerTakeProfit = economics.brokerTakeProfit;
+      const filledVolumeLots = economics.filledVolumeLots;
+      // Never persist proto-default 0 as entry/lots. Missing broker economics stay null.
+      const lotsForLifecycle = filledVolumeLots;
+      const lifecycleEntry = fillPrice;
       const lifecycleSl = brokerStopLoss ?? stopLoss;
       const lifecycleTp = brokerTakeProfit ?? takeProfit;
 
@@ -2722,16 +2780,28 @@ export async function processDecisionForQualification(args: {
         openTimestamp: openedAt,
         status: "OPEN",
         pnl: null,
-        counted: false
+        counted: false,
+        clientOrderId: result.clientOrderId ?? fastClientOrderId
       };
 
-      if (state === "CONTROLLED_DEMO_QUALIFICATION") {
+      const bucket =
+        state === "CONTROLLED_DEMO_QUALIFICATION" ? "controlled" : "demoAuto";
+      const upserted = await upsertQualificationOpenTrade({
+        uid,
+        accountId: setup.accountId,
+        trade,
+        bucket
+      });
+      if (upserted) {
+        doc = upserted;
+      } else if (state === "CONTROLLED_DEMO_QUALIFICATION") {
         doc = {
           ...doc,
           controlledTrades: [...doc.controlledTrades, trade],
           firstControlledDemoTradeAt: doc.firstControlledDemoTradeAt ?? trade.at
         };
         doc = recountControlled(doc);
+        await saveQualificationDoc(doc);
       } else {
         doc = {
           ...doc,
@@ -2762,14 +2832,15 @@ export async function processDecisionForQualification(args: {
               entry: trade.entry,
               stopLoss: trade.stopLoss,
               takeProfit: trade.takeProfit,
-              lots: trade.lots
+              lots: trade.lots,
+              clientOrderId: trade.clientOrderId
             }
           ],
           firstDemoAutoTradeAt: doc.firstDemoAutoTradeAt ?? trade.at
         };
         doc = recountDemoAuto(doc);
+        await saveQualificationDoc(doc);
       }
-      await saveQualificationDoc(doc);
       try {
         await markTradeOpened({ uid, environment: "demo", tradeId: trade.correlationId });
       } catch {
@@ -2832,6 +2903,9 @@ export async function processDecisionForQualification(args: {
           },
           executionStage: "BROKER_SUBMITTED",
           clientOrderId: result.clientOrderId ?? fastClientOrderId,
+          entryGeometry: entryGeometryDiagnostics,
+          payloadShape: result.payloadShape ?? null,
+          commissionDiagnostics,
           finalReason: submitLabel,
           fastTelemetry: fastDecision
             ? {
@@ -2972,12 +3046,14 @@ export async function processDecisionForQualification(args: {
       return { handled: true, message: "order_submitted" };
     } catch (e) {
       const sanitized = sanitizeBrokerFailure(e);
+      await incrementQualificationBlockedAttempts(doc.uid, doc.accountId, {
+        lastError: sanitized.code
+      });
       doc = {
         ...doc,
         controlledBlockedAttempts: doc.controlledBlockedAttempts + 1,
         lastError: sanitized.code
       };
-      await saveQualificationDoc(doc);
       await logEval(
         "REJECTED",
         "BROKER_SUBMIT_ERROR",
@@ -3089,7 +3165,37 @@ export async function markQualificationTradeClosed(args: {
 
   const prior =
     doc.controlledTrades.find((t) => t.correlationId === args.correlationId) ||
-    doc.demoAutoTrades.find((t) => t.correlationId === args.correlationId);
+    doc.demoAutoTrades.find((t) => t.correlationId === args.correlationId) ||
+    doc.demoAutoTrades.find(
+      (t) =>
+        args.brokerPositionId && t.brokerPositionId === args.brokerPositionId
+    ) ||
+    doc.controlledTrades.find(
+      (t) =>
+        args.brokerPositionId && t.brokerPositionId === args.brokerPositionId
+    );
+
+  if (!prior && args.correlationId) {
+    const synthesized: DemoAutoTradeRecord = {
+      id: `tr_repair_${args.correlationId}`.slice(0, 80),
+      correlationId: args.correlationId,
+      signalId: args.correlationId,
+      at: args.closedAt ?? now,
+      closedAt: null,
+      direction: "BUY",
+      status: "OPEN",
+      pnl: null,
+      counted: false,
+      brokerOrderId: args.brokerOrderId ?? null,
+      brokerPositionId: args.brokerPositionId ?? null,
+      brokerDealId: args.brokerDealId ?? null,
+      clientOrderId: null
+    };
+    doc = {
+      ...doc,
+      demoAutoTrades: [...doc.demoAutoTrades, synthesized]
+    };
+  }
   const alreadyFullyCounted =
     prior != null &&
     prior.status === "CLOSED" &&
@@ -3129,7 +3235,9 @@ export async function markQualificationTradeClosed(args: {
           environment: "demo",
           tradeId: args.correlationId,
           pnl: confirmedPnl,
-          strategyId
+          strategyId,
+          brokerDealId: args.brokerDealId ?? null,
+          brokerPositionId: args.brokerPositionId ?? null
         });
       } catch {
         /* ignore */

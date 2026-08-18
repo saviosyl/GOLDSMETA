@@ -160,6 +160,11 @@ vi.mock("../../../../../src/services/broker/ctrader/qualificationStore", () => (
   tryAddPreview: vi.fn(),
   recountControlled: vi.fn((d: unknown) => d),
   recountDemoAuto: vi.fn((d: unknown) => d),
+  qualificationTradeKeysMatch: vi.fn(() => false),
+  mergeQualificationOpenTrade: vi.fn((_a: unknown, b: unknown) => b),
+  applyQualificationOpenTrade: vi.fn((doc: unknown) => doc),
+  upsertQualificationOpenTrade: vi.fn(async () => null),
+  incrementQualificationBlockedAttempts: vi.fn(async () => undefined),
   normalizeAccountId: (id: unknown) =>
     id == null ? null : String(id).trim() || null,
   findForeignStartedQualifications: vi.fn(async () => ({ ok: true, hits: [] }))
@@ -345,6 +350,19 @@ vi.mock("../../../../../src/services/broker/ctrader/autoTradeNotifications", () 
 
 vi.mock("../../../../../src/services/broker/ctrader/openApiClient", () => ({
   createOpenApiClient: () => ({})
+}));
+
+vi.mock("../../../../../src/services/broker/ctrader/quoteService", () => ({
+  getExecutableQuoteForAutoTrade: vi.fn(async () => ({
+    bid: quoteState.bid,
+    ask: quoteState.ask,
+    spread: quoteState.spread,
+    timestamp: quoteState.timestamp,
+    stale: quoteState.stale,
+    marketStatus: quoteState.marketStatus,
+    executable: true,
+    freshness: "LIVE"
+  }))
 }));
 
 import { createArmedCandidate } from "../../../../../src/services/broker/ctrader/armedCandidate";
@@ -548,6 +566,8 @@ describe("FAST_AUTOTRADE_V1 execution integration", () => {
     quoteState.stale = false;
     quoteState.marketStatus = "OPEN";
     quoteState.spread = 0.1;
+    quoteState.bid = 3400;
+    quoteState.ask = 3400.1;
     quoteState.timestamp = new Date().toISOString();
     qualDoc.demoAutoTrades = [];
     qualDoc.previewSignalIds = [];
@@ -1073,5 +1093,124 @@ describe("FAST_AUTOTRADE_V1 execution integration", () => {
     await runQual();
     expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
     expect(createDemoPositionLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("production stale BUY past TP → zero NewOrderReq and BLOCK_ENTRY_TARGET_ALREADY_PASSED", async () => {
+    quoteState.bid = 4398.0;
+    quoteState.ask = 4398.08;
+    evaluateFastAutoTrade.mockReturnValue(
+      fastBuy(81, {
+        regime: "NORMAL",
+        geometry: {
+          entry: 4396.35,
+          stopLoss: 4395.88,
+          takeProfit: 4397.98,
+          takeProfit2: null,
+          riskReward: 3.47
+        },
+        signalId:
+          "fast_BUY_BREAKOUT_BREAKOUT:BULLISH:4393_2_1:4396_37:4397_17:4395_97:4396"
+      })
+    );
+    await runQual();
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(0);
+    expect(createDemoPositionLifecycle).not.toHaveBeenCalled();
+    expect(createAutoTradeJournalEntry).not.toHaveBeenCalled();
+    const blocked = appendEvaluation.mock.calls.find(
+      (c) => c[0].reasonCode === "BLOCK_ENTRY_TARGET_ALREADY_PASSED"
+    );
+    expect(blocked).toBeTruthy();
+    expect(blocked?.[0].entryGeometry?.freshExecutionPrice).toBe(4398.08);
+    quoteState.bid = 3400;
+    quoteState.ask = 3400.1;
+  });
+
+  it("valid geometry persists broker fill/lots and a unique clientOrderId", async () => {
+    quoteState.bid = 4396.3;
+    quoteState.ask = 4396.4;
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: true,
+      outcome: "BROKER_FILLED",
+      orderId: "70265866",
+      positionId: "54335877",
+      executionType: "ORDER_FILLED",
+      errorCode: null,
+      clientOrderId: "will-be-replaced",
+      fillPrice: 4396.41,
+      stopLoss: 4395.94,
+      takeProfit: 4398.04,
+      filledVolumeLots: 92,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(
+      fastBuy(81, {
+        regime: "NORMAL",
+        geometry: {
+          entry: 4396.35,
+          stopLoss: 4395.88,
+          takeProfit: 4397.98,
+          takeProfit2: null,
+          riskReward: 3.47
+        },
+        signalId:
+          "fast_BUY_BREAKOUT_valid_geom:BULLISH:4393_2_1:4396_37"
+      })
+    );
+    await runQual();
+    expect(submitDemoMarketOrder).toHaveBeenCalledTimes(1);
+    const sentId = submitDemoMarketOrder.mock.calls[0][0].clientOrderId;
+    expect(sentId).toMatch(/^fa_/);
+    expect(sentId).not.toBe("fa_fast_BUY_BREAKOUT_BREAKOUTBULLISH4393_2_");
+    expect(createDemoPositionLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: 4396.41,
+        lots: 92,
+        brokerPositionId: "54335877"
+      })
+    );
+    expect(createAutoTradeJournalEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: 4396.41,
+        lots: 92
+      })
+    );
+    quoteState.bid = 3400;
+    quoteState.ask = 3400.1;
+  });
+
+  it("ORDER_FILLED with proto-zero fill does not persist entry/lots as 0", async () => {
+    submitDemoMarketOrder.mockResolvedValue({
+      accepted: true,
+      outcome: "BROKER_FILLED",
+      orderId: "70265866",
+      positionId: "54335877",
+      executionType: "ORDER_FILLED",
+      errorCode: null,
+      clientOrderId: "c_zero",
+      fillPrice: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      filledVolumeLots: 0,
+      ctidTraderAccountId: "48014710",
+      requestSent: true,
+      newOrderReqCount: 1
+    });
+    evaluateFastAutoTrade.mockReturnValue(fastBuy(74));
+    await runQual();
+    expect(createDemoPositionLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: null,
+        lots: null,
+        brokerPositionId: "54335877"
+      })
+    );
+    expect(createAutoTradeJournalEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: null,
+        lots: null
+      })
+    );
   });
 });

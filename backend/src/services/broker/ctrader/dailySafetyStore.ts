@@ -45,17 +45,42 @@ export function emptyDailySafety(
   };
 }
 
+function historyRef(uid: string, environment: AutoTradeEnvironment, day: string) {
+  return getFirestore().doc(
+    `users/${uid}/autotradeDailySafetyHistory/${environment}_${day}`
+  );
+}
+
 export async function getDailySafetyDoc(
   uid: string,
   environment: AutoTradeEnvironment
 ): Promise<DailySafetyDocument> {
   const day = tradingDayKey();
-  const snap = await docRef(uid, environment).get();
-  if (!snap.exists) return emptyDailySafety(uid, environment, day);
+  const ref = docRef(uid, environment);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    const fresh = emptyDailySafety(uid, environment, day);
+    await ref.set(fresh);
+    return fresh;
+  }
   const data = snap.data() as DailySafetyDocument;
   if (data.tradingDay !== day) {
-    // New trading day — reset counters, keep uid/env.
-    return emptyDailySafety(uid, environment, day);
+    // Persist yesterday as history; replace the active document (no merge).
+    const archived = {
+      ...data,
+      uid,
+      environment
+    };
+    try {
+      await historyRef(uid, environment, data.tradingDay || "unknown").set(archived, {
+        merge: true
+      });
+    } catch {
+      /* history is best-effort — active day must still roll */
+    }
+    const fresh = emptyDailySafety(uid, environment, day);
+    await ref.set(fresh);
+    return fresh;
   }
   return {
     ...emptyDailySafety(uid, environment, day),
@@ -70,6 +95,18 @@ export async function getDailySafetyDoc(
 }
 
 export async function saveDailySafetyDoc(doc: DailySafetyDocument): Promise<void> {
-  const next = { ...doc, updatedAt: new Date().toISOString() };
-  await docRef(doc.uid, doc.environment).set(next, { merge: true });
+  const today = tradingDayKey();
+  if (doc.tradingDay && doc.tradingDay !== today) {
+    try {
+      await historyRef(doc.uid, doc.environment, doc.tradingDay).set(
+        { ...doc, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch {
+      /* keep going — never write yesterday onto today's active doc */
+    }
+    return;
+  }
+  const next = { ...doc, tradingDay: today, updatedAt: new Date().toISOString() };
+  await docRef(doc.uid, doc.environment).set(next);
 }

@@ -135,6 +135,7 @@ export type DemoMarketOrderResult = {
     | "BROKER_ACCEPTED_PENDING_FILL";
   requestSent?: boolean;
   newOrderReqCount?: number;
+  payloadShape?: Record<string, unknown> | null;
   raw?: Record<string, unknown>;
 };
 

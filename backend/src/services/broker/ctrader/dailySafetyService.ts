@@ -210,12 +210,19 @@ export async function markTradeClosed(args: {
   tradeId: string;
   pnl: number;
   strategyId?: string | null;
+  brokerDealId?: string | null;
+  brokerPositionId?: string | null;
 }): Promise<void> {
   const [settings, daily] = await Promise.all([
     getUserAutoTradeSettings(args.uid, args.environment),
     getDailySafetyDoc(args.uid, args.environment)
   ]);
-  if (daily.countedTradeIds.includes(`close:${args.tradeId}`)) return;
+  const keys = [
+    `close:${args.tradeId}`,
+    args.brokerDealId ? `deal:${args.brokerDealId}` : null,
+    args.brokerPositionId ? `posclose:${args.brokerPositionId}` : null
+  ].filter((k): k is string => Boolean(k));
+  if (keys.some((k) => daily.countedTradeIds.includes(k))) return;
 
   daily.openPositions = Math.max(0, daily.openPositions - 1);
   daily.realisedPnl += args.pnl;
@@ -269,7 +276,7 @@ export async function markTradeClosed(args: {
     daily.pausedAt = daily.pausedAt ?? new Date().toISOString();
   }
 
-  daily.countedTradeIds = [...daily.countedTradeIds, `close:${args.tradeId}`].slice(-200);
+  daily.countedTradeIds = [...daily.countedTradeIds, ...keys].slice(-200);
   await saveDailySafetyDoc(daily);
 }
 
