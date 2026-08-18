@@ -24,7 +24,8 @@ export function resetGoldHunterTradeMemory(): void {
  */
 export function stripUndefinedForFirestore<T>(value: T): T {
   if (Array.isArray(value)) {
-    return value.map((item) => stripUndefinedForFirestore(item)) as T;
+    const items = value as unknown[];
+    return items.map((item) => stripUndefinedForFirestore(item)) as T;
   }
   if (value && typeof value === "object" && !(value instanceof Date)) {
     const out: Record<string, unknown> = {};

@@ -1,11 +1,21 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
- * Preserves V1 / V1.1 / V1.2 research baselines; does not retune them.
+ * V1 research baselines preserved in git history.
+ * Brain V2 revises Setup B entry quality only (Demo forward validation).
  */
-export const GOLD_HUNTER_FAST_STRATEGY_VERSION = "GOLD_HUNTER_FAST_V1" as const;
+/** Brain identity for Demo A/B/C selection — distinguishable from V1. */
+export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V2" as const;
+/**
+ * Strategy version stamped on selector candidates / frozen identity.
+ * Brain V2: Setup B uses prior-only breakouts + stronger confirmation.
+ * A/C specialist logic unchanged from V1.
+ */
+export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
+  GOLD_HUNTER_BRAIN_VERSION;
 export const GOLD_HUNTER_FAST_ENGINE_VERSION = "GH_FAST_EVENT_V1" as const;
+/** Feature schema includes priorHigh/Low* (past-only, excludes current tick). */
 export const GOLD_HUNTER_FAST_FEATURE_SCHEMA_VERSION =
-  "gh-fast-features-v1.0.0" as const;
+  "gh-fast-features-v1.1.0" as const;
 
 /** Engineering latency targets (ms) — not broker guarantees. */
 export const GH_FAST_LATENCY_P50_TARGET_MS = 20;

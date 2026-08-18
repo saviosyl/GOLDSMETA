@@ -9,11 +9,13 @@
 import { createHash } from "node:crypto";
 import {
   GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+  GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
   type GhFastDepthEvent,
   type ResearchDepthValidity
 } from "./abc";
 import { GoldHunterFeaturePipeline } from "./abc/featurePipeline";
+import type { GhBreakoutDiagnostics } from "./abc/setups";
 import { GH_ADMIN_STRATEGY_ID } from "./types";
 
 export type GoldHunterSetupLetter = "A" | "B" | "C";
@@ -45,6 +47,17 @@ export type GoldHunterSelectedCandidate = {
   consumed: boolean;
   /** Wall-clock ms when opportunity opened (for freshness). */
   opportunityStartedAtMs: number;
+  /** Brain V2 identity — distinguishable from V1. */
+  brainVersion?: typeof GOLD_HUNTER_BRAIN_VERSION;
+  /** Additive B diagnostics when selected setup is B (never invents fills). */
+  breakoutDiagnostics?: GhBreakoutDiagnostics | null;
+  /** B re-entry / regime-reset state for telemetry. */
+  bReentryState?: {
+    structuralResetOk: boolean;
+    timeFloorOk: boolean;
+    lastBSide: "BUY" | "SELL" | null;
+    rejectionReason: string | null;
+  };
 };
 
 /** Explicit selector tick result — execution only when newOpportunity. */
@@ -155,6 +168,17 @@ type ActiveOpportunity = {
   bookGeneration: number;
   resyncGeneration: number;
   consumed: boolean;
+  breakoutReference: number | null;
+};
+
+/** B-specific anti-churn / regime state (does not gate A or C). */
+type BRegimeState = {
+  lastSide: "BUY" | "SELL" | null;
+  /** Prior extreme that was cleared (high for BUY, low for SELL). */
+  lastBreakoutReference: number | null;
+  endedAtMs: number | null;
+  /** True once mid returned inside the prior breakout reference. */
+  structuralResetComplete: boolean;
 };
 
 export class GoldHunterStrategySelector {
@@ -175,6 +199,12 @@ export class GoldHunterStrategySelector {
   private lastOpportunityEndedAtMs: number | null = null;
   private lastSpotAtMs: number | null = null;
   private lastDepthAtMs: number | null = null;
+  private bRegime: BRegimeState = {
+    lastSide: null,
+    lastBreakoutReference: null,
+    endedAtMs: null,
+    structuralResetComplete: true
+  };
 
   constructor(opts?: { depthFreshnessMs?: number }) {
     try {
@@ -220,11 +250,16 @@ export class GoldHunterStrategySelector {
     this.resyncGeneration += 1;
     this.pipeline.clearForResync();
     if (this.activeOpportunity) {
-      this.lastOpportunityEndedAtMs = Date.now();
-      this.activeOpportunity = null;
+      this.endActiveOpportunity(Date.now(), null);
     }
     this.lastCandidateForDisplay = null;
     this.lastSnapshot = null;
+    this.bRegime = {
+      lastSide: null,
+      lastBreakoutReference: null,
+      endedAtMs: null,
+      structuralResetComplete: true
+    };
   }
 
   onSpot(args: {
@@ -275,10 +310,50 @@ export class GoldHunterStrategySelector {
     return this.afterSnapshot(snap, seq, args.receivedAtMs);
   }
 
-  private endActiveOpportunity(atMs: number): void {
-    if (this.activeOpportunity) {
-      this.lastOpportunityEndedAtMs = atMs;
-      this.activeOpportunity = null;
+  private endActiveOpportunity(
+    atMs: number,
+    mid: number | null
+  ): void {
+    if (!this.activeOpportunity) return;
+    const ending = this.activeOpportunity;
+    this.lastOpportunityEndedAtMs = atMs;
+    if (ending.setup === "B") {
+      const ref =
+        ending.breakoutReference ??
+        this.lastCandidateForDisplay?.breakoutDiagnostics?.breakoutReference ??
+        null;
+      this.bRegime = {
+        lastSide: ending.side,
+        lastBreakoutReference: ref,
+        endedAtMs: atMs,
+        // Opposite-side flip or same-side re-entry requires a structural unwind.
+        structuralResetComplete: false
+      };
+      // If mid already back inside at end (rare), mark reset immediately.
+      if (mid != null && ref != null) {
+        this.updateBStructuralReset(mid);
+      }
+    }
+    this.activeOpportunity = null;
+  }
+
+  /**
+   * Structural reset: after a B BUY, mid must return to/below the cleared prior
+   * high before another B BUY is fresh. After B SELL, mid must return to/above
+   * the cleared prior low. Also enables opposite-direction regime change.
+   */
+  private updateBStructuralReset(mid: number): void {
+    if (this.bRegime.structuralResetComplete) return;
+    const ref = this.bRegime.lastBreakoutReference;
+    const side = this.bRegime.lastSide;
+    if (ref == null || side == null) {
+      this.bRegime.structuralResetComplete = true;
+      return;
+    }
+    if (side === "BUY" && mid <= ref) {
+      this.bRegime.structuralResetComplete = true;
+    } else if (side === "SELL" && mid >= ref) {
+      this.bRegime.structuralResetComplete = true;
     }
   }
 
@@ -286,6 +361,61 @@ export class GoldHunterStrategySelector {
     const floor = this.pipeline.config().rearmFloorMs;
     if (this.lastOpportunityEndedAtMs == null) return true;
     return atMs - this.lastOpportunityEndedAtMs >= floor;
+  }
+
+  /**
+   * B-only arming gate. A/C ignore this. Structural reset is primary;
+   * breakoutBRearmFloorMs is a secondary time backstop.
+   */
+  private bArmingGate(args: {
+    side: "BUY" | "SELL";
+    atMs: number;
+    mid: number;
+  }): {
+    ok: boolean;
+    structuralResetOk: boolean;
+    timeFloorOk: boolean;
+    rejectionReason: string | null;
+  } {
+    this.updateBStructuralReset(args.mid);
+    if (this.bRegime.endedAtMs == null || this.bRegime.lastSide == null) {
+      return {
+        ok: true,
+        structuralResetOk: true,
+        timeFloorOk: true,
+        rejectionReason: null
+      };
+    }
+    const cfg = this.pipeline.config();
+    const elapsed = args.atMs - this.bRegime.endedAtMs;
+    const timeFloorOk = elapsed >= cfg.breakoutBRearmFloorMs;
+    const structuralResetOk = this.bRegime.structuralResetComplete;
+
+    if (!structuralResetOk) {
+      return {
+        ok: false,
+        structuralResetOk: false,
+        timeFloorOk,
+        rejectionReason:
+          args.side === this.bRegime.lastSide
+            ? "b_no_structural_reset"
+            : "b_no_regime_reset"
+      };
+    }
+    if (!timeFloorOk) {
+      return {
+        ok: false,
+        structuralResetOk: true,
+        timeFloorOk: false,
+        rejectionReason: "b_rearm_time_floor"
+      };
+    }
+    return {
+      ok: true,
+      structuralResetOk: true,
+      timeFloorOk: true,
+      rejectionReason: null
+    };
   }
 
   private buildCandidate(args: {
@@ -305,6 +435,8 @@ export class GoldHunterStrategySelector {
     receivedAtMs: number;
     opportunityStartedAtMs: number;
     consumed: boolean;
+    breakoutDiagnostics?: GhBreakoutDiagnostics | null;
+    bReentryState?: GoldHunterSelectedCandidate["bReentryState"];
   }): GoldHunterSelectedCandidate {
     return {
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -328,7 +460,10 @@ export class GoldHunterStrategySelector {
       featureSchema: GOLD_HUNTER_FAST_STRATEGY_VERSION,
       mid: (args.bid + args.ask) / 2,
       consumed: args.consumed,
-      opportunityStartedAtMs: args.opportunityStartedAtMs
+      opportunityStartedAtMs: args.opportunityStartedAtMs,
+      brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+      breakoutDiagnostics: args.breakoutDiagnostics ?? null,
+      bReentryState: args.bReentryState
     };
   }
 
@@ -340,9 +475,17 @@ export class GoldHunterStrategySelector {
     this.lastSnapshot = snap;
     this.lastObservationAt = new Date(receivedAtMs).toISOString();
 
+    const midHint =
+      snap.lastFeatureSpot != null
+        ? (snap.lastFeatureSpot.bid + snap.lastFeatureSpot.ask) / 2
+        : snap.bestBid != null && snap.bestAsk != null
+          ? (snap.bestBid + snap.bestAsk) / 2
+          : null;
+    if (midHint != null) this.updateBStructuralReset(midHint);
+
     const hit = snap.selected;
     if (!hit) {
-      this.endActiveOpportunity(receivedAtMs);
+      this.endActiveOpportunity(receivedAtMs, midHint);
       return {
         selectedNow: false,
         newOpportunity: false,
@@ -353,7 +496,7 @@ export class GoldHunterStrategySelector {
 
     const letter = setupLetter(hit.setup);
     if (!letter) {
-      this.endActiveOpportunity(receivedAtMs);
+      this.endActiveOpportunity(receivedAtMs, midHint);
       return {
         selectedNow: false,
         newOpportunity: false,
@@ -373,8 +516,12 @@ export class GoldHunterStrategySelector {
       };
     }
 
+    const mid = (bid + ask) / 2;
+    this.updateBStructuralReset(mid);
     const spread = ask - bid;
     const depthExecutable = isDepthExecutableForOrder(snap.depthValidity);
+    const breakoutDiagnostics =
+      letter === "B" ? hit.diagnostics ?? null : null;
     const sameActive =
       this.activeOpportunity != null &&
       this.activeOpportunity.setup === letter &&
@@ -399,7 +546,8 @@ export class GoldHunterStrategySelector {
         depthExecutable,
         receivedAtMs,
         opportunityStartedAtMs: this.activeOpportunity.startedAtMs,
-        consumed: this.activeOpportunity.consumed
+        consumed: this.activeOpportunity.consumed,
+        breakoutDiagnostics
       });
       this.lastCandidateForDisplay = updated;
       return {
@@ -412,11 +560,21 @@ export class GoldHunterStrategySelector {
 
     // Setup/side/resync changed → end prior opportunity before considering rearm.
     if (this.activeOpportunity) {
-      this.endActiveOpportunity(receivedAtMs);
+      this.endActiveOpportunity(receivedAtMs, mid);
     }
 
-    if (!this.rearmSatisfied(receivedAtMs)) {
-      // Selected for display, but rearm floor not yet met — no new opportunity.
+    const bGate =
+      letter === "B"
+        ? this.bArmingGate({ side: hit.side, atMs: receivedAtMs, mid })
+        : {
+            ok: true,
+            structuralResetOk: true,
+            timeFloorOk: true,
+            rejectionReason: null as string | null
+          };
+
+    if (!this.rearmSatisfied(receivedAtMs) || (letter === "B" && !bGate.ok)) {
+      // Selected for display, but rearm / B structural gate not met.
       const displayOnly = this.buildCandidate({
         letter,
         setupId: hit.setup,
@@ -433,7 +591,21 @@ export class GoldHunterStrategySelector {
         depthExecutable,
         receivedAtMs,
         opportunityStartedAtMs: receivedAtMs,
-        consumed: true // not executable
+        consumed: true, // not executable
+        breakoutDiagnostics,
+        bReentryState:
+          letter === "B"
+            ? {
+                structuralResetOk: bGate.structuralResetOk,
+                timeFloorOk: bGate.timeFloorOk,
+                lastBSide: this.bRegime.lastSide,
+                rejectionReason:
+                  bGate.rejectionReason ??
+                  (!this.rearmSatisfied(receivedAtMs)
+                    ? "generic_rearm_floor"
+                    : null)
+              }
+            : undefined
       });
       this.lastCandidateForDisplay = displayOnly;
       return {
@@ -461,7 +633,8 @@ export class GoldHunterStrategySelector {
       startReceiveSeq: receiveSeq,
       bookGeneration: snap.bookGeneration,
       resyncGeneration: this.resyncGeneration,
-      consumed: false
+      consumed: false,
+      breakoutReference: breakoutDiagnostics?.breakoutReference ?? null
     };
 
     const candidate = this.buildCandidate({
@@ -480,7 +653,17 @@ export class GoldHunterStrategySelector {
       depthExecutable,
       receivedAtMs,
       opportunityStartedAtMs: receivedAtMs,
-      consumed: false
+      consumed: false,
+      breakoutDiagnostics,
+      bReentryState:
+        letter === "B"
+          ? {
+              structuralResetOk: true,
+              timeFloorOk: true,
+              lastBSide: this.bRegime.lastSide,
+              rejectionReason: null
+            }
+          : undefined
     });
     this.lastCandidateForDisplay = candidate;
 
@@ -570,6 +753,7 @@ export class GoldHunterStrategySelector {
       setup: string;
       side: "BUY" | "SELL";
       quality: number;
+      diagnostics?: GhBreakoutDiagnostics;
     } | null;
     receivedAtMs: number;
     receiveSeq?: number;
@@ -649,10 +833,16 @@ export class GoldHunterStrategySelector {
       low15s: bid,
       high30s: ask,
       low30s: bid,
+      priorHigh5s: bid,
+      priorLow5s: bid,
+      priorHigh10s: bid,
+      priorLow10s: bid,
       distHigh1s: 0,
       distLow1s: 0,
       distHigh5s: 0,
       distLow5s: 0,
+      distPriorHigh5s: 0,
+      distPriorLow5s: 0,
       upTouches5s: 0,
       downTouches5s: 0,
       depth: depthStats
@@ -668,7 +858,8 @@ export class GoldHunterStrategySelector {
               | "C_PULLBACK_REACCEL",
             side: args.selected.side,
             quality: args.selected.quality,
-            reasons: ["test"]
+            reasons: ["test"],
+            diagnostics: args.selected.diagnostics
           }
         : null,
       bestBid: bid,

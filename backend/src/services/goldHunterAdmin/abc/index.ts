@@ -17,8 +17,22 @@ export {
 export type { ResearchDepthValidity } from "./depthRecovery";
 export { FastFeatureEngine } from "./features";
 export type { GhFastFeatureSnapshot } from "./features";
-export { evaluateSetupsDetailed, evaluateSetups } from "./setups";
-export type { SetupHit } from "./setups";
+export {
+  GOLD_HUNTER_FAST_STRATEGY_VERSION,
+  GOLD_HUNTER_FAST_ENGINE_VERSION,
+  GOLD_HUNTER_BRAIN_VERSION,
+  GH_FAST_MAX_OPEN_POSITIONS,
+  GH_FAST_BROKER_EXECUTION_ENABLED
+} from "./versions";
+export {
+  evaluateSetupsDetailed,
+  evaluateSetups,
+  scoreMomentumIgnition,
+  scoreFastBreakout,
+  scorePullbackReaccel,
+  requiredBreakoutDistance
+} from "./setups";
+export type { SetupHit, GhBreakoutDiagnostics } from "./setups";
 export {
   frozenGhFastSoakConfig,
   getFrozenGhFastIdentity,
@@ -41,10 +55,6 @@ export type {
   GhFastExitReason,
   GhFastSpecialistRawEval
 } from "./types";
-export {
-  GOLD_HUNTER_FAST_STRATEGY_VERSION,
-  GOLD_HUNTER_FAST_ENGINE_VERSION
-} from "./versions";
 export {
   GoldHunterFeaturePipeline
 } from "./featurePipeline";

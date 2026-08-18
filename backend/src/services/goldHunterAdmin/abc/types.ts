@@ -228,6 +228,22 @@ export type GhFastConfig = {
   depthTopN: number;
   /** Setup quality thresholds (interpretable, not ML confidence). */
   minSetupQuality: number;
+  /**
+   * B-only quality floor (Brain V2). Higher than global minSetupQuality so
+   * mediocre breakouts cannot pass on a large unconditional base score.
+   */
+  minSetupQualityB: number;
+  /** B-only minimum path efficiency over 1s (chop filter). */
+  breakoutMinEfficiency1s: number;
+  /** B-only minimum |signedImbalance1s| for directional confirmation. */
+  breakoutImbalanceMin: number;
+  /** B-only minimum supportive |depthImbalance| (sign must match side). */
+  breakoutDepthImbalanceMin: number;
+  /**
+   * B-only secondary re-arm time floor (ms) after a B opportunity ends.
+   * Structural reset is primary; this is a backstop only.
+   */
+  breakoutBRearmFloorMs: number;
   momentumVelMin: number;
   breakoutTouchCount: number;
   pullbackRetraceMax: number;
