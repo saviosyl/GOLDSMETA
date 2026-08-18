@@ -244,7 +244,7 @@ export async function fetchConfirmedCloseForPosition(args: {
   let deals: BrokerClosedDeal[] = [];
   if (client.fetchDemoDealsByPositionId) {
     try {
-      deals = await client.fetchDemoDealsByPositionId({
+      const page = await client.fetchDemoDealsByPositionId({
         accessToken,
         clientId,
         clientSecret,
@@ -253,6 +253,11 @@ export async function fetchConfirmedCloseForPosition(args: {
         fromTimestampMs,
         toTimestampMs
       });
+      const agg = aggregateClosingDeals(page.items);
+      // Truncated page without a closing deal is NOT proof of absence.
+      if (!page.hasMore || agg != null) {
+        deals = page.items;
+      }
     } catch {
       deals = [];
     }

@@ -112,7 +112,7 @@ async function fetchClosingDealForPosition(args: {
     : Date.now() - 7 * 86_400_000;
   const toTimestampMs = Date.now() + 60_000;
   if (client.fetchDemoDealsByPositionId) {
-    const deals = await client.fetchDemoDealsByPositionId({
+    const page = await client.fetchDemoDealsByPositionId({
       accessToken,
       clientId,
       clientSecret,
@@ -121,8 +121,12 @@ async function fetchClosingDealForPosition(args: {
       fromTimestampMs,
       toTimestampMs
     });
-    const agg = aggregateClosingDeals(deals);
+    const agg = aggregateClosingDeals(page.items);
+    // Truncated hasMore without closing P/L → not authoritative absence.
     if (agg) return agg;
+    if (page.hasMore) {
+      /* fall through to DealList */
+    }
   }
   if (client.fetchDemoDealList) {
     const deals = await client.fetchDemoDealList({

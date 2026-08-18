@@ -270,20 +270,25 @@ describe("demo close accounting lifecycle", () => {
       brokerPnlConfirmed: false,
       netPnl: null
     });
-    fetchDemoDealsByPositionId.mockResolvedValue([
-      {
-        dealId: "deal-1",
-        orderId: null,
-        positionId: "53870324",
-        closePrice: 4376.37,
-        closedAt: "2026-08-10T19:00:00.000Z",
-        grossPnl: -2.93,
-        commission: -0.78,
-        swap: 0,
-        netPnl: -3.71,
-        closedVolumeLots: 0.13
-      }
-    ]);
+    fetchDemoDealsByPositionId.mockResolvedValue({
+      items: [
+        {
+          dealId: "deal-1",
+          orderId: null,
+          positionId: "53870324",
+          closePrice: 4376.37,
+          closedAt: "2026-08-10T19:00:00.000Z",
+          grossPnl: -2.93,
+          commission: -0.78,
+          swap: 0,
+          netPnl: -3.71,
+          closedVolumeLots: 0.13
+        }
+      ],
+      hasMore: false,
+      fromTimestampMs: 0,
+      toTimestampMs: Date.now()
+    });
 
     const r = await repairUnaccountedDemoCloses("uid");
     expect(r.examined).toBe(1);

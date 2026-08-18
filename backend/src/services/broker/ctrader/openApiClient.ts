@@ -255,6 +255,12 @@ export type BrokerDealEvidence = {
   tradeSide: "BUY" | "SELL" | null;
   isClosing: boolean;
   close: BrokerClosedDeal | null;
+  /** From deal / nested tradeData when broker supplies order label. */
+  label: string | null;
+  /** From deal / nested tradeData when broker supplies order comment. */
+  comment: string | null;
+  symbolId: string | null;
+  dealStatus: string | null;
 };
 
 /** Single ProtoOAOrderList / DealList response page. */
@@ -431,7 +437,7 @@ export interface CTraderOpenApiClient {
     positionId: string;
     fromTimestampMs: number;
     toTimestampMs: number;
-  }): Promise<BrokerClosedDeal[]>;
+  }): Promise<BrokerHistoryPage<BrokerClosedDeal>>;
   /** Demo host only — deal list in a time window (max 7 days). */
   fetchDemoDealList?(args: {
     accessToken: string;
@@ -634,6 +640,7 @@ export function parseBrokerDealEvidence(raw: unknown): BrokerDealEvidence[] {
   const out: BrokerDealEvidence[] = [];
   for (const item of list) {
     const row = (item ?? {}) as Record<string, unknown>;
+    const trade = (row.tradeData ?? {}) as Record<string, unknown>;
     const dealId = row.dealId != null ? String(row.dealId) : "";
     if (!dealId) continue;
     const closeRaw = (row.closePositionDetail ?? null) as Record<
@@ -644,6 +651,25 @@ export function parseBrokerDealEvidence(raw: unknown): BrokerDealEvidence[] {
     const sideNum = asNumber(row.tradeSide);
     const filledVol = asNumber(row.filledVolume ?? row.volume);
     const execTs = asNumber(row.executionTimestamp ?? row.utcLastUpdateTimestamp);
+    const dealStatusRaw = row.dealStatus;
+    const dealStatus =
+      dealStatusRaw == null
+        ? null
+        : typeof dealStatusRaw === "number"
+          ? String(dealStatusRaw)
+          : String(dealStatusRaw).trim() || null;
+    const label =
+      typeof row.label === "string"
+        ? row.label
+        : typeof trade.label === "string"
+          ? trade.label
+          : null;
+    const comment =
+      typeof row.comment === "string"
+        ? row.comment
+        : typeof trade.comment === "string"
+          ? trade.comment
+          : null;
     out.push({
       dealId,
       orderId: row.orderId != null ? String(row.orderId) : null,
@@ -654,10 +680,29 @@ export function parseBrokerDealEvidence(raw: unknown): BrokerDealEvidence[] {
         filledVol != null ? Number((filledVol / 100).toFixed(8)) : null,
       tradeSide: sideNum === 2 ? "SELL" : sideNum === 1 ? "BUY" : null,
       isClosing: closeRaw != null,
-      close: closing[0] ?? null
+      close: closing[0] ?? null,
+      label,
+      comment,
+      symbolId:
+        row.symbolId != null
+          ? String(row.symbolId)
+          : trade.symbolId != null
+            ? String(trade.symbolId)
+            : null,
+      dealStatus
     });
   }
   return out;
+}
+
+/** Exact goldHunterTradeId label ownership — never comment-only. */
+export function findDealByExactGoldHunterLabel(
+  deals: readonly BrokerDealEvidence[],
+  goldHunterTradeId: string
+): BrokerDealEvidence | null {
+  const want = goldHunterTradeId.trim();
+  if (!want) return null;
+  return deals.find((d) => d.label === want) ?? null;
 }
 
 /** Exact clientOrderId match — never fall back to newest / same-side. */
@@ -1933,24 +1978,25 @@ export function createLiveOpenApiClient(): CTraderOpenApiClient {
           accessToken: args.accessToken,
           ctidTraderAccountId: Number(args.ctidTraderAccountId)
         });
-        // Spotware: toTimestamp - fromTimestamp <= 7 days; toTimestamp must not be future.
-        const nowMs = Date.now();
-        const toTimestamp = Math.min(args.toTimestampMs, nowMs);
-        const span = Math.min(
-          Math.max(toTimestamp - args.fromTimestampMs, 1),
-          7 * 86_400_000
-        );
-        const fromTimestamp = toTimestamp - span;
+        const clamped = clampOrderTsAnchoredHistoryWindow({
+          fromTimestampMs: args.fromTimestampMs,
+          toTimestampMs: args.toTimestampMs
+        });
         const res = (await connection.sendCommand(
           "ProtoOADealListByPositionIdReq",
           {
             ctidTraderAccountId: Number(args.ctidTraderAccountId),
             positionId: Number(args.positionId),
-            fromTimestamp,
-            toTimestamp
+            fromTimestamp: clamped.fromTimestampMs,
+            toTimestamp: clamped.toTimestampMs
           }
         )) as Record<string, unknown>;
-        return parseBrokerClosedDeals(res.deal ?? res.deals);
+        return {
+          items: parseBrokerClosedDeals(res.deal ?? res.deals),
+          hasMore: parseHistoryHasMore(res.hasMore),
+          fromTimestampMs: clamped.fromTimestampMs,
+          toTimestampMs: clamped.toTimestampMs
+        };
       });
     },
 
@@ -2241,26 +2287,32 @@ export function createMockOpenApiClient(opts?: {
       };
     },
     async fetchDemoDealsByPositionId(args) {
-      return [
-        {
-          dealId: "mock-deal-1",
-          orderId: "mock-order-close",
-          positionId: args.positionId,
-          closePrice: 2360,
-          closedAt: new Date().toISOString(),
-          grossPnl: 12.5,
-          commission: 0.3,
-          swap: 0,
-          netPnl: 12.2,
-          closedVolumeLots: 0.01
-        }
-      ];
+      return {
+        items: [
+          {
+            dealId: "mock-deal-1",
+            orderId: "mock-order-close",
+            positionId: args.positionId,
+            closePrice: 2360,
+            closedAt: new Date().toISOString(),
+            grossPnl: 12.5,
+            commission: 0.3,
+            swap: 0,
+            netPnl: 12.2,
+            closedVolumeLots: 0.01
+          }
+        ],
+        hasMore: false,
+        fromTimestampMs: args.fromTimestampMs,
+        toTimestampMs: args.toTimestampMs
+      };
     },
     async fetchDemoDealList(args) {
-      return this.fetchDemoDealsByPositionId!({
+      const page = await this.fetchDemoDealsByPositionId!({
         ...args,
         positionId: "mock-pos-1"
       });
+      return page.items;
     },
 
     async fetchDemoDealEvidenceList(args) {
@@ -2275,7 +2327,11 @@ export function createMockOpenApiClient(opts?: {
           filledVolumeLots: d.closedVolumeLots,
           tradeSide: null,
           isClosing: true,
-          close: d
+          close: d,
+          label: null,
+          comment: null,
+          symbolId: null,
+          dealStatus: null
         })),
         hasMore: false,
         fromTimestampMs: args.fromTimestampMs,

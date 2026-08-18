@@ -62,12 +62,28 @@ export type DemoBrokerHistoryHooks = {
     fromTimestampMs: number;
     toTimestampMs: number;
   }) => Promise<BrokerHistoryReadResult<BrokerHistoryPage<BrokerDealEvidence>>>;
+  /** Page-level DealListByPositionId (hasMore aware). */
+  fetchDealsByPositionIdPage?: (args: {
+    ownerUid: string;
+    positionId: string;
+    fromTimestampMs: number;
+    toTimestampMs: number;
+  }) => Promise<BrokerHistoryReadResult<BrokerHistoryPage<BrokerClosedDeal>>>;
+  /**
+   * Optional full closing-deal override for tests.
+   * When set, bypasses exhaustive by-position walk.
+   */
   fetchClosingDealsForPosition?: (args: {
     ownerUid: string;
     positionId: string;
     fromTimestampMs: number;
     toTimestampMs: number;
-  }) => Promise<BrokerHistoryReadResult<BrokerClosedDeal | null>>;
+  }) => Promise<
+    BrokerHistoryReadResult<{
+      deal: BrokerClosedDeal | null;
+      complete: boolean;
+    }>
+  >;
 };
 
 let hooks: DemoBrokerHistoryHooks = {};
@@ -419,29 +435,130 @@ export async function fetchDemoHistoricalDealEvidenceExhaustive(args: {
   ownerUid: string;
   fromTimestampMs: number;
   toTimestampMs: number;
-  /** Optional early-stop when a deal for this orderId / positionId appears. */
-  stopOnOrderId?: string;
-  stopOnPositionId?: string;
+  /**
+   * Early-stop policy:
+   * - OPENING_FOR_ORDER: stop when any deal for orderId appears (positionId recovery)
+   * - CLOSING_FOR_POSITION: stop only when a closing deal (netPnl) for positionId appears
+   * - none / omit: fully exhaustive (required for NEVER_FOUND emptiness + close proof)
+   */
+  earlyStop?:
+    | { mode: "OPENING_FOR_ORDER"; orderId: string }
+    | { mode: "CLOSING_FOR_POSITION"; positionId: string }
+    | { mode: "LABEL_MATCH"; goldHunterTradeId: string }
+    | null;
 }): Promise<ExhaustiveHistoryResult<BrokerDealEvidence>> {
-  const orderId = args.stopOnOrderId ? String(args.stopOnOrderId) : "";
-  const positionId = args.stopOnPositionId
-    ? String(args.stopOnPositionId)
-    : "";
+  const early = args.earlyStop ?? null;
   return fetchExhaustiveHistoryPages({
     ownerUid: args.ownerUid,
     fromTimestampMs: args.fromTimestampMs,
     toTimestampMs: args.toTimestampMs,
     fetchPage: fetchDealEvidencePage,
     itemKey: (d) => d.dealId,
-    findMatch:
-      orderId || positionId
-        ? (items) =>
-            items.find(
-              (d) =>
-                (orderId && d.orderId === orderId) ||
-                (positionId && d.positionId === positionId)
-            ) ?? null
-        : undefined
+    findMatch: early
+      ? (items) => {
+          if (early.mode === "OPENING_FOR_ORDER") {
+            return (
+              items.find(
+                (d) =>
+                  d.orderId === early.orderId &&
+                  d.positionId &&
+                  !d.isClosing
+              ) ??
+              items.find(
+                (d) => d.orderId === early.orderId && d.positionId
+              ) ??
+              null
+            );
+          }
+          if (early.mode === "CLOSING_FOR_POSITION") {
+            return (
+              items.find(
+                (d) =>
+                  d.positionId === early.positionId &&
+                  d.isClosing &&
+                  d.close?.netPnl != null
+              ) ?? null
+            );
+          }
+          if (early.mode === "LABEL_MATCH") {
+            return (
+              items.find((d) => d.label === early.goldHunterTradeId) ?? null
+            );
+          }
+          return null;
+        }
+      : undefined
+  });
+}
+
+async function fetchDealsByPositionIdPage(args: {
+  ownerUid: string;
+  positionId: string;
+  fromTimestampMs: number;
+  toTimestampMs: number;
+}): Promise<BrokerHistoryReadResult<BrokerHistoryPage<BrokerClosedDeal>>> {
+  if (hooks.fetchDealsByPositionIdPage) {
+    return hooks.fetchDealsByPositionIdPage(args);
+  }
+  try {
+    const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+    const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+    if (!clientId || !clientSecret) {
+      return { ok: false, errorCode: "CTRADER_CLIENT_CONFIG_MISSING" };
+    }
+    const { accessToken, connection } = await ensureFreshAccessToken(
+      args.ownerUid
+    );
+    const accountId = assertDemoAccount(connection);
+    const client = createOpenApiClient();
+    if (!client.fetchDemoDealsByPositionId) {
+      return { ok: false, errorCode: "DEALS_BY_POSITION_UNSUPPORTED" };
+    }
+    const page = await client.fetchDemoDealsByPositionId({
+      accessToken,
+      clientId,
+      clientSecret,
+      ctidTraderAccountId: accountId,
+      positionId: args.positionId,
+      fromTimestampMs: args.fromTimestampMs,
+      toTimestampMs: args.toTimestampMs
+    });
+    return { ok: true, value: page };
+  } catch (err) {
+    return {
+      ok: false,
+      errorCode:
+        err instanceof Error ? err.message.slice(0, 80) : "DEALS_BY_POSITION_FAIL"
+    };
+  }
+}
+
+/**
+ * Exhaustive ProtoOADealListByPositionId walk (hasMore-aware).
+ * Incomplete results must never be treated as "no closing deal".
+ */
+export async function fetchDemoDealsByPositionIdExhaustive(args: {
+  ownerUid: string;
+  positionId: string;
+  fromTimestampMs: number;
+  toTimestampMs: number;
+  /** Stop early only when a closing deal with netPnl is found. */
+  stopOnClosingDeal?: boolean;
+}): Promise<ExhaustiveHistoryResult<BrokerClosedDeal>> {
+  const positionId = String(args.positionId);
+  return fetchExhaustiveHistoryPages({
+    ownerUid: args.ownerUid,
+    fromTimestampMs: args.fromTimestampMs,
+    toTimestampMs: args.toTimestampMs,
+    fetchPage: (pageArgs) =>
+      fetchDealsByPositionIdPage({
+        ...pageArgs,
+        positionId
+      }),
+    itemKey: (d) => d.dealId,
+    findMatch: args.stopOnClosingDeal
+      ? (items) => items.find((d) => d.netPnl != null) ?? null
+      : undefined
   });
 }
 
@@ -467,62 +584,70 @@ export async function fetchDemoHistoricalDealEvidence(args: {
   return { ok: true, value: ex.items };
 }
 
+/**
+ * Authoritative closing deal for a position.
+ * Uses exhaustive DealListByPositionId; falls back to exhaustive general
+ * DealList filtered by positionId. Never treats truncated history as empty.
+ */
 export async function fetchDemoClosingDealForPosition(args: {
   ownerUid: string;
   positionId: string;
   fromTimestampMs: number;
   toTimestampMs: number;
-}): Promise<BrokerHistoryReadResult<BrokerClosedDeal | null>> {
+}): Promise<
+  BrokerHistoryReadResult<{ deal: BrokerClosedDeal | null; complete: boolean }>
+> {
   if (hooks.fetchClosingDealsForPosition) {
     return hooks.fetchClosingDealsForPosition(args);
   }
-  try {
-    const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
-    const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
-    if (!clientId || !clientSecret) {
-      return { ok: false, errorCode: "CTRADER_CLIENT_CONFIG_MISSING" };
-    }
-    const { accessToken, connection } = await ensureFreshAccessToken(
-      args.ownerUid
-    );
-    const accountId = assertDemoAccount(connection);
-    const client = createOpenApiClient();
-    let deals: BrokerClosedDeal[] = [];
-    if (client.fetchDemoDealsByPositionId) {
-      deals = await client.fetchDemoDealsByPositionId({
-        accessToken,
-        clientId,
-        clientSecret,
-        ctidTraderAccountId: accountId,
-        positionId: args.positionId,
-        fromTimestampMs: args.fromTimestampMs,
-        toTimestampMs: args.toTimestampMs
-      });
-    }
-    if (
-      (!deals.length || aggregateClosingDeals(deals) == null) &&
-      client.fetchDemoDealList
-    ) {
-      const listed = await client.fetchDemoDealList({
-        accessToken,
-        clientId,
-        clientSecret,
-        ctidTraderAccountId: accountId,
-        fromTimestampMs: args.fromTimestampMs,
-        toTimestampMs: args.toTimestampMs
-      });
-      deals = listed.filter(
-        (d) => String(d.positionId) === String(args.positionId)
-      );
-    }
-    return { ok: true, value: aggregateClosingDeals(deals) };
-  } catch (err) {
+
+  const byPos = await fetchDemoDealsByPositionIdExhaustive({
+    ownerUid: args.ownerUid,
+    positionId: args.positionId,
+    fromTimestampMs: args.fromTimestampMs,
+    toTimestampMs: args.toTimestampMs,
+    stopOnClosingDeal: true
+  });
+  if (!byPos.ok) return byPos;
+  const aggByPos = aggregateClosingDeals(byPos.items);
+  if (aggByPos) {
+    return { ok: true, value: { deal: aggByPos, complete: true } };
+  }
+  if (!byPos.complete) {
     return {
-      ok: false,
-      errorCode:
-        err instanceof Error ? err.message.slice(0, 80) : "CLOSE_DEAL_LIST_FAIL"
+      ok: true,
+      value: { deal: null, complete: false }
     };
   }
+
+  // OPTION B fallback: exhaustive general DealList filtered by positionId —
+  // no early-stop so closing deals on later pages are visible.
+  const general = await fetchDemoHistoricalDealEvidenceExhaustive({
+    ownerUid: args.ownerUid,
+    fromTimestampMs: args.fromTimestampMs,
+    toTimestampMs: args.toTimestampMs,
+    earlyStop: {
+      mode: "CLOSING_FOR_POSITION",
+      positionId: args.positionId
+    }
+  });
+  if (!general.ok) return general;
+  const closing = general.items
+    .filter(
+      (d) =>
+        d.positionId === String(args.positionId) &&
+        d.close != null &&
+        d.close.netPnl != null
+    )
+    .map((d) => d.close!);
+  const agg = aggregateClosingDeals(closing);
+  if (agg) {
+    return { ok: true, value: { deal: agg, complete: true } };
+  }
+  return {
+    ok: true,
+    value: { deal: null, complete: general.complete }
+  };
 }
 
 export async function lookupDemoOrderByClientOrderId(args: {
