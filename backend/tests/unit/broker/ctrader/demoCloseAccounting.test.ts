@@ -153,7 +153,11 @@ describe("demo close accounting lifecycle", () => {
       brokerPnlConfirmed: false,
       netPnl: null,
       events: [],
-      appliedDedupeKeys: []
+      appliedDedupeKeys: [],
+      side: "BUY",
+      entry: 4378,
+      currentSl: 4376,
+      lots: 0.13
     });
     const deal = {
       dealId: "deal-1",
@@ -181,6 +185,7 @@ describe("demo close accounting lifecycle", () => {
     expect(saved.netPnl).toBe(-3.71);
     expect(saved.grossPnl).toBe(-2.93);
     expect(saved.brokerPnlConfirmed).toBe(true);
+    expect(saved.closeDiagnostics).toBeTruthy();
     expect(markQualificationTradeClosed).toHaveBeenCalledWith(
       expect.objectContaining({
         correlationId: "corr_msnkgvva_c53188cc",
@@ -188,6 +193,140 @@ describe("demo close accounting lifecycle", () => {
         brokerDealId: "deal-1"
       })
     );
+  });
+
+  it("#148+#149: multi-deal exhaustive aggregate settles once with diagnostics + idempotent re-apply", async () => {
+    const aggregated = {
+      dealId: "d1,d2",
+      orderId: "o2",
+      positionId: "P900",
+      closePrice: 4407.2,
+      closedAt: "2026-08-18T12:00:00.000Z",
+      grossPnl: 3.1,
+      commission: -0.1,
+      swap: 0,
+      netPnl: 3.0,
+      closedVolumeLots: 0.25
+    };
+    let life: Record<string, unknown> = {
+      correlationId: "corr_multi_close",
+      brokerPositionId: "P900",
+      status: "OPEN",
+      brokerPnlConfirmed: false,
+      netPnl: null,
+      events: [],
+      appliedDedupeKeys: [],
+      side: "SELL",
+      entry: 4410,
+      currentSl: 4415,
+      lots: 0.25,
+      strategyId: null
+    };
+    getPositionLifecycle.mockImplementation(async () => life);
+    savePositionLifecycle.mockImplementation(async (next: Record<string, unknown>) => {
+      life = { ...life, ...next };
+    });
+
+    const first = await applyConfirmedDemoBrokerClose({
+      uid: "uid",
+      correlationId: "corr_multi_close",
+      brokerPositionId: "P900",
+      deal: aggregated,
+      closeReason: "Broker multi-deal close"
+    });
+    expect(first.applied).toBe(true);
+    expect(life.status).toBe("CLOSED");
+    expect(life.netPnl).toBe(3.0);
+    expect(life.brokerDealId).toBe("d1,d2");
+    expect(life.brokerPnlConfirmed).toBe(true);
+    expect(life.closeDiagnostics).toBeTruthy();
+    expect(markQualificationTradeClosed).toHaveBeenCalledTimes(1);
+    expect(markQualificationTradeClosed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        correlationId: "corr_multi_close",
+        pnl: 3.0,
+        brokerDealId: "d1,d2",
+        brokerPositionId: "P900"
+      })
+    );
+
+    const second = await applyConfirmedDemoBrokerClose({
+      uid: "uid",
+      correlationId: "corr_multi_close",
+      brokerPositionId: "P900",
+      deal: aggregated,
+      closeReason: "Broker multi-deal close"
+    });
+    expect(second.applied).toBe(false);
+    expect(second.reason).toBe("already_closed_confirmed");
+    // Qualification may be re-invoked for idempotent recount, but lifecycle not re-saved as open→closed.
+    expect(life.netPnl).toBe(3.0);
+    expect(life.brokerDealId).toBe("d1,d2");
+  });
+
+  it("#148 exhaustive fetch: truncated hasMore page does not settle repair CLOSED", async () => {
+    const {
+      setDemoBrokerHistoryHooksForTests,
+      resetDemoBrokerHistoryHooksForTests
+    } = await import(
+      "../../../../src/services/broker/ctrader/demoBrokerHistory"
+    );
+    resetDemoBrokerHistoryHooksForTests();
+    setDemoBrokerHistoryHooksForTests({
+      fetchDealsByPositionIdPage: async (args) => ({
+        ok: true,
+        value: {
+          items: [
+            {
+              dealId: "partial-only",
+              orderId: null,
+              positionId: "53870324",
+              closePrice: 4376.37,
+              closedAt: "2026-08-10T19:00:00.000Z",
+              grossPnl: -2.93,
+              commission: -0.78,
+              swap: 0,
+              netPnl: -3.71,
+              closedVolumeLots: 0.13
+            }
+          ],
+          hasMore: true,
+          fromTimestampMs: args.fromTimestampMs,
+          toTimestampMs: args.toTimestampMs
+        }
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: false,
+        errorCode: "DEAL_PAGE_FAIL"
+      })
+    });
+    getQualificationDoc.mockResolvedValue({
+      accountId: "48014710",
+      controlledTrades: [],
+      demoAutoTrades: [
+        {
+          id: "t1",
+          correlationId: "corr_trunc",
+          signalId: "sig",
+          at: "2026-08-10T18:32:05.000Z",
+          closedAt: null,
+          direction: "BUY",
+          status: "OPEN",
+          pnl: null,
+          counted: false,
+          brokerPositionId: "53870324"
+        }
+      ]
+    });
+    getPositionLifecycle.mockResolvedValue(null);
+
+    const { repairUnaccountedDemoCloses } = await import(
+      "../../../../src/services/broker/ctrader/demoCloseAccounting"
+    );
+    const r = await repairUnaccountedDemoCloses("uid");
+    expect(r.repaired).toBe(0);
+    expect(savePositionLifecycle).not.toHaveBeenCalled();
+    resetDemoBrokerHistoryHooksForTests();
   });
 
   it("L: duplicate close does not re-apply when already confirmed", async () => {
@@ -270,20 +409,25 @@ describe("demo close accounting lifecycle", () => {
       brokerPnlConfirmed: false,
       netPnl: null
     });
-    fetchDemoDealsByPositionId.mockResolvedValue([
-      {
-        dealId: "deal-1",
-        orderId: null,
-        positionId: "53870324",
-        closePrice: 4376.37,
-        closedAt: "2026-08-10T19:00:00.000Z",
-        grossPnl: -2.93,
-        commission: -0.78,
-        swap: 0,
-        netPnl: -3.71,
-        closedVolumeLots: 0.13
-      }
-    ]);
+    fetchDemoDealsByPositionId.mockResolvedValue({
+      items: [
+        {
+          dealId: "deal-1",
+          orderId: null,
+          positionId: "53870324",
+          closePrice: 4376.37,
+          closedAt: "2026-08-10T19:00:00.000Z",
+          grossPnl: -2.93,
+          commission: -0.78,
+          swap: 0,
+          netPnl: -3.71,
+          closedVolumeLots: 0.13
+        }
+      ],
+      hasMore: false,
+      fromTimestampMs: 0,
+      toTimestampMs: Date.now()
+    });
 
     const r = await repairUnaccountedDemoCloses("uid");
     expect(r.examined).toBe(1);

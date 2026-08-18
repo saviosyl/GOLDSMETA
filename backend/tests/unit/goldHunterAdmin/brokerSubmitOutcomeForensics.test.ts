@@ -346,6 +346,7 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
         onEvent: () => () => undefined
       },
       sendTimeoutMs: 30,
+      sendUncertaintyMs: 40,
       eventWaitMs: 10
     });
     expect(result.outcome).toBe("BROKER_OUTCOME_UNKNOWN");

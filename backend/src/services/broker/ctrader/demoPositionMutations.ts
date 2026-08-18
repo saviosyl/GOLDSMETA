@@ -11,7 +11,6 @@ import {
 } from "./connectionStore";
 import { refreshAccessToken } from "./oauth";
 import {
-  aggregateClosingDeals,
   createOpenApiClient,
   type BrokerClosedDeal,
   type BrokerOpenPosition,
@@ -21,6 +20,7 @@ import type { BrokerSymbol } from "../domain";
 import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
 import { isCTraderLiveEnabled } from "./flags";
 import { assertDemoPositionMutationAllowed } from "./mutationGuard";
+import { fetchDemoClosingDealForPosition } from "./demoBrokerHistory";
 
 async function decryptAccessToken(ownerUid: string): Promise<{
   accessToken: string;
@@ -223,59 +223,25 @@ export function goldHunterCloseDealQueryWindow(args: {
  * Query broker closing deals for a position. Returns null when unavailable
  * (caller must mark CLOSE_RECONCILIATION_PENDING — never invent P/L = 0).
  *
- * Prefer ProtoOADealListByPositionIdReq; on empty/failure fall back to
- * ProtoOADealListReq filtered by positionId (same authoritative P/L source).
+ * FINAL settlement requires exhaustive by-position history. A truncated
+ * first page (hasMore=true) must never settle CLOSED from a partial aggregate.
  */
 export async function fetchConfirmedCloseForPosition(args: {
   ownerUid: string;
   positionId: string;
   openedAt: string;
 }): Promise<BrokerClosedDeal | null> {
-  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
-  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
-  const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
-  const accountId = assertDemoAccount(connection);
-  const client = createOpenApiClient();
   const { fromTimestampMs, toTimestampMs } = goldHunterCloseDealQueryWindow({
     openedAt: args.openedAt
   });
-  const positionId = String(args.positionId);
-
-  let deals: BrokerClosedDeal[] = [];
-  if (client.fetchDemoDealsByPositionId) {
-    try {
-      deals = await client.fetchDemoDealsByPositionId({
-        accessToken,
-        clientId,
-        clientSecret,
-        ctidTraderAccountId: accountId,
-        positionId,
-        fromTimestampMs,
-        toTimestampMs
-      });
-    } catch {
-      deals = [];
-    }
-  }
-
-  if (
-    (!deals.length || aggregateClosingDeals(deals) == null) &&
-    client.fetchDemoDealList
-  ) {
-    try {
-      const listed = await client.fetchDemoDealList({
-        accessToken,
-        clientId,
-        clientSecret,
-        ctidTraderAccountId: accountId,
-        fromTimestampMs,
-        toTimestampMs
-      });
-      deals = listed.filter((d) => String(d.positionId) === positionId);
-    } catch {
-      /* keep prior deals / empty */
-    }
-  }
-
-  return aggregateClosingDeals(deals);
+  const result = await fetchDemoClosingDealForPosition({
+    ownerUid: args.ownerUid,
+    positionId: String(args.positionId),
+    fromTimestampMs,
+    toTimestampMs
+  });
+  if (!result.ok) return null;
+  // Incomplete / truncated history → pending — never partial CLOSED.
+  if (!result.value.complete) return null;
+  return result.value.deal;
 }

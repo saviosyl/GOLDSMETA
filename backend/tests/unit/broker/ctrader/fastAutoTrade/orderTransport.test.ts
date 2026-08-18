@@ -244,6 +244,7 @@ describe("FAST order transport", () => {
       request: request(),
       transport,
       sendTimeoutMs: 30,
+      sendUncertaintyMs: 40,
       eventWaitMs: 10
     });
     expect(result.outcome).toBe("BROKER_OUTCOME_UNKNOWN");

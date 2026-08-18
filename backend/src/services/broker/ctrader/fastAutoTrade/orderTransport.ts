@@ -95,6 +95,8 @@ export type ReconcilePort = {
 
 const DEFAULT_EVENT_WAIT_MS = 8_000;
 const DEFAULT_SEND_WAIT_MS = 8_000;
+/** Must cover underlying FastDemoSession sendCommand timeout (~12s). */
+const DEFAULT_SEND_UNCERTAINTY_MS = 15_000;
 const DEFAULT_RECONCILE_ATTEMPTS = 2;
 const DEFAULT_RECONCILE_GAP_MS = 250;
 
@@ -293,6 +295,12 @@ export async function submitFastMarketOrder(args: {
   transport: OrderTransportPort;
   reconcile?: ReconcilePort;
   sendTimeoutMs?: number;
+  /**
+   * Total wait from send start covering underlying sendCommand uncertainty.
+   * Outer withBoundedOp may expire earlier; we keep listening (no resend)
+   * until this window ends, then optionally reconcile by clientOrderId.
+   */
+  sendUncertaintyMs?: number;
   eventWaitMs?: number;
   reconcileAttempts?: number;
   reconcileGapMs?: number;
@@ -385,9 +393,86 @@ export async function submitFastMarketOrder(args: {
 
   let requestSent = false;
   let newOrderReqCount = 0;
+  /** True once sendNewOrder is invoked (even if outer wait times out). */
+  let sendInvoked = false;
   let sendResponse: Record<string, unknown> = {};
+  const sendStartedAt = Date.now();
+  const uncertaintyMs =
+    args.sendUncertaintyMs ?? DEFAULT_SEND_UNCERTAINTY_MS;
+
+  const finishFromClassified = (): FastOrderResult | null => {
+    const known = classified as Classified | null;
+    if (known === null || known.outcome === "BROKER_ACCEPTED") return null;
+    const ids = extractIds(latest);
+    const fill = extractFill(latest);
+    // Broker-proven execution after an uncertain send → transmission proven.
+    const proven =
+      known.outcome === "BROKER_FILLED" ||
+      known.outcome === "BROKER_REJECTED" ||
+      known.accepted;
+    return {
+      accepted: known.accepted,
+      outcome: known.outcome,
+      executionType: known.executionType,
+      orderId: ids.orderId,
+      positionId: ids.positionId,
+      errorCode: known.errorCode,
+      clientOrderId,
+      fillPrice: fill.fillPrice,
+      stopLoss: fill.stopLoss,
+      takeProfit: fill.takeProfit,
+      filledVolumeLots: fill.filledVolumeLots,
+      ctidTraderAccountId: args.request.ctidTraderAccountId,
+      requestSent: proven && sendInvoked ? true : requestSent,
+      newOrderReqCount:
+        proven && sendInvoked ? Math.max(newOrderReqCount, 1) : newOrderReqCount,
+      raw: latest
+    };
+  };
+
+  const tryReconcileFilled = async (): Promise<FastOrderResult | null> => {
+    if (!args.reconcile) return null;
+    const attempts = Math.min(
+      args.reconcileAttempts ?? DEFAULT_RECONCILE_ATTEMPTS,
+      2
+    );
+    const gap = args.reconcileGapMs ?? DEFAULT_RECONCILE_GAP_MS;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        const snapshot = await args.reconcile.reconcile();
+        const match = matchReconcileByClientOrderId({ clientOrderId, snapshot });
+        if (match.matched && match.positionId) {
+          // Exact clientOrderId match proves the NewOrder reached the broker.
+          return {
+            accepted: true,
+            outcome: "BROKER_TIMEOUT_RECONCILED_FILLED",
+            executionType: "RECONCILED",
+            orderId: match.orderId,
+            positionId: match.positionId,
+            errorCode: null,
+            clientOrderId,
+            fillPrice: null,
+            stopLoss: null,
+            takeProfit: null,
+            filledVolumeLots: null,
+            ctidTraderAccountId: args.request.ctidTraderAccountId,
+            requestSent: sendInvoked ? true : requestSent,
+            newOrderReqCount: sendInvoked
+              ? Math.max(newOrderReqCount, 1)
+              : newOrderReqCount,
+            raw: { reconcile: match, afterSendTimeout: true }
+          };
+        }
+      } catch {
+        /* bounded miss */
+      }
+      if (i < attempts - 1) await sleep(gap);
+    }
+    return null;
+  };
 
   try {
+    sendInvoked = true;
     const sent = await withBoundedOp(
       "NEWORDER_SEND",
       args.sendTimeoutMs ?? DEFAULT_SEND_WAIT_MS,
@@ -400,10 +485,22 @@ export async function submitFastMarketOrder(args: {
       finishKnown("sendCommand", sendResponse);
     }
   } catch (err) {
-    unsubscribe();
     if (err instanceof BoundedOpTimeoutError) {
       // Outer send wait expired while underlying sendCommand may still be in
-      // flight (COMMAND_TIMEOUT_MS). Do NOT claim "not sent".
+      // flight. Do NOT resend. Keep listening through the uncertainty window,
+      // then read-only reconcile by exact clientOrderId. Terminal "not found"
+      // is owned by the durable ENTRY PENDING watchdog — not this short path.
+      while (!settled && Date.now() - sendStartedAt < uncertaintyMs) {
+        await sleep(20);
+      }
+      const knownEarly = finishFromClassified();
+      if (knownEarly) {
+        unsubscribe();
+        return knownEarly;
+      }
+      const reconciled = await tryReconcileFilled();
+      unsubscribe();
+      if (reconciled) return reconciled;
       return {
         accepted: false,
         outcome: "BROKER_OUTCOME_UNKNOWN",
@@ -417,12 +514,14 @@ export async function submitFastMarketOrder(args: {
         takeProfit: null,
         filledVolumeLots: null,
         ctidTraderAccountId: args.request.ctidTraderAccountId,
+        // Still unknown — do not invent requestSent=true.
         requestSent: false,
         newOrderReqCount: 0,
         payloadShape: built.shape,
-        raw: { error: err.message, uncertainSend: true }
+        raw: { error: err.message, uncertainSend: true, sendInvoked }
       };
     }
+    unsubscribe();
     return {
       accepted: false,
       outcome: requestSent ? "BROKER_OUTCOME_UNKNOWN" : "BROKER_SUBMIT_ERROR",

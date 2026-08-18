@@ -20,6 +20,10 @@ import {
   registerGoldHunterOpenPositionForOwner
 } from "./demoPositionManager";
 import {
+  reconcileGoldHunterEntryPendingWatchdog,
+  type EntryPendingWatchdogResult
+} from "./entryPendingReconciliation";
+import {
   reconcileGoldHunterDemoPositions,
   type BrokerDemoPositionLite
 } from "./reconcilePositions";
@@ -547,6 +551,8 @@ export type GoldHunterReconcilePassResult = {
   closeRequestedStillOpen: number;
   closesSettled: number;
   closesPending: number;
+  /** ENTRY PENDING_RECONCILIATION historical watchdog counters. */
+  entryWatchdog?: EntryPendingWatchdogResult;
 };
 
 /**
@@ -597,6 +603,7 @@ export async function runGoldHunterReconcilePass(args: {
   let closeRequestedSettled = 0;
   let closeRequestedSettlementPending = 0;
   let closeRequestedStillOpen = 0;
+  let entryWatchdog: EntryPendingWatchdogResult | undefined;
 
   if (positionsReadOk) {
     const pos = await reconcileGoldHunterDemoPositions({
@@ -643,6 +650,17 @@ export async function runGoldHunterReconcilePass(args: {
   }
   // positionsReadOk === false → do NOT treat as empty account; leave opens alone.
 
+  // ENTRY transmission uncertainty watchdog — uses historical order/deal APIs.
+  // Runs even when open-position read failed (fail closed on history errors).
+  // Never places NewOrder. Independent of new Gold Hunter signals.
+  entryWatchdog = await reconcileGoldHunterEntryPendingWatchdog({
+    ownerUid: args.ownerUid,
+    brokerPositions: lite,
+    positionsReadOk,
+    nowMs: now
+  });
+  recoveredOpen += entryWatchdog.recoveredOpen;
+
   const closes = await reconcileGoldHunterCloseSettlements({
     ownerUid: args.ownerUid
   });
@@ -662,7 +680,8 @@ export async function runGoldHunterReconcilePass(args: {
     closeRequestedSettlementPending,
     closeRequestedStillOpen,
     closesSettled: closes.settled,
-    closesPending: closes.stillPending
+    closesPending: closes.stillPending,
+    entryWatchdog
   };
 }
 

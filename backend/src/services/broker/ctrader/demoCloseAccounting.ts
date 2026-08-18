@@ -7,18 +7,7 @@
  */
 
 import { getConnection } from "./connectionStore";
-import {
-  createOpenApiClient,
-  aggregateClosingDeals,
-  type BrokerClosedDeal
-} from "./openApiClient";
-import { loadCTraderConfig } from "./config";
-import {
-  loadTokenEncryptionSecret,
-  persistRotatedTokensAtomic
-} from "./connectionStore";
-import { refreshAccessToken } from "./oauth";
-import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
+import { type BrokerClosedDeal } from "./openApiClient";
 import {
   getActiveQualificationAccountId,
   getQualificationDoc
@@ -27,6 +16,7 @@ import { getPositionLifecycle, savePositionLifecycle } from "./positionLifecycle
 import { updateAutoTradeJournalOnClose } from "./autoTradeJournal";
 import { logger } from "../../logging/logger";
 import { computeCloseDiagnostics } from "./fastAutoTrade/closeDiagnostics";
+import { fetchDemoClosingDealForPosition } from "./demoBrokerHistory";
 
 export type DemoCloseRepairResult = {
   examined: number;
@@ -35,109 +25,27 @@ export type DemoCloseRepairResult = {
   errors: string[];
 };
 
-async function ensureFreshAccessToken(ownerUid: string): Promise<{
-  accessToken: string;
-  ctidTraderAccountId: string;
-}> {
-  const cfg = loadCTraderConfig();
-  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
-  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
-  if (!cfg.configured || !clientId || !clientSecret) {
-    throw new Error("CONFIGURATION_REQUIRED");
-  }
-  const connection = await getConnection(ownerUid);
-  if (!connection?.selectedAccountId) throw new Error("CTRADER_ACCOUNT_NOT_SELECTED");
-  if (connection.selectedAccountIsLive || connection.environment === "LIVE") {
-    throw new Error("LIVE_ACCOUNT_MUTATION_DENIED");
-  }
-  const secret = loadTokenEncryptionSecret();
-  if (!secret) throw new Error("[REDACTED]_KEY");
-  const payload = JSON.parse(
-    decryptTokenPayload(connection.tokens.ciphertext, secret)
-  ) as { accessToken?: string; refreshToken?: string };
-  if (!payload.accessToken || !payload.refreshToken) {
-    throw new Error("CTRADER_TOKENS_MISSING");
-  }
-  let accessToken = payload.accessToken;
-  const expiresAt = Date.parse(connection.tokens.accessExpiresAt);
-  const stale = !Number.isFinite(expiresAt) || expiresAt < Date.now() + 60_000;
-  if (stale) {
-    const rotated = await refreshAccessToken({
-      clientId,
-      clientSecret,
-      refreshToken: payload.refreshToken
-    });
-    const ciphertext = encryptTokenPayload(
-      JSON.stringify({
-        accessToken: rotated.accessToken,
-        refreshToken: rotated.refreshToken ?? payload.refreshToken
-      }),
-      secret
-    );
-    await persistRotatedTokensAtomic({
-      ownerUid,
-      expectedCiphertext: connection.tokens.ciphertext,
-      expectedTokenVersion: connection.tokens.tokenVersion ?? 0,
-      newTokens: {
-        ciphertext,
-        accessExpiresAt: new Date(
-          Date.now() + (rotated.expiresIn ?? 3600) * 1000
-        ).toISOString(),
-        refreshedAt: new Date().toISOString(),
-        tokenVersion: (connection.tokens.tokenVersion ?? 0) + 1
-      }
-    });
-    accessToken = rotated.accessToken;
-  }
-  return {
-    accessToken,
-    ctidTraderAccountId: connection.selectedAccountId
-  };
-}
-
 async function fetchClosingDealForPosition(args: {
   ownerUid: string;
   positionId: string;
   openedAt: string;
 }): Promise<BrokerClosedDeal | null> {
-  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
-  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
-  const { accessToken, ctidTraderAccountId } = await ensureFreshAccessToken(
-    args.ownerUid
-  );
-  const client = createOpenApiClient();
   const openedMs = Date.parse(args.openedAt);
   const fromTimestampMs = Number.isFinite(openedMs)
     ? Math.max(0, openedMs - 60_000)
     : Date.now() - 7 * 86_400_000;
-  const toTimestampMs = Date.now() + 60_000;
-  if (client.fetchDemoDealsByPositionId) {
-    const deals = await client.fetchDemoDealsByPositionId({
-      accessToken,
-      clientId,
-      clientSecret,
-      ctidTraderAccountId,
-      positionId: args.positionId,
-      fromTimestampMs,
-      toTimestampMs
-    });
-    const agg = aggregateClosingDeals(deals);
-    if (agg) return agg;
-  }
-  if (client.fetchDemoDealList) {
-    const deals = await client.fetchDemoDealList({
-      accessToken,
-      clientId,
-      clientSecret,
-      ctidTraderAccountId,
-      fromTimestampMs,
-      toTimestampMs
-    });
-    return aggregateClosingDeals(
-      deals.filter((d) => d.positionId === args.positionId)
-    );
-  }
-  return null;
+  // Never send a future toTimestamp — Spotware rejects it.
+  const toTimestampMs = Date.now();
+  const result = await fetchDemoClosingDealForPosition({
+    ownerUid: args.ownerUid,
+    positionId: String(args.positionId),
+    fromTimestampMs,
+    toTimestampMs
+  });
+  if (!result.ok) return null;
+  // Truncated / incomplete pages must not settle CLOSED from partial P/L.
+  if (!result.value.complete) return null;
+  return result.value.deal;
 }
 
 /**

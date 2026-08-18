@@ -57,7 +57,10 @@ type DemoLifecycleDisplay = {
  */
 export function classifyGoldHunterDemoLifecycle(args: {
   demoAutoTradeEnabled: boolean;
-  openTrades: ReadonlyArray<{ status?: string | null }>;
+  openTrades: ReadonlyArray<{
+    status?: string | null;
+    brokerPositionId?: string | null;
+  }>;
   brokerOpenPositionCount: number | null | undefined;
   firstRealGateBlocker: string | null;
   armingReady: boolean;
@@ -85,16 +88,31 @@ export function classifyGoldHunterDemoLifecycle(args: {
   const hasSettlementPending = openTrades.some(
     (t) => t.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
   );
-  const hasBrokerManagedLocal = openTrades.some(
+  const hasEntryPendingUnmatched = openTrades.some(
+    (t) =>
+      t.status === "PENDING_RECONCILIATION" &&
+      (t.brokerPositionId == null || String(t.brokerPositionId).trim() === "")
+  );
+  const hasMatchedGhOpen = openTrades.some(
+    (t) =>
+      (t.status === "FILLED" ||
+        t.status === "PROTECTED" ||
+        t.status === "OPEN") &&
+      t.brokerPositionId != null &&
+      String(t.brokerPositionId).trim() !== ""
+  );
+  const hasActiveManagedLocal = openTrades.some(
     (t) =>
       t.status === "FILLED" ||
       t.status === "PROTECTED" ||
       t.status === "ACCEPTED_PENDING_FILL" ||
-      t.status === "PENDING_RECONCILIATION" ||
       t.status === "SENT" ||
       t.status === "ORDER_CREATED" ||
       t.status === "OPEN"
   );
+  const hasBrokerManagedLocal =
+    hasActiveManagedLocal ||
+    openTrades.some((t) => t.status === "PENDING_RECONCILIATION");
 
   if (hasCloseRequested) {
     return {
@@ -112,7 +130,23 @@ export function classifyGoldHunterDemoLifecycle(args: {
     };
   }
 
-  if (hasBrokerManagedLocal && brokerConfirmedOpen) {
+  // Null/unproven entry pending must never become IN DEMO TRADE merely because
+  // the account has some unrelated open position.
+  if (hasEntryPendingUnmatched) {
+    return {
+      state: "RECONCILING DEMO ENTRY",
+      hint: "Order transmission outcome is being verified with cTrader. No new order will be sent until broker state is confirmed."
+    };
+  }
+
+  if (hasMatchedGhOpen && brokerConfirmedOpen) {
+    return {
+      state: "IN DEMO TRADE",
+      hint: "Gold Hunter has an active cTrader DEMO position and is managing it."
+    };
+  }
+
+  if (hasActiveManagedLocal && brokerConfirmedOpen) {
     return {
       state: "IN DEMO TRADE",
       hint: "Gold Hunter has an active cTrader DEMO position and is managing it."

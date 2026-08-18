@@ -200,6 +200,143 @@ describe("autotrade safety patch — broker close P/L", () => {
     expect(a!.dealId).toBe("1,2");
     expect(a!.netPnl).toBe(b!.netPnl);
     expect(a!.netPnl).toBeCloseTo(2.9, 5); // 1+2 - 0.10
+    expect(a!.closedVolumeLots).toBeCloseTo(0.02, 8);
+    expect(a!.closePrice).toBeCloseTo(2365, 5); // VWAP of 2360 & 2370
+  });
+
+  it("M1-style: multi-deal close sums net P/L and closed volume", () => {
+    const deals = parseBrokerClosedDeals([
+      {
+        dealId: "d1",
+        positionId: "P123",
+        executionPrice: 4400,
+        executionTimestamp: 1,
+        closePositionDetail: {
+          grossProfit: 100,
+          commission: 0,
+          swap: 0,
+          moneyDigits: 2,
+          closedVolume: 10
+        }
+      },
+      {
+        dealId: "d2",
+        positionId: "P123",
+        executionPrice: 4402,
+        executionTimestamp: 2,
+        closePositionDetail: {
+          grossProfit: 200,
+          commission: 0,
+          swap: 0,
+          moneyDigits: 2,
+          closedVolume: 15
+        }
+      }
+    ]);
+    const agg = aggregateClosingDeals(deals);
+    expect(agg).not.toBeNull();
+    expect(agg!.netPnl).toBeCloseTo(3.0, 5);
+    expect(agg!.closedVolumeLots).toBeCloseTo(0.25, 8);
+    expect(agg!.dealId).toBe("d1,d2");
+    expect(agg!.closePrice).toBeCloseTo(
+      (4400 * 0.1 + 4402 * 0.15) / 0.25,
+      5
+    );
+  });
+
+  it("incomplete multi-deal price → preserve P/L, aggregate closePrice null", () => {
+    const d1 = {
+      dealId: "d1",
+      orderId: "o1",
+      positionId: "P123",
+      closePrice: 4408,
+      closedAt: "2026-08-18T10:00:00.000Z",
+      grossPnl: 1,
+      commission: 0,
+      swap: 0,
+      netPnl: 1,
+      closedVolumeLots: 0.1
+    };
+    const d2 = {
+      dealId: "d2",
+      orderId: "o2",
+      positionId: "P123",
+      closePrice: null,
+      closedAt: "2026-08-18T10:00:01.000Z",
+      grossPnl: 2,
+      commission: 0,
+      swap: 0,
+      netPnl: 2,
+      closedVolumeLots: 0.15
+    };
+    const agg = aggregateClosingDeals([d1, d2]);
+    expect(agg).not.toBeNull();
+    expect(agg!.netPnl).toBe(3);
+    expect(agg!.closedVolumeLots).toBeCloseTo(0.25, 8);
+    expect(agg!.dealId).toBe("d1,d2");
+    // Subset VWAP must not be presented as the full exit price.
+    expect(agg!.closePrice).toBeNull();
+  });
+
+  it("multi-deal with any null netPnl → aggregate null (no partial CLOSED P/L)", () => {
+    const agg = aggregateClosingDeals([
+      {
+        dealId: "d1",
+        orderId: "o1",
+        positionId: "P1",
+        closePrice: 4400,
+        closedAt: "2026-08-18T10:00:00.000Z",
+        grossPnl: -20,
+        commission: 0,
+        swap: 0,
+        netPnl: -20,
+        closedVolumeLots: 0.1
+      },
+      {
+        dealId: "d2",
+        orderId: "o2",
+        positionId: "P1",
+        closePrice: 4401,
+        closedAt: "2026-08-18T10:00:01.000Z",
+        grossPnl: null,
+        commission: null,
+        swap: null,
+        netPnl: null,
+        closedVolumeLots: 0.1
+      }
+    ]);
+    expect(agg).toBeNull();
+  });
+
+  it("multi-deal complete netPnl -20 and +5 → aggregate -15", () => {
+    const agg = aggregateClosingDeals([
+      {
+        dealId: "d1",
+        orderId: "o1",
+        positionId: "P1",
+        closePrice: 4400,
+        closedAt: "2026-08-18T10:00:00.000Z",
+        grossPnl: -20,
+        commission: 0,
+        swap: 0,
+        netPnl: -20,
+        closedVolumeLots: 0.1
+      },
+      {
+        dealId: "d2",
+        orderId: "o2",
+        positionId: "P1",
+        closePrice: 4401,
+        closedAt: "2026-08-18T10:00:01.000Z",
+        grossPnl: 5,
+        commission: 0,
+        swap: 0,
+        netPnl: 5,
+        closedVolumeLots: 0.1
+      }
+    ]);
+    expect(agg).not.toBeNull();
+    expect(agg!.netPnl).toBe(-15);
   });
 });
 
