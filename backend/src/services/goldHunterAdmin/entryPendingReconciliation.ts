@@ -95,7 +95,7 @@ function normalizeEvidence(
   nowIso: string
 ): EntryReconcileEvidence {
   const base = prior ?? emptyEvidence(nowIso);
-  return {
+  const next: EntryReconcileEvidence = {
     reconciliationAttempts: base.reconciliationAttempts ?? 0,
     lastReconcileAt: nowIso,
     lastBrokerReadOk: base.lastBrokerReadOk ?? false,
@@ -103,12 +103,22 @@ function normalizeEvidence(
     firstSuccessfulEmptyProofAt: base.firstSuccessfulEmptyProofAt ?? null,
     lastSuccessfulEmptyProofAt: base.lastSuccessfulEmptyProofAt ?? null,
     lastHistoryComplete: base.lastHistoryComplete ?? false,
-    terminalReason: base.terminalReason ?? null,
-    openPositionChecks: base.openPositionChecks,
-    orderHistoryChecks: base.orderHistoryChecks,
-    dealHistoryChecks: base.dealHistoryChecks,
-    firstReconcileAt: base.firstReconcileAt
+    terminalReason: base.terminalReason ?? null
   };
+  // Omit optional legacy counters when absent — Firestore rejects `undefined`.
+  if (typeof base.openPositionChecks === "number") {
+    next.openPositionChecks = base.openPositionChecks;
+  }
+  if (typeof base.orderHistoryChecks === "number") {
+    next.orderHistoryChecks = base.orderHistoryChecks;
+  }
+  if (typeof base.dealHistoryChecks === "number") {
+    next.dealHistoryChecks = base.dealHistoryChecks;
+  }
+  if (typeof base.firstReconcileAt === "string") {
+    next.firstReconcileAt = base.firstReconcileAt;
+  }
+  return next;
 }
 
 /**
