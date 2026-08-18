@@ -22,7 +22,13 @@ import type {
   BrokerHistoricalOrder,
   BrokerOpenPosition
 } from "../broker/ctrader/openApiClient";
-import { findDealByExactGoldHunterLabel } from "../broker/ctrader/openApiClient";
+import {
+  aggregateClosingDeals,
+  classifyExactLabelledDeals,
+  isSuccessfulExecutionDealStatus,
+  normalizeBrokerDealStatus,
+  type BrokerDealStatusKind
+} from "../broker/ctrader/openApiClient";
 import { applyBrokerSettledClose } from "./closeSettlement";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
 import type { BrokerDemoPositionLite } from "./reconcilePositions";
@@ -413,13 +419,18 @@ async function resolveClosingDeal(args: {
   order: BrokerHistoricalOrder;
   positionId: string;
   deals: readonly BrokerDealEvidence[];
-  /** When true, deals were collected with early-stop and may miss closing rows. */
+  /**
+   * When true, in-memory deals may be early-stopped / truncated and must not
+   * be treated as complete multi-deal settlement evidence.
+   */
   dealsMayBeTruncatedForClose: boolean;
   window: { fromTimestampMs: number; toTimestampMs: number };
 }): Promise<
   | { ok: true; deal: BrokerClosedDeal }
   | { ok: false; unavailable: boolean }
 > {
+  // Only aggregate from already-collected evidence when that history is
+  // proven exhaustive for the close (no early-stop / hasMore truncation).
   if (!args.dealsMayBeTruncatedForClose) {
     const matched = dealsMatchingOrderOrPosition({
       deals: args.deals,
@@ -430,38 +441,64 @@ async function resolveClosingDeal(args: {
       .map((d) => d.close)
       .filter((c): c is BrokerClosedDeal => c != null && c.netPnl != null);
     if (closingFromEvidence.length > 0) {
-      const last = closingFromEvidence.sort(
-        (a, b) => Date.parse(a.closedAt ?? "") - Date.parse(b.closedAt ?? "")
-      )[closingFromEvidence.length - 1]!;
-      return { ok: true, deal: last };
+      const agg = aggregateClosingDeals(closingFromEvidence);
+      if (agg) return { ok: true, deal: agg };
     }
   }
 
+  // Authoritative FINAL settlement: exhaustive by-position (all closing deals).
   const byPos = await fetchDemoClosingDealForPosition({
     ownerUid: args.ownerUid,
     positionId: args.positionId,
     ...args.window
   });
   if (!byPos.ok) return { ok: false, unavailable: true };
-  if (byPos.value.deal && byPos.value.deal.netPnl != null) {
-    return { ok: true, deal: byPos.value.deal };
-  }
   if (!byPos.value.complete) {
     return { ok: false, unavailable: true };
+  }
+  if (byPos.value.deal && byPos.value.deal.netPnl != null) {
+    return { ok: true, deal: byPos.value.deal };
   }
   return { ok: false, unavailable: false };
 }
 
+function orderStatusFromDealKind(kind: BrokerDealStatusKind): {
+  orderStatus: string;
+  orderStatusCode: number | null;
+} {
+  if (kind === "FILLED") {
+    return { orderStatus: "ORDER_STATUS_FILLED", orderStatusCode: 2 };
+  }
+  if (kind === "PARTIALLY_FILLED") {
+    return { orderStatus: "ORDER_STATUS_PARTIALLY_FILLED", orderStatusCode: null };
+  }
+  if (
+    kind === "REJECTED" ||
+    kind === "INTERNALLY_REJECTED" ||
+    kind === "ERROR" ||
+    kind === "MISSED"
+  ) {
+    return { orderStatus: "ORDER_STATUS_REJECTED", orderStatusCode: 4 };
+  }
+  return { orderStatus: "ORDER_STATUS_UNKNOWN", orderStatusCode: null };
+}
+
+/**
+ * Build a historical-order stub from deal evidence.
+ * Never invents ORDER_STATUS_FILLED for REJECTED / ERROR / MISSED deals.
+ */
 function orderStubFromDealEvidence(
   deal: BrokerDealEvidence,
   trade: GoldHunterDemoTrade
 ): BrokerHistoricalOrder {
+  const kind = normalizeBrokerDealStatus(deal.dealStatus);
+  const { orderStatus, orderStatusCode } = orderStatusFromDealKind(kind);
   return {
     orderId: deal.orderId ?? `recovered:${deal.dealId}`,
     positionId: deal.positionId,
     clientOrderId: trade.clientOrderId ?? null,
-    orderStatus: "ORDER_STATUS_FILLED",
-    orderStatusCode: 2,
+    orderStatus,
+    orderStatusCode,
     tradeSide: deal.tradeSide ?? trade.side,
     symbolId: deal.symbolId,
     label: deal.label ?? trade.goldHunterTradeId,
@@ -472,6 +509,38 @@ function orderStubFromDealEvidence(
     updatedAt: deal.executedAt,
     closingOrder: deal.isClosing
   };
+}
+
+/** Prefer a successful-execution labelled deal for fill stubs. */
+function pickSuccessfulDealForStub(
+  successful: readonly BrokerDealEvidence[]
+): BrokerDealEvidence | null {
+  if (!successful.length) return null;
+  // Prefer FILLED over PARTIALLY_FILLED; then latest by executedAt.
+  const filled = successful.filter(
+    (d) => normalizeBrokerDealStatus(d.dealStatus) === "FILLED"
+  );
+  const pool = filled.length ? filled : [...successful];
+  return (
+    [...pool].sort(
+      (a, b) =>
+        Date.parse(b.executedAt ?? "") - Date.parse(a.executedAt ?? "")
+    )[0] ?? null
+  );
+}
+
+function sumSuccessfulFilledVolumeLots(
+  successful: readonly BrokerDealEvidence[]
+): number | null {
+  let sum = 0;
+  let any = false;
+  for (const d of successful) {
+    if (d.filledVolumeLots != null) {
+      sum += d.filledVolumeLots;
+      any = true;
+    }
+  }
+  return any ? Number(sum.toFixed(8)) : null;
 }
 
 /**
@@ -647,86 +716,7 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
 
     if (order && (order.orderStatusCode === 1 || order.orderStatusCode === 2)) {
       // CASE C / D — order known; try closed reconstruction when no open match.
-      // Close discovery must NOT reuse OPENING_FOR_ORDER early-stop results.
-      let dealsForClose: BrokerDealEvidence[] = [];
-      let dealsForCloseComplete = false;
-
-      if (resolvedPositionId) {
-        const closeDealsRead = await fetchDemoHistoricalDealEvidenceExhaustive({
-          ownerUid: args.ownerUid,
-          ...window,
-          earlyStop: {
-            mode: "CLOSING_FOR_POSITION",
-            positionId: resolvedPositionId
-          }
-        });
-        if (!closeDealsRead.ok) {
-          evidence = {
-            ...evidence,
-            lastBrokerReadOk: false,
-            lastHistoryComplete: false
-          };
-          await persistEvidence(args.ownerUid, trade, evidence);
-          result.brokerUnavailable += 1;
-          result.stillPending += 1;
-          continue;
-        }
-        dealsForClose = closeDealsRead.items;
-        dealsForCloseComplete = closeDealsRead.complete;
-        deals = dealsForClose;
-        dealsComplete = dealsForCloseComplete;
-      } else {
-        const dealsRead = await fetchDemoHistoricalDealEvidenceExhaustive({
-          ownerUid: args.ownerUid,
-          ...window,
-          earlyStop: { mode: "OPENING_FOR_ORDER", orderId: order.orderId }
-        });
-        if (!dealsRead.ok) {
-          evidence = {
-            ...evidence,
-            lastBrokerReadOk: false,
-            lastHistoryComplete: false
-          };
-          await persistEvidence(args.ownerUid, trade, evidence);
-          result.brokerUnavailable += 1;
-          result.stillPending += 1;
-          continue;
-        }
-        deals = dealsRead.items;
-        dealsComplete = dealsRead.complete;
-        resolvedPositionId = resolvePositionIdFromDeals({
-          orderId: order.orderId,
-          deals
-        });
-        if (resolvedPositionId) {
-          const closeDealsRead = await fetchDemoHistoricalDealEvidenceExhaustive(
-            {
-              ownerUid: args.ownerUid,
-              ...window,
-              earlyStop: {
-                mode: "CLOSING_FOR_POSITION",
-                positionId: resolvedPositionId
-              }
-            }
-          );
-          if (!closeDealsRead.ok) {
-            evidence = {
-              ...evidence,
-              lastBrokerReadOk: false,
-              lastHistoryComplete: false
-            };
-            await persistEvidence(args.ownerUid, trade, evidence);
-            result.brokerUnavailable += 1;
-            result.stillPending += 1;
-            continue;
-          }
-          dealsForClose = closeDealsRead.items;
-          dealsForCloseComplete = closeDealsRead.complete;
-          deals = dealsForClose;
-          dealsComplete = dealsForCloseComplete;
-        }
-      }
-
+      // FINAL close settlement always uses exhaustive by-position (never first-close).
       if (!resolvedPositionId) {
         // Order exists but position still unknown — keep pending (Case D).
         await persistEvidence(args.ownerUid, trade, {
@@ -743,8 +733,8 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
         ownerUid: args.ownerUid,
         order,
         positionId: resolvedPositionId,
-        deals: dealsForClose.length ? dealsForClose : deals,
-        dealsMayBeTruncatedForClose: false,
+        deals,
+        dealsMayBeTruncatedForClose: true,
         window
       });
       if (closing.ok) {
@@ -844,87 +834,239 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
     }
 
     // Exact goldHunterTradeId label on a deal is POSITIVE broker evidence —
-    // never count as an empty proof cycle.
-    const labelled = findDealByExactGoldHunterLabel(
+    // never count as an empty proof cycle. Classify by dealStatus across the
+    // complete labelled set — never trust arbitrary list order.
+    const labelClass = classifyExactLabelledDeals(
       dealsRead.items,
       trade.goldHunterTradeId
     );
-    if (labelled) {
-      const positionId = labelled.positionId
-        ? String(labelled.positionId)
-        : null;
-      const stub = orderStubFromDealEvidence(labelled, trade);
+    if (labelClass.labelled.length > 0) {
+      const successfulDeal = pickSuccessfulDealForStub(labelClass.successful);
+      // Prefer positionId from successful execution deals; else any labelled.
+      const positionIdRaw =
+        successfulDeal?.positionId ??
+        labelClass.labelled.find((d) => d.positionId)?.positionId ??
+        null;
+      const positionId = positionIdRaw ? String(positionIdRaw) : null;
 
-      if (positionId && args.positionsReadOk) {
-        const openMatch = matchOpenByPositionId(
-          args.brokerPositions,
-          positionId
-        );
-        if (openMatch) {
-          await recoverOpenFromPosition({
-            ownerUid: args.ownerUid,
-            trade,
-            match: openMatch,
-            order: stub,
-            evidence: {
+      // S1 / S5: terminal failure only (REJECTED/ERROR/MISSED) — never
+      // synthesize FILLED or invent CLOSED without execution evidence.
+      if (labelClass.allTerminalFailure && !labelClass.hasSuccessfulExecution) {
+        if (positionId && args.positionsReadOk) {
+          const openMatch = matchOpenByPositionId(
+            args.brokerPositions,
+            positionId
+          );
+          if (openMatch) {
+            // Unexpected residual exposure with only failure-labelled deals —
+            // fail closed pending (do not invent rejection while open exists).
+            await persistEvidence(args.ownerUid, trade, {
               ...evidence,
               lastBrokerReadOk: true,
               lastHistoryComplete: true,
-              terminalReason: "RECOVERED_OPEN_FROM_DEAL_LABEL"
-            }
-          });
-          result.recoveredOpen += 1;
-          continue;
+              terminalReason: null
+            });
+            result.stillPending += 1;
+            continue;
+          }
         }
-      }
-
-      if (positionId) {
-        const closing = await resolveClosingDeal({
+        const failDeal =
+          labelClass.terminalFailure.find(
+            (d) =>
+              normalizeBrokerDealStatus(d.dealStatus) === "REJECTED" ||
+              normalizeBrokerDealStatus(d.dealStatus) === "INTERNALLY_REJECTED"
+          ) ?? labelClass.terminalFailure[0]!;
+        const rejectStub = orderStubFromDealEvidence(failDeal, trade);
+        await persistRejected({
           ownerUid: args.ownerUid,
-          order: stub,
-          positionId,
-          deals: dealsRead.items,
-          dealsMayBeTruncatedForClose: false,
-          window
-        });
-        if (closing.ok) {
-          await persistClosedFromDeals({
-            ownerUid: args.ownerUid,
-            trade,
-            order: stub,
-            deal: closing.deal,
-            positionId,
-            evidence: {
-              ...evidence,
-              lastBrokerReadOk: true,
-              lastHistoryComplete: true,
-              terminalReason: "RECOVERED_CLOSED_FROM_DEAL_LABEL"
-            }
-          });
-          result.recoveredClosed += 1;
-          continue;
-        }
-        if (closing.unavailable) {
-          evidence = {
+          trade,
+          order: rejectStub,
+          evidence: {
             ...evidence,
-            lastBrokerReadOk: false,
-            lastHistoryComplete: false
-          };
-          await persistEvidence(args.ownerUid, trade, evidence);
-          result.brokerUnavailable += 1;
-          result.stillPending += 1;
-          continue;
-        }
+            lastBrokerReadOk: true,
+            lastHistoryComplete: true,
+            terminalReason: "HISTORICAL_DEAL_REJECTED"
+          }
+        });
+        result.rejected += 1;
+        continue;
       }
 
-      // Labelled deal exists but final open/closed state not yet proven.
+      // Successful (FILLED/PARTIALLY_FILLED) OR unknown/legacy null status.
+      // Unknown may still correlate to real exposure; never invent rejection.
+      // Explicit terminal failures alone are handled above (S1/S5).
+      const execCandidates = [
+        ...labelClass.successful,
+        ...labelClass.unknown
+      ];
+      if (execCandidates.length > 0) {
+        const primary =
+          pickSuccessfulDealForStub(labelClass.successful) ??
+          [...labelClass.unknown].sort(
+            (a, b) =>
+              Date.parse(b.executedAt ?? "") - Date.parse(a.executedAt ?? "")
+          )[0] ??
+          execCandidates[0]!;
+        const stub = orderStubFromDealEvidence(primary, trade);
+        // When recovering a proven open/close, promote unknown stub to FILLED
+        // only after broker position/settlement proof (never for reject-only).
+        const filledVol =
+          sumSuccessfulFilledVolumeLots(labelClass.successful) ??
+          sumSuccessfulFilledVolumeLots(labelClass.unknown) ??
+          stub.executedVolumeLots;
+
+        if (positionId && args.positionsReadOk) {
+          const openMatch = matchOpenByPositionId(
+            args.brokerPositions,
+            positionId
+          );
+          if (openMatch) {
+            const openStub: BrokerHistoricalOrder = {
+              ...stub,
+              orderStatus:
+                isSuccessfulExecutionDealStatus(
+                  normalizeBrokerDealStatus(primary.dealStatus)
+                ) || normalizeBrokerDealStatus(primary.dealStatus) === "UNKNOWN"
+                  ? "ORDER_STATUS_FILLED"
+                  : stub.orderStatus,
+              orderStatusCode: 2,
+              executedVolumeLots:
+                openMatch.volumeLots ?? filledVol ?? stub.executedVolumeLots
+            };
+            await recoverOpenFromPosition({
+              ownerUid: args.ownerUid,
+              trade,
+              match: openMatch,
+              order: openStub,
+              evidence: {
+                ...evidence,
+                lastBrokerReadOk: true,
+                lastHistoryComplete: true,
+                terminalReason: "RECOVERED_OPEN_FROM_DEAL_LABEL"
+              }
+            });
+            result.recoveredOpen += 1;
+            continue;
+          }
+        }
+
+        if (positionId && labelClass.hasSuccessfulExecution) {
+          // Exhaustive close settlement for proven successful execution deals.
+          const closing = await resolveClosingDeal({
+            ownerUid: args.ownerUid,
+            order: stub,
+            positionId,
+            deals: dealsRead.items,
+            dealsMayBeTruncatedForClose: true,
+            window
+          });
+          if (closing.ok) {
+            await persistClosedFromDeals({
+              ownerUid: args.ownerUid,
+              trade,
+              order: stub,
+              deal: closing.deal,
+              positionId,
+              evidence: {
+                ...evidence,
+                lastBrokerReadOk: true,
+                lastHistoryComplete: true,
+                terminalReason: "RECOVERED_CLOSED_FROM_DEAL_LABEL"
+              }
+            });
+            result.recoveredClosed += 1;
+            continue;
+          }
+          if (closing.unavailable) {
+            evidence = {
+              ...evidence,
+              lastBrokerReadOk: false,
+              lastHistoryComplete: false
+            };
+            await persistEvidence(args.ownerUid, trade, evidence);
+            result.brokerUnavailable += 1;
+            result.stillPending += 1;
+            continue;
+          }
+        }
+
+        // Unknown-status labelled deals: allow close recovery when exhaustive
+        // closing history proves settlement (legacy null dealStatus).
+        if (positionId && labelClass.unknown.length > 0) {
+          const closing = await resolveClosingDeal({
+            ownerUid: args.ownerUid,
+            order: {
+              ...stub,
+              orderStatus: "ORDER_STATUS_FILLED",
+              orderStatusCode: 2
+            },
+            positionId,
+            deals: dealsRead.items,
+            dealsMayBeTruncatedForClose: true,
+            window
+          });
+          if (closing.ok) {
+            await persistClosedFromDeals({
+              ownerUid: args.ownerUid,
+              trade,
+              order: {
+                ...stub,
+                orderStatus: "ORDER_STATUS_FILLED",
+                orderStatusCode: 2
+              },
+              deal: closing.deal,
+              positionId,
+              evidence: {
+                ...evidence,
+                lastBrokerReadOk: true,
+                lastHistoryComplete: true,
+                terminalReason: "RECOVERED_CLOSED_FROM_DEAL_LABEL"
+              }
+            });
+            result.recoveredClosed += 1;
+            continue;
+          }
+          if (closing.unavailable) {
+            evidence = {
+              ...evidence,
+              lastBrokerReadOk: false,
+              lastHistoryComplete: false
+            };
+            await persistEvidence(args.ownerUid, trade, evidence);
+            result.brokerUnavailable += 1;
+            result.stillPending += 1;
+            continue;
+          }
+        }
+
+        // Candidate fill evidence but open/closed not yet proven.
+        await upsertGoldHunterDemoTrade(args.ownerUid, {
+          ...trade,
+          brokerOrderId: primary.orderId ?? trade.brokerOrderId,
+          brokerPositionId: positionId ?? trade.brokerPositionId,
+          entry: primary.executionPrice ?? trade.entry,
+          fillTs: primary.executedAt ?? trade.fillTs,
+          filledVolumeLots: filledVol ?? trade.filledVolumeLots,
+          entryReconcileEvidence: {
+            ...evidence,
+            lastBrokerReadOk: true,
+            lastHistoryComplete: true,
+            terminalReason: null
+          }
+        });
+        result.stillPending += 1;
+        continue;
+      }
+
+      // Should not reach: labelled without successful/unknown/terminal paths.
+      const anyLabel = labelClass.labelled[0]!;
       await upsertGoldHunterDemoTrade(args.ownerUid, {
         ...trade,
-        brokerOrderId: labelled.orderId ?? trade.brokerOrderId,
+        brokerOrderId: anyLabel.orderId ?? trade.brokerOrderId,
         brokerPositionId: positionId ?? trade.brokerPositionId,
-        entry: labelled.executionPrice ?? trade.entry,
-        fillTs: labelled.executedAt ?? trade.fillTs,
-        filledVolumeLots: labelled.filledVolumeLots ?? trade.filledVolumeLots,
+        entry: anyLabel.executionPrice ?? trade.entry,
+        fillTs: anyLabel.executedAt ?? trade.fillTs,
+        filledVolumeLots: anyLabel.filledVolumeLots ?? trade.filledVolumeLots,
         entryReconcileEvidence: {
           ...evidence,
           lastBrokerReadOk: true,

@@ -13,6 +13,9 @@ import {
 import {
   findHistoricalOrderByClientOrderId,
   parseBrokerHistoricalOrders,
+  normalizeBrokerDealStatus,
+  classifyExactLabelledDeals,
+  isSuccessfulExecutionDealStatus,
   type BrokerDealEvidence,
   type BrokerHistoricalOrder,
   type BrokerHistoryPage
@@ -1181,6 +1184,8 @@ describe("exhaustive close-deal discovery C1–C4", () => {
       closedVolumeLots: 0.25,
       entryPrice: 4410.5
     };
+    let byPosCalls = 0;
+    let dealCalls = 0;
     setDemoBrokerHistoryHooksForTests({
       fetchOrderListPage: async () => ({
         ok: true,
@@ -1189,9 +1194,9 @@ describe("exhaustive close-deal discovery C1–C4", () => {
         ])
       }),
       fetchDealEvidencePage: async (args) => {
-        const span = args.toTimestampMs - args.fromTimestampMs;
-        if (span > 60_000) {
-          // Truncated: opening only — must NOT early-stop close discovery.
+        dealCalls += 1;
+        // First page truncated opening-only — must NOT early-stop close discovery.
+        if (dealCalls === 1) {
           return {
             ok: true,
             value: pageDeals(
@@ -1230,8 +1235,8 @@ describe("exhaustive close-deal discovery C1–C4", () => {
         };
       },
       fetchDealsByPositionIdPage: async (args) => {
-        const span = args.toTimestampMs - args.fromTimestampMs;
-        if (span > 60_000) {
+        byPosCalls += 1;
+        if (byPosCalls === 1) {
           return {
             ok: true,
             value: {
@@ -1260,6 +1265,7 @@ describe("exhaustive close-deal discovery C1–C4", () => {
       positionsReadOk: true,
       graceMs: 0
     });
+    expect(byPosCalls).toBeGreaterThan(1);
     expect(r.recoveredClosed).toBe(1);
     const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(trade.status).toBe("CLOSED");
@@ -1396,11 +1402,14 @@ describe("exhaustive close-deal discovery C1–C4", () => {
       positionsReadOk: true,
       graceMs: 0
     });
-    expect(dealCalls).toBeGreaterThan(1);
+    // Opening early-stop may complete in one DealList page; FINAL close must
+    // still settle via exhaustive by-position (fetchClosingDealsForPosition).
+    expect(dealCalls).toBeGreaterThanOrEqual(1);
     expect(r.recoveredClosed).toBe(1);
     const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(trade.status).toBe("CLOSED");
     expect(trade.netPnlEur).toBe(5.9);
+    expect(trade.brokerPositionId).toBe("P99");
   });
 
   it("C4: exhaustive history proves no closing deal yet → remain PENDING", async () => {
@@ -1454,6 +1463,565 @@ describe("exhaustive close-deal discovery C1–C4", () => {
     expect(r.terminalNotFound).toBe(0);
     const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(trade.status).toBe("PENDING_RECONCILIATION");
+    expect(trade.netPnlEur).toBeNull();
+  });
+});
+
+describe("multi-deal exhaustive close settlement M1–M4", () => {
+  function closingDeal(
+    over: Partial<{
+      dealId: string;
+      netPnl: number;
+      closedVolumeLots: number;
+      closePrice: number;
+      closedAt: string;
+    }>
+  ) {
+    const dealId = over.dealId ?? "d-close";
+    return {
+      dealId,
+      orderId: `o-${dealId}`,
+      positionId: "P123",
+      closePrice: over.closePrice ?? 4408,
+      closedAt: over.closedAt ?? new Date().toISOString(),
+      grossPnl: over.netPnl ?? 1,
+      commission: 0,
+      swap: 0,
+      netPnl: over.netPnl ?? 1,
+      closedVolumeLots: over.closedVolumeLots ?? 0.1,
+      entryPrice: 4410.5
+    };
+  }
+
+  it("M1: two closing deals → CLOSED only with aggregated P/L + volume", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    const d1 = closingDeal({
+      dealId: "d1",
+      netPnl: 1,
+      closedVolumeLots: 0.1,
+      closePrice: 4408,
+      closedAt: new Date(Date.now() - 2_000).toISOString()
+    });
+    const d2 = closingDeal({
+      dealId: "d2",
+      netPnl: 2,
+      closedVolumeLots: 0.15,
+      closePrice: 4406,
+      closedAt: new Date().toISOString()
+    });
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([
+          histOrder({ orderId: "ord-1", positionId: "P123" })
+        ])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([])
+      }),
+      fetchDealsByPositionIdPage: async () => ({
+        ok: true,
+        value: {
+          items: [d1, d2],
+          hasMore: false,
+          fromTimestampMs: 0,
+          toTimestampMs: Date.now()
+        }
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredClosed).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("CLOSED");
+    expect(trade.netPnlEur).toBe(3);
+    expect(trade.filledVolumeLots).toBeCloseTo(0.25, 8);
+    expect(trade.netPnlEur).not.toBe(1);
+    expect(trade.netPnlEur).not.toBe(2);
+  });
+
+  it("M2: first page hasMore=true with one close — do not settle until page 2", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    const d1 = closingDeal({
+      dealId: "d1",
+      netPnl: 1,
+      closedVolumeLots: 0.1
+    });
+    const d2 = closingDeal({
+      dealId: "d2",
+      netPnl: 2,
+      closedVolumeLots: 0.15
+    });
+    let byPosCalls = 0;
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([
+          histOrder({ orderId: "ord-1", positionId: "P123" })
+        ])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([])
+      }),
+      fetchDealsByPositionIdPage: async (args) => {
+        byPosCalls += 1;
+        // Page 1: one closing deal + hasMore — must NOT settle yet.
+        if (byPosCalls === 1) {
+          return {
+            ok: true,
+            value: {
+              items: [d1],
+              hasMore: true,
+              fromTimestampMs: args.fromTimestampMs,
+              toTimestampMs: args.toTimestampMs
+            }
+          };
+        }
+        // Later pages: second closing deal (exhaustive aggregate).
+        return {
+          ok: true,
+          value: {
+            items: [d2],
+            hasMore: false,
+            fromTimestampMs: args.fromTimestampMs,
+            toTimestampMs: args.toTimestampMs
+          }
+        };
+      }
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(byPosCalls).toBeGreaterThan(1);
+    expect(r.recoveredClosed).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("CLOSED");
+    expect(trade.netPnlEur).toBe(3);
+    expect(trade.filledVolumeLots).toBeCloseTo(0.25, 8);
+  });
+
+  it("M3: page1 closing + hasMore, page2 fails → PENDING, no partial CLOSED", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    let byPosCalls = 0;
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([
+          histOrder({ orderId: "ord-1", positionId: "P123" })
+        ])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([])
+      }),
+      fetchDealsByPositionIdPage: async (args) => {
+        byPosCalls += 1;
+        if (byPosCalls === 1) {
+          return {
+            ok: true,
+            value: {
+              items: [
+                closingDeal({
+                  dealId: "d1",
+                  netPnl: 1,
+                  closedVolumeLots: 0.1
+                })
+              ],
+              hasMore: true,
+              fromTimestampMs: args.fromTimestampMs,
+              toTimestampMs: args.toTimestampMs
+            }
+          };
+        }
+        return { ok: false, errorCode: "BY_POS_PAGE_FAIL" };
+      }
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredClosed).toBe(0);
+    expect(r.stillPending + r.brokerUnavailable).toBeGreaterThan(0);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("PENDING_RECONCILIATION");
+    expect(trade.netPnlEur).toBeNull();
+  });
+
+  it("M4: DealList fallback — closing deals on separate bisection pages both settle", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    const d1 = closingDeal({
+      dealId: "d1",
+      netPnl: 1.25,
+      closedVolumeLots: 0.1,
+      closedAt: new Date(Date.now() - 3_000).toISOString()
+    });
+    const d2 = closingDeal({
+      dealId: "d2",
+      netPnl: 1.75,
+      closedVolumeLots: 0.15,
+      closedAt: new Date().toISOString()
+    });
+    let dealCalls = 0;
+    let truncatedOnce = false;
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([
+          histOrder({ orderId: "ord-1", positionId: "P123" })
+        ])
+      }),
+      // By-position empty but complete → fall through to general DealList.
+      fetchDealsByPositionIdPage: async () => ({
+        ok: true,
+        value: {
+          items: [],
+          hasMore: false,
+          fromTimestampMs: 0,
+          toTimestampMs: Date.now()
+        }
+      }),
+      fetchDealEvidencePage: async (args) => {
+        dealCalls += 1;
+        const asEv = (deal: typeof d1) =>
+          dealEv({
+            dealId: deal.dealId,
+            orderId: deal.orderId,
+            positionId: "P123",
+            executionPrice: deal.closePrice,
+            isClosing: true,
+            close: deal,
+            dealStatus: "2"
+          });
+        // First page of the first walk: only d1 + hasMore (truncated).
+        // Later pages / later exhaustive settlement walk: both deals.
+        if (!truncatedOnce) {
+          truncatedOnce = true;
+          return {
+            ok: true,
+            value: pageDeals(
+              [asEv(d1)],
+              true,
+              args.fromTimestampMs,
+              args.toTimestampMs
+            )
+          };
+        }
+        return {
+          ok: true,
+          value: pageDeals(
+            [asEv(d1), asEv(d2)],
+            false,
+            args.fromTimestampMs,
+            args.toTimestampMs
+          )
+        };
+      }
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(dealCalls).toBeGreaterThan(1);
+    expect(r.recoveredClosed).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("CLOSED");
+    expect(trade.netPnlEur).toBe(3);
+    expect(trade.filledVolumeLots).toBeCloseTo(0.25, 8);
+  });
+});
+
+describe("dealStatus normalization S1–S5", () => {
+  it("normalizes ProtoOADealStatus codes and names", () => {
+    expect(normalizeBrokerDealStatus(2)).toBe("FILLED");
+    expect(normalizeBrokerDealStatus("3")).toBe("PARTIALLY_FILLED");
+    expect(normalizeBrokerDealStatus("REJECTED")).toBe("REJECTED");
+    expect(normalizeBrokerDealStatus("INTERNALLY_REJECTED")).toBe(
+      "INTERNALLY_REJECTED"
+    );
+    expect(normalizeBrokerDealStatus(6)).toBe("ERROR");
+    expect(normalizeBrokerDealStatus("MISSED")).toBe("MISSED");
+    expect(isSuccessfulExecutionDealStatus("FILLED")).toBe(true);
+    expect(isSuccessfulExecutionDealStatus("PARTIALLY_FILLED")).toBe(true);
+    expect(isSuccessfulExecutionDealStatus("REJECTED")).toBe(false);
+
+    const classified = classifyExactLabelledDeals(
+      [
+        dealEv({ dealId: "a", label: TRADE_ID, dealStatus: "3" }),
+        dealEv({ dealId: "b", label: TRADE_ID, dealStatus: "2" }),
+        dealEv({ dealId: "c", label: "other", dealStatus: "2" })
+      ],
+      TRADE_ID
+    );
+    expect(classified.labelled).toHaveLength(2);
+    expect(classified.successful).toHaveLength(2);
+    expect(classified.hasSuccessfulExecution).toBe(true);
+  });
+
+  it("S1: REJECTED labelled deal only — never FILLED / never fake CLOSED", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
+          dealEv({
+            dealId: "rej-1",
+            orderId: "O-rej",
+            positionId: null,
+            label: TRADE_ID,
+            dealStatus: "4",
+            executionPrice: null,
+            filledVolumeLots: null
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.rejected).toBe(1);
+    expect(r.recoveredClosed).toBe(0);
+    expect(r.recoveredOpen).toBe(0);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("BROKER_REJECTED");
+    expect(trade.result).not.toBe("CLOSED");
+    expect(trade.netPnlEur).toBeNull();
+  });
+
+  it("S2: PARTIALLY_FILLED + open position → recover broker volume", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
+          dealEv({
+            dealId: "partial-1",
+            orderId: "O-p",
+            positionId: "P55",
+            label: TRADE_ID,
+            dealStatus: "PARTIALLY_FILLED",
+            executionPrice: 4410,
+            filledVolumeLots: 0.1,
+            tradeSide: "SELL"
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [
+        {
+          positionId: "P55",
+          side: "SELL",
+          volumeLots: 0.1,
+          entryPrice: 4410,
+          stopLoss: 4415,
+          label: TRADE_ID,
+          comment: null
+        }
+      ],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredOpen).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("FILLED");
+    expect(trade.result).toBe("OPEN");
+    expect(trade.filledVolumeLots).toBe(0.1);
+    expect(trade.brokerPositionId).toBe("P55");
+  });
+
+  it("S3: PARTIALLY_FILLED then FILLED → recover final open volume", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
+          dealEv({
+            dealId: "p1",
+            orderId: "O1",
+            positionId: "P77",
+            label: TRADE_ID,
+            dealStatus: "3",
+            filledVolumeLots: 0.1,
+            executionPrice: 4410,
+            executedAt: new Date(Date.now() - 5_000).toISOString(),
+            tradeSide: "SELL"
+          }),
+          dealEv({
+            dealId: "f1",
+            orderId: "O1",
+            positionId: "P77",
+            label: TRADE_ID,
+            dealStatus: "2",
+            filledVolumeLots: 0.15,
+            executionPrice: 4410.2,
+            executedAt: new Date().toISOString(),
+            tradeSide: "SELL"
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [
+        {
+          positionId: "P77",
+          side: "SELL",
+          volumeLots: 0.25,
+          entryPrice: 4410.1,
+          stopLoss: 4415,
+          label: TRADE_ID,
+          comment: null
+        }
+      ],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredOpen).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("FILLED");
+    expect(trade.filledVolumeLots).toBe(0.25);
+    expect(trade.brokerPositionId).toBe("P77");
+  });
+
+  it("S4: PARTIALLY_FILLED then REJECTED remainder — keep filled exposure", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
+          dealEv({
+            dealId: "p1",
+            orderId: "O1",
+            positionId: "P88",
+            label: TRADE_ID,
+            dealStatus: "PARTIALLY_FILLED",
+            filledVolumeLots: 0.12,
+            executionPrice: 4411,
+            tradeSide: "SELL"
+          }),
+          dealEv({
+            dealId: "r1",
+            orderId: "O1",
+            positionId: "P88",
+            label: TRADE_ID,
+            dealStatus: "REJECTED",
+            filledVolumeLots: null,
+            executionPrice: null,
+            tradeSide: "SELL"
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [
+        {
+          positionId: "P88",
+          side: "SELL",
+          volumeLots: 0.12,
+          entryPrice: 4411,
+          stopLoss: 4416,
+          label: TRADE_ID,
+          comment: null
+        }
+      ],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredOpen).toBe(1);
+    expect(r.rejected).toBe(0);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("FILLED");
+    expect(trade.result).toBe("OPEN");
+    expect(trade.filledVolumeLots).toBe(0.12);
+  });
+
+  it("S5: ERROR/MISSED only — never FILLED or CLOSED", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
+          dealEv({
+            dealId: "e1",
+            label: TRADE_ID,
+            dealStatus: "ERROR",
+            positionId: null
+          }),
+          dealEv({
+            dealId: "m1",
+            label: TRADE_ID,
+            dealStatus: "7",
+            positionId: null
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredOpen).toBe(0);
+    expect(r.recoveredClosed).toBe(0);
+    expect(r.rejected).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("BROKER_REJECTED");
     expect(trade.netPnlEur).toBeNull();
   });
 });

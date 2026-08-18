@@ -99,7 +99,7 @@ export function resetDemoBrokerHistoryHooksForTests(): void {
 }
 
 /** Max bisection pages per exhaustive walk (fail closed beyond). */
-export const GH_HISTORY_MAX_PAGES = 12;
+export const GH_HISTORY_MAX_PAGES = 32;
 /** Do not bisect windows narrower than this. */
 export const GH_HISTORY_MIN_BISECT_MS = 1_000;
 
@@ -585,9 +585,12 @@ export async function fetchDemoHistoricalDealEvidence(args: {
 }
 
 /**
- * Authoritative closing deal for a position.
- * Uses exhaustive DealListByPositionId; falls back to exhaustive general
- * DealList filtered by positionId. Never treats truncated history as empty.
+ * Authoritative closing deal for a position — FINAL SETTLEMENT ONLY.
+ *
+ * Exhaustive DealListByPositionId across the full window (every hasMore page).
+ * Falls back to exhaustive general DealList filtered by positionId.
+ * Never early-stops after the first closing deal — cTrader may close with
+ * multiple deals; partial history must not become CLOSED accounting.
  */
 export async function fetchDemoClosingDealForPosition(args: {
   ownerUid: string;
@@ -601,37 +604,38 @@ export async function fetchDemoClosingDealForPosition(args: {
     return hooks.fetchClosingDealsForPosition(args);
   }
 
+  // FINAL settlement: never stopOnClosingDeal — collect ALL closing deals.
   const byPos = await fetchDemoDealsByPositionIdExhaustive({
     ownerUid: args.ownerUid,
     positionId: args.positionId,
     fromTimestampMs: args.fromTimestampMs,
-    toTimestampMs: args.toTimestampMs,
-    stopOnClosingDeal: true
+    toTimestampMs: args.toTimestampMs
   });
   if (!byPos.ok) return byPos;
-  const aggByPos = aggregateClosingDeals(byPos.items);
-  if (aggByPos) {
-    return { ok: true, value: { deal: aggByPos, complete: true } };
-  }
   if (!byPos.complete) {
     return {
       ok: true,
       value: { deal: null, complete: false }
     };
   }
+  const aggByPos = aggregateClosingDeals(byPos.items);
+  if (aggByPos) {
+    return { ok: true, value: { deal: aggByPos, complete: true } };
+  }
 
-  // OPTION B fallback: exhaustive general DealList filtered by positionId —
-  // no early-stop so closing deals on later pages are visible.
+  // OPTION B fallback: fully exhaustive general DealList (no early-stop).
   const general = await fetchDemoHistoricalDealEvidenceExhaustive({
     ownerUid: args.ownerUid,
     fromTimestampMs: args.fromTimestampMs,
-    toTimestampMs: args.toTimestampMs,
-    earlyStop: {
-      mode: "CLOSING_FOR_POSITION",
-      positionId: args.positionId
-    }
+    toTimestampMs: args.toTimestampMs
   });
   if (!general.ok) return general;
+  if (!general.complete) {
+    return {
+      ok: true,
+      value: { deal: null, complete: false }
+    };
+  }
   const closing = general.items
     .filter(
       (d) =>
@@ -641,13 +645,26 @@ export async function fetchDemoClosingDealForPosition(args: {
     )
     .map((d) => d.close!);
   const agg = aggregateClosingDeals(closing);
-  if (agg) {
-    return { ok: true, value: { deal: agg, complete: true } };
-  }
   return {
     ok: true,
-    value: { deal: null, complete: general.complete }
+    value: { deal: agg, complete: true }
   };
+}
+
+/**
+ * Positive diagnostic only: early-stop when any closing deal appears.
+ * MUST NOT feed applyBrokerSettledClose / CLOSED accounting.
+ */
+export async function fetchDemoClosingDealEvidenceEarly(args: {
+  ownerUid: string;
+  positionId: string;
+  fromTimestampMs: number;
+  toTimestampMs: number;
+}): Promise<ExhaustiveHistoryResult<BrokerClosedDeal>> {
+  return fetchDemoDealsByPositionIdExhaustive({
+    ...args,
+    stopOnClosingDeal: true
+  });
 }
 
 export async function lookupDemoOrderByClientOrderId(args: {

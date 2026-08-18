@@ -695,14 +695,123 @@ export function parseBrokerDealEvidence(raw: unknown): BrokerDealEvidence[] {
   return out;
 }
 
+/**
+ * ProtoOADealStatus semantic kinds.
+ * Numeric Spotware values: FILLED=2, PARTIALLY_FILLED=3, REJECTED=4,
+ * INTERNALLY_REJECTED=5, ERROR=6, MISSED=7.
+ */
+export type BrokerDealStatusKind =
+  | "FILLED"
+  | "PARTIALLY_FILLED"
+  | "REJECTED"
+  | "INTERNALLY_REJECTED"
+  | "ERROR"
+  | "MISSED"
+  | "UNKNOWN";
+
+const DEAL_STATUS_BY_CODE: Record<string, BrokerDealStatusKind> = {
+  "2": "FILLED",
+  "3": "PARTIALLY_FILLED",
+  "4": "REJECTED",
+  "5": "INTERNALLY_REJECTED",
+  "6": "ERROR",
+  "7": "MISSED"
+};
+
+export function normalizeBrokerDealStatus(
+  raw: string | number | null | undefined
+): BrokerDealStatusKind {
+  if (raw == null) return "UNKNOWN";
+  const s = String(raw).trim().toUpperCase();
+  if (!s) return "UNKNOWN";
+  if (s in DEAL_STATUS_BY_CODE) return DEAL_STATUS_BY_CODE[s]!;
+  const stripped = s.replace(/^PROTOOADEALSTATUS_?/i, "").replace(/^DEAL_STATUS_?/i, "");
+  if (
+    stripped === "FILLED" ||
+    stripped === "PARTIALLY_FILLED" ||
+    stripped === "REJECTED" ||
+    stripped === "INTERNALLY_REJECTED" ||
+    stripped === "ERROR" ||
+    stripped === "MISSED"
+  ) {
+    return stripped;
+  }
+  if (stripped in DEAL_STATUS_BY_CODE) return DEAL_STATUS_BY_CODE[stripped]!;
+  return "UNKNOWN";
+}
+
+export function isSuccessfulExecutionDealStatus(
+  kind: BrokerDealStatusKind
+): boolean {
+  return kind === "FILLED" || kind === "PARTIALLY_FILLED";
+}
+
+export function isTerminalFailureDealStatus(
+  kind: BrokerDealStatusKind
+): boolean {
+  return (
+    kind === "REJECTED" ||
+    kind === "INTERNALLY_REJECTED" ||
+    kind === "ERROR" ||
+    kind === "MISSED"
+  );
+}
+
+export type ExactLabelDealClassification = {
+  labelled: BrokerDealEvidence[];
+  successful: BrokerDealEvidence[];
+  terminalFailure: BrokerDealEvidence[];
+  unknown: BrokerDealEvidence[];
+  hasSuccessfulExecution: boolean;
+  /** All labelled deals are terminal failures; none succeeded. */
+  allTerminalFailure: boolean;
+};
+
+/** Classify every exact-label deal — never trust list order alone. */
+export function classifyExactLabelledDeals(
+  deals: readonly BrokerDealEvidence[],
+  goldHunterTradeId: string
+): ExactLabelDealClassification {
+  const labelled = findDealsByExactGoldHunterLabel(deals, goldHunterTradeId);
+  const successful: BrokerDealEvidence[] = [];
+  const terminalFailure: BrokerDealEvidence[] = [];
+  const unknown: BrokerDealEvidence[] = [];
+  for (const d of labelled) {
+    const kind = normalizeBrokerDealStatus(d.dealStatus);
+    if (isSuccessfulExecutionDealStatus(kind)) successful.push(d);
+    else if (isTerminalFailureDealStatus(kind)) terminalFailure.push(d);
+    else unknown.push(d);
+  }
+  return {
+    labelled,
+    successful,
+    terminalFailure,
+    unknown,
+    hasSuccessfulExecution: successful.length > 0,
+    allTerminalFailure:
+      labelled.length > 0 &&
+      successful.length === 0 &&
+      unknown.length === 0 &&
+      terminalFailure.length === labelled.length
+  };
+}
+
+/** Exact goldHunterTradeId label ownership — never comment-only. */
+export function findDealsByExactGoldHunterLabel(
+  deals: readonly BrokerDealEvidence[],
+  goldHunterTradeId: string
+): BrokerDealEvidence[] {
+  const want = goldHunterTradeId.trim();
+  if (!want) return [];
+  return deals.filter((d) => d.label === want);
+}
+
 /** Exact goldHunterTradeId label ownership — never comment-only. */
 export function findDealByExactGoldHunterLabel(
   deals: readonly BrokerDealEvidence[],
   goldHunterTradeId: string
 ): BrokerDealEvidence | null {
-  const want = goldHunterTradeId.trim();
-  if (!want) return null;
-  return deals.find((d) => d.label === want) ?? null;
+  return findDealsByExactGoldHunterLabel(deals, goldHunterTradeId)[0] ?? null;
 }
 
 /** Exact clientOrderId match — never fall back to newest / same-side. */
@@ -728,6 +837,10 @@ export function aggregateClosingDeals(
   let commission = 0;
   let swap = 0;
   let hasNet = false;
+  let volumeSum = 0;
+  let hasVolume = false;
+  let vwapNum = 0;
+  let vwapDen = 0;
   for (const d of sorted) {
     if (d.netPnl != null) {
       net += d.netPnl;
@@ -736,12 +849,32 @@ export function aggregateClosingDeals(
     if (d.grossPnl != null) gross += d.grossPnl;
     if (d.commission != null) commission += d.commission;
     if (d.swap != null) swap += d.swap;
+    if (d.closedVolumeLots != null) {
+      volumeSum += d.closedVolumeLots;
+      hasVolume = true;
+      if (d.closePrice != null) {
+        vwapNum += d.closePrice * d.closedVolumeLots;
+        vwapDen += d.closedVolumeLots;
+      }
+    }
   }
   const last = sorted[sorted.length - 1]!;
   if (!hasNet) return null;
+  // Multi-deal exit: volume-weighted average when volumes+prices exist.
+  // Never pretend the last deal's price alone was the entire exit.
+  const closePrice =
+    vwapDen > 0
+      ? Number((vwapNum / vwapDen).toFixed(8))
+      : sorted.length === 1
+        ? last.closePrice
+        : null;
   return {
     ...last,
     dealId: sorted.map((d) => d.dealId).join(","),
+    closePrice,
+    closedVolumeLots: hasVolume
+      ? Number(volumeSum.toFixed(8))
+      : last.closedVolumeLots,
     grossPnl: Number(gross.toFixed(8)),
     commission: Number(commission.toFixed(8)),
     swap: Number(swap.toFixed(8)),
