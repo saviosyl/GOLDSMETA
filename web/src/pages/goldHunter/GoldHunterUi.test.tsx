@@ -364,12 +364,14 @@ describe("Gold Hunter UI", () => {
 
   it("shows IN DEMO TRADE when an open Gold Hunter position exists", async () => {
     status.config.demoAutoTradeEnabled = true;
+    status.broker.openPositionCount = 1;
+    status.broker.marginUsed = 120;
     status.openTrades = [
       {
         goldHunterTradeId: "GH-D-1",
         setup: "A",
         side: "BUY",
-        status: "OPEN",
+        status: "FILLED",
         netPnlEur: 0,
         entry: 2400,
         stop: 2399.45
@@ -378,6 +380,54 @@ describe("Gold Hunter UI", () => {
     renderAt("/gold-hunter");
     await waitFor(() =>
       expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("IN DEMO TRADE")
+    );
+  });
+
+  it("shows RECONCILING DEMO CLOSE for CLOSE_REQUESTED without claiming active management", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.broker.openPositionCount = 0;
+    status.broker.marginUsed = 0;
+    status.openTrades = [
+      {
+        goldHunterTradeId: "GH-D-5194a263",
+        setup: "B",
+        side: "BUY",
+        status: "CLOSE_REQUESTED",
+        netPnlEur: null,
+        entry: 4415.27,
+        stop: 4415.93
+      }
+    ] as typeof status.openTrades;
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "RECONCILING DEMO CLOSE"
+      )
+    );
+    expect(screen.getByTestId("gh-demo-autotrade-hint")).not.toHaveTextContent(
+      "active cTrader DEMO position and is managing it"
+    );
+  });
+
+  it("shows CLOSE SETTLEMENT PENDING when broker is flat and local awaits deal P/L", async () => {
+    status.config.demoAutoTradeEnabled = true;
+    status.broker.openPositionCount = 0;
+    status.openTrades = [
+      {
+        goldHunterTradeId: "GH-D-settle",
+        setup: "A",
+        side: "BUY",
+        status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+        netPnlEur: null,
+        entry: 2400,
+        stop: 2399.45
+      }
+    ] as typeof status.openTrades;
+    renderAt("/gold-hunter");
+    await waitFor(() =>
+      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
+        "CLOSE SETTLEMENT PENDING"
+      )
     );
   });
 

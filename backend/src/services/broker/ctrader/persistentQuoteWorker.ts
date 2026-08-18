@@ -45,6 +45,7 @@ import {
 } from "../../goldHunterAdmin/marketFeedHook";
 import {
   enqueueGoldHunterReconcilePass,
+  maybeEnqueueStaleCloseRequestedWatchdog,
   runGoldHunterReconcilePass
 } from "../../goldHunterAdmin/reconciliationRuntime";
 import {
@@ -284,6 +285,9 @@ export class PersistentXauUsdQuoteWorker {
     });
     if (this.ghReconcileTimer) clearInterval(this.ghReconcileTimer);
     this.ghReconcileTimer = setInterval(() => {
+      void maybeEnqueueStaleCloseRequestedWatchdog(ownerUid).catch(() => {
+        /* watchdog is best-effort */
+      });
       enqueueGoldHunterReconcilePass(ownerUid, false);
     }, 30_000);
 

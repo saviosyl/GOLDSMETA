@@ -31,6 +31,7 @@ import {
   reconcileGoldHunterDemoPositions,
   type BrokerDemoPositionLite
 } from "./reconcilePositions";
+import { maybeEnqueueStaleCloseRequestedWatchdog } from "./reconciliationRuntime";
 import { getGoldHunterStrategySelector } from "./strategySelector";
 import {
   listGoldHunterDemoTrades,
@@ -297,6 +298,13 @@ export async function tickGoldHunterPositionManager(args: {
     stopsTightened: 0,
     lastExitReason: null
   };
+
+  // Stale CLOSE_REQUESTED must recover even when no new entry is attempted and
+  // normal tick management skips CLOSE_REQUESTED rows.
+  await maybeEnqueueStaleCloseRequestedWatchdog(args.ownerUid).catch(
+    () => undefined
+  );
+
   const sel = getGoldHunterStrategySelector(args.ownerUid);
   const snap = sel.getLastSnapshot();
   const feat = snap?.features;

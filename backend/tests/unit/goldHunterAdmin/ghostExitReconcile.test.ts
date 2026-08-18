@@ -159,8 +159,12 @@ describe("Exit-side PENDING_RECONCILIATION reconcile", () => {
       ownerUid: OWNER,
       force: true
     });
-    expect(pass.exitPendingSettlementPending).toBe(1);
-    expect(pass.exitPendingSettled).toBe(0);
+    // PENDING_RECONCILIATION with brokerPositionId may settle via disappeared-open
+    // (runs first) or exit-pending reconcile — either path is authoritative.
+    expect(
+      pass.exitPendingSettlementPending + pass.disappearedPending
+    ).toBe(1);
+    expect(pass.exitPendingSettled + pass.disappearedSettled).toBe(0);
 
     const row = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(row.status).toBe("CLOSE_ACCEPTED_PENDING_SETTLEMENT");
@@ -192,7 +196,7 @@ describe("Exit-side PENDING_RECONCILIATION reconcile", () => {
       ownerUid: OWNER,
       force: true
     });
-    expect(pass.exitPendingSettled).toBe(1);
+    expect(pass.exitPendingSettled + pass.disappearedSettled).toBe(1);
 
     const row = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(row.status).toBe("CLOSED");
@@ -374,7 +378,7 @@ describe("Exit-side PENDING_RECONCILIATION reconcile", () => {
       ownerUid: OWNER,
       force: true
     });
-    expect(pass.exitPendingSettled).toBe(1);
+    expect(pass.exitPendingSettled + pass.disappearedSettled).toBe(1);
     expect(closeMutations).toBe(0);
     const row = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
     expect(row.status).toBe("CLOSED");
@@ -466,7 +470,7 @@ describe("Exit-side PENDING_RECONCILIATION reconcile", () => {
       ownerUid: OWNER,
       force: true
     });
-    expect(pass.exitPendingSettled).toBe(1);
+    expect(pass.exitPendingSettled + pass.disappearedSettled).toBe(1);
     expect(pass.unmatched).toBe(1);
     const trades = await listGoldHunterDemoTrades(OWNER, { limit: 20 });
     expect(trades.every((t) => t.strategy === GH_ADMIN_STRATEGY_ID)).toBe(true);

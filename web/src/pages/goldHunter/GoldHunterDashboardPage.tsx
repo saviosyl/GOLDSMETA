@@ -46,6 +46,129 @@ export function selectMeaningfulOrderBlockers(
   });
 }
 
+type DemoLifecycleDisplay = {
+  state: string;
+  hint: string;
+};
+
+/**
+ * Truthful Demo AutoTrade lifecycle for the dashboard.
+ * "IN DEMO TRADE" only when a broker-confirmed open position supports it.
+ */
+export function classifyGoldHunterDemoLifecycle(args: {
+  demoAutoTradeEnabled: boolean;
+  openTrades: ReadonlyArray<{ status?: string | null }>;
+  brokerOpenPositionCount: number | null | undefined;
+  firstRealGateBlocker: string | null;
+  armingReady: boolean;
+  armingBlockers: readonly string[];
+  marketClosed: boolean;
+  meaningfulGateBlockers: readonly string[];
+}): DemoLifecycleDisplay {
+  const {
+    demoAutoTradeEnabled,
+    openTrades,
+    brokerOpenPositionCount,
+    firstRealGateBlocker,
+    armingReady,
+    armingBlockers,
+    marketClosed,
+    meaningfulGateBlockers
+  } = args;
+
+  const brokerConfirmedOpen =
+    brokerOpenPositionCount != null &&
+    Number.isFinite(brokerOpenPositionCount) &&
+    brokerOpenPositionCount > 0;
+
+  const hasCloseRequested = openTrades.some((t) => t.status === "CLOSE_REQUESTED");
+  const hasSettlementPending = openTrades.some(
+    (t) => t.status === "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
+  );
+  const hasBrokerManagedLocal = openTrades.some(
+    (t) =>
+      t.status === "FILLED" ||
+      t.status === "PROTECTED" ||
+      t.status === "ACCEPTED_PENDING_FILL" ||
+      t.status === "PENDING_RECONCILIATION" ||
+      t.status === "SENT" ||
+      t.status === "ORDER_CREATED" ||
+      t.status === "OPEN"
+  );
+
+  if (hasCloseRequested) {
+    return {
+      state: "RECONCILING DEMO CLOSE",
+      hint: brokerConfirmedOpen
+        ? "Close requested. Broker still shows an open DEMO position — reconciling without opening another trade."
+        : "Close requested. Broker no longer shows the position — settling the close from authoritative broker deals."
+    };
+  }
+
+  if (hasSettlementPending) {
+    return {
+      state: "CLOSE SETTLEMENT PENDING",
+      hint: "Broker exposure is closed. Waiting for the broker closing deal before recording P/L — not managing an active position."
+    };
+  }
+
+  if (hasBrokerManagedLocal && brokerConfirmedOpen) {
+    return {
+      state: "IN DEMO TRADE",
+      hint: "Gold Hunter has an active cTrader DEMO position and is managing it."
+    };
+  }
+
+  if (hasBrokerManagedLocal && !brokerConfirmedOpen) {
+    return {
+      state: "RECONCILIATION REQUIRED",
+      hint: "Local Demo trade state does not match broker open positions. Gold Hunter is reconciling before claiming an active position."
+    };
+  }
+
+  if (demoAutoTradeEnabled) {
+    if (firstRealGateBlocker) {
+      return {
+        state: "ARMED — TEMPORARILY BLOCKED",
+        hint: `No new order right now: ${firstRealGateBlocker}`
+      };
+    }
+    return {
+      state: "ARMED — WAITING FOR VALID SIGNAL",
+      hint: "The execution engine is live in DEMO mode and is waiting for the next valid A/B/C Gold Hunter setup."
+    };
+  }
+
+  if (!armingReady) {
+    return {
+      state: "NOT READY",
+      hint:
+        armingBlockers.length > 0
+          ? `Cannot start yet: ${armingBlockers.join(", ")}`
+          : "Cannot start yet."
+    };
+  }
+
+  if (firstRealGateBlocker) {
+    return {
+      state: "READY TO ARM",
+      hint: `Structurally ready to arm. Current trading status: BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
+    };
+  }
+
+  if (marketClosed && meaningfulGateBlockers.length === 0) {
+    return {
+      state: "READY TO ARM — MARKET CLOSED",
+      hint: "Structurally ready to arm when the market is open. Start Demo AutoTrade only when you intend cTrader DEMO orders."
+    };
+  }
+
+  return {
+    state: "READY TO ARM",
+    hint: "Ready to arm. Start Demo AutoTrade to allow valid Gold Hunter setups to submit cTrader DEMO orders."
+  };
+}
+
 export function GoldHunterDashboardPage() {
   const { status, refresh } = useGoldHunter();
   const { api } = useAuth();
@@ -59,7 +182,6 @@ export function GoldHunterDashboardPage() {
   const pf = status.performanceToday;
   const cur = status.broker.currency;
   const demoEnabled = status.config.demoAutoTradeEnabled;
-  const hasOpenTrade = status.openTrades.length > 0;
   const armingBlockers = status.arming?.blockers ?? [];
   const meaningfulGateBlockers = selectMeaningfulOrderBlockers(
     status.gates.blockers,
@@ -67,31 +189,18 @@ export function GoldHunterDashboardPage() {
   );
   const firstRealGateBlocker = meaningfulGateBlockers[0] ?? null;
   const marketClosed = status.market.marketStatus === "CLOSED";
-  const demoState = hasOpenTrade
-    ? "IN DEMO TRADE"
-    : demoEnabled
-      ? firstRealGateBlocker
-        ? "ARMED — TEMPORARILY BLOCKED"
-        : "ARMED — WAITING FOR VALID SIGNAL"
-      : !status.arming?.ready
-        ? "NOT READY"
-        : marketClosed && meaningfulGateBlockers.length === 0
-          ? "READY TO ARM — MARKET CLOSED"
-          : "READY TO ARM";
-  const demoHint = hasOpenTrade
-    ? "Gold Hunter has an active cTrader DEMO position and is managing it."
-    : demoEnabled
-      ? firstRealGateBlocker
-        ? `No new order right now: ${firstRealGateBlocker}`
-        : "The execution engine is live in DEMO mode and is waiting for the next valid A/B/C Gold Hunter setup."
-      : armingBlockers.length > 0
-        ? `Cannot start yet: ${armingBlockers.join(", ")}`
-        : firstRealGateBlocker
-          ? `Structurally ready to arm. Current trading status: BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
-          : marketClosed
-            ? "Structurally ready to arm when the market is open. Start Demo AutoTrade only when you intend cTrader DEMO orders."
-            : "Ready to arm. Start Demo AutoTrade to allow valid Gold Hunter setups to submit cTrader DEMO orders.";
-
+  const lifecycle = classifyGoldHunterDemoLifecycle({
+    demoAutoTradeEnabled: demoEnabled,
+    openTrades: status.openTrades,
+    brokerOpenPositionCount: status.broker.openPositionCount,
+    firstRealGateBlocker,
+    armingReady: status.arming?.ready === true,
+    armingBlockers,
+    marketClosed,
+    meaningfulGateBlockers
+  });
+  const demoState = lifecycle.state;
+  const demoHint = lifecycle.hint;
   async function onRefresh() {
     setRefreshing(true);
     try {
