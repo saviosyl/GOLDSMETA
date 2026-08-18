@@ -1748,6 +1748,59 @@ describe("multi-deal exhaustive close settlement M1–M4", () => {
     expect(trade.netPnlEur).toBe(3);
     expect(trade.filledVolumeLots).toBeCloseTo(0.25, 8);
   });
+
+  it("incomplete multi-deal exit price → CLOSED with full P/L, exit null", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    const d1 = closingDeal({
+      dealId: "d1",
+      netPnl: 1,
+      closedVolumeLots: 0.1,
+      closePrice: 4408
+    });
+    const d2 = {
+      ...closingDeal({
+        dealId: "d2",
+        netPnl: 2,
+        closedVolumeLots: 0.15,
+        closePrice: 4406
+      }),
+      closePrice: null as number | null
+    };
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([
+          histOrder({ orderId: "ord-1", positionId: "P123" })
+        ])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([])
+      }),
+      fetchDealsByPositionIdPage: async () => ({
+        ok: true,
+        value: {
+          items: [d1, d2],
+          hasMore: false,
+          fromTimestampMs: 0,
+          toTimestampMs: Date.now()
+        }
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredClosed).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("CLOSED");
+    expect(trade.netPnlEur).toBe(3);
+    expect(trade.exit).toBeNull();
+  });
 });
 
 describe("dealStatus normalization S1–S5", () => {
@@ -1984,7 +2037,7 @@ describe("dealStatus normalization S1–S5", () => {
     expect(trade.filledVolumeLots).toBe(0.12);
   });
 
-  it("S5: ERROR/MISSED only — never FILLED or CLOSED", async () => {
+  it("S5a: ERROR-only labelled deal → BROKER_SUBMIT_ERROR (not rejected)", async () => {
     await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
     await seedClaim();
     setDemoBrokerHistoryHooksForTests({
@@ -2000,7 +2053,37 @@ describe("dealStatus normalization S1–S5", () => {
             label: TRADE_ID,
             dealStatus: "ERROR",
             positionId: null
-          }),
+          })
+        ])
+      })
+    });
+
+    const r = await reconcileGoldHunterEntryPendingWatchdog({
+      ownerUid: OWNER,
+      brokerPositions: [],
+      positionsReadOk: true,
+      graceMs: 0
+    });
+    expect(r.recoveredOpen).toBe(0);
+    expect(r.recoveredClosed).toBe(0);
+    expect(r.rejected).toBe(1);
+    const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
+    expect(trade.status).toBe("BROKER_SUBMIT_ERROR");
+    expect(trade.errorCode).toBe("BROKER_DEAL_ERROR");
+    expect(trade.netPnlEur).toBeNull();
+  });
+
+  it("S5b: MISSED-only labelled deal → BROKER_SUBMIT_ERROR (not rejected)", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, pendingEntryTrade());
+    await seedClaim();
+    setDemoBrokerHistoryHooksForTests({
+      fetchOrderListPage: async () => ({
+        ok: true,
+        value: pageOrders([])
+      }),
+      fetchDealEvidencePage: async () => ({
+        ok: true,
+        value: pageDeals([
           dealEv({
             dealId: "m1",
             label: TRADE_ID,
@@ -2021,7 +2104,8 @@ describe("dealStatus normalization S1–S5", () => {
     expect(r.recoveredClosed).toBe(0);
     expect(r.rejected).toBe(1);
     const trade = (await listGoldHunterDemoTrades(OWNER, { limit: 5 }))[0]!;
-    expect(trade.status).toBe("BROKER_REJECTED");
+    expect(trade.status).toBe("BROKER_SUBMIT_ERROR");
+    expect(trade.errorCode).toBe("BROKER_DEAL_MISSED");
     expect(trade.netPnlEur).toBeNull();
   });
 });

@@ -243,6 +243,40 @@ describe("autotrade safety patch — broker close P/L", () => {
       5
     );
   });
+
+  it("incomplete multi-deal price → preserve P/L, aggregate closePrice null", () => {
+    const d1 = {
+      dealId: "d1",
+      orderId: "o1",
+      positionId: "P123",
+      closePrice: 4408,
+      closedAt: "2026-08-18T10:00:00.000Z",
+      grossPnl: 1,
+      commission: 0,
+      swap: 0,
+      netPnl: 1,
+      closedVolumeLots: 0.1
+    };
+    const d2 = {
+      dealId: "d2",
+      orderId: "o2",
+      positionId: "P123",
+      closePrice: null,
+      closedAt: "2026-08-18T10:00:01.000Z",
+      grossPnl: 2,
+      commission: 0,
+      swap: 0,
+      netPnl: 2,
+      closedVolumeLots: 0.15
+    };
+    const agg = aggregateClosingDeals([d1, d2]);
+    expect(agg).not.toBeNull();
+    expect(agg!.netPnl).toBe(3);
+    expect(agg!.closedVolumeLots).toBeCloseTo(0.25, 8);
+    expect(agg!.dealId).toBe("d1,d2");
+    // Subset VWAP must not be presented as the full exit price.
+    expect(agg!.closePrice).toBeNull();
+  });
 });
 
 describe("autotrade safety patch — volume metadata", () => {

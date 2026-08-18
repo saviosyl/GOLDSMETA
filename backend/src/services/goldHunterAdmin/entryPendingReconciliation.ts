@@ -323,6 +323,42 @@ async function persistRejected(args: {
   }
 }
 
+/**
+ * Terminal non-rejection deal failure (ERROR / MISSED).
+ * Do not label these BROKER_REJECTED — cTrader did not report rejection.
+ */
+async function persistDealSubmitError(args: {
+  ownerUid: string;
+  trade: GoldHunterDemoTrade;
+  order: BrokerHistoricalOrder;
+  evidence: EntryReconcileEvidence;
+  errorCode: "BROKER_DEAL_ERROR" | "BROKER_DEAL_MISSED";
+  terminalReason: string;
+}): Promise<void> {
+  const next: GoldHunterDemoTrade = {
+    ...args.trade,
+    status: "BROKER_SUBMIT_ERROR",
+    brokerOrderId: args.order.orderId,
+    brokerPositionId: args.order.positionId,
+    errorCode: args.errorCode,
+    entryReconcileEvidence: {
+      ...args.evidence,
+      lastBrokerReadOk: true,
+      terminalReason: args.terminalReason
+    }
+  };
+  await upsertGoldHunterDemoTrade(args.ownerUid, next);
+  if (args.trade.signalId) {
+    await updateGoldHunterSignalClaim(args.ownerUid, args.trade.signalId, {
+      state: "BROKER_SUBMIT_ERROR",
+      brokerOrderId: args.order.orderId,
+      brokerPositionId: args.order.positionId,
+      goldHunterTradeId: args.trade.goldHunterTradeId,
+      errorCode: args.errorCode
+    });
+  }
+}
+
 async function persistClosedFromDeals(args: {
   ownerUid: string;
   trade: GoldHunterDemoTrade;
@@ -472,13 +508,14 @@ function orderStatusFromDealKind(kind: BrokerDealStatusKind): {
   if (kind === "PARTIALLY_FILLED") {
     return { orderStatus: "ORDER_STATUS_PARTIALLY_FILLED", orderStatusCode: null };
   }
-  if (
-    kind === "REJECTED" ||
-    kind === "INTERNALLY_REJECTED" ||
-    kind === "ERROR" ||
-    kind === "MISSED"
-  ) {
+  if (kind === "REJECTED" || kind === "INTERNALLY_REJECTED") {
     return { orderStatus: "ORDER_STATUS_REJECTED", orderStatusCode: 4 };
+  }
+  if (kind === "ERROR") {
+    return { orderStatus: "ORDER_STATUS_ERROR", orderStatusCode: 6 };
+  }
+  if (kind === "MISSED") {
+    return { orderStatus: "ORDER_STATUS_MISSED", orderStatusCode: 7 };
   }
   return { orderStatus: "ORDER_STATUS_UNKNOWN", orderStatusCode: null };
 }
@@ -849,8 +886,10 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
         null;
       const positionId = positionIdRaw ? String(positionIdRaw) : null;
 
-      // S1 / S5: terminal failure only (REJECTED/ERROR/MISSED) — never
-      // synthesize FILLED or invent CLOSED without execution evidence.
+      // Terminal labelled failures with NO successful execution:
+      // REJECTED / INTERNALLY_REJECTED → BROKER_REJECTED
+      // ERROR / MISSED → BROKER_SUBMIT_ERROR (not "rejected")
+      // UNKNOWN remains fail-closed / PENDING (handled below).
       if (labelClass.allTerminalFailure && !labelClass.hasSuccessfulExecution) {
         if (positionId && args.positionsReadOk) {
           const openMatch = matchOpenByPositionId(
@@ -870,25 +909,72 @@ export async function reconcileGoldHunterEntryPendingWatchdog(args: {
             continue;
           }
         }
-        const failDeal =
-          labelClass.terminalFailure.find(
-            (d) =>
-              normalizeBrokerDealStatus(d.dealStatus) === "REJECTED" ||
-              normalizeBrokerDealStatus(d.dealStatus) === "INTERNALLY_REJECTED"
-          ) ?? labelClass.terminalFailure[0]!;
-        const rejectStub = orderStubFromDealEvidence(failDeal, trade);
-        await persistRejected({
-          ownerUid: args.ownerUid,
-          trade,
-          order: rejectStub,
-          evidence: {
-            ...evidence,
-            lastBrokerReadOk: true,
-            lastHistoryComplete: true,
-            terminalReason: "HISTORICAL_DEAL_REJECTED"
-          }
+        const kinds = labelClass.terminalFailure.map((d) =>
+          normalizeBrokerDealStatus(d.dealStatus)
+        );
+        const hasReject = kinds.some(
+          (k) => k === "REJECTED" || k === "INTERNALLY_REJECTED"
+        );
+        const hasError = kinds.some((k) => k === "ERROR");
+        const hasMissed = kinds.some((k) => k === "MISSED");
+
+        if (hasReject) {
+          const failDeal =
+            labelClass.terminalFailure.find((d) => {
+              const k = normalizeBrokerDealStatus(d.dealStatus);
+              return k === "REJECTED" || k === "INTERNALLY_REJECTED";
+            }) ?? labelClass.terminalFailure[0]!;
+          const rejectStub = orderStubFromDealEvidence(failDeal, trade);
+          await persistRejected({
+            ownerUid: args.ownerUid,
+            trade,
+            order: rejectStub,
+            evidence: {
+              ...evidence,
+              lastBrokerReadOk: true,
+              lastHistoryComplete: true,
+              terminalReason: "HISTORICAL_DEAL_REJECTED"
+            }
+          });
+          result.rejected += 1;
+          continue;
+        }
+
+        if (hasError || hasMissed) {
+          const failDeal =
+            labelClass.terminalFailure.find((d) => {
+              const k = normalizeBrokerDealStatus(d.dealStatus);
+              return k === "ERROR" || k === "MISSED";
+            }) ?? labelClass.terminalFailure[0]!;
+          const stub = orderStubFromDealEvidence(failDeal, trade);
+          const errorCode = hasError ? "BROKER_DEAL_ERROR" : "BROKER_DEAL_MISSED";
+          await persistDealSubmitError({
+            ownerUid: args.ownerUid,
+            trade,
+            order: stub,
+            evidence: {
+              ...evidence,
+              lastBrokerReadOk: true,
+              lastHistoryComplete: true
+            },
+            errorCode,
+            terminalReason: hasError
+              ? "HISTORICAL_DEAL_ERROR"
+              : "HISTORICAL_DEAL_MISSED"
+          });
+          // Counted as terminalized entry (not open); not a broker "rejection".
+          result.rejected += 1;
+          continue;
+        }
+
+        // Unexpected terminal classification — fail closed.
+        await persistEvidence(args.ownerUid, trade, {
+          ...evidence,
+          lastBrokerReadOk: true,
+          lastHistoryComplete: true,
+          terminalReason: null
         });
-        result.rejected += 1;
+        result.stillPending += 1;
         continue;
       }
 

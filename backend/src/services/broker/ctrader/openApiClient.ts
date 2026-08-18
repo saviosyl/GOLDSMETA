@@ -838,7 +838,8 @@ export function aggregateClosingDeals(
   let swap = 0;
   let hasNet = false;
   let volumeSum = 0;
-  let hasVolume = false;
+  let volumeKnownForAll = true;
+  let priceVolumeComplete = true;
   let vwapNum = 0;
   let vwapDen = 0;
   for (const d of sorted) {
@@ -849,32 +850,42 @@ export function aggregateClosingDeals(
     if (d.grossPnl != null) gross += d.grossPnl;
     if (d.commission != null) commission += d.commission;
     if (d.swap != null) swap += d.swap;
-    if (d.closedVolumeLots != null) {
-      volumeSum += d.closedVolumeLots;
-      hasVolume = true;
-      if (d.closePrice != null) {
-        vwapNum += d.closePrice * d.closedVolumeLots;
-        vwapDen += d.closedVolumeLots;
+    const vol = d.closedVolumeLots;
+    const price = d.closePrice;
+    const volOk =
+      vol != null && Number.isFinite(vol) && vol > 0;
+    const priceOk = price != null && Number.isFinite(price);
+    if (!volOk) volumeKnownForAll = false;
+    if (!(volOk && priceOk)) priceVolumeComplete = false;
+    if (volOk) {
+      volumeSum += vol;
+      if (priceOk) {
+        vwapNum += price * vol;
+        vwapDen += vol;
       }
     }
   }
   const last = sorted[sorted.length - 1]!;
   if (!hasNet) return null;
-  // Multi-deal exit: volume-weighted average when volumes+prices exist.
-  // Never pretend the last deal's price alone was the entire exit.
+  // Multi-deal exit price: VWAP only when EVERY contributing deal has
+  // finite positive volume AND finite closePrice. Never imply a subset VWAP
+  // is the full position exit. Single-deal may keep its broker closePrice.
   const closePrice =
-    vwapDen > 0
-      ? Number((vwapNum / vwapDen).toFixed(8))
-      : sorted.length === 1
-        ? last.closePrice
+    sorted.length === 1
+      ? last.closePrice
+      : priceVolumeComplete && vwapDen > 0
+        ? Number((vwapNum / vwapDen).toFixed(8))
         : null;
   return {
     ...last,
     dealId: sorted.map((d) => d.dealId).join(","),
     closePrice,
-    closedVolumeLots: hasVolume
+    closedVolumeLots: volumeKnownForAll
       ? Number(volumeSum.toFixed(8))
-      : last.closedVolumeLots,
+      : // Partial volume knowledge — still sum what we know; null only if none.
+        volumeSum > 0
+          ? Number(volumeSum.toFixed(8))
+          : last.closedVolumeLots,
     grossPnl: Number(gross.toFixed(8)),
     commission: Number(commission.toFixed(8)),
     swap: Number(swap.toFixed(8)),
