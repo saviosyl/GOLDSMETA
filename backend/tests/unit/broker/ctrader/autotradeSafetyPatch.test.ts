@@ -277,6 +277,67 @@ describe("autotrade safety patch — broker close P/L", () => {
     // Subset VWAP must not be presented as the full exit price.
     expect(agg!.closePrice).toBeNull();
   });
+
+  it("multi-deal with any null netPnl → aggregate null (no partial CLOSED P/L)", () => {
+    const agg = aggregateClosingDeals([
+      {
+        dealId: "d1",
+        orderId: "o1",
+        positionId: "P1",
+        closePrice: 4400,
+        closedAt: "2026-08-18T10:00:00.000Z",
+        grossPnl: -20,
+        commission: 0,
+        swap: 0,
+        netPnl: -20,
+        closedVolumeLots: 0.1
+      },
+      {
+        dealId: "d2",
+        orderId: "o2",
+        positionId: "P1",
+        closePrice: 4401,
+        closedAt: "2026-08-18T10:00:01.000Z",
+        grossPnl: null,
+        commission: null,
+        swap: null,
+        netPnl: null,
+        closedVolumeLots: 0.1
+      }
+    ]);
+    expect(agg).toBeNull();
+  });
+
+  it("multi-deal complete netPnl -20 and +5 → aggregate -15", () => {
+    const agg = aggregateClosingDeals([
+      {
+        dealId: "d1",
+        orderId: "o1",
+        positionId: "P1",
+        closePrice: 4400,
+        closedAt: "2026-08-18T10:00:00.000Z",
+        grossPnl: -20,
+        commission: 0,
+        swap: 0,
+        netPnl: -20,
+        closedVolumeLots: 0.1
+      },
+      {
+        dealId: "d2",
+        orderId: "o2",
+        positionId: "P1",
+        closePrice: 4401,
+        closedAt: "2026-08-18T10:00:01.000Z",
+        grossPnl: 5,
+        commission: 0,
+        swap: 0,
+        netPnl: 5,
+        closedVolumeLots: 0.1
+      }
+    ]);
+    expect(agg).not.toBeNull();
+    expect(agg!.netPnl).toBe(-15);
+  });
 });
 
 describe("autotrade safety patch — volume metadata", () => {

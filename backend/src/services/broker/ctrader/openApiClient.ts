@@ -832,21 +832,22 @@ export function aggregateClosingDeals(
   const sorted = [...deals].sort(
     (a, b) => Date.parse(a.closedAt ?? "") - Date.parse(b.closedAt ?? "")
   );
+  // Every contributing closing deal must have finite netPnl — never persist
+  // partial broker P/L as complete CLOSED settlement.
+  for (const d of sorted) {
+    if (d.netPnl == null || !Number.isFinite(d.netPnl)) return null;
+  }
   let net = 0;
   let gross = 0;
   let commission = 0;
   let swap = 0;
-  let hasNet = false;
   let volumeSum = 0;
   let volumeKnownForAll = true;
   let priceVolumeComplete = true;
   let vwapNum = 0;
   let vwapDen = 0;
   for (const d of sorted) {
-    if (d.netPnl != null) {
-      net += d.netPnl;
-      hasNet = true;
-    }
+    net += d.netPnl!;
     if (d.grossPnl != null) gross += d.grossPnl;
     if (d.commission != null) commission += d.commission;
     if (d.swap != null) swap += d.swap;
@@ -866,7 +867,6 @@ export function aggregateClosingDeals(
     }
   }
   const last = sorted[sorted.length - 1]!;
-  if (!hasNet) return null;
   // Multi-deal exit price: VWAP only when EVERY contributing deal has
   // finite positive volume AND finite closePrice. Never imply a subset VWAP
   // is the full position exit. Single-deal may keep its broker closePrice.
