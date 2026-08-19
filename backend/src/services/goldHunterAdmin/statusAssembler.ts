@@ -134,6 +134,7 @@ export type GoldHunterStatusPayload = {
     mfeEur: number | null;
     maeR: number;
     protectedProfitR: number;
+    executableProtectedProfitR: number;
     protectedStopPrice: number | null;
     lastStopAdjustReason: string | null;
     lastHarvestAssessment: unknown;

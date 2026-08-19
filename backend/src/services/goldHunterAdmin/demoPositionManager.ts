@@ -292,6 +292,7 @@ async function maybePersistMfeMae(
     mfeEur: diag.mfeEur,
     maeEur: null,
     protectedProfitR: diag.protectedProfitR,
+    executableProtectedProfitR: diag.executableProtectedProfitR,
     protectedStopPrice: diag.protectedStopPrice,
     lastStopAdjustReason: diag.lastStopAdjustReason
   });
@@ -299,6 +300,7 @@ async function maybePersistMfeMae(
   trade.mae = state.mae;
   trade.smartPmState = diag.profitManagementState;
   trade.protectedProfitR = diag.protectedProfitR;
+  trade.executableProtectedProfitR = diag.executableProtectedProfitR;
   trade.mfeR = diag.mfeR;
   trade.maeR = diag.maeR;
 }
@@ -360,6 +362,7 @@ function spmFieldsFromState(
     maeEur: closed.maeEur,
     protectedProfitR: closed.protectedProfitR,
     protectedStopPrice: state.protectedStopPrice ?? state.lockFloor ?? null,
+    executableProtectedProfitR: state.executableProtectedProfitR ?? null,
     lastStopAdjustReason: state.lastStopAdjustReason ?? null,
     profitSurrenderEur: closed.profitSurrenderEur,
     profitRetentionRatio: closed.profitRetentionRatio

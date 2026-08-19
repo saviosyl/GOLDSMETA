@@ -366,6 +366,7 @@ export function updateSmartPositionManager(
   );
   const nextState = advanceSmartPmState(prevState, planned.state);
 
+  // protectedProfitR = theoretical stage target (monotonic).
   trade.protectedProfitR = nextProtected;
   trade.smartPmState = nextState;
   trade.highestProtectionStage = advanceSmartPmState(
@@ -376,6 +377,10 @@ export function updateSmartPositionManager(
   if (nextProtected <= 0 && prevProtected <= 0) {
     trade.lastStopAdjustReason = "NONE";
     trade.protectedStopPrice = trade.initialStopPrice;
+    trade.executableProtectedProfitR = applyMonotonicProtectedProfitR(
+      trade.executableProtectedProfitR ?? 0,
+      0
+    );
     return;
   }
 
@@ -448,6 +453,22 @@ export function updateSmartPositionManager(
 
   trade.protectedStopPrice = trade.lockFloor;
   trade.harvestRunner = nextState === "RUNNER" || nextState === "HARVEST";
+
+  // Executable R from the placed lockFloor — may lag theoretical protectedProfitR.
+  const placedR =
+    trade.lockFloor == null
+      ? 0
+      : Math.max(
+          0,
+          moveToR(
+            favourableMove(trade.side, trade.entryPrice, trade.lockFloor),
+            risk
+          )
+        );
+  trade.executableProtectedProfitR = applyMonotonicProtectedProfitR(
+    trade.executableProtectedProfitR ?? 0,
+    Math.min(placedR, nextProtected)
+  );
 }
 
 export function evaluateSmartPositionExit(args: {
@@ -584,7 +605,10 @@ export function openTradeSmartDiagnostics(trade: GhFastOpenTrade): {
   mfeR: number;
   mfeEur: number | null;
   maeR: number;
+  /** Theoretical stage target R (may lead executable when geometry blocks). */
   protectedProfitR: number;
+  /** R actually locked by current executable stop/lockFloor. */
+  executableProtectedProfitR: number;
   protectedStopPrice: number | null;
   lastStopAdjustReason: SmartPmStopAdjustReason | null;
   lastHarvestAssessment: GhFastOpenTrade["lastHarvestAssessment"];
@@ -600,6 +624,7 @@ export function openTradeSmartDiagnostics(trade: GhFastOpenTrade): {
     mfeEur: trade.maxFavourablePnlEur ?? null,
     maeR: trade.maxAdverseR ?? 0,
     protectedProfitR: trade.protectedProfitR ?? 0,
+    executableProtectedProfitR: trade.executableProtectedProfitR ?? 0,
     protectedStopPrice: trade.protectedStopPrice ?? trade.lockFloor,
     lastStopAdjustReason: trade.lastStopAdjustReason ?? null,
     lastHarvestAssessment: trade.lastHarvestAssessment ?? null

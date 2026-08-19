@@ -460,6 +460,22 @@ export class GoldHunterStrategySelector {
         closedAtMs: atMs,
         structuralResetComplete: false
       };
+      // Canonical opportunity must not stay executable after a LOSS close.
+      if (
+        args.opportunityId &&
+        this.activeOpportunity?.opportunityId === args.opportunityId
+      ) {
+        this.activeOpportunity.consumed = true;
+      }
+      if (
+        args.opportunityId &&
+        this.lastCandidateForDisplay?.opportunityId === args.opportunityId
+      ) {
+        this.lastCandidateForDisplay = {
+          ...this.lastCandidateForDisplay,
+          consumed: true
+        };
+      }
       return;
     }
     // Non-loss: clear loss gate but remember last opportunity identity.
@@ -766,6 +782,54 @@ export class GoldHunterStrategySelector {
       this.activeOpportunity.resyncGeneration === this.resyncGeneration;
 
     if (sameActive && this.activeOpportunity) {
+      const feat = snap.features;
+      const lossGateActive = this.lossArmingGate({
+        side: hit.side,
+        atMs: receivedAtMs,
+        mid,
+        opportunityId: this.activeOpportunity.opportunityId,
+        signedImbalance1s: feat?.signedImbalance1s,
+        midVel250: feat?.midVel250
+      });
+      if (!lossGateActive.ok) {
+        // Losing opportunity must not remain executable (e.g. WAIT_DUPLICATE_OPPORTUNITY).
+        this.activeOpportunity.consumed = true;
+        const blocked = this.buildCandidate({
+          letter,
+          setupId: hit.setup,
+          side: hit.side,
+          quality: hit.quality,
+          opportunityId: this.activeOpportunity.opportunityId,
+          receiveSeq: this.activeOpportunity.startReceiveSeq,
+          latestReceiveSeq: receiveSeq,
+          bookGeneration: snap.bookGeneration,
+          bid,
+          ask,
+          spread,
+          depthValidity: snap.depthValidity,
+          depthExecutable,
+          receivedAtMs,
+          opportunityStartedAtMs: this.activeOpportunity.startedAtMs,
+          consumed: true,
+          breakoutDiagnostics,
+          antiChurnState: {
+            structuralResetOk: lossGateActive.structuralResetOk,
+            timeFloorOk: lossGateActive.timeFloorOk,
+            lastSide: this.lossReentry.lastSide,
+            lastResult: this.lossReentry.lastResult,
+            oppositeFlip: lossGateActive.oppositeFlip,
+            rejectionReason: lossGateActive.rejectionReason
+          }
+        });
+        this.lastCandidateForDisplay = blocked;
+        return {
+          selectedNow: true,
+          newOpportunity: false,
+          candidate: blocked,
+          opportunity: null
+        };
+      }
+
       // Continuing selected setup — ONE opportunity across Depth bursts.
       const updated = this.buildCandidate({
         letter,

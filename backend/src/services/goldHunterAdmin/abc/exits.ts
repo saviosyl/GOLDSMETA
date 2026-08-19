@@ -55,6 +55,7 @@ export function openTrade(args: {
     smartPmState: "UNPROTECTED",
     highestProtectionStage: "UNPROTECTED",
     protectedProfitR: 0,
+    executableProtectedProfitR: 0,
     currentR: 0,
     maxFavourableR: 0,
     maxAdverseR: 0,

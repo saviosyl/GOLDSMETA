@@ -338,6 +338,26 @@ describe("SMART_POSITION_MANAGER_V1 — costs / geometry", () => {
     expect(stop).toBeCloseTo(ENTRY + 0.4 * HARD, 1);
   });
 
+  it("theoretical protectedProfitR may lead executableProtectedProfitR under min-distance", () => {
+    // Huge min-distance prevents placing the theoretical +0.9R floor immediately.
+    const cfg = cfgSpm({ spmMinStopDistance: 50 });
+    const t = buyTrade();
+    const bid = ENTRY + HARD * 2.1;
+    // Market only slightly above entry — cannot place stop 0.9R above entry.
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(t.smartPmState).toBe("LOCKED");
+    expect(t.protectedProfitR!).toBeGreaterThanOrEqual(0.9 - 1e-9);
+    // Executable R must reflect placed lockFloor only (0 if none placeable).
+    expect(t.executableProtectedProfitR ?? 0).toBeLessThan(0.9 - 1e-6);
+    const diag = openTradeSmartDiagnostics(t);
+    expect(diag.protectedProfitR).toBeGreaterThanOrEqual(0.9 - 1e-9);
+    expect(diag.executableProtectedProfitR).toBeLessThan(diag.protectedProfitR);
+    // Monotonic: later tick cannot reduce executable floor once set
+    const exec1 = t.executableProtectedProfitR ?? 0;
+    updateOpenTrade(t, bid + 0.01, bid + 0.06, cfg);
+    expect(t.executableProtectedProfitR ?? 0).toBeGreaterThanOrEqual(exec1);
+  });
+
   it("legacy path still available when SPM disabled", () => {
     const cfg = defaultGhFastConfig({ smartPositionManagerEnabled: false });
     const t = buyTrade();
@@ -352,6 +372,82 @@ describe("SMART_POSITION_MANAGER_V1 — costs / geometry", () => {
 describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
   beforeEach(() => {
     resetGoldHunterStrategySelectorsForTests();
+  });
+
+  it("live selector path: LOSS opp-1 rejected as WAIT_DUPLICATE_OPPORTUNITY; fresh opp-2 after reset accepted", () => {
+    const sel = new GoldHunterStrategySelector();
+    const cfg = defaultGhFastConfig();
+    const t0 = 5_000_000;
+
+    const first = sel.processInjectedSelectionForTests({
+      selected: {
+        setup: "A_MOMENTUM_IGNITION",
+        side: "BUY",
+        quality: 0.8
+      },
+      receivedAtMs: t0,
+      bid: 2600,
+      ask: 2600.12
+    });
+    expect(first.newOpportunity).toBe(true);
+    expect(first.opportunity).not.toBeNull();
+    const opp1 = first.opportunity!.opportunityId;
+    expect(opp1).toMatch(/^GH-OPP-/);
+
+    sel.notifyTradeClosed({
+      side: "BUY",
+      setup: "A",
+      entryPrice: 2600.12,
+      result: "LOSS",
+      opportunityId: opp1,
+      closedAtMs: t0 + 1_000
+    });
+
+    // Same continuous opportunity identity (real afterSnapshot / sameActive path).
+    const again = sel.processInjectedSelectionForTests({
+      selected: {
+        setup: "A_MOMENTUM_IGNITION",
+        side: "BUY",
+        quality: 0.8
+      },
+      receivedAtMs: t0 + 1_500,
+      bid: 2600.2,
+      ask: 2600.32
+    });
+    expect(again.newOpportunity).toBe(false);
+    expect(again.opportunity).toBeNull();
+    expect(again.candidate?.opportunityId).toBe(opp1);
+    expect(again.candidate?.consumed).toBe(true);
+    expect(again.candidate?.antiChurnState?.rejectionReason).toBe(
+      "WAIT_DUPLICATE_OPPORTUNITY"
+    );
+    expect(sel.getExecutableCandidate()).toBeNull();
+
+    // End opportunity lifecycle, then satisfy time + structural reset.
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: t0 + 2_000,
+      bid: 2599.9,
+      ask: 2600.0
+    });
+
+    const fresh = sel.processInjectedSelectionForTests({
+      selected: {
+        setup: "A_MOMENTUM_IGNITION",
+        side: "BUY",
+        quality: 0.85
+      },
+      receivedAtMs: t0 + 1_000 + cfg.antiChurnLossMinMs + 500,
+      // mid below losing entry → structural reset for BUY loss
+      bid: 2599.7,
+      ask: 2599.85
+    });
+    expect(fresh.newOpportunity).toBe(true);
+    expect(fresh.opportunity).not.toBeNull();
+    const opp2 = fresh.opportunity!.opportunityId;
+    expect(opp2).not.toBe(opp1);
+    expect(fresh.candidate?.antiChurnState?.rejectionReason ?? null).toBeNull();
+    expect(fresh.candidate?.consumed).toBe(false);
   });
 
   it("immediate opposite-side flip after LOSS rejected", () => {

@@ -225,6 +225,13 @@ export type GhFastOpenTrade = {
   maxAdverseR?: number;
   maxAdversePnlEur?: number | null;
   protectedProfitR?: number;
+  /**
+   * R locked by the current executable lockFloor/stop (0 if none placed yet).
+   * May lag targetProtectedProfitR / protectedProfitR when broker min-distance
+   * prevents placing the theoretical floor. Never exceeds protectedProfitR.
+   * Monotonic once advanced.
+   */
+  executableProtectedProfitR?: number;
   protectedStopPrice?: number | null;
   lastStopAdjustReason?: SmartPmStopAdjustReason | null;
   lastHarvestAssessment?: {

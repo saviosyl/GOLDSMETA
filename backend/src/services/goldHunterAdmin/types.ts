@@ -165,6 +165,8 @@ export type GoldHunterDemoTrade = {
   mfeEur?: number | null;
   maeEur?: number | null;
   protectedProfitR?: number | null;
+  /** R locked by executable stop; may lag protectedProfitR under min-distance. */
+  executableProtectedProfitR?: number | null;
   protectedStopPrice?: number | null;
   lastStopAdjustReason?: string | null;
   profitSurrenderEur?: number | null;
