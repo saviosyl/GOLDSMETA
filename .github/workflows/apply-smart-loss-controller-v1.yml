@@ -21,33 +21,47 @@ jobs:
           ref: cursor/smart-loss-controller-v1
           fetch-depth: 0
 
-      - name: Reconstruct and verify exact supplied patch
+      - name: Reconstruct, repair paste transport, and verify patch
         shell: bash
         run: |
           set -euo pipefail
           cat .tmp-slc-xz/part-*.b64 > /tmp/smart-loss-controller-v1.xz.b64
           base64 -d /tmp/smart-loss-controller-v1.xz.b64 > /tmp/smart-loss-controller-v1.xz
-          xz_bytes="$(wc -c < /tmp/smart-loss-controller-v1.xz | tr -d ' ')"
-          xz_sha="$(sha256sum /tmp/smart-loss-controller-v1.xz | awk '{print $1}')"
-          echo "XZ bytes: $xz_bytes"
-          echo "XZ sha256: $xz_sha"
-          test "$xz_bytes" = "12652"
-          test "$xz_sha" = "f0203045bc0609dfe79b4153178cf2ad4062c3f09a3f302a2942216a578aa6c7"
-          xz -dc /tmp/smart-loss-controller-v1.xz > /tmp/smart-loss-controller-v1.patch
+          test "$(wc -c < /tmp/smart-loss-controller-v1.xz | tr -d ' ')" = "12652"
+          test "$(sha256sum /tmp/smart-loss-controller-v1.xz | awk '{print $1}')" = "f0203045bc0609dfe79b4153178cf2ad4062c3f09a3f302a2942216a578aa6c7"
+          xz -dc /tmp/smart-loss-controller-v1.xz > /tmp/smart-loss-controller-v1.raw.patch
+          test "$(wc -c < /tmp/smart-loss-controller-v1.raw.patch | tr -d ' ')" = "68223"
+          test "$(sha256sum /tmp/smart-loss-controller-v1.raw.patch | awk '{print $1}')" = "6669a30b3855c5186f10a792de32473d17d908348c4162b9c10c6153cc202dfb"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/smart-loss-controller-v1.raw.patch').read_text()
+          bad1 = '   GhFastOpenTrade,\n\n   GhFastSide,'
+          good1 = '   GhFastOpenTrade,\n   GhFastSide,'
+          bad2 = '+    const windowMs = Math.max(1_000, this.pipeline.config().antiChurnCi\nrcuitBreakerWindowMs);'
+          good2 = '+    const windowMs = Math.max(1_000, this.pipeline.config().antiChurnCircuitBreakerWindowMs);'
+          assert p.count(bad1) == 1, p.count(bad1)
+          assert p.count(bad2) == 1, p.count(bad2)
+          p = p.replace(bad1, good1, 1).replace(bad2, good2, 1)
+          Path('/tmp/smart-loss-controller-v1.patch').write_text(p)
+          PY
           bytes="$(wc -c < /tmp/smart-loss-controller-v1.patch | tr -d ' ')"
           sha="$(sha256sum /tmp/smart-loss-controller-v1.patch | awk '{print $1}')"
-          echo "Patch bytes: $bytes"
-          echo "Patch sha256: $sha"
-          test "$bytes" = "68223"
-          test "$sha" = "6669a30b3855c5186f10a792de32473d17d908348c4162b9c10c6153cc202dfb"
+          echo "Repaired patch bytes: $bytes"
+          echo "Repaired patch sha256: $sha"
+          test "$bytes" = "68221"
+          test "$sha" = "9c83f9dd8ed675332a268d05d67170f246529f4a9e25eaa9fc526c3048c4a4a1"
           test "$(grep -c '^diff --git ' /tmp/smart-loss-controller-v1.patch)" = "14"
-          git apply --check /tmp/smart-loss-controller-v1.patch
+          git apply --recount --check /tmp/smart-loss-controller-v1.patch
+          stats="$(git apply --numstat --recount /tmp/smart-loss-controller-v1.patch)"
+          echo "$stats"
+          test "$(echo "$stats" | awk '{a+=$1; d+=$2} END{print a}')" = "1029"
+          test "$(echo "$stats" | awk '{a+=$1; d+=$2} END{print d}')" = "75"
 
-      - name: Apply exact patch and remove transport staging
+      - name: Apply exact repaired patch and remove transport staging
         shell: bash
         run: |
           set -euo pipefail
-          git apply /tmp/smart-loss-controller-v1.patch
+          git apply --recount /tmp/smart-loss-controller-v1.patch
           rm -rf .tmp-slc .tmp-slc-xz
           rm -f .github/workflows/apply-smart-loss-controller-v1.yml
           git add -A
