@@ -10,6 +10,10 @@ import {
   type GoldHunterDemoTrade
 } from "./types";
 import { getGoldHunterStrategySelector } from "./strategySelector";
+import {
+  computeSettledRealisedR,
+  resolveOriginalRiskPrice
+} from "./abc/settledRealisedR";
 
 export type CloseSettlementHooks = {
   fetchClose?: (args: {
@@ -58,6 +62,50 @@ export function resultFromNetPnl(net: number): "WIN" | "LOSS" | "BREAKEVEN" {
   if (net > 0.01) return "WIN";
   if (net < -0.01) return "LOSS";
   return "BREAKEVEN";
+}
+
+/**
+ * True settled realised R from entry/exit / original risk.
+ * Returns null when inputs are incomplete — never invents maeR/mfe approximations.
+ */
+export function realisedRFromSettledDemoTrade(
+  trade: GoldHunterDemoTrade
+): number | null {
+  return computeSettledRealisedR({
+    side: trade.side,
+    entry: trade.entry,
+    exit: trade.exit,
+    originalRiskPrice: resolveOriginalRiskPrice({
+      side: trade.side,
+      entry: trade.entry,
+      stop: trade.stop,
+      initialRiskPrice: trade.initialRiskPrice
+    })
+  });
+}
+
+/**
+ * Exactly-once-safe selector notify for a settled Demo GH trade.
+ */
+export function notifySelectorOfSettledGoldHunterClose(args: {
+  ownerUid: string;
+  trade: GoldHunterDemoTrade;
+}): void {
+  const { trade } = args;
+  try {
+    getGoldHunterStrategySelector(args.ownerUid).notifyTradeClosed({
+      side: trade.side,
+      setup: trade.setup,
+      entryPrice: trade.entry,
+      result: trade.result === "OPEN" ? null : trade.result,
+      opportunityId: trade.signalId ?? null,
+      closedAtMs: Date.parse(trade.closeTs ?? "") || Date.now(),
+      realisedR: realisedRFromSettledDemoTrade(trade),
+      tradeId: trade.goldHunterTradeId
+    });
+  } catch {
+    /* best-effort anti-churn / LC notify */
+  }
 }
 
 /**
@@ -165,24 +213,10 @@ export async function settleGoldHunterCloseFromBroker(args: {
       exitReason: trade.exitReason
     });
     await upsertGoldHunterDemoTrade(args.ownerUid, settled);
-    try {
-      getGoldHunterStrategySelector(args.ownerUid).notifyTradeClosed({
-        side: settled.side,
-        setup: settled.setup,
-        entryPrice: settled.entry,
-        result: settled.result === "OPEN" ? null : settled.result,
-        opportunityId: settled.signalId ?? null,
-        closedAtMs: Date.parse(settled.closeTs ?? "") || Date.now(),
-        realisedR:
-          settled.result === "LOSS"
-            ? -(Math.max(settled.maeR ?? 0.7, 0.1))
-            : settled.result === "WIN"
-              ? Math.max(0.05, (settled.mfeR ?? 0.3) * 0.5)
-              : 0
-      });
-    } catch {
-      /* best-effort anti-churn notify */
-    }
+    notifySelectorOfSettledGoldHunterClose({
+      ownerUid: args.ownerUid,
+      trade: settled
+    });
     return { settled: true, trade: settled };
   }
 

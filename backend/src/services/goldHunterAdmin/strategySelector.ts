@@ -225,6 +225,8 @@ type LossControllerEntryState = {
   lossCircuitBreakerActive: boolean;
   circuitBreakerReason: string | null;
   circuitBreakerActivatedAtMs: number | null;
+  /** goldHunterTradeId values already applied to streak / rolling R. */
+  notifiedClosedTradeIds: Set<string>;
 };
 
 function emptyLossControllerEntryState(): LossControllerEntryState {
@@ -235,7 +237,8 @@ function emptyLossControllerEntryState(): LossControllerEntryState {
     lossStreakActivatedAtMs: null,
     lossCircuitBreakerActive: false,
     circuitBreakerReason: null,
-    circuitBreakerActivatedAtMs: null
+    circuitBreakerActivatedAtMs: null,
+    notifiedClosedTradeIds: new Set()
   };
 }
 
@@ -473,6 +476,10 @@ export class GoldHunterStrategySelector {
    * Notify selector that a Demo GH trade closed — arms anti-churn memory on LOSS.
    * WIN/BREAKEVEN clear the single-loss gate (generic rearm floor still applies).
    * Also updates SMART_LOSS_CONTROLLER_V1 streak / rolling circuit-breaker state.
+   *
+   * Exactly-once for streak / rolling R when `tradeId` (goldHunterTradeId) is set:
+   * settlement retry / delayed settlement / reconcile must not double-count.
+   * Does not invent realisedR — callers must pass true settled R or omit/null.
    */
   notifyTradeClosed(args: {
     side: "BUY" | "SELL";
@@ -481,21 +488,75 @@ export class GoldHunterStrategySelector {
     result: "WIN" | "LOSS" | "BREAKEVEN" | null;
     opportunityId?: string | null;
     closedAtMs?: number;
-    /** Realised R for rolling circuit breaker (negative = loss). */
+    /**
+     * Realised R for rolling circuit breaker (negative = loss).
+     * Pass null/omit when entry/exit/risk cannot safely determine R — never invent.
+     */
     realisedR?: number | null;
+    /** Stable goldHunterTradeId — required for exactly-once LC accounting. */
+    tradeId?: string | null;
   }): void {
     const atMs = args.closedAtMs ?? Date.now();
     const cfg = this.pipeline.config();
+    const tradeKey =
+      args.tradeId != null && String(args.tradeId).trim().length > 0
+        ? String(args.tradeId).trim()
+        : null;
+
+    // Exactly-once: same settled trade must not mutate streak / rolling twice.
+    if (
+      tradeKey &&
+      this.lossControllerEntry.notifiedClosedTradeIds.has(tradeKey)
+    ) {
+      // Still refresh anti-churn identity on duplicate LOSS without re-counting R.
+      if (args.result === "LOSS") {
+        this.lossReentry = {
+          ...this.lossReentry,
+          lastSide: args.side,
+          lastSetup: args.setup,
+          lastEntryPrice:
+            args.entryPrice != null && Number.isFinite(args.entryPrice)
+              ? args.entryPrice
+              : this.lossReentry.lastEntryPrice,
+          lastResult: "LOSS",
+          lastOpportunityId:
+            args.opportunityId ?? this.lossReentry.lastOpportunityId,
+          closedAtMs: this.lossReentry.closedAtMs ?? atMs
+        };
+        if (
+          args.opportunityId &&
+          this.activeOpportunity?.opportunityId === args.opportunityId
+        ) {
+          this.activeOpportunity.consumed = true;
+        }
+      }
+      return;
+    }
+
+    if (tradeKey) {
+      this.lossControllerEntry.notifiedClosedTradeIds.add(tradeKey);
+      // Bound memory — keep recent ids only.
+      if (this.lossControllerEntry.notifiedClosedTradeIds.size > 500) {
+        const oldest = this.lossControllerEntry.notifiedClosedTradeIds
+          .values()
+          .next().value;
+        if (oldest != null) {
+          this.lossControllerEntry.notifiedClosedTradeIds.delete(oldest);
+        }
+      }
+    }
+
     const realisedR =
       args.realisedR != null && Number.isFinite(args.realisedR)
         ? args.realisedR
-        : args.result === "LOSS"
-          ? -cfg.slcSoftMaxLossR
-          : args.result === "WIN"
-            ? cfg.slcSoftMaxLossR
-            : 0;
+        : null;
 
-  if (args.result === "LOSS" || args.result === "WIN" || args.result === "BREAKEVEN") {
+    if (
+      (args.result === "LOSS" ||
+        args.result === "WIN" ||
+        args.result === "BREAKEVEN") &&
+      realisedR != null
+    ) {
       this.recordRealisedR(realisedR, cfg, atMs);
     }
 
@@ -582,6 +643,7 @@ export class GoldHunterStrategySelector {
   getLossControllerEntryState(): {
     consecutiveLosses: number;
     rollingRealisedR: number;
+    rollingSampleCount: number;
     lossStreakGuardActive: boolean;
     lossCircuitBreakerActive: boolean;
     circuitBreakerReason: string | null;
@@ -593,6 +655,7 @@ export class GoldHunterStrategySelector {
     return {
       consecutiveLosses: this.lossControllerEntry.consecutiveLosses,
       rollingRealisedR,
+      rollingSampleCount: this.lossControllerEntry.rollingRealisedRs.length,
       lossStreakGuardActive: this.lossControllerEntry.lossStreakGuardActive,
       lossCircuitBreakerActive: this.lossControllerEntry.lossCircuitBreakerActive,
       circuitBreakerReason: this.lossControllerEntry.circuitBreakerReason
