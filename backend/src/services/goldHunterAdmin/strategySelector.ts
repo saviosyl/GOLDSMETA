@@ -1039,11 +1039,6 @@ export class GoldHunterStrategySelector {
 
     if (rearmBlocked || bBlocked || antiChurnBlocked) {
       // Selected for display, but rearm / B structural / anti-churn gate not met.
-      const rejectionReason = antiChurnBlocked
-        ? lossGateLive.rejectionReason
-        : bBlocked
-          ? bGate.rejectionReason
-          : "generic_rearm_floor";
       const displayOnly = this.buildCandidate({
         letter,
         setupId: hit.setup,
