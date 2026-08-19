@@ -174,6 +174,9 @@ export type GoldHunterStatusPayload = {
     lastUnknownRReason: string | null;
     consecutiveUnknownRLosses: number;
     unknownRGuardActive: boolean;
+    entryIntegrityHealthy: boolean;
+    entryIntegrityRecoveredAtMs: number | null;
+    lastEntryIntegrityRecoveryReason: string | null;
     reentryState: GoldHunterSelectedCandidate["antiChurnState"] | null;
     bReentryState: GoldHunterSelectedCandidate["bReentryState"] | null;
   };
@@ -537,7 +540,11 @@ export async function assembleGoldHunterStatus(
             lastUnknownRTradeId: lc.lastUnknownRTradeId,
             lastUnknownRReason: lc.lastUnknownRReason,
             consecutiveUnknownRLosses: lc.consecutiveUnknownRLosses,
-            unknownRGuardActive: lc.unknownRGuardActive
+            unknownRGuardActive: lc.unknownRGuardActive,
+            entryIntegrityHealthy: lc.entryIntegrityHealthy,
+            entryIntegrityRecoveredAtMs: lc.entryIntegrityRecoveredAtMs,
+            lastEntryIntegrityRecoveryReason:
+              lc.lastEntryIntegrityRecoveryReason
           };
         } catch {
           return {
@@ -551,7 +558,10 @@ export async function assembleGoldHunterStatus(
             lastUnknownRTradeId: null as string | null,
             lastUnknownRReason: null as string | null,
             consecutiveUnknownRLosses: 0,
-            unknownRGuardActive: false
+            unknownRGuardActive: false,
+            entryIntegrityHealthy: true,
+            entryIntegrityRecoveredAtMs: null as number | null,
+            lastEntryIntegrityRecoveryReason: null as string | null
           };
         }
       })(),

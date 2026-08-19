@@ -8,6 +8,11 @@ import {
   repairGoldHunterTradeFromBrokerPosition
 } from "./entryRepair";
 import { isValidGoldHunterEntryPrice } from "./entryValidity";
+import {
+  maybeSignalEntryIntegrityFromReconcileCycle,
+  signalGoldHunterEntryIntegrityRecovered,
+  tradeHasAuthoritativeEntryIntegrity
+} from "./entryIntegrity";
 
 export type BrokerDemoPositionLite = {
   positionId: string;
@@ -71,6 +76,13 @@ export async function reconcileGoldHunterDemoPositions(args: {
         await upsertGoldHunterDemoTrade(args.ownerUid, repaired.trade);
         if (repaired.entryRepaired) {
           entryRepaired += 1;
+          if (tradeHasAuthoritativeEntryIntegrity(repaired.trade)) {
+            signalGoldHunterEntryIntegrityRecovered({
+              ownerUid: args.ownerUid,
+              reason: "BROKER_POSITION_ENTRY_REPAIRED",
+              tradeId: repaired.trade.goldHunterTradeId
+            });
+          }
         }
         restored.push(repaired.trade);
       } else {
@@ -129,8 +141,23 @@ export async function reconcileGoldHunterDemoPositions(args: {
         ownerUid: args.ownerUid
       }
     });
+    if (tradeHasAuthoritativeEntryIntegrity(trade)) {
+      signalGoldHunterEntryIntegrityRecovered({
+        ownerUid: args.ownerUid,
+        reason: "BROKER_POSITION_OPEN_RECOVERED",
+        tradeId: trade.goldHunterTradeId
+      });
+    }
     restored.push(trade);
   }
+
+  const after = await listGoldHunterDemoTrades(args.ownerUid, { limit: 200 });
+  maybeSignalEntryIntegrityFromReconcileCycle({
+    ownerUid: args.ownerUid,
+    trades: after,
+    brokerPositions: args.brokerPositions,
+    positionsReadOk: true
+  });
 
   return { restored, unmatched, entryRepaired };
 }

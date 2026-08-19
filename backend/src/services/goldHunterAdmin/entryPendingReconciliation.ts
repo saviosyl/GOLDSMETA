@@ -32,6 +32,10 @@ import {
 import { applyBrokerSettledClose } from "./closeSettlement";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
 import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
+import {
+  signalGoldHunterEntryIntegrityRecovered,
+  tradeHasAuthoritativeEntryIntegrity
+} from "./entryIntegrity";
 import type { BrokerDemoPositionLite } from "./reconcilePositions";
 import { updateGoldHunterSignalClaim } from "./signalClaimStore";
 import {
@@ -299,6 +303,13 @@ async function recoverOpenFromPosition(args: {
     bid: recovered.entry!,
     ask: recovered.entry!
   });
+  if (tradeHasAuthoritativeEntryIntegrity(recovered)) {
+    signalGoldHunterEntryIntegrityRecovered({
+      ownerUid: args.ownerUid,
+      reason: "BROKER_POSITION_OPEN_RECOVERED",
+      tradeId: recovered.goldHunterTradeId
+    });
+  }
   if (trade.signalId) {
     await updateGoldHunterSignalClaim(args.ownerUid, trade.signalId, {
       state: "OPEN",

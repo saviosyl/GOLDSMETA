@@ -32,6 +32,10 @@ import {
   repairGoldHunterTradeFromBrokerPosition
 } from "./entryRepair";
 import {
+  signalGoldHunterEntryIntegrityRecovered,
+  tradeHasAuthoritativeEntryIntegrity
+} from "./entryIntegrity";
+import {
   getGoldHunterSignalClaim,
   updateGoldHunterSignalClaim
 } from "./signalClaimStore";
@@ -236,6 +240,13 @@ export async function reconcileGoldHunterPendingEntries(args: {
         bid: recovered.entry!,
         ask: recovered.entry!
       });
+      if (tradeHasAuthoritativeEntryIntegrity(recovered)) {
+        signalGoldHunterEntryIntegrityRecovered({
+          ownerUid: args.ownerUid,
+          reason: "BROKER_POSITION_OPEN_RECOVERED",
+          tradeId: recovered.goldHunterTradeId
+        });
+      }
       if (trade.signalId) {
         await updateGoldHunterSignalClaim(args.ownerUid, trade.signalId, {
           state: "OPEN",
@@ -334,6 +345,13 @@ export async function reconcileGoldHunterDisappearedOpenPositions(args: {
               bid: next.entry,
               ask: next.entry
             });
+            if (tradeHasAuthoritativeEntryIntegrity(next)) {
+              signalGoldHunterEntryIntegrityRecovered({
+                ownerUid: args.ownerUid,
+                reason: "BROKER_POSITION_ENTRY_REPAIRED",
+                tradeId: next.goldHunterTradeId
+              });
+            }
           }
         }
       }

@@ -243,8 +243,7 @@ describe("Unknown realised-R fail-safe", () => {
     resetGoldHunterStrategySelectorsForTests();
   });
 
-  it("3 consecutive unknown-R losses gate with WAIT_REALISED_R_INCOMPLETE", () => {
-    const sel = new GoldHunterStrategySelector();
+  function armUnknownRGuard(sel: GoldHunterStrategySelector, baseMs = 1_000_000) {
     for (let i = 0; i < 3; i++) {
       sel.notifyTradeClosed({
         side: "BUY",
@@ -253,13 +252,19 @@ describe("Unknown realised-R fail-safe", () => {
         result: "LOSS",
         tradeId: `gh-unk-${i}`,
         realisedR: null,
-        closedAtMs: 1_000_000 + i * 1000
+        closedAtMs: baseMs + i * 1000
       });
     }
+  }
+
+  it("A) 3 consecutive unknown-R losses => WAIT_REALISED_R_INCOMPLETE active", () => {
+    const sel = new GoldHunterStrategySelector();
+    armUnknownRGuard(sel);
     const st = sel.getLossControllerEntryState();
     expect(st.consecutiveUnknownRLosses).toBe(3);
     expect(st.unknownRealisedRLossCount).toBe(3);
     expect(st.unknownRGuardActive).toBe(true);
+    expect(st.entryIntegrityHealthy).toBe(false);
     expect(st.rollingSampleCount).toBe(0);
 
     const gate = sel.evaluateAntiChurnGateForTests({
@@ -271,6 +276,182 @@ describe("Unknown realised-R fail-safe", () => {
     });
     expect(gate.ok).toBe(false);
     expect(gate.rejectionReason).toBe("WAIT_REALISED_R_INCOMPLETE");
+  });
+
+  it("B) time+structure+direction without integrity recovery still gated", () => {
+    const sel = new GoldHunterStrategySelector();
+    armUnknownRGuard(sel);
+    // 60s+ elapsed; null entryPrice makes structural reset auto-complete;
+    // directional confirmation present — but no integrity recovery signal.
+    const gate = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: 1_002_000 + 60_000,
+      mid: 2599,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(gate.ok).toBe(false);
+    expect(gate.rejectionReason).toBe("WAIT_REALISED_R_INCOMPLETE");
+    expect(sel.getLossControllerEntryState().unknownRGuardActive).toBe(true);
+    expect(sel.getLossControllerEntryState().entryIntegrityHealthy).toBe(false);
+  });
+
+  it("C) integrity recovery + time + structure + direction clears guard", () => {
+    const sel = new GoldHunterStrategySelector();
+    armUnknownRGuard(sel);
+    const recoveredAt = 1_002_000 + 30_000;
+    sel.notifyEntryIntegrityRecovered({
+      atMs: recoveredAt,
+      reason: "BROKER_POSITION_ENTRY_REPAIRED",
+      tradeId: "GH-D-repaired"
+    });
+    expect(sel.getLossControllerEntryState().entryIntegrityHealthy).toBe(true);
+    expect(sel.getLossControllerEntryState().entryIntegrityRecoveredAtMs).toBe(
+      recoveredAt
+    );
+
+    const gate = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: 1_002_000 + 60_000,
+      mid: 2599,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(gate.ok).toBe(true);
+    expect(gate.rejectionReason).toBeNull();
+    expect(sel.getLossControllerEntryState().unknownRGuardActive).toBe(false);
+  });
+
+  it("D) after recovery, true-R settlement enters rollingRealisedR exactly once", () => {
+    const sel = getGoldHunterStrategySelector(OWNER);
+    armUnknownRGuard(sel);
+    sel.notifyEntryIntegrityRecovered({
+      atMs: 1_050_000,
+      reason: "BROKER_POSITION_ENTRY_REPAIRED"
+    });
+    sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: 1_070_000,
+      mid: 2599,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(sel.getLossControllerEntryState().unknownRGuardActive).toBe(false);
+
+    const settled = applyBrokerSettledClose({
+      trade: baseTrade({
+        goldHunterTradeId: "GH-D-true-r-1",
+        entry: 2600,
+        status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+        dataQuality: null,
+        errorCode: null,
+        fillTs: "2026-08-19T15:18:11.000Z",
+        initialRiskPrice: HARD
+      }),
+      deal: {
+        dealId: "d-true",
+        orderId: "o-true",
+        positionId: "pos-1",
+        netPnl: -3.5,
+        grossPnl: -3.2,
+        commission: -0.3,
+        swap: 0,
+        closePrice: 2600 - HARD * 0.7,
+        entryPrice: 2600,
+        closedAt: "2026-08-19T15:20:00.000Z",
+        closedVolumeLots: 0.09
+      },
+      exitReason: "SMART_SOFT_MAX_LOSS"
+    });
+    const r = realisedRFromSettledDemoTrade(settled);
+    expect(r).toBeCloseTo(-0.7, 6);
+    notifySelectorOfSettledGoldHunterClose({ ownerUid: OWNER, trade: settled });
+    const st = sel.getLossControllerEntryState();
+    expect(st.rollingSampleCount).toBe(1);
+    expect(st.rollingRealisedR).toBeCloseTo(-0.7, 6);
+  });
+
+  it("E) duplicate settlement cannot clear/alter integrity state incorrectly", () => {
+    const sel = getGoldHunterStrategySelector(OWNER);
+    armUnknownRGuard(sel);
+    expect(sel.getLossControllerEntryState().entryIntegrityHealthy).toBe(false);
+    expect(sel.getLossControllerEntryState().unknownRGuardActive).toBe(true);
+
+    const settled = applyBrokerSettledClose({
+      trade: baseTrade({
+        goldHunterTradeId: "GH-D-dup-1",
+        entry: null,
+        status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+        exitReason: "BROKER_EXTERNAL_CLOSE"
+      }),
+      deal: {
+        dealId: "d-dup",
+        orderId: "o-dup",
+        positionId: "pos-1",
+        netPnl: -5,
+        grossPnl: -4.5,
+        commission: -0.5,
+        swap: 0,
+        closePrice: 2599.4,
+        // No entryPrice on deal — R stays unknown
+        entryPrice: null,
+        closedAt: "2026-08-19T15:20:00.000Z",
+        closedVolumeLots: 0.09
+      }
+    });
+    notifySelectorOfSettledGoldHunterClose({ ownerUid: OWNER, trade: settled });
+    notifySelectorOfSettledGoldHunterClose({ ownerUid: OWNER, trade: settled });
+    const st = sel.getLossControllerEntryState();
+    // Duplicate must not invent integrity recovery or clear the latch.
+    expect(st.entryIntegrityHealthy).toBe(false);
+    expect(st.unknownRGuardActive).toBe(true);
+    expect(st.entryIntegrityRecoveredAtMs).toBeNull();
+    expect(st.rollingSampleCount).toBe(0);
+
+    // Still gated without integrity recovery even after 60s + direction.
+    const gate = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: 1_070_000,
+      mid: 2599,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(gate.ok).toBe(false);
+    expect(gate.rejectionReason).toBe("WAIT_REALISED_R_INCOMPLETE");
+  });
+
+  it("reconcile entry repair signals integrity recovery", async () => {
+    resetGoldHunterTradeMemory();
+    const sel = getGoldHunterStrategySelector(OWNER);
+    armUnknownRGuard(sel);
+    expect(sel.getLossControllerEntryState().entryIntegrityHealthy).toBe(false);
+
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      baseTrade({ goldHunterTradeId: "GH-D-int-rec" })
+    );
+    const r = await reconcileGoldHunterDemoPositions({
+      ownerUid: OWNER,
+      brokerPositions: [
+        {
+          positionId: "pos-1",
+          label: "GH-D-int-rec",
+          comment: "GOLD_HUNTER",
+          side: "BUY",
+          entryPrice: 2601.5,
+          stopLoss: 2601.5 - HARD,
+          volumeLots: 0.09
+        }
+      ]
+    });
+    expect(r.entryRepaired).toBeGreaterThanOrEqual(1);
+    const st = sel.getLossControllerEntryState();
+    expect(st.entryIntegrityHealthy).toBe(true);
+    expect(st.entryIntegrityRecoveredAtMs).not.toBeNull();
+    expect([
+      "BROKER_POSITION_ENTRY_REPAIRED",
+      "RECONCILE_CYCLE_ALL_OPEN_ENTRIES_VALID"
+    ]).toContain(st.lastEntryIntegrityRecoveryReason);
   });
 });
 
