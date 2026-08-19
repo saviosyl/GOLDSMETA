@@ -227,6 +227,22 @@ type LossControllerEntryState = {
   circuitBreakerActivatedAtMs: number | null;
   /** goldHunterTradeId values already applied to streak / rolling R. */
   notifiedClosedTradeIds: Set<string>;
+  /** Consecutive CLOSED LOSS trades where realisedR could not be computed. */
+  consecutiveUnknownRLosses: number;
+  unknownRealisedRLossCount: number;
+  rollingUnknownRTradeCount: number;
+  lastUnknownRTradeId: string | null;
+  lastUnknownRReason: string | null;
+  unknownRGuardActive: boolean;
+  unknownRGuardActivatedAtMs: number | null;
+  /**
+   * Data-integrity latch for WAIT_REALISED_R_INCOMPLETE.
+   * Cleared (false) when the unknown-R guard arms; set true only by
+   * authoritative reconciliation recovery — never by timer alone.
+   */
+  entryIntegrityHealthy: boolean;
+  entryIntegrityRecoveredAtMs: number | null;
+  lastEntryIntegrityRecoveryReason: string | null;
 };
 
 function emptyLossControllerEntryState(): LossControllerEntryState {
@@ -238,7 +254,17 @@ function emptyLossControllerEntryState(): LossControllerEntryState {
     lossCircuitBreakerActive: false,
     circuitBreakerReason: null,
     circuitBreakerActivatedAtMs: null,
-    notifiedClosedTradeIds: new Set()
+    notifiedClosedTradeIds: new Set(),
+    consecutiveUnknownRLosses: 0,
+    unknownRealisedRLossCount: 0,
+    rollingUnknownRTradeCount: 0,
+    lastUnknownRTradeId: null,
+    lastUnknownRReason: null,
+    unknownRGuardActive: false,
+    unknownRGuardActivatedAtMs: null,
+    entryIntegrityHealthy: true,
+    entryIntegrityRecoveredAtMs: null,
+    lastEntryIntegrityRecoveryReason: null
   };
 }
 
@@ -558,6 +584,35 @@ export class GoldHunterStrategySelector {
       realisedR != null
     ) {
       this.recordRealisedR(realisedR, cfg, atMs);
+      this.lossControllerEntry.consecutiveUnknownRLosses = 0;
+    } else if (args.result === "LOSS" && realisedR == null) {
+      // Fail-safe diagnostics — never invent R, but do not ignore unknown losses.
+      this.lossControllerEntry.unknownRealisedRLossCount += 1;
+      this.lossControllerEntry.rollingUnknownRTradeCount += 1;
+      this.lossControllerEntry.consecutiveUnknownRLosses += 1;
+      this.lossControllerEntry.lastUnknownRTradeId = tradeKey;
+      this.lossControllerEntry.lastUnknownRReason =
+        "SETTLED_LOSS_REALISED_R_UNAVAILABLE";
+      if (
+        cfg.smartLossControllerEnabled &&
+        this.lossControllerEntry.consecutiveUnknownRLosses >= 3
+      ) {
+        this.lossControllerEntry.unknownRGuardActive = true;
+        this.lossControllerEntry.unknownRGuardActivatedAtMs =
+          this.lossControllerEntry.unknownRGuardActivatedAtMs ?? atMs;
+        // Latch integrity unhealthy until authoritative reconciliation recovers.
+        this.lossControllerEntry.entryIntegrityHealthy = false;
+        this.lossControllerEntry.entryIntegrityRecoveredAtMs = null;
+      }
+    } else if (
+      (args.result === "WIN" || args.result === "BREAKEVEN") &&
+      realisedR == null
+    ) {
+      this.lossControllerEntry.rollingUnknownRTradeCount += 1;
+      this.lossControllerEntry.consecutiveUnknownRLosses = 0;
+      this.lossControllerEntry.lastUnknownRTradeId = tradeKey;
+      this.lossControllerEntry.lastUnknownRReason =
+        "SETTLED_NON_LOSS_REALISED_R_UNAVAILABLE";
     }
 
     if (args.result === "LOSS") {
@@ -647,6 +702,15 @@ export class GoldHunterStrategySelector {
     lossStreakGuardActive: boolean;
     lossCircuitBreakerActive: boolean;
     circuitBreakerReason: string | null;
+    unknownRealisedRLossCount: number;
+    rollingUnknownRTradeCount: number;
+    lastUnknownRTradeId: string | null;
+    lastUnknownRReason: string | null;
+    consecutiveUnknownRLosses: number;
+    unknownRGuardActive: boolean;
+    entryIntegrityHealthy: boolean;
+    entryIntegrityRecoveredAtMs: number | null;
+    lastEntryIntegrityRecoveryReason: string | null;
   } {
     const rollingRealisedR = this.lossControllerEntry.rollingRealisedRs.reduce(
       (a, b) => a + b,
@@ -658,8 +722,38 @@ export class GoldHunterStrategySelector {
       rollingSampleCount: this.lossControllerEntry.rollingRealisedRs.length,
       lossStreakGuardActive: this.lossControllerEntry.lossStreakGuardActive,
       lossCircuitBreakerActive: this.lossControllerEntry.lossCircuitBreakerActive,
-      circuitBreakerReason: this.lossControllerEntry.circuitBreakerReason
+      circuitBreakerReason: this.lossControllerEntry.circuitBreakerReason,
+      unknownRealisedRLossCount:
+        this.lossControllerEntry.unknownRealisedRLossCount,
+      rollingUnknownRTradeCount:
+        this.lossControllerEntry.rollingUnknownRTradeCount,
+      lastUnknownRTradeId: this.lossControllerEntry.lastUnknownRTradeId,
+      lastUnknownRReason: this.lossControllerEntry.lastUnknownRReason,
+      consecutiveUnknownRLosses:
+        this.lossControllerEntry.consecutiveUnknownRLosses,
+      unknownRGuardActive: this.lossControllerEntry.unknownRGuardActive,
+      entryIntegrityHealthy: this.lossControllerEntry.entryIntegrityHealthy,
+      entryIntegrityRecoveredAtMs:
+        this.lossControllerEntry.entryIntegrityRecoveredAtMs,
+      lastEntryIntegrityRecoveryReason:
+        this.lossControllerEntry.lastEntryIntegrityRecoveryReason
     };
+  }
+
+  /**
+   * Authoritative reconciliation proved entry integrity recovered.
+   * Does not clear unknownRGuardActive by itself — gate still needs time /
+   * structural / directional confirmation. Never invents prices or R.
+   */
+  notifyEntryIntegrityRecovered(args: {
+    atMs?: number;
+    reason: string;
+    tradeId?: string | null;
+  }): void {
+    const atMs = args.atMs ?? Date.now();
+    this.lossControllerEntry.entryIntegrityHealthy = true;
+    this.lossControllerEntry.entryIntegrityRecoveredAtMs = atMs;
+    this.lossControllerEntry.lastEntryIntegrityRecoveryReason = args.reason;
   }
 
   /** Test helper — exposes loss anti-churn gate. */
@@ -723,6 +817,39 @@ export class GoldHunterStrategySelector {
       lc.circuitBreakerReason = null;
       lc.circuitBreakerActivatedAtMs = null;
       lc.rollingRealisedRs = [];
+    }
+
+    // Unknown realised-R integrity guard — 3 consecutive LOSS closes without safe R.
+    // DATA-INTEGRITY latch: time/structure/direction alone never clear this.
+    // Requires positive reconciliation recovery (entryIntegrityHealthy).
+    // Checked before streak so the integrity reason surfaces when both apply.
+    if (cfg.smartLossControllerEnabled && lc.unknownRGuardActive) {
+      const activatedAt = lc.unknownRGuardActivatedAtMs ?? args.atMs;
+      const timeOk = args.atMs - activatedAt >= cfg.slcLossStreakResetMs;
+      const structuralOk = this.lossReentry.structuralResetComplete;
+      const integrityOk =
+        lc.entryIntegrityHealthy &&
+        lc.entryIntegrityRecoveredAtMs != null &&
+        lc.entryIntegrityRecoveredAtMs >= activatedAt;
+      if (
+        !timeOk ||
+        !structuralOk ||
+        !directionalOk(args.side) ||
+        !integrityOk
+      ) {
+        return {
+          ok: false,
+          structuralResetOk: structuralOk,
+          timeFloorOk: timeOk,
+          oppositeFlip:
+            this.lossReentry.lastSide != null &&
+            args.side !== this.lossReentry.lastSide,
+          rejectionReason: "WAIT_REALISED_R_INCOMPLETE"
+        };
+      }
+      lc.unknownRGuardActive = false;
+      lc.unknownRGuardActivatedAtMs = null;
+      lc.consecutiveUnknownRLosses = 0;
     }
 
     // Loss streak guard after N consecutive realised losses.

@@ -135,6 +135,14 @@ export type GoldHunterDemoTrade = {
    */
   dataQuality?: "ENTRY_INVALID" | "MFE_MAE_CORRUPT" | null;
   /**
+   * When entry was repaired from authoritative broker evidence.
+   */
+  entryRecoverySource?:
+    | "BROKER_POSITION_RECONCILIATION"
+    | "BROKER_DEAL_SETTLEMENT"
+    | "BROKER_ORDER_EXECUTION"
+    | null;
+  /**
    * Forensic counters for ENTRY PENDING_RECONCILIATION watchdog.
    * Terminal never-found uses successfulEmptyProofCycles only.
    */

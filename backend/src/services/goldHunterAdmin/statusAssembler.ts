@@ -168,6 +168,15 @@ export type GoldHunterStatusPayload = {
     circuitBreakerReason: string | null;
     lossStreakGuardActive: boolean;
     consecutiveLosses: number;
+    unknownRealisedRLossCount: number;
+    rollingUnknownRTradeCount: number;
+    lastUnknownRTradeId: string | null;
+    lastUnknownRReason: string | null;
+    consecutiveUnknownRLosses: number;
+    unknownRGuardActive: boolean;
+    entryIntegrityHealthy: boolean;
+    entryIntegrityRecoveredAtMs: number | null;
+    lastEntryIntegrityRecoveryReason: string | null;
     reentryState: GoldHunterSelectedCandidate["antiChurnState"] | null;
     bReentryState: GoldHunterSelectedCandidate["bReentryState"] | null;
   };
@@ -525,7 +534,17 @@ export async function assembleGoldHunterStatus(
             lossCircuitBreakerActive: lc.lossCircuitBreakerActive,
             circuitBreakerReason: lc.circuitBreakerReason,
             lossStreakGuardActive: lc.lossStreakGuardActive,
-            consecutiveLosses: lc.consecutiveLosses
+            consecutiveLosses: lc.consecutiveLosses,
+            unknownRealisedRLossCount: lc.unknownRealisedRLossCount,
+            rollingUnknownRTradeCount: lc.rollingUnknownRTradeCount,
+            lastUnknownRTradeId: lc.lastUnknownRTradeId,
+            lastUnknownRReason: lc.lastUnknownRReason,
+            consecutiveUnknownRLosses: lc.consecutiveUnknownRLosses,
+            unknownRGuardActive: lc.unknownRGuardActive,
+            entryIntegrityHealthy: lc.entryIntegrityHealthy,
+            entryIntegrityRecoveredAtMs: lc.entryIntegrityRecoveredAtMs,
+            lastEntryIntegrityRecoveryReason:
+              lc.lastEntryIntegrityRecoveryReason
           };
         } catch {
           return {
@@ -533,7 +552,16 @@ export async function assembleGoldHunterStatus(
             lossCircuitBreakerActive: false,
             circuitBreakerReason: null as string | null,
             lossStreakGuardActive: false,
-            consecutiveLosses: 0
+            consecutiveLosses: 0,
+            unknownRealisedRLossCount: 0,
+            rollingUnknownRTradeCount: 0,
+            lastUnknownRTradeId: null as string | null,
+            lastUnknownRReason: null as string | null,
+            consecutiveUnknownRLosses: 0,
+            unknownRGuardActive: false,
+            entryIntegrityHealthy: true,
+            entryIntegrityRecoveredAtMs: null as number | null,
+            lastEntryIntegrityRecoveryReason: null as string | null
           };
         }
       })(),

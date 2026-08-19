@@ -25,6 +25,7 @@ import {
   GH_ADMIN_STRATEGY_ID,
   type GoldHunterDemoTrade
 } from "./types";
+import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
 
 export type GoldHunterDemoSubmitArgs = {
   ownerUid: string;
@@ -207,6 +208,7 @@ export async function submitGoldHunterDemoOrder(
       entry: null,
       exit: null,
       stop: args.stopLoss ?? null,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
       mfe: null,
@@ -279,6 +281,7 @@ export async function submitGoldHunterDemoOrder(
       entry: null,
       exit: null,
       stop: args.stopLoss ?? null,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
       mfe: null,
@@ -333,6 +336,7 @@ export async function submitGoldHunterDemoOrder(
       entry: null,
       exit: null,
       stop: args.stopLoss ?? null,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
       mfe: null,
@@ -396,6 +400,7 @@ export async function submitGoldHunterDemoOrder(
       entry: fillPrice != null && fillPrice > 0 ? fillPrice : null,
       exit: null,
       stop: broker.stopLoss ?? args.stopLoss ?? null,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
       mfe: null,
@@ -459,6 +464,7 @@ export async function submitGoldHunterDemoOrder(
     entry: fillPrice,
     exit: null,
     stop: broker.stopLoss ?? args.stopLoss ?? null,
+    initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
     entrySpread: null,
     durationMs: null,
     mfe: null,

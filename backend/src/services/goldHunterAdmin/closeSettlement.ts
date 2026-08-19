@@ -14,6 +14,12 @@ import {
   computeSettledRealisedR,
   resolveOriginalRiskPrice
 } from "./abc/settledRealisedR";
+import {
+  goldHunterFrozenInitialRiskPrice,
+  preserveGoldHunterEntryOnClose,
+  repairGoldHunterTradeEntryFromDeal
+} from "./entryRepair";
+import { isValidGoldHunterEntryPrice } from "./entryValidity";
 
 export type CloseSettlementHooks = {
   fetchClose?: (args: {
@@ -110,6 +116,7 @@ export function notifySelectorOfSettledGoldHunterClose(args: {
 
 /**
  * Apply a confirmed broker closing deal → status CLOSED with real P/L.
+ * Never clears a known entry. Backfills entry from deal.entryPrice when missing.
  */
 export function applyBrokerSettledClose(args: {
   trade: GoldHunterDemoTrade;
@@ -141,12 +148,23 @@ export function applyBrokerSettledClose(args: {
     profitSurrenderEur = mfeEur - net;
     profitRetentionRatio = net / mfeEur;
   }
-  return {
-    ...trade,
+
+  // Repair entry from deal when still missing — never invent.
+  const withEntry = repairGoldHunterTradeEntryFromDeal({
+    trade,
+    dealEntryPrice: deal.entryPrice
+  });
+
+  const closed: GoldHunterDemoTrade = {
+    ...withEntry,
     strategy: GH_ADMIN_STRATEGY_ID,
     environment: "DEMO",
     status: "CLOSED",
     result: resultFromNetPnl(deal.netPnl),
+    // Never overwrite a known entry with null from deal.close-only payloads.
+    entry: isValidGoldHunterEntryPrice(withEntry.entry)
+      ? withEntry.entry
+      : trade.entry,
     exit: deal.closePrice ?? trade.exit,
     closeTs,
     brokerSettlementTs: closeTs,
@@ -161,8 +179,16 @@ export function applyBrokerSettledClose(args: {
     filledVolumeLots: deal.closedVolumeLots ?? trade.filledVolumeLots,
     errorCode: null,
     profitSurrenderEur,
-    profitRetentionRatio
+    profitRetentionRatio,
+    initialRiskPrice:
+      withEntry.initialRiskPrice != null &&
+      Number.isFinite(withEntry.initialRiskPrice) &&
+      withEntry.initialRiskPrice > 0
+        ? withEntry.initialRiskPrice
+        : goldHunterFrozenInitialRiskPrice()
   };
+
+  return preserveGoldHunterEntryOnClose(trade, closed);
 }
 
 /**
