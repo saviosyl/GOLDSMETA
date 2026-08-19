@@ -1,0 +1,54 @@
+name: Apply Smart Loss Controller V1 patch
+
+on:
+  push:
+    branches:
+      - cursor/smart-loss-controller-v1
+    paths:
+      - '.github/workflows/apply-smart-loss-controller-v1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: cursor/smart-loss-controller-v1
+          fetch-depth: 0
+
+      - name: Reconstruct and verify exact supplied patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/smart-loss-controller-v1.patch
+          for f in .tmp-slc/slc-*.b64; do
+            base64 -d "$f" >> /tmp/smart-loss-controller-v1.patch
+          done
+          bytes="$(wc -c < /tmp/smart-loss-controller-v1.patch | tr -d ' ')"
+          sha="$(sha256sum /tmp/smart-loss-controller-v1.patch | awk '{print $1}')"
+          echo "Patch bytes: $bytes"
+          echo "Patch sha256: $sha"
+          test "$bytes" = "68223"
+          test "$sha" = "6669a30b3855c5186f10a792de32473d17d908348c4162b9c10c6153cc202dfb"
+          test "$(grep -c '^diff --git ' /tmp/smart-loss-controller-v1.patch)" = "14"
+          git apply --check /tmp/smart-loss-controller-v1.patch
+
+      - name: Apply exact patch and remove transport staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply /tmp/smart-loss-controller-v1.patch
+          rm -rf .tmp-slc
+          rm -f .github/workflows/apply-smart-loss-controller-v1.yml
+          git add -A
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = "14"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add SMART_LOSS_CONTROLLER_V1 with conservative guards"
+          git push origin HEAD:cursor/smart-loss-controller-v1
