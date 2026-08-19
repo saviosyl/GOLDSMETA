@@ -433,9 +433,10 @@ describe("Candidate freshness", () => {
 });
 
 describe("Frozen exits + position manager", () => {
-  it("RAPID_ABORT / TRAIL_HIT / SMART_HARVEST / DATA_STALE paths (SPM)", () => {
+  it("EARLY_THESIS / TRAIL_HIT / SMART_HARVEST / DATA_STALE paths (SPM+LC)", () => {
     const cfg = frozenGhFastSoakConfig();
     expect(cfg.smartPositionManagerEnabled).toBe(true);
+    expect(cfg.smartLossControllerEnabled).toBe(true);
     const trade = openTrade({
       tradeId: "t1",
       side: "BUY",
@@ -467,9 +468,10 @@ describe("Frozen exits + position manager", () => {
     ).toBe("DATA_STALE");
 
     updateOpenTrade(trade, 2599.9, 2600.0, cfg);
+    // LC owns early failure with multi-confirm (replaces RAPID_ABORT below +1R).
     expect(
       evaluateOpenExit({ trade, f: baseFeat, cfg, dataOk: true })
-    ).toBe("RAPID_ABORT");
+    ).toBe("SMART_EARLY_THESIS_FAILURE");
 
     // SPM: need ~2R+ MFE before profit floor; trail at lock floor
     const runner = openTrade({

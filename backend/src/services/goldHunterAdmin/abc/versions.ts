@@ -12,6 +12,12 @@ export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V2" as const;
 export const GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION =
   "SMART_POSITION_MANAGER_V1" as const;
 /**
+ * Smart loss-side controller on top of Brain V2 + Smart PM V1.
+ * Kept separate so brainVersion / positionManagerVersion stay stable.
+ */
+export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
+  "SMART_LOSS_CONTROLLER_V1" as const;
+/**
  * Strategy version stamped on selector candidates / frozen identity.
  * Brain V2: Setup B uses prior-only breakouts + stronger confirmation.
  * A/C specialist logic unchanged from V1.

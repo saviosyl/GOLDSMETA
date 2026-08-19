@@ -4,7 +4,9 @@
  *
  * When cfg.smartPositionManagerEnabled: SMART_POSITION_MANAGER_V1 R-based
  * protection supersedes legacy early profit-lock / HARVEST_FADE.
- * Hard stop, RAPID_ABORT, DATA_STALE, SPREAD_UNSAFE always retained.
+ * When cfg.smartLossControllerEnabled: SMART_LOSS_CONTROLLER_V1 owns
+ * soft-max / early-failure / small-profit harvest below +1R MFE; Smart PM
+ * still owns winners from +1R onward. Hard stop always retained.
  */
 import type {
   GhFastConfig,
@@ -17,10 +19,18 @@ import type { GhFastFeatureSnapshot } from "./features";
 import {
   evaluateSmartPositionExit,
   isSmartPositionManagerEnabled,
+  moveToR,
   updateSmartPositionManager
 } from "./smartPositionManager";
-import { GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION } from "./versions";
-import { GOLD_HUNTER_BRAIN_VERSION } from "./versions";
+import {
+  evaluateSmartLossController,
+  isSmartLossControllerEnabled
+} from "./smartLossController";
+import {
+  GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION
+} from "./versions";
 
 export function openTrade(args: {
   tradeId: string;
@@ -52,6 +62,7 @@ export function openTrade(args: {
     harvestRunner: false,
     brainVersion: GOLD_HUNTER_BRAIN_VERSION,
     positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+    lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
     smartPmState: "UNPROTECTED",
     highestProtectionStage: "UNPROTECTED",
     protectedProfitR: 0,
@@ -63,7 +74,8 @@ export function openTrade(args: {
     signalId: args.signalId ?? null,
     pnlScaleEurPerPrice: args.pnlScaleEurPerPrice ?? null,
     lastStopAdjustReason: "NONE",
-    lastHarvestAssessment: null
+    lastHarvestAssessment: null,
+    lastLossControllerAssessment: null
   };
 }
 
@@ -188,6 +200,47 @@ function evaluateOpenExitLegacy(args: {
   return null;
 }
 
+/**
+ * Below +1R MFE: LC owns soft-max / early-failure / small harvest.
+ * Skips SPM RAPID_ABORT so a single-tick velocity abort cannot bypass
+ * the multi-confirm early-failure gate.
+ * At/above +1R: full Smart PM path (PROTECTED / LOCKED / RUNNER / harvest).
+ */
+function evaluateWithSmartLossController(args: {
+  trade: GhFastOpenTrade;
+  f: GhFastFeatureSnapshot;
+  cfg: GhFastConfig;
+  dataOk: boolean;
+}): GhFastExitReason | null {
+  const { trade, f, cfg } = args;
+  const exec = trade.side === "BUY" ? f.bid : f.ask;
+
+  if (!args.dataOk) return "DATA_STALE";
+  if (f.spread > cfg.maxSpread * 1.25) return "SPREAD_UNSAFE";
+
+  const adverse =
+    trade.side === "BUY"
+      ? trade.entryPrice - f.bid
+      : f.ask - trade.entryPrice;
+  if (adverse >= cfg.hardStop) return "HARD_PROTECTION";
+
+  // Always assess LC for diagnostics / handoff stamp; exits only below +1R MFE.
+  const lc = evaluateSmartLossController({ trade, f, cfg });
+  const mfeR = trade.maxFavourableR ?? moveToR(trade.mfe, cfg.hardStop);
+  if (mfeR < cfg.slcHandoffMfeR) {
+    if (lc.exitReason) return lc.exitReason;
+    // Trail only if a floor was somehow placed below handoff — never RAPID_ABORT.
+    if (trade.profitLockActive && trade.lockFloor != null) {
+      if (trade.side === "BUY" && exec <= trade.lockFloor) return "TRAIL_HIT";
+      if (trade.side === "SELL" && exec >= trade.lockFloor) return "TRAIL_HIT";
+    }
+    return null;
+  }
+
+  // Handoff: Smart PM owns winning-trade management from +1R MFE.
+  return evaluateSmartPositionExit(args);
+}
+
 export function evaluateOpenExit(args: {
   trade: GhFastOpenTrade;
   f: GhFastFeatureSnapshot;
@@ -195,6 +248,9 @@ export function evaluateOpenExit(args: {
   dataOk: boolean;
 }): GhFastExitReason | null {
   if (isSmartPositionManagerEnabled(args.cfg)) {
+    if (isSmartLossControllerEnabled(args.cfg)) {
+      return evaluateWithSmartLossController(args);
+    }
     return evaluateSmartPositionExit(args);
   }
   return evaluateOpenExitLegacy(args);

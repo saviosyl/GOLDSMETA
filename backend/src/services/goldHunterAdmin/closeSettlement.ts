@@ -172,7 +172,13 @@ export async function settleGoldHunterCloseFromBroker(args: {
         entryPrice: settled.entry,
         result: settled.result === "OPEN" ? null : settled.result,
         opportunityId: settled.signalId ?? null,
-        closedAtMs: Date.parse(settled.closeTs ?? "") || Date.now()
+        closedAtMs: Date.parse(settled.closeTs ?? "") || Date.now(),
+        realisedR:
+          settled.result === "LOSS"
+            ? -(Math.max(settled.maeR ?? 0.7, 0.1))
+            : settled.result === "WIN"
+              ? Math.max(0.05, (settled.mfeR ?? 0.3) * 0.5)
+              : 0
       });
     } catch {
       /* best-effort anti-churn notify */

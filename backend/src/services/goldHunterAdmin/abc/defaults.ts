@@ -58,7 +58,21 @@ export function defaultGhFastConfig(
     spmHarvestMinMfeR: 2.5,
     spmHarvestMinRetraceR: 0.75,
     antiChurnLossMinMs: 8_000,
-    antiChurnOppositeFlipMinMs: 15_000
+    antiChurnOppositeFlipMinMs: 15_000,
+    // SMART_LOSS_CONTROLLER_V1 — Demo forward default ON; set false to roll back.
+    smartLossControllerEnabled: true,
+    slcSoftMaxLossR: 0.7,
+    slcHandoffMfeR: 1.0,
+    slcEarlyFailureMaxMfeR: 0.5,
+    slcEarlyFailureMinMaeR: 0.2,
+    slcEarlyFailureMinConfirms: 3,
+    slcSmallHarvestMinMfeR: 0.25,
+    slcSmallHarvestMinSurrenderR: 0.12,
+    slcLossStreakCount: 3,
+    slcLossStreakResetMs: 60_000,
+    slcRollingCircuitBreakerR: 4.0,
+    slcRollingWindowTrades: 12,
+    slcCircuitBreakerResetMs: 60_000
   };
   return { ...base, ...over, rearmFloorMs: rearm };
 }

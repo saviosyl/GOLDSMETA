@@ -22,6 +22,7 @@ export {
   GOLD_HUNTER_FAST_ENGINE_VERSION,
   GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+  GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
   GH_FAST_MAX_OPEN_POSITIONS,
   GH_FAST_BROKER_EXECUTION_ENABLED
 } from "./versions";
@@ -38,7 +39,8 @@ export {
   frozenGhFastSoakConfig,
   frozenGhFastShadowExitConfig,
   getFrozenGhFastIdentity,
-  hashGhFastConfig
+  hashGhFastConfig,
+  resetFrozenGhFastIdentityForTests
 } from "./frozenConfig";
 export { defaultGhFastConfig } from "./defaults";
 export {
@@ -54,6 +56,13 @@ export {
   openTradeSmartDiagnostics,
   targetProtectedProfitR
 } from "./smartPositionManager";
+export {
+  countEarlyThesisFailureConfirms,
+  evaluateSmartLossController,
+  isSmartLossControllerEnabled,
+  minProfitableRAfterCosts
+} from "./smartLossController";
+export type { SmartLossAssessment } from "./smartLossController";
 export type {
   GhFastConfig,
   GhFastSetupId,
