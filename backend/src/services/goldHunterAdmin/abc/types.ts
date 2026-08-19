@@ -30,6 +30,9 @@ export type GhFastExitReason =
   | "TRAIL_HIT"
   | "HARVEST_FADE"
   | "SMART_HARVEST_MOMENTUM_DEPTH_REVERSAL"
+  | "SMART_SOFT_MAX_LOSS"
+  | "SMART_EARLY_THESIS_FAILURE"
+  | "SMART_SMALL_PROFIT_HARVEST"
   | "DATA_STALE"
   | "SPREAD_UNSAFE";
 
@@ -242,6 +245,28 @@ export type GhFastOpenTrade = {
     depthAgainst: boolean;
     velocityAgainst: boolean;
   } | null;
+  /** SMART_LOSS_CONTROLLER_V1 fields (additive). */
+  lossControllerVersion?: string;
+  lastLossControllerAssessment?: {
+    lossControllerVersion: string;
+    mfeR: number;
+    maeR: number;
+    currentR: number;
+    handedOffToSmartPm: boolean;
+    softMaxLossHit: boolean;
+    earlyFailureConfirms: number;
+    earlyFailureFlags: {
+      accelerationAgainst: boolean;
+      imbalanceAgainst: boolean;
+      depthAgainst: boolean;
+      velocityAgainst: boolean;
+    };
+    smallProfitEligible: boolean;
+    smallProfitStillProfitable: boolean;
+    momentumDeteriorating: boolean;
+    depthAgainst: boolean;
+    surrenderingFavourable: boolean;
+  } | null;
   spread?: number;
   timeInTradeMs?: number;
   opportunityId?: string | null;
@@ -343,4 +368,34 @@ export type GhFastConfig = {
   antiChurnLossMinMs: number;
   /** Extra ms floor for immediate opposite-side flip after a LOSS. */
   antiChurnOppositeFlipMinMs: number;
+  /**
+   * SMART_LOSS_CONTROLLER_V1 — when true, owns soft-max / early-failure /
+   * small-profit harvest below +1R MFE. Smart PM still owns >= +1R winners.
+   * Set false to roll back without code revert.
+   */
+  smartLossControllerEnabled: boolean;
+  /** Soft strategy max loss in R (hard stop remains cfg.hardStop = 1.0R). */
+  slcSoftMaxLossR: number;
+  /** MFE R at which LC hands off to Smart PM (default +1.0R). */
+  slcHandoffMfeR: number;
+  /** Early thesis failure only while MFE stays below this R. */
+  slcEarlyFailureMaxMfeR: number;
+  /** Minimum adverse excursion (R) before early-failure may fire. */
+  slcEarlyFailureMinMaeR: number;
+  /** Independent microstructure confirms required for early failure. */
+  slcEarlyFailureMinConfirms: number;
+  /** Min MFE R before small-profit harvest may consider. */
+  slcSmallHarvestMinMfeR: number;
+  /** Min surrender from MFE (R) with deteriorating flow to harvest. */
+  slcSmallHarvestMinSurrenderR: number;
+  /** Consecutive realised losses to activate LOSS_STREAK_GUARD. */
+  slcLossStreakCount: number;
+  /** Minimum ms reset while LOSS_STREAK_GUARD is active. */
+  slcLossStreakResetMs: number;
+  /** Absolute rolling realised R that activates the entry circuit breaker. */
+  slcRollingCircuitBreakerR: number;
+  /** Rolling window length for realised R circuit breaker. */
+  slcRollingWindowTrades: number;
+  /** Minimum ms recovery after rolling circuit breaker trips. */
+  slcCircuitBreakerResetMs: number;
 };

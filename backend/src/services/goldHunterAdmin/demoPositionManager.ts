@@ -328,13 +328,20 @@ function notifySelectorTradeClosed(
 ): void {
   try {
     const sel = getGoldHunterStrategySelector(ownerUid);
+    const realisedR =
+      trade.result === "LOSS"
+        ? -(Math.max(trade.maeR ?? 0.7, 0.1))
+        : trade.result === "WIN"
+          ? Math.max(0.05, (trade.mfeR ?? 0.3) * 0.5)
+          : 0;
     sel.notifyTradeClosed({
       side: trade.side,
       setup: trade.setup,
       entryPrice: trade.entry,
       result: trade.result === "OPEN" ? null : trade.result,
       opportunityId: trade.signalId ?? null,
-      closedAtMs: Date.parse(trade.closeTs ?? "") || Date.now()
+      closedAtMs: Date.parse(trade.closeTs ?? "") || Date.now(),
+      realisedR
     });
   } catch {
     /* selector notify is best-effort */
@@ -354,6 +361,8 @@ function spmFieldsFromState(
   return {
     brainVersion: closed.brainVersion,
     positionManagerVersion: closed.positionManagerVersion,
+    lossControllerVersion:
+      state.lossControllerVersion ?? "SMART_LOSS_CONTROLLER_V1",
     smartPmState: state.smartPmState ?? null,
     highestProtectionStage: closed.highestProtectionStage,
     mfeR: closed.mfeR,

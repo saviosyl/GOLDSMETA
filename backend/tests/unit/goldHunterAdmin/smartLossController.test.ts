@@ -1,0 +1,564 @@
+/**
+ * SMART_LOSS_CONTROLLER_V1 — BUY/SELL exit + entry-gate + safety tests.
+ */
+import { describe, expect, it, beforeEach } from "vitest";
+import {
+  defaultGhFastConfig,
+  GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+  GH_FAST_MAX_OPEN_POSITIONS,
+  GH_FAST_BROKER_EXECUTION_ENABLED,
+  getFrozenGhFastIdentity,
+  resetFrozenGhFastIdentityForTests
+} from "../../../src/services/goldHunterAdmin/abc";
+import {
+  openTrade,
+  updateOpenTrade,
+  evaluateOpenExit
+} from "../../../src/services/goldHunterAdmin/abc/exits";
+import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmin/abc/features";
+import type { DepthBookStats } from "../../../src/services/goldHunterAdmin/abc/depthBook";
+import {
+  GoldHunterStrategySelector,
+  resetGoldHunterStrategySelectorsForTests
+} from "../../../src/services/goldHunterAdmin/strategySelector";
+import {
+  GH_ADMIN_DEFAULT_CONFIG,
+  GH_ADMIN_EXECUTION_MODE
+} from "../../../src/services/goldHunterAdmin/types";
+import { GH_DEMO_MAX_OPEN_TRADES_REQUIRED } from "../../../src/services/goldHunterAdmin/configValidation";
+
+const ENTRY = 2600;
+const HARD = 0.55;
+
+function cfgLc(
+  over: Partial<ReturnType<typeof defaultGhFastConfig>> = {}
+) {
+  return defaultGhFastConfig({
+    smartPositionManagerEnabled: true,
+    smartLossControllerEnabled: true,
+    spmMinStopDistance: 0.01,
+    ...over
+  });
+}
+
+function feat(
+  bid: number,
+  ask: number,
+  over: Partial<GhFastFeatureSnapshot> = {}
+): GhFastFeatureSnapshot {
+  const mid = (bid + ask) / 2;
+  const depthBase: DepthBookStats = {
+    available: true,
+    topBidDepth: 10,
+    topAskDepth: 10,
+    bidDepthN: 10,
+    askDepthN: 10,
+    bidLevels: 3,
+    askLevels: 3,
+    depthRatio: 1,
+    depthImbalance: 0,
+    weightedImbalance: 0,
+    liquidityAddedBid: 0,
+    liquidityAddedAsk: 0,
+    liquidityRemovedBid: 0,
+    liquidityRemovedAsk: 0,
+    addRateBid: 0,
+    addRateAsk: 0,
+    removeRateBid: 0,
+    removeRateAsk: 0,
+    bestBid: bid,
+    bestAsk: ask,
+    spread: ask - bid,
+    crossed: false,
+    lastUpdateMs: 0,
+    lastValidBookMs: 0,
+    consecutiveInvalidSnapshots: 0,
+    bookGeneration: 1,
+    resyncCount: 0,
+    deleteHits: 0
+  };
+  return {
+    bid,
+    ask,
+    mid,
+    spread: ask - bid,
+    bidVel250: 0,
+    bidVel500: 0,
+    bidVel1s: 0,
+    bidVel2s: 0,
+    bidVel3s: 0,
+    askVel1s: 0,
+    midVel250: 0,
+    midVel500: 0,
+    midVel1s: 0,
+    midVel2s: 0,
+    midVel3s: 0,
+    acceleration: 0,
+    updateRate1s: 10,
+    signedImbalance1s: 0,
+    efficiency1s: 0.5,
+    efficiency3s: 0.5,
+    high1s: mid,
+    low1s: mid,
+    high2s: mid,
+    low2s: mid,
+    high5s: mid,
+    low5s: mid,
+    high10s: mid,
+    low10s: mid,
+    high15s: mid,
+    low15s: mid,
+    high30s: mid,
+    low30s: mid,
+    priorHigh5s: mid,
+    priorLow5s: mid,
+    priorHigh10s: mid,
+    priorLow10s: mid,
+    distHigh1s: 0,
+    distLow1s: 0,
+    distHigh5s: 0,
+    distLow5s: 0,
+    distPriorHigh5s: 0,
+    distPriorLow5s: 0,
+    upTouches5s: 0,
+    downTouches5s: 0,
+    depth: depthBase,
+    ...over,
+    depth: (over.depth
+      ? { ...depthBase, ...over.depth }
+      : depthBase) as DepthBookStats
+  };
+}
+
+function buyTrade() {
+  return openTrade({
+    tradeId: "buy-lc-1",
+    side: "BUY",
+    setup: "A_MOMENTUM_IGNITION",
+    entryTs: Date.now(),
+    bid: ENTRY - 0.05,
+    ask: ENTRY,
+    trailDistance: 0.12
+  });
+}
+
+function sellTrade() {
+  return openTrade({
+    tradeId: "sell-lc-1",
+    side: "SELL",
+    setup: "A_MOMENTUM_IGNITION",
+    entryTs: Date.now(),
+    bid: ENTRY,
+    ask: ENTRY + 0.05,
+    trailDistance: 0.12
+  });
+}
+
+describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
+  const cfg = cfgLc();
+
+  it("normal noise survives (no exit)", () => {
+    const t = buyTrade();
+    const bid = ENTRY - HARD * 0.1;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          acceleration: -cfg.momentumVelMin * 0.5,
+          signedImbalance1s: -0.05,
+          midVel250: -cfg.momentumVelMin * 0.5
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+  });
+
+  it("single bad tick does not early-exit", () => {
+    const t = buyTrade();
+    const bid = ENTRY - HARD * 0.25;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    // Only velocity against — 1 confirm
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          midVel250: -cfg.momentumVelMin * 3,
+          acceleration: 0,
+          signedImbalance1s: 0,
+          depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: 0 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+  });
+
+  it("3-confirm thesis failure exits SMART_EARLY_THESIS_FAILURE", () => {
+    const t = buyTrade();
+    const bid = ENTRY - HARD * 0.25;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          acceleration: -cfg.momentumVelMin * 2,
+          signedImbalance1s: -0.3,
+          midVel250: -cfg.momentumVelMin * 2,
+          depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: -0.35 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_EARLY_THESIS_FAILURE");
+  });
+
+  it("-0.70R soft loss exits SMART_SOFT_MAX_LOSS", () => {
+    const t = buyTrade();
+    const bid = ENTRY - HARD * 0.72;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_SOFT_MAX_LOSS");
+  });
+
+  it("existing -1R hard protection remains", () => {
+    const t = buyTrade();
+    const bid = ENTRY - HARD - 0.02;
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("HARD_PROTECTION");
+  });
+
+  it("small profitable deterioration harvests SMART_SMALL_PROFIT_HARVEST", () => {
+    const t = buyTrade();
+    // MFE ~0.4R
+    const peak = ENTRY + HARD * 0.4;
+    updateOpenTrade(t, peak, peak + 0.05, cfg);
+    // Retrace to ~0.22R — still net profitable after friction+spread costs
+    const bid = ENTRY + HARD * 0.22;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          acceleration: -cfg.momentumVelMin,
+          signedImbalance1s: -0.25,
+          midVel250: -cfg.momentumVelMin * 0.5,
+          depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: -0.3 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_SMALL_PROFIT_HARVEST");
+  });
+
+  it("healthy small-profit trade stays open", () => {
+    const t = buyTrade();
+    const peak = ENTRY + HARD * 0.4;
+    updateOpenTrade(t, peak, peak + 0.05, cfg);
+    const bid = ENTRY + HARD * 0.35;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          acceleration: cfg.momentumVelMin,
+          signedImbalance1s: 0.2,
+          midVel250: cfg.momentumVelMin * 2,
+          depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: 0.2 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+  });
+
+  it("+1R hands management to Smart PM (PROTECTED)", () => {
+    const t = buyTrade();
+    const bid = ENTRY + HARD * 1.05;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    expect(t.smartPmState).toBe("PROTECTED");
+    expect(t.maxFavourableR!).toBeGreaterThanOrEqual(1);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+    expect(t.lastLossControllerAssessment?.handedOffToSmartPm).toBe(true);
+  });
+
+  it("+3R RUNNER is not interrupted by loss controller", () => {
+    const t = buyTrade();
+    const peak = ENTRY + HARD * 3.2;
+    updateOpenTrade(t, peak, peak + 0.05, cfg);
+    expect(t.smartPmState).toBe("RUNNER");
+    const bid = ENTRY + HARD * 2.8;
+    updateOpenTrade(t, bid, bid + 0.05, cfg);
+    // Adverse flow that would early-fail below 1R must NOT soft LC exit
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(bid, bid + 0.05, {
+          acceleration: -cfg.momentumVelMin * 3,
+          signedImbalance1s: -0.4,
+          midVel250: -cfg.momentumVelMin * 3,
+          depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: -0.4 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+    expect(t.smartPmState).toBe("RUNNER");
+  });
+});
+
+describe("SMART_LOSS_CONTROLLER_V1 — SELL mirror", () => {
+  const cfg = cfgLc();
+
+  it("SELL soft max loss + early thesis + small harvest invert correctly", () => {
+    const soft = sellTrade();
+    const askSoft = ENTRY + HARD * 0.72;
+    updateOpenTrade(soft, askSoft - 0.05, askSoft, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: soft,
+        f: feat(askSoft - 0.05, askSoft),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_SOFT_MAX_LOSS");
+
+    const early = sellTrade();
+    const askE = ENTRY + HARD * 0.25;
+    updateOpenTrade(early, askE - 0.05, askE, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: early,
+        f: feat(askE - 0.05, askE, {
+          acceleration: cfg.momentumVelMin * 2,
+          signedImbalance1s: 0.3,
+          midVel250: cfg.momentumVelMin * 2,
+          depth: { ...feat(askE - 0.05, askE).depth, depthImbalance: 0.35 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_EARLY_THESIS_FAILURE");
+
+    const harvest = sellTrade();
+    const peak = ENTRY - HARD * 0.4;
+    updateOpenTrade(harvest, peak - 0.05, peak, cfg);
+    const askH = ENTRY - HARD * 0.22;
+    updateOpenTrade(harvest, askH - 0.05, askH, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: harvest,
+        f: feat(askH - 0.05, askH, {
+          acceleration: cfg.momentumVelMin,
+          signedImbalance1s: 0.25,
+          midVel250: cfg.momentumVelMin * 0.5,
+          depth: { ...feat(askH - 0.05, askH).depth, depthImbalance: 0.3 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBe("SMART_SMALL_PROFIT_HARVEST");
+  });
+
+  it("SELL single bad tick does not early-exit", () => {
+    const t = sellTrade();
+    const ask = ENTRY + HARD * 0.25;
+    updateOpenTrade(t, ask - 0.05, ask, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(ask - 0.05, ask, {
+          midVel250: cfg.momentumVelMin * 3
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+  });
+
+  it("SELL +3R RUNNER not interrupted", () => {
+    const t = sellTrade();
+    updateOpenTrade(t, ENTRY - HARD * 3.2 - 0.05, ENTRY - HARD * 3.2, cfg);
+    expect(t.smartPmState).toBe("RUNNER");
+    const ask = ENTRY - HARD * 2.8;
+    updateOpenTrade(t, ask - 0.05, ask, cfg);
+    expect(
+      evaluateOpenExit({
+        trade: t,
+        f: feat(ask - 0.05, ask, {
+          acceleration: cfg.momentumVelMin * 3,
+          signedImbalance1s: 0.4,
+          midVel250: cfg.momentumVelMin * 3,
+          depth: { ...feat(ask - 0.05, ask).depth, depthImbalance: 0.4 }
+        }),
+        cfg,
+        dataOk: true
+      })
+    ).toBeNull();
+  });
+});
+
+describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
+  beforeEach(() => {
+    resetGoldHunterStrategySelectorsForTests();
+  });
+
+  it("3-loss streak activates LOSS_STREAK_GUARD; structural reset restores entry", () => {
+    const sel = new GoldHunterStrategySelector();
+    const cfg = cfgLc();
+    const t0 = 8_000_000;
+
+    for (let i = 0; i < 3; i++) {
+      sel.notifyTradeClosed({
+        side: "BUY",
+        setup: "A",
+        entryPrice: 2600,
+        result: "LOSS",
+        opportunityId: `opp-loss-${i}`,
+        closedAtMs: t0 + i * 1000,
+        realisedR: -0.7
+      });
+    }
+    const st = sel.getLossControllerEntryState();
+    expect(st.consecutiveLosses).toBe(3);
+    expect(st.lossStreakGuardActive).toBe(true);
+
+    // Too soon — blocked
+    const early = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 2000 + 5_000,
+      mid: 2599.5,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(early.ok).toBe(false);
+    expect(early.rejectionReason).toBe("WAIT_LOSS_STREAK_GUARD");
+
+    // Force structural reset via mid below entry, then wait 60s + direction
+    sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 2000 + cfg.slcLossStreakResetMs + 100,
+      mid: 2599.0,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    // Second call after structure may clear (first call may have set structure)
+    const recovered = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 2000 + cfg.slcLossStreakResetMs + 200,
+      mid: 2599.0,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(recovered.ok).toBe(true);
+    expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(false);
+  });
+
+  it("-4R rolling circuit breaker activates; recovery resets it", () => {
+    const sel = new GoldHunterStrategySelector();
+    const cfg = cfgLc();
+    const t0 = 9_000_000;
+
+    for (let i = 0; i < 6; i++) {
+      sel.notifyTradeClosed({
+        side: "BUY",
+        setup: "A",
+        entryPrice: 2600,
+        result: "LOSS",
+        opportunityId: `opp-cb-${i}`,
+        closedAtMs: t0 + i * 500,
+        realisedR: -0.7
+      });
+    }
+    const st = sel.getLossControllerEntryState();
+    expect(st.rollingRealisedR).toBeLessThanOrEqual(-4);
+    expect(st.lossCircuitBreakerActive).toBe(true);
+    expect(st.circuitBreakerReason).toBe("ROLLING_REALISED_R");
+
+    const blocked = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 3000,
+      mid: 2599.0,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.rejectionReason).toBe("WAIT_LOSS_CIRCUIT_BREAKER");
+
+    // Structural mid + time + direction
+    sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 3000 + cfg.slcCircuitBreakerResetMs + 50,
+      mid: 2599.0,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    const recovered = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: t0 + 3000 + cfg.slcCircuitBreakerResetMs + 100,
+      mid: 2599.0,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(recovered.ok).toBe(true);
+    const after = sel.getLossControllerEntryState();
+    expect(after.lossCircuitBreakerActive).toBe(false);
+    expect(after.rollingRealisedR).toBe(0);
+  });
+});
+
+describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
+  it("versions + soak label + Demo safety unchanged", () => {
+    resetFrozenGhFastIdentityForTests();
+    const id = getFrozenGhFastIdentity();
+    expect(id.soakLabel).toBe("BRAIN_V2_SMART_PM_V1_SMART_LOSS_V1_DEMO");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V2");
+    expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
+      "SMART_POSITION_MANAGER_V1"
+    );
+    expect(GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION).toBe(
+      "SMART_LOSS_CONTROLLER_V1"
+    );
+    const cfg = defaultGhFastConfig();
+    expect(cfg.smartLossControllerEnabled).toBe(true);
+    expect(cfg.slcSoftMaxLossR).toBe(0.7);
+    expect(cfg.hardStop).toBe(0.55);
+    expect(GH_FAST_MAX_OPEN_POSITIONS).toBe(1);
+    expect(GH_DEMO_MAX_OPEN_TRADES_REQUIRED).toBe(1);
+    expect(GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades).toBe(1);
+    expect(GH_ADMIN_DEFAULT_CONFIG.riskPerTradePct).toBe(1);
+    expect(GH_ADMIN_DEFAULT_CONFIG.allocatedCapitalEur).toBe(5000);
+    expect(GH_ADMIN_EXECUTION_MODE).toBe("DEMO_ONLY");
+    expect(GH_FAST_BROKER_EXECUTION_ENABLED).toBe(false);
+    expect(GH_ADMIN_DEFAULT_CONFIG.demoAutoTradeEnabled).toBe(false);
+  });
+
+  it("openTrade stamps lossControllerVersion", () => {
+    const t = buyTrade();
+    expect(t.brainVersion).toBe("GOLD_HUNTER_BRAIN_V2");
+    expect(t.positionManagerVersion).toBe("SMART_POSITION_MANAGER_V1");
+    expect(t.lossControllerVersion).toBe("SMART_LOSS_CONTROLLER_V1");
+  });
+});

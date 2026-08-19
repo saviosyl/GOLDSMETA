@@ -158,6 +158,7 @@ export type GoldHunterDemoTrade = {
   /** SMART_POSITION_MANAGER_V1 closed/open diagnostics (additive). */
   brainVersion?: string | null;
   positionManagerVersion?: string | null;
+  lossControllerVersion?: string | null;
   smartPmState?: string | null;
   highestProtectionStage?: string | null;
   mfeR?: number | null;

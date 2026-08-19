@@ -11,6 +11,7 @@ import {
   GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
   GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
+  GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
   type GhFastDepthEvent,
   type ResearchDepthValidity
@@ -69,6 +70,15 @@ export type GoldHunterSelectedCandidate = {
     rejectionReason: string | null;
   };
   positionManagerVersion?: string;
+  lossControllerVersion?: string;
+  /** SMART_LOSS_CONTROLLER_V1 entry-gate telemetry. */
+  lossControllerState?: {
+    consecutiveLosses: number;
+    rollingRealisedR: number;
+    lossStreakGuardActive: boolean;
+    lossCircuitBreakerActive: boolean;
+    circuitBreakerReason: string | null;
+  };
 };
 
 /** Explicit selector tick result — execution only when newOpportunity. */
@@ -206,6 +216,29 @@ type LossReentryState = {
   structuralResetComplete: boolean;
 };
 
+/** SMART_LOSS_CONTROLLER_V1 entry guards (streak + rolling realised R). */
+type LossControllerEntryState = {
+  consecutiveLosses: number;
+  rollingRealisedRs: number[];
+  lossStreakGuardActive: boolean;
+  lossStreakActivatedAtMs: number | null;
+  lossCircuitBreakerActive: boolean;
+  circuitBreakerReason: string | null;
+  circuitBreakerActivatedAtMs: number | null;
+};
+
+function emptyLossControllerEntryState(): LossControllerEntryState {
+  return {
+    consecutiveLosses: 0,
+    rollingRealisedRs: [],
+    lossStreakGuardActive: false,
+    lossStreakActivatedAtMs: null,
+    lossCircuitBreakerActive: false,
+    circuitBreakerReason: null,
+    circuitBreakerActivatedAtMs: null
+  };
+}
+
 export class GoldHunterStrategySelector {
   private readonly pipeline: GoldHunterFeaturePipeline;
   private receiveSeq = 0;
@@ -239,6 +272,8 @@ export class GoldHunterStrategySelector {
     closedAtMs: null,
     structuralResetComplete: true
   };
+  private lossControllerEntry: LossControllerEntryState =
+    emptyLossControllerEntryState();
 
   constructor(opts?: { depthFreshnessMs?: number }) {
     try {
@@ -436,7 +471,8 @@ export class GoldHunterStrategySelector {
 
   /**
    * Notify selector that a Demo GH trade closed — arms anti-churn memory on LOSS.
-   * WIN/BREAKEVEN clear the loss gate (generic rearm floor still applies).
+   * WIN/BREAKEVEN clear the single-loss gate (generic rearm floor still applies).
+   * Also updates SMART_LOSS_CONTROLLER_V1 streak / rolling circuit-breaker state.
    */
   notifyTradeClosed(args: {
     side: "BUY" | "SELL";
@@ -445,9 +481,34 @@ export class GoldHunterStrategySelector {
     result: "WIN" | "LOSS" | "BREAKEVEN" | null;
     opportunityId?: string | null;
     closedAtMs?: number;
+    /** Realised R for rolling circuit breaker (negative = loss). */
+    realisedR?: number | null;
   }): void {
     const atMs = args.closedAtMs ?? Date.now();
+    const cfg = this.pipeline.config();
+    const realisedR =
+      args.realisedR != null && Number.isFinite(args.realisedR)
+        ? args.realisedR
+        : args.result === "LOSS"
+          ? -cfg.slcSoftMaxLossR
+          : args.result === "WIN"
+            ? cfg.slcSoftMaxLossR
+            : 0;
+
+  if (args.result === "LOSS" || args.result === "WIN" || args.result === "BREAKEVEN") {
+      this.recordRealisedR(realisedR, cfg, atMs);
+    }
+
     if (args.result === "LOSS") {
+      this.lossControllerEntry.consecutiveLosses += 1;
+      if (
+        cfg.smartLossControllerEnabled &&
+        this.lossControllerEntry.consecutiveLosses >= cfg.slcLossStreakCount
+      ) {
+        this.lossControllerEntry.lossStreakGuardActive = true;
+        this.lossControllerEntry.lossStreakActivatedAtMs =
+          this.lossControllerEntry.lossStreakActivatedAtMs ?? atMs;
+      }
       this.lossReentry = {
         lastSide: args.side,
         lastSetup: args.setup,
@@ -478,7 +539,10 @@ export class GoldHunterStrategySelector {
       }
       return;
     }
-    // Non-loss: clear loss gate but remember last opportunity identity.
+    // Non-loss: clear consecutive streak; keep rolling window / CB until recovered.
+    this.lossControllerEntry.consecutiveLosses = 0;
+    this.lossControllerEntry.lossStreakGuardActive = false;
+    this.lossControllerEntry.lossStreakActivatedAtMs = null;
     this.lossReentry = {
       lastSide: args.side,
       lastSetup: args.setup,
@@ -493,8 +557,46 @@ export class GoldHunterStrategySelector {
     };
   }
 
+  private recordRealisedR(
+    realisedR: number,
+    cfg: ReturnType<GoldHunterFeaturePipeline["config"]>,
+    atMs: number
+  ): void {
+    if (!cfg.smartLossControllerEnabled) return;
+    const next = [...this.lossControllerEntry.rollingRealisedRs, realisedR];
+    while (next.length > cfg.slcRollingWindowTrades) next.shift();
+    this.lossControllerEntry.rollingRealisedRs = next;
+    const sum = next.reduce((a, b) => a + b, 0);
+    if (sum <= -cfg.slcRollingCircuitBreakerR) {
+      this.lossControllerEntry.lossCircuitBreakerActive = true;
+      this.lossControllerEntry.circuitBreakerReason = "ROLLING_REALISED_R";
+      this.lossControllerEntry.circuitBreakerActivatedAtMs =
+        this.lossControllerEntry.circuitBreakerActivatedAtMs ?? atMs;
+    }
+  }
+
   getAntiChurnStateForTests(): LossReentryState {
     return { ...this.lossReentry };
+  }
+
+  getLossControllerEntryState(): {
+    consecutiveLosses: number;
+    rollingRealisedR: number;
+    lossStreakGuardActive: boolean;
+    lossCircuitBreakerActive: boolean;
+    circuitBreakerReason: string | null;
+  } {
+    const rollingRealisedR = this.lossControllerEntry.rollingRealisedRs.reduce(
+      (a, b) => a + b,
+      0
+    );
+    return {
+      consecutiveLosses: this.lossControllerEntry.consecutiveLosses,
+      rollingRealisedR,
+      lossStreakGuardActive: this.lossControllerEntry.lossStreakGuardActive,
+      lossCircuitBreakerActive: this.lossControllerEntry.lossCircuitBreakerActive,
+      circuitBreakerReason: this.lossControllerEntry.circuitBreakerReason
+    };
   }
 
   /** Test helper — exposes loss anti-churn gate. */
@@ -512,6 +614,7 @@ export class GoldHunterStrategySelector {
   /**
    * A/B/C anti-churn after LOSS. Stronger requirements for immediate opposite flip.
    * Does not replace B structural gate — both must pass when applicable.
+   * SMART_LOSS_CONTROLLER_V1 adds streak guard + rolling circuit breaker.
    */
   private lossArmingGate(args: {
     side: "BUY" | "SELL";
@@ -528,6 +631,58 @@ export class GoldHunterStrategySelector {
     rejectionReason: string | null;
   } {
     this.updateLossStructuralReset(args.mid);
+    const cfg = this.pipeline.config();
+    const lc = this.lossControllerEntry;
+    const directionalOk = (side: "BUY" | "SELL"): boolean => {
+      const imb = args.signedImbalance1s ?? 0;
+      const vel = args.midVel250 ?? 0;
+      return side === "BUY" ? imb > 0.1 && vel > 0 : imb < -0.1 && vel < 0;
+    };
+
+    // Rolling realised-R circuit breaker — gates NEW entries only.
+    if (cfg.smartLossControllerEnabled && lc.lossCircuitBreakerActive) {
+      const activatedAt = lc.circuitBreakerActivatedAtMs ?? args.atMs;
+      const timeOk = args.atMs - activatedAt >= cfg.slcCircuitBreakerResetMs;
+      const structuralOk = this.lossReentry.structuralResetComplete;
+      if (!timeOk || !structuralOk || !directionalOk(args.side)) {
+        return {
+          ok: false,
+          structuralResetOk: structuralOk,
+          timeFloorOk: timeOk,
+          oppositeFlip:
+            this.lossReentry.lastSide != null &&
+            args.side !== this.lossReentry.lastSide,
+          rejectionReason: "WAIT_LOSS_CIRCUIT_BREAKER"
+        };
+      }
+      // Recovery: clear CB and rolling window so we do not immediately re-trip.
+      lc.lossCircuitBreakerActive = false;
+      lc.circuitBreakerReason = null;
+      lc.circuitBreakerActivatedAtMs = null;
+      lc.rollingRealisedRs = [];
+    }
+
+    // Loss streak guard after N consecutive realised losses.
+    if (cfg.smartLossControllerEnabled && lc.lossStreakGuardActive) {
+      const activatedAt = lc.lossStreakActivatedAtMs ?? args.atMs;
+      const timeOk = args.atMs - activatedAt >= cfg.slcLossStreakResetMs;
+      const structuralOk = this.lossReentry.structuralResetComplete;
+      if (!timeOk || !structuralOk || !directionalOk(args.side)) {
+        return {
+          ok: false,
+          structuralResetOk: structuralOk,
+          timeFloorOk: timeOk,
+          oppositeFlip:
+            this.lossReentry.lastSide != null &&
+            args.side !== this.lossReentry.lastSide,
+          rejectionReason: "WAIT_LOSS_STREAK_GUARD"
+        };
+      }
+      lc.lossStreakGuardActive = false;
+      lc.lossStreakActivatedAtMs = null;
+      lc.consecutiveLosses = 0;
+    }
+
     if (
       this.lossReentry.closedAtMs == null ||
       this.lossReentry.lastResult !== "LOSS" ||
@@ -557,7 +712,6 @@ export class GoldHunterStrategySelector {
       };
     }
 
-    const cfg = this.pipeline.config();
     const oppositeFlip = args.side !== this.lossReentry.lastSide;
     const minMs = oppositeFlip
       ? Math.max(cfg.antiChurnLossMinMs, cfg.antiChurnOppositeFlipMinMs)
@@ -587,13 +741,7 @@ export class GoldHunterStrategySelector {
 
     if (oppositeFlip) {
       // Require directional confirmation that structure actually flipped.
-      const imb = args.signedImbalance1s ?? 0;
-      const vel = args.midVel250 ?? 0;
-      const confirmed =
-        args.side === "BUY"
-          ? imb > 0.1 && vel > 0
-          : imb < -0.1 && vel < 0;
-      if (!confirmed) {
+      if (!directionalOk(args.side)) {
         return {
           ok: false,
           structuralResetOk: true,
@@ -710,6 +858,8 @@ export class GoldHunterStrategySelector {
       opportunityStartedAtMs: args.opportunityStartedAtMs,
       brainVersion: GOLD_HUNTER_BRAIN_VERSION,
       positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+      lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
+      lossControllerState: this.getLossControllerEntryState(),
       breakoutDiagnostics: args.breakoutDiagnostics ?? null,
       bReentryState: args.bReentryState,
       antiChurnState: args.antiChurnState
@@ -889,11 +1039,6 @@ export class GoldHunterStrategySelector {
 
     if (rearmBlocked || bBlocked || antiChurnBlocked) {
       // Selected for display, but rearm / B structural / anti-churn gate not met.
-      const rejectionReason = antiChurnBlocked
-        ? lossGateLive.rejectionReason
-        : bBlocked
-          ? bGate.rejectionReason
-          : "generic_rearm_floor";
       const displayOnly = this.buildCandidate({
         letter,
         setupId: hit.setup,

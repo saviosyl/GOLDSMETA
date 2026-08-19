@@ -38,6 +38,7 @@ import { isGoldHunterSignalDurablyConsumed } from "./signalClaimStore";
 import { loadGoldHunterExecutionDiagnostics } from "./executionRuntimeStore";
 import {
   GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION
 } from "./abc/versions";
 
@@ -161,6 +162,12 @@ export type GoldHunterStatusPayload = {
   strategyVersions: {
     brainVersion: string;
     positionManagerVersion: string;
+    lossControllerVersion: string;
+    rollingRealisedR: number;
+    lossCircuitBreakerActive: boolean;
+    circuitBreakerReason: string | null;
+    lossStreakGuardActive: boolean;
+    consecutiveLosses: number;
     reentryState: GoldHunterSelectedCandidate["antiChurnState"] | null;
     bReentryState: GoldHunterSelectedCandidate["bReentryState"] | null;
   };
@@ -509,6 +516,27 @@ export async function assembleGoldHunterStatus(
     strategyVersions: {
       brainVersion: GOLD_HUNTER_BRAIN_VERSION,
       positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+      lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
+      ...(() => {
+        try {
+          const lc = getGoldHunterStrategySelector(ownerUid).getLossControllerEntryState();
+          return {
+            rollingRealisedR: lc.rollingRealisedR,
+            lossCircuitBreakerActive: lc.lossCircuitBreakerActive,
+            circuitBreakerReason: lc.circuitBreakerReason,
+            lossStreakGuardActive: lc.lossStreakGuardActive,
+            consecutiveLosses: lc.consecutiveLosses
+          };
+        } catch {
+          return {
+            rollingRealisedR: 0,
+            lossCircuitBreakerActive: false,
+            circuitBreakerReason: null as string | null,
+            lossStreakGuardActive: false,
+            consecutiveLosses: 0
+          };
+        }
+      })(),
       reentryState: lastCandidate?.antiChurnState ?? null,
       bReentryState: lastCandidate?.bReentryState ?? null
     },
