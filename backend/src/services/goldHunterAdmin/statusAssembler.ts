@@ -23,6 +23,7 @@ import {
   getGoldHunterStrategySelector,
   type GoldHunterSelectedCandidate
 } from "./strategySelector";
+import { getGoldHunterOpenPositionDiagnostics } from "./demoPositionManager";
 import {
   computeDemoPerformance,
   listGoldHunterDemoTrades,
@@ -35,6 +36,10 @@ import {
 } from "./types";
 import { isGoldHunterSignalDurablyConsumed } from "./signalClaimStore";
 import { loadGoldHunterExecutionDiagnostics } from "./executionRuntimeStore";
+import {
+  GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION
+} from "./abc/versions";
 
 const FEED_STALE_MS = 45_000;
 const FEED_HARD_STALE_MS = 120_000;
@@ -118,6 +123,21 @@ export type GoldHunterStatusPayload = {
   };
   gates: ReturnType<typeof evaluateGoldHunterOrderGates>;
   openTrades: GoldHunterDemoTrade[];
+  /** In-memory SMART_POSITION_MANAGER_V1 diagnostics for open trades. */
+  openPositionManagement: Array<{
+    tradeId: string;
+    brainVersion: string;
+    positionManagerVersion: string;
+    profitManagementState: string;
+    currentR: number;
+    mfeR: number;
+    mfeEur: number | null;
+    maeR: number;
+    protectedProfitR: number;
+    protectedStopPrice: number | null;
+    lastStopAdjustReason: string | null;
+    lastHarvestAssessment: unknown;
+  }>;
   unmatchedDemoPositions: Array<{
     label: "UNMATCHED DEMO POSITION";
     brokerPositionId: string;
@@ -136,6 +156,12 @@ export type GoldHunterStatusPayload = {
     consumed: boolean;
     ageMs: number | null;
     note: string;
+  };
+  strategyVersions: {
+    brainVersion: string;
+    positionManagerVersion: string;
+    reentryState: GoldHunterSelectedCandidate["antiChurnState"] | null;
+    bReentryState: GoldHunterSelectedCandidate["bReentryState"] | null;
   };
   execution: Awaited<ReturnType<typeof loadGoldHunterExecutionDiagnostics>>;
 };
@@ -463,6 +489,7 @@ export async function assembleGoldHunterStatus(
     arming,
     gates,
     openTrades,
+    openPositionManagement: getGoldHunterOpenPositionDiagnostics(ownerUid),
     unmatchedDemoPositions: [],
     performanceToday: computeDemoPerformance(trades, "today"),
     audit,
@@ -477,6 +504,12 @@ export async function assembleGoldHunterStatus(
       consumed: signalConsumed,
       ageMs: candidateAgeMs,
       note: signalNote
+    },
+    strategyVersions: {
+      brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+      positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+      reentryState: lastCandidate?.antiChurnState ?? null,
+      bReentryState: lastCandidate?.bReentryState ?? null
     },
     execution: await (async () => {
       // Read-only hydrate from worker-persisted telemetry.

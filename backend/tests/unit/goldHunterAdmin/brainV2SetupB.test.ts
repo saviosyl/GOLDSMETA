@@ -644,16 +644,17 @@ describe("Gold Hunter Brain V2 — safety invariants", () => {
     });
   });
 
-  it("exit parameters unchanged", () => {
+  it("exit parameters unchanged (legacy knobs retained for rollback)", () => {
     const cfg = defaultGhFastConfig();
     expect(cfg.hardStop).toBe(0.55);
     expect(cfg.profitLockActivateMfe).toBe(0.18);
     expect(cfg.profitLockFraction).toBe(0.45);
     expect(cfg.trailDistance).toBe(0.12);
     expect(cfg.friction).toBe(0.06);
+    expect(cfg.smartPositionManagerEnabled).toBe(true);
   });
 
-  it("brain version is V2", () => {
+  it("brain version is V2; position manager is V1", () => {
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V2");
   });
 });

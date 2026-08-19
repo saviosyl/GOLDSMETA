@@ -155,6 +155,20 @@ export type GoldHunterDemoTrade = {
     dealHistoryChecks?: number;
     firstReconcileAt?: string;
   } | null;
+  /** SMART_POSITION_MANAGER_V1 closed/open diagnostics (additive). */
+  brainVersion?: string | null;
+  positionManagerVersion?: string | null;
+  smartPmState?: string | null;
+  highestProtectionStage?: string | null;
+  mfeR?: number | null;
+  maeR?: number | null;
+  mfeEur?: number | null;
+  maeEur?: number | null;
+  protectedProfitR?: number | null;
+  protectedStopPrice?: number | null;
+  lastStopAdjustReason?: string | null;
+  profitSurrenderEur?: number | null;
+  profitRetentionRatio?: number | null;
 };
 
 export type GoldHunterOrderGateResult = {

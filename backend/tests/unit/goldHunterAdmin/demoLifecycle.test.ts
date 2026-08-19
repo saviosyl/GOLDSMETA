@@ -74,7 +74,7 @@ import {
 import { saveGoldHunterConfig } from "../../../src/services/goldHunterAdmin/configStore";
 import { resetOwnerQueuesForTests, BoundedSerializedQueue } from "../../../src/services/goldHunterAdmin/boundedQueue";
 import { assertGoldHunterCandidateFresh } from "../../../src/services/goldHunterAdmin/candidateFreshness";
-import { frozenGhFastSoakConfig } from "../../../src/services/goldHunterAdmin/abc";
+import { frozenGhFastSoakConfig, defaultGhFastConfig } from "../../../src/services/goldHunterAdmin/abc";
 import {
   updateOpenTrade,
   evaluateOpenExit,
@@ -433,8 +433,9 @@ describe("Candidate freshness", () => {
 });
 
 describe("Frozen exits + position manager", () => {
-  it("RAPID_ABORT / TRAIL_HIT / HARVEST_FADE / DATA_STALE paths", () => {
+  it("RAPID_ABORT / TRAIL_HIT / SMART_HARVEST / DATA_STALE paths (SPM)", () => {
     const cfg = frozenGhFastSoakConfig();
+    expect(cfg.smartPositionManagerEnabled).toBe(true);
     const trade = openTrade({
       tradeId: "t1",
       side: "BUY",
@@ -470,7 +471,7 @@ describe("Frozen exits + position manager", () => {
       evaluateOpenExit({ trade, f: baseFeat, cfg, dataOk: true })
     ).toBe("RAPID_ABORT");
 
-    // Profit lock trail
+    // SPM: need ~2R+ MFE before profit floor; trail at lock floor
     const runner = openTrade({
       tradeId: "t2",
       side: "BUY",
@@ -480,8 +481,10 @@ describe("Frozen exits + position manager", () => {
       ask: 2600.1,
       trailDistance: cfg.trailDistance
     });
-    updateOpenTrade(runner, 2600.4, 2600.5, cfg); // mfe enough for lock
+    const mfe2 = runner.entryPrice + cfg.hardStop * 2.1;
+    updateOpenTrade(runner, mfe2, mfe2 + 0.05, cfg);
     expect(runner.profitLockActive).toBe(true);
+    expect(runner.smartPmState).toBe("LOCKED");
     const trailFeat = {
       ...baseFeat,
       bid: runner.lockFloor! - 0.01,
@@ -504,16 +507,47 @@ describe("Frozen exits + position manager", () => {
       ask: 2600.1,
       trailDistance: cfg.trailDistance
     });
-    updateOpenTrade(harvest, 2600.4, 2600.5, cfg);
+    const peak = harvest.entryPrice + cfg.hardStop * 3.2;
+    updateOpenTrade(harvest, peak, peak + 0.05, cfg);
+    const fadeBid = harvest.entryPrice + cfg.hardStop * 2.2;
     const fadeFeat = {
       ...baseFeat,
+      bid: fadeBid,
+      ask: fadeBid + 0.05,
+      midVel250: -cfg.momentumVelMin * 2,
+      acceleration: -cfg.momentumVelMin * 3,
+      signedImbalance1s: -0.3,
+      depth: { depthImbalance: -0.35, removeRateBid: 0, removeRateAsk: 0 }
+    } as typeof baseFeat;
+    updateOpenTrade(harvest, fadeBid, fadeBid + 0.05, cfg);
+    expect(
+      evaluateOpenExit({ trade: harvest, f: fadeFeat, cfg, dataOk: true })
+    ).toBe("SMART_HARVEST_MOMENTUM_DEPTH_REVERSAL");
+  });
+
+  it("legacy HARVEST_FADE path when SPM disabled", () => {
+    const cfg = defaultGhFastConfig({ smartPositionManagerEnabled: false });
+    const harvest = openTrade({
+      tradeId: "t-legacy",
+      side: "BUY",
+      setup: "A_MOMENTUM_IGNITION",
+      entryTs: Date.now(),
+      bid: 2600,
+      ask: 2600.1,
+      trailDistance: cfg.trailDistance
+    });
+    updateOpenTrade(harvest, 2600.4, 2600.5, cfg);
+    expect(harvest.profitLockActive).toBe(true);
+    const fadeFeat = {
       bid: 2600.35,
       ask: 2600.4,
+      mid: 2600.375,
+      spread: 0.05,
       midVel250: 0,
       acceleration: -0.001,
       signedImbalance1s: -0.1,
       depth: { depthImbalance: 0, removeRateBid: 0, removeRateAsk: 0 }
-    } as typeof baseFeat;
+    } as Parameters<typeof evaluateOpenExit>[0]["f"];
     expect(
       evaluateOpenExit({ trade: harvest, f: fadeFeat, cfg, dataOk: true })
     ).toBe("HARVEST_FADE");

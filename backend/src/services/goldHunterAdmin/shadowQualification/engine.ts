@@ -14,7 +14,7 @@ import {
   updateOpenTrade
 } from "../abc/exits";
 import {
-  frozenGhFastSoakConfig,
+  frozenGhFastShadowExitConfig,
   getFrozenGhFastIdentity
 } from "../abc/frozenConfig";
 import type { GhFastFeatureSnapshot } from "../abc/features";
@@ -694,7 +694,7 @@ export class GhShadowQualificationEngine {
     if (!this.open || !this.epoch) return;
     // Mirror Demo demoPositionManager: if snap.features is missing, do NOT manage.
     if (!input.features) return;
-    const cfg = frozenGhFastSoakConfig();
+    const cfg = frozenGhFastShadowExitConfig();
     const { trade, fast } = this.open;
     const bid = input.features.bid;
     const ask = input.features.ask;
@@ -754,7 +754,7 @@ export class GhShadowQualificationEngine {
     this.finalizePendingLatencyIfAny("superseded_by_new_open");
 
     const identity = getFrozenGhFastIdentity();
-    const cfg = frozenGhFastSoakConfig();
+    const cfg = frozenGhFastShadowExitConfig();
     const signalTs =
       opp.signalTimestamp || new Date(input.eventTsMs).toISOString();
 

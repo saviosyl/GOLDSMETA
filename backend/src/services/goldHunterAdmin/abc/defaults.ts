@@ -42,7 +42,23 @@ export function defaultGhFastConfig(
     breakoutBRearmFloorMs: 8_000,
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
-    pullbackRetraceMax: 0.45
+    pullbackRetraceMax: 0.45,
+    // SMART_POSITION_MANAGER_V1 — Demo forward default ON; set false to roll back.
+    smartPositionManagerEnabled: true,
+    spmTickSize: 0.01,
+    spmMinStopDistance: 0.05,
+    spmProtectMfeR: 1.0,
+    spmProtect15MfeR: 1.5,
+    spmProtect15FloorR: 0.4,
+    spmLockMfeR: 2.0,
+    spmLockFloorR: 0.9,
+    spmRunnerMfeR: 3.0,
+    spmRunnerMinFloorR: 1.6,
+    spmRunnerTrailR: 1.25,
+    spmHarvestMinMfeR: 2.5,
+    spmHarvestMinRetraceR: 0.75,
+    antiChurnLossMinMs: 8_000,
+    antiChurnOppositeFlipMinMs: 15_000
   };
   return { ...base, ...over, rearmFloorMs: rearm };
 }

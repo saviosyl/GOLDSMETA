@@ -29,8 +29,27 @@ export type GhFastExitReason =
   | "PROFIT_LOCK"
   | "TRAIL_HIT"
   | "HARVEST_FADE"
+  | "SMART_HARVEST_MOMENTUM_DEPTH_REVERSAL"
   | "DATA_STALE"
   | "SPREAD_UNSAFE";
+
+/** Monotonic profit-management states (SMART_POSITION_MANAGER_V1). */
+export type SmartPmState =
+  | "UNPROTECTED"
+  | "PROTECTED"
+  | "LOCKED"
+  | "RUNNER"
+  | "HARVEST";
+
+export type SmartPmStopAdjustReason =
+  | "NONE"
+  | "SPM_BREAK_EVEN_AFTER_COSTS"
+  | "SPM_PROTECT_0_4R"
+  | "SPM_LOCK_0_9R"
+  | "SPM_RUNNER_MIN_FLOOR"
+  | "SPM_RUNNER_TRAIL"
+  | "MONOTONIC_HOLD"
+  | "LEGACY_PROFIT_LOCK";
 
 export type GhFastSpotEvent = {
   kind: "SPOT";
@@ -188,6 +207,40 @@ export type GhFastOpenTrade = {
   lockFloor: number | null;
   trailDistance: number;
   harvestRunner: boolean;
+  /** SMART_POSITION_MANAGER_V1 fields (additive; optional for legacy restores). */
+  brainVersion?: string;
+  positionManagerVersion?: string;
+  smartPmState?: SmartPmState;
+  highestProtectionStage?: SmartPmState;
+  initialStopPrice?: number;
+  initialRiskPrice?: number;
+  initialRiskR?: number;
+  currentPrice?: number;
+  currentR?: number;
+  currentUnrealisedPnlEur?: number | null;
+  maxFavourablePrice?: number;
+  maxFavourableR?: number;
+  maxFavourablePnlEur?: number | null;
+  maxAdversePrice?: number;
+  maxAdverseR?: number;
+  maxAdversePnlEur?: number | null;
+  protectedProfitR?: number;
+  protectedStopPrice?: number | null;
+  lastStopAdjustReason?: SmartPmStopAdjustReason | null;
+  lastHarvestAssessment?: {
+    mfeR: number;
+    currentR: number;
+    retraceR: number;
+    momentumAgainst: boolean;
+    depthAgainst: boolean;
+    velocityAgainst: boolean;
+  } | null;
+  spread?: number;
+  timeInTradeMs?: number;
+  opportunityId?: string | null;
+  signalId?: string | null;
+  /** EUR P/L per 1.0 price unit (from sizing); null → R-only diagnostics. */
+  pnlScaleEurPerPrice?: number | null;
 };
 
 export type GhFastClosedTrade = GhFastOpenTrade & {
@@ -247,4 +300,40 @@ export type GhFastConfig = {
   momentumVelMin: number;
   breakoutTouchCount: number;
   pullbackRetraceMax: number;
+  /**
+   * SMART_POSITION_MANAGER_V1 — when true, R-based protection supersedes
+   * legacy early profit-lock / HARVEST_FADE. Hard stop + RAPID_ABORT retained.
+   * Set false to roll back to Brain V2 legacy exits without code revert.
+   */
+  smartPositionManagerEnabled: boolean;
+  /** Tick size for stop geometry (XAUUSD typically 0.01). */
+  spmTickSize: number;
+  /** Minimum broker stop distance from market (price units). */
+  spmMinStopDistance: number;
+  /** MFE R to enter PROTECTED (cost-aware break-even). */
+  spmProtectMfeR: number;
+  /** MFE R to protect ~spmProtect15FloorR. */
+  spmProtect15MfeR: number;
+  spmProtect15FloorR: number;
+  /** MFE R to enter LOCKED. */
+  spmLockMfeR: number;
+  /** Locked floor R (safer mid of +0.8R..+1.0R). */
+  spmLockFloorR: number;
+  /** MFE R to enter RUNNER. */
+  spmRunnerMfeR: number;
+  /** Minimum runner protected profit R (mid of +1.5R..+1.75R). */
+  spmRunnerMinFloorR: number;
+  /** Runner trail distance from best exit, in R. */
+  spmRunnerTrailR: number;
+  /** Min MFE R before smart harvest may fire. */
+  spmHarvestMinMfeR: number;
+  /** Min retrace from MFE (R) required with momentum+depth confirmation. */
+  spmHarvestMinRetraceR: number;
+  /**
+   * After a LOSS close: minimum ms before same/opposite re-entry (structure
+   * reset is still required). Not a large idle cooldown.
+   */
+  antiChurnLossMinMs: number;
+  /** Extra ms floor for immediate opposite-side flip after a LOSS. */
+  antiChurnOppositeFlipMinMs: number;
 };
