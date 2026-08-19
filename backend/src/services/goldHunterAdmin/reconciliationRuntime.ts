@@ -28,6 +28,10 @@ import {
   type BrokerDemoPositionLite
 } from "./reconcilePositions";
 import {
+  goldHunterFrozenInitialRiskPrice,
+  repairGoldHunterTradeFromBrokerPosition
+} from "./entryRepair";
+import {
   getGoldHunterSignalClaim,
   updateGoldHunterSignalClaim
 } from "./signalClaimStore";
@@ -216,7 +220,14 @@ export async function reconcileGoldHunterPendingEntries(args: {
         fillTs: trade.fillTs ?? now,
         filledVolumeLots: match.volumeLots ?? trade.filledVolumeLots,
         errorCode: null,
-        dataQuality: null
+        dataQuality: null,
+        entryRecoverySource: "BROKER_POSITION_RECONCILIATION",
+        initialRiskPrice:
+          trade.initialRiskPrice != null &&
+          Number.isFinite(trade.initialRiskPrice) &&
+          trade.initialRiskPrice > 0
+            ? trade.initialRiskPrice
+            : goldHunterFrozenInitialRiskPrice()
       };
       await upsertGoldHunterDemoTrade(args.ownerUid, recovered);
       registerGoldHunterOpenPositionForOwner({
@@ -293,18 +304,38 @@ export async function reconcileGoldHunterDisappearedOpenPositions(args: {
     const posId = String(trade.brokerPositionId);
     if (openIds.has(posId)) {
       const live = args.brokerPositions.find((p) => p.positionId === posId);
-      if (
-        live &&
-        ((live.volumeLots != null &&
-          live.volumeLots > 0 &&
-          live.volumeLots !== trade.filledVolumeLots) ||
-          (live.stopLoss != null && live.stopLoss !== trade.stop))
-      ) {
-        await upsertGoldHunterDemoTrade(args.ownerUid, {
-          ...trade,
-          filledVolumeLots: live.volumeLots ?? trade.filledVolumeLots,
-          stop: live.stopLoss ?? trade.stop
+      if (live) {
+        const repaired = repairGoldHunterTradeFromBrokerPosition({
+          trade,
+          position: live
         });
+        const volumeOrStopChanged =
+          (live.volumeLots != null &&
+            live.volumeLots > 0 &&
+            live.volumeLots !== trade.filledVolumeLots) ||
+          (live.stopLoss != null && live.stopLoss !== trade.stop);
+        if (repaired.repaired || volumeOrStopChanged) {
+          const next = {
+            ...repaired.trade,
+            filledVolumeLots:
+              live.volumeLots ?? repaired.trade.filledVolumeLots,
+            stop: live.stopLoss ?? repaired.trade.stop
+          };
+          await upsertGoldHunterDemoTrade(args.ownerUid, next);
+          if (
+            repaired.entryRepaired &&
+            next.entry != null &&
+            Number.isFinite(next.entry) &&
+            next.entry > 0
+          ) {
+            registerGoldHunterOpenPositionForOwner({
+              ownerUid: args.ownerUid,
+              trade: next,
+              bid: next.entry,
+              ask: next.entry
+            });
+          }
+        }
       }
       stillOpen += 1;
       continue;

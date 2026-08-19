@@ -31,6 +31,7 @@ import {
 } from "../broker/ctrader/openApiClient";
 import { applyBrokerSettledClose } from "./closeSettlement";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
+import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
 import type { BrokerDemoPositionLite } from "./reconcilePositions";
 import { updateGoldHunterSignalClaim } from "./signalClaimStore";
 import {
@@ -278,6 +279,13 @@ async function recoverOpenFromPosition(args: {
       match.volumeLots ?? order?.executedVolumeLots ?? trade.filledVolumeLots,
     errorCode: null,
     dataQuality: null,
+    entryRecoverySource: "BROKER_POSITION_RECONCILIATION",
+    initialRiskPrice:
+      trade.initialRiskPrice != null &&
+      Number.isFinite(trade.initialRiskPrice) &&
+      trade.initialRiskPrice > 0
+        ? trade.initialRiskPrice
+        : goldHunterFrozenInitialRiskPrice(),
     entryReconcileEvidence: {
       ...args.evidence,
       lastBrokerReadOk: true,

@@ -3,6 +3,11 @@
  */
 import { GH_ADMIN_STRATEGY_ID, type GoldHunterDemoTrade } from "./types";
 import { listGoldHunterDemoTrades, upsertGoldHunterDemoTrade } from "./tradeStore";
+import {
+  goldHunterFrozenInitialRiskPrice,
+  repairGoldHunterTradeFromBrokerPosition
+} from "./entryRepair";
+import { isValidGoldHunterEntryPrice } from "./entryValidity";
 
 export type BrokerDemoPositionLite = {
   positionId: string;
@@ -21,6 +26,8 @@ export type ReconcileResult = {
     brokerPositionId: string;
     note: string;
   }>;
+  /** Existing trades whose missing entry/volume/stop were backfilled. */
+  entryRepaired: number;
 };
 
 function isGoldHunterOwned(pos: BrokerDemoPositionLite): boolean {
@@ -35,6 +42,8 @@ function isGoldHunterOwned(pos: BrokerDemoPositionLite): boolean {
 
 /**
  * Match broker open positions to GH trades. Unowned → UNMATCHED (no mutate).
+ * Existing matches with missing entry are repaired from authoritative broker
+ * position fields (never overwrites a valid stored entry).
  */
 export async function reconcileGoldHunterDemoPositions(args: {
   ownerUid: string;
@@ -48,12 +57,25 @@ export async function reconcileGoldHunterDemoPositions(args: {
   );
   const restored: GoldHunterDemoTrade[] = [];
   const unmatched: ReconcileResult["unmatched"] = [];
+  let entryRepaired = 0;
 
   for (const pos of args.brokerPositions) {
     const existing = byPosition.get(String(pos.positionId));
     if (existing) {
       if (existing.status === "CLOSED") continue;
-      restored.push(existing);
+      const repaired = repairGoldHunterTradeFromBrokerPosition({
+        trade: existing,
+        position: pos
+      });
+      if (repaired.repaired) {
+        await upsertGoldHunterDemoTrade(args.ownerUid, repaired.trade);
+        if (repaired.entryRepaired) {
+          entryRepaired += 1;
+        }
+        restored.push(repaired.trade);
+      } else {
+        restored.push(existing);
+      }
       continue;
     }
     if (!isGoldHunterOwned(pos)) {
@@ -92,7 +114,11 @@ export async function reconcileGoldHunterDemoPositions(args: {
       brokerOrderId: null,
       brokerPositionId: String(pos.positionId),
       status: "FILLED",
-      filledVolumeLots: pos.volumeLots ?? null
+      filledVolumeLots: pos.volumeLots ?? null,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+      entryRecoverySource: isValidGoldHunterEntryPrice(pos.entryPrice)
+        ? "BROKER_POSITION_RECONCILIATION"
+        : null
     };
     await upsertGoldHunterDemoTrade(args.ownerUid, {
       ...trade,
@@ -106,5 +132,5 @@ export async function reconcileGoldHunterDemoPositions(args: {
     restored.push(trade);
   }
 
-  return { restored, unmatched };
+  return { restored, unmatched, entryRepaired };
 }

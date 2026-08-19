@@ -132,6 +132,12 @@ function seedOpenTradeFromPersisted(t: GoldHunterDemoTrade): GhFastOpenTrade | n
     trailDistance: cfg.trailDistance
   });
   state.entryPrice = t.entry!;
+  state.initialRiskPrice =
+    t.initialRiskPrice != null &&
+    Number.isFinite(t.initialRiskPrice) &&
+    t.initialRiskPrice > 0
+      ? t.initialRiskPrice
+      : cfg.hardStop;
   // Restore only proven MFE/MAE; never invent trail/lock that could widen stops.
   // Skip corrupt MFE/MAE (entry contamination artifacts).
   if (
@@ -218,6 +224,12 @@ export function registerGoldHunterOpenPositionForOwner(args: {
     trailDistance: cfg.trailDistance
   });
   state.entryPrice = args.trade.entry!;
+  state.initialRiskPrice =
+    args.trade.initialRiskPrice != null &&
+    Number.isFinite(args.trade.initialRiskPrice) &&
+    args.trade.initialRiskPrice > 0
+      ? args.trade.initialRiskPrice
+      : cfg.hardStop;
   ownerMap(args.ownerUid).set(args.trade.goldHunterTradeId, state);
 }
 
