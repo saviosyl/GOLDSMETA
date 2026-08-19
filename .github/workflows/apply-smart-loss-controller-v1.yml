@@ -25,13 +25,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in .tmp-slc/slc-*.b64; do
-            echo "$f b64_bytes=$(wc -c < "$f" | tr -d ' ') decoded_bytes=$(base64 -d "$f" | wc -c | tr -d ' ') decoded_sha=$(base64 -d "$f" | sha256sum | awk '{print $1}')"
-          done
-          : > /tmp/smart-loss-controller-v1.patch
-          for f in .tmp-slc/slc-*.b64; do
-            base64 -d "$f" >> /tmp/smart-loss-controller-v1.patch
-          done
+          cat .tmp-slc-xz/part-*.b64 > /tmp/smart-loss-controller-v1.xz.b64
+          base64 -d /tmp/smart-loss-controller-v1.xz.b64 > /tmp/smart-loss-controller-v1.xz
+          xz_bytes="$(wc -c < /tmp/smart-loss-controller-v1.xz | tr -d ' ')"
+          xz_sha="$(sha256sum /tmp/smart-loss-controller-v1.xz | awk '{print $1}')"
+          echo "XZ bytes: $xz_bytes"
+          echo "XZ sha256: $xz_sha"
+          test "$xz_bytes" = "12652"
+          test "$xz_sha" = "f0203045bc0609dfe79b4153178cf2ad4062c3f09a3f302a2942216a578aa6c7"
+          xz -dc /tmp/smart-loss-controller-v1.xz > /tmp/smart-loss-controller-v1.patch
           bytes="$(wc -c < /tmp/smart-loss-controller-v1.patch | tr -d ' ')"
           sha="$(sha256sum /tmp/smart-loss-controller-v1.patch | awk '{print $1}')"
           echo "Patch bytes: $bytes"
@@ -46,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           git apply /tmp/smart-loss-controller-v1.patch
-          rm -rf .tmp-slc
+          rm -rf .tmp-slc .tmp-slc-xz
           rm -f .github/workflows/apply-smart-loss-controller-v1.yml
           git add -A
           git diff --cached --check
