@@ -25,6 +25,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          for f in .tmp-slc/slc-*.b64; do
+            echo "$f b64_bytes=$(wc -c < "$f" | tr -d ' ') decoded_bytes=$(base64 -d "$f" | wc -c | tr -d ' ') decoded_sha=$(base64 -d "$f" | sha256sum | awk '{print $1}')"
+          done
           : > /tmp/smart-loss-controller-v1.patch
           for f in .tmp-slc/slc-*.b64; do
             base64 -d "$f" >> /tmp/smart-loss-controller-v1.patch
