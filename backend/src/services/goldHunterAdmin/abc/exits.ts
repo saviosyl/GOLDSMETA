@@ -1,6 +1,10 @@
 /**
  * FAST open-trade management — every spot/depth event can exit.
  * Profit lock / trail never loosen once activated.
+ *
+ * When cfg.smartPositionManagerEnabled: SMART_POSITION_MANAGER_V1 R-based
+ * protection supersedes legacy early profit-lock / HARVEST_FADE.
+ * Hard stop, RAPID_ABORT, DATA_STALE, SPREAD_UNSAFE always retained.
  */
 import type {
   GhFastConfig,
@@ -10,6 +14,13 @@ import type {
   GhFastSide
 } from "./types";
 import type { GhFastFeatureSnapshot } from "./features";
+import {
+  evaluateSmartPositionExit,
+  isSmartPositionManagerEnabled,
+  updateSmartPositionManager
+} from "./smartPositionManager";
+import { GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION } from "./versions";
+import { GOLD_HUNTER_BRAIN_VERSION } from "./versions";
 
 export function openTrade(args: {
   tradeId: string;
@@ -19,6 +30,9 @@ export function openTrade(args: {
   bid: number;
   ask: number;
   trailDistance: number;
+  opportunityId?: string | null;
+  signalId?: string | null;
+  pnlScaleEurPerPrice?: number | null;
 }): GhFastOpenTrade {
   const entryPrice = args.side === "BUY" ? args.ask : args.bid;
   return {
@@ -35,11 +49,25 @@ export function openTrade(args: {
     profitLockActive: false,
     lockFloor: null,
     trailDistance: args.trailDistance,
-    harvestRunner: false
+    harvestRunner: false,
+    brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+    positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+    smartPmState: "UNPROTECTED",
+    highestProtectionStage: "UNPROTECTED",
+    protectedProfitR: 0,
+    executableProtectedProfitR: 0,
+    currentR: 0,
+    maxFavourableR: 0,
+    maxAdverseR: 0,
+    opportunityId: args.opportunityId ?? null,
+    signalId: args.signalId ?? null,
+    pnlScaleEurPerPrice: args.pnlScaleEurPerPrice ?? null,
+    lastStopAdjustReason: "NONE",
+    lastHarvestAssessment: null
   };
 }
 
-export function updateOpenTrade(
+function updateOpenTradeLegacy(
   trade: GhFastOpenTrade,
   bid: number,
   ask: number,
@@ -66,6 +94,7 @@ export function updateOpenTrade(
       trade.side === "BUY"
         ? trade.entryPrice + lockMove
         : trade.entryPrice - lockMove;
+    trade.lastStopAdjustReason = "LEGACY_PROFIT_LOCK";
   }
 
   if (trade.profitLockActive) {
@@ -85,7 +114,20 @@ export function updateOpenTrade(
   }
 }
 
-export function evaluateOpenExit(args: {
+export function updateOpenTrade(
+  trade: GhFastOpenTrade,
+  bid: number,
+  ask: number,
+  cfg: GhFastConfig
+): void {
+  if (isSmartPositionManagerEnabled(cfg)) {
+    updateSmartPositionManager(trade, bid, ask, cfg);
+    return;
+  }
+  updateOpenTradeLegacy(trade, bid, ask, cfg);
+}
+
+function evaluateOpenExitLegacy(args: {
   trade: GhFastOpenTrade;
   f: GhFastFeatureSnapshot;
   cfg: GhFastConfig;
@@ -144,4 +186,16 @@ export function evaluateOpenExit(args: {
 
   // Runner continues — no mandatory tiny max-hold close here.
   return null;
+}
+
+export function evaluateOpenExit(args: {
+  trade: GhFastOpenTrade;
+  f: GhFastFeatureSnapshot;
+  cfg: GhFastConfig;
+  dataOk: boolean;
+}): GhFastExitReason | null {
+  if (isSmartPositionManagerEnabled(args.cfg)) {
+    return evaluateSmartPositionExit(args);
+  }
+  return evaluateOpenExitLegacy(args);
 }

@@ -9,6 +9,7 @@ import {
   GH_ADMIN_STRATEGY_ID,
   type GoldHunterDemoTrade
 } from "./types";
+import { getGoldHunterStrategySelector } from "./strategySelector";
 
 export type CloseSettlementHooks = {
   fetchClose?: (args: {
@@ -79,6 +80,19 @@ export function applyBrokerSettledClose(args: {
     Number.isFinite(fillMs) && Number.isFinite(closeMs)
       ? Math.max(0, closeMs - fillMs)
       : trade.durationMs;
+  const net = deal.netPnl;
+  const mfeEur = trade.mfeEur ?? null;
+  let profitSurrenderEur = trade.profitSurrenderEur ?? null;
+  let profitRetentionRatio = trade.profitRetentionRatio ?? null;
+  if (
+    mfeEur != null &&
+    Number.isFinite(mfeEur) &&
+    Number.isFinite(net) &&
+    mfeEur > 0
+  ) {
+    profitSurrenderEur = mfeEur - net;
+    profitRetentionRatio = net / mfeEur;
+  }
   return {
     ...trade,
     strategy: GH_ADMIN_STRATEGY_ID,
@@ -97,7 +111,9 @@ export function applyBrokerSettledClose(args: {
     swapEur: deal.swap,
     brokerDealId: deal.dealId,
     filledVolumeLots: deal.closedVolumeLots ?? trade.filledVolumeLots,
-    errorCode: null
+    errorCode: null,
+    profitSurrenderEur,
+    profitRetentionRatio
   };
 }
 
@@ -149,6 +165,18 @@ export async function settleGoldHunterCloseFromBroker(args: {
       exitReason: trade.exitReason
     });
     await upsertGoldHunterDemoTrade(args.ownerUid, settled);
+    try {
+      getGoldHunterStrategySelector(args.ownerUid).notifyTradeClosed({
+        side: settled.side,
+        setup: settled.setup,
+        entryPrice: settled.entry,
+        result: settled.result === "OPEN" ? null : settled.result,
+        opportunityId: settled.signalId ?? null,
+        closedAtMs: Date.parse(settled.closeTs ?? "") || Date.now()
+      });
+    } catch {
+      /* best-effort anti-churn notify */
+    }
     return { settled: true, trade: settled };
   }
 

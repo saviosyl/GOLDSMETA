@@ -7,7 +7,7 @@ import {
   openTrade,
   updateOpenTrade
 } from "../abc/exits";
-import { frozenGhFastSoakConfig } from "../abc/frozenConfig";
+import { frozenGhFastShadowExitConfig } from "../abc/frozenConfig";
 import type { GhFastOpenTrade } from "../abc/types";
 import type {
   GhShadowCapturedEvent,
@@ -73,7 +73,7 @@ export function replayGhShadowCapturedEvents(args: {
   liveDecisions: GhShadowDecisionRecord[];
   liveTrades: GhShadowTrade[];
 }): GhShadowReplayResult {
-  const cfg = frozenGhFastSoakConfig();
+  const cfg = frozenGhFastShadowExitConfig();
   const sorted = [...args.events].sort((a, b) => a.receiveSeq - b.receiveSeq);
   let fast: GhFastOpenTrade | null = null;
   let openSide: "BUY" | "SELL" | null = null;

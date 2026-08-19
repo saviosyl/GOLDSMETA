@@ -6,6 +6,12 @@
 /** Brain identity for Demo A/B/C selection — distinguishable from V1. */
 export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V2" as const;
 /**
+ * Smart position-management layer on top of Brain V2.
+ * Kept separate so brainVersion telemetry stays stable.
+ */
+export const GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION =
+  "SMART_POSITION_MANAGER_V1" as const;
+/**
  * Strategy version stamped on selector candidates / frozen identity.
  * Brain V2: Setup B uses prior-only breakouts + stronger confirmation.
  * A/C specialist logic unchanged from V1.

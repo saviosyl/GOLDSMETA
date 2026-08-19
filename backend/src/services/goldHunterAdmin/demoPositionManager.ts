@@ -19,6 +19,10 @@ import {
   openTrade,
   updateOpenTrade
 } from "./abc/exits";
+import {
+  buildClosedTradeSmartDiagnostics,
+  openTradeSmartDiagnostics
+} from "./abc/smartPositionManager";
 import { frozenGhFastSoakConfig } from "./abc";
 import type {
   GhFastOpenTrade,
@@ -263,16 +267,106 @@ async function maybePersistMfeMae(
   const now = Date.now();
   const last = lastMfeMaePersistAt.get(key) ?? 0;
   if (!force && now - last < GH_MFE_MAE_PERSIST_MIN_MS) return;
-  if (!force && trade.mfe === state.mfe && trade.mae === state.mae) return;
+  if (
+    !force &&
+    trade.mfe === state.mfe &&
+    trade.mae === state.mae &&
+    trade.smartPmState === state.smartPmState &&
+    trade.protectedProfitR === state.protectedProfitR
+  ) {
+    return;
+  }
   lastMfeMaePersistAt.set(key, now);
   mfeMaeWriteCounts.set(ownerUid, (mfeMaeWriteCounts.get(ownerUid) ?? 0) + 1);
+  const diag = openTradeSmartDiagnostics(state);
   await upsertGoldHunterDemoTrade(ownerUid, {
     ...trade,
     mfe: state.mfe,
-    mae: state.mae
+    mae: state.mae,
+    brainVersion: diag.brainVersion,
+    positionManagerVersion: diag.positionManagerVersion,
+    smartPmState: diag.profitManagementState,
+    highestProtectionStage: state.highestProtectionStage ?? null,
+    mfeR: diag.mfeR,
+    maeR: diag.maeR,
+    mfeEur: diag.mfeEur,
+    maeEur: null,
+    protectedProfitR: diag.protectedProfitR,
+    executableProtectedProfitR: diag.executableProtectedProfitR,
+    protectedStopPrice: diag.protectedStopPrice,
+    lastStopAdjustReason: diag.lastStopAdjustReason
   });
   trade.mfe = state.mfe;
   trade.mae = state.mae;
+  trade.smartPmState = diag.profitManagementState;
+  trade.protectedProfitR = diag.protectedProfitR;
+  trade.executableProtectedProfitR = diag.executableProtectedProfitR;
+  trade.mfeR = diag.mfeR;
+  trade.maeR = diag.maeR;
+}
+
+/**
+ * In-memory open-trade SPM diagnostics for admin status (no secrets).
+ */
+export function getGoldHunterOpenPositionDiagnostics(
+  ownerUid: string
+): Array<ReturnType<typeof openTradeSmartDiagnostics> & { tradeId: string }> {
+  const map = managed.get(ownerUid);
+  if (!map) return [];
+  const out: Array<
+    ReturnType<typeof openTradeSmartDiagnostics> & { tradeId: string }
+  > = [];
+  for (const [tradeId, state] of map) {
+    out.push({ tradeId, ...openTradeSmartDiagnostics(state) });
+  }
+  return out;
+}
+
+function notifySelectorTradeClosed(
+  ownerUid: string,
+  trade: GoldHunterDemoTrade
+): void {
+  try {
+    const sel = getGoldHunterStrategySelector(ownerUid);
+    sel.notifyTradeClosed({
+      side: trade.side,
+      setup: trade.setup,
+      entryPrice: trade.entry,
+      result: trade.result === "OPEN" ? null : trade.result,
+      opportunityId: trade.signalId ?? null,
+      closedAtMs: Date.parse(trade.closeTs ?? "") || Date.now()
+    });
+  } catch {
+    /* selector notify is best-effort */
+  }
+}
+
+function spmFieldsFromState(
+  state: GhFastOpenTrade,
+  finalPnlEur: number | null,
+  exitReason: string | null
+): Partial<GoldHunterDemoTrade> {
+  const closed = buildClosedTradeSmartDiagnostics({
+    trade: state,
+    finalPnlEur,
+    exitReason
+  });
+  return {
+    brainVersion: closed.brainVersion,
+    positionManagerVersion: closed.positionManagerVersion,
+    smartPmState: state.smartPmState ?? null,
+    highestProtectionStage: closed.highestProtectionStage,
+    mfeR: closed.mfeR,
+    maeR: closed.maeR,
+    mfeEur: closed.mfeEur,
+    maeEur: closed.maeEur,
+    protectedProfitR: closed.protectedProfitR,
+    protectedStopPrice: state.protectedStopPrice ?? state.lockFloor ?? null,
+    executableProtectedProfitR: state.executableProtectedProfitR ?? null,
+    lastStopAdjustReason: state.lastStopAdjustReason ?? null,
+    profitSurrenderEur: closed.profitSurrenderEur,
+    profitRetentionRatio: closed.profitRetentionRatio
+  };
 }
 
 export type PositionTickResult = {
@@ -390,7 +484,8 @@ export async function tickGoldHunterPositionManager(args: {
             stop: tightened,
             status: "PROTECTED",
             mfe: state.mfe,
-            mae: state.mae
+            mae: state.mae,
+            ...spmFieldsFromState(state, null, null)
           });
           trade.stop = tightened;
           trade.status = "PROTECTED";
@@ -509,7 +604,8 @@ export async function closeGoldHunterDemoPosition(args: {
     mae: args.state.mae,
     netPnlEur: null,
     grossPnlEur: null,
-    result: null
+    result: null,
+    ...spmFieldsFromState(args.state, null, String(args.exitReason))
   });
 
   try {
@@ -548,7 +644,8 @@ export async function closeGoldHunterDemoPosition(args: {
       filledVolumeLots: volume.lots,
       mfe: args.state.mfe,
       mae: args.state.mae,
-      errorCode: "CLOSE_SETTLEMENT_PENDING"
+      errorCode: "CLOSE_SETTLEMENT_PENDING",
+      ...spmFieldsFromState(args.state, null, String(args.exitReason))
     };
     await upsertGoldHunterDemoTrade(args.ownerUid, pending);
 
@@ -557,6 +654,9 @@ export async function closeGoldHunterDemoPosition(args: {
       ownerUid: args.ownerUid,
       trade: pending
     });
+    if (settled.settled) {
+      notifySelectorTradeClosed(args.ownerUid, settled.trade);
+    }
     return settled.settled ? "SETTLED" : "SETTLEMENT_PENDING";
   } catch (e) {
     await upsertGoldHunterDemoTrade(args.ownerUid, {

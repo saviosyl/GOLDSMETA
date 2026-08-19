@@ -21,6 +21,7 @@ export {
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
   GOLD_HUNTER_FAST_ENGINE_VERSION,
   GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
   GH_FAST_MAX_OPEN_POSITIONS,
   GH_FAST_BROKER_EXECUTION_ENABLED
 } from "./versions";
@@ -35,6 +36,7 @@ export {
 export type { SetupHit, GhBreakoutDiagnostics } from "./setups";
 export {
   frozenGhFastSoakConfig,
+  frozenGhFastShadowExitConfig,
   getFrozenGhFastIdentity,
   hashGhFastConfig
 } from "./frozenConfig";
@@ -44,6 +46,14 @@ export {
   updateOpenTrade as updateGhAbcOpenTrade,
   evaluateOpenExit as evaluateGhAbcOpenExit
 } from "./exits";
+export {
+  applyMonotonicProtectedProfitR,
+  assessSmartHarvest,
+  buildClosedTradeSmartDiagnostics,
+  isSmartPositionManagerEnabled,
+  openTradeSmartDiagnostics,
+  targetProtectedProfitR
+} from "./smartPositionManager";
 export type {
   GhFastConfig,
   GhFastSetupId,
@@ -53,7 +63,9 @@ export type {
   GhFastMarketEvent,
   GhFastOpenTrade,
   GhFastExitReason,
-  GhFastSpecialistRawEval
+  GhFastSpecialistRawEval,
+  SmartPmState,
+  SmartPmStopAdjustReason
 } from "./types";
 export {
   GoldHunterFeaturePipeline

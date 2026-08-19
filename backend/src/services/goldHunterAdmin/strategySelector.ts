@@ -11,6 +11,7 @@ import {
   GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
   GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
   type GhFastDepthEvent,
   type ResearchDepthValidity
 } from "./abc";
@@ -58,6 +59,16 @@ export type GoldHunterSelectedCandidate = {
     lastBSide: "BUY" | "SELL" | null;
     rejectionReason: string | null;
   };
+  /** Loss / anti-churn re-entry state (A/B/C) for telemetry. */
+  antiChurnState?: {
+    structuralResetOk: boolean;
+    timeFloorOk: boolean;
+    lastSide: "BUY" | "SELL" | null;
+    lastResult: "WIN" | "LOSS" | "BREAKEVEN" | null;
+    oppositeFlip: boolean;
+    rejectionReason: string | null;
+  };
+  positionManagerVersion?: string;
 };
 
 /** Explicit selector tick result — execution only when newOpportunity. */
@@ -171,13 +182,27 @@ type ActiveOpportunity = {
   breakoutReference: number | null;
 };
 
-/** B-specific anti-churn / regime state (does not gate A or C). */
+/** B-specific anti-churn / regime state (does not gate A or C alone). */
 type BRegimeState = {
   lastSide: "BUY" | "SELL" | null;
   /** Prior extreme that was cleared (high for BUY, low for SELL). */
   lastBreakoutReference: number | null;
   endedAtMs: number | null;
   /** True once mid returned inside the prior breakout reference. */
+  structuralResetComplete: boolean;
+};
+
+/**
+ * After a closed LOSS: structure-aware re-entry memory for A/B/C.
+ * Prevents BUY→SELL→BUY churn from instantaneous opposite signals.
+ */
+type LossReentryState = {
+  lastSide: "BUY" | "SELL" | null;
+  lastSetup: GoldHunterSetupLetter | null;
+  lastEntryPrice: number | null;
+  lastResult: "WIN" | "LOSS" | "BREAKEVEN" | null;
+  lastOpportunityId: string | null;
+  closedAtMs: number | null;
   structuralResetComplete: boolean;
 };
 
@@ -203,6 +228,15 @@ export class GoldHunterStrategySelector {
     lastSide: null,
     lastBreakoutReference: null,
     endedAtMs: null,
+    structuralResetComplete: true
+  };
+  private lossReentry: LossReentryState = {
+    lastSide: null,
+    lastSetup: null,
+    lastEntryPrice: null,
+    lastResult: null,
+    lastOpportunityId: null,
+    closedAtMs: null,
     structuralResetComplete: true
   };
 
@@ -258,6 +292,15 @@ export class GoldHunterStrategySelector {
       lastSide: null,
       lastBreakoutReference: null,
       endedAtMs: null,
+      structuralResetComplete: true
+    };
+    this.lossReentry = {
+      lastSide: null,
+      lastSetup: null,
+      lastEntryPrice: null,
+      lastResult: null,
+      lastOpportunityId: null,
+      closedAtMs: null,
       structuralResetComplete: true
     };
   }
@@ -367,6 +410,209 @@ export class GoldHunterStrategySelector {
    * B-only arming gate. A/C ignore this. Structural reset is primary;
    * breakoutBRearmFloorMs is a secondary time backstop.
    */
+  /**
+   * Structural reset after LOSS: mid must unwind through the losing entry
+   * before another entry is considered a genuine new opportunity.
+   * BUY loss → mid <= entry; SELL loss → mid >= entry.
+   */
+  private updateLossStructuralReset(mid: number): void {
+    if (this.lossReentry.structuralResetComplete) return;
+    if (this.lossReentry.lastResult !== "LOSS") {
+      this.lossReentry.structuralResetComplete = true;
+      return;
+    }
+    const entry = this.lossReentry.lastEntryPrice;
+    const side = this.lossReentry.lastSide;
+    if (entry == null || side == null) {
+      this.lossReentry.structuralResetComplete = true;
+      return;
+    }
+    if (side === "BUY" && mid <= entry) {
+      this.lossReentry.structuralResetComplete = true;
+    } else if (side === "SELL" && mid >= entry) {
+      this.lossReentry.structuralResetComplete = true;
+    }
+  }
+
+  /**
+   * Notify selector that a Demo GH trade closed — arms anti-churn memory on LOSS.
+   * WIN/BREAKEVEN clear the loss gate (generic rearm floor still applies).
+   */
+  notifyTradeClosed(args: {
+    side: "BUY" | "SELL";
+    setup: GoldHunterSetupLetter | null;
+    entryPrice: number | null;
+    result: "WIN" | "LOSS" | "BREAKEVEN" | null;
+    opportunityId?: string | null;
+    closedAtMs?: number;
+  }): void {
+    const atMs = args.closedAtMs ?? Date.now();
+    if (args.result === "LOSS") {
+      this.lossReentry = {
+        lastSide: args.side,
+        lastSetup: args.setup,
+        lastEntryPrice:
+          args.entryPrice != null && Number.isFinite(args.entryPrice)
+            ? args.entryPrice
+            : null,
+        lastResult: "LOSS",
+        lastOpportunityId: args.opportunityId ?? null,
+        closedAtMs: atMs,
+        structuralResetComplete: false
+      };
+      // Canonical opportunity must not stay executable after a LOSS close.
+      if (
+        args.opportunityId &&
+        this.activeOpportunity?.opportunityId === args.opportunityId
+      ) {
+        this.activeOpportunity.consumed = true;
+      }
+      if (
+        args.opportunityId &&
+        this.lastCandidateForDisplay?.opportunityId === args.opportunityId
+      ) {
+        this.lastCandidateForDisplay = {
+          ...this.lastCandidateForDisplay,
+          consumed: true
+        };
+      }
+      return;
+    }
+    // Non-loss: clear loss gate but remember last opportunity identity.
+    this.lossReentry = {
+      lastSide: args.side,
+      lastSetup: args.setup,
+      lastEntryPrice:
+        args.entryPrice != null && Number.isFinite(args.entryPrice)
+          ? args.entryPrice
+          : this.lossReentry.lastEntryPrice,
+      lastResult: args.result,
+      lastOpportunityId: args.opportunityId ?? this.lossReentry.lastOpportunityId,
+      closedAtMs: atMs,
+      structuralResetComplete: true
+    };
+  }
+
+  getAntiChurnStateForTests(): LossReentryState {
+    return { ...this.lossReentry };
+  }
+
+  /** Test helper — exposes loss anti-churn gate. */
+  evaluateAntiChurnGateForTests(args: {
+    side: "BUY" | "SELL";
+    atMs: number;
+    mid: number;
+    opportunityId?: string | null;
+    signedImbalance1s?: number;
+    midVel250?: number;
+  }) {
+    return this.lossArmingGate(args);
+  }
+
+  /**
+   * A/B/C anti-churn after LOSS. Stronger requirements for immediate opposite flip.
+   * Does not replace B structural gate — both must pass when applicable.
+   */
+  private lossArmingGate(args: {
+    side: "BUY" | "SELL";
+    atMs: number;
+    mid: number;
+    opportunityId?: string | null;
+    signedImbalance1s?: number;
+    midVel250?: number;
+  }): {
+    ok: boolean;
+    structuralResetOk: boolean;
+    timeFloorOk: boolean;
+    oppositeFlip: boolean;
+    rejectionReason: string | null;
+  } {
+    this.updateLossStructuralReset(args.mid);
+    if (
+      this.lossReentry.closedAtMs == null ||
+      this.lossReentry.lastResult !== "LOSS" ||
+      this.lossReentry.lastSide == null
+    ) {
+      return {
+        ok: true,
+        structuralResetOk: true,
+        timeFloorOk: true,
+        oppositeFlip: false,
+        rejectionReason: null
+      };
+    }
+
+    // Fresh opportunity identity required when we still remember the loser.
+    if (
+      args.opportunityId &&
+      this.lossReentry.lastOpportunityId &&
+      args.opportunityId === this.lossReentry.lastOpportunityId
+    ) {
+      return {
+        ok: false,
+        structuralResetOk: this.lossReentry.structuralResetComplete,
+        timeFloorOk: true,
+        oppositeFlip: args.side !== this.lossReentry.lastSide,
+        rejectionReason: "WAIT_DUPLICATE_OPPORTUNITY"
+      };
+    }
+
+    const cfg = this.pipeline.config();
+    const oppositeFlip = args.side !== this.lossReentry.lastSide;
+    const minMs = oppositeFlip
+      ? Math.max(cfg.antiChurnLossMinMs, cfg.antiChurnOppositeFlipMinMs)
+      : cfg.antiChurnLossMinMs;
+    const elapsed = args.atMs - this.lossReentry.closedAtMs;
+    const timeFloorOk = elapsed >= minMs;
+    const structuralResetOk = this.lossReentry.structuralResetComplete;
+
+    if (!timeFloorOk) {
+      return {
+        ok: false,
+        structuralResetOk,
+        timeFloorOk: false,
+        oppositeFlip,
+        rejectionReason: "WAIT_REENTRY_TIME_RESET"
+      };
+    }
+    if (!structuralResetOk) {
+      return {
+        ok: false,
+        structuralResetOk: false,
+        timeFloorOk: true,
+        oppositeFlip,
+        rejectionReason: "WAIT_REENTRY_STRUCTURE_RESET"
+      };
+    }
+
+    if (oppositeFlip) {
+      // Require directional confirmation that structure actually flipped.
+      const imb = args.signedImbalance1s ?? 0;
+      const vel = args.midVel250 ?? 0;
+      const confirmed =
+        args.side === "BUY"
+          ? imb > 0.1 && vel > 0
+          : imb < -0.1 && vel < 0;
+      if (!confirmed) {
+        return {
+          ok: false,
+          structuralResetOk: true,
+          timeFloorOk: true,
+          oppositeFlip: true,
+          rejectionReason: "WAIT_REVERSAL_NOT_CONFIRMED"
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      structuralResetOk: true,
+      timeFloorOk: true,
+      oppositeFlip,
+      rejectionReason: null
+    };
+  }
+
   private bArmingGate(args: {
     side: "BUY" | "SELL";
     atMs: number;
@@ -437,6 +683,7 @@ export class GoldHunterStrategySelector {
     consumed: boolean;
     breakoutDiagnostics?: GhBreakoutDiagnostics | null;
     bReentryState?: GoldHunterSelectedCandidate["bReentryState"];
+    antiChurnState?: GoldHunterSelectedCandidate["antiChurnState"];
   }): GoldHunterSelectedCandidate {
     return {
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -462,8 +709,10 @@ export class GoldHunterStrategySelector {
       consumed: args.consumed,
       opportunityStartedAtMs: args.opportunityStartedAtMs,
       brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+      positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
       breakoutDiagnostics: args.breakoutDiagnostics ?? null,
-      bReentryState: args.bReentryState
+      bReentryState: args.bReentryState,
+      antiChurnState: args.antiChurnState
     };
   }
 
@@ -481,7 +730,10 @@ export class GoldHunterStrategySelector {
         : snap.bestBid != null && snap.bestAsk != null
           ? (snap.bestBid + snap.bestAsk) / 2
           : null;
-    if (midHint != null) this.updateBStructuralReset(midHint);
+    if (midHint != null) {
+      this.updateBStructuralReset(midHint);
+      this.updateLossStructuralReset(midHint);
+    }
 
     const hit = snap.selected;
     if (!hit) {
@@ -518,6 +770,7 @@ export class GoldHunterStrategySelector {
 
     const mid = (bid + ask) / 2;
     this.updateBStructuralReset(mid);
+    this.updateLossStructuralReset(mid);
     const spread = ask - bid;
     const depthExecutable = isDepthExecutableForOrder(snap.depthValidity);
     const breakoutDiagnostics =
@@ -529,6 +782,54 @@ export class GoldHunterStrategySelector {
       this.activeOpportunity.resyncGeneration === this.resyncGeneration;
 
     if (sameActive && this.activeOpportunity) {
+      const feat = snap.features;
+      const lossGateActive = this.lossArmingGate({
+        side: hit.side,
+        atMs: receivedAtMs,
+        mid,
+        opportunityId: this.activeOpportunity.opportunityId,
+        signedImbalance1s: feat?.signedImbalance1s,
+        midVel250: feat?.midVel250
+      });
+      if (!lossGateActive.ok) {
+        // Losing opportunity must not remain executable (e.g. WAIT_DUPLICATE_OPPORTUNITY).
+        this.activeOpportunity.consumed = true;
+        const blocked = this.buildCandidate({
+          letter,
+          setupId: hit.setup,
+          side: hit.side,
+          quality: hit.quality,
+          opportunityId: this.activeOpportunity.opportunityId,
+          receiveSeq: this.activeOpportunity.startReceiveSeq,
+          latestReceiveSeq: receiveSeq,
+          bookGeneration: snap.bookGeneration,
+          bid,
+          ask,
+          spread,
+          depthValidity: snap.depthValidity,
+          depthExecutable,
+          receivedAtMs,
+          opportunityStartedAtMs: this.activeOpportunity.startedAtMs,
+          consumed: true,
+          breakoutDiagnostics,
+          antiChurnState: {
+            structuralResetOk: lossGateActive.structuralResetOk,
+            timeFloorOk: lossGateActive.timeFloorOk,
+            lastSide: this.lossReentry.lastSide,
+            lastResult: this.lossReentry.lastResult,
+            oppositeFlip: lossGateActive.oppositeFlip,
+            rejectionReason: lossGateActive.rejectionReason
+          }
+        });
+        this.lastCandidateForDisplay = blocked;
+        return {
+          selectedNow: true,
+          newOpportunity: false,
+          candidate: blocked,
+          opportunity: null
+        };
+      }
+
       // Continuing selected setup — ONE opportunity across Depth bursts.
       const updated = this.buildCandidate({
         letter,
@@ -573,8 +874,26 @@ export class GoldHunterStrategySelector {
             rejectionReason: null as string | null
           };
 
-    if (!this.rearmSatisfied(receivedAtMs) || (letter === "B" && !bGate.ok)) {
-      // Selected for display, but rearm / B structural gate not met.
+    const feat = snap.features;
+    const lossGateLive = this.lossArmingGate({
+      side: hit.side,
+      atMs: receivedAtMs,
+      mid,
+      signedImbalance1s: feat?.signedImbalance1s,
+      midVel250: feat?.midVel250
+    });
+
+    const antiChurnBlocked = !lossGateLive.ok;
+    const bBlocked = letter === "B" && !bGate.ok;
+    const rearmBlocked = !this.rearmSatisfied(receivedAtMs);
+
+    if (rearmBlocked || bBlocked || antiChurnBlocked) {
+      // Selected for display, but rearm / B structural / anti-churn gate not met.
+      const rejectionReason = antiChurnBlocked
+        ? lossGateLive.rejectionReason
+        : bBlocked
+          ? bGate.rejectionReason
+          : "generic_rearm_floor";
       const displayOnly = this.buildCandidate({
         letter,
         setupId: hit.setup,
@@ -601,11 +920,19 @@ export class GoldHunterStrategySelector {
                 lastBSide: this.bRegime.lastSide,
                 rejectionReason:
                   bGate.rejectionReason ??
-                  (!this.rearmSatisfied(receivedAtMs)
-                    ? "generic_rearm_floor"
-                    : null)
+                  (rearmBlocked ? "generic_rearm_floor" : null)
               }
-            : undefined
+            : undefined,
+        antiChurnState: {
+          structuralResetOk: lossGateLive.structuralResetOk,
+          timeFloorOk: lossGateLive.timeFloorOk,
+          lastSide: this.lossReentry.lastSide,
+          lastResult: this.lossReentry.lastResult,
+          oppositeFlip: lossGateLive.oppositeFlip,
+          rejectionReason: antiChurnBlocked
+            ? lossGateLive.rejectionReason
+            : null
+        }
       });
       this.lastCandidateForDisplay = displayOnly;
       return {
@@ -663,7 +990,15 @@ export class GoldHunterStrategySelector {
               lastBSide: this.bRegime.lastSide,
               rejectionReason: null
             }
-          : undefined
+          : undefined,
+      antiChurnState: {
+        structuralResetOk: true,
+        timeFloorOk: true,
+        lastSide: this.lossReentry.lastSide,
+        lastResult: this.lossReentry.lastResult,
+        oppositeFlip: lossGateLive.oppositeFlip,
+        rejectionReason: null
+      }
     });
     this.lastCandidateForDisplay = candidate;
 
