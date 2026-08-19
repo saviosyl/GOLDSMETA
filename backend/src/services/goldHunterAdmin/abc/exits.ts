@@ -75,7 +75,9 @@ export function openTrade(args: {
     pnlScaleEurPerPrice: args.pnlScaleEurPerPrice ?? null,
     lastStopAdjustReason: "NONE",
     lastHarvestAssessment: null,
-    lastLossControllerAssessment: null
+    lastLossControllerAssessment: null,
+    slcEarlyFailurePersistCount: 0,
+    slcSmallHarvestPersistCount: 0
   };
 }
 

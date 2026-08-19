@@ -247,6 +247,10 @@ export type GhFastOpenTrade = {
   } | null;
   /** SMART_LOSS_CONTROLLER_V1 fields (additive). */
   lossControllerVersion?: string;
+  /** Consecutive assessments where early-thesis condition fully held. */
+  slcEarlyFailurePersistCount?: number;
+  /** Consecutive assessments where small-harvest condition fully held. */
+  slcSmallHarvestPersistCount?: number;
   lastLossControllerAssessment?: {
     lossControllerVersion: string;
     mfeR: number;
@@ -261,6 +265,8 @@ export type GhFastOpenTrade = {
       depthAgainst: boolean;
       velocityAgainst: boolean;
     };
+    earlyFailurePersistCount?: number;
+    smallHarvestPersistCount?: number;
     smallProfitEligible: boolean;
     smallProfitStillProfitable: boolean;
     momentumDeteriorating: boolean;

@@ -468,7 +468,10 @@ describe("Frozen exits + position manager", () => {
     ).toBe("DATA_STALE");
 
     updateOpenTrade(trade, 2599.9, 2600.0, cfg);
-    // LC owns early failure with multi-confirm (replaces RAPID_ABORT below +1R).
+    // LC requires 2 consecutive qualifying snapshots before early thesis exit.
+    expect(
+      evaluateOpenExit({ trade, f: baseFeat, cfg, dataOk: true })
+    ).toBeNull();
     expect(
       evaluateOpenExit({ trade, f: baseFeat, cfg, dataOk: true })
     ).toBe("SMART_EARLY_THESIS_FAILURE");

@@ -159,6 +159,8 @@ export type GoldHunterDemoTrade = {
   brainVersion?: string | null;
   positionManagerVersion?: string | null;
   lossControllerVersion?: string | null;
+  /** Frozen original risk (price units) stamped at entry — for settled realised R. */
+  initialRiskPrice?: number | null;
   smartPmState?: string | null;
   highestProtectionStage?: string | null;
   mfeR?: number | null;

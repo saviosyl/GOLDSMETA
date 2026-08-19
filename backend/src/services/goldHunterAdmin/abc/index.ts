@@ -60,9 +60,14 @@ export {
   countEarlyThesisFailureConfirms,
   evaluateSmartLossController,
   isSmartLossControllerEnabled,
-  minProfitableRAfterCosts
+  minProfitableRAfterCosts,
+  SMART_LOSS_PERSIST_SNAPSHOTS
 } from "./smartLossController";
 export type { SmartLossAssessment } from "./smartLossController";
+export {
+  computeSettledRealisedR,
+  resolveOriginalRiskPrice
+} from "./settledRealisedR";
 export type {
   GhFastConfig,
   GhFastSetupId,
