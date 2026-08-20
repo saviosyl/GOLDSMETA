@@ -185,8 +185,9 @@ describe("legacy Core / FAST AutoTrade removal", () => {
   it("frontend no longer mounts Core AutoTrade pages", () => {
     const app = readFileSync(resolve(repoRoot, "web/src/App.tsx"), "utf8");
     expect(app).not.toContain("AutoTradePage");
-    expect(app).toContain('path="/autotrade"');
-    expect(app).toContain('to="/gold-hunter"');
+    expect(app).not.toContain('path="/autotrade"');
+    expect(app).not.toContain('path="/autotrade/performance"');
+    expect(app).toContain('path="/gold-hunter"');
     expect(
       existsSync(resolve(repoRoot, "web/src/pages/AutoTradePage.tsx"))
     ).toBe(false);
