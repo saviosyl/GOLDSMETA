@@ -1,5 +1,5 @@
 /**
- * UI-only display translation for AutoTrade / broker activity strings.
+ * UI-only display translation for broker activity strings.
  * Does not alter stored enums or API payloads.
  */
 
@@ -12,6 +12,7 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bDEMO_AUTO\b/gi, "Gold Hunter Demo"],
   [/\bLIVE_AUTO\b/gi, "Live Auto"],
   [/\bSHADOW\b/g, "Shadow"],
+  [/\bAutoTrade\b/gi, "Gold Hunter"],
   [/\breconnect required\b/gi, "Reconnect required"]
 ];
 

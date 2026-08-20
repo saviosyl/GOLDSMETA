@@ -262,13 +262,13 @@ describe("BrokerControlCentrePage", () => {
     vi.useRealTimers();
   });
 
-  it("renders broker options with Gold Hunter AutoTrade badge and no-order badges", async () => {
+  it("renders broker options with Gold Hunter Demo badge and no-order badges", async () => {
     renderBroker();
     await waitFor(() => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
     expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent(
-      /Gold Hunter is the AutoTrade UI/i
+      /Gold Hunter Demo OFF/i
     );
     expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
       /Live orders locked|Order submission disabled/i

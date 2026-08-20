@@ -15,7 +15,7 @@ test.describe("Broker print layout", () => {
     expect(navHidden).toBe(true);
     await expect(page.getByTestId("broker-edit-autotrade-settings")).toBeVisible();
     await expect(page.getByTestId("no-order-badge")).toHaveText(
-      /Order submission disabled in this preview/i
+      /Live orders locked|Order submission disabled/i
     );
   });
 });

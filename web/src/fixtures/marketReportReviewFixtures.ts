@@ -161,7 +161,7 @@ const buyPlan: IntradayPlan = {
   action: "BUY_NOW",
   actionLabel: "BUY NOW",
   oneSentence:
-    "Buy plan is active with confirmation — manage risk manually; AutoTrade stays OFF.",
+    "Buy plan is active with confirmation — manage risk manually; Gold Hunter Demo stays OFF.",
   whyNotReady: null,
   directionBias: "BULLISH",
   marketType: "BREAKOUT",
@@ -233,7 +233,7 @@ const sellPlan: IntradayPlan = {
   action: "SELL_NOW",
   actionLabel: "SELL NOW",
   oneSentence:
-    "Sell plan is active with confirmation — manage risk manually; AutoTrade stays OFF.",
+    "Sell plan is active with confirmation — manage risk manually; Gold Hunter Demo stays OFF.",
   whyNotReady: null,
   directionBias: "BEARISH",
   marketType: "BREAKOUT",

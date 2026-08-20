@@ -13,7 +13,7 @@ describe("PWA cache safety", () => {
   });
 
   it("uses a fresh premium UI Workbox cache namespace", () => {
-    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v8"/);
+    expect(viteConfig).toMatch(/cacheId:\s*"goldmeta-premium-ui-v9"/);
     expect(viteConfig).not.toMatch(/goldmeta-hold-lean-v4/);
     expect(viteConfig).toMatch(/sw-cache-migrate\.js/);
     expect(viteConfig).toMatch(/navigateFallbackDenylist/);

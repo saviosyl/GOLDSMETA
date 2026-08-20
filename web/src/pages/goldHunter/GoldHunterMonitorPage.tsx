@@ -1,14 +1,17 @@
 import { GhStatusTone, formatEur, useGoldHunter } from "./GoldHunterShell";
 import { formatResearchLocalTime, formatResearchUtcTime } from "../../lib/formatResearchLocalTime";
+import { goldHunterDisplayWait } from "../../lib/goldHunterIdentity";
 
 export function GoldHunterMonitorPage() {
   const { status } = useGoldHunter();
   if (!status) return null;
 
   const open = status.openTrades[0] ?? null;
-  const primaryWait = !status.config.demoAutoTradeEnabled
-    ? "WAIT — AUTOTRADE OFF"
-    : status.gates.blockers[0] ?? status.signal.note;
+  const primaryWait = goldHunterDisplayWait(
+    !status.config.demoAutoTradeEnabled
+      ? "WAIT — DEMO OFF"
+      : status.gates.blockers[0] ?? status.signal.note
+  );
 
   return (
     <div data-testid="gh-monitor">
@@ -85,7 +88,7 @@ export function GoldHunterMonitorPage() {
               </span>
               <span>
                 Gates{" "}
-                <strong>{status.gates.ok ? "READY" : status.gates.blockers[0] ?? "WAIT"}</strong>
+                <strong>{status.gates.ok ? "READY" : goldHunterDisplayWait(status.gates.blockers[0] ?? "WAIT")}</strong>
               </span>
             </div>
           </div>
@@ -187,7 +190,7 @@ export function GoldHunterMonitorPage() {
             data-testid="gh-gate-list"
           >
             {status.gates.blockers.map((b) => (
-              <li key={b}>{b}</li>
+              <li key={b}>{goldHunterDisplayWait(b)}</li>
             ))}
           </ul>
         ) : (

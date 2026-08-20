@@ -41,7 +41,7 @@ export function RegistrationCompletePage() {
       </ol>
       <p className="gm-auth-trust">
         GoldMeta's market feed is centrally managed. Broker trading is not enabled by
-        registration. AutoTrade remains OFF.
+        registration. Gold Hunter Demo remains OFF.
       </p>
       <Link className="gm-auth-submit" to="/" style={{ display: "inline-block", textAlign: "center" }}>
         Go to Sign In
@@ -110,7 +110,7 @@ export function AccountReadyPage() {
         <li>Optionally enable phone alerts.</li>
         <li>Set risk preferences and record outcomes in Journal.</li>
         <li>Broker connection and trading stay locked until separately enabled.</li>
-        <li>AutoTrade remains OFF.</li>
+        <li>Gold Hunter Demo remains OFF.</li>
       </ol>
       <p className="gm-auth-trust">
         GoldMeta's market feed is centrally managed. Registration never enables broker orders,

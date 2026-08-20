@@ -151,7 +151,7 @@ export function DetailedReportSections({
       </ReportSection>
 
       <ReportSection id="safety" title="Safety checks">
-        <p>Manual analysis only. AutoTrade OFF. Demo OFF. Live OFF. No broker order submission.</p>
+        <p>Manual analysis only. Gold Hunter Demo OFF. Live OFF. No broker order submission.</p>
         <ul>
           <li>Geometry valid: {plan.geometryValid === true ? "yes" : plan.geometryValid === false ? "no" : "unknown"}</li>
           <li>Ordering note: {plan.tradePlan.orderingNote ?? "none"}</li>

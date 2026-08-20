@@ -123,7 +123,7 @@ const main = async () => {
   }
 
   // SPA deep links must still resolve to the app shell.
-  for (const route of ["/intelligence", "/autotrade", "/learn"]) {
+  for (const route of ["/intelligence", "/gold-hunter", "/learn"]) {
     const routeRes = await fetch(`${base}${route}?t=${Date.now()}`, {
       headers: { "Cache-Control": "no-cache" }
     });

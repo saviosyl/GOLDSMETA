@@ -21,7 +21,7 @@ function resolveBuildIdentity() {
   }
   const short = full.slice(0, 7);
   // August premium UI delivery stamp — must change whenever the shell cache bumps.
-  const stamp = `premium-ui-v5-${short}-2026-08-08`;
+  const stamp = `premium-ui-v5-${short}-2026-08-20`;
   return { full, short, stamp };
 }
 
@@ -153,7 +153,8 @@ export default defineConfig({
         // Bump when hashed chunk layout changes so stale PWA shells recover.
         // v7: retain gmv7 assets + push-handler without regressing premium PWA.
         // v8: gmv7 nearest-404 + navigateFallback denylist (stale-chunk safety).
-        cacheId: "goldmeta-premium-ui-v8",
+        // v9: drop stale AutoTrade UI shells after Gold Hunter-only frontend.
+        cacheId: "goldmeta-premium-ui-v9",
         navigateFallback: "/index.html",
         // Never treat hashed assets / static files as SPA navigations.
         navigateFallbackDenylist: [

@@ -8,7 +8,7 @@ export function TermsPage() {
         <p className="gm-auth-support">Version 2026-07-24</p>
         <p className="gm-meta">
           GoldMeta provides market analysis tools only. Creating an account does not enable broker
-          trading, AutoTrade, Demo order submission, or Live order submission. You remain
+          trading, Gold Hunter Demo, Demo order submission, or Live order submission. You remain
           responsible for your own trading decisions. GoldMeta is not an investment adviser and does
           not claim regulatory approval for brokerage services.
         </p>

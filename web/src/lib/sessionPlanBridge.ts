@@ -99,7 +99,7 @@ function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary, confLabel: 
       stable.planStabilityLabel === "PLAN UNCHANGED"
         ? "Plan unchanged — quote refreshed price and distances only."
         : stable.lifecycleState === "CONFIRMED"
-          ? "Session plan is confirmed — manage risk manually; AutoTrade stays OFF."
+          ? "Session plan is confirmed — manage risk manually; Gold Hunter Demo stays OFF."
           : stable.lifecycleState === "NO_TRADE" || stable.lifecycleState === "NO_VALID_PLAN"
             ? "No valid session plan — stay flat until a complete 15M plan arrives."
             : `Session plan status: ${String(stable.lifecycleState ?? "unknown").replace(/_/g, " ")}.`

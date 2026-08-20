@@ -65,7 +65,7 @@ export function GoldHunterControlPage() {
     <div data-testid="gh-control">
       <div className="gh-card" style={{ marginBottom: 12 }}>
         <h3>Control Centre</h3>
-        <p className="gh-kpi-label">Capital, risk and Demo AutoTrade</p>
+        <p className="gh-kpi-label">Capital, risk and Gold Hunter Demo</p>
       </div>
 
       <div className="gh-split">
@@ -225,7 +225,7 @@ export function GoldHunterControlPage() {
               data-testid="gh-arm-open"
               onClick={() => setConfirmArm(true)}
             >
-              Enable Demo AutoTrade
+              Enable Demo
             </button>
           ) : (
             <button
@@ -235,7 +235,7 @@ export function GoldHunterControlPage() {
               data-testid="gh-disarm"
               onClick={() => void savePatch({ demoAutoTradeEnabled: false })}
             >
-              Turn Demo AutoTrade OFF
+              Turn Demo OFF
             </button>
           )}
 
@@ -259,7 +259,7 @@ export function GoldHunterControlPage() {
             onClick={() => {
               if (
                 window.confirm(
-                  "EMERGENCY STOP Gold Hunter Demo AutoTrade? New entries halt. Existing positions are not auto-closed."
+                  "EMERGENCY STOP Gold Hunter Demo? New entries halt. Existing positions are not auto-closed."
                 )
               ) {
                 void savePatch({ emergencyStopActive: true });
@@ -303,7 +303,7 @@ export function GoldHunterControlPage() {
             aria-labelledby="gh-arm-title"
             data-testid="gh-arm-modal"
           >
-            <h2 id="gh-arm-title">Enable Gold Hunter Demo AutoTrade?</h2>
+            <h2 id="gh-arm-title">Enable Gold Hunter Demo?</h2>
             <p>Broker: cTrader DEMO</p>
             <dl>
               <dt>Allocation</dt>

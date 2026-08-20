@@ -5,7 +5,7 @@ import { DisclosurePanel } from "./ui/primitives";
  * Compact intentional safety notice — not a failure banner.
  * Live execution locked is expected product behaviour.
  */
-export function ExecutionDisabledBanner({ page }: { page: "brokers" | "autotrade" }) {
+export function ExecutionDisabledBanner({ page }: { page: "brokers" | "gold-hunter" }) {
   return (
     <div
       className="gm-execution-disabled gm-safety-notice"
@@ -17,12 +17,12 @@ export function ExecutionDisabledBanner({ page }: { page: "brokers" | "autotrade
         <h2 className="gm-section-title">Safety mode</h2>
       </div>
       <p>
-        Live execution locked · Live Auto locked · No live orders can be submitted
+        Live execution locked · Live locked · No live orders can be submitted
       </p>
       <DisclosurePanel summary="Technical details">
         <p className="gm-meta" style={{ margin: 0 }} data-testid={`${page}-execution-diagnostics`}>
-          {page === "autotrade"
-            ? "AutoTrade controls stay locked for live. No martingale, grid, or averaging-down paths are enabled."
+          {page === "gold-hunter"
+            ? "Gold Hunter Demo stays locked for live. No martingale, grid, or averaging-down paths are enabled."
             : "Broker Control Centre keeps live order submission locked. Demo prep and account connection remain available."}
         </p>
       </DisclosurePanel>

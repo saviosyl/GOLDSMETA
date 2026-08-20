@@ -15,6 +15,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import type { GoldHunterStatusResponse } from "../../lib/api";
+import {
+  GOLD_HUNTER_BRAIN_LABEL,
+  GOLD_HUNTER_PRODUCT_LABEL,
+  GOLD_HUNTER_UI_REV,
+  goldHunterBuildShort
+} from "../../lib/goldHunterIdentity";
 import "../../styles/goldHunter.css";
 
 type GhCtx = {
@@ -99,8 +105,12 @@ export function GoldHunterShell() {
       <div className="gm-gold-hunter" data-testid="gold-hunter-shell">
         <div className="gh-brand-row">
           <div className="gh-brand">
-            <strong>GOLD HUNTER</strong>
-            <span>Gold Trading Intelligence</span>
+            <strong>{GOLD_HUNTER_PRODUCT_LABEL}</strong>
+            <div className="gh-rev" data-testid="gh-revision">
+              <span>{GOLD_HUNTER_BRAIN_LABEL}</span>
+              <span>Rev {GOLD_HUNTER_UI_REV}</span>
+              <span>Build {goldHunterBuildShort()}</span>
+            </div>
           </div>
           <div className="gh-mode-stack" data-testid="gh-mode-stack">
             <span className="primary">{status?.modeLabel.primary ?? "…"}</span>

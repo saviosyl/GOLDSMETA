@@ -42,19 +42,19 @@ const TOPIC_GROUPS: Array<{
       {
         id: "auto-risk",
         term: "Gold Hunter risk",
-        detail: "Automated trading risk lives under Gold Hunter. Core AutoTrade and FAST AutoTrade were removed."
+        detail: "Automated trading risk lives under Gold Hunter, the only automatic trading engine."
       }
     ]
   },
   {
-    id: "autotrade",
+    id: "gold-hunter",
     title: "Automated trading",
     items: [
       {
         id: "qual",
-        term: "Core qualification (removed)",
+        term: "Gold Hunter",
         detail:
-          "Core AutoTrade qualification and Demo Auto qualification were removed. Gold Hunter is the only AutoTrade UI."
+          "Gold Hunter is the only automatic trading engine. Legacy qualification paths are not part of this application."
       },
       {
         id: "demo-live",
@@ -62,10 +62,10 @@ const TOPIC_GROUPS: Array<{
         detail: "Demo uses practice funds. Live money execution remains hard-locked."
       },
       {
-        id: "how-autotrade",
+        id: "how-gold-hunter",
         term: "How automated trading works",
         detail:
-          "Gold Hunter is the AutoTrade UI. Core AutoTrade and FAST AutoTrade were removed. Live Auto stays locked."
+          "Gold Hunter evaluates setups and can place Demo orders only when you enable it. Live stays locked."
       }
     ]
   },
@@ -162,8 +162,7 @@ export function HelpPage() {
             Review risk in the <Link to="/planner">Risk Planner</Link> or Gold Hunter (staff).
           </li>
           <li>
-            Follow <Link to="/gold-hunter">Gold Hunter</Link> or your manual workflow. Core AutoTrade
-            qualification was removed.
+            Follow <Link to="/gold-hunter">Gold Hunter</Link> or your manual workflow.
           </li>
           <li>
             Review the outcome in <Link to="/journal">Journal</Link> and{" "}

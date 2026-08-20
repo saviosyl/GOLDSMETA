@@ -199,7 +199,7 @@ export function friendlyApiCode(
       message: "Pepperstone server configuration is incomplete.",
       whatHappened:
         "GoldMeta identified specific missing non-secret configuration items required for OAuth.",
-      impact: "Market analysis still works. Broker connection and trading stay locked. AutoTrade stays OFF.",
+      impact: "Market analysis still works. Broker connection and trading stay locked. Gold Hunter Demo stays OFF.",
       nextStep:
         "Open Broker Control Centre and fix the listed missing configuration items, then press Authorise Demo Trading."
     };
@@ -223,7 +223,7 @@ export function friendlyApiCode(
     return {
       message: "Pepperstone session expired. Please reconnect from Broker Control Centre.",
       whatHappened: "The stored Pepperstone session could not be refreshed or was denied.",
-      impact: "Read-only broker data pauses until you reconnect. AutoTrade stays OFF. No orders are submitted.",
+      impact: "Read-only broker data pauses until you reconnect. Gold Hunter Demo stays OFF. No orders are submitted.",
       nextStep: "Tap Reconnect cTrader, complete OAuth again, then refresh accounts."
     };
   }
@@ -232,7 +232,7 @@ export function friendlyApiCode(
     return {
       message: "Broker connection was updated elsewhere. Reloading the latest state.",
       whatHappened: "A concurrent token refresh won compare-and-set; the previous write was discarded safely.",
-      impact: "No tokens were partially overwritten. AutoTrade stays OFF.",
+      impact: "No tokens were partially overwritten. Gold Hunter Demo stays OFF.",
       nextStep: "Wait for the page to reload the winning connection state, then continue."
     };
   }
@@ -248,9 +248,9 @@ export function friendlyApiCode(
 
   if (c.includes("LIVE_SELECTION_CONFIRMATION") || c.includes("LIVE_ACTIVATION")) {
     return {
-      message: "Live AutoTrade needs an explicit confirmation.",
+      message: "Live trading needs an explicit confirmation.",
       whatHappened: "A Live (real money) action was requested without confirmation.",
-      impact: "Live AutoTrade stays OFF. Demo settings are unchanged.",
+      impact: "Live trading stays OFF. Demo settings are unchanged.",
       nextStep: "Review the Live confirmation screen and type ENABLE LIVE."
     };
   }
@@ -278,7 +278,7 @@ export function friendlyApiCode(
       message: "This broker action is not available for your account.",
       whatHappened: "Access was denied for this broker operation.",
       impact: "Your analysis access is unchanged.",
-      nextStep: "Sign in with a verified active account and open AutoTrade."
+      nextStep: "Sign in with a verified active account and open Gold Hunter."
     };
   }
 
@@ -314,7 +314,7 @@ export function friendlyApiCode(
     return {
       message: "Order submission is currently disabled in this preview.",
       whatHappened: "Preview locks prevent Demo and Live order submission.",
-      impact: "AutoTrade stays OFF. Settings and previews still work.",
+      impact: "Gold Hunter Demo stays OFF. Settings and previews still work.",
       nextStep: "Continue configuration. Execution will require a later approved phase."
     };
   }

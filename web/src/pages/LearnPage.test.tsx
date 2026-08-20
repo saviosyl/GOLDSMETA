@@ -63,8 +63,8 @@ describe("Learn GoldMeta", () => {
     expect(screen.getByTestId("learn-readalong")).toHaveTextContent(/Scenario Map/i);
   });
 
-  it("shows AutoTrade lesson safety language", () => {
-    renderLearn("/learn/autotrade-explained");
+  it("shows Gold Hunter lesson safety language", () => {
+    renderLearn("/learn/gold-hunter-explained");
     expect(screen.getByTestId("learn-readalong")).toHaveTextContent(/NOT a money button/i);
     expect(screen.getByTestId("learn-readalong")).toHaveTextContent(
       /must never start automatically/i
@@ -218,8 +218,7 @@ describe("Learn GoldMeta", () => {
   it("qualification lesson states Core qualification was removed and Live locked", () => {
     renderLearn("/learn/qualification-demo");
     const body = screen.getByTestId("learn-readalong");
-    expect(body).toHaveTextContent(/Core AutoTrade qualification was removed/i);
-    expect(body).toHaveTextContent(/Gold Hunter is the only AutoTrade UI/i);
+    expect(body).toHaveTextContent(/Gold Hunter is the only automatic trading engine/i);
     expect(body).toHaveTextContent(/Live remains LOCKED/i);
   });
 });

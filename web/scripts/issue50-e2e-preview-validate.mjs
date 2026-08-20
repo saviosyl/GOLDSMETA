@@ -117,7 +117,7 @@ function validateCase(id, ui, planSeed, overflow) {
   const pass = (name, ok, detail) => checks.push({ name, ok: !!ok, detail });
 
   pass("main action visible", !!ui.action, ui.action);
-  pass("AutoTrade OFF visible", /AutoTrade OFF/i.test(ui.autoTrade ?? ""), ui.autoTrade);
+  pass("Gold Hunter Demo OFF visible", /Gold Hunter Demo stays OFF|Live trading locked/i.test(ui.autoTrade ?? ""), ui.autoTrade);
   pass("no Reference TP1", !ui.refTp1, "Reference TP1 absent");
   pass("no order-ticket copy", !ui.bodyHasOrderTicket, "no place/submit order language");
   pass("no broker/order network requests", (ui.networkBrokerish ?? []).length === 0, JSON.stringify(ui.networkBrokerish));
