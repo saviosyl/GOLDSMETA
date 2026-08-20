@@ -39,7 +39,7 @@ describe("Mobile Plan V2 states", () => {
     );
     expect(screen.getByTestId("cockpit-bias")).toHaveTextContent(/Market bias:/i);
     expect(screen.getByTestId("bias-context-hint")).toHaveTextContent(/not an entry signal/i);
-    expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/AutoTrade OFF/i);
+    expect(screen.getByTestId("intraday-autotrade-off")).toHaveTextContent(/Live trading locked/i);
   });
 
   it("valid BUY shows levels and a single instruction", () => {

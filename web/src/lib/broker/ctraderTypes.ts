@@ -9,7 +9,6 @@ export interface BrokerControlCentreResponse {
   defaultBroker: BrokerOptionId;
   autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
   orderSubmissionEnabled?: boolean;
-  demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi;
   brokers: Array<{
     id: BrokerOptionId;
     name: string;
@@ -88,7 +87,6 @@ export interface CTraderDiagnosticsReport {
   tradingSafelyLocked: true;
   autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
   orderSubmissionEnabled?: boolean;
-  demoAutoAuthority?: import("./demoAutoAuthority").DemoAutoAuthorityApi;
   environment: "DEMO" | "LIVE";
   connection: {
     accountMasked: string | null;

@@ -17,9 +17,7 @@ const TRADING_KEYS = [
   "Market feed",
   "Strategy feed",
   "Broker",
-  "AutoTrade engine",
-  "Risk engine",
-  "Qualification"
+  "Risk engine"
 ] as const;
 
 export function SystemHealthStrip({ health, compact = true }: Props) {
@@ -27,10 +25,8 @@ export function SystemHealthStrip({ health, compact = true }: Props) {
     ["Market feed", health.marketFeed],
     ["Strategy feed", health.strategyFeed],
     ["Broker", health.broker],
-    ["AutoTrade engine", health.autoTradeEngine],
     ["Risk engine", health.riskEngine],
-    ["Notifications", health.notifications],
-    ["Qualification", health.qualificationWorker]
+    ["Notifications", health.notifications]
   ] as const;
 
   const tradingIssues = useMemo(

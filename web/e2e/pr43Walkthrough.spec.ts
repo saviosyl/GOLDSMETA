@@ -11,20 +11,10 @@ const VIEWPORTS = [
 ] as const;
 
 test.describe("PR #43 human UX walkthrough (ui-review)", () => {
-  test("AutoTrade daily controls and Live warning", async ({ page }) => {
+  test("legacy AutoTrade review path redirects away from Core AutoTrade", async ({ page }) => {
     await page.goto("/ui-review/autotrade");
-    await expect(page.getByTestId("autotrade-page")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId("autotrade-mode-pill")).toHaveText("OFF");
-    await expect(page.getByTestId("autotrade-select-account")).toBeVisible();
-    await expect(page.getByTestId("autotrade-connect-ctrader")).toBeVisible();
-    await expect(page.getByTestId("autotrade-edit-settings")).toBeVisible();
-    await expect(page.getByTestId("autotrade-preview-trade")).toBeVisible();
-    await expect(page.getByTestId("autotrade-enable-demo-auto")).toBeDisabled();
-    await expect(page.getByTestId("autotrade-emergency-stop")).toBeVisible();
-    await page.getByTestId("autotrade-tab-live").click();
-    await expect(page.getByTestId("autotrade-live-warn")).toContainText(/real money/i);
-    await page.getByTestId("autotrade-edit-settings").click();
-    await expect(page.getByTestId("autotrade-risk-style")).toBeVisible();
+    await expect(page.getByTestId("autotrade-page")).toHaveCount(0);
+    await expect(page.getByTestId("ui-review-shell")).toBeVisible({ timeout: 15_000 });
   });
 
   test("TradingView standard wizard labels", async ({ page }) => {
@@ -43,17 +33,16 @@ test.describe("PR #43 human UX walkthrough (ui-review)", () => {
   });
 
   for (const vp of VIEWPORTS) {
-    test(`AutoTrade no horizontal overflow @ ${vp.name}`, async ({ page }) => {
+    test(`Plan page no horizontal overflow @ ${vp.name}`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto("/ui-review/autotrade");
-      await expect(page.getByTestId("autotrade-page")).toBeVisible({ timeout: 15_000 });
+      await page.goto("/ui-review/");
+      await expect(page.getByTestId("overview-page")).toBeVisible({ timeout: 15_000 });
       const overflow = await page.evaluate(() => {
-        const el = document.querySelector('[data-testid="autotrade-page"]');
+        const el = document.querySelector('[data-testid="overview-page"]');
         if (!el) return -1;
         return el.scrollWidth - el.clientWidth;
       });
       expect(overflow).toBeLessThanOrEqual(2);
-      await expect(page.getByTestId("autotrade-emergency-stop")).toBeVisible();
     });
   }
 });

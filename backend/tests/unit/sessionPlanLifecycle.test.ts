@@ -17,7 +17,7 @@ import { processSessionPlanLifecycle } from "../../src/services/decision/session
 import { processDecisionPipeline } from "../../src/services/decision/decisionPipeline";
 import { AiExplainer } from "../../src/services/ai/explainer";
 import { InMemoryStore } from "../../src/services/storage/inMemoryStore";
-import { LIVE_EXECUTION_FEATURE_FLAG } from "../../src/services/autoTrade/types";
+import { isCTraderLiveEnabled } from "../../src/services/broker/ctrader/flags";
 import { buildStableEventId } from "../../src/services/webhook/eventId";
 import { freshPayload } from "../helpers";
 
@@ -415,7 +415,7 @@ describe("2.1.0 compat + pipeline + no broker orders", () => {
   });
 
   it("Pine 3.0 pipeline keeps trading locks OFF", async () => {
-    expect(LIVE_EXECUTION_FEATURE_FLAG).toBe(false);
+    expect(isCTraderLiveEnabled()).toBe(false);
     const store = new InMemoryStore();
     await processDecisionPipeline(
       "default-user",

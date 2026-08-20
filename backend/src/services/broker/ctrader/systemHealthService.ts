@@ -3,7 +3,6 @@
  */
 
 import { getConnection } from "./connectionStore";
-import { getActiveQualificationAccountId, getQualificationDoc } from "./qualificationStore";
 import { getUserAutoTradeSettings } from "./userAutoTradeSettings";
 import { loadNewsProviderKind } from "./newsGuard";
 
@@ -29,8 +28,6 @@ export async function buildSystemHealth(args: {
 }): Promise<SystemHealthView> {
   const connection = await getConnection(args.uid);
   const settings = await getUserAutoTradeSettings(args.uid, "demo");
-  const accountId = await getActiveQualificationAccountId(args.uid);
-  const qual = accountId ? await getQualificationDoc(args.uid, accountId) : null;
 
   const tokenOk =
     connection?.tokens?.accessExpiresAt != null &&
@@ -59,12 +56,11 @@ export async function buildSystemHealth(args: {
         : { tone: "amber", label: "Strategy feed status pending" };
 
   const autoTradeEngine: SystemHealthView["autoTradeEngine"] = settings.emergencyStopActive
-    ? { tone: "red", label: "AutoTrade locked by Emergency Stop" }
-    : settings.autoTradePaused
-      ? { tone: "amber", label: "AutoTrade paused" }
-      : qual?.startedAt
-        ? { tone: "green", label: "Qualification / AutoTrade engine active" }
-        : { tone: "amber", label: "AutoTrade engine idle" };
+    ? { tone: "red", label: "Broker emergency stop active" }
+    : {
+        tone: "green",
+        label: "Gold Hunter is the only AutoTrade engine"
+      };
 
   const riskEngine: SystemHealthView["riskEngine"] =
     settings.maxDailyLoss > 0 && settings.maxTradesPerDay > 0
@@ -76,9 +72,10 @@ export async function buildSystemHealth(args: {
     label: "Notifications available"
   };
 
-  const qualificationWorker: SystemHealthView["qualificationWorker"] = qual?.startedAt
-    ? { tone: "green", label: "Qualification worker ready (backend)" }
-    : { tone: "amber", label: "Qualification not started" };
+  const qualificationWorker: SystemHealthView["qualificationWorker"] = {
+    tone: "green",
+    label: "Core qualification retired"
+  };
 
   const tones = [
     marketFeed.tone,

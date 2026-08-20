@@ -19,10 +19,40 @@ import {
 } from "./fixtures";
 import { DISABLED_ORDER_METHODS } from "./mutationGuard";
 import { approveTradePreview, buildTradePreview } from "./preview";
-import {
-  evaluateDemoAutoQualification,
-  type DemoAutoQualificationState
-} from "./qualification";
+type RetiredQualificationProgress = {
+  unlocked: false;
+  canActivate: false;
+  passed: string[];
+  failed: string[];
+  progress: {
+    completedPreviews: number;
+    requiredPreviews: 0;
+    approvedControlledDemoTrades: number;
+    requiredTrades: 0;
+    daysSinceFirstTrade: number | null;
+    requiredDays: 0;
+    source: "retired_core_autotrade";
+    sourceLabel: string;
+  };
+};
+
+const RETIRED_QUALIFICATION: RetiredQualificationProgress = {
+  unlocked: false,
+  canActivate: false,
+  passed: [],
+  failed: ["CORE_AUTOTRADE_RETIRED"],
+  progress: {
+    completedPreviews: 0,
+    requiredPreviews: 0,
+    approvedControlledDemoTrades: 0,
+    requiredTrades: 0,
+    daysSinceFirstTrade: null,
+    requiredDays: 0,
+    source: "retired_core_autotrade",
+    sourceLabel:
+      "Core / FAST AutoTrade qualification is retired. Gold Hunter is the only automatic trading engine."
+  }
+};
 import { resolveXauUsdFromCatalogue } from "./symbolResolver";
 
 export interface AuthHealthSnapshot {
@@ -51,7 +81,7 @@ export interface CTraderReadinessReport {
   flags: ReturnType<typeof snapshotCTraderFlags>;
   config: ReturnType<typeof loadCTraderConfig>;
   auth: AuthHealthSnapshot;
-  qualification: ReturnType<typeof evaluateDemoAutoQualification>;
+  qualification: RetiredQualificationProgress;
   wizardSteps: Array<{
     step: number;
     title: string;
@@ -68,23 +98,6 @@ export interface CTraderReadinessReport {
     lastQuoteAt: string | null;
   };
 }
-
-const DEFAULT_QUAL: DemoAutoQualificationState = {
-  authHealthy: false,
-  pinnedOwnerVerified: false,
-  oauthHealthy: false,
-  pepperstoneDemoConfirmed: false,
-  xauusdMetadataComplete: false,
-  completedPreviews: 0,
-  approvedControlledDemoTrades: 0,
-  firstDemoTradeAt: null,
-  unresolvedUnknownOrders: 0,
-  duplicateOrders: 0,
-  restartRecoveryTested: false,
-  emergencyStopTested: false,
-  dailyLossLockTested: false,
-  ownerUnlockedDemoAuto: false
-};
 
 export function buildAuthHealthSnapshot(
   partial?: Partial<AuthHealthSnapshot>
@@ -109,7 +122,6 @@ export function buildAuthHealthSnapshot(
 
 export function buildCTraderReadiness(args?: {
   auth?: AuthHealthSnapshot;
-  qualification?: Partial<DemoAutoQualificationState>;
   connection?: {
     oauthConnected?: boolean;
     demoAccountSelected?: boolean;
@@ -142,19 +154,7 @@ export function buildCTraderReadiness(args?: {
   const marginOk = Boolean(conn?.marginMetadataAvailable);
 
   const demoSubmit = snapshotCTraderFlags().CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-  const qualState: DemoAutoQualificationState = {
-    ...DEFAULT_QUAL,
-    ...args?.qualification,
-    authHealthy: auth.status === "HEALTHY",
-    pinnedOwnerVerified: Boolean(auth.pinnedOwnerExists && auth.emailMapsToPinned),
-    oauthHealthy: oauthConnected,
-    pepperstoneDemoConfirmed: pepperstone && demoSelected,
-    xauusdMetadataComplete: goldFound,
-    // Owner Demo start unlocks Demo Auto intent when submission is enabled.
-    ownerUnlockedDemoAuto:
-      args?.qualification?.ownerUnlockedDemoAuto ?? demoSubmit
-  };
-  const qualification = evaluateDemoAutoQualification(qualState);
+  const qualification = RETIRED_QUALIFICATION;
   const authSetupRequired = auth.status !== "HEALTHY";
 
   const step4Status: CTraderReadinessReport["wizardSteps"][0]["status"] =
@@ -238,24 +238,21 @@ export function buildCTraderReadiness(args?: {
     },
     {
       step: 8,
-      title: "Enable Demo Auto",
-      status: qualification.canActivate ? "AVAILABLE" : demoSubmit ? "IN_PROGRESS" : "BLOCKED",
-      detail: qualification.canActivate
-        ? "Demo Auto can be activated for Pepperstone Demo (Live stays locked)."
-        : demoSubmit
-          ? "Authorise Demo Trading (trading scope), select a Pepperstone Demo account, then Enable Demo Auto."
-          : "Demo order submission is off — Demo Auto stays locked."
+      title: "Gold Hunter AutoTrade",
+      status: "AVAILABLE",
+      detail:
+        "Core and FAST AutoTrade are removed. Gold Hunter is the only automatic trading engine (Demo only). Live stays locked."
     }
   ];
 
   const setupRequired = !(oauthConnected && demoSelected && goldFound);
   const label = oauthConnected
     ? demoSubmit
-      ? "Pepperstone Demo — order submission enabled — Live execution locked — AutoTrade ready when activated"
-      : "Pepperstone connected — preview mode — order submission disabled — AutoTrade OFF"
+      ? "Pepperstone Demo — manual Demo orders available — Live execution locked — Gold Hunter is the only AutoTrade engine"
+      : "Pepperstone connected — preview mode — order submission disabled — Core AutoTrade removed"
     : oauthConfigured
-      ? "Pepperstone OAuth ready — Authorise Demo Trading available — AutoTrade OFF"
-      : "Pepperstone connection required — preview mode — AutoTrade OFF";
+      ? "Pepperstone OAuth ready — Authorise Demo Trading available — Core AutoTrade removed"
+      : "Pepperstone connection required — preview mode — Core AutoTrade removed";
 
   return {
     setupRequired,
@@ -265,7 +262,7 @@ export function buildCTraderReadiness(args?: {
     connected: oauthConnected,
     demonstrationAvailable: true,
     automationMode: "OFF",
-    autoTrade: qualification.canActivate ? "READY" : "OFF",
+    autoTrade: "OFF",
     orderSubmissionEnabled: demoSubmit,
     liveEnabled: false,
     flags: snapshotCTraderFlags(),

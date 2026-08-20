@@ -23,7 +23,6 @@ import {
   buildIntentKey,
   buildTradePreview
 } from "../../../../src/services/broker/ctrader/preview";
-import { evaluateDemoAutoQualification } from "../../../../src/services/broker/ctrader/qualification";
 import { createCTraderMockServer } from "../../../../src/services/broker/ctrader/mockServer";
 import {
   buildCTraderReadiness,
@@ -475,58 +474,6 @@ describe("preview engine", () => {
   });
 });
 
-describe("qualification", () => {
-  it("keeps Demo Auto inactive when Demo submission env is off", () => {
-    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-    delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-    const r = evaluateDemoAutoQualification({
-      authHealthy: true,
-      pinnedOwnerVerified: true,
-      oauthHealthy: true,
-      pepperstoneDemoConfirmed: true,
-      xauusdMetadataComplete: true,
-      completedPreviews: 20,
-      approvedControlledDemoTrades: 5,
-      firstDemoTradeAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
-      unresolvedUnknownOrders: 0,
-      duplicateOrders: 0,
-      restartRecoveryTested: true,
-      emergencyStopTested: true,
-      dailyLossLockTested: true,
-      ownerUnlockedDemoAuto: true
-    });
-    expect(r.unlocked).toBe(true);
-    expect(r.canActivate).toBe(false);
-    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
-  });
-
-  it("allows Demo Auto activate when Demo submission is enabled", () => {
-    const prev = process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-    process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
-    const r = evaluateDemoAutoQualification({
-      authHealthy: true,
-      pinnedOwnerVerified: true,
-      oauthHealthy: true,
-      pepperstoneDemoConfirmed: true,
-      xauusdMetadataComplete: true,
-      completedPreviews: 0,
-      approvedControlledDemoTrades: 0,
-      firstDemoTradeAt: null,
-      unresolvedUnknownOrders: 0,
-      duplicateOrders: 0,
-      restartRecoveryTested: false,
-      emergencyStopTested: false,
-      dailyLossLockTested: false,
-      ownerUnlockedDemoAuto: true,
-      tradingScopeGranted: true
-    });
-    expect(r.canActivate).toBe(true);
-    if (prev === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
-    else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
-  });
-});
-
 describe("mutation guard + service", () => {
   it("denies all order methods", () => {
     expect(() => cTraderOrderApi.placeMarketBuy()).toThrow(CTraderMutationDisabledError);
@@ -545,7 +492,7 @@ describe("mutation guard + service", () => {
     else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prev;
     expect(readiness.wizardSteps).toHaveLength(8);
     expect(readiness.wizardSteps[0]?.title).toMatch(/Create Pepperstone/i);
-    expect(readiness.wizardSteps[7]?.title).toMatch(/Enable Demo Auto/i);
+    expect(readiness.wizardSteps[7]?.title).toMatch(/Gold Hunter AutoTrade/i);
     expect(readiness.label).toMatch(/Pepperstone connection required/i);
     const centre = getBrokerControlCentreSnapshot();
     expect(centre.autoTrade).toBe("OFF");

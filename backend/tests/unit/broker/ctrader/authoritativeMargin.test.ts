@@ -11,7 +11,6 @@ import {
   selectSideExpectedMargin,
   MARGIN_SNAPSHOT_MAX_AGE_MS
 } from "../../../../src/services/broker/ctrader/authoritativeMargin";
-import { calculatePepperstoneXauUsdDemoVolume } from "../../../../src/services/broker/ctrader/demoXauUsdSizing";
 import { lotsToOrderVolumeUnits } from "../../../../src/services/broker/ctrader/volumeUnits";
 import { isBrokerExecutionEnabled, isCTraderLiveEnabled } from "../../../../src/services/broker/ctrader/flags";
 
@@ -267,47 +266,7 @@ describe("authoritative Demo margin", () => {
     const diagnosticsFreeMargin: number | null = null;
     expect(diagnosticsFreeMargin).toBeNull();
 
-    // Risk sizing ~17 lots with deferred margin gate (ACTIVE_DEMO).
-    const sizing = calculatePepperstoneXauUsdDemoVolume({
-      riskAmountDeposit: 50, // A+ major mult 1.0 × €50
-      entryPrice: 4413.05,
-      stopLoss: 4409.84,
-      quoteToDepositRate: 0.9,
-      ozPerLot: 1,
-      minLots: 1,
-      stepLots: 1,
-      maxLots: 5000,
-      freeMargin: diagnosticsFreeMargin,
-      leverage: 30,
-      remainingDailyLossCapacity: 250,
-      maxPositionExposureLots: null,
-      sizingMode: "automatic_risk",
-      deferBrokerMarginGate: true
-    });
-    expect(sizing.ok).toBe(true);
-    expect(sizing.volumeLots).toBe(17);
-    expect(sizing.protocolVolume).toBe(lotsToOrderVolumeUnits(17));
-    expect(sizing.rejectionReason).not.toBe("MARGIN_UNAVAILABLE");
-
-    // Without defer, same inputs still hit the old blocker:
-    const legacy = calculatePepperstoneXauUsdDemoVolume({
-      riskAmountDeposit: 50,
-      entryPrice: 4413.05,
-      stopLoss: 4409.84,
-      quoteToDepositRate: 0.9,
-      ozPerLot: 1,
-      minLots: 1,
-      stepLots: 1,
-      maxLots: 5000,
-      freeMargin: null,
-      leverage: 30,
-      remainingDailyLossCapacity: 250,
-      maxPositionExposureLots: null,
-      sizingMode: "automatic_risk",
-      deferBrokerMarginGate: false
-    });
-    expect(legacy.ok).toBe(false);
-    expect(legacy.rejectionReason).toBe("MARGIN_UNAVAILABLE");
+    expect(lotsToOrderVolumeUnits(17)).toBe(1700);
 
     // Authoritative flat snapshot + expected margin below free → pass.
     const snap = computeAuthoritativeMarginSnapshot({

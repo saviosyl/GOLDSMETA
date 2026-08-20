@@ -41,31 +41,31 @@ const TOPIC_GROUPS: Array<{
       },
       {
         id: "auto-risk",
-        term: "AutoTrade risk",
-        detail: "Daily trade limits, loss limits and cooldowns live under AutoTrade → Risk."
+        term: "Gold Hunter risk",
+        detail: "Automated trading risk lives under Gold Hunter. Core AutoTrade and FAST AutoTrade were removed."
       }
     ]
   },
   {
     id: "autotrade",
-    title: "AutoTrade & qualification",
+    title: "Automated trading",
     items: [
       {
         id: "qual",
-        term: "Qualification",
+        term: "Core qualification (removed)",
         detail:
-          "Preview setups, controlled Demo trades, then observation before Demo Auto can be enabled. Live stays locked until separate activation."
+          "Core AutoTrade qualification and Demo Auto qualification were removed. Gold Hunter is the only AutoTrade UI."
       },
       {
         id: "demo-live",
         term: "Demo vs Live",
-        detail: "Demo uses practice funds. Live money execution remains hard-locked until you complete activation."
+        detail: "Demo uses practice funds. Live money execution remains hard-locked."
       },
       {
         id: "how-autotrade",
-        term: "How AutoTrade works",
+        term: "How automated trading works",
         detail:
-          "GoldMeta evaluates verified strategy plans against your risk rules. Qualification previews setups, then controlled Demo trades, then observation. Demo Auto can place practice orders only after you enable it. Live Auto stays locked until separate activation."
+          "Gold Hunter is the AutoTrade UI. Core AutoTrade and FAST AutoTrade were removed. Live Auto stays locked."
       }
     ]
   },
@@ -76,7 +76,7 @@ const TOPIC_GROUPS: Array<{
       {
         id: "pepperstone",
         term: "Pepperstone cTrader",
-        detail: "Connect a Demo account for qualification. Reconnect only when the connection is unhealthy."
+        detail: "Connect a Demo account for broker quotes and Gold Hunter. Reconnect only when the connection is unhealthy."
       }
     ]
   },
@@ -140,7 +140,7 @@ export function HelpPage() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Qualification, risk, broker…"
+          placeholder="Gold Hunter, risk, broker…"
           data-testid="help-search"
         />
       </label>
@@ -159,10 +159,11 @@ export function HelpPage() {
           </li>
           <li>Understand BUY / SELL / HOLD / WAIT and what GoldMeta is waiting for.</li>
           <li>
-            Review risk in the <Link to="/planner">Risk Planner</Link> or AutoTrade risk settings.
+            Review risk in the <Link to="/planner">Risk Planner</Link> or Gold Hunter (staff).
           </li>
           <li>
-            Follow <Link to="/autotrade">AutoTrade</Link> qualification or your manual workflow.
+            Follow <Link to="/gold-hunter">Gold Hunter</Link> or your manual workflow. Core AutoTrade
+            qualification was removed.
           </li>
           <li>
             Review the outcome in <Link to="/journal">Journal</Link> and{" "}

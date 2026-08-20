@@ -44,20 +44,7 @@ const { mockApi } = vi.hoisted(() => {
       ],
       source: "SHARED_CTRADER_TRENDBARS"
     }),
-    getAutoTradeQualification: vi.fn().mockResolvedValue({
-      state: "PREVIEW_QUALIFICATION",
-      overallLabel: "Preview qualification",
-      nextAction: "Waiting for valid market setup",
-      demoAuto: { enabled: false, ready: false },
-      liveOrders: "LOCKED"
-    }),
-    autoTradeStatus: vi.fn().mockResolvedValue({
-      mode: "OFF",
-      displayStatus: "OFF",
-      locked: true
-    }),
-    getSystemHealth: vi.fn().mockResolvedValue(null),
-    getDailySafety: vi.fn().mockResolvedValue(null)
+    getSystemHealth: vi.fn().mockResolvedValue(null)
   };
   return { mockApi };
 });
@@ -127,12 +114,12 @@ describe("AppShell navigation", () => {
     expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
     expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("AutoTrade").length).toBeGreaterThan(0);
+    expect(screen.queryByText("AutoTrade")).not.toBeInTheDocument();
     expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Journal").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/More/i).length).toBeGreaterThan(0);
     const mobileNav = screen.getByTestId("mobile-bottom-nav");
-    expect(mobileNav.textContent).toMatch(/AutoTrade/);
+    expect(mobileNav.textContent).not.toMatch(/AutoTrade/);
     expect(mobileNav.textContent).not.toMatch(/Alerts/);
   });
 

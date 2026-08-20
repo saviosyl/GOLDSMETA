@@ -482,8 +482,8 @@ export function SettingsPage() {
             ) : null}
           </nav>
           <p className="gm-meta" style={{ marginTop: 12 }}>
-            AutoTrade risk settings live under{" "}
-            <Link to="/autotrade">AutoTrade → Risk</Link>.
+            Automated trading risk lives under{" "}
+            <Link to="/gold-hunter">Gold Hunter</Link> (staff).
           </p>
         </section>
         <div className="gm-settings-content">

@@ -215,10 +215,11 @@ describe("Learn GoldMeta", () => {
     expect(screen.getByTestId("learn-readalong")).toBeInTheDocument();
   });
 
-  it("qualification lesson states Demo max trades and Live locked", () => {
+  it("qualification lesson states Core qualification was removed and Live locked", () => {
     renderLearn("/learn/qualification-demo");
     const body = screen.getByTestId("learn-readalong");
-    expect(body).toHaveTextContent(/Demo Max Trades per Day can be set up to 6/i);
+    expect(body).toHaveTextContent(/Core AutoTrade qualification was removed/i);
+    expect(body).toHaveTextContent(/Gold Hunter is the only AutoTrade UI/i);
     expect(body).toHaveTextContent(/Live remains LOCKED/i);
   });
 });

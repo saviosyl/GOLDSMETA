@@ -4,8 +4,6 @@
  */
 
 import { buildPerformanceSummary } from "./performanceService";
-import { getQualificationView } from "./qualificationService";
-import { listRecentEvaluations } from "./evaluationLogStore";
 import { notifyAutoTradeEvent } from "./autoTradeNotifications";
 import {
   currentWeekBounds,
@@ -90,28 +88,8 @@ export async function buildAndPersistWeeklyReport(args: {
     period: "7d"
   });
 
-  let qualificationLabel = "Not started";
-  try {
-    const q = await getQualificationView(args.uid);
-    qualificationLabel = `${q.overallLabel} · Previews ${q.preview.completed}/${q.preview.required} · Controlled ${q.controlledDemo.completed}/${q.controlledDemo.required}`;
-  } catch {
-    /* ignore */
-  }
-
+  const qualificationLabel = "Core / FAST AutoTrade retired — Gold Hunter only";
   const safetyEvents: string[] = [];
-  try {
-    const evals = await listRecentEvaluations(args.uid, 80);
-    for (const e of evals) {
-      const blob = `${e.reasonCode} ${(e.failed ?? []).join(",")}`;
-      if (
-        /DAILY_LOSS|EMERGENCY|COOLDOWN|CONSECUTIVE|NEWS_GUARD|PROFIT_/i.test(blob)
-      ) {
-        safetyEvents.push(e.reasonCode || e.outcome);
-      }
-    }
-  } catch {
-    /* ignore */
-  }
 
   const { whatWorked, whatStruggled } = insightsFromPerf(perf);
   const report: StoredWeeklyReport = {

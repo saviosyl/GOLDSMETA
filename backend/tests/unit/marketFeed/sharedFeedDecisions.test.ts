@@ -7,7 +7,7 @@ import { AiExplainer } from "../../../src/services/ai/explainer";
 import { resetRateLimits } from "../../../src/middleware/rateLimit";
 import { __resetSharedFeedMemoryForTests } from "../../../src/services/marketFeed/sharedFeed";
 import { InMemoryStore } from "../../../src/services/storage/inMemoryStore";
-import { LIVE_EXECUTION_FEATURE_FLAG, DEMO_ORDER_SUBMISSION_ENABLED, BROKER_EXECUTION_ENABLED } from "../../../src/services/autoTrade/types";
+import { isBrokerExecutionEnabled, isCTraderLiveEnabled } from "../../../src/services/broker/ctrader/flags";
 
 const SHARED = "shared-market-feed";
 const USER_A = "approved-user-a";
@@ -57,9 +57,8 @@ describe("shared feed decisions latest", () => {
     expect(blob.toLowerCase()).not.toMatch(/webhooksecret/);
   });
 
-  it("keeps AutoTrade / Demo / Live execution OFF", () => {
-    expect(LIVE_EXECUTION_FEATURE_FLAG).toBe(false);
-    expect(DEMO_ORDER_SUBMISSION_ENABLED).toBe(false);
-    expect(BROKER_EXECUTION_ENABLED).toBe(false);
+  it("keeps generic broker / Live execution OFF", () => {
+    expect(isCTraderLiveEnabled()).toBe(false);
+    expect(isBrokerExecutionEnabled()).toBe(false);
   });
 });

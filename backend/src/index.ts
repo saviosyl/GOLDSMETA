@@ -1,6 +1,6 @@
 /**
  * Production Cloud Functions entry + re-exports.
- * Production `api` serves Signal Outcome Tracking + AutoTrade Control Centre.
+ * Production `api` serves Signal Outcome Tracking + Gold Hunter AutoTrade.
  * `apiV6Preview` remains additive / isolated (IG Demo secrets).
  */
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
@@ -15,23 +15,15 @@ import { createStore } from "./services/storage/createStore";
 import { AiExplainer } from "./services/ai/explainer";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
-import { createAutoTradeService } from "./services/autoTrade/runtime";
-import { processDecisionForAutoTrade } from "./services/autoTrade/decisionTrigger";
-import { processDecisionForQualification } from "./services/broker/ctrader/qualificationService";
 import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
-import { runDemoPositionManagementPass } from "./services/broker/ctrader/demoPositionLifecycle";
 import { runWeeklyReportPass } from "./services/broker/ctrader/weeklyReportService";
-import { isFastAutoTradeV1Enabled } from "./services/broker/ctrader/fastAutoTrade/config";
-import { runFastAutoTradeScanPass } from "./services/broker/ctrader/fastAutoTrade/scan";
-import { runBoundedFastScanCycle } from "./services/broker/ctrader/fastAutoTrade/scanScheduler";
 import {
-  applyCanonicalDemoFastRuntimeEnv,
+  applyCanonicalDemoRuntimeEnv,
   CTRADER_DEMO_FUNCTION_SECRETS
 } from "./services/broker/ctrader/demoFastRuntime";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
-const defaultAutoTradeService = createAutoTradeService();
 
 export type { AppDependencies };
 export { createApiApp };
@@ -40,32 +32,16 @@ export const createApp = (dependencies: Partial<AppDependencies> = {}) =>
   createApiApp({
     store: dependencies.store ?? defaultStore,
     aiExplainer: dependencies.aiExplainer ?? new AiExplainer(),
-    tradingService: dependencies.tradingService ?? defaultTradingService,
-    autoTradeService: dependencies.autoTradeService ?? defaultAutoTradeService
+    tradingService: dependencies.tradingService ?? defaultTradingService
   });
 
 export const app = createApp();
 /**
  * Apply cTrader Demo connector env on production `api` when CTRADER_* secrets
- * are bound. Demo paper submission may be enabled for Demo Auto; Live execution
- * stays hard-locked via flags.ts.
+ * are bound. Demo paper submission stays available for Gold Hunter + manual
+ * Demo orders. Live execution stays hard-locked via flags.ts.
  * OAuth redirect URI continues to come from CTRADER_REDIRECT_URI (Secret Manager).
  */
-/**
- * Demo AutoTrade strategy is FAST_AUTOTRADE_V1 (Demo only).
- * Temporary overnight overlay (DEMO_OVERNIGHT_MODE) is OFF after morning handoff.
- * Guard implementation in demoOvernightGuard.ts is retained for future controlled sessions.
- * Never enables Live.
- */
-function applyDemoOvernightRuntimeEnv(): void {
-  process.env.DEMO_OPPORTUNITY_MODE =
-    process.env.DEMO_OPPORTUNITY_MODE || "FAST_AUTOTRADE_V1";
-  process.env.FAST_AUTOTRADE_V1_ENABLED =
-    process.env.FAST_AUTOTRADE_V1_ENABLED || "true";
-  // Morning handoff 2026-08-13: disable temporary overnight entry overlay.
-  process.env.DEMO_OVERNIGHT_MODE = "false";
-}
-
 function applyProductionCTraderRuntimeEnv(): void {
   if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) return;
   process.env.CTRADER_CONNECTOR_ENABLED =
@@ -74,16 +50,16 @@ function applyProductionCTraderRuntimeEnv(): void {
     process.env.CTRADER_DEMO_READ_ENABLED || "true";
   process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED =
     process.env.CTRADER_DEMO_ORDER_PREVIEW_ENABLED || "true";
-  // Demo Auto / controlled Demo paper orders — Live remains impossible.
   process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = "true";
   process.env.CTRADER_LIVE_ENABLED = "false";
   process.env.BROKER_EXECUTION_ENABLED = "false";
-  applyDemoOvernightRuntimeEnv();
+  delete process.env.FAST_AUTOTRADE_V1_ENABLED;
+  delete process.env.DEMO_OPPORTUNITY_MODE;
+  delete process.env.DEMO_OVERNIGHT_MODE;
   if (!process.env.GOLDMETA_WEB_ORIGIN) {
     process.env.GOLDMETA_WEB_ORIGIN =
       process.env.WEB_ORIGIN ?? "https://goldmeta.metamechsolutions.com";
   }
-  // Force DEMO Open API environment for this phase.
   process.env.CTRADER_ENVIRONMENT = "DEMO";
 }
 
@@ -227,49 +203,26 @@ export const refreshCTraderLiveQuotes = onSchedule(
 );
 
 /**
- * Demo position lifecycle management — SL verify, breakeven, TP tracking.
- * Runs with PWA closed. Demo mutations enabled for this worker only; Live stays locked.
+ * Retired Core / FAST AutoTrade scheduler.
+ * Kept as a deployed no-op so production no longer scans or submits Core/FAST orders.
+ * Gold Hunter position management runs on the quote-worker path, not here.
  */
 export const manageDemoAutoTradePositions = onSchedule(
   {
     schedule: "every 1 minutes",
     region: env.FIREBASE_REGION,
-    timeoutSeconds: 240,
-    memory: "512MiB",
+    timeoutSeconds: 60,
+    memory: "256MiB",
     secrets: [...CTRADER_DEMO_FUNCTION_SECRETS]
   },
   async () => {
-    applyCanonicalDemoFastRuntimeEnv();
-    if (!(process.env.CTRADER_CLIENT_ID ?? "").trim()) {
-      console.log(
-        JSON.stringify({
-          event: "manage_demo_positions_skip",
-          reason: "CTRADER_CLIENT_ID_MISSING",
-          ts: new Date().toISOString()
-        })
-      );
-      return;
-    }
-    const cycle = await runBoundedFastScanCycle({
-      scan: () =>
-        isFastAutoTradeV1Enabled()
-          ? runFastAutoTradeScanPass()
-          : Promise.resolve({ scanned: 0, handled: 0 }),
-      manage: () => runDemoPositionManagementPass()
-    });
-    const result = cycle.manageResult ?? { owners: 0, managed: 0, closed: 0 };
-    const fastScan = cycle.scanResult ?? { scanned: 0, handled: 0 };
+    applyCanonicalDemoRuntimeEnv();
     console.log(
       JSON.stringify({
-        event: "manage_demo_positions_pass",
-        ...result,
-        fastScan,
-        scanRan: cycle.scanRan,
-        scanTimedOut: cycle.scanTimedOut,
-        manageRan: cycle.manageRan,
-        manageTimedOut: cycle.manageTimedOut,
-        scanError: cycle.scanError,
-        manageError: cycle.manageError,
+        event: "manage_demo_positions_retired",
+        coreAutoTrade: "ABSENT",
+        fastAutoTrade: "ABSENT",
+        automaticOwner: "GOLD_HUNTER",
         ts: new Date().toISOString()
       })
     );
@@ -299,7 +252,11 @@ export const generateWeeklyGoldMetaReports = onSchedule(
   }
 );
 
-/** Trusted AutoTrade path — never trusts browser execution payloads. */
+/**
+ * Retired Core / FAST DecisionRecord trigger.
+ * DecisionRecord BUY/SELL must never place a broker order.
+ * Gold Hunter does not consume DecisionRecords.
+ */
 export const onGoldMetaDecisionCreated = onDocumentCreated(
   {
     document: "users/{userId}/decisions/{decisionId}",
@@ -307,29 +264,18 @@ export const onGoldMetaDecisionCreated = onDocumentCreated(
     secrets: [...CTRADER_DEMO_FUNCTION_SECRETS]
   },
   async (event) => {
-    const userId = event.params.userId;
-    const decisionId = event.params.decisionId;
-    // Demo paper AutoTrade path — submission on; Live stays hard-off.
-    applyCanonicalDemoFastRuntimeEnv();
-    await processDecisionForAutoTrade({
-      userId,
-      decisionId,
-      autoTrade: defaultAutoTradeService,
-      store: defaultStore
-    });
-    try {
-      await processDecisionForQualification({
-        uid: userId,
-        decisionId,
-        store: defaultStore
-      });
-    } catch (error) {
-      console.error("Qualification decision trigger failed", {
-        userId,
-        decisionId,
-        error: error instanceof Error ? error.message : "unknown"
-      });
-    }
+    applyCanonicalDemoRuntimeEnv();
+    console.log(
+      JSON.stringify({
+        event: "decision_autotrade_retired",
+        userId: event.params.userId,
+        decisionId: event.params.decisionId,
+        coreAutoTrade: "ABSENT",
+        fastAutoTrade: "ABSENT",
+        submitted: false,
+        ts: new Date().toISOString()
+      })
+    );
   }
 );
 

@@ -11,15 +11,13 @@ test.describe("UI review host / production isolation", () => {
     await page.goto("/ui-review/?scenario=issue50-below-val");
     await expect(page.getByTestId("ui-review-shell")).toBeVisible();
     await expect(page.getByTestId("intraday-action-card")).toBeVisible();
-    // Premium DecisionDashboard uses dashboard-autotrade-off; legacy header used
+    // Premium DecisionDashboard uses dashboard-autotrade-off; header may use
     // intraday-autotrade-off. Accept either so ui-review stays host-gated.
     const autoTradeOff = page
       .getByTestId("dashboard-autotrade-off")
       .or(page.getByTestId("intraday-autotrade-off"));
-    // Premium UI uses qualification-aware wording (e.g. idle / qualifying).
-    // Status may be visually sr-only / in a collapsed panel — assert attached + copy.
     await expect(autoTradeOff.first()).toBeAttached();
-    await expect(autoTradeOff.first()).toContainText(/AutoTrade|idle|Qualifying|OFF|Demo/i);
+    await expect(autoTradeOff.first()).toContainText(/Gold Hunter is the AutoTrade UI|Live trading locked/i);
     await expect(page.locator("body")).toContainText(/LABELLED|PREVIEW|FIXTURE/i);
   });
 

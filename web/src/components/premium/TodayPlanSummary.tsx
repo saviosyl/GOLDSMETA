@@ -1,7 +1,3 @@
-import type { DailySafetyPublicView } from "../../lib/broker/ctraderTypes";
-import type { QualificationPublicView } from "../../lib/broker/qualificationTypes";
-import { deriveAutoTradeHeaderStatus } from "../../lib/autoTradeHeaderStatus";
-
 type Props = {
   marketStatus: string;
   price: number | null;
@@ -11,8 +7,6 @@ type Props = {
   decisionLabel: string;
   confidence: number | null;
   nextAction: string;
-  qualification: QualificationPublicView | null;
-  daily: DailySafetyPublicView | null;
 };
 
 export function TodayPlanSummary({
@@ -23,16 +17,8 @@ export function TodayPlanSummary({
   updatedLabel,
   decisionLabel,
   confidence,
-  nextAction,
-  qualification,
-  daily
+  nextAction
 }: Props) {
-  const headerStatus = deriveAutoTradeHeaderStatus({ qualification, status: null });
-  const autoNote =
-    qualification?.liveOrders === "LOCKED"
-      ? "Live locked"
-      : headerStatus.nextAction ?? qualification?.overallLabel ?? null;
-
   return (
     <section className="gm-prem-card gm-today-summary" data-testid="today-plan-summary" aria-label="Today summary">
       <div className="gm-qual-dash__head">
@@ -58,29 +44,9 @@ export function TodayPlanSummary({
           </em>
         </div>
         <div className="gm-prem-stat">
-          <span>AutoTrade</span>
-          <strong data-testid="today-autotrade-label">{headerStatus.label}</strong>
-          {autoNote ? <em className="gm-prem-stat-note">{autoNote}</em> : null}
-        </div>
-        <div className="gm-prem-stat">
-          <span>Trades today</span>
-          <strong>
-            {daily ? `${daily.tradesToday} / ${daily.tradesMax}` : "—"}
-          </strong>
-        </div>
-        <div className="gm-prem-stat">
-          <span>Daily P/L</span>
-          <strong>
-            {daily
-              ? `${daily.dailyPnl >= 0 ? "+" : ""}€${daily.dailyPnl.toFixed(2)}`
-              : "—"}
-          </strong>
-        </div>
-        <div className="gm-prem-stat">
-          <span>Daily risk remaining</span>
-          <strong>
-            {daily ? `€${daily.dailyLossRemaining.toFixed(2)}` : "—"}
-          </strong>
+          <span>Automated trading</span>
+          <strong data-testid="today-autotrade-label">Gold Hunter</strong>
+          <em className="gm-prem-stat-note">Live locked</em>
         </div>
         <div className="gm-prem-stat" data-testid="today-next-action">
           <span>Next action</span>

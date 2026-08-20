@@ -30,18 +30,14 @@ describe("Demo Auto dist deploy guard", () => {
     expect(hooks.some((h) => h.includes("run build"))).toBe(true);
   });
 
-  it("source includes open-position reconcile required by the Functions runtime", () => {
-    const reconcileTs = resolve(
-      backendRoot,
-      "src/services/broker/ctrader/openPositionReconcile.ts"
-    );
+  it("retired Core/FAST scheduler no longer scans or submits", () => {
     const indexTs = resolve(backendRoot, "src/index.ts");
-    expect(existsSync(reconcileTs)).toBe(true);
     expect(existsSync(indexTs)).toBe(true);
     const index = readFileSync(indexTs, "utf8");
-    expect(index).toContain("manage_demo_positions_pass");
-    const reconcile = readFileSync(reconcileTs, "utf8");
-    expect(reconcile).toContain("reconcileDemoOpenPositionCounters");
-    expect(reconcile).toContain("backfillLifecycleFromBroker");
+    expect(index).toContain("manage_demo_positions_retired");
+    expect(index).toContain("decision_autotrade_retired");
+    expect(index).not.toContain("runFastAutoTradeScanPass");
+    expect(index).not.toContain("processDecisionForQualification");
+    expect(index).not.toContain("processDecisionForAutoTrade");
   });
 });

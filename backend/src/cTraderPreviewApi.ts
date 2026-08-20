@@ -16,8 +16,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import type { Express } from "express";
 import { createApiApp } from "./apiApp";
-import { createAutoTradeService } from "./services/autoTrade/runtime";
-import { redactSecrets } from "./services/autoTrade/redactSecrets";
+import { redactSecrets } from "./services/security/redactSecrets";
 import {
   assertCTraderMutationsDisabled,
   snapshotCTraderFlags
@@ -76,8 +75,7 @@ let previewApp: Express | null = null;
 function getCTraderPreviewApp(): Express {
   if (!previewApp) {
     applyCTraderPreviewRuntimeEnv();
-    const autoTradeService = createAutoTradeService({ brokerMode: "fake" });
-    previewApp = createApiApp({ autoTradeService });
+    previewApp = createApiApp();
   }
   return previewApp;
 }

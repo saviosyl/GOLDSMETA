@@ -142,7 +142,7 @@ export function JournalPage() {
         {filtered.length === 0 ? (
           <EmptyState
             title="No journal entries yet"
-            body="Completed Demo Auto and qualification trades appear here. You can also add a manual note."
+            body="Completed Gold Hunter and manual trades appear here. You can also add a manual note."
             icon={<BookOpen aria-hidden />}
           />
         ) : (

@@ -78,7 +78,7 @@ export function NextDecisionStrip({
         </div>
       </div>
       <p className="gm-meta gm-next-decision-note">
-        Analysis only — AutoTrade OFF. Conditional scenarios are research references, not order
+        Analysis only — Live trading locked. Conditional scenarios are research references, not order
         tickets.
       </p>
     </section>

@@ -20,7 +20,7 @@ import {
   type BrokerHistoricalOrder,
   type BrokerHistoryPage
 } from "../../../src/services/broker/ctrader/openApiClient";
-import { submitFastMarketOrder } from "../../../src/services/broker/ctrader/fastAutoTrade/orderTransport";
+import { submitFastMarketOrder } from "../../../src/services/broker/ctrader/demoTransport/orderTransport";
 import {
   reconcileGoldHunterEntryPendingWatchdog,
   isGoldHunterEntryTransmissionUncertainty,

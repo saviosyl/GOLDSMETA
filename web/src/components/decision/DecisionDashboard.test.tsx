@@ -25,15 +25,6 @@ vi.mock("../../lib/push", () => ({
   }))
 }));
 
-vi.mock("../../hooks/useAutoTradeHeaderStatus", () => ({
-  useAutoTradeHeaderStatus: () => ({
-    label: "OFF",
-    environment: "OFF",
-    stateKey: "OFF",
-    tone: "neutral",
-    nextAction: null
-  })
-}));
 
 function wrap(ui: ReactNode) {
   return <MemoryRouter>{ui}</MemoryRouter>;
@@ -217,7 +208,9 @@ describe("DecisionDashboard", () => {
     expect(screen.getByTestId("intraday-action-short")).toHaveTextContent(/BUY READY|BUY/i);
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
-    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(/AutoTrade idle|OFF/i);
+    expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(
+      /Gold Hunter is the AutoTrade UI/i
+    );
   });
 
   it("shows BUY with confidence from 65% instead of BLOCKED", () => {

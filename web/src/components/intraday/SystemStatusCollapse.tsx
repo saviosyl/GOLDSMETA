@@ -35,9 +35,8 @@ export function SystemStatusCollapse({
       </summary>
       <div className="gm-system-status-body">
         <p className="gm-meta" data-testid="system-status-safety">
-          AutoTrade {plan?.safety.autoTrade ?? "OFF"} · Demo orders{" "}
-          {plan?.safety.demoOrderSubmission ? "ON" : "OFF"} · Live trading{" "}
-          {plan?.safety.liveTrading ? "ON" : "OFF"} · Analysis only
+          Live trading {plan?.safety.liveTrading ? "ON" : "locked"} · Demo orders{" "}
+          {plan?.safety.demoOrderSubmission ? "ON" : "OFF"} · Analysis only
         </p>
         <p className="gm-meta">
           Mode: {marketStructureMode ?? "—"}

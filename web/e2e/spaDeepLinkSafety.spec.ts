@@ -7,7 +7,6 @@ import { expect, test } from "@playwright/test";
 const ROUTES: Array<{ path: string; marker: string }> = [
   { path: "/ui-review/", marker: '[data-testid="overview-page"]' },
   { path: "/ui-review/intelligence", marker: '[data-testid="intelligence-page"]' },
-  { path: "/ui-review/autotrade", marker: '[data-testid="autotrade-page"]' },
   { path: "/ui-review/brokers", marker: '[data-testid="broker-control-centre"]' },
   { path: "/ui-review/settings", marker: '[data-testid="settings-page"]' },
   { path: "/ui-review/help", marker: '[data-testid="help-page"]' },
