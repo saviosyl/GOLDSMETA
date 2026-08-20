@@ -1271,6 +1271,68 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
     ).toBe(true);
   });
 
+  it("26. immediate TIMEOUT hands off to supervisor while overall horizon remains", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-imm-timeout-handoff" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    const immediate = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 100,
+      pollMs: 20,
+      listPositions: () =>
+        new Promise(() => {
+          /* hung immediate broker read */
+        })
+    });
+    expect(immediate.recovered).toBe(false);
+    expect(immediate.reason).toBe("TIMEOUT");
+    expect(immediate.trade.openEntryRecoveryStartedAt).toBeTruthy();
+    expect(immediate.trade.openEntryRecoveryLastReason).toBe("TIMEOUT");
+    const startedAt = immediate.trade.openEntryRecoveryStartedAt;
+    expect(getGoldHunterSupervisorNewOrderCallCount()).toBe(0);
+
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade: immediate.trade,
+      timeoutMs: 400,
+      pollMs: 20,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 4478.35,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-imm-timeout-handoff"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(true);
+    expect(r.reason).toBe("RECOVERED_OPEN");
+    expect(r.trade.status).toBe("FILLED");
+    expect(r.trade.result).toBe("OPEN");
+    expect(r.trade.entry).toBe(4478.35);
+    expect(r.trade.fillTs).toBeTruthy();
+    expect(r.trade.initialRiskPrice).toBe(HARD);
+    expect(r.pmRegistered).toBe(true);
+    expect(r.trade.openEntryPmRegisteredAt).toBeTruthy();
+    expect(r.trade.openEntryRecoveryLastReason).toBe("RECOVERED_OPEN");
+    expect(r.trade.openEntryRecoveryStartedAt).toBe(startedAt);
+    expect(getGoldHunterSupervisorNewOrderCallCount()).toBe(0);
+    expect(
+      getGoldHunterOpenPositionDiagnostics(OWNER).some(
+        (p) => p.tradeId === "GH-D-imm-timeout-handoff"
+      )
+    ).toBe(true);
+    const persisted = await getGoldHunterDemoTrade(
+      OWNER,
+      "GH-D-imm-timeout-handoff"
+    );
+    expect(persisted?.status).toBe("FILLED");
+    expect(persisted?.openEntryPmRegisteredAt).toBeTruthy();
+    expect(persisted?.openEntryRecoveryStartedAt).toBe(startedAt);
+  });
+
   it("safety defaults unchanged", () => {
     expect(GH_ADMIN_DEFAULT_CONFIG.demoAutoTradeEnabled).toBe(false);
     expect(GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades).toBe(1);

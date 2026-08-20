@@ -140,8 +140,15 @@ export function isGoldHunterKnownPositionEntrySupervisorInFlight(
 }
 
 /**
- * Quote-worker resume must not relaunch an expired or terminally-resolved
- * known-position supervisor. Does not reset openEntryRecoveryStartedAt.
+ * Resume eligibility for the known-position OPEN-entry supervisor.
+ *
+ * TIMEOUT from the immediate 2500ms broker-read phase is NOT automatically
+ * terminal. Eligibility uses the overall recovery horizon:
+ * `openEntryRecoveryStartedAt + horizonMs` (default 10s). A TIMEOUT whose
+ * deadline is still in the future may continue; an expired horizon must not
+ * relaunch. Does not reset openEntryRecoveryStartedAt.
+ *
+ * POSITION_CLOSED_BEFORE_RECOVERY remains immediately terminal.
  */
 export function isGoldHunterKnownPositionEntrySupervisorResumeEligible(
   trade: GoldHunterDemoTrade,
@@ -149,7 +156,6 @@ export function isGoldHunterKnownPositionEntrySupervisorResumeEligible(
   horizonMs = GH_KNOWN_POSITION_ENTRY_RECOVERY_HORIZON_MS
 ): boolean {
   if (!isKnownBrokerPositionEntryPending(trade)) return false;
-  if (trade.openEntryRecoveryLastReason === "TIMEOUT") return false;
   if (trade.openEntryRecoveryLastReason === "POSITION_CLOSED_BEFORE_RECOVERY") {
     return false;
   }
@@ -929,7 +935,14 @@ export function ensureGoldHunterKnownPositionEntrySupervisor(args: {
   );
   const existing = inFlight.get(key);
   if (existing) return existing;
-  if (!isGoldHunterKnownPositionEntrySupervisorResumeEligible(args.trade)) {
+  const horizonMs = args.timeoutMs ?? GH_KNOWN_POSITION_ENTRY_RECOVERY_HORIZON_MS;
+  if (
+    !isGoldHunterKnownPositionEntrySupervisorResumeEligible(
+      args.trade,
+      Date.now(),
+      horizonMs
+    )
+  ) {
     const reason: OpenEntryRecoveryReason =
       args.trade.openEntryRecoveryLastReason === "TIMEOUT"
         ? "TIMEOUT"
