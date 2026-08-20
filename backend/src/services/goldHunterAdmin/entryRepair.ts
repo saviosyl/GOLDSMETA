@@ -10,7 +10,9 @@ import type { BrokerDemoPositionLite } from "./reconcilePositions";
 export type EntryRecoverySource =
   | "BROKER_POSITION_RECONCILIATION"
   | "BROKER_DEAL_SETTLEMENT"
-  | "BROKER_ORDER_EXECUTION";
+  | "BROKER_ORDER_EXECUTION"
+  | "BROKER_ORDER_EXECUTION_RECONCILIATION"
+  | "BROKER_OPENING_DEAL_RECONCILIATION";
 
 /**
  * Canonical frozen original risk (price units) for GH Demo trades.

@@ -4,7 +4,12 @@
  */
 import type { BrokerClosedDeal } from "../broker/ctrader/openApiClient";
 import { fetchConfirmedCloseForPosition } from "../broker/ctrader/demoPositionMutations";
-import { upsertGoldHunterDemoTrade } from "./tradeStore";
+import {
+  getGoldHunterDemoTrade,
+  isGoldHunterClosedTerminal,
+  upsertGoldHunterDemoTrade
+} from "./tradeStore";
+import { syncGoldHunterOpenEntryIntegrityHealth } from "./entryIntegrity";
 import {
   GH_ADMIN_STRATEGY_ID,
   type GoldHunterDemoTrade
@@ -237,18 +242,32 @@ export async function settleGoldHunterCloseFromBroker(args: {
     deal = null;
   }
 
+  const current = await getGoldHunterDemoTrade(
+    args.ownerUid,
+    trade.goldHunterTradeId
+  );
+  if (isGoldHunterClosedTerminal(current)) {
+    await syncGoldHunterOpenEntryIntegrityHealth(args.ownerUid);
+    return { settled: true, trade: current! };
+  }
+
   if (deal && deal.netPnl != null && Number.isFinite(deal.netPnl)) {
     const settled = applyBrokerSettledClose({
-      trade,
+      trade: current ?? trade,
       deal,
       exitReason: trade.exitReason
     });
-    await upsertGoldHunterDemoTrade(args.ownerUid, settled);
+    const persisted = await upsertGoldHunterDemoTrade(args.ownerUid, settled);
     notifySelectorOfSettledGoldHunterClose({
       ownerUid: args.ownerUid,
-      trade: settled
+      trade: persisted.trade
     });
-    return { settled: true, trade: settled };
+    await syncGoldHunterOpenEntryIntegrityHealth(args.ownerUid);
+    return { settled: true, trade: persisted.trade };
+  }
+
+  if (isGoldHunterClosedTerminal(current)) {
+    return { settled: true, trade: current! };
   }
 
   const pending: GoldHunterDemoTrade = {

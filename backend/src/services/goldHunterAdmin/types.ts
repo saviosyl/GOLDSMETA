@@ -141,7 +141,34 @@ export type GoldHunterDemoTrade = {
     | "BROKER_POSITION_RECONCILIATION"
     | "BROKER_DEAL_SETTLEMENT"
     | "BROKER_ORDER_EXECUTION"
+    | "BROKER_ORDER_EXECUTION_RECONCILIATION"
+    | "BROKER_OPENING_DEAL_RECONCILIATION"
     | null;
+  /**
+   * Dedicated OPEN-entry recovery forensics (immediate + supervisor).
+   * Exact reasons — next Demo test must not require log guessing.
+   */
+  openEntryRecoveryStartedAt?: string | null;
+  openEntryRecoveryLastAt?: string | null;
+  openEntryRecoveryAttempts?: number | null;
+  openEntryRecoveryLastReason?:
+    | "RECOVERED_OPEN"
+    | "POSITION_NOT_FOUND_WITHIN_WINDOW"
+    | "ENTRY_INVALID_WITHIN_WINDOW"
+    | "POSITIONS_READ_FAILED"
+    | "TIMEOUT"
+    | "POSITION_CLOSED_BEFORE_RECOVERY"
+    | "NO_POSITION_ID"
+    | "SKIPPED_STATUS"
+    | "ALREADY_VALID"
+    | null;
+  openEntryRecoverySource?:
+    | "BROKER_POSITION_RECONCILIATION"
+    | "BROKER_ORDER_EXECUTION_RECONCILIATION"
+    | "BROKER_OPENING_DEAL_RECONCILIATION"
+    | null;
+  openEntryRecoveredAt?: string | null;
+  openEntryPmRegisteredAt?: string | null;
   /**
    * Forensic counters for ENTRY PENDING_RECONCILIATION watchdog.
    * Terminal never-found uses successfulEmptyProofCycles only.

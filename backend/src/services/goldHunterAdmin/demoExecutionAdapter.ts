@@ -27,6 +27,7 @@ import {
   type GoldHunterDemoTrade
 } from "./types";
 import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
+import { signalGoldHunterOpenEntryIntegrityDefect } from "./entryIntegrity";
 
 export type GoldHunterDemoSubmitArgs = {
   ownerUid: string;
@@ -493,6 +494,16 @@ export async function submitGoldHunterDemoOrder(
         signalId: args.signalId ?? null
       }
     });
+    if (
+      trade.status === "PENDING_RECONCILIATION" &&
+      trade.errorCode === "ENTRY_PRICE_INVALID" &&
+      trade.brokerPositionId
+    ) {
+      signalGoldHunterOpenEntryIntegrityDefect({
+        ownerUid: args.ownerUid,
+        tradeId: trade.goldHunterTradeId
+      });
+    }
     return {
       ok: true,
       outcome:

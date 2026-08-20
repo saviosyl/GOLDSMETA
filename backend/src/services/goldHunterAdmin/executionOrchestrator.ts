@@ -13,6 +13,7 @@ import { computeGoldHunterCommittedCapital } from "./committedCapital";
 import { submitGoldHunterDemoOrder } from "./demoExecutionAdapter";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
 import { recoverGoldHunterOpenEntryImmediate } from "./immediateOpenEntryRecovery";
+import { ensureGoldHunterKnownPositionEntrySupervisor } from "./knownBrokerPositionEntrySupervisor";
 import {
   evaluateGoldHunterFinalLossSafetyForCandidate
 } from "./lossSafetyGate";
@@ -779,6 +780,13 @@ export async function attemptGoldHunterDemoExecution(
             brokerPositionId: recovery.trade.brokerPositionId ?? null
           });
         } else {
+          void ensureGoldHunterKnownPositionEntrySupervisor({
+            ownerUid,
+            trade: recovery.trade,
+            bid: candidate.bid,
+            ask: candidate.ask,
+            listPositions: deps.listOpenPositions
+          });
           tel?.({
             phase: "ACCEPTED_PENDING_FILL",
             claimed: true,
@@ -832,6 +840,14 @@ export async function attemptGoldHunterDemoExecution(
             tradeId: recovery.trade.goldHunterTradeId,
             brokerOrderId: recovery.trade.brokerOrderId ?? null,
             brokerPositionId: recovery.trade.brokerPositionId ?? null
+          });
+        } else {
+          void ensureGoldHunterKnownPositionEntrySupervisor({
+            ownerUid,
+            trade: recovery.trade,
+            bid: candidate.bid,
+            ask: candidate.ask,
+            listPositions: deps.listOpenPositions
           });
         }
       }

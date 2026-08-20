@@ -155,6 +155,33 @@ export async function acquireGoldHunterSignalClaim(args: {
   }
 }
 
+function applyMonotonicClaimPatch(
+  existing: GoldHunterSignalClaim,
+  patch: Partial<GoldHunterSignalClaim>,
+  now: string
+): { claim: GoldHunterSignalClaim; rejectedRegression: boolean } {
+  if (existing.state === "CLOSED") {
+    if (patch.state != null && patch.state !== "CLOSED") {
+      return { claim: existing, rejectedRegression: true };
+    }
+    return {
+      claim: {
+        ...existing,
+        ...patch,
+        state: "CLOSED",
+        signalId: existing.signalId,
+        ownerUid: existing.ownerUid,
+        updatedAt: now
+      },
+      rejectedRegression: false
+    };
+  }
+  return {
+    claim: { ...existing, ...patch, updatedAt: now, signalId: existing.signalId, ownerUid: existing.ownerUid },
+    rejectedRegression: false
+  };
+}
+
 export async function updateGoldHunterSignalClaim(
   ownerUid: string,
   signalId: string,
@@ -166,14 +193,29 @@ export async function updateGoldHunterSignalClaim(
     const map = memMap(ownerUid);
     const cur = map.get(signalId);
     if (!cur) return null;
-    const next = { ...cur, ...patch, updatedAt: now, signalId, ownerUid };
-    map.set(signalId, next);
-    return next;
+    const merged = applyMonotonicClaimPatch(cur, patch, now);
+    if (merged.rejectedRegression) return merged.claim;
+    map.set(signalId, merged.claim);
+    return merged.claim;
   }
   const ref = col.doc(signalId);
-  await ref.set({ ...patch, updatedAt: now }, { merge: true });
-  const snap = await ref.get();
-  return snap.exists ? (snap.data() as GoldHunterSignalClaim) : null;
+  return col.firestore.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      tx.set(ref, { ...patch, updatedAt: now, signalId, ownerUid }, { merge: true });
+      return {
+        ...(patch as GoldHunterSignalClaim),
+        signalId,
+        ownerUid,
+        updatedAt: now
+      };
+    }
+    const existing = snap.data() as GoldHunterSignalClaim;
+    const merged = applyMonotonicClaimPatch(existing, patch, now);
+    if (merged.rejectedRegression) return merged.claim;
+    tx.set(ref, merged.claim, { merge: true });
+    return merged.claim;
+  });
 }
 
 export async function getGoldHunterSignalClaim(

@@ -9,8 +9,8 @@
   "scripts": {
     "postinstall": "node scripts/applyCTraderLayerProtoExtensions.mjs",
     "build": "rm -rf dist && tsc",
-    "test": "vitest run --exclude tests/integration/signalOutcome.firestore.emulator.test.ts --exclude tests/integration/shadowReplayAtomic.firestore.emulator.test.ts",
-    "test:firestore-emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 GCLOUD_PROJECT=goldmeta-signal-outcome-test GOOGLE_CLOUD_PROJECT=goldmeta-signal-outcome-test firebase emulators:exec --only firestore --project goldmeta-signal-outcome-test \"npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts tests/integration/shadowReplayAtomic.firestore.emulator.test.ts\"",
+    "test": "vitest run --exclude tests/integration/signalOutcome.firestore.emulator.test.ts --exclude tests/integration/shadowReplayAtomic.firestore.emulator.test.ts --exclude tests/integration/goldHunterClosedAtomic.firestore.emulator.test.ts",
+    "test:firestore-emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 GCLOUD_PROJECT=goldmeta-signal-outcome-test GOOGLE_CLOUD_PROJECT=goldmeta-signal-outcome-test firebase emulators:exec --only firestore --project goldmeta-signal-outcome-test \"npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts tests/integration/shadowReplayAtomic.firestore.emulator.test.ts tests/integration/goldHunterClosedAtomic.firestore.emulator.test.ts\"",
     "lint": "eslint src --ext .ts",
     "gate:micro-edge-core": "node scripts/microEdge/assertProtectedCoreUnchanged.mjs",
     "gate:micro-edge-imports": "node scripts/microEdge/assertMicroImportBoundary.mjs",
