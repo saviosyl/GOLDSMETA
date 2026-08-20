@@ -13,7 +13,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     term: "BUY",
     short: "GoldMeta sees conditions favouring a long (buy) bias.",
     detail:
-      "BUY means the analysis leans toward buying gold at the proposed entry. It is not an order. Keep AutoTrade OFF until you understand the plan."
+      "BUY means the analysis leans toward buying gold at the proposed entry. It is not an order. Live execution stays locked until you understand the plan."
   },
   {
     id: "sell",
@@ -107,9 +107,9 @@ export const GLOSSARY: GlossaryTerm[] = [
   {
     id: "autotrade",
     term: "AutoTrade",
-    short: "Automatic order placement — currently OFF and locked.",
+    short: "Gold Hunter is the AutoTrade UI. Live execution stays locked.",
     detail:
-      "AutoTrade stays OFF. Broker execution flags remain disabled. Do not enable automation until Demo readiness and separate approval are complete."
+      "Core AutoTrade and FAST AutoTrade were removed. Gold Hunter is the only AutoTrade UI. Live execution remains locked."
   },
   {
     id: "emergency-stop",

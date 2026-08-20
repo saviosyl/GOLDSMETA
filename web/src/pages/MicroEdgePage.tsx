@@ -191,7 +191,7 @@ export function MicroEdgePage() {
         <div>
           <h1 className="gm-page-title">Micro Edge</h1>
           <p className="gm-page-sub">
-            Isolated shadow research bot — not Core AutoTrade.
+            Isolated shadow research bot — not Gold Hunter AutoTrade.
           </p>
         </div>
         <div className="gm-micro-badges">

@@ -92,18 +92,14 @@ describe("registration access matrix", () => {
 
     const d = await request(app).get("/v1/decisions/latest").set(h);
     expect([200, 404]).toContain(d.status);
-    // Analysis AutoTrade status may be readable (shows OFF) but broker mutations stay locked.
+    // Core AutoTrade routes are gone; Gold Hunter remains staff-only.
     const at = await request(app).get("/v1/autotrade/status").set(h);
-    expect([200, 403]).toContain(at.status);
-    if (at.status === 200) {
-      expect(String(at.body.mode ?? at.body.displayStatus ?? "OFF").toUpperCase()).toMatch(
-        /OFF|LOCKED|SHADOW/
-      );
-    }
+    expect([403, 404]).toContain(at.status);
     await request(app).get("/v1/brokers/control-centre").set(h).expect(403);
     await request(app).post("/v1/tradingview/connections").set(h).expect(403);
     await request(app).post("/v1/ctrader/oauth/start").set(h).expect(403);
-    await request(app).post("/v1/autotrade/connect").set(h).expect(403);
+    await request(app).post("/v1/autotrade/connect").set(h).expect(404);
+    await request(app).get("/v1/gold-hunter/status").set(h).expect(403);
     await request(app).get("/v1/admin/users").set(h).expect(403);
   });
 
@@ -135,7 +131,10 @@ describe("registration access matrix", () => {
   it("USER_SUSPENDED cannot use protected APIs", async () => {
     const h = { "x-test-user-id": "suspended-1", "x-test-role": "USER_SUSPENDED" };
     await request(app).get("/v1/decisions/latest").set(h).expect(403);
-    await request(app).get("/v1/autotrade/status").set(h).expect(403);
+    const retired = await request(app).get("/v1/autotrade/status").set(h);
+    expect([403, 404]).toContain(retired.status);
+    const gh = await request(app).get("/v1/gold-hunter/status").set(h);
+    expect([403, 404]).toContain(gh.status);
   });
 
   it("ADMIN can list users but cannot modify OWNER or peer ADMIN", async () => {

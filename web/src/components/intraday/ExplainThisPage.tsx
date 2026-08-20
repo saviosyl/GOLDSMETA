@@ -4,7 +4,7 @@ import { PAGE_EXPLAINERS } from "../../lib/cockpitHelpers";
 const PLAN_EXPLAINERS: Array<{ title: string; body: string }> = [
   {
     title: "Today's Intraday Plan",
-    body: "The primary plan for this session — direction, trigger, invalidation and first target. It is analysis only; AutoTrade stays OFF."
+    body: "The primary plan for this session — direction, trigger, invalidation and first target. It is analysis only; Live execution stays locked."
   },
   {
     title: "Colour meanings",

@@ -20,11 +20,8 @@ import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
 import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
 import { lotsToOrderVolumeUnits } from "./volumeUnits";
 import { denyCTraderMutation } from "./mutationGuard";
-import { assertFastAutoTradeDemoOnly } from "./fastAutoTrade/demoLock";
-import { isFastAutoTradeV1Enabled } from "./fastAutoTrade/config";
-import { FAST_AUTOTRADE_STRATEGY_ID } from "./fastAutoTrade/types";
-import { relativeProtectionFromGeometry } from "./fastAutoTrade/newOrderPayload";
-import { FAST_CLIENT_ORDER_ID_MAX_LEN } from "./fastAutoTrade/clientOrderId";
+import { relativeProtectionFromGeometry } from "./demoTransport/newOrderPayload";
+import { FAST_CLIENT_ORDER_ID_MAX_LEN } from "./demoTransport/clientOrderId";
 
 export type SubmitDemoMarketOrderArgs = {
   ownerUid: string;
@@ -38,7 +35,7 @@ export type SubmitDemoMarketOrderArgs = {
   label?: string;
   /** Optional durable client order id (e.g. Gold Hunter). */
   clientOrderId?: string | null;
-  /** When FAST_AUTOTRADE_V1, Live accounts are blocked even if other gates slip. */
+  /** Optional strategy attribution. Never used to enable a second auto engine. */
   strategyId?: string | null;
 };
 
@@ -155,17 +152,6 @@ export async function submitDemoMarketOrder(
 
   const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
 
-  const strategyId =
-    args.strategyId ??
-    (isFastAutoTradeV1Enabled() ? FAST_AUTOTRADE_STRATEGY_ID : null);
-  if (strategyId === FAST_AUTOTRADE_STRATEGY_ID) {
-    assertFastAutoTradeDemoOnly({
-      strategyId,
-      accountIsLive: connection.selectedAccountIsLive,
-      environment: connection.environment
-    });
-  }
-
   if (connection.selectedAccountIsLive || connection.environment === "LIVE") {
     throw new Error("CTRADER_DEMO_ONLY_LIVE_ACCOUNT_FORBIDDEN");
   }
@@ -211,7 +197,7 @@ export async function submitDemoMarketOrder(
       `gm_${randomBytes(8).toString("hex")}`
     ).slice(0, FAST_CLIENT_ORDER_ID_MAX_LEN),
     label: (args.label ?? "GoldMeta Demo").slice(0, 100),
-    comment: (args.comment ?? "GoldMeta Demo AutoTrade").slice(0, 512)
+    comment: (args.comment ?? "GoldMeta Demo").slice(0, 512)
   };
 
   const client = createOpenApiClient();

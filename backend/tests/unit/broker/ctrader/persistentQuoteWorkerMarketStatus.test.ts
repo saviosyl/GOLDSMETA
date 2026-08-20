@@ -5,7 +5,6 @@ import {
   resolveCachedScheduleMarketStatus
 } from "../../../../src/services/broker/ctrader/persistentQuoteWorker";
 import type { ScheduleInterval } from "../../../../src/services/broker/ctrader/marketSchedule";
-import { evaluateQualificationCandidate } from "../../../../src/services/broker/ctrader/qualificationEvaluator";
 import { DEFAULT_LIVE_QUOTE_THRESHOLDS } from "../../../../src/services/broker/ctrader/liveQuote";
 
 /**
@@ -138,105 +137,26 @@ describe("persistent quote worker market-status lifecycle (no latch)", () => {
     expect(q.executable).toBe(false);
   });
 
-  it("G: spread protection remains unchanged (wide spread still fails gate)", () => {
+  it("G: wide spread is still visible on the authoritative quote", () => {
     const q = quoteAt(OPEN_AFTER_ROLLOVER, { bid: 4362.0, ask: 4365.5, ageMs: 50 });
     expect(q.marketStatus).toBe("OPEN");
     expect(q.spread).toBeGreaterThan(2);
-    const cand = evaluateQualificationCandidate({
-      direction: "SELL",
-      signalId: "spread-guard",
-      entry: 4362,
-      stopLoss: 4370,
-      takeProfit: 4340,
-      confidence: 85,
-      minConfidence: 80,
-      quoteBid: q.bid,
-      quoteAsk: q.ask,
-      quoteSpread: q.spread,
-      quoteStale: false,
-      marketStatus: q.marketStatus,
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: q.ageMs / 1000,
-      alreadyCountedSignal: false,
-      requireMarketOpen: true
-    });
-    expect(cand.failed).toContain("SPREAD_TOO_WIDE");
-    expect(cand.ok).toBe(false);
   });
 
-  it("H: Demo Auto qualification can pass market-open gate after CLOSED → OPEN", () => {
+  it("H: quote becomes executable after CLOSED → OPEN without a reconnect", () => {
     const closedQ = quoteAt(CLOSED_ROLLOVER);
-    const closedCand = evaluateQualificationCandidate({
-      direction: "SELL",
-      signalId: "after-rollover",
-      entry: 4362,
-      stopLoss: 4370,
-      takeProfit: 4340,
-      confidence: 85,
-      minConfidence: 80,
-      quoteBid: closedQ.bid,
-      quoteAsk: closedQ.ask,
-      quoteSpread: closedQ.spread,
-      quoteStale: false,
-      marketStatus: closedQ.marketStatus,
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: 0.05,
-      alreadyCountedSignal: false,
-      requireMarketOpen: true
-    });
-    expect(closedCand.failed).toContain("MARKET_NOT_OPEN");
+    expect(closedQ.executable).toBe(false);
+    expect(closedQ.marketStatus).toBe("CLOSED");
 
     const openQ = quoteAt(OPEN_AFTER_ROLLOVER, { ageMs: 50 });
-    const openCand = evaluateQualificationCandidate({
-      direction: "SELL",
-      signalId: "after-rollover",
-      entry: 4362,
-      stopLoss: 4370,
-      takeProfit: 4340,
-      confidence: 85,
-      minConfidence: 80,
-      quoteBid: openQ.bid,
-      quoteAsk: openQ.ask,
-      quoteSpread: openQ.spread,
-      quoteStale: false,
-      marketStatus: openQ.marketStatus,
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: openQ.ageMs / 1000,
-      alreadyCountedSignal: false,
-      requireMarketOpen: true
-    });
-    expect(openCand.failed).not.toContain("MARKET_NOT_OPEN");
-    expect(openCand.passed).toContain("MARKET_OPEN");
-    expect(openCand.ok).toBe(true);
+    expect(openQ.marketStatus).toBe("OPEN");
+    expect(openQ.executable).toBe(true);
   });
 
-  it("I: actual CLOSED session still blocks execution", () => {
+  it("I: actual CLOSED session still marks the quote non-executable", () => {
     const q = quoteAt(CLOSED_ROLLOVER);
     expect(q.executable).toBe(false);
-    const cand = evaluateQualificationCandidate({
-      direction: "BUY",
-      signalId: "closed-block",
-      entry: 4363,
-      stopLoss: 4355,
-      takeProfit: 4380,
-      confidence: 90,
-      minConfidence: 80,
-      quoteBid: q.bid,
-      quoteAsk: q.ask,
-      quoteSpread: q.spread,
-      quoteStale: false,
-      marketStatus: q.marketStatus,
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: 0.05,
-      alreadyCountedSignal: false,
-      requireMarketOpen: true
-    });
-    expect(cand.ok).toBe(false);
-    expect(cand.failed).toContain("MARKET_NOT_OPEN");
+    expect(q.marketStatus).toBe("CLOSED");
   });
 
   it("J: Live Auto remains hard-locked", () => {

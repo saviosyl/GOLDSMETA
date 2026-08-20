@@ -34,7 +34,6 @@ import { FriendlyErrorBanner } from "../../components/FriendlyErrorBanner";
 import { ExecutionDisabledBanner } from "../../components/ExecutionDisabledBanner";
 import { PremiumStatusChip } from "../../components/broker/PremiumStatusChip";
 import { StatusBadge } from "../../components/ui/primitives";
-import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 import { ApiError } from "../../types/models";
 
 const FALLBACK_WIZARD = [
@@ -87,7 +86,7 @@ const FALLBACK_WIZARD = [
     title: "Request Demo trading approval",
     status: "BLOCKED",
     detail:
-      "Demo Auto stays OFF in this preview until a separate approved activation."
+      "Gold Hunter is the AutoTrade UI. Live execution stays locked."
   }
 ];
 
@@ -128,11 +127,10 @@ type ActionUiState = {
 
 /**
  * Broker Control Centre — MANUAL / T212 / Pepperstone cTrader / IG parked.
- * AutoTrade remains OFF. No order submission. Demonstration data clearly labelled.
+ * Gold Hunter is the AutoTrade UI. No Core/FAST order submission from this page.
  */
 export function BrokerControlCentrePage() {
   const { api } = useAuth();
-  const atHeader = useAutoTradeHeaderStatus();
   const [searchParams, setSearchParams] = useSearchParams();
   const [centre, setCentre] = useState<BrokerControlCentreResponse | null>(null);
   const [demo, setDemo] = useState<CTraderDemonstrationBundle | null>(null);
@@ -837,21 +835,11 @@ export function BrokerControlCentrePage() {
         </div>
         <div className="gm-prem-chip-row">
           <PremiumStatusChip
-            tone={
-              atHeader.stateKey === "QUALIFYING" || atHeader.stateKey === "DEMO_AUTO"
-                ? "amber"
-                : atHeader.stateKey === "OFF"
-                  ? "off"
-                  : "navy"
-            }
+            tone="off"
             withDot
             testId="autotrade-off-badge"
           >
-            {atHeader.stateKey === "QUALIFYING"
-              ? "DEMO · QUALIFYING"
-              : atHeader.stateKey === "OFF"
-                ? "AutoTrade idle"
-                : atHeader.label}
+            Gold Hunter is the AutoTrade UI
           </PremiumStatusChip>
           <PremiumStatusChip
             tone="locked"
@@ -946,10 +934,10 @@ export function BrokerControlCentrePage() {
           <div className="gm-prem-sr-status gm-broker-primary-actions">
             <Link
               className="gm-btn gm-btn-primary"
-              to="/autotrade"
+              to="/gold-hunter"
               data-testid="broker-edit-autotrade-settings"
             >
-              Edit AutoTrade settings
+              Open Gold Hunter
             </Link>
           </div>
         </section>
@@ -993,15 +981,15 @@ export function BrokerControlCentrePage() {
             <li className="is-ok">✓ GoldMeta market data already available</li>
             <li className="is-ok">✓ GoldMeta chart already available</li>
             <li className="is-off">○ Personal broker account not connected</li>
-            <li className="is-off">○ Personal AutoTrade unavailable</li>
+            <li className="is-off">○ Gold Hunter is staff-only</li>
           </ul>
           <div className="gm-broker-actions gm-broker-primary-actions" style={{ marginTop: 12 }}>
             <Link
               className="gm-btn"
-              to="/autotrade"
+              to="/gold-hunter"
               data-testid="broker-edit-autotrade-settings"
             >
-              Edit AutoTrade settings
+              Open Gold Hunter
             </Link>
           </div>
         </section>
@@ -1096,11 +1084,11 @@ export function BrokerControlCentrePage() {
               </span>
               {showAccountManager ? "Hide accounts" : "Switch Account"}
             </button>
-            <Link className="gm-prem-action" to="/autotrade">
+            <Link className="gm-prem-action" to="/gold-hunter">
               <span className="gm-prem-action-ico" aria-hidden="true">
                 🛡
               </span>
-              Permissions / Risk
+              Gold Hunter
             </Link>
             <button
               type="button"
@@ -1795,64 +1783,6 @@ export function BrokerControlCentrePage() {
             </ul>
           </section>
 
-          <section aria-labelledby="qual-heading" data-testid="demo-qualification">
-            <h3 id="qual-heading">Demo trading approval</h3>
-            <p className="gm-meta">
-              Progress is visible only. Demo Auto remains OFF in this preview until a separate
-              approved activation (temporary lock — not a permanent product limitation).
-            </p>
-            {readiness?.qualification.progress ? (
-              <div className="gm-risk-box" data-testid="qualification-defaults">
-                <strong>Recommended qualification defaults</strong>
-                <p className="gm-meta">
-                  Source:{" "}
-                  {readiness.qualification.progress.sourceLabel ??
-                    "Recommended qualification defaults for future Demo Auto approval — not permanent user risk limits."}
-                </p>
-                <ul className="gm-meta">
-                  <li>
-                    Previews: {readiness.qualification.progress.completedPreviews} /{" "}
-                    {readiness.qualification.progress.requiredPreviews} (recommended default)
-                  </li>
-                  <li>
-                    Controlled trades:{" "}
-                    {readiness.qualification.progress.approvedControlledDemoTrades} /{" "}
-                    {readiness.qualification.progress.requiredTrades} (recommended default)
-                  </li>
-                  <li>
-                    Days since first trade:{" "}
-                    {readiness.qualification.progress.daysSinceFirstTrade ?? "—"} /{" "}
-                    {readiness.qualification.progress.requiredDays} (recommended default)
-                  </li>
-                </ul>
-                <p className="gm-meta" style={{ marginBottom: 0 }}>
-                  These thresholds are recommended qualification defaults for a future Demo Auto
-                  approval flow. They are not ordinary per-user risk settings. Changing them
-                  requires an explicit product decision.
-                </p>
-              </div>
-            ) : null}
-            <ul className="gm-qual-list">
-              {(readiness?.qualification.failed ?? []).slice(0, 8).map((g) => (
-                <li key={g}>
-                  <StatusBadge tone="warning">Pending</StatusBadge>{" "}
-                  {g
-                    .replace(/AUTH_HEALTHY/g, "Account security verified")
-                    .replace(/OAUTH_HEALTHY/g, "Pepperstone connection verified")
-                    .replace(/PREVIEWS_20/g, "Recommended preview count not yet met")
-                    .replace(/CONTROLLED_TRADES_5/g, "Recommended controlled-trade count not yet met")
-                    .replace(
-                      /SEVEN_DAYS_SINCE_FIRST_TRADE/g,
-                      "Recommended days-since-first-trade not yet met"
-                    )
-                    .replace(/_/g, " ")
-                    .toLowerCase()
-                    .replace(/^\w/, (c) => c.toUpperCase())}
-                </li>
-              ))}
-            </ul>
-          </section>
-
           <section aria-labelledby="emergency-heading">
             <h3 id="emergency-heading">Emergency STOP</h3>
             <p className="gm-meta">
@@ -1927,8 +1857,8 @@ export function BrokerControlCentrePage() {
           <p>
             Practice stays read-only. Order automation is not enabled from GoldMeta in this phase.
           </p>
-          <Link className="gm-btn" to="/autotrade">
-            Open practice view
+          <Link className="gm-btn" to="/gold-hunter">
+            Open Gold Hunter
           </Link>
         </section>
       ) : null}

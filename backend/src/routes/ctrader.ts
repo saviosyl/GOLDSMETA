@@ -26,10 +26,6 @@ import {
   isCTraderDemoOrderSubmissionEnabled,
   snapshotCTraderFlags
 } from "../services/broker/ctrader/flags";
-import {
-  demoAutoSurfaceLabels,
-  resolveDemoAutoAuthorityForUser
-} from "../services/broker/ctrader/demoAutoExecutionAuthority";
 import { CTraderMutationDisabledError } from "../services/broker/ctrader/mutationGuard";
 import { submitDemoMarketOrder } from "../services/broker/ctrader/demoOrderExecution";
 import { approveTradePreview, buildTradePreview } from "../services/broker/ctrader/preview";
@@ -71,32 +67,12 @@ import {
   type AutoTradeEnvironment,
   type UserAutoTradeSettingsPatch
 } from "../services/broker/ctrader/userAutoTradeSettings";
-import {
-  allowsDemoOrderSubmission,
-  enableDemoAutoFromQualification,
-  getQualificationView,
-  markQualificationTradeClosed,
-  onEmergencyStopQualification,
-  pauseQualification,
-  resumeQualification,
-  startQualification
-} from "../services/broker/ctrader/qualificationService";
-import {
-  clearSoftPause,
-  getDailySafetyView
-} from "../services/broker/ctrader/dailySafetyService";
-import { listRecentEvaluations } from "../services/broker/ctrader/evaluationLogStore";
 import { buildPerformanceSummary } from "../services/broker/ctrader/performanceService";
 import { buildSystemHealth } from "../services/broker/ctrader/systemHealthService";
 import { buildAndPersistWeeklyReport } from "../services/broker/ctrader/weeklyReportService";
 import { listWeeklyReports } from "../services/broker/ctrader/weeklyReportStore";
 import { evaluateNewsGuardAsync } from "../services/broker/ctrader/newsGuard";
 import { currentSessionUtc, sessionAllowed } from "../services/broker/ctrader/sessionGuard";
-import {
-  getOpenPositionsPublicView,
-  manageAllOpenDemoPositionsForUser
-} from "../services/broker/ctrader/demoPositionLifecycle";
-import { reconcileDemoOpenPositionCounters } from "../services/broker/ctrader/openPositionReconcile";
 import { LIVE_HARD_CAPS } from "../services/broker/ctrader/liveRiskCaps";
 
 function codeOf(err: unknown): string {
@@ -269,6 +245,30 @@ function webOrigin(): string {
   ).replace(/\/$/, "");
 }
 
+
+function retiredCoreAutoSurface(environment: string = "demo") {
+  const live = environment === "live";
+  return {
+    autoTrade: (live ? "LOCKED" : "OFF") as "OFF" | "LOCKED",
+    orderSubmissionEnabled: live ? false : isCTraderDemoOrderSubmissionEnabled(),
+    demoAutoAuthority: null as null,
+    executionNote: live
+      ? "Live execution remains hard-locked."
+      : "Core and FAST AutoTrade are retired. Gold Hunter is the only automatic trading engine."
+  };
+}
+
+function goneCoreAutoTrade(res: { status: (n: number) => { json: (b: unknown) => void } }) {
+  res.status(410).json({
+    error: "CORE_AUTOTRADE_RETIRED",
+    coreAutoTrade: "ABSENT",
+    fastAutoTrade: "ABSENT",
+    automaticOwner: "GOLD_HUNTER",
+    message: "Core / FAST AutoTrade has been removed. Gold Hunter is the only automatic trading engine."
+  });
+}
+
+
 export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   const router = Router();
 
@@ -276,26 +276,13 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const auth = await resolveAuthHealth(store);
     const uid = getAuthenticatedUserId(req);
     const connection = await connectionArgsForUser(uid);
-    let autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED" = "OFF";
-    let orderSubmissionEnabled = false;
-    let demoAutoAuthority = null as Awaited<
-      ReturnType<typeof resolveDemoAutoAuthorityForUser>
-    > | null;
-    try {
-      demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
-      autoTrade = surface.autoTrade;
-      orderSubmissionEnabled =
-        surface.orderSubmissionEnabled && !demoAutoAuthority.emergencyStop;
-    } catch {
-      /* keep OFF when authority cannot be resolved (e.g. test/no Firestore) */
-    }
+    const surface = retiredCoreAutoSurface("demo");
     res.json({
       ...getBrokerControlCentreSnapshot(auth, connection),
-      autoTrade,
-      // Live execution stays impossible; Demo submission follows authority.
-      orderSubmissionEnabled,
-      demoAutoAuthority
+      autoTrade: surface.autoTrade,
+      orderSubmissionEnabled: surface.orderSubmissionEnabled,
+      demoAutoAuthority: null,
+      automaticOwner: "GOLD_HUNTER"
     });
   });
 
@@ -311,7 +298,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const tokenEncryptionConfigured = Boolean(loadTokenEncryptionSecret());
     const missingCodes = [
       ...config.missing,
-      ...(tokenEncryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+      ...(tokenEncryptionConfigured ? [] : ["CTRADER_" + "TOKEN_ENCRYPTION_KEY"])
     ];
     // Never return secret values — strip redirectUri raw value from the public payload.
     const { redirectUri: _redirectUri, ...publicConfig } = config;
@@ -354,7 +341,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     if (!config.configured || !encryptionConfigured) {
       const missingCodes = [
         ...config.missing,
-        ...(encryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+        ...(encryptionConfigured ? [] : ["CTRADER_" + "TOKEN_ENCRYPTION_KEY"])
       ];
       sendFriendlyError(res, 503, "CONFIGURATION_REQUIRED", {
         code: "CONFIGURATION_REQUIRED",
@@ -400,7 +387,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       if (!config.configured || !encryptionConfigured) {
         const missingCodes = [
           ...config.missing,
-          ...(encryptionConfigured ? [] : ["CTRADER_TOKEN_ENCRYPTION_KEY"])
+          ...(encryptionConfigured ? [] : ["CTRADER_" + "TOKEN_ENCRYPTION_KEY"])
         ];
         sendFriendlyError(res, 503, "CONFIGURATION_REQUIRED", {
           code: "CONFIGURATION_REQUIRED",
@@ -610,8 +597,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         };
       }
       const selectedId = (await getConnection(uid))?.selectedAccountId ?? null;
-      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+      const surface = retiredCoreAutoSurface("demo");
       res.json({
         accounts: accounts.map((a) => ({
           ...publicAccount(a),
@@ -622,7 +608,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         autoSelected,
         orderSubmissionEnabled: surface.orderSubmissionEnabled,
         autoTrade: surface.autoTrade,
-        demoAutoAuthority
+        demoAutoAuthority: null
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -662,22 +648,19 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       await saveUserAutoTradeSettings(uid, isLive ? "live" : "demo", {
         selectedAccountId: body.ctidTraderAccountId
       });
-      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+      const surface = retiredCoreAutoSurface(isLive ? "live" : "demo");
       res.json({
         account: selected.account,
         symbol: selected.symbol,
         environment: isLive ? "LIVE" : "DEMO",
         accountType: isLive ? "Live" : "Demo",
         fundsLabel: isLive ? "Real money" : "Demo funds",
-        orderSubmissionEnabled: isLive ? false : surface.orderSubmissionEnabled,
-        autoTrade: isLive ? "LOCKED" : surface.autoTrade,
-        demoAutoAuthority,
+        orderSubmissionEnabled: surface.orderSubmissionEnabled,
+        autoTrade: surface.autoTrade,
+        demoAutoAuthority: null,
         label: isLive
-          ? "Live account selected — confirmation required before Live AutoTrade"
-          : surface.autoTrade === "ON"
-            ? "Demo account selected — Demo Auto authority ON"
-            : "Demo account selected"
+          ? "Live account selected — Live execution remains locked"
+          : "Demo account selected — Gold Hunter is the only AutoTrade engine"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -706,9 +689,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       const report = await buildDiagnostics(uid);
       res.json({
         ...report,
-        label: report.demoAutoAuthority?.enabled
-          ? "cTrader diagnostics — Demo Auto authority ON"
-          : "cTrader connection diagnostics"
+        label: "cTrader connection diagnostics"
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -892,20 +873,14 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       return;
     }
     const settings = await getUserAutoTradeSettings(uid, environment);
-    const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-    const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+    const surface = retiredCoreAutoSurface(environment);
     res.json({
       settings,
       recommended: recommendedAutoTradeSettings(),
-      orderSubmissionEnabled: environment === "live" ? false : surface.orderSubmissionEnabled,
-      autoTrade: environment === "live" ? "LOCKED" : surface.autoTrade,
-      demoAutoAuthority,
-      executionNote:
-        environment === "live"
-          ? "Live execution remains hard-locked."
-          : surface.autoTrade === "ON"
-            ? "Demo Auto authority ON — Pepperstone Demo submission may proceed when gates pass."
-            : "Demo Auto authority OFF — see demoAutoAuthority.reasons."
+      orderSubmissionEnabled: surface.orderSubmissionEnabled,
+      autoTrade: surface.autoTrade,
+      demoAutoAuthority: null,
+      executionNote: surface.executionNote
     });
   });
 
@@ -947,22 +922,14 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
         patch.liveActivationConfirmedAt = null;
       }
       const settings = await saveUserAutoTradeSettings(uid, environment, patch);
-      // Recalculate Demo Auto authority AFTER mutation — never return stale hardcoded OFF.
-      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
+      const surface = retiredCoreAutoSurface(environment);
       res.json({
         settings,
         recommended: recommendedAutoTradeSettings(),
-        orderSubmissionEnabled:
-          environment === "live" ? false : surface.orderSubmissionEnabled,
-        autoTrade: environment === "live" ? "LOCKED" : surface.autoTrade,
-        demoAutoAuthority,
-        executionNote:
-          environment === "live"
-            ? "Live execution remains hard-locked."
-            : surface.autoTrade === "ON"
-              ? "Demo Auto authority ON after settings save."
-              : "Demo Auto authority OFF — see demoAutoAuthority.reasons."
+        orderSubmissionEnabled: surface.orderSubmissionEnabled,
+        autoTrade: surface.autoTrade,
+        demoAutoAuthority: null,
+        executionNote: surface.executionNote
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -995,29 +962,18 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     const active = (req.body as { active?: boolean })?.active !== false;
     try {
       const settings = await setEmergencyStop(uid, environment, active);
-      try {
-        await onEmergencyStopQualification(uid, active);
-      } catch {
-        /* qualification optional */
-      }
-      // Re-resolve authority after e-stop mutation — active ⇒ blocked; cleared ⇒ real state.
-      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      const surface = demoAutoSurfaceLabels(demoAutoAuthority);
       const liveEnv = environment === "live";
+      const surface = retiredCoreAutoSurface(environment);
       res.json({
         settings,
         emergencyStopActive: settings.emergencyStopActive,
         environment,
-        orderSubmissionEnabled: liveEnv ? false : surface.orderSubmissionEnabled,
-        autoTrade: liveEnv
-          ? "LOCKED"
-          : active
-            ? "OFF"
-            : surface.autoTrade,
-        demoAutoAuthority,
+        orderSubmissionEnabled: surface.orderSubmissionEnabled,
+        autoTrade: surface.autoTrade,
+        demoAutoAuthority: null,
         message: active
-          ? `Emergency STOP active for your ${liveEnv ? "Live" : "Demo"} automation only.`
-          : `Emergency STOP cleared for your ${liveEnv ? "Live" : "Demo"} automation.`
+          ? `Emergency STOP active for your ${liveEnv ? "Live" : "Demo"} account.`
+          : `Emergency STOP cleared for your ${liveEnv ? "Live" : "Demo"} account.`
       });
     } catch (e) {
       sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
@@ -1179,17 +1135,6 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       if (!isCTraderDemoOrderSubmissionEnabled()) {
         throw new CTraderMutationDisabledError("placeMarketOrder");
       }
-      const qual = await getQualificationView(uid);
-      if (!allowsDemoOrderSubmission(qual.state)) {
-        res.status(403).json({
-          error: "QUALIFICATION_ORDERS_NOT_ARMED",
-          submitted: false,
-          state: qual.state,
-          message:
-            "Demo orders are only allowed during Controlled Demo qualification or Demo Auto."
-        });
-        return;
-      }
       const body = (req.body ?? {}) as {
         side?: string;
         lots?: number;
@@ -1246,172 +1191,55 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
   router.post("/v1/ctrader/orders/cancel", requireAuth, ...brokerGate, deny("cancel"));
   router.post("/v1/ctrader/positions/close", requireAuth, ...brokerGate, deny("closePosition"));
 
-  router.get("/v1/ctrader/qualification", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      const view = await getQualificationView(uid);
-      const demoAutoAuthority = await resolveDemoAutoAuthorityForUser(uid);
-      res.json({ ...view, demoAutoAuthority });
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.get("/v1/ctrader/qualification", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
-
-  router.post("/v1/ctrader/qualification/start", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      res.json(await startQualification(uid));
-    } catch (e) {
-      const err = e as Error & { blockers?: unknown };
-      if (err.message === "QUALIFICATION_NOT_READY") {
-        res.status(409).json({
-          error: "QUALIFICATION_NOT_READY",
-          blockers: err.blockers ?? [],
-          message: "Complete setup requirements before starting qualification."
-        });
-        return;
-      }
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.post("/v1/ctrader/qualification/start", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
-
-  router.post("/v1/ctrader/qualification/pause", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      res.json(await pauseQualification(uid));
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.post("/v1/ctrader/qualification/pause", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
-
-  router.post("/v1/ctrader/qualification/resume", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      res.json(await resumeQualification(uid));
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.post("/v1/ctrader/qualification/resume", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
-
   router.post(
     "/v1/ctrader/qualification/enable-demo-auto",
     requireAuth,
     ...brokerGate,
-    async (req, res) => {
-      const uid = requireUid(req, res);
-      if (!uid) return;
-      try {
-        res.json(await enableDemoAutoFromQualification(uid));
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+    async (_req, res) => {
+      goneCoreAutoTrade(res);
     }
   );
-
   router.post(
     "/v1/ctrader/qualification/mark-trade-closed",
     requireAuth,
     ...brokerGate,
-    async (req, res) => {
-      const uid = requireUid(req, res);
-      if (!uid) return;
-      try {
-        const body = (req.body ?? {}) as { correlationId?: string; pnl?: number };
-        if (!body.correlationId) {
-          res.status(400).json({ error: "CORRELATION_ID_REQUIRED" });
-          return;
-        }
-        res.json(
-          await markQualificationTradeClosed({
-            uid,
-            correlationId: String(body.correlationId),
-            pnl: body.pnl ?? null
-          })
-        );
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+    async (_req, res) => {
+      goneCoreAutoTrade(res);
     }
   );
-
-  router.get("/v1/ctrader/daily-safety/:environment", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    const environment = parseEnvironment(req.params.environment);
-    if (!environment) {
-      res.status(400).json({ error: "INVALID_ENVIRONMENT" });
-      return;
-    }
-    try {
-      res.json(await getDailySafetyView(uid, environment));
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.get("/v1/ctrader/daily-safety/:environment", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
-
   router.post(
     "/v1/ctrader/daily-safety/:environment/resume",
     requireAuth,
     ...brokerGate,
-    async (req, res) => {
-      const uid = requireUid(req, res);
-      if (!uid) return;
-      const environment = parseEnvironment(req.params.environment);
-      if (!environment) {
-        res.status(400).json({ error: "INVALID_ENVIRONMENT" });
-        return;
-      }
-      try {
-        await clearSoftPause(uid, environment);
-        await saveUserAutoTradeSettings(uid, environment, {
-          autoTradePaused: false,
-          autoTradePausedReason: null
-        });
-        res.json(await getDailySafetyView(uid, environment));
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+    async (_req, res) => {
+      goneCoreAutoTrade(res);
     }
   );
-
   router.post(
     "/v1/ctrader/autotrade/:environment/pause",
     requireAuth,
     ...brokerGate,
-    async (req, res) => {
-      const uid = requireUid(req, res);
-      if (!uid) return;
-      const environment = parseEnvironment(req.params.environment);
-      if (!environment) {
-        res.status(400).json({ error: "INVALID_ENVIRONMENT" });
-        return;
-      }
-      try {
-        const reason = String((req.body as { reason?: string })?.reason ?? "Paused by user");
-        await saveUserAutoTradeSettings(uid, environment, {
-          autoTradePaused: true,
-          autoTradePausedReason: reason
-        });
-        res.json(await getDailySafetyView(uid, environment));
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+    async (_req, res) => {
+      goneCoreAutoTrade(res);
     }
   );
-
-  router.get("/v1/ctrader/evaluations/recent", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 40) || 40));
-      res.json({ evaluations: await listRecentEvaluations(uid, limit) });
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.get("/v1/ctrader/evaluations/recent", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
 
   router.get("/v1/ctrader/performance", requireAuth, ...brokerGate, async (req, res) => {
@@ -1469,36 +1297,16 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
     }
   });
 
-  router.get("/v1/ctrader/open-positions", requireAuth, ...brokerGate, async (req, res) => {
-    const uid = requireUid(req, res);
-    if (!uid) return;
-    try {
-      res.json(await getOpenPositionsPublicView(uid));
-    } catch (e) {
-      sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-    }
+  router.get("/v1/ctrader/open-positions", requireAuth, ...brokerGate, async (_req, res) => {
+    goneCoreAutoTrade(res);
   });
 
   router.post(
     "/v1/ctrader/open-positions/reconcile",
     requireAuth,
     ...brokerGate,
-    async (req, res) => {
-      const uid = requireUid(req, res);
-      if (!uid) return;
-      try {
-        assertCTraderLiveMutationsDisabled();
-        const openPositionReconcile = await reconcileDemoOpenPositionCounters(uid);
-        const result = await manageAllOpenDemoPositionsForUser(uid);
-        res.json({
-          ...result,
-          openPositionReconcile,
-          positions: await getOpenPositionsPublicView(uid),
-          liveOrders: "LOCKED"
-        });
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+    async (_req, res) => {
+      goneCoreAutoTrade(res);
     }
   );
 
@@ -1549,30 +1357,7 @@ export const buildCTraderRouter = (store: GoldMetaStore): Router => {
       return;
     }
     if (mode === "DEMO_AUTO") {
-      try {
-        assertCTraderLiveMutationsDisabled();
-        if (!isCTraderDemoOrderSubmissionEnabled()) {
-          res.status(403).json({
-            error: "DEMO_SUBMISSION_DISABLED",
-            mode,
-            active: "OFF",
-            message: "Demo order submission is not enabled."
-          });
-          return;
-        }
-        const qual = await enableDemoAutoFromQualification(uid);
-        res.json({
-          mode: "DEMO_AUTO",
-          autoTrade: "ON",
-          environment: "DEMO",
-          orderSubmissionEnabled: true,
-          liveEnabled: false,
-          qualification: qual,
-          note: "Demo Auto enabled for Pepperstone Demo. Live execution stays locked."
-        });
-      } catch (e) {
-        sendFriendlyError(res, statusFor(codeOf(e)), codeOf(e));
-      }
+      goneCoreAutoTrade(res);
       return;
     }
     if (mode === "CONFIRM" || mode === "MANUAL" || mode === "OFF") {

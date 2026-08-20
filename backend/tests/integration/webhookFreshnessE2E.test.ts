@@ -60,13 +60,16 @@ describe("webhook freshness E2E (local)", () => {
       .expect(200);
     expect(outcomes.body).toHaveProperty("items");
 
-    const autotrade = await request(app)
+    const retired = await request(app)
       .get("/v1/autotrade/status")
+      .set("x-test-user-id", "live-user");
+    expect(retired.status).toBe(404);
+    const ctrader = await request(app)
+      .get("/v1/ctrader/status")
       .set("x-test-user-id", "live-user")
       .expect(200);
-    expect(autotrade.body.status.ordersEnabled).toBe(false);
-    expect(autotrade.body.status.demoOrderSubmissionEnabled).toBe(false);
-    expect(autotrade.body.status.liveExecutionFeatureEnabled).toBe(false);
+    expect(ctrader.body.autoTrade).toBe("OFF");
+    expect(ctrader.body.liveEnabled).toBe(false);
 
     // Stale sentAt still fails
     const stale = stalePayload(staleFixture);

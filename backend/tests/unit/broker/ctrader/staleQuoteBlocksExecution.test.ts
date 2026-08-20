@@ -1,56 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { evaluateQualificationCandidate } from "../../../../src/services/broker/ctrader/qualificationEvaluator";
 import { isCTraderLiveEnabled } from "../../../../src/services/broker/ctrader/flags";
+import {
+  evaluateGoldHunterOrderGates,
+  type GoldHunterGateInput
+} from "../../../../src/services/goldHunterAdmin/orderGates";
+import { GH_ADMIN_DEFAULT_CONFIG } from "../../../../src/services/goldHunterAdmin/types";
 
-describe("E: stale quote blocks AutoTrade execution", () => {
-  it("quote age above maxQuoteAgeSeconds=15 fails QUOTE_AGE gate", () => {
-    const result = evaluateQualificationCandidate({
-      direction: "BUY",
-      signalId: "sig_stale_test",
-      entry: 4350,
-      stopLoss: 4340,
-      takeProfit: 4370,
-      confidence: 90,
-      minConfidence: 80,
-      minRiskReward: 1.5,
-      quoteBid: 4356.75,
-      quoteAsk: 4356.85,
-      quoteSpread: 0.1,
-      quoteStale: false,
-      marketStatus: "OPEN",
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: 180,
-      alreadyCountedSignal: false
-    });
+function gate(over: Partial<GoldHunterGateInput> = {}) {
+  return evaluateGoldHunterOrderGates({
+    config: {
+      ...GH_ADMIN_DEFAULT_CONFIG,
+      demoAutoTradeEnabled: true,
+      allocatedCapitalEur: 1000,
+      riskPerTradePct: 1,
+      dailyLossLimitPct: 3,
+      maxOpenTrades: 1
+    },
+    brokerEnvironment: "DEMO",
+    brokerConnected: true,
+    accountSnapshotValid: true,
+    marketOpen: true,
+    feedFresh: true,
+    depthValid: true,
+    spreadOk: true,
+    capitalOk: true,
+    dailyLossOk: true,
+    openTradeCount: 0,
+    signalPresent: true,
+    signalConsumed: false,
+    isAdmin: true,
+    ...over
+  });
+}
+
+describe("stale quote blocks Gold Hunter execution", () => {
+  it("feedFresh=false fails WAIT — FEED STALE", () => {
+    const result = gate({ feedFresh: false });
     expect(result.ok).toBe(false);
-    expect(result.failed).toContain("QUOTE_AGE");
+    expect(result.blockers).toContain("WAIT — FEED STALE");
   });
 
-  it("quoteStale flag fails QUOTE_STALE gate", () => {
-    const result = evaluateQualificationCandidate({
-      direction: "SELL",
-      signalId: "sig_stale_flag",
-      entry: 4350,
-      stopLoss: 4360,
-      takeProfit: 4330,
-      confidence: 90,
-      minConfidence: 80,
-      quoteBid: 4356.75,
-      quoteAsk: 4356.85,
-      quoteSpread: 0.1,
-      quoteStale: true,
-      marketStatus: "OPEN",
-      maxSpread: 2,
-      maxQuoteAgeSeconds: 15,
-      quoteAgeSeconds: 2,
-      alreadyCountedSignal: false
-    });
+  it("spreadOk=false fails WAIT — SPREAD TOO WIDE", () => {
+    const result = gate({ spreadOk: false });
     expect(result.ok).toBe(false);
-    expect(result.failed).toContain("QUOTE_STALE");
+    expect(result.blockers).toContain("WAIT — SPREAD TOO WIDE");
   });
 
-  it("G: Live remains locked", () => {
+  it("Live remains locked", () => {
     expect(isCTraderLiveEnabled()).toBe(false);
   });
 });

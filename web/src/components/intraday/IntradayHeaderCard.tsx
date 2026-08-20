@@ -101,7 +101,7 @@ export function IntradayHeaderCard({
           </span>
         </p>
         <p className="gm-market-bar-autotrade" data-testid="intraday-autotrade-off">
-          AutoTrade OFF
+          Live trading locked
         </p>
       </div>
       <p className="gm-sr-only" data-testid="intraday-header-meta">

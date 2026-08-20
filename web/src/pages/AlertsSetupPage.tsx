@@ -267,7 +267,7 @@ export function AlertsSetupPage() {
           <li>GoldMeta watches for a valid plan.</li>
           <li>You can enable alerts for plan-ready and confirmation events.</li>
           <li>When a plan is ready, review entry, stop and targets yourself.</li>
-          <li>AutoTrade only places Demo orders when qualification and safety allow it.</li>
+          <li>Gold Hunter is the AutoTrade UI. Live execution remains locked.</li>
         </ul>
       </section>
 

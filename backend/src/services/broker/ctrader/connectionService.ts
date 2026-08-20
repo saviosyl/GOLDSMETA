@@ -1,14 +1,10 @@
 /**
  * Orchestrates cTrader Demo connection lifecycle + diagnostics.
- * Live order submission stays locked. Demo Auto follows demoAutoExecutionAuthority.
+ * Live order submission stays locked. Automatic trading is Gold Hunter only.
  */
 
 import { loadCTraderConfig } from "./config";
-import {
-  demoAutoSurfaceLabels,
-  resolveDemoAutoAuthorityForUser,
-  type DemoAutoAuthorityApi
-} from "./demoAutoExecutionAuthority";
+import { isCTraderDemoOrderSubmissionEnabled } from "./flags";
 import {
   consumeOAuthStateAtomic,
   disconnectConnection,
@@ -93,10 +89,10 @@ export type DiagnosticsReport = {
   marginEligibility: "OK" | "UNKNOWN" | "INSUFFICIENT";
   marketStatusAvailable: boolean;
   tradingSafelyLocked: true;
-  autoTrade: "ON" | "OFF" | "PAUSED" | "LOCKED";
+  autoTrade: "OFF";
   environment: "DEMO" | "LIVE";
   orderSubmissionEnabled: boolean;
-  demoAutoAuthority?: DemoAutoAuthorityApi;
+  demoAutoAuthority?: null;
   connection: {
     accountMasked: string | null;
     brokerName: string | null;
@@ -749,17 +745,10 @@ export async function buildDiagnostics(
     }
   }
 
-  let demoAutoAuthority: DemoAutoAuthorityApi | undefined;
-  let autoTrade: DiagnosticsReport["autoTrade"] = "OFF";
-  let orderSubmissionEnabled = false;
-  try {
-    demoAutoAuthority = await resolveDemoAutoAuthorityForUser(ownerUid);
-    const surface = demoAutoSurfaceLabels(demoAutoAuthority);
-    autoTrade = surface.autoTrade;
-    orderSubmissionEnabled = surface.orderSubmissionEnabled;
-  } catch {
-    /* keep OFF defaults */
-  }
+  const autoTrade: DiagnosticsReport["autoTrade"] = "OFF";
+  const orderSubmissionEnabled =
+    isCTraderDemoOrderSubmissionEnabled() &&
+    Boolean(connection?.selectedAccountId && !connection.selectedAccountIsLive);
 
   return {
     credentialsConfigured: config.configured && Boolean(loadTokenEncryptionSecret()),
@@ -786,7 +775,7 @@ export async function buildDiagnostics(
     autoTrade,
     environment: connection?.environment === "LIVE" ? "LIVE" : "DEMO",
     orderSubmissionEnabled,
-    demoAutoAuthority,
+    demoAutoAuthority: null,
     connection: {
       accountMasked: connection?.selectedAccountMasked ?? null,
       brokerName: connection?.brokerName ?? null,

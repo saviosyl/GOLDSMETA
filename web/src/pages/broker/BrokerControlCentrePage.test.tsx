@@ -51,16 +51,6 @@ const {
   };
 });
 
-vi.mock("../../hooks/useAutoTradeHeaderStatus", () => ({
-  useAutoTradeHeaderStatus: () => ({
-    label: "OFF",
-    environment: "OFF",
-    stateKey: "OFF",
-    tone: "neutral",
-    nextAction: null
-  })
-}));
-
 vi.mock("../../lib/auth", () => ({
   useAuth: () => mockAuth
 }));
@@ -272,20 +262,20 @@ describe("BrokerControlCentrePage", () => {
     vi.useRealTimers();
   });
 
-  it("renders broker options with AutoTrade OFF and no-order badges", async () => {
+  it("renders broker options with Gold Hunter AutoTrade badge and no-order badges", async () => {
     renderBroker();
     await waitFor(() => {
       expect(screen.getByTestId("broker-control-centre")).toBeInTheDocument();
     });
     expect(screen.getByTestId("autotrade-off-badge")).toHaveTextContent(
-      /AutoTrade idle|QUALIFYING|OFF|DEMO/i
+      /Gold Hunter is the AutoTrade UI/i
     );
     expect(screen.getByTestId("no-order-badge")).toHaveTextContent(
       /Live orders locked|Order submission disabled/i
     );
     expect(screen.getByTestId("broker-edit-autotrade-settings")).toHaveAttribute(
       "href",
-      "/autotrade"
+      "/gold-hunter"
     );
     expect(screen.getByTestId("broker-card-pepperstone_ctrader")).toBeInTheDocument();
     expect(screen.getByTestId("broker-top-status")).toBeInTheDocument();

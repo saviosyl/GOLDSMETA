@@ -14,13 +14,11 @@ import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import type { Express } from "express";
 import { createApiApp } from "./apiApp";
-import { createAutoTradeService } from "./services/autoTrade/runtime";
-import {
-  LIVE_EXECUTION_FEATURE_FLAG,
-  T212_LIVE_EXECUTION_FEATURE_FLAG,
-  T212_PAPER_ORDER_SUBMISSION_ENABLED
-} from "./services/autoTrade/types";
-import { redactSecrets } from "./services/autoTrade/redactSecrets";
+import { redactSecrets } from "./services/security/redactSecrets";
+
+const LIVE_EXECUTION_FEATURE_FLAG = false;
+const T212_LIVE_EXECUTION_FEATURE_FLAG = false;
+const T212_PAPER_ORDER_SUBMISSION_ENABLED = false;
 
 const t212DemoApiKey = defineSecret("T212_DEMO_API_KEY");
 const t212DemoApiSecret = defineSecret("T212_DEMO_API_SECRET");
@@ -48,10 +46,7 @@ let previewApp: Express | null = null;
 function getT212PreviewApp(): Express {
   if (!previewApp) {
     applyT212PreviewRuntimeEnv();
-    // IG adapter factory stays on "fake" — T212 uses dedicated credential loader/client.
-    // Never loads IG Demo secrets in this preview.
-    const autoTradeService = createAutoTradeService({ brokerMode: "fake" });
-    previewApp = createApiApp({ autoTradeService });
+    previewApp = createApiApp();
   }
   return previewApp;
 }

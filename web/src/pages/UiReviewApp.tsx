@@ -1,4 +1,4 @@
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useMemo } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { OverviewPage } from "./OverviewPage";
@@ -14,7 +14,6 @@ import { V4ResearchPage } from "./V4ResearchPage";
 import { BrandConceptsPage } from "./BrandConceptsPage";
 import { HistoryPage } from "./HistoryPage";
 import { SignalPerformancePage } from "./SignalPerformancePage";
-import { AutoTradePage } from "./AutoTradePage";
 import { BrokerControlCentrePage } from "./broker/BrokerControlCentrePage";
 import { HelpPage } from "./HelpPage";
 import { LearnPage } from "./LearnPage";
@@ -25,7 +24,6 @@ import type { AuthContextValue } from "../lib/auth";
 import { ReviewAuthProvider } from "../lib/auth";
 import { QuoteProvider } from "../lib/quoteContext";
 import { buildSignalOutcomeReviewFixtures } from "../lib/signalOutcomeReviewFixtures";
-import { buildReviewAutoTradeStatus, type AutoTradeStatus } from "../lib/autoTradeTypes";
 import { ApiError } from "../types/models";
 import { chartExampleIntradayPlanFixture } from "../fixtures/intradayPlanFixture";
 import { getIssue50PreviewCase } from "../preview/issue50PreviewMatrix";
@@ -64,24 +62,6 @@ function buildReviewApi() {
       : "";
   const issue50Case = issue50Id ? getIssue50PreviewCase(issue50Id) : undefined;
   const soFixtures = signalOutcomes ? buildSignalOutcomeReviewFixtures() : null;
-
-  let autoTrade = buildReviewAutoTradeStatus({
-    activity: [
-      {
-        id: "stale-reconnect",
-        at: "2026-08-01T00:00:00.000Z",
-        message: "Broker set to PEPPERSTONE_CTRADER. AutoTrade OFF — reconnect required.",
-        level: "warn"
-      },
-      {
-        id: "review-1",
-        at: new Date().toISOString(),
-        message:
-          "Broker & AutoTrade dashboard ready. Pepperstone cTrader Demo selected. AutoTrade OFF.",
-        level: "info"
-      }
-    ]
-  });
 
   const nowIso = new Date().toISOString();
   const decision = {
@@ -804,10 +784,10 @@ function buildReviewApi() {
         id: "review-user-wh",
         status: "ACTIVE",
         webhookURL:
-          "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh"
+          "https://us-central1-example.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh"
       },
       webhookUrl:
-        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+        "https://us-central1-example.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
       secret: "once-secret-review"
     }),
     revokeTradingViewConnection: async () => ({}),
@@ -867,183 +847,6 @@ function buildReviewApi() {
           },
     signalOutcomeByDecision: async (id: string) =>
       soFixtures?.outcomes.find((o) => o.snapshot.decisionId === id) ?? null,
-    autoTradeStatus: async (): Promise<AutoTradeStatus> => ({ ...autoTrade, activity: [...autoTrade.activity] }),
-    autoTradeSetMode: async (mode: AutoTradeStatus["mode"], opts: {
-      liveConfirmationPhrase?: string;
-      riskAcknowledged?: boolean;
-      accountVerified?: boolean;
-    } = {}) => {
-      if (mode === "IG_LIVE_AUTO") {
-        if (!autoTrade.liveExecutionFeatureEnabled) {
-          throw new ApiError(400, "LIVE_FEATURE_DISABLED", "LIVE execution is disabled by server feature flag for this release.");
-        }
-        if (opts.liveConfirmationPhrase !== "ENABLE LIVE AUTOTRADE") {
-          throw new ApiError(400, "LIVE_CONFIRMATION_REQUIRED", "Type exactly: ENABLE LIVE AUTOTRADE");
-        }
-      }
-      autoTrade = {
-        ...autoTrade,
-        mode,
-        displayStatus:
-          mode === "OFF"
-            ? "OFF"
-            : mode === "SHADOW"
-              ? "SHADOW"
-              : mode === "IG_DEMO_AUTO"
-                ? "DEMO"
-                : "LIVE",
-        locked: false,
-        activity: [
-          {
-            id: `m-${Date.now()}`,
-            at: new Date().toISOString(),
-            message: `Mode set to ${mode}.`,
-            level: "success"
-          },
-          ...autoTrade.activity
-        ]
-      };
-      return { ...autoTrade };
-    },
-    autoTradeConnect: async (environment: "DEMO" | "LIVE") => {
-      autoTrade = {
-        ...autoTrade,
-        connection: {
-          ...autoTrade.connection,
-          connected: true,
-          environment,
-          environmentLabel: "IG DEMO — READ ONLY",
-          connectionState: "Connected",
-          accountIdMasked: environment === "LIVE" ? "****9988" : "****1234",
-          accountName: environment === "LIVE" ? "Live CFD" : "Demo CFD",
-          balance: 10000,
-          available: 9500,
-          marginUsed: 120,
-          marketName: "Spot Gold",
-          marketEpic: "CS.D.USCGC.TODAY.IP",
-          marketStatus: "TRADEABLE",
-          bid: 2385.2,
-          ask: 2385.5,
-          spread: 0.3,
-          minDealSize: 0.1,
-          sizeIncrement: 0.1,
-          valuePerPoint: 1,
-          minNormalStopDistance: 0.3,
-          minGuaranteedStopDistance: 0.5,
-          guaranteedStopAvailable: true,
-          lastHeartbeatAt: new Date().toISOString()
-        },
-        proposedEpic: "CS.D.USCGC.TODAY.IP",
-        goldCandidates: [
-          {
-            epic: "CS.D.USCGC.TODAY.IP",
-            instrumentName: "Spot Gold",
-            instrumentType: "CURRENCIES",
-            expiry: "-",
-            marketStatus: "TRADEABLE",
-            currencyCode: "EUR",
-            bid: 2385.2,
-            offer: 2385.5,
-            proposedPrimary: true,
-            reason: "Review mock Spot Gold"
-          }
-        ],
-        activity: [
-          {
-            id: `c-${Date.now()}`,
-            at: new Date().toISOString(),
-            message: `Connected to IG DEMO — READ ONLY (scaffold / review).`,
-            level: "success"
-          },
-          ...autoTrade.activity
-        ]
-      };
-      return { ...autoTrade };
-    },
-    autoTradeDisconnect: async () => {
-      autoTrade = {
-        ...autoTrade,
-        connection: {
-          ...autoTrade.connection,
-          connected: false,
-          connectionState: "Disconnected",
-          lastHeartbeatAt: null
-        }
-      };
-      return { ...autoTrade };
-    },
-    autoTradeEmergencyStop: async () => {
-      autoTrade = {
-        ...autoTrade,
-        mode: "OFF",
-        displayStatus: "LOCKED",
-        locked: true,
-        lockReason: "emergency_stop",
-        emergencyStopActive: true,
-        activity: [
-          {
-            id: `s-${Date.now()}`,
-            at: new Date().toISOString(),
-            message: "EMERGENCY STOP — AutoTrade locked and set to OFF.",
-            level: "error"
-          },
-          ...autoTrade.activity
-        ]
-      };
-      return { ...autoTrade };
-    },
-    autoTradeUnlock: async () => {
-      autoTrade = {
-        ...autoTrade,
-        mode: "OFF",
-        displayStatus: "OFF",
-        locked: false,
-        lockReason: null,
-        emergencyStopActive: false,
-        activity: [
-          {
-            id: `u-${Date.now()}`,
-            at: new Date().toISOString(),
-            message: "AutoTrade unlocked. Mode remains OFF until you enable it.",
-            level: "info"
-          },
-          ...autoTrade.activity
-        ]
-      };
-      return { ...autoTrade };
-    },
-    autoTradeUpdateLimits: async () => ({ ...autoTrade }),
-    autoTradeDemoDiagnostics: async () => {
-      autoTrade = {
-        ...autoTrade,
-        connection: {
-          ...autoTrade.connection,
-          connected: true,
-          environment: "DEMO",
-          environmentLabel: "IG DEMO — READ ONLY",
-          connectionState: "Connected",
-          accountIdMasked: "****1234",
-          accountName: "Demo CFD",
-          balance: 10000,
-          available: 9500,
-          marginUsed: 120,
-          marketName: "Spot Gold",
-          marketEpic: "CS.D.USCGC.TODAY.IP",
-          marketStatus: "TRADEABLE",
-          bid: 2385.2,
-          ask: 2385.5,
-          spread: 0.3,
-          minDealSize: 0.1,
-          sizeIncrement: 0.1,
-          valuePerPoint: 1,
-          minNormalStopDistance: 0.3,
-          minGuaranteedStopDistance: 0.5,
-          guaranteedStopAvailable: true,
-          lastHeartbeatAt: new Date().toISOString()
-        }
-      };
-      return { ...autoTrade };
-    },
     getBrokerControlCentre: async () => ({
       defaultBroker: "pepperstone_ctrader",
       autoTrade: "OFF",
@@ -1233,43 +1036,6 @@ function buildReviewApi() {
         }
       ]
     }),
-    getAutoTradeSettings: async (environment: "demo" | "live") => ({
-      settings: {
-        uid: "review",
-        environment,
-        updatedAt: new Date().toISOString(),
-        selectedAccountId: environment === "live" ? "live-4706" : "demo-4821",
-        sizingMode: "automatic_risk",
-        fixedRiskAmount: 20,
-        percentageRisk: 0.5,
-        manualLotSize: 0.01,
-        maxDailyLoss: 50,
-        maxTradesPerDay: 3,
-        maxOpenPositions: 1,
-        minConfidence: 80,
-        minRiskReward: 1.5,
-        maxSpread: 2,
-        maxQuoteAgeSeconds: 15,
-        stopLossDistance: null,
-        takeProfitMethod: "fixed_rr",
-        tradeCooldownMinutes: 30,
-        pauseAfterConsecutiveLosses: 3,
-        allowedSessions: ["London", "NewYork"],
-        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-        newsFilterEnabled: true,
-        confirmationCandleRequired: true,
-        trendConfirmationRequired: false,
-        volumeConfirmationRequired: false,
-        breakEvenEnabled: false,
-        trailingStopEnabled: false,
-        partialTakeProfitEnabled: false,
-        liveActivationConfirmedAt: null,
-        liveActivationPhraseConfirmed: false,
-        autoTradeEnabledIntent: false,
-        emergencyStopActive: false
-      },
-      recommended: { sizingMode: "automatic_risk", fixedRiskAmount: 20 }
-    }),
     getTradingViewSetup: async () => ({
       setup: {
         templateMode: "standard",
@@ -1300,7 +1066,7 @@ function buildReviewApi() {
         instructions: ["Create alert", "Paste webhook", "Paste message"]
       },
       webhookUrl:
-        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+        "https://us-central1-example.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
       alertGuide: {
         alertName: "GoldMeta XAUUSD 15",
         messageBody: '{"schemaVersion":"1.0","symbol":"{{ticker}}","action":"{{strategy.order.action}}"}',
@@ -1312,48 +1078,10 @@ function buildReviewApi() {
     saveTradingViewCustomMapping: async () => ({ ok: true }),
     rotateTradingViewConnection: async () => ({
       webhookUrl:
-        "https://us-central1-goldmeta-web.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
+        "https://us-central1-example.cloudfunctions.net/apiCTraderPreview/webhooks/tradingview/review-user-wh",
       secret: "rotated-once"
     }),
     selectCTraderAccount: async () => ({ ok: true }),
-    confirmLiveAutoTradeActivation: async () => ({ ok: true }),
-    saveAutoTradeSettings: async (_env: "demo" | "live", patch: Record<string, unknown>) => ({
-      settings: {
-        uid: "review",
-        environment: _env,
-        updatedAt: new Date().toISOString(),
-        selectedAccountId: "demo-4821",
-        sizingMode: "automatic_risk",
-        fixedRiskAmount: 20,
-        percentageRisk: 0.5,
-        manualLotSize: 0.01,
-        maxDailyLoss: 50,
-        maxTradesPerDay: 3,
-        maxOpenPositions: 1,
-        minConfidence: 80,
-        minRiskReward: 1.5,
-        maxSpread: 2,
-        maxQuoteAgeSeconds: 15,
-        stopLossDistance: null,
-        takeProfitMethod: "fixed_rr",
-        tradeCooldownMinutes: 30,
-        pauseAfterConsecutiveLosses: 3,
-        allowedSessions: ["London", "NewYork"],
-        allowedDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-        newsFilterEnabled: true,
-        confirmationCandleRequired: true,
-        trendConfirmationRequired: false,
-        volumeConfirmationRequired: false,
-        breakEvenEnabled: false,
-        trailingStopEnabled: false,
-        partialTakeProfitEnabled: false,
-        liveActivationConfirmedAt: null,
-        liveActivationPhraseConfirmed: false,
-        autoTradeEnabledIntent: false,
-        emergencyStopActive: false,
-        ...patch
-      }
-    }),
     createCTraderPreview: async () => ({
       notice: "Order submission is currently disabled in this preview.",
       preview: {
@@ -1574,7 +1302,7 @@ export default function UiReviewApp() {
             <Route path="replay" element={<ReplayPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="planner" element={<RiskPlannerPage />} />
-            <Route path="autotrade" element={<AutoTradePage />} />
+            <Route path="autotrade" element={<Navigate to="/ui-review" replace />} />
             <Route path="brokers" element={<BrokerControlCentrePage />} />
             <Route path="tradingview" element={<TradingViewSetupPage />} />
             <Route path="help" element={<HelpPage />} />

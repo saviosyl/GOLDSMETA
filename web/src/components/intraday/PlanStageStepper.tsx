@@ -130,7 +130,7 @@ export function PlanStageStepper({
       detail: isNoTrade
         ? "No trade — management does not start."
         : managing && auth.supportsPlan
-          ? "Manage the manual plan. AutoTrade stays OFF."
+          ? "Manage the manual plan. Live execution stays locked."
           : "Trade management has not started."
     }
   ];
