@@ -1,0 +1,75 @@
+{
+  "productionUrl": "https://goldmeta.metamechsolutions.com",
+  "productionBuild": "83ff6ee54bedb98e6308040b128ceb6291930672",
+  "capturedAt": "2026-08-09T08:17:00.773Z",
+  "desktopViewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "mobileViewport": {
+    "width": 430,
+    "height": 932
+  },
+  "counts": {
+    "desktop": 20,
+    "mobile": 21,
+    "admin": 6
+  },
+  "desktop": [
+    "01-plan-desktop.png",
+    "02-levels-desktop.png",
+    "03-markets-desktop.png",
+    "04-journal-desktop.png",
+    "05-alerts-desktop.png",
+    "06-research-desktop.png",
+    "07-analytics-desktop.png",
+    "08-performance-desktop.png",
+    "09-history-desktop.png",
+    "10-replay-desktop.png",
+    "11-risk-planner-desktop.png",
+    "12-autotrade-desktop.png",
+    "13-broker-desktop.png",
+    "14-settings-desktop.png",
+    "15-help-desktop.png",
+    "16-signal-performance-desktop.png",
+    "17-analysis-desktop.png",
+    "18-tradingview-setup-desktop.png",
+    "P01-sign-in-desktop.png",
+    "P02-register-desktop.png"
+  ],
+  "mobile": [
+    "00-mobile-more-nav-open.png",
+    "01-plan-mobile.png",
+    "02-levels-mobile.png",
+    "03-markets-mobile.png",
+    "04-journal-mobile.png",
+    "05-alerts-mobile.png",
+    "06-research-mobile.png",
+    "07-analytics-mobile.png",
+    "08-performance-mobile.png",
+    "09-history-mobile.png",
+    "10-replay-mobile.png",
+    "11-risk-planner-mobile.png",
+    "12-autotrade-mobile.png",
+    "13-broker-mobile.png",
+    "14-settings-mobile.png",
+    "15-help-mobile.png",
+    "16-signal-performance-mobile.png",
+    "17-analysis-mobile.png",
+    "18-tradingview-setup-mobile.png",
+    "P01-sign-in-mobile.png",
+    "P02-register-mobile.png"
+  ],
+  "admin": [
+    "A01-admin-users-desktop.png",
+    "A01-admin-users-mobile.png",
+    "A02-admin-tradingview-template-desktop.png",
+    "A02-admin-tradingview-template-mobile.png",
+    "A03-admin-diagnostics-desktop.png",
+    "A03-admin-diagnostics-mobile.png"
+  ],
+  "detailRoutes": {
+    "historyDetail": null,
+    "setupDetail": null
+  }
+}
