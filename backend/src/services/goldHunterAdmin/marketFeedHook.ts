@@ -23,6 +23,7 @@ import {
   maybeReconsiderGoldHunterDemoAutoExecution
 } from "./demoAutoExecutionRuntime";
 import { enqueueGoldHunterPositionManagerTick } from "./demoPositionManager";
+import { resumeGoldHunterKnownPositionEntrySupervisors } from "./knownBrokerPositionEntrySupervisor";
 import { onGhShadowMarketTick } from "./shadowQualification";
 
 /** Re-export for callers that previously imported from this module. */
@@ -45,6 +46,8 @@ export const GH_SELECTOR_RUNTIME_PERSIST_MIN_MS = 400;
 const lastPersistAt = new Map<string, number>();
 const persistInFlight = new Map<string, boolean>();
 const pendingForcePersist = new Map<string, boolean>();
+const lastSupervisorResumeAt = new Map<string, number>();
+const GH_SUPERVISOR_RESUME_MIN_MS = 400;
 
 /** Test counters */
 const persistWriteCounts = new Map<string, number>();
@@ -58,6 +61,7 @@ export function resetGoldHunterMarketFeedForTests(): void {
   persistInFlight.clear();
   pendingForcePersist.clear();
   persistWriteCounts.clear();
+  lastSupervisorResumeAt.clear();
 }
 
 export function getGoldHunterRuntimePersistWriteCount(ownerUid: string): number {
@@ -177,6 +181,14 @@ function afterSelectorTick(
 
   // Position management — bounded async, never blocks quote path.
   enqueueGoldHunterPositionManagerTick(meta.ownerUid);
+  // Known-position OPEN entry supervisor — independent of AutoTrade.
+  const resumeAt = lastSupervisorResumeAt.get(meta.ownerUid) ?? 0;
+  if (receivedAtMs - resumeAt >= GH_SUPERVISOR_RESUME_MIN_MS) {
+    lastSupervisorResumeAt.set(meta.ownerUid, receivedAtMs);
+    void resumeGoldHunterKnownPositionEntrySupervisors({
+      ownerUid: meta.ownerUid
+    }).catch(() => undefined);
+  }
 
   // Research shadow qualification — independent of Demo AutoTrade / broker.
   // Default OFF. Pass THIS event's receivedAtMs (not lastSpot ?? lastDepth).

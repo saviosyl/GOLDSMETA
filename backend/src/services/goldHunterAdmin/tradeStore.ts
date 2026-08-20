@@ -1,9 +1,15 @@
 /**
  * Gold Hunter Demo trade persistence.
  * Attribution: strategy=GOLD_HUNTER, environment=DEMO only.
+ *
+ * CLOSED is terminal: no stale writer may regress a persisted CLOSED
+ * document to FILLED / PROTECTED / CLOSE_REQUESTED / pending.
+ * Firestore writes use a transaction; memory uses the same merge rules.
  */
 
+import type { Firestore } from "firebase-admin/firestore";
 import { getFirestoreDb } from "../firebaseAdmin";
+import { isValidGoldHunterEntryPrice } from "./entryValidity";
 import {
   GH_ADMIN_STRATEGY_ID,
   type GoldHunterDemoTrade
@@ -12,6 +18,15 @@ import {
 type StoredGoldHunterTrade = GoldHunterDemoTrade & Record<string, unknown>;
 
 const memoryTrades = new Map<string, Map<string, StoredGoldHunterTrade>>();
+
+/** Test-only Firestore injection (emulator). */
+let testDbOverride: Firestore | null = null;
+
+export function setGoldHunterTradeStoreDbForTests(
+  db: Firestore | null
+): void {
+  testDbOverride = db;
+}
 
 export function resetGoldHunterTradeMemory(): void {
   memoryTrades.clear();
@@ -40,10 +55,115 @@ export function stripUndefinedForFirestore<T>(value: T): T {
   return value;
 }
 
+function resolveDb(): Firestore | null {
+  return testDbOverride ?? getFirestoreDb();
+}
+
 function tradesCol(ownerUid: string) {
-  const db = getFirestoreDb();
+  const db = resolveDb();
   if (!db) return null;
   return db.collection("users").doc(ownerUid).collection("goldHunterDemoTrades");
+}
+
+const REGRESSABLE_FROM_CLOSED = new Set<GoldHunterDemoTrade["status"]>([
+  "FILLED",
+  "PROTECTED",
+  "CLOSE_REQUESTED",
+  "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
+  "PENDING_RECONCILIATION",
+  "ACCEPTED_PENDING_FILL",
+  "ORDER_CREATED",
+  "SENT",
+  "SIGNAL",
+  "BROKER_REJECTED",
+  "BROKER_SUBMIT_ERROR"
+]);
+
+export function isGoldHunterClosedTerminal(
+  trade: Pick<GoldHunterDemoTrade, "status"> | null | undefined
+): boolean {
+  return trade?.status === "CLOSED";
+}
+
+function keepFinite(
+  preferred: number | null | undefined,
+  fallback: number | null | undefined
+): number | null {
+  if (preferred != null && Number.isFinite(preferred)) return preferred;
+  if (fallback != null && Number.isFinite(fallback)) return fallback;
+  return preferred ?? fallback ?? null;
+}
+
+function keepText(
+  preferred: string | null | undefined,
+  fallback: string | null | undefined
+): string | null {
+  if (preferred != null && String(preferred).trim().length > 0) {
+    return preferred;
+  }
+  if (fallback != null && String(fallback).trim().length > 0) {
+    return fallback;
+  }
+  return preferred ?? fallback ?? null;
+}
+
+/**
+ * CLOSED enrichment: later writers may add diagnostics but must preserve
+ * status, result, entry, exit, closeTs, netP/L, deal id, settlement fields.
+ */
+export function mergeClosedGoldHunterTrade(
+  existing: GoldHunterDemoTrade,
+  incoming: GoldHunterDemoTrade
+): GoldHunterDemoTrade {
+  const next: GoldHunterDemoTrade = {
+    ...existing,
+    ...incoming,
+    status: "CLOSED",
+    result: existing.result ?? incoming.result,
+    entry: isValidGoldHunterEntryPrice(existing.entry)
+      ? existing.entry
+      : incoming.entry,
+    exit: keepFinite(existing.exit, incoming.exit),
+    closeTs: keepText(existing.closeTs, incoming.closeTs),
+    netPnlEur: keepFinite(existing.netPnlEur, incoming.netPnlEur),
+    grossPnlEur: keepFinite(existing.grossPnlEur, incoming.grossPnlEur),
+    brokerDealId: keepText(existing.brokerDealId, incoming.brokerDealId),
+    brokerSettlementTs: keepText(
+      existing.brokerSettlementTs,
+      incoming.brokerSettlementTs
+    ),
+    closeAcceptedTs: keepText(existing.closeAcceptedTs, incoming.closeAcceptedTs),
+    commissionEur: keepFinite(existing.commissionEur, incoming.commissionEur),
+    swapEur: keepFinite(existing.swapEur, incoming.swapEur),
+    fillTs: keepText(existing.fillTs, incoming.fillTs),
+    initialRiskPrice: keepFinite(
+      existing.initialRiskPrice,
+      incoming.initialRiskPrice
+    )
+  };
+  return next;
+}
+
+function applyPersistMerge(
+  existing: GoldHunterDemoTrade | null,
+  incoming: GoldHunterDemoTrade
+): { trade: GoldHunterDemoTrade; rejectedRegression: boolean } {
+  if (existing && isGoldHunterClosedTerminal(existing)) {
+    if (
+      incoming.status !== "CLOSED" &&
+      REGRESSABLE_FROM_CLOSED.has(incoming.status)
+    ) {
+      return {
+        trade: mergeClosedGoldHunterTrade(existing, incoming),
+        rejectedRegression: true
+      };
+    }
+    return {
+      trade: mergeClosedGoldHunterTrade(existing, incoming),
+      rejectedRegression: incoming.status !== "CLOSED"
+    };
+  }
+  return { trade: incoming, rejectedRegression: false };
 }
 
 /**
@@ -111,10 +231,34 @@ export async function listGoldHunterDemoTrades(
   }
 }
 
+export async function getGoldHunterDemoTrade(
+  ownerUid: string,
+  goldHunterTradeId: string
+): Promise<GoldHunterDemoTrade | null> {
+  const id = String(goldHunterTradeId ?? "").trim();
+  if (!id) return null;
+  const col = tradesCol(ownerUid);
+  if (!col) {
+    return memoryTrades.get(ownerUid)?.get(id) ?? null;
+  }
+  const snap = await col.doc(id).get();
+  return snap.exists ? (snap.data() as GoldHunterDemoTrade) : null;
+}
+
+export type PersistGoldHunterDemoTradeResult = {
+  trade: GoldHunterDemoTrade;
+  rejectedRegression: boolean;
+};
+
+/**
+ * Transaction-safe persist. If the durable row is already CLOSED, incoming
+ * writes cannot regress status. A read-then-write outside this function
+ * is not sufficient.
+ */
 export async function upsertGoldHunterDemoTrade(
   ownerUid: string,
   trade: StoredGoldHunterTrade
-): Promise<void> {
+): Promise<PersistGoldHunterDemoTradeResult> {
   if (trade.strategy !== GH_ADMIN_STRATEGY_ID || trade.environment !== "DEMO") {
     throw new Error("REFUSE: only GOLD_HUNTER DEMO trades may be persisted");
   }
@@ -125,11 +269,22 @@ export async function upsertGoldHunterDemoTrade(
       map = new Map<string, StoredGoldHunterTrade>();
       memoryTrades.set(ownerUid, map);
     }
-    map.set(trade.goldHunterTradeId, trade);
-    return;
+    const existing = map.get(trade.goldHunterTradeId) ?? null;
+    const merged = applyPersistMerge(existing, trade);
+    map.set(trade.goldHunterTradeId, merged.trade);
+    return merged;
   }
-  const sanitized = stripUndefinedForFirestore(trade);
-  await col.doc(trade.goldHunterTradeId).set(sanitized, { merge: true });
+  const db = resolveDb()!;
+  const ref = col.doc(trade.goldHunterTradeId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const existing = snap.exists
+      ? (snap.data() as GoldHunterDemoTrade)
+      : null;
+    const merged = applyPersistMerge(existing, trade);
+    tx.set(ref, stripUndefinedForFirestore(merged.trade), { merge: true });
+    return merged;
+  });
 }
 
 export type PerformanceBucket = {

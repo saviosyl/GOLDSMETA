@@ -23,6 +23,7 @@ import { isValidGoldHunterEntryPrice } from "./entryValidity";
 import type { BrokerDemoPositionLite } from "./reconcilePositions";
 import { upsertGoldHunterDemoTrade } from "./tradeStore";
 import type { GoldHunterDemoTrade } from "./types";
+import { signalGoldHunterOpenEntryIntegrityDefect } from "./entryIntegrity";
 
 export const GH_IMMEDIATE_ENTRY_RECOVERY_TIMEOUT_MS = 2_500;
 /** Poll interval while waiting for broker position visibility. */
@@ -106,6 +107,22 @@ async function withRemainingRecoveryReadTimeout<T>(
  * Total wall time ≤ timeoutMs. Each listPositions call is bounded by remaining
  * time. Stops immediately on valid match. Never starts a read with no budget.
  */
+function stampImmediateForensics(
+  trade: GoldHunterDemoTrade,
+  reason: ImmediateOpenEntryRecoveryResult["reason"],
+  attempts: number
+): GoldHunterDemoTrade {
+  const now = new Date().toISOString();
+  return {
+    ...trade,
+    openEntryRecoveryStartedAt: trade.openEntryRecoveryStartedAt ?? now,
+    openEntryRecoveryLastAt: now,
+    openEntryRecoveryAttempts:
+      (trade.openEntryRecoveryAttempts ?? 0) + Math.max(0, attempts),
+    openEntryRecoveryLastReason: reason
+  };
+}
+
 export async function recoverGoldHunterOpenEntryImmediate(args: {
   ownerUid: string;
   trade: GoldHunterDemoTrade;
@@ -169,7 +186,15 @@ export async function recoverGoldHunterOpenEntryImmediate(args: {
     } catch (error) {
       if (isImmediateEntryRecoveryReadTimeout(error)) {
         lastFailReason = "TIMEOUT";
-        return { recovered: false, trade, reason: "TIMEOUT", attempts };
+        const stamped = stampImmediateForensics(trade, "TIMEOUT", attempts);
+        await upsertGoldHunterDemoTrade(args.ownerUid, stamped).catch(
+          () => undefined
+        );
+        signalGoldHunterOpenEntryIntegrityDefect({
+          ownerUid: args.ownerUid,
+          tradeId: trade.goldHunterTradeId
+        });
+        return { recovered: false, trade: stamped, reason: "TIMEOUT", attempts };
       }
       lastFailReason = "POSITIONS_READ_FAILED";
       const remain = deadline - Date.now();
@@ -212,16 +237,23 @@ export async function recoverGoldHunterOpenEntryImmediate(args: {
       continue;
     }
 
-    const recoveredTrade: GoldHunterDemoTrade = {
-      ...repaired.trade,
-      status: "FILLED",
-      result: "OPEN",
-      fillTs: repaired.trade.fillTs ?? new Date().toISOString(),
-      entryRecoverySource:
-        repaired.trade.entryRecoverySource ?? "BROKER_POSITION_RECONCILIATION",
-      dataQuality: null,
-      errorCode: null
-    };
+    const recoveredTrade: GoldHunterDemoTrade = stampImmediateForensics(
+      {
+        ...repaired.trade,
+        status: "FILLED",
+        result: "OPEN",
+        fillTs: repaired.trade.fillTs ?? new Date().toISOString(),
+        entryRecoverySource:
+          repaired.trade.entryRecoverySource ?? "BROKER_POSITION_RECONCILIATION",
+        openEntryRecoverySource: "BROKER_POSITION_RECONCILIATION",
+        openEntryRecoveredAt: new Date().toISOString(),
+        openEntryPmRegisteredAt: new Date().toISOString(),
+        dataQuality: null,
+        errorCode: null
+      },
+      "RECOVERED_OPEN",
+      attempts
+    );
     await upsertGoldHunterDemoTrade(args.ownerUid, recoveredTrade);
 
     const bid =
@@ -252,26 +284,21 @@ export async function recoverGoldHunterOpenEntryImmediate(args: {
     };
   }
 
-  if (successfulReads === 0) {
-    return {
-      recovered: false,
-      trade,
-      reason:
-        Date.now() >= deadline && lastFailReason === "POSITIONS_READ_FAILED"
+  const reason: ImmediateOpenEntryRecoveryResult["reason"] =
+    successfulReads === 0
+      ? Date.now() >= deadline && lastFailReason === "POSITIONS_READ_FAILED"
+        ? "POSITIONS_READ_FAILED"
+        : lastFailReason === "POSITIONS_READ_FAILED"
           ? "POSITIONS_READ_FAILED"
-          : lastFailReason === "POSITIONS_READ_FAILED"
-            ? "POSITIONS_READ_FAILED"
-            : "TIMEOUT",
-      attempts
-    };
-  }
-
-  return {
-    recovered: false,
-    trade,
-    reason: sawMatchWithInvalidEntry
-      ? "ENTRY_INVALID_WITHIN_WINDOW"
-      : "POSITION_NOT_FOUND_WITHIN_WINDOW",
-    attempts
-  };
+          : "TIMEOUT"
+      : sawMatchWithInvalidEntry
+        ? "ENTRY_INVALID_WITHIN_WINDOW"
+        : "POSITION_NOT_FOUND_WITHIN_WINDOW";
+  const stamped = stampImmediateForensics(trade, reason, attempts);
+  await upsertGoldHunterDemoTrade(args.ownerUid, stamped).catch(() => undefined);
+  signalGoldHunterOpenEntryIntegrityDefect({
+    ownerUid: args.ownerUid,
+    tradeId: trade.goldHunterTradeId
+  });
+  return { recovered: false, trade: stamped, reason, attempts };
 }

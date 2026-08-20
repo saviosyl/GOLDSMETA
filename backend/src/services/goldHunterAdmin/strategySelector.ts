@@ -245,6 +245,8 @@ type LossControllerEntryState = {
   lastEntryIntegrityRecoveryReason: string | null;
   /** Most recently closed goldHunterTradeId applied to LC accounting. */
   lastClosedTradeId: string | null;
+  /** True while a proven broker-open GH trade has unresolved invalid entry. */
+  openEntryIntegrityDefectActive: boolean;
 };
 
 function emptyLossControllerEntryState(): LossControllerEntryState {
@@ -267,7 +269,8 @@ function emptyLossControllerEntryState(): LossControllerEntryState {
     entryIntegrityHealthy: true,
     entryIntegrityRecoveredAtMs: null,
     lastEntryIntegrityRecoveryReason: null,
-    lastClosedTradeId: null
+    lastClosedTradeId: null,
+    openEntryIntegrityDefectActive: false
   };
 }
 
@@ -760,6 +763,35 @@ export class GoldHunterStrategySelector {
     this.lossControllerEntry.entryIntegrityHealthy = true;
     this.lossControllerEntry.entryIntegrityRecoveredAtMs = atMs;
     this.lossControllerEntry.lastEntryIntegrityRecoveryReason = args.reason;
+    this.lossControllerEntry.openEntryIntegrityDefectActive = false;
+  }
+
+  /**
+   * Proven broker-open GH position has invalid entry / original risk.
+   * Sets entryIntegrityHealthy=false. Does NOT increment unknown-R counters
+   * and does not arm unknownRGuardActive.
+   */
+  notifyOpenEntryIntegrityDefect(args: {
+    tradeId?: string | null;
+    reason?: string;
+  }): void {
+    this.lossControllerEntry.openEntryIntegrityDefectActive = true;
+    this.lossControllerEntry.entryIntegrityHealthy = false;
+    this.lossControllerEntry.lastEntryIntegrityRecoveryReason =
+      args.reason ?? "PROVEN_OPEN_ENTRY_INVALID";
+  }
+
+  /**
+   * Clear the OPEN-entry defect latch only. Returns true when a defect was
+   * active (caller may then mark healthy). Leaves unknown-R latch untouched
+   * when no open-entry defect was active.
+   */
+  clearOpenEntryIntegrityDefectIfIdle(): boolean {
+    if (!this.lossControllerEntry.openEntryIntegrityDefectActive) {
+      return false;
+    }
+    this.lossControllerEntry.openEntryIntegrityDefectActive = false;
+    return true;
   }
 
   /**

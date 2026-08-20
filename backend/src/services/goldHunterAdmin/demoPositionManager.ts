@@ -38,6 +38,8 @@ import {
 import { maybeEnqueueStaleCloseRequestedWatchdog } from "./reconciliationRuntime";
 import { getGoldHunterStrategySelector } from "./strategySelector";
 import {
+  getGoldHunterDemoTrade,
+  isGoldHunterClosedTerminal,
   listGoldHunterDemoTrades,
   upsertGoldHunterDemoTrade
 } from "./tradeStore";
@@ -233,6 +235,17 @@ export function registerGoldHunterOpenPositionForOwner(args: {
   ownerMap(args.ownerUid).set(args.trade.goldHunterTradeId, state);
 }
 
+/** Drop stale in-memory PM state when the durable row is already CLOSED. */
+export function unregisterGoldHunterManagedPosition(
+  ownerUid: string,
+  tradeId: string
+): void {
+  const map = managed.get(ownerUid);
+  if (!map) return;
+  map.delete(tradeId);
+  lastMfeMaePersistAt.delete(tradeKey(ownerUid, tradeId));
+}
+
 /**
  * Never widen: BUY stop may only rise; SELL stop may only fall.
  */
@@ -290,6 +303,11 @@ async function maybePersistMfeMae(
   }
   lastMfeMaePersistAt.set(key, now);
   mfeMaeWriteCounts.set(ownerUid, (mfeMaeWriteCounts.get(ownerUid) ?? 0) + 1);
+  const latest = await getGoldHunterDemoTrade(ownerUid, trade.goldHunterTradeId);
+  if (isGoldHunterClosedTerminal(latest)) {
+    unregisterGoldHunterManagedPosition(ownerUid, trade.goldHunterTradeId);
+    return;
+  }
   const diag = openTradeSmartDiagnostics(state);
   await upsertGoldHunterDemoTrade(ownerUid, {
     ...trade,
@@ -481,6 +499,17 @@ export async function tickGoldHunterPositionManager(args: {
           stopLoss: tightened
         });
         if (amendResult.accepted) {
+          const latest = await getGoldHunterDemoTrade(
+            args.ownerUid,
+            trade.goldHunterTradeId
+          );
+          if (isGoldHunterClosedTerminal(latest)) {
+            unregisterGoldHunterManagedPosition(
+              args.ownerUid,
+              trade.goldHunterTradeId
+            );
+            continue;
+          }
           result.stopsTightened += 1;
           await upsertGoldHunterDemoTrade(args.ownerUid, {
             ...trade,
@@ -567,6 +596,17 @@ export async function closeGoldHunterDemoPosition(args: {
   brokerOpenVolumeLots?: number | null;
 }): Promise<CloseOutcome> {
   const { trade } = args;
+  const current = await getGoldHunterDemoTrade(
+    args.ownerUid,
+    trade.goldHunterTradeId
+  );
+  if (isGoldHunterClosedTerminal(current)) {
+    unregisterGoldHunterManagedPosition(
+      args.ownerUid,
+      trade.goldHunterTradeId
+    );
+    return "SETTLED";
+  }
   if (!trade.brokerPositionId) return false;
 
   const volume = resolveGoldHunterCloseVolumeLots({
@@ -617,6 +657,17 @@ export async function closeGoldHunterDemoPosition(args: {
       positionId: trade.brokerPositionId,
       volumeUnits
     });
+    const afterCallback = await getGoldHunterDemoTrade(
+      args.ownerUid,
+      trade.goldHunterTradeId
+    );
+    if (isGoldHunterClosedTerminal(afterCallback)) {
+      unregisterGoldHunterManagedPosition(
+        args.ownerUid,
+        trade.goldHunterTradeId
+      );
+      return "SETTLED";
+    }
     if (!broker.accepted) {
       await upsertGoldHunterDemoTrade(args.ownerUid, {
         ...trade,
@@ -662,6 +713,17 @@ export async function closeGoldHunterDemoPosition(args: {
     }
     return settled.settled ? "SETTLED" : "SETTLEMENT_PENDING";
   } catch (e) {
+    const afterErr = await getGoldHunterDemoTrade(
+      args.ownerUid,
+      trade.goldHunterTradeId
+    );
+    if (isGoldHunterClosedTerminal(afterErr)) {
+      unregisterGoldHunterManagedPosition(
+        args.ownerUid,
+        trade.goldHunterTradeId
+      );
+      return "SETTLED";
+    }
     await upsertGoldHunterDemoTrade(args.ownerUid, {
       ...trade,
       status: "PENDING_RECONCILIATION",
