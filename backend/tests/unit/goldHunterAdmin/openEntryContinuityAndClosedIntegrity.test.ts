@@ -25,7 +25,9 @@ import { recoverGoldHunterOpenEntryImmediate } from "../../../src/services/goldH
 import {
   ensureGoldHunterKnownPositionEntrySupervisor,
   getGoldHunterSupervisorNewOrderCallCount,
+  isGoldHunterKnownPositionEntrySupervisorInFlight,
   resetKnownPositionEntrySupervisorForTests,
+  resumeGoldHunterKnownPositionEntrySupervisors,
   setKnownPositionEntrySupervisorHooksForTests
 } from "../../../src/services/goldHunterAdmin/knownBrokerPositionEntrySupervisor";
 import {
@@ -35,6 +37,12 @@ import {
   getGoldHunterStrategySelector,
   resetGoldHunterStrategySelectorsForTests
 } from "../../../src/services/goldHunterAdmin/strategySelector";
+import {
+  acquireGoldHunterSignalClaim,
+  getGoldHunterSignalClaim,
+  resetGoldHunterSignalClaimsForTests,
+  updateGoldHunterSignalClaim
+} from "../../../src/services/goldHunterAdmin/signalClaimStore";
 import {
   getGoldHunterDemoTrade,
   listGoldHunterDemoTrades,
@@ -112,6 +120,7 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
     resetGoldHunterCloseSettlementHooksForTests();
     resetGoldHunterStrategySelectorsForTests();
     resetKnownPositionEntrySupervisorForTests();
+    resetGoldHunterSignalClaimsForTests();
   });
 
   it("1. immediate 2500ms fail → supervisor continues → FILLED OPEN + PM", async () => {
@@ -1066,6 +1075,200 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
     expect(r.trade.entry).toBeNull();
     expect(Date.now() - started).toBeLessThan(1500);
     expect(r.trade.openEntryRecoveryStartedAt).toBe(ancient);
+  });
+
+  it("22. post-PM CLOSED race: no OPEN claim, PM removed", async () => {
+    const trade = pendingTrade({
+      goldHunterTradeId: "GH-D-pm-closed-race",
+      signalId: "GH-OPP-pm-closed-race"
+    });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    await acquireGoldHunterSignalClaim({
+      ownerUid: OWNER,
+      signalId: "GH-OPP-pm-closed-race",
+      goldHunterTradeId: trade.goldHunterTradeId,
+      clientOrderId: trade.clientOrderId ?? "gh_client_sup_1",
+      setup: "A",
+      side: "BUY"
+    });
+    await updateGoldHunterSignalClaim(OWNER, "GH-OPP-pm-closed-race", {
+      state: "PENDING_RECONCILIATION",
+      brokerPositionId: "54726281",
+      brokerOrderId: "70609421"
+    });
+    const closed = applyBrokerSettledClose({
+      trade: {
+        ...trade,
+        status: "FILLED",
+        result: "OPEN",
+        entry: 4478.35,
+        fillTs: "2026-08-20T11:41:33.000Z"
+      },
+      deal: {
+        dealId: "61009849",
+        orderId: "70609421",
+        positionId: "54726281",
+        closePrice: 4477.78,
+        closedAt: "2026-08-20T11:41:37.986Z",
+        grossPnl: -4.39,
+        commission: -0.54,
+        swap: 0,
+        netPnl: -4.93,
+        closedVolumeLots: 9,
+        entryPrice: 4478.35
+      }
+    });
+    setGoldHunterTradeStoreHooksForTests({
+      beforeCommit: async (incoming) => {
+        if (incoming.status === "FILLED" && incoming.openEntryPmRegisteredAt) {
+          await upsertGoldHunterDemoTrade(OWNER, closed);
+          await updateGoldHunterSignalClaim(OWNER, "GH-OPP-pm-closed-race", {
+            state: "CLOSED"
+          });
+        }
+      }
+    });
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 300,
+      pollMs: 20,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 4478.35,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-pm-closed-race"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("POSITION_CLOSED_BEFORE_RECOVERY");
+    expect(r.pmRegistered).toBe(false);
+    expect(r.trade.status).toBe("CLOSED");
+    expect(getGoldHunterOpenPositionDiagnostics(OWNER).length).toBe(0);
+    const claim = await getGoldHunterSignalClaim(OWNER, "GH-OPP-pm-closed-race");
+    expect(claim?.state).toBe("CLOSED");
+    const final = await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId);
+    expect(final?.status).toBe("CLOSED");
+    expect(final?.brokerDealId).toBe("61009849");
+    expect(
+      getGoldHunterStrategySelector(OWNER).getLossControllerEntryState()
+        .lastEntryIntegrityRecoveryReason
+    ).not.toBe("BROKER_POSITION_OPEN_RECOVERED");
+    const openAttempt = await updateGoldHunterSignalClaim(
+      OWNER,
+      "GH-OPP-pm-closed-race",
+      { state: "OPEN" }
+    );
+    expect(openAttempt?.state).toBe("CLOSED");
+  });
+
+  it("23. expired TIMEOUT supervisor does not relaunch", async () => {
+    const startedAt = new Date(Date.now() - 11_000).toISOString();
+    const trade = pendingTrade({
+      goldHunterTradeId: "GH-D-resume-timeout",
+      openEntryRecoveryStartedAt: startedAt,
+      openEntryRecoveryLastReason: "TIMEOUT",
+      openEntryRecoveryAttempts: 4,
+      openEntryRecoveryLastAt: startedAt
+    });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let reads = 0;
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => {
+        reads += 1;
+        return null;
+      },
+      findOpeningDeal: async () => {
+        reads += 1;
+        return null;
+      },
+      findClosingDeal: async () => {
+        reads += 1;
+        return null;
+      }
+    });
+    const before = await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId);
+    const first = await resumeGoldHunterKnownPositionEntrySupervisors({
+      ownerUid: OWNER
+    });
+    const second = await resumeGoldHunterKnownPositionEntrySupervisors({
+      ownerUid: OWNER
+    });
+    expect(first).toBe(0);
+    expect(second).toBe(0);
+    expect(reads).toBe(0);
+    const after = await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId);
+    expect(after?.openEntryRecoveryAttempts).toBe(4);
+    expect(after?.openEntryRecoveryStartedAt).toBe(startedAt);
+    expect(after?.openEntryRecoveryLastReason).toBe("TIMEOUT");
+    expect(after?.openEntryRecoveryLastAt).toBe(before?.openEntryRecoveryLastAt);
+  });
+
+  it("24. POSITION_CLOSED_BEFORE_RECOVERY does not relaunch", async () => {
+    const trade = pendingTrade({
+      goldHunterTradeId: "GH-D-resume-closed",
+      openEntryRecoveryStartedAt: new Date().toISOString(),
+      openEntryRecoveryLastReason: "POSITION_CLOSED_BEFORE_RECOVERY",
+      openEntryRecoveryAttempts: 2
+    });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let reads = 0;
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => {
+        reads += 1;
+        return null;
+      }
+    });
+    expect(
+      await resumeGoldHunterKnownPositionEntrySupervisors({ ownerUid: OWNER })
+    ).toBe(0);
+    expect(reads).toBe(0);
+    expect(
+      (await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId))
+        ?.openEntryRecoveryAttempts
+    ).toBe(2);
+  });
+
+  it("25. remaining-horizon ENTRY_INVALID resumes once; parallel resume is deduped", async () => {
+    const trade = pendingTrade({
+      goldHunterTradeId: "GH-D-resume-once",
+      openEntryRecoveryStartedAt: new Date().toISOString(),
+      openEntryRecoveryLastReason: "ENTRY_INVALID_WITHIN_WINDOW",
+      openEntryRecoveryAttempts: 1
+    });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      listPositions: () => new Promise(() => undefined),
+      findHistoricalOrder: async () => null,
+      findOpeningDeal: async () => null,
+      findClosingDeal: async () => null
+    });
+    const first = await resumeGoldHunterKnownPositionEntrySupervisors({
+      ownerUid: OWNER
+    });
+    expect(first).toBe(1);
+    expect(
+      isGoldHunterKnownPositionEntrySupervisorInFlight(
+        OWNER,
+        "GH-D-resume-once"
+      )
+    ).toBe(true);
+    const [a, b] = await Promise.all([
+      resumeGoldHunterKnownPositionEntrySupervisors({ ownerUid: OWNER }),
+      resumeGoldHunterKnownPositionEntrySupervisors({ ownerUid: OWNER })
+    ]);
+    expect(a).toBe(0);
+    expect(b).toBe(0);
+    expect(
+      isGoldHunterKnownPositionEntrySupervisorInFlight(
+        OWNER,
+        "GH-D-resume-once"
+      )
+    ).toBe(true);
   });
 
   it("safety defaults unchanged", () => {

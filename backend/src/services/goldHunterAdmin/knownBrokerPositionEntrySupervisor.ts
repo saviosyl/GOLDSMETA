@@ -123,6 +123,43 @@ export function supervisorDedupeKey(
   return `${ownerUid}:${tradeId}`;
 }
 
+function isDurableOpenPromotion(trade: GoldHunterDemoTrade): boolean {
+  if (isGoldHunterClosedTerminal(trade)) return false;
+  return (
+    trade.status === "FILLED" ||
+    trade.status === "PROTECTED" ||
+    trade.result === "OPEN"
+  );
+}
+
+export function isGoldHunterKnownPositionEntrySupervisorInFlight(
+  ownerUid: string,
+  tradeId: string
+): boolean {
+  return inFlight.has(supervisorDedupeKey(ownerUid, tradeId));
+}
+
+/**
+ * Quote-worker resume must not relaunch an expired or terminally-resolved
+ * known-position supervisor. Does not reset openEntryRecoveryStartedAt.
+ */
+export function isGoldHunterKnownPositionEntrySupervisorResumeEligible(
+  trade: GoldHunterDemoTrade,
+  now = Date.now(),
+  horizonMs = GH_KNOWN_POSITION_ENTRY_RECOVERY_HORIZON_MS
+): boolean {
+  if (!isKnownBrokerPositionEntryPending(trade)) return false;
+  if (trade.openEntryRecoveryLastReason === "TIMEOUT") return false;
+  if (trade.openEntryRecoveryLastReason === "POSITION_CLOSED_BEFORE_RECOVERY") {
+    return false;
+  }
+  const startedMs = Date.parse(trade.openEntryRecoveryStartedAt ?? "");
+  if (Number.isFinite(startedMs) && startedMs + horizonMs <= now) {
+    return false;
+  }
+  return true;
+}
+
 export function isKnownBrokerPositionEntryPending(
   trade: GoldHunterDemoTrade
 ): boolean {
@@ -413,6 +450,13 @@ async function promoteOpen(args: {
   const withPm = await persistForensics(args.ownerUid, persisted.trade, {
     openEntryPmRegisteredAt: new Date().toISOString()
   });
+  if (!isDurableOpenPromotion(withPm)) {
+    unregisterGoldHunterManagedPosition(
+      args.ownerUid,
+      recovered.goldHunterTradeId
+    );
+    return withPm;
+  }
   if (tradeHasAuthoritativeEntryIntegrity(withPm)) {
     signalGoldHunterEntryIntegrityRecovered({
       ownerUid: args.ownerUid,
@@ -885,6 +929,23 @@ export function ensureGoldHunterKnownPositionEntrySupervisor(args: {
   );
   const existing = inFlight.get(key);
   if (existing) return existing;
+  if (!isGoldHunterKnownPositionEntrySupervisorResumeEligible(args.trade)) {
+    const reason: OpenEntryRecoveryReason =
+      args.trade.openEntryRecoveryLastReason === "TIMEOUT"
+        ? "TIMEOUT"
+        : args.trade.openEntryRecoveryLastReason ===
+            "POSITION_CLOSED_BEFORE_RECOVERY"
+          ? "POSITION_CLOSED_BEFORE_RECOVERY"
+          : "SKIPPED_STATUS";
+    return Promise.resolve({
+      recovered: false,
+      trade: args.trade,
+      reason,
+      attempts: args.trade.openEntryRecoveryAttempts ?? 0,
+      newOrderCalls,
+      pmRegistered: false
+    });
+  }
   const started = runSupervisor(args).finally(() => {
     inFlight.delete(key);
   });
@@ -909,7 +970,11 @@ export async function resumeGoldHunterKnownPositionEntrySupervisors(args: {
   const trades = await listGoldHunterDemoTrades(args.ownerUid, { limit: 100 });
   let launched = 0;
   for (const trade of trades) {
-    if (!isKnownBrokerPositionEntryPending(trade)) continue;
+    if (!isGoldHunterKnownPositionEntrySupervisorResumeEligible(trade)) {
+      continue;
+    }
+    const key = supervisorDedupeKey(args.ownerUid, trade.goldHunterTradeId);
+    if (inFlight.has(key)) continue;
     void ensureGoldHunterKnownPositionEntrySupervisor({
       ownerUid: args.ownerUid,
       trade
