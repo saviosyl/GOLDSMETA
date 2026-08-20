@@ -205,4 +205,76 @@ describe("GH CLOSED atomic persist (emulator)", () => {
     expect(final?.smartPmState).toBe(before?.smartPmState);
     expect(final?.errorCode ?? null).toBe(before?.errorCode ?? null);
   });
+
+  it("concurrent stale OPEN persist cannot clear a proven fill (GH-D-6789089c)", async () => {
+    if (!enabled) return;
+    const filled: GoldHunterDemoTrade = {
+      goldHunterTradeId: "GH-D-6789089c",
+      strategy: "GOLD_HUNTER",
+      environment: "DEMO",
+      setup: "A",
+      side: "BUY",
+      signalTs: "2026-08-20T20:16:05.000Z",
+      orderTs: "2026-08-20T20:16:05.000Z",
+      fillTs: "2026-08-20T20:16:06.966Z",
+      closeTs: null,
+      entry: 4522.2,
+      exit: null,
+      stop: 4521.65,
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: "OPEN",
+      exitReason: null,
+      brokerOrderId: "70612001",
+      brokerPositionId: "54814722",
+      status: "FILLED",
+      signalId: "GH-OPP-6789089c",
+      dataQuality: null,
+      errorCode: null,
+      entryRecoverySource: "BROKER_POSITION_RECONCILIATION",
+      initialRiskPrice: 0.55,
+      filledVolumeLots: 9
+    };
+    await upsertGoldHunterDemoTrade(OWNER, filled);
+
+    const stale: GoldHunterDemoTrade = {
+      ...filled,
+      status: "PENDING_RECONCILIATION",
+      result: null,
+      entry: null,
+      fillTs: null,
+      dataQuality: "ENTRY_INVALID",
+      errorCode: "ENTRY_PRICE_INVALID",
+      entryRecoverySource: null,
+      openEntryRecoveryLastReason: "TIMEOUT",
+      openEntryRecoveryLastAt: "2026-08-20T20:16:16.164Z"
+    };
+
+    const [a, b] = await Promise.all([
+      upsertGoldHunterDemoTrade(OWNER, stale),
+      upsertGoldHunterDemoTrade(OWNER, {
+        ...stale,
+        entry: 0,
+        fillTs: null,
+        openEntryRecoveryAttempts: 5
+      })
+    ]);
+    expect(a.trade.entry).toBe(4522.2);
+    expect(b.trade.entry).toBe(4522.2);
+    expect(a.trade.fillTs).toBe("2026-08-20T20:16:06.966Z");
+    expect(b.trade.fillTs).toBe("2026-08-20T20:16:06.966Z");
+
+    const final = await getGoldHunterDemoTrade(OWNER, filled.goldHunterTradeId);
+    expect(final?.entry).toBe(4522.2);
+    expect(final?.fillTs).toBe("2026-08-20T20:16:06.966Z");
+    expect(final?.initialRiskPrice).toBe(0.55);
+    expect(final?.brokerPositionId).toBe("54814722");
+    expect(final?.status).toBe("FILLED");
+    expect(final?.result).toBe("OPEN");
+    expect(final?.dataQuality ?? null).toBeNull();
+  });
 });

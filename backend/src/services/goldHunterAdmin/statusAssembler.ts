@@ -38,6 +38,8 @@ import { isGoldHunterSignalDurablyConsumed } from "./signalClaimStore";
 import { loadGoldHunterExecutionDiagnostics } from "./executionRuntimeStore";
 import {
   GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SOFTWARE_REVISION,
+  GOLD_HUNTER_SOFTWARE_REVISION_AT,
   GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION
 } from "./abc/versions";
@@ -161,6 +163,8 @@ export type GoldHunterStatusPayload = {
   };
   strategyVersions: {
     brainVersion: string;
+    softwareRevision: string;
+    softwareRevisionAt: string;
     positionManagerVersion: string;
     lossControllerVersion: string;
     rollingRealisedR: number;
@@ -531,6 +535,8 @@ export async function assembleGoldHunterStatus(
     },
     strategyVersions: {
       brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+      softwareRevision: GOLD_HUNTER_SOFTWARE_REVISION,
+      softwareRevisionAt: GOLD_HUNTER_SOFTWARE_REVISION_AT,
       positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
       lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
       ...(() => {
