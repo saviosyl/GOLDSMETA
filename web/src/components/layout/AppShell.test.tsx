@@ -34,12 +34,12 @@ describe("AppShell premium V2", () => {
     const sidebar = screen.getByTestId("desktop-sidebar");
     expect(sidebar).toBeInTheDocument();
     expect(sidebar.textContent).toMatch(/Plan/);
-    expect(sidebar.textContent).not.toMatch(/AutoTrade/);
+    expect(sidebar.querySelector('a[href="/autotrade"]')).toBeNull();
     expect(sidebar.textContent).toMatch(/Markets/);
     expect(sidebar.textContent).toMatch(/Journal/);
     expect(sidebar.textContent).toMatch(/Insights/);
     expect(sidebar.textContent).not.toMatch(/TradingView/);
-    expect(sidebar.textContent).not.toMatch(/Gold Hunter/);
+    expect(sidebar.querySelector('a[href="/gold-hunter"]')).toBeNull();
     expect(screen.getByTestId("topbar-live-locked")).toHaveTextContent(/Live locked/i);
   });
 

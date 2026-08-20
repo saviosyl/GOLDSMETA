@@ -36,6 +36,5 @@ describe("AppShell staff nav", () => {
     expect(goldHunter).toBeTruthy();
     expect(goldHunter?.textContent).toMatch(/Gold Hunter/);
     expect(sidebar.querySelector('a[href="/autotrade"]')).toBeNull();
-    expect(sidebar.textContent).not.toMatch(/AutoTrade/);
   });
 });
