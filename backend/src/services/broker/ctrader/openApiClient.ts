@@ -746,6 +746,21 @@ export function isSuccessfulExecutionDealStatus(
   return kind === "FILLED" || kind === "PARTIALLY_FILLED";
 }
 
+/**
+ * Historical order may supply OPEN entry only when it is a successful
+ * opening fill. Closing orders and rejected/expired/cancelled rows never
+ * qualify. Uses normalizeOrderStatus — do not guess raw numeric codes.
+ */
+export function isSuccessfulOpeningHistoricalOrder(
+  order: BrokerHistoricalOrder
+): boolean {
+  if (order.closingOrder === true) return false;
+  const status = normalizeOrderStatus(
+    order.orderStatusCode ?? order.orderStatus
+  );
+  return status.code === 2 || (status.name ?? "").includes("FILLED");
+}
+
 export function isTerminalFailureDealStatus(
   kind: BrokerDealStatusKind
 ): boolean {

@@ -16,6 +16,11 @@ import type {
   BrokerHistoricalOrder
 } from "../broker/ctrader/openApiClient";
 import {
+  isSuccessfulExecutionDealStatus,
+  isSuccessfulOpeningHistoricalOrder,
+  normalizeBrokerDealStatus
+} from "../broker/ctrader/openApiClient";
+import {
   fetchDemoClosingDealEvidenceEarly,
   fetchDemoHistoricalDealEvidenceExhaustive,
   goldHunterEntryHistoryQueryWindow,
@@ -170,6 +175,24 @@ async function withRemainingReadTimeout<T>(
   }
 }
 
+/** Bound every broker/history read by remaining supervisor budget. */
+async function budgetedRead<T>(
+  deadline: number,
+  work: () => Promise<T>
+): Promise<T> {
+  const remainingMs = deadline - nowMs();
+  if (remainingMs <= 0) throw new SupervisorReadTimeoutError();
+  return withRemainingReadTimeout(remainingMs, work);
+}
+
+function isSuccessfulOpeningDeal(deal: BrokerDealEvidence): boolean {
+  if (deal.isClosing) return false;
+  if (!isValidGoldHunterEntryPrice(deal.executionPrice)) return false;
+  return isSuccessfulExecutionDealStatus(
+    normalizeBrokerDealStatus(deal.dealStatus)
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   if (hooks.sleep) return hooks.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,6 +224,45 @@ async function persistForensics(
   return persisted.trade;
 }
 
+async function stampSupervisorTimeout(
+  ownerUid: string,
+  trade: GoldHunterDemoTrade,
+  attempts: number
+): Promise<GoldHunterDemoTrade> {
+  return persistForensics(ownerUid, trade, {
+    openEntryRecoveryAttempts: attempts,
+    openEntryRecoveryLastAt: new Date().toISOString(),
+    openEntryRecoveryLastReason: "TIMEOUT"
+  });
+}
+
+type FreshOpenProof =
+  | { kind: "open"; positions: BrokerOpenPosition[] }
+  | { kind: "absent" }
+  | { kind: "failed" }
+  | { kind: "timeout" };
+
+async function confirmPositionStillOpen(args: {
+  ownerUid: string;
+  positionId: string;
+  deadline: number;
+  list: (ownerUid: string) => Promise<BrokerOpenPosition[]>;
+}): Promise<FreshOpenProof> {
+  try {
+    const positions = await budgetedRead(args.deadline, () =>
+      args.list(args.ownerUid)
+    );
+    if (!Array.isArray(positions)) return { kind: "failed" };
+    const present = positions.some(
+      (p) => String(p.positionId) === String(args.positionId)
+    );
+    return present ? { kind: "open", positions } : { kind: "absent" };
+  } catch (error) {
+    if (error instanceof SupervisorReadTimeoutError) return { kind: "timeout" };
+    return { kind: "failed" };
+  }
+}
+
 async function defaultFindHistoricalOrder(
   ownerUid: string,
   trade: GoldHunterDemoTrade
@@ -217,6 +279,7 @@ async function defaultFindHistoricalOrder(
   });
   if (!read.ok || !read.value.order) return null;
   const order = read.value.order;
+  if (!isSuccessfulOpeningHistoricalOrder(order)) return null;
   if (!isValidGoldHunterEntryPrice(order.executionPrice)) return null;
   if (
     trade.brokerPositionId &&
@@ -254,8 +317,7 @@ async function defaultFindOpeningDeal(
   if (!read.ok) return null;
   return (
     read.items.find((d) => {
-      if (d.isClosing) return false;
-      if (!isValidGoldHunterEntryPrice(d.executionPrice)) return false;
+      if (!isSuccessfulOpeningDeal(d)) return false;
       if (
         trade.brokerPositionId &&
         d.positionId &&
@@ -470,9 +532,7 @@ async function runSupervisor(args: {
     attempts += 1;
     let positions: BrokerOpenPosition[];
     try {
-      positions = await withRemainingReadTimeout(remainingMs, () =>
-        list(ownerUid)
-      );
+      positions = await budgetedRead(deadline, () => list(ownerUid));
       if (!Array.isArray(positions)) {
         lastReason = "POSITIONS_READ_FAILED";
         trade = await persistForensics(ownerUid, trade, {
@@ -489,11 +549,7 @@ async function runSupervisor(args: {
     } catch (error) {
       if (error instanceof SupervisorReadTimeoutError) {
         lastReason = "TIMEOUT";
-        trade = await persistForensics(ownerUid, trade, {
-          openEntryRecoveryAttempts: attempts,
-          openEntryRecoveryLastAt: new Date().toISOString(),
-          openEntryRecoveryLastReason: lastReason
-        });
+        trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
         return {
           recovered: false,
           trade,
@@ -520,9 +576,26 @@ async function runSupervisor(args: {
       .find((p) => String(p.positionId) === String(trade.brokerPositionId));
 
     if (!match) {
-      const closing = await defaultFindClosingDeal(ownerUid, trade).catch(
-        () => null
-      );
+      let closing: { dealId: string } | null = null;
+      try {
+        closing = await budgetedRead(deadline, () =>
+          defaultFindClosingDeal(ownerUid, trade)
+        );
+      } catch (error) {
+        if (error instanceof SupervisorReadTimeoutError) {
+          lastReason = "TIMEOUT";
+          trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
+          return {
+            recovered: false,
+            trade,
+            reason: "TIMEOUT",
+            attempts,
+            newOrderCalls,
+            pmRegistered: false
+          };
+        }
+        closing = null;
+      }
       if (closing) {
         lastReason = "POSITION_CLOSED_BEFORE_RECOVERY";
         trade = await persistForensics(ownerUid, trade, {
@@ -578,20 +651,78 @@ async function runSupervisor(args: {
     sawMatchWithInvalidEntry = true;
     lastReason = "ENTRY_INVALID_WITHIN_WINDOW";
 
-    const order = await defaultFindHistoricalOrder(ownerUid, trade).catch(
-      () => null
-    );
-    if (order && isValidGoldHunterEntryPrice(order.executionPrice)) {
-      const stillOpen = positions
-        .map(toLite)
-        .some((p) => String(p.positionId) === String(trade.brokerPositionId));
-      if (!stillOpen) {
+    let order: BrokerHistoricalOrder | null = null;
+    try {
+      order = await budgetedRead(deadline, () =>
+        defaultFindHistoricalOrder(ownerUid, trade)
+      );
+    } catch (error) {
+      if (error instanceof SupervisorReadTimeoutError) {
+        lastReason = "TIMEOUT";
+        trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
+        return {
+          recovered: false,
+          trade,
+          reason: "TIMEOUT",
+          attempts,
+          newOrderCalls,
+          pmRegistered: false
+        };
+      }
+      order = null;
+    }
+    if (
+      order &&
+      isSuccessfulOpeningHistoricalOrder(order) &&
+      isValidGoldHunterEntryPrice(order.executionPrice)
+    ) {
+      attempts += 1;
+      const proof = await confirmPositionStillOpen({
+        ownerUid,
+        positionId: String(trade.brokerPositionId),
+        deadline,
+        list
+      });
+      if (proof.kind === "timeout") {
+        lastReason = "TIMEOUT";
+        trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
+        return {
+          recovered: false,
+          trade,
+          reason: "TIMEOUT",
+          attempts,
+          newOrderCalls,
+          pmRegistered: false
+        };
+      }
+      if (proof.kind === "failed") {
+        lastReason = "POSITIONS_READ_FAILED";
+        trade = await persistForensics(ownerUid, trade, {
+          openEntryRecoveryAttempts: attempts,
+          openEntryRecoveryLastAt: new Date().toISOString(),
+          openEntryRecoveryLastReason: lastReason
+        });
+        const remain = deadline - nowMs();
+        if (remain <= 0) break;
+        await sleep(Math.min(pollMs, remain));
+        continue;
+      }
+      if (proof.kind === "absent") {
         lastReason = "POSITION_CLOSED_BEFORE_RECOVERY";
         trade = await persistForensics(ownerUid, trade, {
           openEntryRecoveryAttempts: attempts,
           openEntryRecoveryLastAt: new Date().toISOString(),
           openEntryRecoveryLastReason: lastReason
         });
+        break;
+      }
+      const latest = await getGoldHunterDemoTrade(
+        ownerUid,
+        trade.goldHunterTradeId
+      );
+      if (latest) trade = latest;
+      if (isGoldHunterClosedTerminal(trade)) {
+        lastReason = "POSITION_CLOSED_BEFORE_RECOVERY";
         break;
       }
       const promoted = await promoteOpen({
@@ -617,20 +748,74 @@ async function runSupervisor(args: {
       };
     }
 
-    const deal = await defaultFindOpeningDeal(ownerUid, trade).catch(
-      () => null
-    );
-    if (deal && isValidGoldHunterEntryPrice(deal.executionPrice)) {
-      const stillOpen = positions
-        .map(toLite)
-        .some((p) => String(p.positionId) === String(trade.brokerPositionId));
-      if (!stillOpen) {
+    let deal: BrokerDealEvidence | null = null;
+    try {
+      deal = await budgetedRead(deadline, () =>
+        defaultFindOpeningDeal(ownerUid, trade)
+      );
+    } catch (error) {
+      if (error instanceof SupervisorReadTimeoutError) {
+        lastReason = "TIMEOUT";
+        trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
+        return {
+          recovered: false,
+          trade,
+          reason: "TIMEOUT",
+          attempts,
+          newOrderCalls,
+          pmRegistered: false
+        };
+      }
+      deal = null;
+    }
+    if (deal && isSuccessfulOpeningDeal(deal)) {
+      attempts += 1;
+      const proof = await confirmPositionStillOpen({
+        ownerUid,
+        positionId: String(trade.brokerPositionId),
+        deadline,
+        list
+      });
+      if (proof.kind === "timeout") {
+        lastReason = "TIMEOUT";
+        trade = await stampSupervisorTimeout(ownerUid, trade, attempts);
+        return {
+          recovered: false,
+          trade,
+          reason: "TIMEOUT",
+          attempts,
+          newOrderCalls,
+          pmRegistered: false
+        };
+      }
+      if (proof.kind === "failed") {
+        lastReason = "POSITIONS_READ_FAILED";
+        trade = await persistForensics(ownerUid, trade, {
+          openEntryRecoveryAttempts: attempts,
+          openEntryRecoveryLastAt: new Date().toISOString(),
+          openEntryRecoveryLastReason: lastReason
+        });
+        const remain = deadline - nowMs();
+        if (remain <= 0) break;
+        await sleep(Math.min(pollMs, remain));
+        continue;
+      }
+      if (proof.kind === "absent") {
         lastReason = "POSITION_CLOSED_BEFORE_RECOVERY";
         trade = await persistForensics(ownerUid, trade, {
           openEntryRecoveryAttempts: attempts,
           openEntryRecoveryLastAt: new Date().toISOString(),
           openEntryRecoveryLastReason: lastReason
         });
+        break;
+      }
+      const latest = await getGoldHunterDemoTrade(
+        ownerUid,
+        trade.goldHunterTradeId
+      );
+      if (latest) trade = latest;
+      if (isGoldHunterClosedTerminal(trade)) {
+        lastReason = "POSITION_CLOSED_BEFORE_RECOVERY";
         break;
       }
       const promoted = await promoteOpen({

@@ -39,6 +39,7 @@ import {
   getGoldHunterDemoTrade,
   listGoldHunterDemoTrades,
   resetGoldHunterTradeMemory,
+  setGoldHunterTradeStoreHooksForTests,
   upsertGoldHunterDemoTrade
 } from "../../../src/services/goldHunterAdmin/tradeStore";
 import {
@@ -442,6 +443,9 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
     expect(stale.trade.exit).toBe(2600.4);
     expect(stale.trade.closeTs).toBe("2026-08-20T11:42:58.176Z");
     expect(stale.trade.brokerDealId).toBe("d-closed");
+    expect(stale.trade.brokerSettlementTs).toBe("2026-08-20T11:42:58.176Z");
+    expect(stale.trade.mfe).toBe(closed.mfe);
+    expect(stale.trade.mae).toBe(closed.mae);
   });
 
   it("8. unresolved proven-open invalid entry → entryIntegrityHealthy=false", async () => {
@@ -535,6 +539,533 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
     expect(r.reason).toBe("TIMEOUT");
     expect(r.trade.entry).toBeNull();
     expect(elapsed).toBeLessThan(800);
+  });
+
+  it("12. position closes DURING historical lookup → no OPEN promotion", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-sup-race-hist" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let releaseOrder!: (order: {
+      orderId: string;
+      positionId: string;
+      clientOrderId: string;
+      orderStatus: string;
+      orderStatusCode: number;
+      tradeSide: "BUY";
+      symbolId: string;
+      label: string;
+      comment: string;
+      executionPrice: number;
+      executedVolumeLots: number;
+      createdAt: string;
+      updatedAt: string;
+      closingOrder: boolean;
+    }) => void;
+    const heldOrder = new Promise<Parameters<typeof releaseOrder>[0]>((res) => {
+      releaseOrder = res;
+    });
+    let lookupStarted = false;
+    let listCalls = 0;
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => {
+        lookupStarted = true;
+        return heldOrder;
+      },
+      findOpeningDeal: async () => null,
+      findClosingDeal: async () => null
+    });
+    const running = ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 800,
+      pollMs: 20,
+      listPositions: async () => {
+        listCalls += 1;
+        if (listCalls === 1) {
+          return [
+            {
+              positionId: "54726281",
+              side: "BUY",
+              entryPrice: 0,
+              volumeLots: 9,
+              comment: "GOLD_HUNTER",
+              label: "GH-D-sup-race-hist"
+            } as never
+          ];
+        }
+        return [];
+      }
+    });
+    for (let i = 0; i < 40 && !lookupStarted; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(lookupStarted).toBe(true);
+    releaseOrder({
+      orderId: "70609421",
+      positionId: "54726281",
+      clientOrderId: "gh_client_sup_1",
+      orderStatus: "ORDER_FILLED",
+      orderStatusCode: 2,
+      tradeSide: "BUY",
+      symbolId: "41",
+      label: "GH-D-sup-race-hist",
+      comment: "GOLD_HUNTER",
+      executionPrice: 4478.35,
+      executedVolumeLots: 9,
+      createdAt: "2026-08-20T11:41:30.900Z",
+      updatedAt: "2026-08-20T11:41:30.960Z",
+      closingOrder: false
+    });
+    const r = await running;
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("POSITION_CLOSED_BEFORE_RECOVERY");
+    expect(r.trade.status).toBe("PENDING_RECONCILIATION");
+    expect(r.trade.entry).toBeNull();
+    expect(r.pmRegistered).toBe(false);
+    expect(r.trade.openEntryPmRegisteredAt ?? null).toBeNull();
+    expect(getGoldHunterOpenPositionDiagnostics(OWNER).length).toBe(0);
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("13. hung historical order read → bounded TIMEOUT", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-hung-order" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: () => new Promise(() => undefined),
+      findOpeningDeal: async () => null,
+      findClosingDeal: async () => null
+    });
+    const started = Date.now();
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 180,
+      pollMs: 30,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 0,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-hung-order"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("TIMEOUT");
+    expect(r.trade.entry).toBeNull();
+    expect(r.pmRegistered).toBe(false);
+    expect(Date.now() - started).toBeLessThan(800);
+  });
+
+  it("14. hung opening deal read → bounded TIMEOUT", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-hung-deal" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => null,
+      findOpeningDeal: () => new Promise(() => undefined),
+      findClosingDeal: async () => null
+    });
+    const started = Date.now();
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 180,
+      pollMs: 30,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 0,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-hung-deal"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("TIMEOUT");
+    expect(r.trade.entry).toBeNull();
+    expect(Date.now() - started).toBeLessThan(800);
+  });
+
+  it("15. hung closing-deal read → bounded TIMEOUT", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-hung-close" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => null,
+      findOpeningDeal: async () => null,
+      findClosingDeal: () => new Promise(() => undefined)
+    });
+    const started = Date.now();
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 180,
+      pollMs: 30,
+      listPositions: async () => []
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("TIMEOUT");
+    expect(r.trade.entry).toBeNull();
+    expect(Date.now() - started).toBeLessThan(800);
+  });
+
+  it("16. rejected/error/missed opening deal cannot supply entry", async () => {
+    for (const dealStatus of ["REJECTED", "ERROR", "MISSED", "INTERNALLY_REJECTED"]) {
+      resetGoldHunterTradeMemory();
+      resetKnownPositionEntrySupervisorForTests();
+      const trade = pendingTrade({
+        goldHunterTradeId: `GH-D-bad-deal-${dealStatus}`
+      });
+      await upsertGoldHunterDemoTrade(OWNER, trade);
+      setKnownPositionEntrySupervisorHooksForTests({
+        findHistoricalOrder: async () => null,
+        findOpeningDeal: async () => ({
+          dealId: "61009849",
+          orderId: "70609421",
+          positionId: "54726281",
+          executionPrice: 4478.35,
+          executedAt: "2026-08-20T11:41:30.960Z",
+          filledVolumeLots: 9,
+          tradeSide: "BUY",
+          isClosing: false,
+          close: null,
+          label: trade.goldHunterTradeId,
+          comment: "GOLD_HUNTER",
+          symbolId: "41",
+          dealStatus
+        }),
+        findClosingDeal: async () => null
+      });
+      const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+        ownerUid: OWNER,
+        trade,
+        timeoutMs: 160,
+        pollMs: 30,
+        listPositions: async () => [
+          {
+            positionId: "54726281",
+            side: "BUY",
+            entryPrice: 0,
+            volumeLots: 9,
+            comment: "GOLD_HUNTER",
+            label: trade.goldHunterTradeId
+          } as never
+        ]
+      });
+      expect(r.recovered).toBe(false);
+      expect(r.trade.entry).toBeNull();
+      expect(r.pmRegistered).toBe(false);
+    }
+  });
+
+  it("17. successful FILLED opening deal can supply entry", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-good-deal" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => null,
+      findOpeningDeal: async () => ({
+        dealId: "61009849",
+        orderId: "70609421",
+        positionId: "54726281",
+        executionPrice: 4478.35,
+        executedAt: "2026-08-20T11:41:30.960Z",
+        filledVolumeLots: 9,
+        tradeSide: "BUY",
+        isClosing: false,
+        close: null,
+        label: "GH-D-good-deal",
+        comment: "GOLD_HUNTER",
+        symbolId: "41",
+        dealStatus: "FILLED"
+      }),
+      findClosingDeal: async () => null
+    });
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 300,
+      pollMs: 20,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 0,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-good-deal"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(true);
+    expect(r.trade.entry).toBe(4478.35);
+    expect(r.trade.status).toBe("FILLED");
+    expect(r.trade.entryRecoverySource).toBe(
+      "BROKER_OPENING_DEAL_RECONCILIATION"
+    );
+    expect(r.pmRegistered).toBe(true);
+  });
+
+  it("17b. closing FILLED historical order cannot supply OPEN entry", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-close-order" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    setKnownPositionEntrySupervisorHooksForTests({
+      findHistoricalOrder: async () => ({
+        orderId: "70609421",
+        positionId: "54726281",
+        clientOrderId: "gh_client_sup_1",
+        orderStatus: "ORDER_FILLED",
+        orderStatusCode: 2,
+        tradeSide: "BUY",
+        symbolId: "41",
+        label: "GH-D-close-order",
+        comment: "GOLD_HUNTER",
+        executionPrice: 4478.35,
+        executedVolumeLots: 9,
+        createdAt: "2026-08-20T11:41:37.000Z",
+        updatedAt: "2026-08-20T11:41:37.000Z",
+        closingOrder: true
+      }),
+      findOpeningDeal: async () => null,
+      findClosingDeal: async () => null
+    });
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 160,
+      pollMs: 30,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 0,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-close-order"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.trade.entry).toBeNull();
+    expect(r.pmRegistered).toBe(false);
+  });
+
+  it("18. stale non-CLOSED write cannot alter CLOSED lifecycle/PM fields", async () => {
+    const closed = applyBrokerSettledClose({
+      trade: filledOpen({
+        goldHunterTradeId: "GH-D-stale-lifecycle",
+        smartPmState: "PROTECTED",
+        highestProtectionStage: "PROTECTED",
+        exitReason: "TRAIL_HIT",
+        closeRequestTs: "2026-08-20T11:42:50.000Z",
+        errorCode: null
+      }),
+      deal: {
+        dealId: "d-life",
+        orderId: "o1",
+        positionId: "54726731",
+        closePrice: 2600.4,
+        closedAt: "2026-08-20T11:42:58.176Z",
+        grossPnl: 1.31,
+        commission: -0.54,
+        swap: 0,
+        netPnl: 0.77,
+        closedVolumeLots: 9,
+        entryPrice: 2600.1
+      }
+    });
+    await upsertGoldHunterDemoTrade(OWNER, closed);
+    const before = await getGoldHunterDemoTrade(OWNER, closed.goldHunterTradeId);
+    const stale = await upsertGoldHunterDemoTrade(OWNER, {
+      ...closed,
+      status: "CLOSE_REQUESTED",
+      result: null,
+      closeRequestTs: "2026-08-20T12:06:15.594Z",
+      exitSignalTs: "2026-08-20T12:06:15.594Z",
+      errorCode: "CTRADER_ORDER_TIMEOUT",
+      smartPmState: "UNPROTECTED",
+      highestProtectionStage: "UNPROTECTED",
+      protectedProfitR: 0,
+      protectedStopPrice: 1,
+      lastStopAdjustReason: "HARD_PROTECTION",
+      exitReason: "HARD_PROTECTION",
+      entry: 1,
+      exit: null,
+      closeTs: null,
+      netPnlEur: null,
+      brokerDealId: "mutated"
+    });
+    expect(stale.rejectedRegression).toBe(true);
+    const final = stale.trade;
+    expect(final.status).toBe("CLOSED");
+    expect(final.result).toBe(before?.result);
+    expect(final.entry).toBe(before?.entry);
+    expect(final.exit).toBe(before?.exit);
+    expect(final.closeTs).toBe(before?.closeTs);
+    expect(final.netPnlEur).toBe(before?.netPnlEur);
+    expect(final.brokerDealId).toBe(before?.brokerDealId);
+    expect(final.brokerSettlementTs).toBe(before?.brokerSettlementTs);
+    expect(final.closeRequestTs).toBe(before?.closeRequestTs);
+    expect(final.exitReason).toBe(before?.exitReason);
+    expect(final.smartPmState).toBe(before?.smartPmState);
+    expect(final.errorCode ?? null).toBe(before?.errorCode ?? null);
+  });
+
+  it("19. immediate recovery vs concurrent CLOSED → no PM registration", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-imm-closed" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    const closed = applyBrokerSettledClose({
+      trade: {
+        ...trade,
+        status: "FILLED",
+        result: "OPEN",
+        entry: 4478.35,
+        fillTs: "2026-08-20T11:41:33.000Z"
+      },
+      deal: {
+        dealId: "61009849",
+        orderId: "70609421",
+        positionId: "54726281",
+        closePrice: 4477.78,
+        closedAt: "2026-08-20T11:41:37.986Z",
+        grossPnl: -4.39,
+        commission: -0.54,
+        swap: 0,
+        netPnl: -4.93,
+        closedVolumeLots: 9,
+        entryPrice: 4478.35
+      }
+    });
+    let sawRecoveredCandidate = false;
+    setGoldHunterTradeStoreHooksForTests({
+      beforeCommit: async (incoming) => {
+        if (incoming.status === "FILLED" && incoming.result === "OPEN") {
+          expect(incoming.openEntryPmRegisteredAt ?? null).toBeNull();
+          sawRecoveredCandidate = true;
+          await upsertGoldHunterDemoTrade(OWNER, closed);
+        }
+      }
+    });
+    const r = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 200,
+      pollMs: 20,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 4478.35,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-imm-closed"
+        } as never
+      ]
+    });
+    expect(sawRecoveredCandidate).toBe(true);
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("POSITION_CLOSED_BEFORE_RECOVERY");
+    expect(r.pmRegistered ?? false).toBe(false);
+    expect(r.trade.status).toBe("CLOSED");
+    expect(r.trade.result).toBe("LOSS");
+    expect(r.trade.netPnlEur).toBe(-4.93);
+    expect(r.trade.brokerDealId).toBe("61009849");
+    expect(r.trade.openEntryPmRegisteredAt ?? null).toBeNull();
+    expect(getGoldHunterOpenPositionDiagnostics(OWNER).length).toBe(0);
+    const final = await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId);
+    expect(final?.status).toBe("CLOSED");
+    expect(final?.openEntryPmRegisteredAt ?? null).toBeNull();
+  });
+
+  it("20. openEntryPmRegisteredAt only after actual PM registration", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-pm-stamp" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let sawPromoteWithoutPmStamp = false;
+    setGoldHunterTradeStoreHooksForTests({
+      beforeCommit: (incoming) => {
+        if (
+          incoming.status === "FILLED" &&
+          incoming.result === "OPEN" &&
+          !incoming.openEntryPmRegisteredAt
+        ) {
+          sawPromoteWithoutPmStamp = true;
+        }
+      }
+    });
+    const r = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 200,
+      pollMs: 20,
+      listPositions: async () => [
+        {
+          positionId: "54726281",
+          side: "BUY",
+          entryPrice: 4478.35,
+          volumeLots: 9,
+          comment: "GOLD_HUNTER",
+          label: "GH-D-pm-stamp"
+        } as never
+      ]
+    });
+    expect(r.recovered).toBe(true);
+    expect(sawPromoteWithoutPmStamp).toBe(true);
+    expect(r.trade.openEntryPmRegisteredAt).toBeTruthy();
+    expect(
+      getGoldHunterOpenPositionDiagnostics(OWNER).some(
+        (p) => p.tradeId === "GH-D-pm-stamp"
+      )
+    ).toBe(true);
+  });
+
+  it("21. recovery start timestamp is true start and supervisor honours it", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-start-ts" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let startAtFirstPoll: string | null = null;
+    const immediate = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 80,
+      pollMs: 20,
+      listPositions: async () => {
+        const cur = await getGoldHunterDemoTrade(OWNER, trade.goldHunterTradeId);
+        startAtFirstPoll = cur?.openEntryRecoveryStartedAt ?? null;
+        return [
+          {
+            positionId: "54726281",
+            side: "BUY",
+            entryPrice: 0,
+            volumeLots: 9,
+            comment: "GOLD_HUNTER",
+            label: "GH-D-start-ts"
+          } as never
+        ];
+      }
+    });
+    expect(immediate.recovered).toBe(false);
+    expect(startAtFirstPoll).toBeTruthy();
+    expect(immediate.trade.openEntryRecoveryStartedAt).toBe(startAtFirstPoll);
+
+    const ancient = new Date(Date.now() - 9_700).toISOString();
+    const late = pendingTrade({
+      goldHunterTradeId: "GH-D-start-horizon",
+      openEntryRecoveryStartedAt: ancient
+    });
+    await upsertGoldHunterDemoTrade(OWNER, late);
+    const started = Date.now();
+    const r = await ensureGoldHunterKnownPositionEntrySupervisor({
+      ownerUid: OWNER,
+      trade: late,
+      timeoutMs: 10_000,
+      pollMs: 30,
+      listPositions: () => new Promise(() => undefined)
+    });
+    expect(r.reason).toBe("TIMEOUT");
+    expect(r.recovered).toBe(false);
+    expect(r.trade.entry).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(r.trade.openEntryRecoveryStartedAt).toBe(ancient);
   });
 
   it("safety defaults unchanged", () => {

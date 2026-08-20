@@ -151,4 +151,58 @@ describe("GH CLOSED atomic persist (emulator)", () => {
     expect(final?.brokerSettlementTs).toBe("2026-08-20T11:42:58.176Z");
     expect(final?.entry).toBe(4477.65);
   });
+
+  it("stale non-CLOSED write cannot mutate CLOSED lifecycle/PM fields", async () => {
+    if (!enabled) return;
+    const closed = {
+      ...closedTrade(),
+      smartPmState: "PROTECTED",
+      highestProtectionStage: "PROTECTED",
+      closeRequestTs: "2026-08-20T11:42:50.000Z",
+      exitReason: "TRAIL_HIT",
+      errorCode: null
+    };
+    await upsertGoldHunterDemoTrade(OWNER, closed);
+    const before = await getGoldHunterDemoTrade(OWNER, closed.goldHunterTradeId);
+
+    const [a, b] = await Promise.all([
+      upsertGoldHunterDemoTrade(OWNER, {
+        ...closed,
+        status: "CLOSE_REQUESTED",
+        result: null,
+        closeRequestTs: "2026-08-20T12:06:15.594Z",
+        exitSignalTs: "2026-08-20T12:06:15.594Z",
+        errorCode: "CTRADER_ORDER_TIMEOUT",
+        smartPmState: "UNPROTECTED",
+        highestProtectionStage: "UNPROTECTED",
+        exitReason: "HARD_PROTECTION",
+        netPnlEur: null,
+        exit: null
+      }),
+      upsertGoldHunterDemoTrade(OWNER, {
+        ...closed,
+        status: "FILLED",
+        result: "OPEN",
+        errorCode: "STALE_MFE",
+        smartPmState: "UNPROTECTED",
+        closeRequestTs: "2026-08-20T12:07:00.000Z"
+      })
+    ]);
+    expect(a.rejectedRegression).toBe(true);
+    expect(b.rejectedRegression).toBe(true);
+
+    const final = await getGoldHunterDemoTrade(OWNER, closed.goldHunterTradeId);
+    expect(final?.status).toBe("CLOSED");
+    expect(final?.result).toBe(before?.result);
+    expect(final?.entry).toBe(before?.entry);
+    expect(final?.exit).toBe(before?.exit);
+    expect(final?.closeTs).toBe(before?.closeTs);
+    expect(final?.netPnlEur).toBe(before?.netPnlEur);
+    expect(final?.brokerDealId).toBe(before?.brokerDealId);
+    expect(final?.brokerSettlementTs).toBe(before?.brokerSettlementTs);
+    expect(final?.closeRequestTs).toBe(before?.closeRequestTs);
+    expect(final?.exitReason).toBe(before?.exitReason);
+    expect(final?.smartPmState).toBe(before?.smartPmState);
+    expect(final?.errorCode ?? null).toBe(before?.errorCode ?? null);
+  });
 });
