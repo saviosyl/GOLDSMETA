@@ -51,10 +51,10 @@ export function InsightsPage() {
         {active === "performance" ? (
           <div className="gm-insights-signals" data-testid="insights-autotrade-retired">
             <div className="gm-banner gm-banner-info">
-              <strong>Gold Hunter is the AutoTrade UI</strong>
+              <strong>Gold Hunter performance</strong>
               <p>
-                Core AutoTrade and FAST AutoTrade were removed. Automated trading performance lives
-                in Gold Hunter.
+                Automated trading performance lives in Gold Hunter. Gold Hunter is the only
+                automatic trading engine.
               </p>
               <p>
                 <Link to="/gold-hunter/performance">Open Gold Hunter performance</Link>

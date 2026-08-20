@@ -69,6 +69,18 @@
   color: var(--gh-muted);
 }
 
+.gh-rev {
+  display: grid;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.gh-rev span {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--gh-muted);
+}
+
 .gh-mode-stack {
   display: grid;
   gap: 2px;

@@ -586,16 +586,13 @@ It only tells you when more people may be awake and trading.`,
     ]
   },
   {
-    id: "autotrade-explained",
+    id: "gold-hunter-explained",
     number: 18,
-    title: "AutoTrade Explained",
-    description: "Gold Hunter is the AutoTrade UI. Live stays locked.",
+    title: "Gold Hunter Explained",
+    description: "Gold Hunter is the only automatic trading engine. Live stays locked.",
     listenMinutes: 3,
     diagram: null,
-    body: `Gold Hunter is the only AutoTrade UI.
-
-Core AutoTrade and FAST AutoTrade were removed.
-They are not an active engine any more.
+    body: `Gold Hunter is the only automatic trading engine.
 
 Automated trading follows predefined Gold Hunter rules.
 It is NOT a money button.
@@ -609,27 +606,24 @@ Live stays locked until separate activation.
 
 Always stay in control of risk settings.`,
     example:
-      "You use Gold Hunter on Demo with practice money. Core AutoTrade qualification was removed. Live remains locked.",
+      "You use Gold Hunter on Demo with practice money. Live remains locked.",
     remember: [
-      "Gold Hunter is the AutoTrade UI.",
-      "Core AutoTrade and FAST AutoTrade were removed.",
+      "Gold Hunter is the only automatic trading engine.",
       "It is not a money button.",
       "Trades can still lose.",
-      "Live must never auto-start."
+      "Live must never auto-start.",
+      "You control Demo on and off."
     ]
   },
   {
     id: "qualification-demo",
     number: 19,
     title: "Qualification and Demo Trading",
-    description: "Core qualification was removed. Gold Hunter is the AutoTrade UI.",
+    description: "Gold Hunter Demo uses practice money. Live stays locked.",
     listenMinutes: 3,
     diagram: null,
-    body: `Core AutoTrade qualification was removed.
+    body: `Gold Hunter is the only automatic trading engine.
 
-That old path — preview, controlled Demo trades, then observation — is no longer an active system.
-
-Gold Hunter is the only AutoTrade UI.
 Demo uses practice money.
 It feels real, but it is not your live cash.
 
@@ -639,13 +633,13 @@ Limits, risk settings, and controls are reviewed in Gold Hunter.
 Live remains LOCKED until separate activation.
 Nothing in Gold Hunter unlocks Live by itself.`,
     example:
-      "You use Gold Hunter on Demo. Core Demo Auto qualification was removed. Live still shows locked — that is correct.",
+      "You use Gold Hunter on Demo. Live still shows locked — that is correct.",
     remember: [
-      "Core qualification was removed.",
-      "Gold Hunter is the AutoTrade UI.",
+      "Gold Hunter is the only automatic trading engine.",
       "Demo uses practice money.",
       "Live stays locked.",
-      "Practice is for learning, not guaranteed profit."
+      "Practice is for learning, not guaranteed profit.",
+      "Nothing in Gold Hunter unlocks Live."
     ]
   },
   {
@@ -737,9 +731,14 @@ GoldMeta did not know the future.`,
   }
 ];
 
+const LESSON_ALIASES: Record<string, string> = {
+  "autotrade-explained": "gold-hunter-explained"
+};
+
 export function getLessonById(id: string | undefined | null): LearnLesson | null {
   if (!id) return null;
-  return LEARN_LESSONS.find((l) => l.id === id) ?? null;
+  const resolved = LESSON_ALIASES[id] ?? id;
+  return LEARN_LESSONS.find((l) => l.id === resolved) ?? null;
 }
 
 export function getLessonByNumber(n: number): LearnLesson | null {

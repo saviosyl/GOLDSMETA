@@ -105,11 +105,11 @@ export const GLOSSARY: GlossaryTerm[] = [
       "Smaller lots mean smaller risk. GoldMeta will show volume minimums and steps once Pepperstone is connected for read-only checks."
   },
   {
-    id: "autotrade",
-    term: "AutoTrade",
-    short: "Gold Hunter is the AutoTrade UI. Live execution stays locked.",
+    id: "gold-hunter",
+    term: "Gold Hunter",
+    short: "The only automatic trading engine. Live execution stays locked.",
     detail:
-      "Core AutoTrade and FAST AutoTrade were removed. Gold Hunter is the only AutoTrade UI. Live execution remains locked."
+      "Gold Hunter is the only automatic trading engine. Live execution remains locked. Demo stays OFF until you enable it."
   },
   {
     id: "emergency-stop",

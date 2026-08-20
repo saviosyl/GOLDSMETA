@@ -18,7 +18,7 @@ test.describe("Overview research cockpit", () => {
     await expect(page.getByTestId("expected-range-card")).toBeVisible();
     await expect(page.getByTestId("next-decision-strip")).toBeVisible();
     await expect(page.getByTestId("alternative-scenario")).toBeVisible();
-    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/AutoTrade OFF/i);
+    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/Live trading locked/i);
 
     // Fixture labels must never appear in the rendered plan UI
     await expect(page.getByTestId("todays-intraday-plan")).not.toContainText(/LABELLED FIXTURE/i);
@@ -81,7 +81,7 @@ test.describe("Overview research cockpit", () => {
       await page.goto("/ui-review/?scenario=issue50-below-val");
       await expect(page.getByTestId("todays-intraday-plan")).toBeVisible();
       await expect(page.getByTestId("intraday-live-price")).toBeVisible();
-      await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/AutoTrade OFF/i);
+      await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/Live trading locked/i);
       await expect(page.getByTestId("intraday-action-short")).toBeVisible();
       await expect(page.getByTestId("plan-level-entry")).toBeVisible();
       await expect(page.getByTestId("plan-level-stop")).toBeVisible();
@@ -138,7 +138,7 @@ test.describe("Overview research cockpit", () => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/ui-review/?scenario=market-mismatch");
     await expect(page.getByTestId("intraday-action-label")).toContainText(/NO TRADE/i);
-    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/AutoTrade OFF/i);
+    await expect(page.getByTestId("intraday-autotrade-off")).toContainText(/Live trading locked/i);
     await expect(page.getByTestId("next-decision-mode-message")).toContainText(/NO TRADE/i);
     const mismatchCount = await page.locator('[data-testid="cockpit-mismatch"]').count();
     expect(mismatchCount).toBeLessThanOrEqual(1);

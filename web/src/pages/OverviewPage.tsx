@@ -1140,7 +1140,7 @@ export function OverviewPage() {
                 <div className="gm-trading-status-row" data-testid="dashboard-safety">
                   <span className="gm-badge warning">Live trading locked</span>
                   <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-                    Gold Hunter is the AutoTrade UI
+                    Gold Hunter Demo stays OFF
                   </span>
                   <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
                     Emergency STOP ready
@@ -1279,7 +1279,7 @@ export function OverviewPage() {
           <div className="gm-trading-status-row" data-testid="dashboard-safety">
             <span className="gm-badge warning">Live trading locked</span>
             <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-              Gold Hunter is the AutoTrade UI
+              Gold Hunter Demo stays OFF
             </span>
             <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
               Emergency STOP ready

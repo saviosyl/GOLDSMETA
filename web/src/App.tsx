@@ -298,7 +298,6 @@ function ProtectedApp() {
           <Route path="/journal" element={<JournalPage />} />
           <Route path="/brand" element={<BrandConceptsPage />} />
           <Route path="/planner" element={<RiskPlannerPage />} />
-          <Route path="/autotrade" element={<Navigate to="/gold-hunter" replace />} />
           <Route
             path="/micro-edge"
             element={
@@ -314,10 +313,6 @@ function ProtectedApp() {
                 <MicroEdgeConnectCallbackPage />
               </LazyRoute>
             }
-          />
-          <Route
-            path="/autotrade/performance"
-            element={<Navigate to="/gold-hunter" replace />}
           />
           <Route
             path="/brokers"

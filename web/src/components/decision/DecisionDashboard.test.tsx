@@ -209,7 +209,7 @@ describe("DecisionDashboard", () => {
     expect(screen.getByTestId("hero-confidence")).toHaveTextContent(/82%\s*confidence/i);
     expect(screen.getByTestId("decision-confirmation")).toHaveTextContent(/Passed/i);
     expect(screen.getByTestId("dashboard-autotrade-off")).toHaveTextContent(
-      /Gold Hunter is the AutoTrade UI/i
+      /Gold Hunter Demo stays OFF/i
     );
   });
 

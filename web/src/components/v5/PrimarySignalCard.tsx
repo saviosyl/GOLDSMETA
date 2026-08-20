@@ -172,7 +172,7 @@ export function PrimarySignalCard({
           {brokerConnected ? "Broker connected" : "Broker not connected"}
         </StatusBadge>
         <StatusBadge tone={autoTradeOff ? "neutral" : "negative"}>
-          {autoTradeOff ? "AutoTrade OFF" : "AutoTrade ON"}
+          {autoTradeOff ? "Gold Hunter Demo OFF" : "Gold Hunter Demo ON"}
         </StatusBadge>
         <StatusBadge tone="warning">Trading locked</StatusBadge>
       </div>

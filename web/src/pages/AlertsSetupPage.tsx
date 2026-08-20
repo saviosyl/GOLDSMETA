@@ -267,7 +267,7 @@ export function AlertsSetupPage() {
           <li>GoldMeta watches for a valid plan.</li>
           <li>You can enable alerts for plan-ready and confirmation events.</li>
           <li>When a plan is ready, review entry, stop and targets yourself.</li>
-          <li>Gold Hunter is the AutoTrade UI. Live execution remains locked.</li>
+          <li>Gold Hunter is the only automatic trading engine. Live execution remains locked.</li>
         </ul>
       </section>
 

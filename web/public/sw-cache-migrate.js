@@ -8,7 +8,7 @@ self.addEventListener("install", (event) => {
       if (!self.caches?.keys) return;
       const keys = await self.caches.keys();
       const obsolete = keys.filter((key) =>
-        /goldmeta-hold-lean|goldmeta-v[0-4]|workbox-precache.*hold-lean|goldmeta-autotrade-hardening/i.test(
+        /goldmeta-hold-lean|goldmeta-v[0-4]|goldmeta-premium-ui-v[0-8]\b|workbox-precache.*hold-lean|goldmeta-autotrade-hardening/i.test(
           key
         )
       );

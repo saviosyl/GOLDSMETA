@@ -745,7 +745,7 @@ export function TradingViewSetupPage() {
           <div className="gm-tv-step">
             <h3>Test connection</h3>
             <p className="gm-meta">
-              Sends a safe TEST alert into your own decision engine. AutoTrade stays OFF. No broker
+              Sends a safe TEST alert into your own decision engine. Gold Hunter Demo stays OFF. No broker
               order is submitted.
             </p>
             <button
@@ -850,7 +850,7 @@ export function TradingViewSetupPage() {
       ) : null}
 
       <p className="gm-meta gm-at-locked-note">
-        AutoTrade remains OFF. Order submission stays disabled. Signals feed only your analysis.
+        Gold Hunter Demo remains OFF. Order submission stays disabled. Signals feed only your analysis.
       </p>
     </div>
   );

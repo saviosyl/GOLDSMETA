@@ -1,5 +1,6 @@
 import { GhStatusTone, formatEur, useGoldHunter } from "./GoldHunterShell";
 import { formatResearchLocalTime, formatResearchUtcTime } from "../../lib/formatResearchLocalTime";
+import { goldHunterDisplayWait } from "../../lib/goldHunterIdentity";
 import { useAuth } from "../../lib/auth";
 import { useState } from "react";
 
@@ -52,7 +53,7 @@ type DemoLifecycleDisplay = {
 };
 
 /**
- * Truthful Demo AutoTrade lifecycle for the dashboard.
+ * Truthful Gold Hunter Demo lifecycle for the dashboard.
  * "IN DEMO TRADE" only when a broker-confirmed open position supports it.
  */
 export function classifyGoldHunterDemoLifecycle(args: {
@@ -193,13 +194,13 @@ export function classifyGoldHunterDemoLifecycle(args: {
   if (marketClosed && meaningfulGateBlockers.length === 0) {
     return {
       state: "READY TO ARM — MARKET CLOSED",
-      hint: "Structurally ready to arm when the market is open. Start Demo AutoTrade only when you intend cTrader DEMO orders."
+      hint: "Structurally ready to arm when the market is open. Start Demo only when you intend cTrader DEMO orders."
     };
   }
 
   return {
     state: "READY TO ARM",
-    hint: "Ready to arm. Start Demo AutoTrade to allow valid Gold Hunter setups to submit cTrader DEMO orders."
+    hint: "Ready to arm. Start Demo to allow valid Gold Hunter setups to submit cTrader DEMO orders."
   };
 }
 
@@ -257,11 +258,11 @@ export function GoldHunterDashboardPage() {
       });
       await refresh();
       setDemoActionMessage(
-        "Demo AutoTrade is armed. Gold Hunter will place a cTrader DEMO order only when a valid setup passes every safety gate."
+        "Gold Hunter Demo is armed. Gold Hunter will place a cTrader DEMO order only when a valid setup passes every safety gate."
       );
     } catch (e) {
       setDemoActionMessage(
-        e instanceof Error ? e.message : "Gold Hunter Demo AutoTrade could not be started."
+        e instanceof Error ? e.message : "Gold Hunter Demo could not be started."
       );
     } finally {
       setDemoActionBusy(false);
@@ -274,10 +275,10 @@ export function GoldHunterDashboardPage() {
     try {
       await api.goldHunterUpdateConfig({ demoAutoTradeEnabled: false });
       await refresh();
-      setDemoActionMessage("Demo AutoTrade is OFF. No new Gold Hunter broker entries will be submitted.");
+      setDemoActionMessage("Gold Hunter Demo is OFF. No new Gold Hunter broker entries will be submitted.");
     } catch (e) {
       setDemoActionMessage(
-        e instanceof Error ? e.message : "Gold Hunter Demo AutoTrade could not be stopped."
+        e instanceof Error ? e.message : "Gold Hunter Demo could not be stopped."
       );
     } finally {
       setDemoActionBusy(false);
@@ -332,7 +333,7 @@ export function GoldHunterDashboardPage() {
           }}
         >
           <div>
-            <div className="gh-kpi-label">Gold Hunter Demo AutoTrade</div>
+            <div className="gh-kpi-label">Gold Hunter Demo</div>
             <div className="gh-kpi-value" style={{ fontSize: "1.05rem", marginTop: 4 }} data-testid="gh-demo-autotrade-state">
               {demoState}
             </div>
@@ -350,14 +351,14 @@ export function GoldHunterDashboardPage() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      "Start Gold Hunter Demo AutoTrade? This can place orders only on the connected cTrader DEMO account. Live trading remains disabled."
+                      "Start Gold Hunter Demo? This can place orders only on the connected cTrader DEMO account. Live trading remains disabled."
                     )
                   ) {
                     void startDemoAutoTrade();
                   }
                 }}
               >
-                {demoActionBusy ? "Starting…" : "Start Demo AutoTrade"}
+                {demoActionBusy ? "Starting…" : "Start Demo"}
               </button>
             ) : (
               <button
@@ -367,7 +368,7 @@ export function GoldHunterDashboardPage() {
                 data-testid="gh-dashboard-stop-demo-auto"
                 onClick={() => void stopDemoAutoTrade()}
               >
-                {demoActionBusy ? "Stopping…" : "Stop Demo AutoTrade"}
+                {demoActionBusy ? "Stopping…" : "Stop Demo"}
               </button>
             )}
             <span className="gh-badge gh-badge--muted">LIVE LOCKED</span>
@@ -385,17 +386,19 @@ export function GoldHunterDashboardPage() {
         !status.config.demoAutoTradeEnabled ||
         demoEnabled) && (
         <div className="gh-wait" data-testid="gh-primary-wait">
-          {status.config.demoAutoTradeEnabled
-            ? firstRealGateBlocker ??
-              status.signal.note ??
-              "WAIT — VALID SETUP REQUIRED"
-            : !status.arming?.ready
-              ? `WAIT — AUTOTRADE OFF${armingBlockers[0] ? ` · ${armingBlockers[0]}` : ""}`
-              : firstRealGateBlocker
-                ? `READY TO ARM · CURRENTLY BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
-                : marketClosed
-                  ? "READY TO ARM — MARKET CLOSED"
-                  : "READY TO ARM — PRESS START DEMO AUTOTRADE"}
+          {goldHunterDisplayWait(
+            status.config.demoAutoTradeEnabled
+              ? firstRealGateBlocker ??
+                status.signal.note ??
+                "WAIT — VALID SETUP REQUIRED"
+              : !status.arming?.ready
+                ? `WAIT — DEMO OFF${armingBlockers[0] ? ` · ${armingBlockers[0]}` : ""}`
+                : firstRealGateBlocker
+                  ? `READY TO ARM · CURRENTLY BLOCKED — ${stripWaitPrefix(firstRealGateBlocker)}`
+                  : marketClosed
+                    ? "READY TO ARM — MARKET CLOSED"
+                    : "READY TO ARM — PRESS START DEMO"
+          )}
         </div>
       )}
 
@@ -556,7 +559,7 @@ export function GoldHunterDashboardPage() {
             ["DEPTH", status.health.depth],
             ["STRATEGY", status.health.strategy],
             ["RISK", status.health.risk],
-            ["AUTOTRADE", status.health.autoTrade]
+            ["DEMO", status.health.autoTrade]
           ] as const
         ).map(([label, value]) => (
           <div className="gh-health-item" key={label}>
@@ -602,8 +605,7 @@ export function GoldHunterDashboardPage() {
                 stop: t.stop
               })),
               performanceToday: status.performanceToday,
-              feedAgeMs: status.market.ageMs,
-              fastAutoTrade: "NOT_INCLUDED"
+              feedAgeMs: status.market.ageMs
             },
             null,
             2

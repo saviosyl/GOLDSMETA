@@ -102,7 +102,7 @@ export function DecisionSecondaryPanel({
     state.mode === "HOLD" ||
     (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
-  const atLabel = "Gold Hunter is the AutoTrade UI";
+  const atLabel = "Gold Hunter Demo stays OFF";
 
   return (
     <div className="gm-decision-secondary" data-testid="decision-secondary-panel">

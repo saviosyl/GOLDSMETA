@@ -67,7 +67,7 @@ describe("HelpPage", () => {
     );
     expect(screen.getByTestId("help-page")).toBeInTheDocument();
     expect(screen.getByTestId("first-use-guide")).toHaveTextContent(/Open Plan/i);
-    expect(screen.getByTestId("glossary-autotrade")).toBeInTheDocument();
+    expect(screen.getByTestId("glossary-gold-hunter")).toBeInTheDocument();
     expect(screen.getByTestId("glossary-poc")).toBeInTheDocument();
     expect(screen.getByTestId("glossary-trend")).toBeInTheDocument();
     expect(screen.getByTestId("glossary-entry")).toBeInTheDocument();

@@ -1,5 +1,5 @@
 /**
- * Friendly broker / AutoTrade / TradingView copy for ordinary UI.
+ * Friendly broker / Gold Hunter / TradingView copy for ordinary UI.
  * Technical codes stay available under diagnostics only.
  */
 
@@ -19,7 +19,7 @@ const REJECT_MAP: Record<string, string> = {
   CTRADER_LIVE_MUST_REMAIN_FALSE:
     "Live order execution is currently disabled in this preview.",
   SIGNAL_STALE: "This alert is too old to use. Send a fresh TradingView alert.",
-  CONFIDENCE_TOO_LOW: "Confidence is below your AutoTrade setting.",
+  CONFIDENCE_TOO_LOW: "Confidence is below your Gold Hunter setting.",
   CANDLE_CONFIRMATION_REQUIRED: "Waiting for a confirmed candle before trading.",
   MARKET_CLOSED: "The gold market is closed right now.",
   QUOTE_UNAVAILABLE: "A live price quote is not available yet.",
@@ -28,7 +28,7 @@ const REJECT_MAP: Record<string, string> = {
   SYMBOL_METADATA_INCOMPLETE: "Broker symbol details are incomplete. Trading stays locked.",
   MAX_OPEN_POSITIONS: "You already have the maximum number of open positions.",
   MAX_TRADES_PER_DAY: "Today’s trade limit has been reached.",
-  SPREAD_TOO_WIDE: "The spread is wider than your AutoTrade setting allows.",
+  SPREAD_TOO_WIDE: "The spread is wider than your Gold Hunter setting allows.",
   DUPLICATE_SIGNAL: "This alert was already received. No duplicate decision was created.",
   UNSUPPORTED_SYMBOL: "This symbol is not supported. Use an XAUUSD / gold alias.",
   PAYLOAD_TOO_LARGE: "The alert message is too large. Use the standard GoldMeta alert body.",

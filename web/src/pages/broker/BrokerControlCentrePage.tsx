@@ -86,7 +86,7 @@ const FALLBACK_WIZARD = [
     title: "Request Demo trading approval",
     status: "BLOCKED",
     detail:
-      "Gold Hunter is the AutoTrade UI. Live execution stays locked."
+      "Gold Hunter is the automated trading engine. Live execution stays locked."
   }
 ];
 
@@ -127,7 +127,7 @@ type ActionUiState = {
 
 /**
  * Broker Control Centre — MANUAL / T212 / Pepperstone cTrader / IG parked.
- * Gold Hunter is the AutoTrade UI. No Core/FAST order submission from this page.
+ * Gold Hunter is the automated trading engine. No Core/FAST order submission from this page.
  */
 export function BrokerControlCentrePage() {
   const { api } = useAuth();
@@ -228,7 +228,7 @@ export function BrokerControlCentrePage() {
       setActionBanner({
         tone: "warning",
         message:
-          "Pepperstone session expired or was denied. Reconnect to continue — AutoTrade stays OFF.",
+          "Pepperstone session expired or was denied. Reconnect to continue — Gold Hunter Demo stays OFF.",
         action
       });
     } else if (isVersionConflictCode(code)) {
@@ -486,7 +486,7 @@ export function BrokerControlCentrePage() {
     if (!guardAction("authorise_demo_trading")) return;
     if (
       !window.confirm(
-        "Authorise Demo Trading will open cTrader and request trading permission (scope=trading) for your own Pepperstone Demo account.\n\nLive accounts must not be selected.\nAutoTrade stays OFF.\nNo order will be submitted in this step.\n\nContinue?"
+        "Authorise Demo Trading will open cTrader and request trading permission (scope=trading) for your own Pepperstone Demo account.\n\nLive accounts must not be selected.\nGold Hunter Demo stays OFF.\nNo order will be submitted in this step.\n\nContinue?"
       )
     ) {
       return;
@@ -498,7 +498,7 @@ export function BrokerControlCentrePage() {
         setActionBanner({
           tone: "warning",
           message:
-            "Opening cTrader trading consent… grant permission only for your Demo account. AutoTrade stays OFF."
+            "Opening cTrader trading consent… grant permission only for your Demo account. Gold Hunter Demo stays OFF."
         });
         window.location.assign(started.authorizationUrl);
         return;
@@ -539,7 +539,7 @@ export function BrokerControlCentrePage() {
       setActionBanner({
         tone: "warning",
         message:
-          "Confirm Live account selection. Order submission stays disabled; AutoTrade stays OFF."
+          "Confirm Live account selection. Order submission stays disabled; Gold Hunter Demo stays OFF."
       });
       return;
     }
@@ -612,7 +612,7 @@ export function BrokerControlCentrePage() {
       setConfirmDisconnect(true);
       setActionBanner({
         tone: "warning",
-        message: "Confirm disconnect? You can reconnect later. AutoTrade stays OFF."
+        message: "Confirm disconnect? You can reconnect later. Gold Hunter Demo stays OFF."
       });
       return;
     }
@@ -772,7 +772,7 @@ export function BrokerControlCentrePage() {
           label: "Order submission disabled in this preview",
           ok: diagnostics.tradingSafelyLocked
         },
-        { key: "at", label: "AutoTrade OFF", ok: diagnostics.autoTrade === "OFF" }
+        { key: "at", label: "Demo OFF", ok: diagnostics.autoTrade === "OFF" }
       ]
     : [];
 
@@ -839,7 +839,7 @@ export function BrokerControlCentrePage() {
             withDot
             testId="autotrade-off-badge"
           >
-            Gold Hunter is the AutoTrade UI
+            Gold Hunter Demo OFF
           </PremiumStatusChip>
           <PremiumStatusChip
             tone="locked"
@@ -1145,7 +1145,7 @@ export function BrokerControlCentrePage() {
         >
           <p>
             Pepperstone authentication expired or was denied. Reconnect to restore read-only
-            access. AutoTrade stays OFF. No orders can be submitted.
+            access. Gold Hunter Demo stays OFF. No orders can be submitted.
           </p>
           <button
             type="button"
@@ -1217,9 +1217,10 @@ export function BrokerControlCentrePage() {
                   </span>
                   <span className="gm-meta">
                     {b.detail
-                      .replace(/AutoTrade Locked/gi, "AutoTrade OFF")
+                      .replace(/AutoTrade Locked/gi, "Gold Hunter Demo OFF")
+                      .replace(/AutoTrade OFF/gi, "Gold Hunter Demo OFF")
                       .replace(/Live Locked/gi, "Live not active in preview")
-                      .replace(/cTrader Demo workflow/gi, "cTrader AutoTrade workflow")
+                      .replace(/cTrader AutoTrade workflow/gi, "cTrader Demo workflow")
                       .replace(/Demo read-only/gi, "preview — order submission disabled")
                       .replace(/Demo setup only/gi, "Preview mode")
                       .replace(/order automation unmerged/gi, "practice read-only")}
@@ -1228,7 +1229,7 @@ export function BrokerControlCentrePage() {
               ))}
             </div>
             <p className="gm-meta">
-              Switching brokers keeps AutoTrade OFF. Reconnecting never turns AutoTrade on.
+              Switching brokers keeps Gold Hunter Demo OFF. Reconnecting never turns Gold Hunter on.
             </p>
           </section>
         </details>
@@ -1272,9 +1273,10 @@ export function BrokerControlCentrePage() {
               </span>
               <span className="gm-meta">
                 {b.detail
-                  .replace(/AutoTrade Locked/gi, "AutoTrade OFF")
+                  .replace(/AutoTrade Locked/gi, "Gold Hunter Demo OFF")
+                  .replace(/AutoTrade OFF/gi, "Gold Hunter Demo OFF")
                   .replace(/Live Locked/gi, "Live not active in preview")
-                  .replace(/cTrader Demo workflow/gi, "cTrader AutoTrade workflow")
+                  .replace(/cTrader AutoTrade workflow/gi, "cTrader Demo workflow")
                   .replace(/Demo read-only/gi, "preview — order submission disabled")
                   .replace(/Demo setup only/gi, "Preview mode")
                   .replace(/order automation unmerged/gi, "practice read-only")}
@@ -1283,7 +1285,7 @@ export function BrokerControlCentrePage() {
           ))}
         </div>
         <p className="gm-meta">
-          Switching brokers keeps AutoTrade OFF. Reconnecting never turns AutoTrade on.
+          Switching brokers keeps Gold Hunter Demo OFF. Reconnecting never turns Gold Hunter on.
         </p>
       </section>
       )}
@@ -1302,11 +1304,11 @@ export function BrokerControlCentrePage() {
           </h2>
           <p className="gm-broker-lead">
             {canonical.connectionPhase === "connected"
-              ? "Connected in preview mode. Order submission is currently disabled in this preview. AutoTrade stays OFF."
+              ? "Connected in preview mode. Order submission is currently disabled in this preview. Gold Hunter Demo stays OFF."
               : canonical.reconnectRequired
                 ? "Session needs reconnect. TradingView alone cannot authorise GoldMeta for cTrader."
                 : oauthConfigured
-                  ? "Server OAuth is configured. Authorise Demo Trading to grant Demo trading permission (scope=trading) with PKCE. TradingView alone cannot authorise GoldMeta for cTrader. AutoTrade stays OFF."
+                  ? "Server OAuth is configured. Authorise Demo Trading to grant Demo trading permission (scope=trading) with PKCE. TradingView alone cannot authorise GoldMeta for cTrader. Gold Hunter Demo stays OFF."
                   : "Connection setup required until server configuration and OAuth are complete. TradingView alone cannot authorise GoldMeta for cTrader."}
           </p>
 
@@ -1327,7 +1329,7 @@ export function BrokerControlCentrePage() {
                 {authBlocked
                   ? "Broker connect stays disabled until account security checks pass. Dashboard and analysis still work."
                   : oauthConfigured
-                    ? "Press Authorise Demo Trading to open the official cTrader consent page for your Demo account. GoldMeta never asks for your broker password. Live accounts must not be selected. AutoTrade stays OFF."
+                    ? "Press Authorise Demo Trading to open the official cTrader consent page for your Demo account. GoldMeta never asks for your broker password. Live accounts must not be selected. Gold Hunter Demo stays OFF."
                     : missingConfigurationItems.length
                       ? "Server configuration is incomplete. Fix the items below, then retry."
                       : "Server configuration is incomplete. OAuth cannot start until the missing items are available to the function."}
@@ -1427,7 +1429,7 @@ export function BrokerControlCentrePage() {
                 data-testid="ctrader-authorise-demo-trading-btn"
                 disabled={anyActionBusy || authBlocked}
                 aria-busy={isBusy("authorise_demo_trading")}
-                title="Request cTrader trading permission for your Demo account (scope=trading, PKCE). AutoTrade stays OFF. No order is submitted."
+                title="Request cTrader trading permission for your Demo account (scope=trading, PKCE). Gold Hunter Demo stays OFF. No order is submitted."
                 onClick={() => void authoriseDemoTrading()}
               >
                 {actionButtonLabel(
@@ -1565,7 +1567,7 @@ export function BrokerControlCentrePage() {
             >
               <h3 id="first-demo-checkpoint-heading">First Demo order checkpoint</h3>
               <p className="gm-meta" data-testid="first-demo-checkpoint-status">
-                Status: {String(firstCheckpoint.status ?? "—")} · AutoTrade OFF · No order submitted
+                Status: {String(firstCheckpoint.status ?? "—")} · Gold Hunter Demo OFF · No order submitted
               </p>
               <p className="gm-meta">
                 Reply <strong>APPROVE FIRST DEMO ORDER</strong> in chat only after reviewing this
@@ -1714,7 +1716,7 @@ export function BrokerControlCentrePage() {
                     {String(diagnostics.connection.tokenRefreshHealthy)}
                     <br />
                     Environment: {diagnostics.environment === "LIVE" ? "Live" : "Demo"} ·
-                    AutoTrade OFF · mutations disabled
+                    Gold Hunter Demo OFF · mutations disabled
                   </p>
                 </div>
               </details>
@@ -1776,7 +1778,7 @@ export function BrokerControlCentrePage() {
               <li>Broker volume min/step from Open API still apply</li>
               <li>Stop loss required · no martingale / averaging / grid / pyramiding / blind retry</li>
               <li>
-                <strong>Temporary preview locks:</strong> AutoTrade OFF · order
+                <strong>Temporary preview locks:</strong> Gold Hunter Demo OFF · order
                 submission disabled · <code>scope=accounts</code> only — not permanent
                 product limitations
               </li>
@@ -1921,7 +1923,7 @@ export function BrokerControlCentrePage() {
               <p className="gm-meta" style={{ margin: 0 }}>
                 Quote source: {demo.quote.source}
                 <br />
-                AutoTrade: {demo.autoTrade} · Order submission:{" "}
+                Gold Hunter Demo: {demo.autoTrade} · Order submission:{" "}
                 {String(demo.orderSubmissionEnabled)}
               </p>
             </div>

@@ -276,7 +276,7 @@ export function AppShell({
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
             <p data-testid="sidebar-live-locked">Live execution locked</p>
-            <p className="gm-meta">Gold Hunter is the AutoTrade UI</p>
+            <p className="gm-meta">Gold Hunter is the automated trading engine</p>
           </div>
         </div>
       </aside>

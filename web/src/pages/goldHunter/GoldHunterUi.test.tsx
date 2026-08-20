@@ -226,10 +226,13 @@ describe("Gold Hunter UI", () => {
     renderAt("/gold-hunter");
     await waitFor(() => expect(screen.getByTestId("gh-dashboard")).toBeInTheDocument());
     expect(screen.getByTestId("gh-allocation")).toHaveTextContent("5,000");
-    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("AUTOTRADE OFF");
+    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("DEMO OFF");
     expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
     expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
     expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
+    expect(screen.getByTestId("gh-revision")).toHaveTextContent("Brain V3");
+    expect(screen.getByTestId("gh-revision")).toHaveTextContent(/Rev 2026\.08\.20-01/);
+    expect(screen.getByTestId("gh-revision")).toHaveTextContent(/Build /);
   });
 
   it("shows Demo AutoTrade card as NOT READY with LIVE LOCKED and exact blocker", async () => {
@@ -511,7 +514,7 @@ describe("Gold Hunter UI", () => {
   it("renders monitor wait reasons", async () => {
     renderAt("/gold-hunter/monitor");
     await waitFor(() => expect(screen.getByTestId("gh-monitor")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-monitor-wait")).toHaveTextContent("AUTOTRADE OFF");
+    expect(screen.getByTestId("gh-monitor-wait")).toHaveTextContent("DEMO OFF");
   });
 
   it("renders performance empty demo history", async () => {

@@ -17,7 +17,7 @@ test.describe("UI review host / production isolation", () => {
       .getByTestId("dashboard-autotrade-off")
       .or(page.getByTestId("intraday-autotrade-off"));
     await expect(autoTradeOff.first()).toBeAttached();
-    await expect(autoTradeOff.first()).toContainText(/Gold Hunter is the AutoTrade UI|Live trading locked/i);
+    await expect(autoTradeOff.first()).toContainText(/Gold Hunter Demo stays OFF|Live trading locked/i);
     await expect(page.locator("body")).toContainText(/LABELLED|PREVIEW|FIXTURE/i);
   });
 

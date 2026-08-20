@@ -592,7 +592,7 @@ export const chartExampleIntradayPlanFixture = {
     "liveTrading": false,
     "analysisOnly": true
   },
-  "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. This payload is a labelled Issue #50 chart fixture for UI/tests only.",
+  "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. This payload is a labelled Issue #50 chart fixture for UI/tests only.",
   "planStatus": "WAITING_FOR_ENTRY_ZONE",
   "planUnchanged": false,
   "confirmation5m": {

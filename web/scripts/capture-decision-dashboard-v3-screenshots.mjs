@@ -43,7 +43,7 @@ function dashboard({ width, feed = "amber" }) {
         </div>
         <div class="row"><div class="button" style="flex:1">Enable alerts</div></div>
         <div class="ghost">Why waiting?</div>
-        <p class="muted">Manual only · Review your risk · AutoTrade OFF</p>
+        <p class="muted">Manual only · Review your risk · Gold Hunter Demo stays OFF</p>
       </section>
     </main>`;
 }

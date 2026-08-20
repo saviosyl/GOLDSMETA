@@ -86,7 +86,7 @@ export function PremiumAnalyticsPage() {
       <PageHeader title="Analytics" environment="LIVE" freshness="V4 shadow only" />
       <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }}>
         Filterable V4 shadow intelligence. Not proof of edge. Broker execution remains disabled.
-        AutoTrade OFF.
+        Gold Hunter Demo OFF.
       </p>
 
       {data && (

@@ -625,7 +625,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. This payload is a labelled Issue #50 chart fixture for UI/tests only."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. This payload is a labelled Issue #50 chart fixture for UI/tests only."
     },
     "decision": {
       "lastKnownPrice": 4034.815,
@@ -1109,7 +1109,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture inside-value — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture inside-value — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4042.5,
@@ -1593,7 +1593,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture above-vah — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture above-vah — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4052.4,
@@ -1632,7 +1632,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
       "schemaVersion": "1.2",
       "action": "BUY_NOW",
       "actionLabel": "BUY NOW",
-      "oneSentence": "Buy plan is active with confirmation — manage risk manually; AutoTrade stays OFF. (LABELLED PREVIEW — buy-confirmed)",
+      "oneSentence": "Buy plan is active with confirmation — manage risk manually; Gold Hunter Demo stays OFF. (LABELLED PREVIEW — buy-confirmed)",
       "trigger": "Buy zone near 4040",
       "triggerPrice": 4040,
       "distanceToTriggerPoints": 2,
@@ -2183,7 +2183,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture buy-confirmed — not live market data.",
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture buy-confirmed — not live market data.",
       "planStatus": "CONFIRMED",
       "planUnchanged": false,
       "confirmation5m": {
@@ -2240,7 +2240,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
       "schemaVersion": "1.2",
       "action": "SELL_ON_REJECTION",
       "actionLabel": "SELL ON REJECTION",
-      "oneSentence": "Sell plan is active with confirmation — manage risk manually; AutoTrade stays OFF. (LABELLED PREVIEW — sell-confirmed)",
+      "oneSentence": "Sell plan is active with confirmation — manage risk manually; Gold Hunter Demo stays OFF. (LABELLED PREVIEW — sell-confirmed)",
       "trigger": "Sell zone near 4042",
       "triggerPrice": 4042,
       "distanceToTriggerPoints": 0,
@@ -2791,7 +2791,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture sell-confirmed — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture sell-confirmed — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4042,
@@ -3275,7 +3275,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture range-conditional — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture range-conditional — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4043,
@@ -3511,7 +3511,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture mismatch — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture mismatch — not live market data."
     },
     "decision": {
       "lastKnownPrice": 2408,
@@ -3888,7 +3888,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture live-range-only — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture live-range-only — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4034.8,
@@ -4299,7 +4299,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture missing-atr — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture missing-atr — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4034.815,
@@ -4677,7 +4677,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture missing-structure — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture missing-structure — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4034.815,
@@ -5266,7 +5266,7 @@ export const issue50PreviewCases: Issue50PreviewCase[] = [
         "liveTrading": false,
         "analysisOnly": true
       },
-      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. AutoTrade stays OFF. No broker orders are submitted. Preview fixture stale-signal-fresh-quote — not live market data."
+      "disclaimer": "GoldMeta is analysis-only manual assistance for adult traders. Gold Hunter Demo stays OFF. No broker orders are submitted. Preview fixture stale-signal-fresh-quote — not live market data."
     },
     "decision": {
       "lastKnownPrice": 4036.2,

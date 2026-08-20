@@ -35,8 +35,6 @@ const REQUIRED_PATHS = [
   "/v4",
   "/journal",
   "/planner",
-  "/autotrade",
-  "/autotrade/performance",
   "/brokers",
   "/tradingview",
   "/admin/users",
@@ -60,13 +58,9 @@ describe("App route inventory", () => {
     expect(REQUIRED_PATHS.length).toBeGreaterThanOrEqual(34);
   });
 
-  it("redirects legacy Core AutoTrade routes to Gold Hunter", () => {
-    expect(appSource).toMatch(
-      /path="\/autotrade"\s+element=\{<Navigate to="\/gold-hunter" replace \/>\}/
-    );
-    expect(appSource).toMatch(
-      /path="\/autotrade\/performance"[\s\S]*?to="\/gold-hunter"/
-    );
+  it("does not register Core AutoTrade routes or pages", () => {
+    expect(appSource).not.toContain('path="/autotrade"');
+    expect(appSource).not.toContain('path="/autotrade/performance"');
     expect(appSource).toContain('path="/gold-hunter"');
     expect(appSource).not.toContain("AutoTradePage");
   });

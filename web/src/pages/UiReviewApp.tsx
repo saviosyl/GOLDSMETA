@@ -857,14 +857,14 @@ function buildReviewApi() {
           name: "Pepperstone cTrader",
           status: "Connected",
           detail:
-            "Multi-user Demo/Live accounts — AutoTrade OFF — order submission temporarily disabled",
+            "Multi-user Demo/Live accounts — Gold Hunter Demo OFF — order submission temporarily disabled",
           badge: "PREVIEW"
         },
         {
           id: "trading212_invest",
           name: "Trading 212 Practice",
           status: "Read only",
-          detail: "Separate gold-proxy path — not part of the cTrader AutoTrade workflow",
+          detail: "Separate gold-proxy path — not part of the cTrader Demo workflow",
           badge: "READ_ONLY"
         },
         {
@@ -944,7 +944,7 @@ function buildReviewApi() {
             detail: "Demo trading stays locked."
           }
         ],
-        label: "Pepperstone connection required — Trading locked — AutoTrade OFF",
+        label: "Pepperstone connection required — Trading locked — Gold Hunter Demo OFF",
         auth: { status: "HEALTHY", brokerSetupEnabled: true, notes: [] },
         qualification: {
           unlocked: false,
