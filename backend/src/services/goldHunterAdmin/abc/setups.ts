@@ -2,8 +2,8 @@
  * Three FAST specialists — interpretable setup-quality scores.
  * Phase 0B: always expose raw A/B/C eligibility separately from best-of selection.
  *
- * Brain V2: Setup B uses prior-only breakout references + stronger confirmation.
- * Setup A and C specialist logic is intentionally unchanged from V1.
+ * Brain V3: Setup A requires 1s velocity direction + updateRate1s persistence.
+ * Setup B remains Brain V2 (prior-only breakout). Setup C unchanged from V1.
  */
 import type {
   GhFastConfig,
@@ -180,7 +180,7 @@ function scoreBreakoutQualityB(
   );
 }
 
-/** A — Momentum ignition (V1 — DO NOT redesign in Brain V2). */
+/** A — Momentum ignition (Brain V3: 1s direction + update-rate persistence). */
 export function scoreMomentumIgnition(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
@@ -212,6 +212,10 @@ function evaluateMomentumIgnition(
     : sellPressure
       ? "SELL"
       : null;
+  const updateRateOk = f.updateRate1s >= 3;
+  const buyVel1sAligned = f.midVel1s > 0;
+  const sellVel1sAligned = f.midVel1s < 0;
+  const vel1sMagOk = Math.abs(f.midVel1s) >= cfg.momentumVelMin;
 
   if (!(buyPressure || sellPressure)) {
     if (!(f.midVel250 > 0 && f.midVel500 > 0) && !(f.midVel250 < 0 && f.midVel500 < 0)) {
@@ -235,7 +239,12 @@ function evaluateMomentumIgnition(
     }
   }
 
-  if (buyPressure && Math.abs(f.midVel1s) >= cfg.momentumVelMin) {
+  if (
+    buyPressure &&
+    buyVel1sAligned &&
+    updateRateOk &&
+    vel1sMagOk
+  ) {
     const quality = clamp01(
       0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
         0.25 * clamp01(f.acceleration * 5000) +
@@ -261,7 +270,12 @@ function evaluateMomentumIgnition(
     failed.push("quality_below_min");
     return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
   }
-  if (sellPressure && Math.abs(f.midVel1s) >= cfg.momentumVelMin) {
+  if (
+    sellPressure &&
+    sellVel1sAligned &&
+    updateRateOk &&
+    vel1sMagOk
+  ) {
     const quality = clamp01(
       0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
         0.25 * clamp01(-f.acceleration * 5000) +
@@ -288,7 +302,14 @@ function evaluateMomentumIgnition(
     return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
   }
   if (buyPressure || sellPressure) {
-    failed.push("velocity_1s_below_min");
+    if (
+      (buyPressure && !buyVel1sAligned) ||
+      (sellPressure && !sellVel1sAligned)
+    ) {
+      failed.push("velocity_1s_not_aligned");
+    }
+    if (!updateRateOk) failed.push("update_rate_insufficient");
+    if (!vel1sMagOk) failed.push("velocity_1s_below_min");
   }
   return {
     hit: null,
