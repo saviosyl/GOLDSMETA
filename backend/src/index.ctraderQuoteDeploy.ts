@@ -7,7 +7,6 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onRequest } from "firebase-functions/v2/https";
 import { env } from "./config/env";
 import { createApiApp } from "./apiApp";
-import { createAutoTradeService } from "./services/autoTrade/runtime";
 import { AiExplainer } from "./services/ai/explainer";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
@@ -16,13 +15,11 @@ import { runQuoteKeepalivePass } from "./services/broker/ctrader/quoteService";
 
 const defaultStore = createStore();
 const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
-const defaultAutoTradeService = createAutoTradeService();
 
 const app = createApiApp({
   store: defaultStore,
   aiExplainer: new AiExplainer(),
-  tradingService: defaultTradingService,
-  autoTradeService: defaultAutoTradeService
+  tradingService: defaultTradingService
 });
 
 function applyProductionCTraderRuntimeEnv(): void {

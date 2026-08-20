@@ -30,11 +30,11 @@ import {
   safeInteger,
   safeWireAccountId
 } from "./openApiNumeric";
-import { withFastDemoSession } from "./fastAutoTrade/demoSession";
+import { withFastDemoSession } from "./demoTransport/demoSession";
 import {
   submitFastMarketOrder,
   toDemoMarketOrderResult
-} from "./fastAutoTrade/orderTransport";
+} from "./demoTransport/orderTransport";
 
 const DEMO_HOST = "demo.ctraderapi.com";
 const DEMO_PORT = 5035;

@@ -69,8 +69,8 @@ import {
   isCTraderLiveEnabled,
   isBrokerExecutionEnabled
 } from "../../../src/services/broker/ctrader/flags";
-import { submitFastMarketOrder } from "../../../src/services/broker/ctrader/fastAutoTrade/orderTransport";
-import { BoundedOpTimeoutError } from "../../../src/services/broker/ctrader/fastAutoTrade/boundedOp";
+import { submitFastMarketOrder } from "../../../src/services/broker/ctrader/demoTransport/orderTransport";
+import { BoundedOpTimeoutError } from "../../../src/services/broker/ctrader/demoTransport/boundedOp";
 
 const OWNER = "gh-broker-outcome-owner";
 

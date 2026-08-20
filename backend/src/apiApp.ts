@@ -22,7 +22,6 @@ import { buildWebhooksRouter } from "./routes/webhooks";
 import { buildSetupsRouter } from "./routes/setups";
 import { buildV4Router } from "./routes/v4";
 import { buildV5Router } from "./routes/v5";
-import { buildAutoTradeRouter } from "./routes/autoTrade";
 import { buildMicroEdgeRouter } from "./routes/microEdge";
 import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
 import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
@@ -36,14 +35,10 @@ import { createStore } from "./services/storage/createStore";
 import type { GoldMetaStore } from "./services/storage/types";
 import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
 import { TradingModeService } from "./services/trading/tradingModeService";
-import { createAutoTradeService } from "./services/autoTrade/runtime";
-import type { AutoTradeService } from "./services/autoTrade/autoTradeService";
-
 export interface AppDependencies {
   store: GoldMetaStore;
   aiExplainer: AiExplainer;
   tradingService?: TradingModeService;
-  autoTradeService?: AutoTradeService;
 }
 
 const isPayloadTooLarge = (error: unknown): boolean => {
@@ -84,7 +79,6 @@ export const createApiApp = (
   const aiExplainer = dependencies.aiExplainer ?? new AiExplainer();
   const tradingService =
     dependencies.tradingService ?? new TradingModeService(new InMemoryTradingStore());
-  const autoTradeService = dependencies.autoTradeService ?? createAutoTradeService();
 
   const app = express();
   app.disable("x-powered-by");
@@ -137,7 +131,6 @@ export const createApiApp = (
   app.use(buildJournalRouter(store));
   app.use(buildSettingsRouter(store));
   app.use(buildTradingRouter(tradingService));
-  app.use(buildAutoTradeRouter(autoTradeService, store));
   app.use(buildMicroEdgeRouter());
   app.use(buildCTraderRouter(store));
   app.use(buildAuthIntegrityRouter(store));

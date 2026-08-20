@@ -80,8 +80,9 @@ describe("cTrader HTTP routes — mutation safety", () => {
       .post("/v1/ctrader/automation/mode")
       .set("x-test-user-id", "ctrader-route-user")
       .send({ mode: "DEMO_AUTO" });
-    expect(res.status).toBe(403);
-    expect(res.body.active ?? "OFF").toBe("OFF");
+    expect(res.status).toBe(410);
+    expect(res.body.automaticOwner).toBe("GOLD_HUNTER");
+    expect(res.body.coreAutoTrade).toBe("ABSENT");
     if (prevDemo === undefined) delete process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED;
     else process.env.CTRADER_DEMO_ORDER_SUBMISSION_ENABLED = prevDemo;
   });

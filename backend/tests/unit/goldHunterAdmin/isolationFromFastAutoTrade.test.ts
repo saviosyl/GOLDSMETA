@@ -1,31 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
- * Protected Core unchanged — Gold Hunter must not mutate Fast AutoTrade
- * strategy / engine / qualification ownership surfaces.
+ * Gold Hunter remains isolated. Core / FAST AutoTrade engines are gone.
  */
-describe("Gold Hunter isolation from Fast AutoTrade", () => {
-  it("does not import Fast AutoTrade engine from GH admin modules", () => {
+describe("Gold Hunter isolation after Core/FAST removal", () => {
+  it("does not import removed Fast / Core AutoTrade engines", () => {
     const files = [
-      "backend/src/services/goldHunterAdmin/demoExecutionAdapter.ts",
-      "backend/src/services/goldHunterAdmin/orderGates.ts",
-      "backend/src/services/goldHunterAdmin/statusAssembler.ts",
-      "backend/src/services/goldHunterAdmin/accountSnapshot.ts",
-      "backend/src/services/goldHunterAdmin/executionOrchestrator.ts",
-      "backend/src/services/goldHunterAdmin/strategySelector.ts",
-      "backend/src/services/goldHunterAdmin/demoAutoExecutionRuntime.ts",
-      "backend/src/services/goldHunterAdmin/demoPositionManager.ts",
-      "backend/src/services/goldHunterAdmin/marketFeedHook.ts",
-      "backend/src/services/goldHunterAdmin/closeSettlement.ts",
-      "backend/src/services/goldHunterAdmin/reconciliationRuntime.ts",
-      "backend/src/services/goldHunterAdmin/executionRuntimeStore.ts",
-      "backend/src/services/goldHunterAdmin/candidateFreshness.ts",
-      "backend/src/routes/goldHunterAdmin.ts"
+      "src/services/goldHunterAdmin/demoExecutionAdapter.ts",
+      "src/services/goldHunterAdmin/orderGates.ts",
+      "src/services/goldHunterAdmin/statusAssembler.ts",
+      "src/services/goldHunterAdmin/accountSnapshot.ts",
+      "src/services/goldHunterAdmin/executionOrchestrator.ts",
+      "src/services/goldHunterAdmin/strategySelector.ts",
+      "src/services/goldHunterAdmin/demoAutoExecutionRuntime.ts",
+      "src/services/goldHunterAdmin/demoPositionManager.ts",
+      "src/services/goldHunterAdmin/marketFeedHook.ts",
+      "src/services/goldHunterAdmin/closeSettlement.ts",
+      "src/services/goldHunterAdmin/reconciliationRuntime.ts",
+      "src/services/goldHunterAdmin/executionRuntimeStore.ts",
+      "src/services/goldHunterAdmin/candidateFreshness.ts",
+      "src/routes/goldHunterAdmin.ts"
     ];
     for (const f of files) {
-      const text = readFileSync(resolve(process.cwd(), f.replace(/^backend\//, "")), "utf8");
+      const text = readFileSync(resolve(process.cwd(), f), "utf8");
       expect(text).not.toMatch(/fastAutoTrade\/engine/);
       expect(text).not.toMatch(/createAutoTradeService/);
       expect(text).not.toMatch(/qualificationMachine/);
@@ -33,6 +32,9 @@ describe("Gold Hunter isolation from Fast AutoTrade", () => {
         /GOLD_HUNTER|GH_ADMIN_STRATEGY|gold-hunter|Gold Hunter|GoldHunter|cTrader/
       );
     }
+    expect(
+      existsSync(resolve(process.cwd(), "src/services/broker/ctrader/fastAutoTrade/engine.ts"))
+    ).toBe(false);
   });
 
   it("execution adapter uses Demo order path with GOLD_HUNTER attribution", () => {
