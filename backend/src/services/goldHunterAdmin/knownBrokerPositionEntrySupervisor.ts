@@ -725,7 +725,7 @@ export async function resumeGoldHunterKnownPositionEntrySupervisors(args: {
   let launched = 0;
   for (const trade of trades) {
     if (!isKnownBrokerPositionEntryPending(trade)) continue;
-    ensureGoldHunterKnownPositionEntrySupervisor({
+    void ensureGoldHunterKnownPositionEntrySupervisor({
       ownerUid: args.ownerUid,
       trade
     });
