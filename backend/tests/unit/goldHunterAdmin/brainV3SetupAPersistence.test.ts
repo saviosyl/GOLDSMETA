@@ -1,6 +1,6 @@
 /**
- * Gold Hunter Brain V3 — Setup A persistence + post-loss anti-churn.
- * Does not retune B/C, efficiency, or execution plumbing.
+ * Gold Hunter Brain V3 — Setup A 1s direction consistency + post-loss anti-churn.
+ * updateRate1s is NOT a Setup A gate. Setup B remains unchanged.
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import {
@@ -190,7 +190,7 @@ describe("Gold Hunter Brain V3 — identity + safety", () => {
   });
 });
 
-describe("Gold Hunter Brain V3 — Setup A persistence", () => {
+describe("Gold Hunter Brain V3 — Setup A 1s direction consistency", () => {
   const cfg = defaultGhFastConfig();
 
   it("1. BUY 250/500 positive, 1s negative, other gates valid => A rejected", () => {
@@ -208,27 +208,11 @@ describe("Gold Hunter Brain V3 — Setup A persistence", () => {
     expect(scoreMomentumIgnition(f, cfg)).toBeNull();
     expect(a.eligible).toBe(false);
     expect(a.failedConditions).toContain("velocity_1s_not_aligned");
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
   });
 
-  it("3. BUY all direction gates valid, updateRate1s=1 => A rejected", () => {
+  it("3. valid BUY with updateRate1s=1 may qualify", () => {
     const f = strongABuy({ updateRate1s: 1 });
-    const a = specialistA(f);
-    expect(scoreMomentumIgnition(f, cfg)).toBeNull();
-    expect(a.eligible).toBe(false);
-    expect(a.failedConditions).toContain("update_rate_insufficient");
-    expect(a.failedConditions).not.toContain("velocity_1s_not_aligned");
-  });
-
-  it("4. BUY all gates valid, updateRate1s=2 => A rejected", () => {
-    const f = strongABuy({ updateRate1s: 2 });
-    const a = specialistA(f);
-    expect(scoreMomentumIgnition(f, cfg)).toBeNull();
-    expect(a.eligible).toBe(false);
-    expect(a.failedConditions).toContain("update_rate_insufficient");
-  });
-
-  it("5. BUY all gates valid, updateRate1s=3 => may qualify if quality passes", () => {
-    const f = strongABuy({ updateRate1s: 3 });
     const hit = scoreMomentumIgnition(f, cfg);
     const a = specialistA(f);
     expect(hit).not.toBeNull();
@@ -236,18 +220,37 @@ describe("Gold Hunter Brain V3 — Setup A persistence", () => {
     expect(hit!.side).toBe("BUY");
     expect(hit!.quality).toBeGreaterThanOrEqual(cfg.minSetupQuality);
     expect(a.eligible).toBe(true);
-    expect(a.failedConditions).toEqual([]);
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
   });
 
-  it("6. SELL all gates valid, updateRate1s>=3 => may qualify", () => {
-    const f = strongASell({ updateRate1s: 3 });
+  it("4. valid BUY with updateRate1s=2 may qualify", () => {
+    const f = strongABuy({ updateRate1s: 2 });
+    const hit = scoreMomentumIgnition(f, cfg);
+    const a = specialistA(f);
+    expect(hit).not.toBeNull();
+    expect(hit!.side).toBe("BUY");
+    expect(a.eligible).toBe(true);
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
+  });
+
+  it("5. valid SELL with updateRate1s=1 may qualify", () => {
+    const f = strongASell({ updateRate1s: 1 });
     const hit = scoreMomentumIgnition(f, cfg);
     const a = specialistA(f);
     expect(hit).not.toBeNull();
     expect(hit!.side).toBe("SELL");
-    expect(hit!.quality).toBeGreaterThanOrEqual(cfg.minSetupQuality);
     expect(a.eligible).toBe(true);
-    expect(a.failedConditions).toEqual([]);
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
+  });
+
+  it("6. valid SELL with updateRate1s=2 may qualify", () => {
+    const f = strongASell({ updateRate1s: 2 });
+    const hit = scoreMomentumIgnition(f, cfg);
+    const a = specialistA(f);
+    expect(hit).not.toBeNull();
+    expect(hit!.side).toBe("SELL");
+    expect(a.eligible).toBe(true);
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
   });
 
   it("7. existing valid A BUY fixture still qualifies", () => {
@@ -258,12 +261,13 @@ describe("Gold Hunter Brain V3 — Setup A persistence", () => {
     expect(hit!.quality).toBeGreaterThanOrEqual(cfg.minSetupQuality);
   });
 
-  it("does not add an efficiency1s gate on Setup A", () => {
-    const f = strongABuy({ efficiency1s: 0 });
+  it("does not add an efficiency1s or updateRate1s gate on Setup A", () => {
+    const f = strongABuy({ efficiency1s: 0, updateRate1s: 0 });
     const hit = scoreMomentumIgnition(f, cfg);
     expect(hit).not.toBeNull();
     const a = specialistA(f);
     expect(a.failedConditions).not.toContain("efficiency1s_too_low");
+    expect(a.failedConditions).not.toContain("update_rate_insufficient");
   });
 });
 
