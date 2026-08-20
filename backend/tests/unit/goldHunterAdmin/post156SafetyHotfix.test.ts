@@ -239,6 +239,36 @@ describe("Immediate OPEN entry recovery", () => {
     const open = getGoldHunterOpenPositionDiagnostics(OWNER);
     expect(open.some((p) => p.tradeId === "GH-D-poll-never")).toBe(false);
   });
+
+  it("hung listPositions cannot hold recovery past remaining budget", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-hung-read" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let calls = 0;
+    const timeoutMs = 200;
+    const started = Date.now();
+    const r = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs,
+      pollMs: 50,
+      listPositions: () => {
+        calls += 1;
+        return new Promise(() => {
+          /* never resolves — hung broker read */
+        });
+      }
+    });
+    const elapsed = Date.now() - started;
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("TIMEOUT");
+    expect(calls).toBe(1);
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 20);
+    expect(elapsed).toBeLessThan(timeoutMs + 400);
+    expect(r.trade.entry).toBeNull();
+    expect(r.trade.status).toBe("PENDING_RECONCILIATION");
+    const open = getGoldHunterOpenPositionDiagnostics(OWNER);
+    expect(open.some((p) => p.tradeId === "GH-D-hung-read")).toBe(false);
+  });
 });
 
 describe("Final pretransport loss-safety", () => {

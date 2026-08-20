@@ -5,6 +5,8 @@
  * while the position is live so Smart Loss / Smart PM can manage it.
  *
  * Polls within a fixed time budget for broker eventual visibility.
+ * Each broker-position read is itself raced against the remaining budget so a
+ * hung list/reconcile cannot hold the recovery past timeoutMs.
  * Never places orders. Never invents prices. Never extends indefinitely.
  */
 import type { BrokerOpenPosition } from "../broker/ctrader/openApiClient";
@@ -58,9 +60,51 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+class ImmediateEntryRecoveryReadTimeoutError extends Error {
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super("IMMEDIATE_ENTRY_RECOVERY_READ_TIMEOUT");
+    this.name = "ImmediateEntryRecoveryReadTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function isImmediateEntryRecoveryReadTimeout(
+  error: unknown
+): error is ImmediateEntryRecoveryReadTimeoutError {
+  return error instanceof ImmediateEntryRecoveryReadTimeoutError;
+}
+
+/**
+ * Race one broker-position read against the remaining recovery budget.
+ * The underlying Promise is not cancelled; callers must not start another
+ * read after this times out.
+ */
+async function withRemainingRecoveryReadTimeout<T>(
+  remainingMs: number,
+  work: () => Promise<T>
+): Promise<T> {
+  const ms = Number.isFinite(remainingMs) && remainingMs > 0 ? remainingMs : 1;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ImmediateEntryRecoveryReadTimeoutError(ms)),
+          ms
+        );
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Bounded open-position poll + entry backfill for a single pending GH trade.
- * Total wall time ≤ timeoutMs. Stops immediately on valid match.
+ * Total wall time ≤ timeoutMs. Each listPositions call is bounded by remaining
+ * time. Stops immediately on valid match. Never starts a read with no budget.
  */
 export async function recoverGoldHunterOpenEntryImmediate(args: {
   ownerUid: string;
@@ -100,11 +144,20 @@ export async function recoverGoldHunterOpenEntryImmediate(args: {
     | "POSITIONS_READ_FAILED"
     | "TIMEOUT" = "POSITION_NOT_FOUND_WITHIN_WINDOW";
 
-  while (Date.now() < deadline) {
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      if (successfulReads === 0 && lastFailReason !== "POSITIONS_READ_FAILED") {
+        lastFailReason = "TIMEOUT";
+      }
+      break;
+    }
     attempts += 1;
     let positions: BrokerOpenPosition[];
     try {
-      positions = await list(args.ownerUid);
+      positions = await withRemainingRecoveryReadTimeout(remainingMs, () =>
+        list(args.ownerUid)
+      );
       if (!Array.isArray(positions)) {
         lastFailReason = "POSITIONS_READ_FAILED";
         const remain = deadline - Date.now();
@@ -113,7 +166,11 @@ export async function recoverGoldHunterOpenEntryImmediate(args: {
         continue;
       }
       successfulReads += 1;
-    } catch {
+    } catch (error) {
+      if (isImmediateEntryRecoveryReadTimeout(error)) {
+        lastFailReason = "TIMEOUT";
+        return { recovered: false, trade, reason: "TIMEOUT", attempts };
+      }
       lastFailReason = "POSITIONS_READ_FAILED";
       const remain = deadline - Date.now();
       if (remain <= 0) break;
