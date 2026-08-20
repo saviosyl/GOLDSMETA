@@ -1,5 +1,5 @@
 /**
- * SMART_POSITION_MANAGER_V1 — R-based profit protection on GOLD_HUNTER_BRAIN_V2.
+ * SMART_POSITION_MANAGER_V1 — R-based profit protection on the current brain.
  * Deterministic, monotonic floors. Easy disable via smartPositionManagerEnabled.
  * Does not change entry thresholds. Never loosens protection. Never removes hard stop.
  */
@@ -13,7 +13,10 @@ import type {
   SmartPmStopAdjustReason
 } from "./types";
 // GhFastExitReason used by evaluateSmartPositionExit return type
-import { GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION } from "./versions";
+import {
+  GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION
+} from "./versions";
 
 export const SMART_PM_STATE_ORDER: Record<SmartPmState, number> = {
   UNPROTECTED: 0,
@@ -298,7 +301,7 @@ export function updateSmartPositionManager(
   trade.currentPrice = exec;
   trade.positionManagerVersion =
     trade.positionManagerVersion ?? GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION;
-  trade.brainVersion = trade.brainVersion ?? "GOLD_HUNTER_BRAIN_V2";
+  trade.brainVersion = trade.brainVersion ?? GOLD_HUNTER_BRAIN_VERSION;
   trade.initialStopPrice =
     trade.initialStopPrice ??
     (trade.side === "BUY"
@@ -591,7 +594,7 @@ export function buildClosedTradeSmartDiagnostics(args: {
     positionManagerVersion:
       args.trade.positionManagerVersion ??
       GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
-    brainVersion: args.trade.brainVersion ?? "GOLD_HUNTER_BRAIN_V2",
+    brainVersion: args.trade.brainVersion ?? GOLD_HUNTER_BRAIN_VERSION,
     exitReason: args.exitReason,
     timeInTradeMs: args.trade.timeInTradeMs ?? Math.max(0, Date.now() - args.trade.entryTs)
   };
@@ -614,7 +617,7 @@ export function openTradeSmartDiagnostics(trade: GhFastOpenTrade): {
   lastHarvestAssessment: GhFastOpenTrade["lastHarvestAssessment"];
 } {
   return {
-    brainVersion: trade.brainVersion ?? "GOLD_HUNTER_BRAIN_V2",
+    brainVersion: trade.brainVersion ?? GOLD_HUNTER_BRAIN_VERSION,
     positionManagerVersion:
       trade.positionManagerVersion ??
       GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,

@@ -25,7 +25,7 @@ export function hashGhFastConfig(cfg: GhFastConfig): string {
 export type GhFastFrozenIdentity = {
   engineVersion: typeof GOLD_HUNTER_FAST_ENGINE_VERSION;
   strategyVersion: typeof GOLD_HUNTER_FAST_STRATEGY_VERSION;
-  soakLabel: "BRAIN_V2_SMART_PM_V1_SMART_LOSS_V1_DEMO";
+  soakLabel: "BRAIN_V3_SMART_PM_V1_SMART_LOSS_V1_DEMO";
   configSha256: string;
   config: GhFastConfig;
   shadowOnly: true;
@@ -43,7 +43,7 @@ export function getFrozenGhFastIdentity(): GhFastFrozenIdentity {
   cached = {
     engineVersion: GOLD_HUNTER_FAST_ENGINE_VERSION,
     strategyVersion: GOLD_HUNTER_FAST_STRATEGY_VERSION,
-    soakLabel: "BRAIN_V2_SMART_PM_V1_SMART_LOSS_V1_DEMO",
+    soakLabel: "BRAIN_V3_SMART_PM_V1_SMART_LOSS_V1_DEMO",
     configSha256: hashGhFastConfig(config),
     config,
     shadowOnly: true,
@@ -61,7 +61,7 @@ export function resetFrozenGhFastIdentityForTests(): void {
 }
 
 /**
- * Shadow qualification keeps the Brain V2 legacy exit path frozen.
+ * Shadow qualification keeps the Brain V2/V3-independent legacy exit path frozen.
  * Demo forward uses SMART_POSITION_MANAGER_V1 + SMART_LOSS_CONTROLLER_V1
  * via default config.
  */
