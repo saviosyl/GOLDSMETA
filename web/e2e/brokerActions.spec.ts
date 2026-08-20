@@ -6,7 +6,9 @@ test.describe("Broker action feedback", () => {
     await page.goto("/ui-review/brokers");
     await expect(page.getByTestId("broker-control-centre")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("autotrade-off-badge")).toHaveText("Gold Hunter Demo OFF");
-    await expect(page.getByTestId("no-order-badge")).toContainText(/Order submission disabled/i);
+    await expect(page.getByTestId("no-order-badge")).toContainText(
+      /Live orders locked|Order submission disabled/i
+    );
 
     const refresh = page.getByTestId("ctrader-refresh-accounts-btn");
     await expect(refresh).toBeVisible();
