@@ -177,6 +177,68 @@ describe("Immediate OPEN entry recovery", () => {
     expect(open.length).toBeGreaterThanOrEqual(1);
     expect(open.some((p) => p.tradeId === "GH-D-pending-1")).toBe(true);
   });
+
+  it("polls within bound: absent on attempt 1, appears with valid entry on attempt 2", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-poll-appear" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let calls = 0;
+    const r = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      bid: 2600,
+      ask: 2600.05,
+      timeoutMs: 2_500,
+      pollMs: 50,
+      listPositions: async () => {
+        calls += 1;
+        if (calls === 1) return [];
+        return [
+          {
+            positionId: "pos-open-1",
+            side: "BUY",
+            entryPrice: 2601.5,
+            stopLoss: 2601.5 - HARD,
+            volumeLots: 0.09,
+            comment: "GOLD_HUNTER",
+            label: "GH-D-poll-appear"
+          } as never
+        ];
+      }
+    });
+    expect(r.recovered).toBe(true);
+    expect(r.reason).toBe("RECOVERED_OPEN");
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(r.trade.entry).toBe(2601.5);
+    expect(r.trade.initialRiskPrice).toBe(HARD);
+    expect(r.trade.fillTs).toBeTruthy();
+    expect(r.trade.status).toBe("FILLED");
+    expect(r.trade.entryRecoverySource).toBe("BROKER_POSITION_RECONCILIATION");
+    const open = getGoldHunterOpenPositionDiagnostics(OWNER);
+    expect(open.some((p) => p.tradeId === "GH-D-poll-appear")).toBe(true);
+  });
+
+  it("exits bounded when target never appears — no invented entry", async () => {
+    const trade = pendingTrade({ goldHunterTradeId: "GH-D-poll-never" });
+    await upsertGoldHunterDemoTrade(OWNER, trade);
+    let calls = 0;
+    const r = await recoverGoldHunterOpenEntryImmediate({
+      ownerUid: OWNER,
+      trade,
+      timeoutMs: 400,
+      pollMs: 80,
+      listPositions: async () => {
+        calls += 1;
+        return [];
+      }
+    });
+    expect(r.recovered).toBe(false);
+    expect(r.reason).toBe("POSITION_NOT_FOUND_WITHIN_WINDOW");
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(r.trade.entry).toBeNull();
+    expect(r.trade.status).toBe("PENDING_RECONCILIATION");
+    const open = getGoldHunterOpenPositionDiagnostics(OWNER);
+    expect(open.some((p) => p.tradeId === "GH-D-poll-never")).toBe(false);
+  });
 });
 
 describe("Final pretransport loss-safety", () => {
@@ -411,9 +473,140 @@ describe("Final pretransport loss-safety", () => {
     }
     expect(placeOrderCount).toBe(0);
   });
+
+  it("third LOSS during onEnterBrokerTransport await → placeOrder count 0, no transport_enter", async () => {
+    const sel = getGoldHunterStrategySelector(OWNER);
+    for (let i = 0; i < 2; i++) {
+      sel.notifyTradeClosed({
+        side: "BUY",
+        setup: "A",
+        entryPrice: 2600,
+        result: "LOSS",
+        tradeId: `gh-race-${i}`,
+        realisedR: -0.7,
+        closedAtMs: 2_000_000 + i * 1000
+      });
+    }
+    expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(false);
+
+    let placeOrderCount = 0;
+    let transportEnterLogs = 0;
+    const infoSpy = vi.spyOn(console, "info").mockImplementation((msg: unknown) => {
+      if (typeof msg === "string" && msg.includes("gold_hunter_broker_transport_enter")) {
+        transportEnterLogs += 1;
+      }
+    });
+
+    vi.spyOn(
+      await import("../../../src/services/broker/ctrader/flags"),
+      "isCTraderLiveEnabled"
+    ).mockReturnValue(false);
+    vi.spyOn(
+      await import("../../../src/services/broker/ctrader/flags"),
+      "isCTraderDemoOrderSubmissionEnabled"
+    ).mockReturnValue(true);
+    vi.spyOn(
+      await import("../../../src/services/broker/ctrader/connectionStore"),
+      "getConnection"
+    ).mockResolvedValue({
+      selectedAccountIsLive: false,
+      environment: "DEMO",
+      selectedAccountId: "1"
+    } as never);
+    vi.spyOn(
+      await import("../../../src/services/goldHunterAdmin/configStore"),
+      "loadGoldHunterConfig"
+    ).mockResolvedValue({
+      ...GH_ADMIN_DEFAULT_CONFIG,
+      demoAutoTradeEnabled: true,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "test"
+    });
+
+    const { submitGoldHunterDemoOrder } = await import(
+      "../../../src/services/goldHunterAdmin/demoExecutionAdapter"
+    );
+
+    let releasePrep: () => void = () => undefined;
+    const prepStarted = new Promise<void>((resolve) => {
+      releasePrep = resolve;
+    });
+    let finishPrep: () => void = () => undefined;
+    const prepHold = new Promise<void>((resolve) => {
+      finishPrep = resolve;
+    });
+
+    const submitPromise = submitGoldHunterDemoOrder({
+      ownerUid: OWNER,
+      isAdmin: true,
+      side: "BUY",
+      lots: 0.09,
+      stopLoss: 2600 - HARD,
+      entryHint: 2600,
+      lossSafetyMid: 2600,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001,
+      setup: "A",
+      signalId: "GH-OPP-race",
+      goldHunterTradeId: "GH-D-race",
+      clientOrderId: "cli-race",
+      marketOpen: true,
+      feedFresh: true,
+      depthValid: true,
+      spreadOk: true,
+      capitalOk: true,
+      dailyLossOk: true,
+      openTradeCount: 0,
+      signalPresent: true,
+      signalConsumed: false,
+      accountSnapshotValid: true,
+      onEnterBrokerTransport: async () => {
+        // Hold async prep open so the third LOSS can settle mid-await.
+        releasePrep();
+        await prepHold;
+      },
+      placeOrder: async () => {
+        placeOrderCount += 1;
+        return {
+          accepted: true,
+          outcome: "FILLED",
+          fillPrice: 2600,
+          positionId: "p-race",
+          orderId: "o-race",
+          requestSent: true,
+          newOrderReqCount: 1
+        } as DemoMarketOrderResult;
+      }
+    });
+
+    await prepStarted;
+    // THIRD distinct loss settles while onEnterBrokerTransport is awaiting.
+    sel.notifyTradeClosed({
+      side: "BUY",
+      setup: "A",
+      entryPrice: 2600,
+      result: "LOSS",
+      tradeId: "gh-race-2",
+      realisedR: -0.7,
+      closedAtMs: 2_003_000
+    });
+    expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(true);
+    vi.spyOn(Date, "now").mockReturnValue(2_003_500);
+    finishPrep();
+
+    const submit = await submitPromise;
+    expect(submit.ok).toBe(false);
+    if (!submit.ok) {
+      expect(submit.blockers[0]).toBe("WAIT_LOSS_STREAK_GUARD");
+      expect(submit.pretransportBlocked).toBe(true);
+    }
+    expect(placeOrderCount).toBe(0);
+    expect(transportEnterLogs).toBe(0);
+    infoSpy.mockRestore();
+  });
 });
 
-describe("Worker-authoritative loss-controller diagnostics", () => {
+describe("Worker-authoritative LC diagnostics", () => {
   beforeEach(() => {
     resetGoldHunterStrategySelectorsForTests();
     resetGoldHunterSelectorRuntimeMemory();

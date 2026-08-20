@@ -13,6 +13,7 @@ export type GoldHunterClaimState =
   | "OPEN"
   | "BROKER_REJECTED"
   | "BROKER_SUBMIT_ERROR"
+  | "PRETRANSPORT_BLOCKED"
   | "PENDING_RECONCILIATION"
   | "CLOSED";
 
@@ -110,6 +111,7 @@ export async function acquireGoldHunterSignalClaim(args: {
         existing.state === "OPEN" ||
         existing.state === "BROKER_REJECTED" ||
         existing.state === "BROKER_SUBMIT_ERROR" ||
+        existing.state === "PRETRANSPORT_BLOCKED" ||
         existing.state === "CLOSED"
       ) {
         return { ok: false, reason: "ALREADY_CLAIMED", claim: existing };
@@ -253,6 +255,7 @@ export async function isGoldHunterSignalDurablyConsumed(
     claim.state === "OPEN" ||
     claim.state === "BROKER_REJECTED" ||
     claim.state === "BROKER_SUBMIT_ERROR" ||
+    claim.state === "PRETRANSPORT_BLOCKED" ||
     claim.state === "PENDING_RECONCILIATION" ||
     claim.state === "CLOSED"
   );

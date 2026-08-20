@@ -591,13 +591,13 @@ export async function attemptGoldHunterDemoExecution(
         opportunityId
       );
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-        state: "BROKER_SUBMIT_ERROR",
+        state: "PRETRANSPORT_BLOCKED",
         errorCode: lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"
       });
       tel?.({
         phase: "PRECLAIM_BLOCKED",
         claimed: true,
-        outcome: "PRECLAIM_BLOCKED",
+        outcome: "PRETRANSPORT_BLOCKED",
         blocker: lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN",
         detail: lossGate.detail ?? "final_pretransport_loss_safety",
         tradeId: goldHunterTradeId
@@ -661,16 +661,28 @@ export async function attemptGoldHunterDemoExecution(
         ownerUid,
         reservationId: goldHunterTradeId
       }).catch(() => undefined);
+      const pretransportBlocked = result.pretransportBlocked === true;
+      if (pretransportBlocked) {
+        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
+          opportunityId
+        );
+      }
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-        state: "BROKER_SUBMIT_ERROR",
+        state: pretransportBlocked
+          ? "PRETRANSPORT_BLOCKED"
+          : "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
       });
       tel?.({
-        phase: "BROKER_SUBMIT_ERROR",
+        phase: pretransportBlocked ? "PRECLAIM_BLOCKED" : "BROKER_SUBMIT_ERROR",
         claimed: true,
-        outcome: "BROKER_SUBMIT_ERROR",
+        outcome: pretransportBlocked
+          ? "PRETRANSPORT_BLOCKED"
+          : "BROKER_SUBMIT_ERROR",
         blocker: result.blockers[0] ?? "GATES_BLOCKED",
-        detail: "local_gate_before_transport",
+        detail: pretransportBlocked
+          ? "final_pretransport_loss_safety_after_async_prep"
+          : "local_gate_before_transport",
         tradeId: goldHunterTradeId
       });
       return {

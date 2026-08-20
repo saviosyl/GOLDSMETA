@@ -333,7 +333,11 @@ function claimIndicatesPossibleBrokerTransmission(
 function claimIsTerminalSafeForNoExposure(
   claim: GoldHunterSignalClaim
 ): boolean {
-  return claim.state === "CLOSED" || claim.state === "BROKER_REJECTED";
+  return (
+    claim.state === "CLOSED" ||
+    claim.state === "BROKER_REJECTED" ||
+    claim.state === "PRETRANSPORT_BLOCKED"
+  );
 }
 
 function tradeIndicatesLeaseUncertainty(trade: GoldHunterDemoTrade): boolean {

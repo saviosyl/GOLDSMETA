@@ -82,6 +82,11 @@ export type GoldHunterDemoSubmitFail = {
   blockers: string[];
   executionMode: typeof GH_ADMIN_EXECUTION_MODE;
   liveExecutionEnabled: false;
+  /**
+   * True when CURRENT loss-safety blocked after async pretransport prep
+   * (e.g. SUBMITTING claim write) and ProtoOANewOrder was never invoked.
+   */
+  pretransportBlocked?: boolean;
 };
 
 /**
@@ -163,8 +168,13 @@ export async function submitGoldHunterDemoOrder(
     };
   }
 
-  // FINAL CURRENT loss-safety revalidation — immediately before transport.
-  // Queued candidates must not bypass a guard armed after selection.
+  // Complete ALL async pretransport preparation first (claim → SUBMITTING, etc.).
+  if (args.onEnterBrokerTransport) {
+    await args.onEnterBrokerTransport();
+  }
+
+  // LAST MEANINGFUL LOCAL OPERATION before ProtoOANewOrder:
+  // CURRENT loss-safety revalidation. No awaited prep may follow this check.
   const mid =
     args.lossSafetyMid != null && Number.isFinite(args.lossSafetyMid)
       ? args.lossSafetyMid
@@ -185,7 +195,7 @@ export async function submitGoldHunterDemoOrder(
         JSON.stringify({
           msg: "gold_hunter_final_loss_safety_blocked",
           product: "GOLD_HUNTER",
-          stage: "FINAL_PRETRANSPORT",
+          stage: "FINAL_PRETRANSPORT_AFTER_ASYNC_PREP",
           signalId: args.signalId ?? null,
           goldHunterTradeId: args.goldHunterTradeId,
           rejectionReason: lossGate.rejectionReason,
@@ -197,16 +207,13 @@ export async function submitGoldHunterDemoOrder(
         ok: false,
         blockers: [lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"],
         executionMode: GH_ADMIN_EXECUTION_MODE,
-        liveExecutionEnabled: false
+        liveExecutionEnabled: false,
+        pretransportBlocked: true
       };
     }
   }
 
-  // Local gates passed — only now enter broker transport / SUBMITTING telemetry.
-  if (args.onEnterBrokerTransport) {
-    await args.onEnterBrokerTransport();
-  }
-
+  // Immediate broker transport — only sync locals between final gate and place().
   const now = new Date().toISOString();
   const place = args.placeOrder ?? submitDemoMarketOrder;
 
