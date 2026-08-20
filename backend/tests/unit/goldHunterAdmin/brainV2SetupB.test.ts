@@ -655,7 +655,7 @@ describe("Gold Hunter Brain V2 — safety invariants", () => {
   });
 
   it("brain version is V2; position manager is V1; loss controller is V1", () => {
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V2");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V3");
     expect(defaultGhFastConfig().smartLossControllerEnabled).toBe(true);
   });
 });

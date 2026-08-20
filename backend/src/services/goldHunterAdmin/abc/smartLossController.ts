@@ -1,5 +1,5 @@
 /**
- * SMART_LOSS_CONTROLLER_V1 — loss-side management on GOLD_HUNTER_BRAIN_V2.
+ * SMART_LOSS_CONTROLLER_V1 — loss-side management on the current brain.
  * Does not rewrite SMART_POSITION_MANAGER_V1.
  *
  * Below +1.0R MFE: owns soft-max-loss, early thesis failure, small-profit harvest.
