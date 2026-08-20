@@ -56,7 +56,6 @@ import {
   WAIT_NO_VALID_PLAN_LABEL
 } from "../lib/planTextFormat";
 import { fmtPrice } from "../lib/intradayFormat";
-import type { QualificationPublicView } from "../lib/broker/qualificationTypes";
 import type { SystemHealthView } from "../lib/broker/ctraderTypes";
 
 type Briefing = {
@@ -398,28 +397,23 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadSuccessAt, setLastLoadSuccessAt] = useState<string | null>(null);
-  const [qualification, setQualification] = useState<QualificationPublicView | null>(null);
   const [systemHealth, setSystemHealth] = useState<SystemHealthView | null>(null);
   const tzPref = loadTimezonePreference();
 
   const load = useCallback(async () => {
     setErrorDetail(null);
     try {
-      const [pack, active, recentSetups, overnight, b, s, qual, health] = await Promise.all([
+      const [pack, active, recentSetups, overnight, b, s, health] = await Promise.all([
         api.latestDecisionPack(),
         api.listActiveSetups().catch(() => [] as SetupRecord[]),
         api.listSetups(6, "LIVE").catch(() => [] as SetupRecord[]),
         api.listSetups(20, "LIVE").catch(() => [] as SetupRecord[]),
         api.v5Briefing("LIVE").catch(() => null),
         api.v5Score("LIVE").catch(() => null),
-        typeof api.getAutoTradeQualification === "function"
-          ? api.getAutoTradeQualification().catch(() => null)
-          : Promise.resolve(null),
         typeof api.getSystemHealth === "function"
           ? api.getSystemHealth().catch(() => null)
           : Promise.resolve(null)
       ]);
-      setQualification(qual);
       setSystemHealth(health);
       const latest = pack?.decision ?? null;
       const complete = pack?.latestCompleteStrategySignal ?? null;
@@ -1146,13 +1140,7 @@ export function OverviewPage() {
                 <div className="gm-trading-status-row" data-testid="dashboard-safety">
                   <span className="gm-badge warning">Live trading locked</span>
                   <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-                    {qualification?.state === "PREVIEW_QUALIFICATION" ||
-                    qualification?.state === "CONTROLLED_DEMO_QUALIFICATION" ||
-                    qualification?.state === "OBSERVATION_PERIOD"
-                      ? "Demo · Qualifying"
-                      : qualification?.demoAuto?.enabled
-                        ? "Demo Auto"
-                        : qualification?.overallLabel || "AutoTrade idle"}
+                    Gold Hunter is the AutoTrade UI
                   </span>
                   <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
                     Emergency STOP ready
@@ -1207,7 +1195,7 @@ export function OverviewPage() {
                   {NO_VALID_PLAN_NEXT}
                 </p>
                 <p className="gm-hero-foot" data-testid="no-valid-plan-title">
-                  Manual trading only — AutoTrade stays OFF.
+                  Manual trading only — Live execution locked.
                 </p>
               </div>
             </section>
@@ -1291,7 +1279,7 @@ export function OverviewPage() {
           <div className="gm-trading-status-row" data-testid="dashboard-safety">
             <span className="gm-badge warning">Live trading locked</span>
             <span className="gm-badge neutral" data-testid="dashboard-autotrade-off">
-              {qualification?.overallLabel || "AutoTrade idle"}
+              Gold Hunter is the AutoTrade UI
             </span>
             <span className="gm-badge negative" data-testid="dashboard-emergency-stop">
               Emergency STOP ready

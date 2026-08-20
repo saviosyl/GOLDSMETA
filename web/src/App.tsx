@@ -57,9 +57,6 @@ const InsightsPage = lazy(() =>
 const HistoryReplayPage = lazy(() =>
   import("./pages/HistoryReplayPage").then((m) => ({ default: m.HistoryReplayPage }))
 );
-const AutoTradePage = lazy(() =>
-  import("./pages/AutoTradePage").then((m) => ({ default: m.AutoTradePage }))
-);
 const MicroEdgePage = lazy(() =>
   import("./pages/MicroEdgePage").then((m) => ({ default: m.MicroEdgePage }))
 );
@@ -301,14 +298,7 @@ function ProtectedApp() {
           <Route path="/journal" element={<JournalPage />} />
           <Route path="/brand" element={<BrandConceptsPage />} />
           <Route path="/planner" element={<RiskPlannerPage />} />
-          <Route
-            path="/autotrade"
-            element={
-              <LazyRoute label="AutoTrade">
-                <AutoTradePage />
-              </LazyRoute>
-            }
-          />
+          <Route path="/autotrade" element={<Navigate to="/gold-hunter" replace />} />
           <Route
             path="/micro-edge"
             element={
@@ -327,7 +317,7 @@ function ProtectedApp() {
           />
           <Route
             path="/autotrade/performance"
-            element={<Navigate to="/insights/performance" replace />}
+            element={<Navigate to="/gold-hunter" replace />}
           />
           <Route
             path="/brokers"

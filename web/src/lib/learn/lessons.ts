@@ -589,17 +589,15 @@ It only tells you when more people may be awake and trading.`,
     id: "autotrade-explained",
     number: 18,
     title: "AutoTrade Explained",
-    description: "Like learning to drive — practice first, Live later.",
+    description: "Gold Hunter is the AutoTrade UI. Live stays locked.",
     listenMinutes: 3,
     diagram: null,
-    body: `Think of AutoTrade like learning to drive.
+    body: `Gold Hunter is the only AutoTrade UI.
 
-First you learn the rules.
-Then you practise.
-Then you take safety checks.
-Only later could Live become possible.
+Core AutoTrade and FAST AutoTrade were removed.
+They are not an active engine any more.
 
-AutoTrade follows predefined GoldMeta rules automatically.
+Automated trading follows predefined Gold Hunter rules.
 It is NOT a money button.
 It does not print profit.
 
@@ -611,11 +609,11 @@ Live stays locked until separate activation.
 
 Always stay in control of risk settings.`,
     example:
-      "You qualify on Demo with practice money. AutoTrade may place practice trades only after you enable Demo Auto. Live remains locked.",
+      "You use Gold Hunter on Demo with practice money. Core AutoTrade qualification was removed. Live remains locked.",
     remember: [
-      "AutoTrade is not a money button.",
-      "It follows rules automatically.",
-      "Practice and Demo come first.",
+      "Gold Hunter is the AutoTrade UI.",
+      "Core AutoTrade and FAST AutoTrade were removed.",
+      "It is not a money button.",
       "Trades can still lose.",
       "Live must never auto-start."
     ]
@@ -624,35 +622,28 @@ Always stay in control of risk settings.`,
     id: "qualification-demo",
     number: 19,
     title: "Qualification and Demo Trading",
-    description: "Preview, practice trades, observation, safety checks.",
+    description: "Core qualification was removed. Gold Hunter is the AutoTrade UI.",
     listenMinutes: 3,
     diagram: null,
-    body: `Qualification is the safe learning path.
+    body: `Core AutoTrade qualification was removed.
 
-Step one: Preview.
-You review setups without forcing Live money.
+That old path — preview, controlled Demo trades, then observation — is no longer an active system.
 
-Step two: Controlled Demo trades.
+Gold Hunter is the only AutoTrade UI.
 Demo uses practice money.
 It feels real, but it is not your live cash.
 
-Step three: Observation.
-You watch results and behaviour.
-
-Step four: Safety checks.
-Limits, risk settings, and controls are reviewed.
-
-Demo Max Trades per Day can be set up to 6.
-That limit helps prevent overtrading in practice.
+Safety checks still matter.
+Limits, risk settings, and controls are reviewed in Gold Hunter.
 
 Live remains LOCKED until separate activation.
-Qualification does not unlock Live by itself.`,
+Nothing in Gold Hunter unlocks Live by itself.`,
     example:
-      "You complete preview and a few Demo trades under the daily practice limit. You observe outcomes. Live still shows locked — that is correct.",
+      "You use Gold Hunter on Demo. Core Demo Auto qualification was removed. Live still shows locked — that is correct.",
     remember: [
-      "Qualification = preview → Demo → observation → checks.",
+      "Core qualification was removed.",
+      "Gold Hunter is the AutoTrade UI.",
       "Demo uses practice money.",
-      "Demo Max Trades/Day can be up to 6.",
       "Live stays locked.",
       "Practice is for learning, not guaranteed profit."
     ]

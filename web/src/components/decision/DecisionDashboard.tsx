@@ -21,7 +21,6 @@ import {
 import { NextPlanUpdate } from "../intraday/NextPlanUpdate";
 import { FeedStatusStrip } from "../gm/FeedStatusStrip";
 import { PhoneAlertsControl } from "./PhoneAlertsControl";
-import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 
 type Props = {
   plan: IntradayPlan;
@@ -103,13 +102,7 @@ export function DecisionSecondaryPanel({
     state.mode === "HOLD" ||
     (isHold && !String(chip).startsWith("PREPARE")) ||
     String(chip).startsWith("PREPARE");
-  const atHeader = useAutoTradeHeaderStatus();
-  const atLabel =
-    atHeader.stateKey === "QUALIFYING"
-      ? "Qualification: Running · Demo Auto: Not enabled yet · Live Auto: Locked"
-      : atHeader.stateKey === "OFF"
-        ? "AutoTrade idle"
-        : atHeader.label;
+  const atLabel = "Gold Hunter is the AutoTrade UI";
 
   return (
     <div className="gm-decision-secondary" data-testid="decision-secondary-panel">

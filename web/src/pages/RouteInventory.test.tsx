@@ -59,4 +59,15 @@ describe("App route inventory", () => {
     }
     expect(REQUIRED_PATHS.length).toBeGreaterThanOrEqual(34);
   });
+
+  it("redirects legacy Core AutoTrade routes to Gold Hunter", () => {
+    expect(appSource).toMatch(
+      /path="\/autotrade"\s+element=\{<Navigate to="\/gold-hunter" replace \/>\}/
+    );
+    expect(appSource).toMatch(
+      /path="\/autotrade\/performance"[\s\S]*?to="\/gold-hunter"/
+    );
+    expect(appSource).toContain('path="/gold-hunter"');
+    expect(appSource).not.toContain("AutoTradePage");
+  });
 });

@@ -1,5 +1,4 @@
-import { NavLink, Navigate, useParams } from "react-router-dom";
-import { AutoTradePerformancePage } from "./AutoTradePerformancePage";
+import { Link, NavLink, Navigate, useParams } from "react-router-dom";
 import { SignalPerformancePage } from "./SignalPerformancePage";
 import { V4ResearchPage } from "./V4ResearchPage";
 
@@ -49,7 +48,20 @@ export function InsightsPage() {
       </div>
 
       <div className="gm-insights-panel" data-testid={`insights-panel-${active}`}>
-        {active === "performance" ? <AutoTradePerformancePage embedded /> : null}
+        {active === "performance" ? (
+          <div className="gm-insights-signals" data-testid="insights-autotrade-retired">
+            <div className="gm-banner gm-banner-info">
+              <strong>Gold Hunter is the AutoTrade UI</strong>
+              <p>
+                Core AutoTrade and FAST AutoTrade were removed. Automated trading performance lives
+                in Gold Hunter.
+              </p>
+              <p>
+                <Link to="/gold-hunter/performance">Open Gold Hunter performance</Link>
+              </p>
+            </div>
+          </div>
+        ) : null}
         {active === "signals" ? (
           <div className="gm-insights-signals">
             <div className="gm-banner gm-banner-info" data-testid="hypothetical-signal-banner">

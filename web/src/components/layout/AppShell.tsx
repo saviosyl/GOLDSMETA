@@ -5,7 +5,6 @@ import {
   BarChart3,
   Bell,
   BookOpen,
-  Bot,
   ChevronRight,
   Crosshair,
   Gauge,
@@ -25,7 +24,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import { useShellQuote } from "../../lib/quoteContext";
-import { useAutoTradeHeaderStatus } from "../../hooks/useAutoTradeHeaderStatus";
 import { NotificationCentre } from "../decision/NotificationCentre";
 import { QuoteHeader } from "../gm/QuoteHeader";
 
@@ -42,7 +40,6 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: "Trade",
     items: [
       { to: "/", label: "Plan", end: true, icon: Home },
-      { to: "/autotrade", label: "AutoTrade", icon: Bot },
       { to: "/micro-edge", label: "Micro Edge", icon: Zap },
       { to: "/intelligence", label: "Markets", icon: Globe2 },
       { to: "/journal", label: "Journal", icon: BookOpen },
@@ -92,7 +89,6 @@ const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
 
 const MOBILE_PRIMARY: NavItem[] = [
   { to: "/", label: "Plan", end: true, icon: Home },
-  { to: "/autotrade", label: "AutoTrade", icon: Bot },
   { to: "/intelligence", label: "Markets", icon: Globe2 },
   { to: "/journal", label: "Journal", icon: BookOpen }
 ];
@@ -160,21 +156,6 @@ function filterStaff<T extends { staffOnly?: boolean }>(items: T[], isStaff: boo
   return items.filter((l) => !l.staffOnly || isStaff);
 }
 
-function headerToneClass(tone: string): string {
-  switch (tone) {
-    case "success":
-      return "gm-autotrade-pill--success";
-    case "warning":
-      return "gm-autotrade-pill--warning";
-    case "danger":
-      return "gm-autotrade-pill--danger";
-    case "info":
-      return "gm-autotrade-pill--info";
-    default:
-      return "gm-autotrade-pill--neutral";
-  }
-}
-
 export function AppShell({
   children,
   linkPrefix = ""
@@ -184,7 +165,6 @@ export function AppShell({
 }) {
   const { user, account } = useAuth();
   const { quote } = useShellQuote();
-  const autoTradeHeader = useAutoTradeHeaderStatus();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -295,8 +275,8 @@ export function AppShell({
         </nav>
         <div className="gm-sidebar-foot">
           <div className="gm-sidebar-premium">
-            <p data-testid="sidebar-autotrade-summary">{autoTradeHeader.label}</p>
-            <p className="gm-meta">Live execution locked</p>
+            <p data-testid="sidebar-live-locked">Live execution locked</p>
+            <p className="gm-meta">Gold Hunter is the AutoTrade UI</p>
           </div>
         </div>
       </aside>
@@ -322,13 +302,10 @@ export function AppShell({
 
             <div className="gm-topbar-actions">
               <span
-                className={`gm-badge gm-autotrade-pill ${headerToneClass(autoTradeHeader.tone)}`}
-                data-testid="topbar-autotrade-status"
-                data-state={autoTradeHeader.stateKey}
-                title={autoTradeHeader.nextAction ?? undefined}
+                className="gm-badge gm-autotrade-pill gm-autotrade-pill--neutral"
+                data-testid="topbar-live-locked"
               >
-                <Bot size={14} aria-hidden />
-                {autoTradeHeader.label}
+                Live locked
               </span>
               <NotificationCentre />
               <div className="gm-profile-menu" ref={profileRef}>
@@ -355,8 +332,8 @@ export function AppShell({
                   >
                     <p className="gm-meta">Signed in as</p>
                     <strong data-testid="profile-email">{email}</strong>
-                    <p className="gm-meta" style={{ marginTop: 8 }} data-testid="profile-autotrade">
-                      {autoTradeHeader.label}
+                    <p className="gm-meta" style={{ marginTop: 8 }} data-testid="profile-live-locked">
+                      Live execution locked
                     </p>
                     <NavLink
                       to={withPrefix("/settings")}

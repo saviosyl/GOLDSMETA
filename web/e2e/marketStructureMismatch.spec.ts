@@ -74,7 +74,7 @@ test.describe("Market Structure Map price sources", () => {
     await expect(page.getByTestId("cockpit-mismatch")).toContainText(/NO TRADE/i);
     // Premium status wording (idle / qualifying / OFF) — never require obsolete header card.
     await expect(page.getByTestId("dashboard-autotrade-off").first()).toContainText(
-      /AutoTrade|idle|Qualifying|OFF|Demo/i
+      /Gold Hunter is the AutoTrade UI/i
     );
 
     const system = await openSystemStatusDiagnostics(page);

@@ -48,8 +48,8 @@ export function RiskPlannerPage() {
       <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }} data-testid="risk-planner-disclaimer">
         <strong>Manual calculator</strong> — does not place orders. Size the trade from balance,
         risk, entry and stop.{" "}
-        <Link className="gm-linkish" to="/autotrade" data-testid="manage-autotrade-risk-link">
-          Manage AutoTrade risk →
+        <Link className="gm-linkish" to="/gold-hunter" data-testid="manage-autotrade-risk-link">
+          Manage Gold Hunter risk →
         </Link>
       </p>
       <ul className="gm-help-list" data-testid="risk-planner-warnings">

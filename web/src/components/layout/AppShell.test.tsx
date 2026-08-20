@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { QuoteProvider } from "../../lib/quoteContext";
@@ -10,20 +10,7 @@ vi.mock("../../lib/auth", () => ({
     user: { email: "user@example.com" },
     account: { role: "USER" },
     signOut: vi.fn(),
-    api: {
-      getAutoTradeQualification: vi.fn(async () => ({
-        state: "PREVIEW_QUALIFICATION",
-        overallLabel: "Preview",
-        nextAction: "Waiting for valid market setup",
-        demoAuto: { enabled: false, ready: false },
-        liveOrders: "LOCKED"
-      })),
-      autoTradeStatus: vi.fn(async () => ({
-        mode: "OFF",
-        displayStatus: "OFF",
-        locked: true
-      }))
-    }
+    api: {}
   })
 }));
 
@@ -36,7 +23,7 @@ function wrap(ui: ReactNode, path = "/") {
 }
 
 describe("AppShell premium V2", () => {
-  it("renders desktop sidebar primary Trade routes", async () => {
+  it("renders desktop sidebar primary Trade routes without Core AutoTrade", async () => {
     render(
       wrap(
         <AppShell>
@@ -47,15 +34,16 @@ describe("AppShell premium V2", () => {
     const sidebar = screen.getByTestId("desktop-sidebar");
     expect(sidebar).toBeInTheDocument();
     expect(sidebar.textContent).toMatch(/Plan/);
-    expect(sidebar.textContent).toMatch(/AutoTrade/);
+    expect(sidebar.textContent).not.toMatch(/AutoTrade/);
     expect(sidebar.textContent).toMatch(/Markets/);
     expect(sidebar.textContent).toMatch(/Journal/);
     expect(sidebar.textContent).toMatch(/Insights/);
     expect(sidebar.textContent).not.toMatch(/TradingView/);
-    expect(await screen.findByTestId("topbar-autotrade-status")).toBeInTheDocument();
+    expect(sidebar.textContent).not.toMatch(/Gold Hunter/);
+    expect(screen.getByTestId("topbar-live-locked")).toHaveTextContent(/Live locked/i);
   });
 
-  it("renders mobile bottom navigation with AutoTrade primary (not Alerts)", () => {
+  it("renders mobile bottom navigation without AutoTrade", () => {
     render(
       wrap(
         <AppShell>
@@ -65,9 +53,9 @@ describe("AppShell premium V2", () => {
     );
     const nav = screen.getByTestId("mobile-bottom-nav");
     expect(nav).toBeInTheDocument();
-    expect(nav.querySelectorAll("a").length).toBe(4);
+    expect(nav.querySelectorAll("a").length).toBe(3);
     expect(nav.textContent).toMatch(/Plan/);
-    expect(nav.textContent).toMatch(/AutoTrade/);
+    expect(nav.textContent).not.toMatch(/AutoTrade/);
     expect(nav.textContent).toMatch(/Markets/);
     expect(nav.textContent).toMatch(/Journal/);
     expect(nav.textContent).toMatch(/More/);
@@ -75,7 +63,7 @@ describe("AppShell premium V2", () => {
     expect(nav.querySelector("a.active, [aria-current='page']")).toBeTruthy();
   });
 
-  it("shows canonical AutoTrade header status (not hardcoded OFF while qualifying)", async () => {
+  it("does not render Core AutoTrade header status", () => {
     render(
       wrap(
         <AppShell>
@@ -83,12 +71,8 @@ describe("AppShell premium V2", () => {
         </AppShell>
       )
     );
-    const pill = await screen.findByTestId("topbar-autotrade-status");
-    await waitFor(() => {
-      expect(pill.getAttribute("data-state")).toBe("QUALIFYING");
-    });
-    expect(pill.textContent).toMatch(/QUALIFYING/i);
-    expect(pill.textContent).not.toMatch(/AutoTrade OFF/i);
+    expect(screen.queryByTestId("topbar-autotrade-status")).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar-live-locked")).toHaveTextContent(/Live locked/i);
   });
 
   it("keeps safe-area CSS tokens available for mobile chrome", () => {

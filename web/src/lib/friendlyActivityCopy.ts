@@ -9,7 +9,7 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bT212_PRACTICE\b/gi, "Trading 212 Practice"],
   [/\bMANUAL\b/g, "Manual"],
   [/\bCSGLDC1s_EQ\b/gi, "XAUUSD"],
-  [/\bDEMO_AUTO\b/gi, "Demo Auto"],
+  [/\bDEMO_AUTO\b/gi, "Gold Hunter Demo"],
   [/\bLIVE_AUTO\b/gi, "Live Auto"],
   [/\bSHADOW\b/g, "Shadow"],
   [/\breconnect required\b/gi, "Reconnect required"]
