@@ -20,6 +20,7 @@ import {
   repairGoldHunterTradeEntryFromDeal
 } from "./entryRepair";
 import { isValidGoldHunterEntryPrice } from "./entryValidity";
+import { persistGoldHunterLossControllerTelemetry } from "./lossControllerTelemetryPersist";
 
 export type CloseSettlementHooks = {
   fetchClose?: (args: {
@@ -109,6 +110,10 @@ export function notifySelectorOfSettledGoldHunterClose(args: {
       realisedR: realisedRFromSettledDemoTrade(trade),
       tradeId: trade.goldHunterTradeId
     });
+    // Persist authoritative LC telemetry for Admin Diagnostics (quote-worker).
+    void persistGoldHunterLossControllerTelemetry(args.ownerUid).catch(
+      () => undefined
+    );
   } catch {
     /* best-effort anti-churn / LC notify */
   }

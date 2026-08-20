@@ -18,6 +18,7 @@ import {
   assertGoldHunterDemoOnlyEnvironment,
   evaluateGoldHunterOrderGates
 } from "./orderGates";
+import { evaluateGoldHunterFinalLossSafetyGate } from "./lossSafetyGate";
 import { loadGoldHunterConfig } from "./configStore";
 import { upsertGoldHunterDemoTrade } from "./tradeStore";
 import {
@@ -50,6 +51,13 @@ export type GoldHunterDemoSubmitArgs = {
   signalPresent: boolean;
   signalConsumed: boolean;
   accountSnapshotValid: boolean;
+  /**
+   * Mid used for CURRENT loss-safety revalidation immediately before transport.
+   * Falls back to entryHint when omitted.
+   */
+  lossSafetyMid?: number | null;
+  signedImbalance1s?: number | null;
+  midVel250?: number | null;
   /** Called only after local gates pass, immediately before ProtoOANewOrder transport. */
   onEnterBrokerTransport?: () => Promise<void>;
   /** Injected for tests. */
@@ -153,6 +161,45 @@ export async function submitGoldHunterDemoOrder(
       executionMode: GH_ADMIN_EXECUTION_MODE,
       liveExecutionEnabled: false
     };
+  }
+
+  // FINAL CURRENT loss-safety revalidation — immediately before transport.
+  // Queued candidates must not bypass a guard armed after selection.
+  const mid =
+    args.lossSafetyMid != null && Number.isFinite(args.lossSafetyMid)
+      ? args.lossSafetyMid
+      : args.entryHint != null && Number.isFinite(args.entryHint)
+        ? args.entryHint
+        : null;
+  if (mid != null) {
+    const lossGate = evaluateGoldHunterFinalLossSafetyGate({
+      ownerUid: args.ownerUid,
+      side: args.side,
+      mid,
+      signedImbalance1s: args.signedImbalance1s ?? null,
+      midVel250: args.midVel250 ?? null,
+      opportunityId: args.signalId ?? null
+    });
+    if (!lossGate.ok) {
+      console.info(
+        JSON.stringify({
+          msg: "gold_hunter_final_loss_safety_blocked",
+          product: "GOLD_HUNTER",
+          stage: "FINAL_PRETRANSPORT",
+          signalId: args.signalId ?? null,
+          goldHunterTradeId: args.goldHunterTradeId,
+          rejectionReason: lossGate.rejectionReason,
+          detail: lossGate.detail,
+          ts: new Date().toISOString()
+        })
+      );
+      return {
+        ok: false,
+        blockers: [lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"],
+        executionMode: GH_ADMIN_EXECUTION_MODE,
+        liveExecutionEnabled: false
+      };
+    }
   }
 
   // Local gates passed — only now enter broker transport / SUBMITTING telemetry.
