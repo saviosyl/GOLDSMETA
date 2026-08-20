@@ -6,6 +6,13 @@
 /** Brain identity for Demo A/B/C selection — distinguishable from V1/V2. */
 export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V3" as const;
 /**
+ * Production software revision — not a strategy/brain change.
+ * Distinguishes the OPEN fill monotonicity hotfix from the prior deploy.
+ */
+export const GOLD_HUNTER_SOFTWARE_REVISION =
+  "GH_OPEN_FILL_MONOTONIC_2026.08.20-02" as const;
+export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-20T21:50:00Z" as const;
+/**
  * Smart position-management layer on top of the current brain.
  * Kept separate so brainVersion telemetry stays stable.
  */

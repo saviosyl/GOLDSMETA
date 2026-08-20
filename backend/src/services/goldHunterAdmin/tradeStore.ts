@@ -115,6 +115,87 @@ function keepText(
 }
 
 /**
+ * Proven broker-open fill: position id + finite entry > 0 + fillTs.
+ * Once this exists, later OPEN/reconciliation writers must not erase it.
+ */
+export function hasAuthoritativeGoldHunterOpenFill(
+  trade: Pick<
+    GoldHunterDemoTrade,
+    "brokerPositionId" | "entry" | "fillTs"
+  > | null | undefined
+): boolean {
+  if (!trade) return false;
+  if (
+    trade.brokerPositionId == null ||
+    String(trade.brokerPositionId).trim().length === 0
+  ) {
+    return false;
+  }
+  if (!isValidGoldHunterEntryPrice(trade.entry)) return false;
+  return keepText(trade.fillTs, null) != null;
+}
+
+/**
+ * OPEN fill monotonicity: a stale/reconciliation payload cannot clear a
+ * previously established authoritative entry/fillTs, and cannot regress
+ * FILLED/PROTECTED/OPEN to PENDING_RECONCILIATION only because it lacked entry.
+ * Does not invent an entry when none was ever known.
+ */
+export function mergeOpenGoldHunterAuthoritativeFill(
+  existing: GoldHunterDemoTrade,
+  incoming: GoldHunterDemoTrade
+): GoldHunterDemoTrade {
+  const next: GoldHunterDemoTrade = {
+    ...existing,
+    ...incoming
+  };
+  next.entry = isValidGoldHunterEntryPrice(incoming.entry)
+    ? incoming.entry
+    : existing.entry;
+  next.fillTs = keepText(existing.fillTs, incoming.fillTs);
+  next.initialRiskPrice = keepFinite(
+    existing.initialRiskPrice,
+    incoming.initialRiskPrice
+  );
+  next.brokerPositionId = keepText(
+    existing.brokerPositionId,
+    incoming.brokerPositionId
+  );
+  next.entryRecoverySource = keepText(
+    existing.entryRecoverySource,
+    incoming.entryRecoverySource
+  ) as GoldHunterDemoTrade["entryRecoverySource"];
+
+  const incomingLacksEntry = !isValidGoldHunterEntryPrice(incoming.entry);
+  if (incomingLacksEntry) {
+    if (incoming.dataQuality === "ENTRY_INVALID") {
+      next.dataQuality =
+        existing.dataQuality === "ENTRY_INVALID" ? existing.dataQuality : null;
+    }
+    if (incoming.errorCode === "ENTRY_PRICE_INVALID") {
+      next.errorCode =
+        existing.errorCode === "ENTRY_PRICE_INVALID"
+          ? existing.errorCode
+          : existing.errorCode ?? null;
+    }
+  }
+
+  const existingOpen =
+    existing.status === "FILLED" ||
+    existing.status === "PROTECTED" ||
+    existing.result === "OPEN";
+  const incomingIsStalePending =
+    incoming.status === "PENDING_RECONCILIATION" &&
+    incomingLacksEntry &&
+    incoming.exitReason == null;
+  if (existingOpen && incomingIsStalePending) {
+    next.status = existing.status;
+    next.result = existing.result;
+  }
+  return next;
+}
+
+/**
  * CLOSED enrichment: later writers may add diagnostics but must preserve
  * status, result, entry, exit, closeTs, netP/L, deal id, settlement fields.
  */
@@ -161,6 +242,12 @@ function applyPersistMerge(
     }
     return {
       trade: mergeClosedGoldHunterTrade(existing, incoming),
+      rejectedRegression: false
+    };
+  }
+  if (existing && hasAuthoritativeGoldHunterOpenFill(existing)) {
+    return {
+      trade: mergeOpenGoldHunterAuthoritativeFill(existing, incoming),
       rejectedRegression: false
     };
   }
