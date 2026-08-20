@@ -2,7 +2,7 @@
  * Three FAST specialists — interpretable setup-quality scores.
  * Phase 0B: always expose raw A/B/C eligibility separately from best-of selection.
  *
- * Brain V3: Setup A requires 1s velocity direction + updateRate1s persistence.
+ * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
  * Setup B remains Brain V2 (prior-only breakout). Setup C unchanged from V1.
  */
 import type {
@@ -180,7 +180,7 @@ function scoreBreakoutQualityB(
   );
 }
 
-/** A — Momentum ignition (Brain V3: 1s direction + update-rate persistence). */
+/** A — Momentum ignition (Brain V3: 1s direction consistency). */
 export function scoreMomentumIgnition(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
@@ -212,7 +212,6 @@ function evaluateMomentumIgnition(
     : sellPressure
       ? "SELL"
       : null;
-  const updateRateOk = f.updateRate1s >= 3;
   const buyVel1sAligned = f.midVel1s > 0;
   const sellVel1sAligned = f.midVel1s < 0;
   const vel1sMagOk = Math.abs(f.midVel1s) >= cfg.momentumVelMin;
@@ -239,12 +238,7 @@ function evaluateMomentumIgnition(
     }
   }
 
-  if (
-    buyPressure &&
-    buyVel1sAligned &&
-    updateRateOk &&
-    vel1sMagOk
-  ) {
+  if (buyPressure && buyVel1sAligned && vel1sMagOk) {
     const quality = clamp01(
       0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
         0.25 * clamp01(f.acceleration * 5000) +
@@ -270,12 +264,7 @@ function evaluateMomentumIgnition(
     failed.push("quality_below_min");
     return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
   }
-  if (
-    sellPressure &&
-    sellVel1sAligned &&
-    updateRateOk &&
-    vel1sMagOk
-  ) {
+  if (sellPressure && sellVel1sAligned && vel1sMagOk) {
     const quality = clamp01(
       0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
         0.25 * clamp01(-f.acceleration * 5000) +
@@ -308,7 +297,6 @@ function evaluateMomentumIgnition(
     ) {
       failed.push("velocity_1s_not_aligned");
     }
-    if (!updateRateOk) failed.push("update_rate_insufficient");
     if (!vel1sMagOk) failed.push("velocity_1s_below_min");
   }
   return {

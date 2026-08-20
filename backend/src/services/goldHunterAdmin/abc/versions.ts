@@ -1,7 +1,7 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
  * V1/V2 research baselines preserved in git history.
- * Brain V3: Setup A persistence + post-loss anti-churn.
+ * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
  */
 /** Brain identity for Demo A/B/C selection — distinguishable from V1/V2. */
 export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V3" as const;
@@ -19,7 +19,7 @@ export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
   "SMART_LOSS_CONTROLLER_V1" as const;
 /**
  * Strategy version stamped on selector candidates / frozen identity.
- * Brain V3: Setup A persistence + post-loss anti-churn.
+ * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
  * B remains Brain V2; C unchanged from V1.
  */
 export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
