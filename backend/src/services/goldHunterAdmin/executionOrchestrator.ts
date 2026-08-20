@@ -5,12 +5,17 @@
  */
 import { randomBytes } from "crypto";
 import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
+import type { BrokerOpenPosition } from "../broker/ctrader/openApiClient";
 import type { SubmitDemoMarketOrderArgs } from "../broker/ctrader/demoOrderExecution";
 import { fetchGoldHunterAccountSnapshot } from "./accountSnapshot";
 import { assertGoldHunterCandidateFresh } from "./candidateFreshness";
 import { computeGoldHunterCommittedCapital } from "./committedCapital";
 import { submitGoldHunterDemoOrder } from "./demoExecutionAdapter";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
+import { recoverGoldHunterOpenEntryImmediate } from "./immediateOpenEntryRecovery";
+import {
+  evaluateGoldHunterFinalLossSafetyForCandidate
+} from "./lossSafetyGate";
 import { loadGoldHunterConfig } from "./configStore";
 import {
   metadataFromBrokerSymbol,
@@ -83,6 +88,8 @@ export type OrchestratorDeps = {
   /** Injected symbol catalogue row (required for sizing). */
   symbol: BrokerSymbol;
   placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
+  /** Test/prod hook for immediate OPEN entry recovery after PENDING. */
+  listOpenPositions?: (ownerUid: string) => Promise<BrokerOpenPosition[]>;
   /** Simulate broker hang after claim (tests). */
   beforeBrokerSubmit?: () => Promise<void>;
   /** Override freshness gate (production uses assertGoldHunterCandidateFresh). */
@@ -570,6 +577,41 @@ export async function attemptGoldHunterDemoExecution(
   }
 
   try {
+    // FINAL CURRENT loss-safety after all preclaim I/O, before transport.
+    const lossGate = evaluateGoldHunterFinalLossSafetyForCandidate({
+      ownerUid,
+      candidate
+    });
+    if (!lossGate.ok) {
+      await releaseGoldHunterMaxOpenSlot({
+        ownerUid,
+        reservationId: goldHunterTradeId
+      }).catch(() => undefined);
+      getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
+        opportunityId
+      );
+      await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+        state: "PRETRANSPORT_BLOCKED",
+        errorCode: lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"
+      });
+      tel?.({
+        phase: "PRECLAIM_BLOCKED",
+        claimed: true,
+        outcome: "PRETRANSPORT_BLOCKED",
+        blocker: lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN",
+        detail: lossGate.detail ?? "final_pretransport_loss_safety",
+        tradeId: goldHunterTradeId
+      });
+      return {
+        ok: false,
+        submitted: false,
+        blockers: [
+          lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"
+        ],
+        signalId: opportunityId
+      };
+    }
+
     const result = await submitGoldHunterDemoOrder({
       ownerUid,
       isAdmin: deps.isAdmin,
@@ -578,6 +620,12 @@ export async function attemptGoldHunterDemoExecution(
       stopLoss: protection.stopPrice,
       takeProfit: null,
       entryHint: protection.entryPrice,
+      lossSafetyMid: (candidate.bid + candidate.ask) / 2,
+      signedImbalance1s:
+        (candidate as { signedImbalance1s?: number | null }).signedImbalance1s ??
+        null,
+      midVel250:
+        (candidate as { midVel250?: number | null }).midVel250 ?? null,
       setup: candidate.setup,
       signalId: opportunityId,
       goldHunterTradeId,
@@ -613,16 +661,28 @@ export async function attemptGoldHunterDemoExecution(
         ownerUid,
         reservationId: goldHunterTradeId
       }).catch(() => undefined);
+      const pretransportBlocked = result.pretransportBlocked === true;
+      if (pretransportBlocked) {
+        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
+          opportunityId
+        );
+      }
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-        state: "BROKER_SUBMIT_ERROR",
+        state: pretransportBlocked
+          ? "PRETRANSPORT_BLOCKED"
+          : "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
       });
       tel?.({
-        phase: "BROKER_SUBMIT_ERROR",
+        phase: pretransportBlocked ? "PRECLAIM_BLOCKED" : "BROKER_SUBMIT_ERROR",
         claimed: true,
-        outcome: "BROKER_SUBMIT_ERROR",
+        outcome: pretransportBlocked
+          ? "PRETRANSPORT_BLOCKED"
+          : "BROKER_SUBMIT_ERROR",
         blocker: result.blockers[0] ?? "GATES_BLOCKED",
-        detail: "local_gate_before_transport",
+        detail: pretransportBlocked
+          ? "final_pretransport_loss_safety_after_async_prep"
+          : "local_gate_before_transport",
         tradeId: goldHunterTradeId
       });
       return {
@@ -694,14 +754,50 @@ export async function attemptGoldHunterDemoExecution(
         brokerPositionId: result.trade?.brokerPositionId ?? null,
         goldHunterTradeId
       });
-      tel?.({
-        phase: "ACCEPTED_PENDING_FILL",
-        claimed: true,
-        outcome: "ACCEPTED_PENDING_FILL",
-        tradeId: goldHunterTradeId,
-        brokerOrderId: result.trade?.brokerOrderId ?? null,
-        brokerPositionId: result.trade?.brokerPositionId ?? null
-      });
+      if (result.trade?.brokerPositionId) {
+        const recovery = await recoverGoldHunterOpenEntryImmediate({
+          ownerUid,
+          trade: result.trade,
+          bid: candidate.bid,
+          ask: candidate.ask,
+          listPositions: deps.listOpenPositions
+        });
+        if (recovery.recovered) {
+          await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+            state: "OPEN",
+            brokerOrderId: recovery.trade.brokerOrderId ?? null,
+            brokerPositionId: recovery.trade.brokerPositionId ?? null,
+            goldHunterTradeId
+          });
+          tel?.({
+            phase: "FILLED",
+            claimed: true,
+            outcome: "FILLED",
+            detail: "immediate_open_entry_recovery",
+            tradeId: recovery.trade.goldHunterTradeId,
+            brokerOrderId: recovery.trade.brokerOrderId ?? null,
+            brokerPositionId: recovery.trade.brokerPositionId ?? null
+          });
+        } else {
+          tel?.({
+            phase: "ACCEPTED_PENDING_FILL",
+            claimed: true,
+            outcome: "ACCEPTED_PENDING_FILL",
+            tradeId: goldHunterTradeId,
+            brokerOrderId: result.trade?.brokerOrderId ?? null,
+            brokerPositionId: result.trade?.brokerPositionId ?? null
+          });
+        }
+      } else {
+        tel?.({
+          phase: "ACCEPTED_PENDING_FILL",
+          claimed: true,
+          outcome: "ACCEPTED_PENDING_FILL",
+          tradeId: goldHunterTradeId,
+          brokerOrderId: result.trade?.brokerOrderId ?? null,
+          brokerPositionId: result.trade?.brokerPositionId ?? null
+        });
+      }
     } else if (result.outcome === "PENDING_RECONCILIATION") {
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "PENDING_RECONCILIATION",
@@ -709,15 +805,47 @@ export async function attemptGoldHunterDemoExecution(
         brokerOrderId: result.trade?.brokerOrderId ?? null,
         brokerPositionId: result.trade?.brokerPositionId ?? null
       });
-      tel?.({
-        phase: "PENDING_RECONCILIATION",
-        claimed: true,
-        outcome: "PENDING_RECONCILIATION",
-        detail: result.errorCode ?? "broker_outcome_unknown",
-        tradeId: goldHunterTradeId,
-        brokerOrderId: result.trade?.brokerOrderId ?? null,
-        brokerPositionId: result.trade?.brokerPositionId ?? null
-      });
+      // Immediate bounded open-position entry recovery while still OPEN.
+      // Settlement BROKER_DEAL_SETTLEMENT remains fallback if this fails.
+      let recoveredTrade = result.trade ?? null;
+      if (result.trade?.brokerPositionId) {
+        const recovery = await recoverGoldHunterOpenEntryImmediate({
+          ownerUid,
+          trade: result.trade,
+          bid: candidate.bid,
+          ask: candidate.ask,
+          listPositions: deps.listOpenPositions
+        });
+        if (recovery.recovered) {
+          recoveredTrade = recovery.trade;
+          await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
+            state: "OPEN",
+            brokerOrderId: recovery.trade.brokerOrderId ?? null,
+            brokerPositionId: recovery.trade.brokerPositionId ?? null,
+            goldHunterTradeId
+          });
+          tel?.({
+            phase: "FILLED",
+            claimed: true,
+            outcome: "FILLED",
+            detail: "immediate_open_entry_recovery",
+            tradeId: recovery.trade.goldHunterTradeId,
+            brokerOrderId: recovery.trade.brokerOrderId ?? null,
+            brokerPositionId: recovery.trade.brokerPositionId ?? null
+          });
+        }
+      }
+      if (!recoveredTrade || recoveredTrade.status === "PENDING_RECONCILIATION") {
+        tel?.({
+          phase: "PENDING_RECONCILIATION",
+          claimed: true,
+          outcome: "PENDING_RECONCILIATION",
+          detail: result.errorCode ?? "broker_outcome_unknown",
+          tradeId: goldHunterTradeId,
+          brokerOrderId: result.trade?.brokerOrderId ?? null,
+          brokerPositionId: result.trade?.brokerPositionId ?? null
+        });
+      }
     }
 
     // Durable trade row now owns max-open occupancy — release claim-time lease.

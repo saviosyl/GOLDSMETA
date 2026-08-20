@@ -1,0 +1,277 @@
+/**
+ * Immediate bounded broker-position entry recovery while a GH Demo trade is
+ * still OPEN / PENDING_RECONCILIATION.
+ * Settlement BROKER_DEAL_SETTLEMENT remains the fallback — this path must run
+ * while the position is live so Smart Loss / Smart PM can manage it.
+ *
+ * Polls within a fixed time budget for broker eventual visibility.
+ * Each broker-position read is itself raced against the remaining budget so a
+ * hung list/reconcile cannot hold the recovery past timeoutMs.
+ * Never places orders. Never invents prices. Never extends indefinitely.
+ */
+import type { BrokerOpenPosition } from "../broker/ctrader/openApiClient";
+import { reconcileDemoBrokerPositions } from "../broker/ctrader/demoPositionMutations";
+import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
+import {
+  signalGoldHunterEntryIntegrityRecovered,
+  tradeHasAuthoritativeEntryIntegrity
+} from "./entryIntegrity";
+import {
+  repairGoldHunterTradeFromBrokerPosition
+} from "./entryRepair";
+import { isValidGoldHunterEntryPrice } from "./entryValidity";
+import type { BrokerDemoPositionLite } from "./reconcilePositions";
+import { upsertGoldHunterDemoTrade } from "./tradeStore";
+import type { GoldHunterDemoTrade } from "./types";
+
+export const GH_IMMEDIATE_ENTRY_RECOVERY_TIMEOUT_MS = 2_500;
+/** Poll interval while waiting for broker position visibility. */
+export const GH_IMMEDIATE_ENTRY_RECOVERY_POLL_MS = 200;
+
+export type ImmediateOpenEntryRecoveryResult = {
+  recovered: boolean;
+  trade: GoldHunterDemoTrade;
+  reason:
+    | "RECOVERED_OPEN"
+    | "NO_POSITION_ID"
+    | "POSITIONS_READ_FAILED"
+    | "POSITION_NOT_FOUND_WITHIN_WINDOW"
+    | "ENTRY_INVALID_WITHIN_WINDOW"
+    | "ALREADY_VALID"
+    | "TIMEOUT"
+    | "SKIPPED_STATUS";
+  /** Diagnostic: how many broker open-position reads were attempted. */
+  attempts?: number;
+};
+
+function toLite(p: BrokerOpenPosition): BrokerDemoPositionLite {
+  return {
+    positionId: String(p.positionId),
+    comment: p.comment ?? null,
+    label: p.label ?? null,
+    side: p.side === "SELL" ? "SELL" : p.side === "BUY" ? "BUY" : null,
+    volumeLots: p.volumeLots ?? null,
+    entryPrice: p.entryPrice ?? null,
+    stopLoss: p.stopLoss ?? null
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class ImmediateEntryRecoveryReadTimeoutError extends Error {
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super("IMMEDIATE_ENTRY_RECOVERY_READ_TIMEOUT");
+    this.name = "ImmediateEntryRecoveryReadTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function isImmediateEntryRecoveryReadTimeout(
+  error: unknown
+): error is ImmediateEntryRecoveryReadTimeoutError {
+  return error instanceof ImmediateEntryRecoveryReadTimeoutError;
+}
+
+/**
+ * Race one broker-position read against the remaining recovery budget.
+ * The underlying Promise is not cancelled; callers must not start another
+ * read after this times out.
+ */
+async function withRemainingRecoveryReadTimeout<T>(
+  remainingMs: number,
+  work: () => Promise<T>
+): Promise<T> {
+  const ms = Number.isFinite(remainingMs) && remainingMs > 0 ? remainingMs : 1;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ImmediateEntryRecoveryReadTimeoutError(ms)),
+          ms
+        );
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Bounded open-position poll + entry backfill for a single pending GH trade.
+ * Total wall time ≤ timeoutMs. Each listPositions call is bounded by remaining
+ * time. Stops immediately on valid match. Never starts a read with no budget.
+ */
+export async function recoverGoldHunterOpenEntryImmediate(args: {
+  ownerUid: string;
+  trade: GoldHunterDemoTrade;
+  bid?: number | null;
+  ask?: number | null;
+  timeoutMs?: number;
+  pollMs?: number;
+  /** Test hook — inject open positions without broker I/O. */
+  listPositions?: (ownerUid: string) => Promise<BrokerOpenPosition[]>;
+}): Promise<ImmediateOpenEntryRecoveryResult> {
+  const trade = args.trade;
+  if (
+    trade.status !== "PENDING_RECONCILIATION" &&
+    trade.status !== "ACCEPTED_PENDING_FILL"
+  ) {
+    return { recovered: false, trade, reason: "SKIPPED_STATUS" };
+  }
+
+  if (!trade.brokerPositionId) {
+    return { recovered: false, trade, reason: "NO_POSITION_ID" };
+  }
+
+  const timeoutMs = args.timeoutMs ?? GH_IMMEDIATE_ENTRY_RECOVERY_TIMEOUT_MS;
+  const pollMs = args.pollMs ?? GH_IMMEDIATE_ENTRY_RECOVERY_POLL_MS;
+  const deadline = Date.now() + timeoutMs;
+  const list =
+    args.listPositions ??
+    ((uid: string) => reconcileDemoBrokerPositions(uid));
+
+  let attempts = 0;
+  let successfulReads = 0;
+  let sawMatchWithInvalidEntry = false;
+  let lastFailReason:
+    | "POSITION_NOT_FOUND_WITHIN_WINDOW"
+    | "ENTRY_INVALID_WITHIN_WINDOW"
+    | "POSITIONS_READ_FAILED"
+    | "TIMEOUT" = "POSITION_NOT_FOUND_WITHIN_WINDOW";
+
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      if (successfulReads === 0 && lastFailReason !== "POSITIONS_READ_FAILED") {
+        lastFailReason = "TIMEOUT";
+      }
+      break;
+    }
+    attempts += 1;
+    let positions: BrokerOpenPosition[];
+    try {
+      positions = await withRemainingRecoveryReadTimeout(remainingMs, () =>
+        list(args.ownerUid)
+      );
+      if (!Array.isArray(positions)) {
+        lastFailReason = "POSITIONS_READ_FAILED";
+        const remain = deadline - Date.now();
+        if (remain <= 0) break;
+        await sleep(Math.min(pollMs, remain));
+        continue;
+      }
+      successfulReads += 1;
+    } catch (error) {
+      if (isImmediateEntryRecoveryReadTimeout(error)) {
+        lastFailReason = "TIMEOUT";
+        return { recovered: false, trade, reason: "TIMEOUT", attempts };
+      }
+      lastFailReason = "POSITIONS_READ_FAILED";
+      const remain = deadline - Date.now();
+      if (remain <= 0) break;
+      await sleep(Math.min(pollMs, remain));
+      continue;
+    }
+
+    const match = positions
+      .map(toLite)
+      .find((p) => String(p.positionId) === String(trade.brokerPositionId));
+
+    if (!match) {
+      lastFailReason = "POSITION_NOT_FOUND_WITHIN_WINDOW";
+      const remain = deadline - Date.now();
+      if (remain <= 0) break;
+      await sleep(Math.min(pollMs, remain));
+      continue;
+    }
+
+    if (!isValidGoldHunterEntryPrice(match.entryPrice)) {
+      sawMatchWithInvalidEntry = true;
+      lastFailReason = "ENTRY_INVALID_WITHIN_WINDOW";
+      const remain = deadline - Date.now();
+      if (remain <= 0) break;
+      await sleep(Math.min(pollMs, remain));
+      continue;
+    }
+
+    const repaired = repairGoldHunterTradeFromBrokerPosition({
+      trade,
+      position: match
+    });
+    if (!tradeHasAuthoritativeEntryIntegrity(repaired.trade)) {
+      sawMatchWithInvalidEntry = true;
+      lastFailReason = "ENTRY_INVALID_WITHIN_WINDOW";
+      const remain = deadline - Date.now();
+      if (remain <= 0) break;
+      await sleep(Math.min(pollMs, remain));
+      continue;
+    }
+
+    const recoveredTrade: GoldHunterDemoTrade = {
+      ...repaired.trade,
+      status: "FILLED",
+      result: "OPEN",
+      fillTs: repaired.trade.fillTs ?? new Date().toISOString(),
+      entryRecoverySource:
+        repaired.trade.entryRecoverySource ?? "BROKER_POSITION_RECONCILIATION",
+      dataQuality: null,
+      errorCode: null
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, recoveredTrade);
+
+    const bid =
+      args.bid != null && Number.isFinite(args.bid)
+        ? args.bid
+        : recoveredTrade.entry!;
+    const ask =
+      args.ask != null && Number.isFinite(args.ask)
+        ? args.ask
+        : recoveredTrade.entry!;
+    registerGoldHunterOpenPositionForOwner({
+      ownerUid: args.ownerUid,
+      trade: recoveredTrade,
+      bid,
+      ask
+    });
+    signalGoldHunterEntryIntegrityRecovered({
+      ownerUid: args.ownerUid,
+      reason: "BROKER_POSITION_ENTRY_REPAIRED",
+      tradeId: recoveredTrade.goldHunterTradeId
+    });
+
+    return {
+      recovered: true,
+      trade: recoveredTrade,
+      reason: "RECOVERED_OPEN",
+      attempts
+    };
+  }
+
+  if (successfulReads === 0) {
+    return {
+      recovered: false,
+      trade,
+      reason:
+        Date.now() >= deadline && lastFailReason === "POSITIONS_READ_FAILED"
+          ? "POSITIONS_READ_FAILED"
+          : lastFailReason === "POSITIONS_READ_FAILED"
+            ? "POSITIONS_READ_FAILED"
+            : "TIMEOUT",
+      attempts
+    };
+  }
+
+  return {
+    recovered: false,
+    trade,
+    reason: sawMatchWithInvalidEntry
+      ? "ENTRY_INVALID_WITHIN_WINDOW"
+      : "POSITION_NOT_FOUND_WITHIN_WINDOW",
+    attempts
+  };
+}

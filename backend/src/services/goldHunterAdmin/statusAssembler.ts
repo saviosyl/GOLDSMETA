@@ -164,6 +164,7 @@ export type GoldHunterStatusPayload = {
     positionManagerVersion: string;
     lossControllerVersion: string;
     rollingRealisedR: number;
+    rollingSampleCount: number;
     lossCircuitBreakerActive: boolean;
     circuitBreakerReason: string | null;
     lossStreakGuardActive: boolean;
@@ -177,6 +178,11 @@ export type GoldHunterStatusPayload = {
     entryIntegrityHealthy: boolean;
     entryIntegrityRecoveredAtMs: number | null;
     lastEntryIntegrityRecoveryReason: string | null;
+    lastClosedTradeId: string | null;
+    updatedAt: string | null;
+    workerRevision: string | null;
+    telemetrySource: "QUOTE_WORKER" | "API_PROCESS_FALLBACK" | null;
+    telemetryAgeMs: number | null;
     reentryState: GoldHunterSelectedCandidate["antiChurnState"] | null;
     bReentryState: GoldHunterSelectedCandidate["bReentryState"] | null;
   };
@@ -294,7 +300,8 @@ export async function assembleGoldHunterStatus(
         depthAgeMs: null as number | null,
         normalizationVersion: "CTRADER_NORMALIZED_V1" as const,
         updatedAt: new Date().toISOString(),
-        protectionGeometryConnected: isGoldHunterProtectionGeometryConnected()
+        protectionGeometryConnected: isGoldHunterProtectionGeometryConnected(),
+        lossControllerTelemetry: null
       };
     })();
 
@@ -527,10 +534,42 @@ export async function assembleGoldHunterStatus(
       positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
       lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
       ...(() => {
+        const tel = runtime.lossControllerTelemetry;
+        const nowMs = Date.now();
+        if (tel && tel.telemetrySource === "QUOTE_WORKER") {
+          const updatedMs = Date.parse(tel.updatedAt);
+          return {
+            rollingRealisedR: tel.rollingRealisedR,
+            rollingSampleCount: tel.rollingSampleCount,
+            lossCircuitBreakerActive: tel.lossCircuitBreakerActive,
+            circuitBreakerReason: tel.circuitBreakerReason,
+            lossStreakGuardActive: tel.lossStreakGuardActive,
+            consecutiveLosses: tel.consecutiveLosses,
+            unknownRealisedRLossCount: tel.unknownRealisedRLossCount,
+            rollingUnknownRTradeCount: tel.rollingUnknownRTradeCount,
+            lastUnknownRTradeId: tel.lastUnknownRTradeId,
+            lastUnknownRReason: tel.lastUnknownRReason,
+            consecutiveUnknownRLosses: tel.consecutiveUnknownRLosses,
+            unknownRGuardActive: tel.unknownRGuardActive,
+            entryIntegrityHealthy: tel.entryIntegrityHealthy,
+            entryIntegrityRecoveredAtMs: tel.entryIntegrityRecoveredAtMs,
+            lastEntryIntegrityRecoveryReason:
+              tel.lastEntryIntegrityRecoveryReason,
+            lastClosedTradeId: tel.lastClosedTradeId,
+            updatedAt: tel.updatedAt,
+            workerRevision: tel.workerRevision,
+            telemetrySource: "QUOTE_WORKER" as const,
+            telemetryAgeMs: Number.isFinite(updatedMs)
+              ? Math.max(0, nowMs - updatedMs)
+              : null
+          };
+        }
+        // Fallback only when worker telemetry missing — mark source clearly.
         try {
           const lc = getGoldHunterStrategySelector(ownerUid).getLossControllerEntryState();
           return {
             rollingRealisedR: lc.rollingRealisedR,
+            rollingSampleCount: lc.rollingSampleCount,
             lossCircuitBreakerActive: lc.lossCircuitBreakerActive,
             circuitBreakerReason: lc.circuitBreakerReason,
             lossStreakGuardActive: lc.lossStreakGuardActive,
@@ -544,11 +583,17 @@ export async function assembleGoldHunterStatus(
             entryIntegrityHealthy: lc.entryIntegrityHealthy,
             entryIntegrityRecoveredAtMs: lc.entryIntegrityRecoveredAtMs,
             lastEntryIntegrityRecoveryReason:
-              lc.lastEntryIntegrityRecoveryReason
+              lc.lastEntryIntegrityRecoveryReason,
+            lastClosedTradeId: lc.lastClosedTradeId,
+            updatedAt: null as string | null,
+            workerRevision: null as string | null,
+            telemetrySource: "API_PROCESS_FALLBACK" as const,
+            telemetryAgeMs: null as number | null
           };
         } catch {
           return {
             rollingRealisedR: 0,
+            rollingSampleCount: 0,
             lossCircuitBreakerActive: false,
             circuitBreakerReason: null as string | null,
             lossStreakGuardActive: false,
@@ -561,7 +606,12 @@ export async function assembleGoldHunterStatus(
             unknownRGuardActive: false,
             entryIntegrityHealthy: true,
             entryIntegrityRecoveredAtMs: null as number | null,
-            lastEntryIntegrityRecoveryReason: null as string | null
+            lastEntryIntegrityRecoveryReason: null as string | null,
+            lastClosedTradeId: null as string | null,
+            updatedAt: null as string | null,
+            workerRevision: null as string | null,
+            telemetrySource: "API_PROCESS_FALLBACK" as const,
+            telemetryAgeMs: null as number | null
           };
         }
       })(),

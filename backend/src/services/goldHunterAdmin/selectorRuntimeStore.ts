@@ -9,6 +9,7 @@ import type {
 import {
   GH_FAST_MARKET_DATA_NORMALIZATION_VERSION
 } from "./abc";
+import type { GoldHunterLossControllerTelemetry } from "./lossControllerTelemetry";
 
 export type GoldHunterSelectorRuntimeSnapshot = {
   ownerUid: string;
@@ -21,6 +22,8 @@ export type GoldHunterSelectorRuntimeSnapshot = {
   normalizationVersion: typeof GH_FAST_MARKET_DATA_NORMALIZATION_VERSION;
   updatedAt: string;
   protectionGeometryConnected: boolean;
+  /** Authoritative SMART_LOSS_CONTROLLER_V1 state from quote-worker. */
+  lossControllerTelemetry?: GoldHunterLossControllerTelemetry | null;
 };
 
 const memory = new Map<string, GoldHunterSelectorRuntimeSnapshot>();

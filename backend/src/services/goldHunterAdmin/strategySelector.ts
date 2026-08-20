@@ -243,6 +243,8 @@ type LossControllerEntryState = {
   entryIntegrityHealthy: boolean;
   entryIntegrityRecoveredAtMs: number | null;
   lastEntryIntegrityRecoveryReason: string | null;
+  /** Most recently closed goldHunterTradeId applied to LC accounting. */
+  lastClosedTradeId: string | null;
 };
 
 function emptyLossControllerEntryState(): LossControllerEntryState {
@@ -264,7 +266,8 @@ function emptyLossControllerEntryState(): LossControllerEntryState {
     unknownRGuardActivatedAtMs: null,
     entryIntegrityHealthy: true,
     entryIntegrityRecoveredAtMs: null,
-    lastEntryIntegrityRecoveryReason: null
+    lastEntryIntegrityRecoveryReason: null,
+    lastClosedTradeId: null
   };
 }
 
@@ -561,6 +564,7 @@ export class GoldHunterStrategySelector {
 
     if (tradeKey) {
       this.lossControllerEntry.notifiedClosedTradeIds.add(tradeKey);
+      this.lossControllerEntry.lastClosedTradeId = tradeKey;
       // Bound memory — keep recent ids only.
       if (this.lossControllerEntry.notifiedClosedTradeIds.size > 500) {
         const oldest = this.lossControllerEntry.notifiedClosedTradeIds
@@ -711,6 +715,7 @@ export class GoldHunterStrategySelector {
     entryIntegrityHealthy: boolean;
     entryIntegrityRecoveredAtMs: number | null;
     lastEntryIntegrityRecoveryReason: string | null;
+    lastClosedTradeId: string | null;
   } {
     const rollingRealisedR = this.lossControllerEntry.rollingRealisedRs.reduce(
       (a, b) => a + b,
@@ -736,7 +741,8 @@ export class GoldHunterStrategySelector {
       entryIntegrityRecoveredAtMs:
         this.lossControllerEntry.entryIntegrityRecoveredAtMs,
       lastEntryIntegrityRecoveryReason:
-        this.lossControllerEntry.lastEntryIntegrityRecoveryReason
+        this.lossControllerEntry.lastEntryIntegrityRecoveryReason,
+      lastClosedTradeId: this.lossControllerEntry.lastClosedTradeId
     };
   }
 
@@ -756,6 +762,21 @@ export class GoldHunterStrategySelector {
     this.lossControllerEntry.lastEntryIntegrityRecoveryReason = args.reason;
   }
 
+  /**
+   * CURRENT loss / anti-churn / unknown-R gate for final pretransport checks.
+   * Same logic as candidate arming — call immediately before broker NewOrder.
+   */
+  evaluateCurrentLossSafetyGate(args: {
+    side: "BUY" | "SELL";
+    atMs: number;
+    mid: number;
+    opportunityId?: string | null;
+    signedImbalance1s?: number;
+    midVel250?: number;
+  }) {
+    return this.lossArmingGate(args);
+  }
+
   /** Test helper — exposes loss anti-churn gate. */
   evaluateAntiChurnGateForTests(args: {
     side: "BUY" | "SELL";
@@ -765,7 +786,7 @@ export class GoldHunterStrategySelector {
     signedImbalance1s?: number;
     midVel250?: number;
   }) {
-    return this.lossArmingGate(args);
+    return this.evaluateCurrentLossSafetyGate(args);
   }
 
   /**

@@ -85,7 +85,7 @@ jobs:
       - name: Firestore Emulator concurrency tests
         run: |
           npx --yes firebase-tools@13 emulators:exec --only firestore --project goldmeta-signal-outcome-test \
-            "npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts tests/integration/fastExecutionClaim.firestore.emulator.test.ts"
+            "npx vitest run tests/integration/signalOutcome.firestore.emulator.test.ts tests/integration/shadowReplayAtomic.firestore.emulator.test.ts"
         env:
           NODE_ENV: test
           APP_ENV: test

@@ -17,12 +17,16 @@ import {
   type GoldHunterSelectorTickResult
 } from "./strategySelector";
 import { saveGoldHunterSelectorRuntime } from "./selectorRuntimeStore";
+import { buildGoldHunterLossControllerTelemetry } from "./lossControllerTelemetryPersist";
 import {
   enqueueGoldHunterDemoAutoExecution,
   maybeReconsiderGoldHunterDemoAutoExecution
 } from "./demoAutoExecutionRuntime";
 import { enqueueGoldHunterPositionManagerTick } from "./demoPositionManager";
 import { onGhShadowMarketTick } from "./shadowQualification";
+
+/** Re-export for callers that previously imported from this module. */
+export { persistGoldHunterLossControllerTelemetry } from "./lossControllerTelemetryPersist";
 
 export type GhMarketFeedMeta = {
   ownerUid: string;
@@ -125,7 +129,11 @@ async function persistRuntime(
         : null,
       normalizationVersion: "CTRADER_NORMALIZED_V1",
       updatedAt: new Date(now).toISOString(),
-      protectionGeometryConnected: isGoldHunterProtectionGeometryConnected()
+      protectionGeometryConnected: isGoldHunterProtectionGeometryConnected(),
+      lossControllerTelemetry: buildGoldHunterLossControllerTelemetry(
+        ownerUid,
+        new Date(now).toISOString()
+      )
     });
     lastPersistAt.set(ownerUid, now);
     persistWriteCounts.set(
