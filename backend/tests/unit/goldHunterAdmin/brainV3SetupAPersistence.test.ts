@@ -13,8 +13,8 @@ import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmi
 import type { DepthBookStats } from "../../../src/services/goldHunterAdmin/abc/depthBook";
 import { GoldHunterStrategySelector } from "../../../src/services/goldHunterAdmin/strategySelector";
 
-const BASE_MS = 1_720_000_000_000;
 const CANDLE_MS = 60_000;
+const BASE_MS = Math.floor(1_720_000_000_000 / CANDLE_MS) * CANDLE_MS;
 
 function depth(over: Partial<DepthBookStats> = {}): DepthBookStats {
   return {
@@ -58,6 +58,23 @@ function features(
   const bid = mid - 0.06;
   const ask = mid + 0.06;
   const bullish = side === "BUY";
+  const sideDepth = bullish
+    ? depth({
+        depthImbalance: 0.1,
+        removeRateBid: 1,
+        removeRateAsk: 3,
+        bestBid: bid,
+        bestAsk: ask,
+        spread: 0.12
+      })
+    : depth({
+        depthImbalance: -0.1,
+        removeRateBid: 3,
+        removeRateAsk: 1,
+        bestBid: bid,
+        bestAsk: ask,
+        spread: 0.12
+      });
   return {
     bid,
     ask,
@@ -103,7 +120,7 @@ function features(
     distPriorLow5s: 0,
     upTouches5s: 0,
     downTouches5s: 0,
-    depth: depth({ bestBid: bid, bestAsk: ask, spread: 0.12 }),
+    depth: sideDepth,
     ...over
   };
 }
@@ -231,8 +248,12 @@ describe("Gold Hunter Brain V4 BUY M1 candle flow", () => {
   it("7) insufficient reward space => no BUY", () => {
     const engine = primeEngineForSide("BUY");
     const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 12_000, 105.6);
-    const out = engine.evaluate(start + 12_000, features(105.6, "BUY"), cfg);
+    engine.onSpot(start + 12_000, 106.0);
+    engine.evaluate(start + 12_000, features(106.0, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 104.95);
+    engine.evaluate(start + 20_000, features(104.95, "BUY"), cfg);
+    engine.onSpot(start + 28_000, 105.35);
+    const out = engine.evaluate(start + 28_000, features(105.35, "BUY"), cfg);
     expect(out.eligible).toBe(false);
     expect(out.waitReason).toBe("WAIT_INSUFFICIENT_REWARD_SPACE");
   });
@@ -285,12 +306,12 @@ describe("Gold Hunter Brain V4 SELL mirrors", () => {
   it("SELL pullback + reacceleration + microstructure => eligible SELL", () => {
     const engine = primeEngineForSide("SELL");
     const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 10_000, 101.7);
-    engine.evaluate(start + 10_000, features(101.7, "SELL"), cfg);
-    engine.onSpot(start + 22_000, 102.5);
-    engine.evaluate(start + 22_000, features(102.5, "SELL"), cfg);
-    engine.onSpot(start + 30_000, 102.2);
-    const out = engine.evaluate(start + 30_000, features(102.2, "SELL"), cfg);
+    engine.onSpot(start + 10_000, 101.6);
+    engine.evaluate(start + 10_000, features(101.6, "SELL"), cfg);
+    engine.onSpot(start + 22_000, 102.4);
+    engine.evaluate(start + 22_000, features(102.4, "SELL"), cfg);
+    engine.onSpot(start + 30_000, 102.05);
+    const out = engine.evaluate(start + 30_000, features(102.05, "SELL"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("SELL");
   });
@@ -313,9 +334,13 @@ describe("Gold Hunter Brain V4 SELL mirrors", () => {
     ).toBe("WAIT_CANDLE_OVEREXTENDED");
 
     const noSpace = primeEngineForSide("SELL");
-    noSpace.onSpot(start + 20_000, 100.9);
+    noSpace.onSpot(start + 12_000, 100.9);
+    noSpace.evaluate(start + 12_000, features(100.9, "SELL"), cfg);
+    noSpace.onSpot(start + 20_000, 101.95);
+    noSpace.evaluate(start + 20_000, features(101.95, "SELL"), cfg);
+    noSpace.onSpot(start + 28_000, 101.15);
     expect(
-      noSpace.evaluate(start + 20_000, features(100.9, "SELL"), cfg).waitReason
+      noSpace.evaluate(start + 28_000, features(101.15, "SELL"), cfg).waitReason
     ).toBe("WAIT_INSUFFICIENT_REWARD_SPACE");
   });
 });
@@ -351,7 +376,7 @@ describe("Gold Hunter Brain V4 one-trade-per-M1 and post-loss gating", () => {
 
   it("10) trade after LOSS on same M1 candle is blocked", () => {
     const sel = new GoldHunterStrategySelector();
-    const minuteStart = 7_000_000;
+    const minuteStart = 7_200_000;
     const first = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.82 },
       receivedAtMs: minuteStart + 10_000
@@ -367,6 +392,10 @@ describe("Gold Hunter Brain V4 one-trade-per-M1 and post-loss gating", () => {
       opportunityId: oppId,
       closedAtMs: minuteStart + 20_000,
       tradeId: "GH-D-loss-v4"
+    });
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 25_000
     });
 
     const sameMinute = sel.processInjectedSelectionForTests({

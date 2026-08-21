@@ -377,7 +377,7 @@ describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
   it("live selector path: LOSS opp-1 rejected as WAIT_DUPLICATE_OPPORTUNITY; fresh opp-2 after reset accepted", () => {
     const sel = new GoldHunterStrategySelector();
     const cfg = defaultGhFastConfig();
-    const t0 = 5_000_000;
+    const t0 = 5_040_000;
 
     const first = sel.processInjectedSelectionForTests({
       selected: {
@@ -419,7 +419,7 @@ describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
     expect(again.candidate?.opportunityId).toBe(opp1);
     expect(again.candidate?.consumed).toBe(true);
     expect(again.candidate?.antiChurnState?.rejectionReason).toBe(
-      "WAIT_DUPLICATE_OPPORTUNITY"
+      "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED"
     );
     expect(sel.getExecutableCandidate()).toBeNull();
 
@@ -437,7 +437,7 @@ describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
         side: "BUY",
         quality: 0.85
       },
-      receivedAtMs: t0 + 1_000 + cfg.antiChurnLossMinMs + 500,
+      receivedAtMs: t0 + 1_000 + cfg.antiChurnLossMinMs + 60_500,
       // mid below losing entry → structural reset for BUY loss
       bid: 2599.7,
       ask: 2599.85

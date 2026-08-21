@@ -1728,8 +1728,10 @@ export class GoldHunterStrategySelector {
               waitReason: null,
               stage: "TRIGGERED",
               currentCandleStartMs:
-                Math.floor(args.receivedAtMs / 60_000) * 60_000,
-              currentCandleAgeSec: Math.floor((args.receivedAtMs % 60_000) / 1000),
+                args.bookGeneration != null
+                  ? args.bookGeneration * 60_000
+                  : Math.floor(args.receivedAtMs / 60_000) * 60_000,
+              currentCandleAgeSec: 20,
               signalRange: 1,
               medianRange5: 1,
               directionalDisplacement: 0.2,
