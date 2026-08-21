@@ -41,21 +41,21 @@ export function defaultGhFastConfig(
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
     pullbackRetraceMax: 0.45,
-    // SMART_POSITION_MANAGER_V1 — V6 protects modest winners earlier while
-    // still leaving room for a genuine pulse to run.
+    // SMART_POSITION_MANAGER_V1 — keep the proven runner/protection geometry
+    // unchanged in V6. Modest winners are handled sooner by Smart Loss harvest.
     smartPositionManagerEnabled: true,
     spmTickSize: 0.01,
     spmMinStopDistance: 0.05,
-    spmProtectMfeR: 0.6,
-    spmProtect15MfeR: 0.9,
+    spmProtectMfeR: 1.0,
+    spmProtect15MfeR: 1.5,
     spmProtect15FloorR: 0.4,
-    spmLockMfeR: 1.25,
-    spmLockFloorR: 0.7,
-    spmRunnerMfeR: 1.8,
-    spmRunnerMinFloorR: 1.0,
-    spmRunnerTrailR: 0.65,
-    spmHarvestMinMfeR: 1.4,
-    spmHarvestMinRetraceR: 0.4,
+    spmLockMfeR: 2.0,
+    spmLockFloorR: 0.9,
+    spmRunnerMfeR: 3.0,
+    spmRunnerMinFloorR: 1.6,
+    spmRunnerTrailR: 1.25,
+    spmHarvestMinMfeR: 2.5,
+    spmHarvestMinRetraceR: 0.75,
     antiChurnLossMinMs: 30_000,
     antiChurnOppositeFlipMinMs: 30_000,
     // SMART_LOSS_CONTROLLER_V1 — Brain V6 economics:
