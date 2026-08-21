@@ -133,7 +133,6 @@ function openOpportunity(side: "BUY" | "SELL" = "SELL"): {
   opportunityId: string;
 } {
   const sel = getGoldHunterStrategySelector(OWNER);
-  const cfg = sel.getFrozenConfig();
   // End any active opportunity, then wait past rearm floor before starting a new one.
   if (sel.getActiveOpportunityId()) {
     oppClock += 10;
@@ -143,24 +142,8 @@ function openOpportunity(side: "BUY" | "SELL" = "SELL"): {
       bookGeneration: Math.floor(oppClock / 100)
     });
   }
-  const setup =
-    side === "BUY" ? "B_FAST_BREAKOUT" : "A_MOMENTUM_IGNITION";
-  // Brain V2: B has a longer secondary re-arm floor than the generic floor.
-  const waitMs =
-    setup === "B_FAST_BREAKOUT"
-      ? Math.max(400, cfg.breakoutBRearmFloorMs + 20)
-      : 400;
-  // Complete any pending B structural reset by printing a calm mid.
-  if (setup === "B_FAST_BREAKOUT") {
-    oppClock += 10;
-    sel.processInjectedSelectionForTests({
-      selected: null,
-      receivedAtMs: oppClock,
-      bid: 2599.5,
-      ask: 2599.62,
-      bookGeneration: Math.floor(oppClock / 100)
-    });
-  }
+  const setup = "A_MOMENTUM_IGNITION";
+  const waitMs = 400;
   oppClock += waitMs;
   const tick = sel.processInjectedSelectionForTests({
     selected: {

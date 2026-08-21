@@ -13,11 +13,16 @@ import { FastFeatureEngine } from "./features";
 import { evaluateSetupsDetailed, type SetupHit } from "./setups";
 import { frozenGhFastSoakConfig } from "./frozenConfig";
 import type { GhFastDepthEvent, GhFastSpotEvent, GhFastSpecialistRawEval } from "./types";
+import {
+  M1CandleFlowEngine,
+  type M1CandleFlowEvaluation
+} from "./m1CandleFlow";
 
 export type GoldHunterPipelineSnapshot = {
   features: ReturnType<FastFeatureEngine["snapshot"]>;
   specialists: GhFastSpecialistRawEval[] | null;
   selected: SetupHit | null;
+  m1CandleFlow: M1CandleFlowEvaluation | null;
   bestBid: number | null;
   bestAsk: number | null;
   spread: number | null;
@@ -35,6 +40,7 @@ export type GoldHunterPipelineSnapshot = {
 export class GoldHunterFeaturePipeline {
   private readonly depth = new InMemoryDepthBook();
   private readonly features = new FastFeatureEngine();
+  private readonly m1CandleFlow = new M1CandleFlowEngine();
   private readonly cfg = frozenGhFastSoakConfig();
   private lastBid: number | null = null;
   private lastAsk: number | null = null;
@@ -51,6 +57,7 @@ export class GoldHunterFeaturePipeline {
   clearForResync(): void {
     this.depth.clearForResync();
     this.features.clear();
+    this.m1CandleFlow.clear();
     this.lastBid = null;
     this.lastAsk = null;
     this.lastFeatureSpot = null;
@@ -84,6 +91,7 @@ export class GoldHunterFeaturePipeline {
     if (hasAsk) this.lastAsk = ev.ask!;
     if (this.lastBid != null && this.lastAsk != null) {
       this.features.onSpot(ev.receivedAtMs, this.lastBid, this.lastAsk);
+      this.m1CandleFlow.onSpot(ev.receivedAtMs, (this.lastBid + this.lastAsk) / 2);
       this.lastFeatureSpot = { bid: this.lastBid, ask: this.lastAsk };
     }
     return this.snapshot(ev.receivedAtMs);
@@ -140,6 +148,7 @@ export class GoldHunterFeaturePipeline {
         features: null,
         specialists: null,
         selected: null,
+        m1CandleFlow: null,
         bestBid,
         bestAsk,
         spread,
@@ -155,11 +164,13 @@ export class GoldHunterFeaturePipeline {
       };
     }
 
-    const evaluated = evaluateSetupsDetailed(feat, this.cfg);
+    const m1CandleFlow = this.m1CandleFlow.evaluate(nowMs, feat, this.cfg);
+    const evaluated = evaluateSetupsDetailed(feat, this.cfg, { m1CandleFlow });
     return {
       features: feat,
       specialists: evaluated.specialists,
       selected: evaluated.selected,
+      m1CandleFlow,
       bestBid,
       bestAsk,
       spread,

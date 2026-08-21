@@ -25,7 +25,7 @@ export function hashGhFastConfig(cfg: GhFastConfig): string {
 export type GhFastFrozenIdentity = {
   engineVersion: typeof GOLD_HUNTER_FAST_ENGINE_VERSION;
   strategyVersion: typeof GOLD_HUNTER_FAST_STRATEGY_VERSION;
-  soakLabel: "BRAIN_V3_SMART_PM_V1_SMART_LOSS_V1_DEMO";
+  soakLabel: "BRAIN_V4_M1_CANDLE_FLOW_SMART_PM_V1_SMART_LOSS_V1_DEMO";
   configSha256: string;
   config: GhFastConfig;
   shadowOnly: true;
@@ -43,7 +43,7 @@ export function getFrozenGhFastIdentity(): GhFastFrozenIdentity {
   cached = {
     engineVersion: GOLD_HUNTER_FAST_ENGINE_VERSION,
     strategyVersion: GOLD_HUNTER_FAST_STRATEGY_VERSION,
-    soakLabel: "BRAIN_V3_SMART_PM_V1_SMART_LOSS_V1_DEMO",
+    soakLabel: "BRAIN_V4_M1_CANDLE_FLOW_SMART_PM_V1_SMART_LOSS_V1_DEMO",
     configSha256: hashGhFastConfig(config),
     config,
     shadowOnly: true,
