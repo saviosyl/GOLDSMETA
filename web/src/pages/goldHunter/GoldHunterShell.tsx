@@ -16,10 +16,12 @@ import {
 import { useAuth } from "../../lib/auth";
 import type { GoldHunterStatusResponse } from "../../lib/api";
 import {
-  GOLD_HUNTER_BRAIN_LABEL,
   GOLD_HUNTER_PRODUCT_LABEL,
-  GOLD_HUNTER_UI_REV,
-  goldHunterBuildShort
+  goldHunterBuildShort,
+  goldHunterDisplayBrainVersion,
+  goldHunterDisplayStrategyVariant,
+  goldHunterRevisionFromSoftwareRevision,
+  goldHunterVariantFromSoftwareRevision
 } from "../../lib/goldHunterIdentity";
 import "../../styles/goldHunter.css";
 
@@ -100,6 +102,20 @@ export function GoldHunterShell() {
     return <Navigate to="/gold-hunter" replace />;
   }
 
+  const brainVersion = goldHunterDisplayBrainVersion(
+    status?.strategyVersions?.brainVersion ?? null
+  );
+  const softwareRevision = status?.strategyVersions?.softwareRevision ?? null;
+  const brainRevision =
+    status?.strategyVersions?.brainRevision ??
+    goldHunterRevisionFromSoftwareRevision(softwareRevision) ??
+    "—";
+  const strategyVariant = goldHunterDisplayStrategyVariant(
+    status?.strategyVersions?.strategyVariant ??
+      goldHunterVariantFromSoftwareRevision(softwareRevision) ??
+      null
+  );
+
   return (
     <GoldHunterContext.Provider value={{ status, loading, error, refresh }}>
       <div className="gm-gold-hunter" data-testid="gold-hunter-shell">
@@ -107,9 +123,14 @@ export function GoldHunterShell() {
           <div className="gh-brand">
             <strong>{GOLD_HUNTER_PRODUCT_LABEL}</strong>
             <div className="gh-rev" data-testid="gh-revision">
-              <span>{GOLD_HUNTER_BRAIN_LABEL}</span>
-              <span>Rev {GOLD_HUNTER_UI_REV}</span>
-              <span>Build {goldHunterBuildShort()}</span>
+              <span data-testid="gh-trading-brain-label">Trading Brain</span>
+              <span data-testid="gh-trading-brain-value">
+                {brainVersion} · {brainRevision}
+              </span>
+              <span data-testid="gh-strategy-label">Strategy</span>
+              <span data-testid="gh-strategy-value">{strategyVariant}</span>
+              <span data-testid="gh-web-build-label">Web Build</span>
+              <span data-testid="gh-web-build-value">{goldHunterBuildShort()}</span>
             </div>
           </div>
           <div className="gh-mode-stack" data-testid="gh-mode-stack">
