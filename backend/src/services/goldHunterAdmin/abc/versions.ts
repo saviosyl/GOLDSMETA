@@ -1,17 +1,19 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
  * V1/V2 research baselines preserved in git history.
- * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
+ * Brain V4: M1 Candle Flow (direction + pullback + continuation confirmation).
  */
 /** Brain identity for Demo A/B/C selection — distinguishable from V1/V2. */
-export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V3" as const;
+export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V4" as const;
+export const GOLD_HUNTER_BRAIN_REVISION = "GH-B4-20260821-01" as const;
+export const GOLD_HUNTER_STRATEGY_VARIANT = "M1_CANDLE_FLOW" as const;
 /**
  * Production software revision — not a strategy/brain change.
  * Distinguishes the OPEN fill monotonicity hotfix from the prior deploy.
  */
 export const GOLD_HUNTER_SOFTWARE_REVISION =
-  "GH_OPEN_FILL_MONOTONIC_2026.08.20-02" as const;
-export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-20T21:50:00Z" as const;
+  "GH_BRAIN_V4_M1_CANDLE_FLOW_2026.08.21-01" as const;
+export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-21T06:30:00Z" as const;
 /**
  * Smart position-management layer on top of the current brain.
  * Kept separate so brainVersion telemetry stays stable.
@@ -26,7 +28,7 @@ export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
   "SMART_LOSS_CONTROLLER_V1" as const;
 /**
  * Strategy version stamped on selector candidates / frozen identity.
- * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
+ * Brain V4: Setup A now uses M1 Candle Flow.
  * B remains Brain V2; C unchanged from V1.
  */
 export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
@@ -34,7 +36,7 @@ export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
 export const GOLD_HUNTER_FAST_ENGINE_VERSION = "GH_FAST_EVENT_V1" as const;
 /** Feature schema includes priorHigh/Low* (past-only, excludes current tick). */
 export const GOLD_HUNTER_FAST_FEATURE_SCHEMA_VERSION =
-  "gh-fast-features-v1.1.0" as const;
+  "gh-fast-features-v1.2.0" as const;
 
 /** Engineering latency targets (ms) — not broker guarantees. */
 export const GH_FAST_LATENCY_P50_TARGET_MS = 20;

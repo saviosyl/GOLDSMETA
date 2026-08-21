@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import type { GhFastFeatureSnapshot } from "./features";
 import { GOLD_HUNTER_BRAIN_VERSION } from "./versions";
+import type { M1CandleFlowEvaluation } from "./m1CandleFlow";
 
 /** Brain V2 breakout / selection diagnostics (additive; never invents fills). */
 export type GhBreakoutDiagnostics = {
@@ -40,11 +41,17 @@ export type SetupHit = {
   reasons: string[];
   /** Present on B hits (Brain V2); optional for A/C. */
   diagnostics?: GhBreakoutDiagnostics;
+  /** Present on Setup A when using V4 M1 Candle Flow. */
+  m1CandleFlow?: M1CandleFlowEvaluation | null;
 };
 
 export type EvaluateSetupsResult = {
   selected: SetupHit | null;
   specialists: GhFastSpecialistRawEval[];
+};
+
+export type EvaluateSetupsContext = {
+  m1CandleFlow?: M1CandleFlowEvaluation | null;
 };
 
 function clamp01(x: number): number {
@@ -183,127 +190,60 @@ function scoreBreakoutQualityB(
 /** A — Momentum ignition (Brain V3: 1s direction consistency). */
 export function scoreMomentumIgnition(
   f: GhFastFeatureSnapshot,
-  cfg: GhFastConfig
+  cfg: GhFastConfig,
+  ctx?: EvaluateSetupsContext
 ): SetupHit | null {
-  return evaluateMomentumIgnition(f, cfg).hit;
+  return evaluateMomentumIgnition(f, cfg, ctx).hit;
 }
 
 function evaluateMomentumIgnition(
-  f: GhFastFeatureSnapshot,
-  cfg: GhFastConfig
+  _f: GhFastFeatureSnapshot,
+  _cfg: GhFastConfig,
+  ctx?: EvaluateSetupsContext
 ): SpecialistEvalInternal {
-  const failed: string[] = [];
-  const buyPressure =
-    f.midVel250 > 0 &&
-    f.midVel500 > 0 &&
-    f.acceleration > 0 &&
-    f.signedImbalance1s > 0.15 &&
-    f.depth.removeRateAsk >= f.depth.removeRateBid &&
-    f.depth.depthImbalance >= -0.15;
-  const sellPressure =
-    f.midVel250 < 0 &&
-    f.midVel500 < 0 &&
-    f.acceleration < 0 &&
-    f.signedImbalance1s < -0.15 &&
-    f.depth.removeRateBid >= f.depth.removeRateAsk &&
-    f.depth.depthImbalance <= 0.15;
-  const candidateSide: GhFastSide | null = buyPressure
-    ? "BUY"
-    : sellPressure
-      ? "SELL"
-      : null;
-  const buyVel1sAligned = f.midVel1s > 0;
-  const sellVel1sAligned = f.midVel1s < 0;
-  const vel1sMagOk = Math.abs(f.midVel1s) >= cfg.momentumVelMin;
-
-  if (!(buyPressure || sellPressure)) {
-    if (!(f.midVel250 > 0 && f.midVel500 > 0) && !(f.midVel250 < 0 && f.midVel500 < 0)) {
-      failed.push("velocity_not_aligned");
-    }
-    if (f.acceleration === 0 || Math.sign(f.acceleration) !== Math.sign(f.midVel250 || 1)) {
-      failed.push("acceleration_not_aligned");
-    }
-    if (Math.abs(f.signedImbalance1s) <= 0.15) failed.push("imbalance_too_weak");
-    if (f.depth.removeRateAsk < f.depth.removeRateBid && f.midVel250 > 0) {
-      failed.push("ask_liquidity_not_consumed");
-    }
-    if (f.depth.removeRateBid < f.depth.removeRateAsk && f.midVel250 < 0) {
-      failed.push("bid_liquidity_not_consumed");
-    }
-    if (f.depth.depthImbalance < -0.15 && f.midVel250 > 0) {
-      failed.push("depth_imbalance_against_buy");
-    }
-    if (f.depth.depthImbalance > 0.15 && f.midVel250 < 0) {
-      failed.push("depth_imbalance_against_sell");
-    }
+  const flow = ctx?.m1CandleFlow ?? null;
+  if (!flow) {
+    return {
+      hit: null,
+      failed: ["m1_candle_flow_missing"],
+      softQuality: null,
+      candidateSide: null
+    };
+  }
+  if (!flow.eligible || !flow.side) {
+    const failed = flow.waitReason ? [flow.waitReason] : ["m1_candle_flow_wait"];
+    return {
+      hit: null,
+      failed,
+      softQuality: flow.finalQuality || null,
+      candidateSide: flow.side
+    };
   }
 
-  if (buyPressure && buyVel1sAligned && vel1sMagOk) {
-    const quality = clamp01(
-      0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
-        0.25 * clamp01(f.acceleration * 5000) +
-        0.2 * clamp01(f.signedImbalance1s) +
-        0.2 *
-          clamp01(
-            f.depth.removeRateAsk / Math.max(1, f.depth.removeRateBid + 1)
-          )
-    );
-    if (quality >= cfg.minSetupQuality) {
-      return {
-        hit: {
-          setup: "A_MOMENTUM_IGNITION",
-          side: "BUY",
-          quality,
-          reasons: ["mom_ignition_buy", "ask_liquidity_consumed"]
-        },
-        failed: [],
-        softQuality: quality,
-        candidateSide: "BUY"
-      };
-    }
-    failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality, candidateSide: "BUY" };
+  const quality = clamp01(flow.finalQuality);
+  if (quality >= flow.qualityThreshold) {
+    return {
+      hit: {
+        setup: "A_MOMENTUM_IGNITION",
+        side: flow.side,
+        quality,
+        reasons: [
+          flow.side === "BUY" ? "m1_candle_flow_buy" : "m1_candle_flow_sell",
+          ...flow.reasons
+        ],
+        m1CandleFlow: flow
+      },
+      failed: [],
+      softQuality: quality,
+      candidateSide: flow.side
+    };
   }
-  if (sellPressure && sellVel1sAligned && vel1sMagOk) {
-    const quality = clamp01(
-      0.35 * Math.min(1, Math.abs(f.midVel1s) / (cfg.momentumVelMin * 3)) +
-        0.25 * clamp01(-f.acceleration * 5000) +
-        0.2 * clamp01(-f.signedImbalance1s) +
-        0.2 *
-          clamp01(
-            f.depth.removeRateBid / Math.max(1, f.depth.removeRateAsk + 1)
-          )
-    );
-    if (quality >= cfg.minSetupQuality) {
-      return {
-        hit: {
-          setup: "A_MOMENTUM_IGNITION",
-          side: "SELL",
-          quality,
-          reasons: ["mom_ignition_sell", "bid_liquidity_consumed"]
-        },
-        failed: [],
-        softQuality: quality,
-        candidateSide: "SELL"
-      };
-    }
-    failed.push("quality_below_min");
-    return { hit: null, failed, softQuality: quality, candidateSide: "SELL" };
-  }
-  if (buyPressure || sellPressure) {
-    if (
-      (buyPressure && !buyVel1sAligned) ||
-      (sellPressure && !sellVel1sAligned)
-    ) {
-      failed.push("velocity_1s_not_aligned");
-    }
-    if (!vel1sMagOk) failed.push("velocity_1s_below_min");
-  }
+
   return {
     hit: null,
-    failed: failed.length ? failed : ["no_momentum_pressure"],
-    softQuality: null,
-    candidateSide
+    failed: ["WAIT_QUALITY_BELOW_MIN"],
+    softQuality: quality,
+    candidateSide: flow.side
   };
 }
 
@@ -623,14 +563,15 @@ function evaluatePullbackReaccel(
 /** Full A/B/C raw evaluation + best-of selection. */
 export function evaluateSetupsDetailed(
   f: GhFastFeatureSnapshot,
-  cfg: GhFastConfig
+  cfg: GhFastConfig,
+  ctx?: EvaluateSetupsContext
 ): EvaluateSetupsResult {
-  const a = evaluateMomentumIgnition(f, cfg);
+  const a = evaluateMomentumIgnition(f, cfg, ctx);
   const b = evaluateFastBreakout(f, cfg);
   const c = evaluatePullbackReaccel(f, cfg);
-  const hits = [a.hit, b.hit, c.hit].filter((x): x is SetupHit => x != null);
-  hits.sort((x, y) => y.quality - x.quality);
-  const selected = hits.length ? hits[0]! : null;
+  // Brain V4 initial Demo phase: only Setup A (M1 Candle Flow) is execution-eligible.
+  // Setups B/C remain fully evaluated for diagnostics/shadow research.
+  const selected = a.hit;
   const specialists: GhFastSpecialistRawEval[] = [
     rawFromHit(
       "A_MOMENTUM_IGNITION",
@@ -646,7 +587,7 @@ export function evaluateSetupsDetailed(
       b.failed,
       b.softQuality,
       b.candidateSide,
-      selected?.setup === "B_FAST_BREAKOUT"
+      false
     ),
     rawFromHit(
       "C_PULLBACK_REACCEL",
@@ -654,7 +595,7 @@ export function evaluateSetupsDetailed(
       c.failed,
       c.softQuality,
       c.candidateSide,
-      selected?.setup === "C_PULLBACK_REACCEL"
+      false
     )
   ];
   return { selected, specialists };
@@ -663,7 +604,8 @@ export function evaluateSetupsDetailed(
 /** Pick best of A/B/C (exactly three specialists). */
 export function evaluateSetups(
   f: GhFastFeatureSnapshot,
-  cfg: GhFastConfig
+  cfg: GhFastConfig,
+  ctx?: EvaluateSetupsContext
 ): SetupHit | null {
-  return evaluateSetupsDetailed(f, cfg).selected;
+  return evaluateSetupsDetailed(f, cfg, ctx).selected;
 }

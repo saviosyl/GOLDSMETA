@@ -9,11 +9,14 @@
 import { createHash } from "node:crypto";
 import {
   GH_FAST_MARKET_DATA_NORMALIZATION_VERSION,
+  GOLD_HUNTER_BRAIN_REVISION,
   GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
   GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
+  GOLD_HUNTER_STRATEGY_VARIANT,
   type GhFastDepthEvent,
+  type M1CandleFlowEvaluation,
   type ResearchDepthValidity
 } from "./abc";
 import { GoldHunterFeaturePipeline } from "./abc/featurePipeline";
@@ -51,8 +54,33 @@ export type GoldHunterSelectedCandidate = {
   opportunityStartedAtMs: number;
   /** Brain V2 identity — distinguishable from V1. */
   brainVersion?: typeof GOLD_HUNTER_BRAIN_VERSION;
+  strategyVariant?: typeof GOLD_HUNTER_STRATEGY_VARIANT;
+  strategyRevision?: typeof GOLD_HUNTER_BRAIN_REVISION;
   /** Additive B diagnostics when selected setup is B (never invents fills). */
   breakoutDiagnostics?: GhBreakoutDiagnostics | null;
+  /** Strategy-layer V4 M1 Candle Flow diagnostics. */
+  m1CandleFlow?: {
+    stage: string | null;
+    waitReason: string | null;
+    currentCandleStartMs: number | null;
+    currentCandleAgeSec: number | null;
+    medianRange5: number | null;
+    signalRange: number | null;
+    directionalDisplacement: number | null;
+    remainingExpectedRange: number | null;
+    pullbackRatio: number | null;
+    reclaimDistance: number | null;
+    candleTrendScore: number;
+    pullbackScore: number;
+    microstructureScore: number;
+    rewardSpaceScore: number;
+    finalQuality: number;
+    qualityThreshold: number;
+    reasons: string[];
+  } | null;
+  /** Additive feature telemetry for final loss-safety mirror checks. */
+  signedImbalance1s?: number;
+  midVel250?: number;
   /** B re-entry / regime-reset state for telemetry. */
   bReentryState?: {
     structuralResetOk: boolean;
@@ -190,6 +218,7 @@ type ActiveOpportunity = {
   resyncGeneration: number;
   consumed: boolean;
   breakoutReference: number | null;
+  candleStartMs: number | null;
 };
 
 /** B-specific anti-churn / regime state (does not gate A or C alone). */
@@ -309,6 +338,9 @@ export class GoldHunterStrategySelector {
   };
   private lossControllerEntry: LossControllerEntryState =
     emptyLossControllerEntryState();
+  private tradedCandleStartMs: number | null = null;
+  private lastLossTradeCandleStartMs: number | null = null;
+  private readonly opportunityCandleStart = new Map<string, number>();
 
   constructor(opts?: { depthFreshnessMs?: number }) {
     try {
@@ -373,6 +405,9 @@ export class GoldHunterStrategySelector {
       closedAtMs: null,
       structuralResetComplete: true
     };
+    this.tradedCandleStartMs = null;
+    this.lastLossTradeCandleStartMs = null;
+    this.opportunityCandleStart.clear();
   }
 
   onSpot(args: {
@@ -542,6 +577,12 @@ export class GoldHunterStrategySelector {
     ) {
       // Still refresh anti-churn identity on duplicate LOSS without re-counting R.
       if (args.result === "LOSS") {
+        if (args.opportunityId) {
+          const candleStart = this.opportunityCandleStart.get(args.opportunityId);
+          if (candleStart != null) {
+            this.lastLossTradeCandleStartMs = candleStart;
+          }
+        }
         this.lossReentry = {
           ...this.lossReentry,
           lastSide: args.side,
@@ -623,6 +664,12 @@ export class GoldHunterStrategySelector {
     }
 
     if (args.result === "LOSS") {
+      if (args.opportunityId) {
+        const candleStart = this.opportunityCandleStart.get(args.opportunityId);
+        if (candleStart != null) {
+          this.lastLossTradeCandleStartMs = candleStart;
+        }
+      }
       this.lossControllerEntry.consecutiveLosses += 1;
       if (
         cfg.smartLossControllerEnabled &&
@@ -1055,6 +1102,52 @@ export class GoldHunterStrategySelector {
     };
   }
 
+  private static m1FlowCandidateDiagnostics(
+    flow: M1CandleFlowEvaluation | null | undefined
+  ): GoldHunterSelectedCandidate["m1CandleFlow"] {
+    if (!flow) return null;
+    return {
+      stage: flow.stage,
+      waitReason: flow.waitReason,
+      currentCandleStartMs: flow.currentCandleStartMs,
+      currentCandleAgeSec: flow.currentCandleAgeSec,
+      medianRange5: flow.medianRange5,
+      signalRange: flow.signalRange,
+      directionalDisplacement: flow.directionalDisplacement,
+      remainingExpectedRange: flow.remainingExpectedRange,
+      pullbackRatio: flow.pullbackRatio,
+      reclaimDistance: flow.reclaimDistance,
+      candleTrendScore: flow.candleTrendScore,
+      pullbackScore: flow.pullbackScore,
+      microstructureScore: flow.microstructureScore,
+      rewardSpaceScore: flow.rewardSpaceScore,
+      finalQuality: flow.finalQuality,
+      qualityThreshold: flow.qualityThreshold,
+      reasons: flow.reasons
+    };
+  }
+
+  private m1CandleEntryGate(
+    letter: GoldHunterSetupLetter,
+    flow: M1CandleFlowEvaluation | null | undefined
+  ): string | null {
+    if (letter !== "A" || !flow) return null;
+    if (flow.waitReason) return flow.waitReason;
+    const candleStart = flow.currentCandleStartMs;
+    if (candleStart == null) return "WAIT_CANDLE_DIRECTION_UNCLEAR";
+    if (this.tradedCandleStartMs != null && this.tradedCandleStartMs === candleStart) {
+      return "WAIT_CANDLE_ALREADY_TRADED";
+    }
+    if (
+      this.lossReentry.lastResult === "LOSS" &&
+      this.lastLossTradeCandleStartMs != null &&
+      this.lastLossTradeCandleStartMs === candleStart
+    ) {
+      return "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED";
+    }
+    return null;
+  }
+
   private buildCandidate(args: {
     letter: GoldHunterSetupLetter;
     setupId: string;
@@ -1075,6 +1168,9 @@ export class GoldHunterStrategySelector {
     breakoutDiagnostics?: GhBreakoutDiagnostics | null;
     bReentryState?: GoldHunterSelectedCandidate["bReentryState"];
     antiChurnState?: GoldHunterSelectedCandidate["antiChurnState"];
+    m1CandleFlow?: M1CandleFlowEvaluation | null;
+    signedImbalance1s?: number;
+    midVel250?: number;
   }): GoldHunterSelectedCandidate {
     return {
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -1100,6 +1196,13 @@ export class GoldHunterStrategySelector {
       consumed: args.consumed,
       opportunityStartedAtMs: args.opportunityStartedAtMs,
       brainVersion: GOLD_HUNTER_BRAIN_VERSION,
+      strategyVariant: GOLD_HUNTER_STRATEGY_VARIANT,
+      strategyRevision: GOLD_HUNTER_BRAIN_REVISION,
+      m1CandleFlow: GoldHunterStrategySelector.m1FlowCandidateDiagnostics(
+        args.m1CandleFlow
+      ),
+      signedImbalance1s: args.signedImbalance1s,
+      midVel250: args.midVel250,
       positionManagerVersion: GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
       lossControllerVersion: GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION,
       lossControllerState: this.getLossControllerEntryState(),
@@ -1168,6 +1271,9 @@ export class GoldHunterStrategySelector {
     const depthExecutable = isDepthExecutableForOrder(snap.depthValidity);
     const breakoutDiagnostics =
       letter === "B" ? hit.diagnostics ?? null : null;
+    const m1CandleFlow = hit.m1CandleFlow ?? snap.m1CandleFlow ?? null;
+    const m1GateReason = this.m1CandleEntryGate(letter, m1CandleFlow);
+    const feat = snap.features;
     const sameActive =
       this.activeOpportunity != null &&
       this.activeOpportunity.setup === letter &&
@@ -1175,7 +1281,6 @@ export class GoldHunterStrategySelector {
       this.activeOpportunity.resyncGeneration === this.resyncGeneration;
 
     if (sameActive && this.activeOpportunity) {
-      const feat = snap.features;
       const lossGateActive = this.lossArmingGate({
         side: hit.side,
         atMs: receivedAtMs,
@@ -1184,7 +1289,7 @@ export class GoldHunterStrategySelector {
         signedImbalance1s: feat?.signedImbalance1s,
         midVel250: feat?.midVel250
       });
-      if (!lossGateActive.ok) {
+      if (!lossGateActive.ok || m1GateReason != null) {
         // Losing opportunity must not remain executable (e.g. WAIT_DUPLICATE_OPPORTUNITY).
         this.activeOpportunity.consumed = true;
         const blocked = this.buildCandidate({
@@ -1205,13 +1310,16 @@ export class GoldHunterStrategySelector {
           opportunityStartedAtMs: this.activeOpportunity.startedAtMs,
           consumed: true,
           breakoutDiagnostics,
+          m1CandleFlow,
+          signedImbalance1s: feat?.signedImbalance1s,
+          midVel250: feat?.midVel250,
           antiChurnState: {
             structuralResetOk: lossGateActive.structuralResetOk,
             timeFloorOk: lossGateActive.timeFloorOk,
             lastSide: this.lossReentry.lastSide,
             lastResult: this.lossReentry.lastResult,
             oppositeFlip: lossGateActive.oppositeFlip,
-            rejectionReason: lossGateActive.rejectionReason
+            rejectionReason: m1GateReason ?? lossGateActive.rejectionReason
           }
         });
         this.lastCandidateForDisplay = blocked;
@@ -1241,7 +1349,10 @@ export class GoldHunterStrategySelector {
         receivedAtMs,
         opportunityStartedAtMs: this.activeOpportunity.startedAtMs,
         consumed: this.activeOpportunity.consumed,
-        breakoutDiagnostics
+        breakoutDiagnostics,
+        m1CandleFlow,
+        signedImbalance1s: feat?.signedImbalance1s,
+        midVel250: feat?.midVel250
       });
       this.lastCandidateForDisplay = updated;
       return {
@@ -1267,7 +1378,6 @@ export class GoldHunterStrategySelector {
             rejectionReason: null as string | null
           };
 
-    const feat = snap.features;
     const lossGateLive = this.lossArmingGate({
       side: hit.side,
       atMs: receivedAtMs,
@@ -1279,8 +1389,9 @@ export class GoldHunterStrategySelector {
     const antiChurnBlocked = !lossGateLive.ok;
     const bBlocked = letter === "B" && !bGate.ok;
     const rearmBlocked = !this.rearmSatisfied(receivedAtMs);
+    const m1Blocked = m1GateReason != null;
 
-    if (rearmBlocked || bBlocked || antiChurnBlocked) {
+    if (rearmBlocked || bBlocked || antiChurnBlocked || m1Blocked) {
       // Selected for display, but rearm / B structural / anti-churn gate not met.
       const displayOnly = this.buildCandidate({
         letter,
@@ -1300,6 +1411,9 @@ export class GoldHunterStrategySelector {
         opportunityStartedAtMs: receivedAtMs,
         consumed: true, // not executable
         breakoutDiagnostics,
+        m1CandleFlow,
+        signedImbalance1s: feat?.signedImbalance1s,
+        midVel250: feat?.midVel250,
         bReentryState:
           letter === "B"
             ? {
@@ -1317,9 +1431,9 @@ export class GoldHunterStrategySelector {
           lastSide: this.lossReentry.lastSide,
           lastResult: this.lossReentry.lastResult,
           oppositeFlip: lossGateLive.oppositeFlip,
-          rejectionReason: antiChurnBlocked
+          rejectionReason: m1GateReason ?? (antiChurnBlocked
             ? lossGateLive.rejectionReason
-            : null
+            : null)
         }
       });
       this.lastCandidateForDisplay = displayOnly;
@@ -1349,8 +1463,19 @@ export class GoldHunterStrategySelector {
       bookGeneration: snap.bookGeneration,
       resyncGeneration: this.resyncGeneration,
       consumed: false,
-      breakoutReference: breakoutDiagnostics?.breakoutReference ?? null
+      breakoutReference: breakoutDiagnostics?.breakoutReference ?? null,
+      candleStartMs: m1CandleFlow?.currentCandleStartMs ?? null
     };
+    if (m1CandleFlow?.currentCandleStartMs != null) {
+      this.opportunityCandleStart.set(
+        opportunityId,
+        m1CandleFlow.currentCandleStartMs
+      );
+      if (this.opportunityCandleStart.size > 500) {
+        const oldest = this.opportunityCandleStart.keys().next().value;
+        if (oldest != null) this.opportunityCandleStart.delete(oldest);
+      }
+    }
 
     const candidate = this.buildCandidate({
       letter,
@@ -1370,6 +1495,9 @@ export class GoldHunterStrategySelector {
       opportunityStartedAtMs: receivedAtMs,
       consumed: false,
       breakoutDiagnostics,
+      m1CandleFlow,
+      signedImbalance1s: feat?.signedImbalance1s,
+      midVel250: feat?.midVel250,
       bReentryState:
         letter === "B"
           ? {
@@ -1390,7 +1518,7 @@ export class GoldHunterStrategySelector {
     });
     this.lastCandidateForDisplay = candidate;
 
-    const newOpportunity = depthExecutable;
+    const newOpportunity = depthExecutable && letter === "A";
     return {
       selectedNow: true,
       newOpportunity,
@@ -1400,6 +1528,13 @@ export class GoldHunterStrategySelector {
   }
 
   markConsumed(signalId: string): void {
+    const candleStart =
+      this.opportunityCandleStart.get(signalId) ??
+      this.lastCandidateForDisplay?.m1CandleFlow?.currentCandleStartMs ??
+      null;
+    if (candleStart != null) {
+      this.tradedCandleStartMs = candleStart;
+    }
     if (this.activeOpportunity?.opportunityId === signalId) {
       this.activeOpportunity.consumed = true;
     }
@@ -1585,6 +1720,33 @@ export class GoldHunterStrategySelector {
             diagnostics: args.selected.diagnostics
           }
         : null,
+      m1CandleFlow:
+        args.selected?.setup === "A_MOMENTUM_IGNITION"
+          ? ({
+              eligible: true,
+              side: args.selected.side,
+              waitReason: null,
+              stage: "TRIGGERED",
+              currentCandleStartMs:
+                Math.floor(args.receivedAtMs / 60_000) * 60_000,
+              currentCandleAgeSec: Math.floor((args.receivedAtMs % 60_000) / 1000),
+              signalRange: 1,
+              medianRange5: 1,
+              directionalDisplacement: 0.2,
+              remainingExpectedRange: 0.8,
+              pullbackRatio: 0.3,
+              reclaimDistance: 0.2,
+              candleTrendScore: 0.9,
+              pullbackScore: 0.85,
+              microstructureScore: 1,
+              rewardSpaceScore: 0.8,
+              finalQuality: 0.85,
+              qualityThreshold: 0.7,
+              reasons: ["test_injected"],
+              latestClosedCandle: null,
+              previousClosedCandle: null
+            } satisfies M1CandleFlowEvaluation)
+          : null,
       bestBid: bid,
       bestAsk: ask,
       spread: ask - bid,

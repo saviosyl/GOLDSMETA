@@ -17,10 +17,20 @@ export {
 export type { ResearchDepthValidity } from "./depthRecovery";
 export { FastFeatureEngine } from "./features";
 export type { GhFastFeatureSnapshot } from "./features";
+export { M1CandleTracker, M1CandleFlowEngine } from "./m1CandleFlow";
+export type {
+  M1Candle,
+  M1CandleDirection,
+  M1CandleFlowStage,
+  M1CandleFlowWaitReason,
+  M1CandleFlowEvaluation
+} from "./m1CandleFlow";
 export {
   GOLD_HUNTER_FAST_STRATEGY_VERSION,
   GOLD_HUNTER_FAST_ENGINE_VERSION,
   GOLD_HUNTER_BRAIN_VERSION,
+  GOLD_HUNTER_BRAIN_REVISION,
+  GOLD_HUNTER_STRATEGY_VARIANT,
   GOLD_HUNTER_SOFTWARE_REVISION,
   GOLD_HUNTER_SOFTWARE_REVISION_AT,
   GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION,
