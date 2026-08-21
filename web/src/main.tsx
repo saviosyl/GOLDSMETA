@@ -12,6 +12,7 @@ import "./styles/premium-dashboard.css";
 import "./styles/gm-v2.css";
 import "./styles/premium-broker-autotrade.css";
 import "./styles/learn.css";
+import "./styles/goldmeta-2026.css";
 
 export { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA };
 
@@ -35,9 +36,7 @@ function purgeObsoleteUiCaches() {
 }
 
 function Root() {
-  const [updateFn, setUpdateFn] = useState<((reloadPage?: boolean) => Promise<void>) | null>(
-    null
-  );
+  const [updateFn, setUpdateFn] = useState<((reloadPage?: boolean) => Promise<void>) | null>(null);
 
   useEffect(() => {
     purgeObsoleteUiCaches();
@@ -69,8 +68,6 @@ function Root() {
 
 const updateSW = registerSW({
   immediate: true,
-  // autoUpdate still fires onNeedRefresh in some browsers — keep the banner
-  // as a fallback, but skipWaiting means most clients refresh themselves.
   onNeedRefresh() {
     window.dispatchEvent(
       new CustomEvent<UpdateDetail>(UPDATE_EVENT, {
@@ -80,8 +77,6 @@ const updateSW = registerSW({
   },
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return;
-    // Poll for a new sw.js frequently — custom-domain edges have cached sw.js
-    // aggressively before, which left STATUS stuck on "Blocked".
     window.setInterval(() => {
       void registration.update();
     }, 60_000);
@@ -96,5 +91,5 @@ createRoot(document.getElementById("root")!).render(
 document.documentElement.dataset.build = GOLD_META_BUILD_STAMP;
 document.documentElement.dataset.commit = GOLD_META_COMMIT_SHA;
 document.documentElement.dataset.scrollHotfix = "1";
-document.documentElement.dataset.uiRedesign = "1";
-document.documentElement.dataset.premiumUi = "v5";
+document.documentElement.dataset.uiRedesign = "2026";
+document.documentElement.dataset.premiumUi = "goldmeta-2026";
