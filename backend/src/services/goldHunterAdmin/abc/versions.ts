@@ -1,17 +1,16 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
  * V1/V2 research baselines preserved in git history.
- * Brain V6: Pulse Guard Scalper
- * (V5 pulse structure + entry-health gate + tighter loss economics).
+ * Brain V6: Pulse Guard Scalper + guarded trend continuation fallback.
  */
 /** Brain identity for Demo A/B/C selection — distinguishable from prior brains. */
 export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V6" as const;
-export const GOLD_HUNTER_BRAIN_REVISION = "GH-B6-20260821-01" as const;
-export const GOLD_HUNTER_STRATEGY_VARIANT = "PULSE_GUARD_SCALPER" as const;
+export const GOLD_HUNTER_BRAIN_REVISION = "GH-B6-20260821-02" as const;
+export const GOLD_HUNTER_STRATEGY_VARIANT = "PULSE_GUARD_CONTINUATION" as const;
 /** Production software revision for this strategy release. */
 export const GOLD_HUNTER_SOFTWARE_REVISION =
-  "GH_BRAIN_V6_PULSE_GUARD_SCALPER_2026.08.21-01" as const;
-export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-21T10:30:00Z" as const;
+  "GH_BRAIN_V6_PULSE_GUARD_CONTINUATION_2026.08.21-02" as const;
+export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-21T16:20:00Z" as const;
 /**
  * Smart position-management layer on top of the current brain.
  * Kept separate so position-manager telemetry stays stable.
@@ -26,13 +25,14 @@ export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
   "SMART_LOSS_CONTROLLER_V1" as const;
 /**
  * Strategy version stamped on selector candidates / frozen identity.
- * Brain V6: Setup A uses Pulse Guard Scalper.
- * B remains Brain V2; C remains shadow/research only.
+ * Brain V6: Setup A remains Pulse Guard; strong Setup B breakouts may execute
+ * as a guarded continuation fallback when A has no valid entry.
+ * Setup C remains shadow/research only.
  */
 export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
   GOLD_HUNTER_BRAIN_VERSION;
 export const GOLD_HUNTER_FAST_ENGINE_VERSION = "GH_FAST_EVENT_V1" as const;
-/** Feature schema remains compatible with V5 pulse telemetry. */
+/** Feature schema remains compatible with V5/V6 pulse telemetry. */
 export const GOLD_HUNTER_FAST_FEATURE_SCHEMA_VERSION =
   "gh-fast-features-v1.2.0" as const;
 
