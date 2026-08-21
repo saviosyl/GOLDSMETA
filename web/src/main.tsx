@@ -13,6 +13,7 @@ import "./styles/gm-v2.css";
 import "./styles/premium-broker-autotrade.css";
 import "./styles/learn.css";
 import "./styles/goldmeta-2026.css";
+import "./styles/goldmeta-2026-polish.css";
 
 export { GOLD_META_BUILD_STAMP, GOLD_META_COMMIT_SHA };
 
