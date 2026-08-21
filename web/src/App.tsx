@@ -104,6 +104,11 @@ const GoldHunterPerformancePage = lazy(() =>
     default: m.GoldHunterPerformancePage
   }))
 );
+const GoldHunterTestConsolePage = lazy(() =>
+  import("./pages/goldHunter/GoldHunterTestConsolePage").then((m) => ({
+    default: m.GoldHunterTestConsolePage
+  }))
+);
 
 function RouteFallback({ label }: { label: string }) {
   return (
@@ -343,6 +348,14 @@ function ProtectedApp() {
             element={
               <LazyRoute label="TradingView template">
                 <TradingViewTemplateAdminPage />
+              </LazyRoute>
+            }
+          />
+          <Route
+            path="/gold-hunter-test"
+            element={
+              <LazyRoute label="Gold Hunter Test Console">
+                <GoldHunterTestConsolePage />
               </LazyRoute>
             }
           />
