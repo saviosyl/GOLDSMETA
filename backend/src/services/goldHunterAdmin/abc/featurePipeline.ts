@@ -9,7 +9,7 @@ import {
   isDerivedDataContaminated,
   type ResearchDepthValidity
 } from "./depthRecovery";
-import { FastFeatureEngine } from "./features";
+import { FastFeatureEngine, type GhFastFeatureSnapshot } from "./features";
 import {
   evaluateSetupsDetailed,
   scoreFastBreakout,
@@ -19,7 +19,6 @@ import { frozenGhFastSoakConfig } from "./frozenConfig";
 import type {
   GhFastConfig,
   GhFastDepthEvent,
-  GhFastFeatureSnapshot,
   GhFastSpotEvent,
   GhFastSpecialistRawEval
 } from "./types";
