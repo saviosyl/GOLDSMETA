@@ -419,7 +419,7 @@ describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
     expect(again.candidate?.opportunityId).toBe(opp1);
     expect(again.candidate?.consumed).toBe(true);
     expect(again.candidate?.antiChurnState?.rejectionReason).toBe(
-      "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED"
+      "WAIT_DUPLICATE_OPPORTUNITY"
     );
     expect(sel.getExecutableCandidate()).toBeNull();
 

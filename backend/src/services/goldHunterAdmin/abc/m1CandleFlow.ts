@@ -225,7 +225,7 @@ function classifyRegime(args: {
     0.45 * netNorm + 0.35 * pathEfficiency + 0.2 * directionalPersistence
   );
 
-  if (pathEfficiency < 0.24 || Math.abs(net) < medianRange5 * 0.32) {
+  if (pathEfficiency < 0.14 && Math.abs(net) < medianRange5 * 0.2) {
     return {
       regime: "RANGE",
       side: null,
@@ -235,7 +235,13 @@ function classifyRegime(args: {
     };
   }
 
-  if (net > 0 && upStructure && trendScore >= 0.55) {
+  if (
+    net > 0 &&
+    upPersistence >= 3 &&
+    (upStructure || directionalPersistence >= 0.7) &&
+    trendScore >= 0.35 &&
+    pathEfficiency >= 0.14
+  ) {
     return {
       regime: "TREND_UP",
       side: "BUY",
@@ -244,7 +250,13 @@ function classifyRegime(args: {
       directionalPersistence
     };
   }
-  if (net < 0 && downStructure && trendScore >= 0.55) {
+  if (
+    net < 0 &&
+    downPersistence >= 3 &&
+    (downStructure || directionalPersistence >= 0.7) &&
+    trendScore >= 0.35 &&
+    pathEfficiency >= 0.14
+  ) {
     return {
       regime: "TREND_DOWN",
       side: "SELL",
@@ -520,11 +532,11 @@ export class M1CandleFlowEngine {
       0
     );
     const requiredBudget = Math.max(
-      1.1 * cfg.hardStop +
-        cfg.friction +
-        Math.max(0, f.spread) +
-        recentNoise * 0.35,
-      cfg.hardStop * 0.9
+      0.75 * cfg.hardStop +
+        cfg.friction * 0.6 +
+        Math.max(0, f.spread) * 0.5 +
+        recentNoise * 0.2,
+      cfg.hardStop * 0.45
     );
     const rewardSpaceScore = clamp01(
       remainingExpectedRange / Math.max(requiredBudget * 1.6, EPSILON)
@@ -582,7 +594,7 @@ export class M1CandleFlowEngine {
         stage: "IMPULSE",
         pulseId: `PS-${current.startMs}-${side}-${this.pulseSerial}`,
         regimeEpoch: this.regimeEpoch,
-        pulseStart: f.mid,
+        pulseStart: current.open,
         pulseExtreme: f.mid,
         pulseStartedAtMs: nowMs,
         retraceExtreme: null,
@@ -594,8 +606,12 @@ export class M1CandleFlowEngine {
     }
 
     const state = this.state;
-    state.pulseExtreme =
-      side === "BUY" ? Math.max(state.pulseExtreme, f.mid) : Math.min(state.pulseExtreme, f.mid);
+    if (state.stage === "IMPULSE" || state.stage === "RETRACE") {
+      state.pulseExtreme =
+        side === "BUY"
+          ? Math.max(state.pulseExtreme, f.mid)
+          : Math.min(state.pulseExtreme, f.mid);
+    }
     const pulseDistance =
       side === "BUY"
         ? Math.max(0, state.pulseExtreme - state.pulseStart)
@@ -623,7 +639,7 @@ export class M1CandleFlowEngine {
       };
     }
 
-    if (pulseDistance < recentNoise * 1.4 || pulseEfficiency < 0.42) {
+    if (pulseDistance < recentNoise * 0.6 || pulseEfficiency < 0.25) {
       state.stage = "IMPULSE";
       return {
         ...shared,
@@ -654,10 +670,16 @@ export class M1CandleFlowEngine {
     );
     const pullbackMinPct = 25 - adaptiveTolPct;
     const pullbackMaxPct = 45 + adaptiveTolPct;
+    const previousStage = state.stage;
+    const retraceLocked =
+      previousStage === "HOLD" ||
+      previousStage === "BREAK" ||
+      previousStage === "TRIGGERED" ||
+      state.continuationBreakLevel != null;
     state.retracementPct = retracementPct;
     state.stage = "RETRACE";
 
-    if (retracementPct < pullbackMinPct) {
+    if (!retraceLocked && retracementPct < pullbackMinPct) {
       return {
         ...shared,
         stage: state.stage,
@@ -774,8 +796,8 @@ export class M1CandleFlowEngine {
     if (state.continuationBreakLevel == null) {
       state.continuationBreakLevel =
         side === "BUY"
-          ? state.retraceExtreme + Math.max(pulseDistance * 0.18, recentNoise * 0.4)
-          : state.retraceExtreme - Math.max(pulseDistance * 0.18, recentNoise * 0.4);
+          ? state.retraceExtreme + Math.max(pulseDistance * 0.18, recentNoise * 0.15)
+          : state.retraceExtreme - Math.max(pulseDistance * 0.18, recentNoise * 0.15);
     }
     const continuationConfirmed =
       side === "BUY"

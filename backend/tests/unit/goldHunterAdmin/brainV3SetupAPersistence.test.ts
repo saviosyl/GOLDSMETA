@@ -184,16 +184,16 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const start = BASE_MS + 6 * CANDLE_MS;
     engine.onSpot(start + 10_000, 105.35);
     engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
-    engine.onSpot(start + 20_000, 104.75);
-    engine.evaluate(start + 20_000, features(104.75, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 104.8);
-    engine.evaluate(start + 22_000, features(104.8, "BUY"), cfg);
-    engine.onSpot(start + 23_300, 104.81);
-    engine.evaluate(start + 23_300, features(104.81, "BUY"), cfg);
-    engine.onSpot(start + 24_700, 104.82);
-    engine.evaluate(start + 24_700, features(104.82, "BUY"), cfg);
-    engine.onSpot(start + 29_000, 105.08);
-    const out = engine.evaluate(start + 29_000, features(105.08, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 105.22);
+    engine.evaluate(start + 20_000, features(105.22, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 105.23);
+    engine.evaluate(start + 22_000, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 105.24);
+    engine.evaluate(start + 23_300, features(105.24, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 105.23);
+    engine.evaluate(start + 24_700, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.43);
+    const out = engine.evaluate(start + 29_000, features(105.43, "BUY"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("BUY");
     expect(out.pulseId).toBeTruthy();
@@ -205,16 +205,16 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const start = BASE_MS + 6 * CANDLE_MS;
     engine.onSpot(start + 10_000, 101.1);
     engine.evaluate(start + 10_000, features(101.1, "SELL"), cfg);
-    engine.onSpot(start + 20_000, 101.7);
-    engine.evaluate(start + 20_000, features(101.7, "SELL"), cfg);
-    engine.onSpot(start + 22_000, 101.66);
-    engine.evaluate(start + 22_000, features(101.66, "SELL"), cfg);
-    engine.onSpot(start + 23_300, 101.65);
-    engine.evaluate(start + 23_300, features(101.65, "SELL"), cfg);
-    engine.onSpot(start + 24_700, 101.64);
-    engine.evaluate(start + 24_700, features(101.64, "SELL"), cfg);
-    engine.onSpot(start + 29_000, 101.35);
-    const out = engine.evaluate(start + 29_000, features(101.35, "SELL"), cfg);
+    engine.onSpot(start + 20_000, 101.23);
+    engine.evaluate(start + 20_000, features(101.23, "SELL"), cfg);
+    engine.onSpot(start + 22_000, 101.22);
+    engine.evaluate(start + 22_000, features(101.22, "SELL"), cfg);
+    engine.onSpot(start + 23_300, 101.21);
+    engine.evaluate(start + 23_300, features(101.21, "SELL"), cfg);
+    engine.onSpot(start + 24_700, 101.22);
+    engine.evaluate(start + 24_700, features(101.22, "SELL"), cfg);
+    engine.onSpot(start + 29_000, 101.04);
+    const out = engine.evaluate(start + 29_000, features(101.04, "SELL"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("SELL");
   });
@@ -235,8 +235,8 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const start = BASE_MS + 6 * CANDLE_MS;
     engine.onSpot(start + 10_000, 105.35);
     engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
-    engine.onSpot(start + 19_000, 104.72);
-    const out = engine.evaluate(start + 19_000, features(104.72, "BUY"), cfg);
+    engine.onSpot(start + 19_000, 105.22);
+    const out = engine.evaluate(start + 19_000, features(105.22, "BUY"), cfg);
     expect(out.waitReason).toBe("WAIT_BASE_NOT_CONFIRMED");
   });
 
@@ -265,18 +265,20 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const engine = new M1CandleFlowEngine();
     primeTrend(engine, "BUY");
     const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 10_000, 105.3);
-    engine.evaluate(start + 10_000, features(105.3, "BUY"), cfg);
-    engine.onSpot(start + 20_000, 104.72);
-    engine.evaluate(start + 20_000, features(104.72, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 104.74);
-    engine.evaluate(start + 22_000, features(104.74, "BUY"), cfg);
-    engine.onSpot(start + 24_000, 104.75);
-    engine.evaluate(start + 24_000, features(104.75, "BUY"), cfg);
-    engine.onSpot(start + 30_000, 104.96);
+    engine.onSpot(start + 10_000, 105.35);
+    engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 105.22);
+    engine.evaluate(start + 20_000, features(105.22, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 105.23);
+    engine.evaluate(start + 22_000, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 105.24);
+    engine.evaluate(start + 23_300, features(105.24, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 105.23);
+    engine.evaluate(start + 24_700, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.43);
     const out = engine.evaluate(
-      start + 30_000,
-      features(104.96, "BUY", {
+      start + 29_000,
+      features(105.43, "BUY", {
         efficiency1s: 0.2,
         midVel250: 0.00002,
         midVel500: 0.00008
@@ -290,21 +292,20 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const engine = new M1CandleFlowEngine();
     primeTrend(engine, "BUY");
     const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 10_000, 106.4);
-    engine.evaluate(start + 10_000, features(106.4, "BUY"), cfg);
-    engine.onSpot(start + 18_000, 105.9);
-    engine.evaluate(start + 18_000, features(105.9, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 105.92);
-    engine.evaluate(start + 22_000, features(105.92, "BUY"), cfg);
-    engine.onSpot(start + 24_500, 105.93);
-    engine.evaluate(start + 24_500, features(105.93, "BUY"), cfg);
-    engine.onSpot(start + 29_000, 106.05);
+    engine.onSpot(start + 10_000, 105.35);
+    engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 105.22);
+    engine.evaluate(start + 20_000, features(105.22, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 105.23);
+    engine.evaluate(start + 22_000, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 105.24);
+    engine.evaluate(start + 23_300, features(105.24, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 105.23);
+    engine.evaluate(start + 24_700, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.75);
     const out = engine.evaluate(
       start + 29_000,
-      features(106.05, "BUY", {
-        high5s: 106.1,
-        low5s: 105.9
-      }),
+      features(105.75, "BUY"),
       cfg
     );
     expect(out.waitReason).toBe("WAIT_NO_EDGE_LEFT");
@@ -316,18 +317,18 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const start = BASE_MS + 6 * CANDLE_MS;
     engine.onSpot(start + 10_000, 105.35);
     engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
-    engine.onSpot(start + 20_000, 104.75);
-    engine.evaluate(start + 20_000, features(104.75, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 104.8);
-    engine.evaluate(start + 22_000, features(104.8, "BUY"), cfg);
-    engine.onSpot(start + 23_300, 104.81);
-    engine.evaluate(start + 23_300, features(104.81, "BUY"), cfg);
-    engine.onSpot(start + 24_700, 104.82);
-    engine.evaluate(start + 24_700, features(104.82, "BUY"), cfg);
-    engine.onSpot(start + 29_000, 105.08);
+    engine.onSpot(start + 20_000, 105.22);
+    engine.evaluate(start + 20_000, features(105.22, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 105.23);
+    engine.evaluate(start + 22_000, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 105.24);
+    engine.evaluate(start + 23_300, features(105.24, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 105.23);
+    engine.evaluate(start + 24_700, features(105.23, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.43);
     const out = engine.evaluate(
       start + 29_000,
-      features(105.08, "BUY", {
+      features(105.43, "BUY", {
         midVel250: -0.0002,
         midVel500: -0.0002,
         midVel1s: -0.0002,
@@ -353,16 +354,16 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
     const start = BASE_MS + 9 * CANDLE_MS;
     engine.onSpot(start + 10_000, 101.55);
     engine.evaluate(start + 10_000, features(101.55, "SELL"), cfg);
-    engine.onSpot(start + 20_000, 102.1);
-    engine.evaluate(start + 20_000, features(102.1, "SELL"), cfg);
-    engine.onSpot(start + 22_000, 102.06);
-    engine.evaluate(start + 22_000, features(102.06, "SELL"), cfg);
-    engine.onSpot(start + 23_400, 102.05);
-    engine.evaluate(start + 23_400, features(102.05, "SELL"), cfg);
-    engine.onSpot(start + 24_800, 102.04);
-    engine.evaluate(start + 24_800, features(102.04, "SELL"), cfg);
-    engine.onSpot(start + 29_500, 101.72);
-    const out = engine.evaluate(start + 29_500, features(101.72, "SELL"), cfg);
+    engine.onSpot(start + 20_000, 101.68);
+    engine.evaluate(start + 20_000, features(101.68, "SELL"), cfg);
+    engine.onSpot(start + 22_000, 101.67);
+    engine.evaluate(start + 22_000, features(101.67, "SELL"), cfg);
+    engine.onSpot(start + 23_400, 101.66);
+    engine.evaluate(start + 23_400, features(101.66, "SELL"), cfg);
+    engine.onSpot(start + 24_800, 101.67);
+    engine.evaluate(start + 24_800, features(101.67, "SELL"), cfg);
+    engine.onSpot(start + 29_500, 101.4);
+    const out = engine.evaluate(start + 29_500, features(101.4, "SELL"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("SELL");
   });
@@ -379,10 +380,15 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
     });
     expect(first.newOpportunity).toBe(true);
     sel.markOpportunityConsumed(first.opportunity!.opportunityId);
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 10_500,
+      bookGeneration: 200
+    });
 
     const second = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.81 },
-      receivedAtMs: minuteStart + 20_000,
+      receivedAtMs: minuteStart + 21_000,
       bookGeneration: 200
     });
     expect(second.newOpportunity).toBe(true);
@@ -464,6 +470,11 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
       bookGeneration: 300
     });
     expect(first.newOpportunity).toBe(true);
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 10_500,
+      bookGeneration: 300
+    });
     sel.notifyTradeClosed({
       side: "BUY",
       setup: "A",
@@ -475,24 +486,36 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
     });
 
     const second = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.83 },
-      receivedAtMs: minuteStart + 30_000,
-      bookGeneration: 300
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.83 },
+      receivedAtMs: minuteStart + 52_000,
+      bookGeneration: 300,
+      bid: 2599.7,
+      ask: 2599.82
     });
     expect(second.newOpportunity).toBe(true);
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 52_500,
+      bookGeneration: 300
+    });
     sel.notifyTradeClosed({
-      side: "SELL",
+      side: "BUY",
       setup: "A",
       entryPrice: 2600,
       result: "LOSS",
       opportunityId: second.opportunity!.opportunityId,
       tradeId: "v5-loss-2",
-      closedAtMs: minuteStart + 40_000
+      closedAtMs: minuteStart + 53_000
+    });
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 53_500,
+      bookGeneration: 300
     });
 
     const blocked = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
-      receivedAtMs: minuteStart + 45_000,
+      receivedAtMs: minuteStart + 54_000,
       bookGeneration: 300
     });
     expect(blocked.newOpportunity).toBe(false);
@@ -502,8 +525,10 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
 
     const freshRegime = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
-      receivedAtMs: minuteStart + 75_000,
-      bookGeneration: 301
+      receivedAtMs: minuteStart + 95_000,
+      bookGeneration: 301,
+      bid: 2599.7,
+      ask: 2599.82
     });
     expect(freshRegime.newOpportunity).toBe(true);
   });
@@ -518,10 +543,15 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
     });
     expect(first.newOpportunity).toBe(true);
     sel.markOpportunityConsumed(first.opportunity!.opportunityId);
+    sel.processInjectedSelectionForTests({
+      selected: null,
+      receivedAtMs: minuteStart + 10_500,
+      bookGeneration: 400
+    });
 
     const second = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.83 },
-      receivedAtMs: minuteStart + 20_000,
+      receivedAtMs: minuteStart + 21_000,
       bookGeneration: 400
     });
     expect(second.newOpportunity).toBe(true);
