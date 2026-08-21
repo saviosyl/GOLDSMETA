@@ -2,7 +2,7 @@
  * Three FAST specialists — interpretable setup-quality scores.
  * Phase 0B: always expose raw A/B/C eligibility separately from best-of selection.
  *
- * Brain V3: Setup A 1s direction consistency + post-loss anti-churn.
+ * Brain V6: Setup A is Pulse Guard Scalper.
  * Setup B remains Brain V2 (prior-only breakout). Setup C unchanged from V1.
  */
 import type {
@@ -41,7 +41,7 @@ export type SetupHit = {
   reasons: string[];
   /** Present on B hits (Brain V2); optional for A/C. */
   diagnostics?: GhBreakoutDiagnostics;
-  /** Present on Setup A when using V4 M1 Candle Flow. */
+  /** Present on Setup A when using M1/Pulse Flow. */
   m1CandleFlow?: M1CandleFlowEvaluation | null;
 };
 
@@ -156,7 +156,6 @@ function scoreBreakoutQualityB(
             Number(f.midVel1s < 0)) /
             3
         );
-  // Same scale as Setup A: momentumVelMin * 3 (default 0.00024). Guard denom.
   const velMagDenom = Math.max(cfg.momentumVelMin * 3, 1e-12);
   const velMagNorm = clamp01(Math.abs(f.midVel1s) / velMagDenom);
   const eff = clamp01(f.efficiency1s);
@@ -187,7 +186,7 @@ function scoreBreakoutQualityB(
   );
 }
 
-/** A — Momentum ignition (Brain V3: 1s direction consistency). */
+/** A — Brain V6 Pulse Guard entry. */
 export function scoreMomentumIgnition(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig,
@@ -220,22 +219,82 @@ function evaluateMomentumIgnition(
     };
   }
 
+  const side = flow.side;
   const quality = clamp01(flow.finalQuality);
-  if (quality >= flow.qualityThreshold) {
+  const ageSec = flow.currentCandleAgeSec;
+  const displacement = flow.currentM1Displacement;
+  const pulseHealth = flow.pulseHealthAtEntry ?? 0;
+  const pulseEfficiency = flow.pulseEfficiency ?? 0;
+
+  // V6 guard 1: do not enter on opening noise or in the dying seconds of M1.
+  if (ageSec == null || ageSec < 5) {
+    return {
+      hit: null,
+      failed: ["WAIT_CANDLE_TOO_EARLY"],
+      softQuality: quality,
+      candidateSide: side
+    };
+  }
+  if (ageSec > 55) {
+    return {
+      hit: null,
+      failed: ["WAIT_CANDLE_TOO_LATE"],
+      softQuality: quality,
+      candidateSide: side
+    };
+  }
+
+  // V6 guard 2: the forming M1 candle itself must still agree with the pulse.
+  const currentCandleAligned =
+    displacement != null &&
+    (side === "BUY" ? displacement > 0 : displacement < 0);
+  if (!currentCandleAligned) {
+    return {
+      hit: null,
+      failed: ["WAIT_CURRENT_CANDLE_NOT_ALIGNED"],
+      softQuality: quality,
+      candidateSide: side
+    };
+  }
+
+  // V6 guard 3: V5 computed pulse health but did not use it as an entry veto.
+  if (pulseHealth < 52) {
+    return {
+      hit: null,
+      failed: ["WAIT_PULSE_HEALTH_WEAK"],
+      softQuality: quality,
+      candidateSide: side
+    };
+  }
+
+  // V6 guard 4: reject structurally messy pulses even if other components pass.
+  if (pulseEfficiency < 0.28) {
+    return {
+      hit: null,
+      failed: ["WAIT_PULSE_EFFICIENCY_WEAK"],
+      softQuality: quality,
+      candidateSide: side
+    };
+  }
+
+  // Keep V5's weighted quality, but require a slightly stronger minimum for execution.
+  const v6QualityThreshold = Math.max(flow.qualityThreshold, 0.66);
+  if (quality >= v6QualityThreshold) {
     return {
       hit: {
         setup: "A_MOMENTUM_IGNITION",
-        side: flow.side,
+        side,
         quality,
         reasons: [
-          flow.side === "BUY" ? "m1_candle_flow_buy" : "m1_candle_flow_sell",
+          side === "BUY" ? "pulse_guard_buy" : "pulse_guard_sell",
+          "pulse_guard_entry_health_passed",
           ...flow.reasons
         ],
         m1CandleFlow: flow
       },
       failed: [],
       softQuality: quality,
-      candidateSide: flow.side
+      candidateSide: side
     };
   }
 
@@ -243,7 +302,7 @@ function evaluateMomentumIgnition(
     hit: null,
     failed: ["WAIT_QUALITY_BELOW_MIN"],
     softQuality: quality,
-    candidateSide: flow.side
+    candidateSide: side
   };
 }
 
@@ -431,7 +490,7 @@ function evaluateFastBreakout(
   };
 }
 
-/** C — Pullback re-acceleration (V1 — DO NOT redesign in Brain V2). */
+/** C — Pullback re-acceleration (V1 — retained for shadow diagnostics). */
 export function scorePullbackReaccel(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig
@@ -560,7 +619,7 @@ function evaluatePullbackReaccel(
   };
 }
 
-/** Full A/B/C raw evaluation + best-of selection. */
+/** Full A/B/C raw evaluation + V6 execution selection. */
 export function evaluateSetupsDetailed(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig,
@@ -569,8 +628,8 @@ export function evaluateSetupsDetailed(
   const a = evaluateMomentumIgnition(f, cfg, ctx);
   const b = evaluateFastBreakout(f, cfg);
   const c = evaluatePullbackReaccel(f, cfg);
-  // Brain V4 initial Demo phase: only Setup A (M1 Candle Flow) is execution-eligible.
-  // Setups B/C remain fully evaluated for diagnostics/shadow research.
+  // Brain V6: only Setup A / Pulse Guard is execution-eligible.
+  // B/C remain evaluated for diagnostics/shadow research only.
   const selected = a.hit;
   const specialists: GhFastSpecialistRawEval[] = [
     rawFromHit(
@@ -601,7 +660,7 @@ export function evaluateSetupsDetailed(
   return { selected, specialists };
 }
 
-/** Pick best of A/B/C (exactly three specialists). */
+/** Pick execution-eligible specialist. */
 export function evaluateSetups(
   f: GhFastFeatureSnapshot,
   cfg: GhFastConfig,
