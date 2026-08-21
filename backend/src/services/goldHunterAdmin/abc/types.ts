@@ -26,6 +26,7 @@ export type GhFastSide = "BUY" | "SELL";
 export type GhFastExitReason =
   | "RAPID_ABORT"
   | "HARD_PROTECTION"
+  | "FAILED_PULSE_EXIT"
   | "PROFIT_LOCK"
   | "TRAIL_HIT"
   | "HARVEST_FADE"

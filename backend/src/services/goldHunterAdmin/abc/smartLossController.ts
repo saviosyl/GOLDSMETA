@@ -17,6 +17,12 @@ import {
 } from "./smartPositionManager";
 import { GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION } from "./versions";
 
+const EPSILON = 1e-9;
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 export function isSmartLossControllerEnabled(cfg: GhFastConfig): boolean {
   return cfg.smartLossControllerEnabled === true;
 }
@@ -26,6 +32,7 @@ export type SmartLossAssessment = {
     GhFastExitReason,
     | "SMART_SOFT_MAX_LOSS"
     | "SMART_EARLY_THESIS_FAILURE"
+    | "FAILED_PULSE_EXIT"
     | "SMART_SMALL_PROFIT_HARVEST"
   > | null;
   diagnostics: {
@@ -49,6 +56,8 @@ export type SmartLossAssessment = {
     momentumDeteriorating: boolean;
     depthAgainst: boolean;
     surrenderingFavourable: boolean;
+    pulseHealthScore: number;
+    progressStalled: boolean;
   };
 };
 
@@ -152,7 +161,9 @@ export function evaluateSmartLossController(args: {
     smallProfitStillProfitable: false,
     momentumDeteriorating: false,
     depthAgainst: early.flags.depthAgainst,
-    surrenderingFavourable: false
+    surrenderingFavourable: false,
+    pulseHealthScore: 100,
+    progressStalled: false
   };
 
   trade.lossControllerVersion =
@@ -188,6 +199,60 @@ export function evaluateSmartLossController(args: {
     };
     trade.lastLossControllerAssessment = diagnostics;
     return { exitReason: "SMART_SOFT_MAX_LOSS", diagnostics };
+  }
+
+  // 1.5) FAILED_PULSE_EXIT — fast thesis-failure protection for weak progress.
+  const timeInTradeMs =
+    trade.timeInTradeMs ??
+    (Number.isFinite(trade.entryTs) ? Math.max(0, Date.now() - trade.entryTs) : 0);
+  const sideAlignedVel =
+    trade.side === "BUY"
+      ? f.midVel250 > 0 && f.midVel500 > 0
+      : f.midVel250 < 0 && f.midVel500 < 0;
+  const sideAlignedImbalance =
+    trade.side === "BUY" ? f.signedImbalance1s > 0 : f.signedImbalance1s < 0;
+  const pulseHealthScore = Math.round(
+    100 *
+      clamp01(
+        0.28 * Number(sideAlignedVel) +
+          0.2 * clamp01(f.efficiency1s) +
+          0.22 * clamp01(sideAlignedImbalance ? Math.abs(f.signedImbalance1s) : 0) +
+          0.15 * clamp01((currentR + 0.4) / 1.1) +
+          0.15 *
+            clamp01(
+              (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) <= 0
+                ? 0
+                : 1 -
+                    Math.max(
+                      0,
+                      (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) - currentR
+                    ) /
+                      Math.max(
+                        trade.maxFavourableR ?? moveToR(trade.mfe, risk),
+                        EPSILON
+                      )
+            )
+      )
+  );
+  const progressStalled =
+    (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) < 0.18 && currentR < 0.08;
+  const pulseFailing =
+    timeInTradeMs >= 7_000 &&
+    progressStalled &&
+    pulseHealthScore < 30 &&
+    early.count >= 2;
+  if (pulseFailing) {
+    trade.slcEarlyFailurePersistCount = 0;
+    trade.slcSmallHarvestPersistCount = 0;
+    const diagnostics = {
+      ...baseDiag,
+      pulseHealthScore,
+      progressStalled,
+      earlyFailurePersistCount: 0,
+      smallHarvestPersistCount: 0
+    };
+    trade.lastLossControllerAssessment = diagnostics;
+    return { exitReason: "FAILED_PULSE_EXIT", diagnostics };
   }
 
   // 2) Early thesis failure — multi-confirm + 2 consecutive snapshots.
@@ -250,7 +315,9 @@ export function evaluateSmartLossController(args: {
     smallProfitStillProfitable: stillProfitable,
     momentumDeteriorating,
     depthAgainst,
-    surrenderingFavourable
+    surrenderingFavourable,
+    pulseHealthScore,
+    progressStalled
   };
   trade.lastLossControllerAssessment = diagnostics;
 

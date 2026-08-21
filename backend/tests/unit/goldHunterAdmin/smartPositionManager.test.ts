@@ -419,7 +419,7 @@ describe("SMART_POSITION_MANAGER_V1 — anti-churn / re-entry", () => {
     expect(again.candidate?.opportunityId).toBe(opp1);
     expect(again.candidate?.consumed).toBe(true);
     expect(again.candidate?.antiChurnState?.rejectionReason).toBe(
-      "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED"
+      "WAIT_DUPLICATE_OPPORTUNITY"
     );
     expect(sel.getExecutableCandidate()).toBeNull();
 
@@ -536,7 +536,7 @@ describe("SMART_POSITION_MANAGER_V1 — safety invariants", () => {
     expect(GH_FAST_MAX_OPEN_POSITIONS).toBe(1);
     expect(GH_DEMO_MAX_OPEN_TRADES_REQUIRED).toBe(1);
     expect(GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades).toBe(1);
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V4");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
     expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
       "SMART_POSITION_MANAGER_V1"
     );
@@ -566,7 +566,7 @@ describe("SMART_POSITION_MANAGER_V1 — safety invariants", () => {
     const t = buyTrade();
     updateOpenTrade(t, ENTRY + HARD * 2.1, ENTRY + HARD * 2.1 + 0.05, cfg);
     const d = openTradeSmartDiagnostics(t);
-    expect(d.brainVersion).toBe("GOLD_HUNTER_BRAIN_V4");
+    expect(d.brainVersion).toBe("GOLD_HUNTER_BRAIN_V5");
     expect(d.positionManagerVersion).toBe("SMART_POSITION_MANAGER_V1");
     expect(d.profitManagementState).toBe("LOCKED");
     expect(d.mfeR).toBeGreaterThanOrEqual(2);
