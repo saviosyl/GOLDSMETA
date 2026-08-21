@@ -60,7 +60,7 @@ function LazyRoute({ label, children }: { label: string; children: ReactNode }) 
   const [retryKey, setRetryKey] = useState(0);
   return (
     <RouteErrorBoundary label={label} onRetry={() => setRetryKey((key) => key + 1)}>
-      <Suspense key={retryKey} fallback={<RouteFallback label={label} />}>{children}</Suspense>
+      <Suspense key={retryKey} fallback={<RouteFallback label={label}>{}</RouteFallback> as never}>{children}</Suspense>
     </RouteErrorBoundary>
   );
 }
@@ -68,6 +68,7 @@ function LazyRoute({ label, children }: { label: string; children: ReactNode }) 
 function PublicAuthRoutes() {
   return (
     <Routes>
+      <Route path="/brand" element={<Navigate to="/" replace />} />
       <Route path="/ui-review/*" element={<UiReviewGate />} />
       <Route path="/register" element={<PublicPageShell testId="register-shell"><RegisterPage /></PublicPageShell>} />
       <Route path="/legal/terms" element={<PublicPageShell testId="legal-terms-shell"><TermsPage /></PublicPageShell>} />
@@ -99,6 +100,7 @@ function ProtectedApp() {
         <LiveQuoteBridge />
         <AppShell>
           <Routes>
+            <Route path="/brand" element={<Navigate to="/" replace />} />
             <Route path="/ui-review/*" element={<UiReviewGate />} />
             <Route path="/verify-email" element={<VerifyEmailPage />} />
             <Route path="/account-ready" element={<AccountReadyPage />} />
@@ -146,8 +148,12 @@ function ProtectedApp() {
             <Route path="/intelligence" element={<Navigate to="/" replace />} />
             <Route path="/levels" element={<Navigate to="/" replace />} />
             <Route path="/journal" element={<Navigate to="/history" replace />} />
+            <Route path="/history-replay" element={<Navigate to="/advanced/replay" replace />} />
+            <Route path="/history-replay/:tab" element={<Navigate to="/advanced/replay" replace />} />
             <Route path="/history-replay/*" element={<Navigate to="/advanced/replay" replace />} />
             <Route path="/replay" element={<Navigate to="/advanced/replay" replace />} />
+            <Route path="/insights" element={<Navigate to="/history" replace />} />
+            <Route path="/insights/:tab" element={<Navigate to="/history" replace />} />
             <Route path="/insights/*" element={<Navigate to="/history" replace />} />
             <Route path="/signal-performance" element={<Navigate to="/advanced/analytics" replace />} />
             <Route path="/analytics" element={<Navigate to="/advanced/analytics" replace />} />
