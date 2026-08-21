@@ -513,20 +513,33 @@ describe("Gold Hunter Brain V6 selector and exit controls", () => {
       bookGeneration: 300
     });
 
-    const blocked = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
-      receivedAtMs: minuteStart + 54_000,
-      bookGeneration: 300
+    const blockedBeforeFloor = sel.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs: minuteStart + 100_000,
+      mid: 2599.76,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
     });
-    expect(blocked.newOpportunity).toBe(false);
-    expect(blocked.candidate?.antiChurnState?.rejectionReason).toBe(
+    expect(blockedBeforeFloor.ok).toBe(false);
+    expect(blockedBeforeFloor.timeFloorOk).toBe(false);
+    expect(blockedBeforeFloor.rejectionReason).toBe("WAIT_LOSS_STREAK_GUARD");
+
+    const staleRegimeAfterFloor = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
+      receivedAtMs: minuteStart + 175_000,
+      bookGeneration: 300,
+      bid: 2599.7,
+      ask: 2599.82
+    });
+    expect(staleRegimeAfterFloor.newOpportunity).toBe(false);
+    expect(staleRegimeAfterFloor.candidate?.antiChurnState?.rejectionReason).toBe(
       "WAIT_REGIME_RESET_AFTER_LOSSES"
     );
 
     const freshRegime = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
-      receivedAtMs: minuteStart + 95_000,
-      bookGeneration: 301,
+      receivedAtMs: minuteStart + 176_000,
+      bookGeneration: 302,
       bid: 2599.7,
       ask: 2599.82
     });

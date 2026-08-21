@@ -41,12 +41,12 @@ export function defaultGhFastConfig(
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
     pullbackRetraceMax: 0.45,
-    // SMART_POSITION_MANAGER_V1 — keep the proven runner/protection geometry
-    // unchanged in V6. Modest winners are handled sooner by Smart Loss harvest.
+    // SMART_POSITION_MANAGER_V1 — V6 begins protection at +0.6R while keeping
+    // the rest of the proven runner/protection geometry unchanged.
     smartPositionManagerEnabled: true,
     spmTickSize: 0.01,
     spmMinStopDistance: 0.05,
-    spmProtectMfeR: 1.0,
+    spmProtectMfeR: 0.6,
     spmProtect15MfeR: 1.5,
     spmProtect15FloorR: 0.4,
     spmLockMfeR: 2.0,

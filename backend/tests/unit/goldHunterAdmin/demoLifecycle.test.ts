@@ -441,7 +441,7 @@ describe("Frozen exits + position manager", () => {
       tradeId: "t1",
       side: "BUY",
       setup: "A_MOMENTUM_IGNITION",
-      entryTs: Date.now(),
+      entryTs: Date.now() - 3_000,
       bid: 2600,
       ask: 2600.1,
       trailDistance: cfg.trailDistance
@@ -468,6 +468,7 @@ describe("Frozen exits + position manager", () => {
     ).toBe("DATA_STALE");
 
     updateOpenTrade(trade, 2599.9, 2600.0, cfg);
+    trade.timeInTradeMs = 3_000;
     // LC requires 2 consecutive qualifying snapshots before early thesis exit.
     expect(
       evaluateOpenExit({ trade, f: baseFeat, cfg, dataOk: true })

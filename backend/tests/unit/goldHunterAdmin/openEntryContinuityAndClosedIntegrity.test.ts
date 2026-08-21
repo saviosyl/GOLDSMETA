@@ -512,7 +512,7 @@ describe("GH OPEN entry continuity + CLOSED integrity", () => {
         entryPrice: 2600,
         result: "LOSS",
         tradeId: `gh-loss-${i}`,
-        realisedR: -0.7,
+        realisedR: -0.45,
         closedAtMs: 1_000_000 + i * 1000
       });
     }

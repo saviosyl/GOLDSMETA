@@ -281,11 +281,11 @@ describe("Unknown realised-R fail-safe", () => {
   it("B) time+structure+direction without integrity recovery still gated", () => {
     const sel = new GoldHunterStrategySelector();
     armUnknownRGuard(sel);
-    // 60s+ elapsed; null entryPrice makes structural reset auto-complete;
+    // Nearly 120s elapsed; null entryPrice makes structural reset auto-complete;
     // directional confirmation present — but no integrity recovery signal.
     const gate = sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: 1_002_000 + 60_000,
+      atMs: 1_002_000 + 119_000,
       mid: 2599,
       signedImbalance1s: 0.2,
       midVel250: 0.001
@@ -312,7 +312,7 @@ describe("Unknown realised-R fail-safe", () => {
 
     const gate = sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: 1_002_000 + 60_000,
+      atMs: 1_002_000 + 120_500,
       mid: 2599,
       signedImbalance1s: 0.2,
       midVel250: 0.001
@@ -331,7 +331,7 @@ describe("Unknown realised-R fail-safe", () => {
     });
     sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: 1_070_000,
+      atMs: 1_122_500,
       mid: 2599,
       signedImbalance1s: 0.2,
       midVel250: 0.001
@@ -408,10 +408,10 @@ describe("Unknown realised-R fail-safe", () => {
     expect(st.entryIntegrityRecoveredAtMs).toBeNull();
     expect(st.rollingSampleCount).toBe(0);
 
-    // Still gated without integrity recovery even after 60s + direction.
+    // Still gated without integrity recovery even after 120s + direction.
     const gate = sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: 1_070_000,
+      atMs: 1_122_500,
       mid: 2599,
       signedImbalance1s: 0.2,
       midVel250: 0.001
