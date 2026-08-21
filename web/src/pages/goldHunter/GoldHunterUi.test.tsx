@@ -80,6 +80,35 @@ const status = {
     risk: "NORMAL",
     autoTrade: "OFF"
   },
+  strategyVersions: {
+    brainVersion: "GOLD_HUNTER_BRAIN_V6",
+    softwareRevision: "GH_BRAIN_V6_PULSE_GUARD_SCALPER_2026.08.21-01",
+    softwareRevisionAt: "2026-08-21T10:30:00Z",
+    positionManagerVersion: "SMART_POSITION_MANAGER_V1",
+    lossControllerVersion: "SMART_LOSS_CONTROLLER_V1",
+    rollingRealisedR: 0,
+    rollingSampleCount: 0,
+    lossCircuitBreakerActive: false,
+    circuitBreakerReason: null,
+    lossStreakGuardActive: false,
+    consecutiveLosses: 0,
+    unknownRealisedRLossCount: 0,
+    rollingUnknownRTradeCount: 0,
+    lastUnknownRTradeId: null,
+    lastUnknownRReason: null,
+    consecutiveUnknownRLosses: 0,
+    unknownRGuardActive: false,
+    entryIntegrityHealthy: true,
+    entryIntegrityRecoveredAtMs: null,
+    lastEntryIntegrityRecoveryReason: null,
+    lastClosedTradeId: null,
+    updatedAt: null,
+    workerRevision: null,
+    telemetrySource: "API_PROCESS_FALLBACK" as const,
+    telemetryAgeMs: null,
+    reentryState: null,
+    bReentryState: null
+  },
   strategyPipeline: {
     connected: false,
     spot: "CLOSED",
@@ -230,9 +259,14 @@ describe("Gold Hunter UI", () => {
     expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
     expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
     expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
-    expect(screen.getByTestId("gh-revision")).toHaveTextContent("Brain V3");
-    expect(screen.getByTestId("gh-revision")).toHaveTextContent(/Rev 2026\.08\.20-01/);
-    expect(screen.getByTestId("gh-revision")).toHaveTextContent(/Build /);
+    expect(screen.getByTestId("gh-trading-brain-value")).toHaveTextContent(
+      "V6 · GH-B6-20260821-01"
+    );
+    expect(screen.getByTestId("gh-strategy-value")).toHaveTextContent(
+      "Pulse Guard Scalper"
+    );
+    expect(screen.getByTestId("gh-web-build-label")).toHaveTextContent("Web Build");
+    expect(screen.getByTestId("gh-web-build-value")).toHaveTextContent(/[a-z0-9]{7}|dev/i);
   });
 
   it("shows Demo AutoTrade card as NOT READY with LIVE LOCKED and exact blocker", async () => {

@@ -1349,6 +1349,37 @@ export type GoldHunterStatusResponse = {
     risk: string;
     autoTrade: string;
   };
+  strategyVersions: {
+    brainVersion: string;
+    brainRevision?: string;
+    strategyVariant?: string;
+    softwareRevision: string;
+    softwareRevisionAt: string;
+    positionManagerVersion: string;
+    lossControllerVersion: string;
+    rollingRealisedR: number;
+    rollingSampleCount: number;
+    lossCircuitBreakerActive: boolean;
+    circuitBreakerReason: string | null;
+    lossStreakGuardActive: boolean;
+    consecutiveLosses: number;
+    unknownRealisedRLossCount: number;
+    rollingUnknownRTradeCount: number;
+    lastUnknownRTradeId: string | null;
+    lastUnknownRReason: string | null;
+    consecutiveUnknownRLosses: number;
+    unknownRGuardActive: boolean;
+    entryIntegrityHealthy: boolean;
+    entryIntegrityRecoveredAtMs: number | null;
+    lastEntryIntegrityRecoveryReason: string | null;
+    lastClosedTradeId: string | null;
+    updatedAt: string | null;
+    workerRevision: string | null;
+    telemetrySource: "QUOTE_WORKER" | "API_PROCESS_FALLBACK" | null;
+    telemetryAgeMs: number | null;
+    reentryState: Record<string, unknown> | null;
+    bReentryState: Record<string, unknown> | null;
+  };
   strategyPipeline?: {
     connected: boolean;
     spot: string;
