@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GoldHunterTrade } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 import { formatResearchLocalTime } from "../../lib/formatResearchLocalTime";
 import { formatEur, useGoldHunter } from "./GoldHunterShell";
 
@@ -9,9 +10,9 @@ function px(value: number | null | undefined) {
 
 export function GoldHunterTradesPage() {
   const { status } = useGoldHunter();
+  const { api } = useAuth();
   const [trades, setTrades] = useState<GoldHunterTrade[]>([]);
   const [loading, setLoading] = useState(true);
-  const { api } = requireAuthApi();
 
   useEffect(() => {
     let cancelled = false;
@@ -80,9 +81,4 @@ export function GoldHunterTradesPage() {
       </section>
     </div>
   );
-}
-
-import { useAuth } from "../../lib/auth";
-function requireAuthApi() {
-  return useAuth();
 }
