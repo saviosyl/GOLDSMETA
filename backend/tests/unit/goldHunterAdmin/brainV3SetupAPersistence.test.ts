@@ -161,21 +161,21 @@ function primeTrend(engine: M1CandleFlowEngine, side: "BUY" | "SELL") {
   engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 101.5);
 }
 
-describe("Gold Hunter Brain V5 identity", () => {
-  it("stamps V5 brain/revision/variant and frozen identity", () => {
+describe("Gold Hunter Brain V6 identity", () => {
+  it("stamps V6 brain/revision/variant and frozen identity", () => {
     resetFrozenGhFastIdentityForTests();
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
-    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B5-20260821-01");
-    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_STRUCTURE_SCALPER");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
+    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B6-20260821-01");
+    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_GUARD_SCALPER");
     const id = getFrozenGhFastIdentity();
-    expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(id.soakLabel).toBe(
-      "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+      "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
     );
   });
 });
 
-describe("Gold Hunter Brain V5 pulse-structure entry", () => {
+describe("Gold Hunter Brain V6 pulse-structure entry", () => {
   const cfg = defaultGhFastConfig();
 
   it("1) bullish impulse -> retrace -> hold -> break => BUY", () => {
@@ -369,7 +369,7 @@ describe("Gold Hunter Brain V5 pulse-structure entry", () => {
   });
 });
 
-describe("Gold Hunter Brain V5 selector and exit controls", () => {
+describe("Gold Hunter Brain V6 selector and exit controls", () => {
   it("10) noise cannot create BUY/SELL ping-pong", () => {
     const sel = new GoldHunterStrategySelector();
     const minuteStart = 8_400_000;
@@ -408,17 +408,17 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
   it("11) failed pulse after entry triggers early exit", () => {
     const cfg = defaultGhFastConfig();
     const t = openGhAbcTrade({
-      tradeId: "v5-pulse-fail",
+      tradeId: "v6-pulse-fail",
       side: "BUY",
       setup: "A_MOMENTUM_IGNITION",
-      entryTs: Date.now() - 8_500,
+      entryTs: Date.now() - 5_500,
       bid: 2600,
       ask: 2600.05,
       trailDistance: 0.12
     });
     const bid = 2599.98;
     updateGhAbcOpenTrade(t, bid, bid + 0.05, cfg);
-    t.timeInTradeMs = 8_500;
+    t.timeInTradeMs = 5_500;
     const reason = evaluateGhAbcOpenExit({
       trade: t,
       f: features(bid + 0.025, "BUY", {
@@ -436,7 +436,7 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
   it("12) healthy pulse is not exited prematurely", () => {
     const cfg = defaultGhFastConfig();
     const t = openGhAbcTrade({
-      tradeId: "v5-pulse-healthy",
+      tradeId: "v6-pulse-healthy",
       side: "SELL",
       setup: "A_MOMENTUM_IGNITION",
       entryTs: Date.now() - 4_500,
@@ -481,7 +481,7 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
       entryPrice: 2600,
       result: "LOSS",
       opportunityId: first.opportunity!.opportunityId,
-      tradeId: "v5-loss-1",
+      tradeId: "v6-loss-1",
       closedAtMs: minuteStart + 20_000
     });
 
@@ -504,7 +504,7 @@ describe("Gold Hunter Brain V5 selector and exit controls", () => {
       entryPrice: 2600,
       result: "LOSS",
       opportunityId: second.opportunity!.opportunityId,
-      tradeId: "v5-loss-2",
+      tradeId: "v6-loss-2",
       closedAtMs: minuteStart + 53_000
     });
     sel.processInjectedSelectionForTests({
