@@ -209,6 +209,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
     const t = buyTrade();
     const bid = ENTRY - HARD * 0.25;
     updateOpenTrade(t, bid, bid + 0.05, cfg);
+    t.timeInTradeMs = 2_000;
     const hostile = feat(bid, bid + 0.05, {
       acceleration: -cfg.momentumVelMin * 2,
       signedImbalance1s: -0.3,
@@ -226,6 +227,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
     const t = buyTrade();
     const bid = ENTRY - HARD * 0.25;
     updateOpenTrade(t, bid, bid + 0.05, cfg);
+    t.timeInTradeMs = 2_000;
     const hostile = feat(bid, bid + 0.05, {
       acceleration: -cfg.momentumVelMin * 2,
       signedImbalance1s: -0.3,
@@ -246,9 +248,9 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
     expect(t.slcEarlyFailurePersistCount).toBe(1);
   });
 
-  it("-0.70R soft loss exits SMART_SOFT_MAX_LOSS", () => {
+  it("-0.45R soft loss exits SMART_SOFT_MAX_LOSS", () => {
     const t = buyTrade();
-    const bid = ENTRY - HARD * 0.72;
+    const bid = ENTRY - HARD * (cfg.slcSoftMaxLossR + 0.01);
     updateOpenTrade(t, bid, bid + 0.05, cfg);
     expect(
       evaluateOpenExit({
@@ -281,6 +283,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
     // Retrace to ~0.22R — still net profitable after friction+spread costs
     const bid = ENTRY + HARD * 0.22;
     updateOpenTrade(t, bid, bid + 0.05, cfg);
+    t.timeInTradeMs = 2_000;
     const fade = feat(bid, bid + 0.05, {
       acceleration: -cfg.momentumVelMin,
       signedImbalance1s: -0.25,
@@ -361,7 +364,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — SELL mirror", () => {
 
   it("SELL soft max loss + early thesis + small harvest invert correctly", () => {
     const soft = sellTrade();
-    const askSoft = ENTRY + HARD * 0.72;
+    const askSoft = ENTRY + HARD * (cfg.slcSoftMaxLossR + 0.01);
     updateOpenTrade(soft, askSoft - 0.05, askSoft, cfg);
     expect(
       evaluateOpenExit({
@@ -375,6 +378,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — SELL mirror", () => {
     const early = sellTrade();
     const askE = ENTRY + HARD * 0.25;
     updateOpenTrade(early, askE - 0.05, askE, cfg);
+    early.timeInTradeMs = 2_000;
     const hostile = feat(askE - 0.05, askE, {
       acceleration: cfg.momentumVelMin * 2,
       signedImbalance1s: 0.3,
@@ -391,6 +395,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — SELL mirror", () => {
     updateOpenTrade(harvest, peak - 0.05, peak, cfg);
     const askH = ENTRY - HARD * 0.22;
     updateOpenTrade(harvest, askH - 0.05, askH, cfg);
+    harvest.timeInTradeMs = 2_000;
     const fade = feat(askH - 0.05, askH, {
       acceleration: cfg.momentumVelMin,
       signedImbalance1s: 0.25,
@@ -446,12 +451,12 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
     resetGoldHunterStrategySelectorsForTests();
   });
 
-  it("3-loss streak activates LOSS_STREAK_GUARD; structural reset restores entry", () => {
+  it("2-loss streak activates LOSS_STREAK_GUARD; structural reset restores entry", () => {
     const sel = new GoldHunterStrategySelector();
     const cfg = cfgLc();
     const t0 = 8_000_000;
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       sel.notifyTradeClosed({
         side: "BUY",
         setup: "A",
@@ -459,12 +464,12 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
         result: "LOSS",
         opportunityId: `opp-loss-${i}`,
         closedAtMs: t0 + i * 1000,
-        realisedR: -0.7,
+        realisedR: -0.5,
         tradeId: `gh-loss-${i}`
       });
     }
     const st = sel.getLossControllerEntryState();
-    expect(st.consecutiveLosses).toBe(3);
+    expect(st.consecutiveLosses).toBe(2);
     expect(st.lossStreakGuardActive).toBe(true);
 
     // Too soon — blocked
@@ -478,7 +483,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
     expect(early.ok).toBe(false);
     expect(early.rejectionReason).toBe("WAIT_LOSS_STREAK_GUARD");
 
-    // Force structural reset via mid below entry, then wait 60s + direction
+    // Force structural reset via mid below entry, then wait 120s + direction
     sel.evaluateAntiChurnGateForTests({
       side: "BUY",
       atMs: t0 + 2000 + cfg.slcLossStreakResetMs + 100,
@@ -498,12 +503,12 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
     expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(false);
   });
 
-  it("-4R rolling circuit breaker activates; recovery resets it", () => {
+  it("-2R rolling circuit breaker over 8 trades activates; recovery resets it", () => {
     const sel = new GoldHunterStrategySelector();
     const cfg = cfgLc();
     const t0 = 9_000_000;
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       sel.notifyTradeClosed({
         side: "BUY",
         setup: "A",
@@ -511,18 +516,18 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
         result: "LOSS",
         opportunityId: `opp-cb-${i}`,
         closedAtMs: t0 + i * 500,
-        realisedR: -0.7,
+        realisedR: -0.25,
         tradeId: `gh-cb-${i}`
       });
     }
     const st = sel.getLossControllerEntryState();
-    expect(st.rollingRealisedR).toBeLessThanOrEqual(-4);
+    expect(st.rollingRealisedR).toBeLessThanOrEqual(-2);
     expect(st.lossCircuitBreakerActive).toBe(true);
     expect(st.circuitBreakerReason).toBe("ROLLING_REALISED_R");
 
     const blocked = sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: t0 + 3000,
+      atMs: t0 + 3600,
       mid: 2599.0,
       signedImbalance1s: 0.2,
       midVel250: 0.001
@@ -533,14 +538,14 @@ describe("SMART_LOSS_CONTROLLER_V1 — streak + circuit breaker", () => {
     // Structural mid + time + direction
     sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: t0 + 3000 + cfg.slcCircuitBreakerResetMs + 50,
+      atMs: t0 + 3500 + cfg.slcCircuitBreakerResetMs + 50,
       mid: 2599.0,
       signedImbalance1s: 0.2,
       midVel250: 0.001
     });
     const recovered = sel.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs: t0 + 3000 + cfg.slcCircuitBreakerResetMs + 100,
+      atMs: t0 + 3500 + cfg.slcCircuitBreakerResetMs + 100,
       mid: 2599.0,
       signedImbalance1s: 0.2,
       midVel250: 0.001
@@ -557,9 +562,9 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
     resetFrozenGhFastIdentityForTests();
     const id = getFrozenGhFastIdentity();
     expect(id.soakLabel).toBe(
-      "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+      "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
     );
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
       "SMART_POSITION_MANAGER_V1"
     );
@@ -568,7 +573,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
     );
     const cfg = defaultGhFastConfig();
     expect(cfg.smartLossControllerEnabled).toBe(true);
-    expect(cfg.slcSoftMaxLossR).toBe(0.7);
+    expect(cfg.slcSoftMaxLossR).toBe(0.45);
     expect(cfg.hardStop).toBe(0.55);
     expect(GH_FAST_MAX_OPEN_POSITIONS).toBe(1);
     expect(GH_DEMO_MAX_OPEN_TRADES_REQUIRED).toBe(1);
@@ -582,7 +587,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
 
   it("openTrade stamps lossControllerVersion", () => {
     const t = buyTrade();
-    expect(t.brainVersion).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(t.brainVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(t.positionManagerVersion).toBe("SMART_POSITION_MANAGER_V1");
     expect(t.lossControllerVersion).toBe("SMART_LOSS_CONTROLLER_V1");
   });

@@ -133,7 +133,7 @@ function armThreeLosses(sel: GoldHunterStrategySelector, baseMs = 1_000_000) {
       entryPrice: 2600,
       result: "LOSS",
       tradeId: `gh-loss-${i}`,
-      realisedR: -0.7,
+      realisedR: -0.45,
       closedAtMs: baseMs + i * 1000
     });
   }
@@ -313,7 +313,7 @@ describe("Final pretransport loss-safety", () => {
       ownerUid: OWNER,
       side: "BUY",
       mid: 2600,
-      atMs: 1_002_500, // within 60s of streak activation — must not clear
+      atMs: 1_002_500, // within 120s of streak activation — must not clear
       signedImbalance1s: 0.2,
       midVel250: 0.001
     });
@@ -398,17 +398,17 @@ describe("Final pretransport loss-safety", () => {
     expect(placeOrderCount).toBe(0);
   });
 
-  it("third LOSS during async preclaim I/O still blocks broker submission afterwards", async () => {
+  it("second LOSS during async preclaim I/O still blocks broker submission afterwards", async () => {
     const sel = getGoldHunterStrategySelector(OWNER);
-    // Two losses so far — streak not yet active.
-    for (let i = 0; i < 2; i++) {
+    // One realised loss so far — V6 streak guard is not yet active.
+    for (let i = 0; i < 1; i++) {
       sel.notifyTradeClosed({
         side: "BUY",
         setup: "A",
         entryPrice: 2600,
         result: "LOSS",
         tradeId: `gh-pre-${i}`,
-        realisedR: -0.7,
+        realisedR: -0.45,
         closedAtMs: 1_000_000 + i * 1000
       });
     }
@@ -445,15 +445,15 @@ describe("Final pretransport loss-safety", () => {
       "../../../src/services/goldHunterAdmin/demoExecutionAdapter"
     );
 
-    // Simulate third LOSS settling while "preclaim" work was underway,
+    // Simulate second LOSS settling while "preclaim" work was underway,
     // immediately before final pretransport check inside submit.
     sel.notifyTradeClosed({
       side: "BUY",
       setup: "A",
       entryPrice: 2600,
       result: "LOSS",
-      tradeId: "gh-pre-2",
-      realisedR: -0.7,
+      tradeId: "gh-pre-1",
+      realisedR: -0.45,
       closedAtMs: 1_003_000
     });
     expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(true);
@@ -504,16 +504,16 @@ describe("Final pretransport loss-safety", () => {
     expect(placeOrderCount).toBe(0);
   });
 
-  it("third LOSS during onEnterBrokerTransport await → placeOrder count 0, no transport_enter", async () => {
+  it("second LOSS during onEnterBrokerTransport await → placeOrder count 0, no transport_enter", async () => {
     const sel = getGoldHunterStrategySelector(OWNER);
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 1; i++) {
       sel.notifyTradeClosed({
         side: "BUY",
         setup: "A",
         entryPrice: 2600,
         result: "LOSS",
         tradeId: `gh-race-${i}`,
-        realisedR: -0.7,
+        realisedR: -0.45,
         closedAtMs: 2_000_000 + i * 1000
       });
     }
@@ -610,14 +610,14 @@ describe("Final pretransport loss-safety", () => {
     });
 
     await prepStarted;
-    // THIRD distinct loss settles while onEnterBrokerTransport is awaiting.
+    // SECOND distinct loss settles while onEnterBrokerTransport is awaiting.
     sel.notifyTradeClosed({
       side: "BUY",
       setup: "A",
       entryPrice: 2600,
       result: "LOSS",
-      tradeId: "gh-race-2",
-      realisedR: -0.7,
+      tradeId: "gh-race-1",
+      realisedR: -0.45,
       closedAtMs: 2_003_000
     });
     expect(sel.getLossControllerEntryState().lossStreakGuardActive).toBe(true);

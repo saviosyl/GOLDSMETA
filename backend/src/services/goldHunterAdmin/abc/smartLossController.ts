@@ -2,8 +2,12 @@
  * SMART_LOSS_CONTROLLER_V1 — loss-side management on the current brain.
  * Does not rewrite SMART_POSITION_MANAGER_V1.
  *
- * Below +1.0R MFE: owns soft-max-loss, early thesis failure, small-profit harvest.
- * At/above +1.0R MFE: returns null (handoff to Smart PM — never interrupts runners).
+ * Brain V6 policy:
+ * - ordinary losers should normally be cut before the emergency hard stop;
+ * - a pulse that does not progress and loses health is exited quickly;
+ * - modest profitable moves may be harvested when deterioration is confirmed.
+ *
+ * At/above the configured handoff MFE, Smart PM owns the trade.
  */
 import type { GhFastFeatureSnapshot } from "./features";
 import type {
@@ -11,10 +15,7 @@ import type {
   GhFastExitReason,
   GhFastOpenTrade
 } from "./types";
-import {
-  favourableMove,
-  moveToR
-} from "./smartPositionManager";
+import { favourableMove, moveToR } from "./smartPositionManager";
 import { GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION } from "./versions";
 
 const EPSILON = 1e-9;
@@ -61,7 +62,7 @@ export type SmartLossAssessment = {
   };
 };
 
-/** Consecutive qualifying assessments required before early/harvest exits. */
+/** Two snapshots avoids exiting on a single noisy book/tick update. */
 export const SMART_LOSS_PERSIST_SNAPSHOTS = 2 as const;
 
 function currentSignedR(
@@ -75,8 +76,9 @@ function currentSignedR(
 }
 
 /**
- * Cost-aware minimum net R still considered a small profit for harvest.
- * Uses friction + half-spread in R terms so we do not harvest into a loss.
+ * Cost-aware minimum R still considered a small profit for harvest.
+ * A small extra buffer is kept above friction/spread to avoid harvesting
+ * nominally-green moves that are too close to costs.
  */
 export function minProfitableRAfterCosts(args: {
   cfg: GhFastConfig;
@@ -85,7 +87,7 @@ export function minProfitableRAfterCosts(args: {
   const risk = args.cfg.hardStop;
   if (!(risk > 0)) return 0.05;
   const cost = Math.max(0, args.cfg.friction) + Math.max(0, args.spread) * 0.5;
-  return Math.max(0.02, cost / risk + 0.01);
+  return Math.max(0.03, cost / risk + 0.03);
 }
 
 export function countEarlyThesisFailureConfirms(args: {
@@ -101,8 +103,8 @@ export function countEarlyThesisFailureConfirms(args: {
   if (trade.side === "BUY") {
     const flags = {
       accelerationAgainst: f.acceleration < -vel,
-      imbalanceAgainst: f.signedImbalance1s < -0.2,
-      depthAgainst: f.depth.depthImbalance < -0.25,
+      imbalanceAgainst: f.signedImbalance1s < -0.15,
+      depthAgainst: f.depth.depthImbalance < -0.2,
       velocityAgainst: f.midVel250 < -vel
     };
     const count =
@@ -114,8 +116,8 @@ export function countEarlyThesisFailureConfirms(args: {
   }
   const flags = {
     accelerationAgainst: f.acceleration > vel,
-    imbalanceAgainst: f.signedImbalance1s > 0.2,
-    depthAgainst: f.depth.depthImbalance > 0.25,
+    imbalanceAgainst: f.signedImbalance1s > 0.15,
+    depthAgainst: f.depth.depthImbalance > 0.2,
     velocityAgainst: f.midVel250 > vel
   };
   const count =
@@ -128,11 +130,7 @@ export function countEarlyThesisFailureConfirms(args: {
 
 /**
  * Evaluate loss-controller exits. Null = no LC exit (including Smart PM handoff).
- * Caller must still apply HARD_PROTECTION / DATA_STALE / SPREAD_UNSAFE.
- *
- * Early thesis failure and small-profit harvest require the full qualifying
- * condition on SMART_LOSS_PERSIST_SNAPSHOTS consecutive assessments.
- * Soft max loss remains immediate.
+ * Caller still applies HARD_PROTECTION / DATA_STALE / SPREAD_UNSAFE.
  */
 export function evaluateSmartLossController(args: {
   trade: GhFastOpenTrade;
@@ -174,7 +172,7 @@ export function evaluateSmartLossController(args: {
     return { exitReason: null, diagnostics: baseDiag };
   }
 
-  // Handoff: Smart PM owns winners from +1R MFE onward.
+  // Smart PM owns demonstrated winners from the configured handoff onward.
   if (mfeR >= cfg.slcHandoffMfeR) {
     trade.slcEarlyFailurePersistCount = 0;
     trade.slcSmallHarvestPersistCount = 0;
@@ -187,7 +185,7 @@ export function evaluateSmartLossController(args: {
     return { exitReason: null, diagnostics: diag };
   }
 
-  // 1) Soft max loss — immediate; hard stop remains emergency.
+  // Immediate V6 soft loss cap; broker hard stop remains emergency protection.
   if (currentR <= -cfg.slcSoftMaxLossR) {
     trade.slcEarlyFailurePersistCount = 0;
     trade.slcSmallHarvestPersistCount = 0;
@@ -201,7 +199,6 @@ export function evaluateSmartLossController(args: {
     return { exitReason: "SMART_SOFT_MAX_LOSS", diagnostics };
   }
 
-  // 1.5) FAILED_PULSE_EXIT — fast thesis-failure protection for weak progress.
   const timeInTradeMs =
     trade.timeInTradeMs ??
     (Number.isFinite(trade.entryTs) ? Math.max(0, Date.now() - trade.entryTs) : 0);
@@ -220,27 +217,28 @@ export function evaluateSmartLossController(args: {
           0.15 * clamp01((currentR + 0.4) / 1.1) +
           0.15 *
             clamp01(
-              (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) <= 0
+              mfeR <= 0
                 ? 0
-                : 1 -
-                    Math.max(
-                      0,
-                      (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) - currentR
-                    ) /
-                      Math.max(
-                        trade.maxFavourableR ?? moveToR(trade.mfe, risk),
-                        EPSILON
-                      )
+                : 1 - Math.max(0, mfeR - currentR) / Math.max(mfeR, EPSILON)
             )
       )
   );
-  const progressStalled =
-    (trade.maxFavourableR ?? moveToR(trade.mfe, risk)) < 0.18 && currentR < 0.08;
-  const pulseFailing =
-    timeInTradeMs >= 7_000 &&
-    progressStalled &&
-    pulseHealthScore < 30 &&
+
+  // V6: distinguish an immediate rejection from a merely slow trade.
+  const progressStalled = mfeR < 0.16 && currentR < 0.06;
+  const fastRejection =
+    timeInTradeMs >= 2_500 &&
+    mfeR < 0.08 &&
+    currentR <= -0.22 &&
+    pulseHealthScore < 45 &&
     early.count >= 2;
+  const stalledFailure =
+    timeInTradeMs >= 5_000 &&
+    progressStalled &&
+    pulseHealthScore < 50 &&
+    early.count >= 2;
+  const pulseFailing = fastRejection || stalledFailure;
+
   if (pulseFailing) {
     trade.slcEarlyFailurePersistCount = 0;
     trade.slcSmallHarvestPersistCount = 0;
@@ -255,13 +253,15 @@ export function evaluateSmartLossController(args: {
     return { exitReason: "FAILED_PULSE_EXIT", diagnostics };
   }
 
-  // 2) Early thesis failure — multi-confirm + 2 consecutive snapshots.
+  // Early thesis failure — only after a short observation window and two
+  // consecutive qualifying snapshots. This is faster than V5 but not one-tick reactive.
   const adverseEnough =
     maeR >= cfg.slcEarlyFailureMinMaeR || currentR <= -cfg.slcEarlyFailureMinMaeR;
   const unprotected =
     (trade.smartPmState ?? "UNPROTECTED") === "UNPROTECTED" &&
     (trade.protectedProfitR ?? 0) <= 0;
   const earlyQualified =
+    timeInTradeMs >= 1_500 &&
     mfeR < cfg.slcEarlyFailureMaxMfeR &&
     unprotected &&
     adverseEnough &&
@@ -275,7 +275,9 @@ export function evaluateSmartLossController(args: {
     trade.slcEarlyFailurePersistCount = 0;
   }
 
-  // 3) Small profit harvest — also requires 2 consecutive snapshots.
+  // Small-profit harvest: require real positive room plus a giveback, then any
+  // two independent deterioration signals. V5 required every signal at once
+  // and therefore surrendered too many modest greens.
   const minProfitR = minProfitableRAfterCosts({ cfg, spread: f.spread });
   const momentumDeteriorating =
     trade.side === "BUY"
@@ -291,14 +293,19 @@ export function evaluateSmartLossController(args: {
     trade.side === "BUY"
       ? f.midVel250 <= cfg.momentumVelMin
       : f.midVel250 >= -cfg.momentumVelMin;
+  const pulseHealthWeak = pulseHealthScore < 55;
+  const deteriorationConfirms =
+    Number(momentumDeteriorating) +
+    Number(depthAgainst) +
+    Number(velSoft) +
+    Number(pulseHealthWeak);
   const harvestQualified =
     !earlyQualified &&
+    timeInTradeMs >= 1_500 &&
     smallProfitEligible &&
     stillProfitable &&
-    momentumDeteriorating &&
-    depthAgainst &&
     surrenderingFavourable &&
-    velSoft;
+    deteriorationConfirms >= 2;
 
   if (harvestQualified) {
     trade.slcSmallHarvestPersistCount =

@@ -157,12 +157,12 @@ function sellTrade() {
 describe("SMART_POSITION_MANAGER_V1 — BUY scenarios", () => {
   const cfg = cfgSpm();
 
-  it("never reaches +1R → stays UNPROTECTED with original hard stop only", () => {
+  it("never reaches +0.6R → stays UNPROTECTED with original hard stop only", () => {
     const t = buyTrade();
-    // 0.8R favourable
-    const bid = ENTRY + HARD * 0.8;
+    // 0.55R favourable
+    const bid = ENTRY + HARD * 0.55;
     updateOpenTrade(t, bid, bid + 0.05, cfg);
-    expect(t.maxFavourableR!).toBeLessThan(1);
+    expect(t.maxFavourableR!).toBeLessThan(cfg.spmProtectMfeR);
     expect(t.smartPmState).toBe("UNPROTECTED");
     expect(t.protectedProfitR).toBe(0);
     expect(t.lockFloor).toBeNull();
@@ -536,7 +536,7 @@ describe("SMART_POSITION_MANAGER_V1 — safety invariants", () => {
     expect(GH_FAST_MAX_OPEN_POSITIONS).toBe(1);
     expect(GH_DEMO_MAX_OPEN_TRADES_REQUIRED).toBe(1);
     expect(GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades).toBe(1);
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
       "SMART_POSITION_MANAGER_V1"
     );
@@ -566,7 +566,7 @@ describe("SMART_POSITION_MANAGER_V1 — safety invariants", () => {
     const t = buyTrade();
     updateOpenTrade(t, ENTRY + HARD * 2.1, ENTRY + HARD * 2.1 + 0.05, cfg);
     const d = openTradeSmartDiagnostics(t);
-    expect(d.brainVersion).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(d.brainVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(d.positionManagerVersion).toBe("SMART_POSITION_MANAGER_V1");
     expect(d.profitManagementState).toBe("LOCKED");
     expect(d.mfeR).toBeGreaterThanOrEqual(2);
