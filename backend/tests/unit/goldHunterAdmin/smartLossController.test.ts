@@ -556,8 +556,10 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
   it("versions + soak label + Demo safety unchanged", () => {
     resetFrozenGhFastIdentityForTests();
     const id = getFrozenGhFastIdentity();
-    expect(id.soakLabel).toBe("BRAIN_V4_M1_CANDLE_FLOW_SMART_PM_V1_SMART_LOSS_V1_DEMO");
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V4");
+    expect(id.soakLabel).toBe(
+      "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+    );
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
     expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
       "SMART_POSITION_MANAGER_V1"
     );
@@ -580,7 +582,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
 
   it("openTrade stamps lossControllerVersion", () => {
     const t = buyTrade();
-    expect(t.brainVersion).toBe("GOLD_HUNTER_BRAIN_V4");
+    expect(t.brainVersion).toBe("GOLD_HUNTER_BRAIN_V5");
     expect(t.positionManagerVersion).toBe("SMART_POSITION_MANAGER_V1");
     expect(t.lossControllerVersion).toBe("SMART_LOSS_CONTROLLER_V1");
   });

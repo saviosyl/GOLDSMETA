@@ -1,18 +1,19 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
  * V1/V2 research baselines preserved in git history.
- * Brain V4: M1 Candle Flow (direction + pullback + continuation confirmation).
+ * Brain V5: Pulse Structure Scalper
+ * (regime -> impulse -> retrace -> hold -> break -> entry).
  */
 /** Brain identity for Demo A/B/C selection — distinguishable from V1/V2. */
-export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V4" as const;
-export const GOLD_HUNTER_BRAIN_REVISION = "GH-B4-20260821-01" as const;
-export const GOLD_HUNTER_STRATEGY_VARIANT = "M1_CANDLE_FLOW" as const;
+export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V5" as const;
+export const GOLD_HUNTER_BRAIN_REVISION = "GH-B5-20260821-01" as const;
+export const GOLD_HUNTER_STRATEGY_VARIANT = "PULSE_STRUCTURE_SCALPER" as const;
 /**
  * Production software revision — not a strategy/brain change.
  * Distinguishes the OPEN fill monotonicity hotfix from the prior deploy.
  */
 export const GOLD_HUNTER_SOFTWARE_REVISION =
-  "GH_BRAIN_V4_M1_CANDLE_FLOW_2026.08.21-01" as const;
+  "GH_BRAIN_V5_PULSE_STRUCTURE_SCALPER_2026.08.21-01" as const;
 export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-21T06:30:00Z" as const;
 /**
  * Smart position-management layer on top of the current brain.
@@ -28,7 +29,7 @@ export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
   "SMART_LOSS_CONTROLLER_V1" as const;
 /**
  * Strategy version stamped on selector candidates / frozen identity.
- * Brain V4: Setup A now uses M1 Candle Flow.
+ * Brain V5: Setup A now uses Pulse Structure Scalper.
  * B remains Brain V2; C unchanged from V1.
  */
 export const GOLD_HUNTER_FAST_STRATEGY_VERSION =

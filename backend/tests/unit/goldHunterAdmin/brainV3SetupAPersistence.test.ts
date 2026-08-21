@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_BRAIN_REVISION,
+  GOLD_HUNTER_BRAIN_VERSION,
   GOLD_HUNTER_STRATEGY_VARIANT,
-  defaultGhFastConfig,
   M1CandleFlowEngine,
   M1CandleTracker,
+  defaultGhFastConfig,
   getFrozenGhFastIdentity,
-  resetFrozenGhFastIdentityForTests
+  openGhAbcTrade,
+  evaluateGhAbcOpenExit,
+  resetFrozenGhFastIdentityForTests,
+  updateGhAbcOpenTrade
 } from "../../../src/services/goldHunterAdmin/abc";
-import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmin/abc/features";
 import type { DepthBookStats } from "../../../src/services/goldHunterAdmin/abc/depthBook";
+import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmin/abc/features";
 import { GoldHunterStrategySelector } from "../../../src/services/goldHunterAdmin/strategySelector";
 
 const CANDLE_MS = 60_000;
@@ -19,15 +22,15 @@ const BASE_MS = Math.floor(1_720_000_000_000 / CANDLE_MS) * CANDLE_MS;
 function depth(over: Partial<DepthBookStats> = {}): DepthBookStats {
   return {
     available: true,
-    topBidDepth: 10,
-    topAskDepth: 10,
-    bidDepthN: 10,
-    askDepthN: 10,
-    bidLevels: 3,
-    askLevels: 3,
+    topBidDepth: 12,
+    topAskDepth: 12,
+    bidDepthN: 12,
+    askDepthN: 12,
+    bidLevels: 4,
+    askLevels: 4,
     depthRatio: 1,
-    depthImbalance: 0.1,
-    weightedImbalance: 0.1,
+    depthImbalance: 0.2,
+    weightedImbalance: 0.2,
     liquidityAddedBid: 0,
     liquidityAddedAsk: 0,
     liquidityRemovedBid: 0,
@@ -57,24 +60,7 @@ function features(
 ): GhFastFeatureSnapshot {
   const bid = mid - 0.06;
   const ask = mid + 0.06;
-  const bullish = side === "BUY";
-  const sideDepth = bullish
-    ? depth({
-        depthImbalance: 0.1,
-        removeRateBid: 1,
-        removeRateAsk: 3,
-        bestBid: bid,
-        bestAsk: ask,
-        spread: 0.12
-      })
-    : depth({
-        depthImbalance: -0.1,
-        removeRateBid: 3,
-        removeRateAsk: 1,
-        bestBid: bid,
-        bestAsk: ask,
-        spread: 0.12
-      });
+  const buy = side === "BUY";
   return {
     bid,
     ask,
@@ -86,28 +72,28 @@ function features(
     bidVel2s: 0,
     bidVel3s: 0,
     askVel1s: 0,
-    midVel250: bullish ? 0.0003 : -0.0003,
-    midVel500: bullish ? 0.00035 : -0.00035,
-    midVel1s: bullish ? 0.0004 : -0.0004,
+    midVel250: buy ? 0.0003 : -0.0003,
+    midVel500: buy ? 0.00028 : -0.00028,
+    midVel1s: buy ? 0.00034 : -0.00034,
     midVel2s: 0,
     midVel3s: 0,
-    acceleration: bullish ? 0.00015 : -0.00015,
-    updateRate1s: 12,
-    signedImbalance1s: bullish ? 0.4 : -0.4,
-    efficiency1s: 0.55,
-    efficiency3s: 0.5,
+    acceleration: buy ? 0.00012 : -0.00012,
+    updateRate1s: 14,
+    signedImbalance1s: buy ? 0.35 : -0.35,
+    efficiency1s: 0.65,
+    efficiency3s: 0.6,
     high1s: ask,
     low1s: bid,
     high2s: ask,
     low2s: bid,
-    high5s: ask,
-    low5s: bid,
-    high10s: ask,
-    low10s: bid,
-    high15s: ask,
-    low15s: bid,
-    high30s: ask,
-    low30s: bid,
+    high5s: ask + 0.25,
+    low5s: bid - 0.25,
+    high10s: ask + 0.28,
+    low10s: bid - 0.28,
+    high15s: ask + 0.3,
+    low15s: bid - 0.3,
+    high30s: ask + 0.32,
+    low30s: bid - 0.32,
     priorHigh5s: ask,
     priorLow5s: bid,
     priorHigh10s: ask,
@@ -120,7 +106,25 @@ function features(
     distPriorLow5s: 0,
     upTouches5s: 0,
     downTouches5s: 0,
-    depth: sideDepth,
+    depth: depth(
+      buy
+        ? {
+            depthImbalance: 0.22,
+            removeRateAsk: 3,
+            removeRateBid: 1,
+            bestBid: bid,
+            bestAsk: ask,
+            spread: 0.12
+          }
+        : {
+            depthImbalance: -0.22,
+            removeRateAsk: 1,
+            removeRateBid: 3,
+            bestBid: bid,
+            bestAsk: ask,
+            spread: 0.12
+          }
+    ),
     ...over
   };
 }
@@ -137,281 +141,401 @@ function feedCandle(
   engine.onSpot(start + 59_000, points[3]);
 }
 
-function primeEngineForSide(side: "BUY" | "SELL") {
-  const engine = new M1CandleFlowEngine();
-  const history: [number, number, number, number][] = [
-    [100.0, 101.5, 99.5, 100.5],
-    [100.5, 102.0, 100.0, 101.0],
-    [101.0, 102.5, 100.5, 101.5],
-    [101.5, 103.0, 101.0, 102.0],
-    [102.0, 103.5, 101.5, 102.5]
-  ];
-  for (let i = 0; i < history.length; i++) {
-    feedCandle(engine, i, history[i]!);
-  }
+function primeTrend(engine: M1CandleFlowEngine, side: "BUY" | "SELL") {
   if (side === "BUY") {
-    feedCandle(engine, 5, [102.5, 104.5, 102.0, 104.2]);
-    engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 104.2);
-  } else {
-    feedCandle(engine, 5, [104.2, 104.5, 102.0, 102.3]);
-    engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 102.3);
+    feedCandle(engine, 0, [100.0, 100.8, 99.8, 100.6]);
+    feedCandle(engine, 1, [100.6, 101.5, 100.4, 101.2]);
+    feedCandle(engine, 2, [101.2, 102.3, 101.0, 102.0]);
+    feedCandle(engine, 3, [102.0, 103.3, 101.8, 102.9]);
+    feedCandle(engine, 4, [102.9, 104.1, 102.8, 103.8]);
+    feedCandle(engine, 5, [103.8, 105.1, 103.6, 104.9]);
+    engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 104.9);
+    return;
   }
-  return engine;
+  feedCandle(engine, 0, [105.0, 105.2, 104.3, 104.6]);
+  feedCandle(engine, 1, [104.6, 104.8, 103.9, 104.1]);
+  feedCandle(engine, 2, [104.1, 104.2, 103.2, 103.5]);
+  feedCandle(engine, 3, [103.5, 103.7, 102.6, 102.9]);
+  feedCandle(engine, 4, [102.9, 103.0, 101.9, 102.3]);
+  feedCandle(engine, 5, [102.3, 102.5, 101.2, 101.5]);
+  engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 101.5);
 }
 
-describe("Gold Hunter Brain V4 identity", () => {
-  it("stamps V4 brain/revision/variant and frozen identity", () => {
+describe("Gold Hunter Brain V5 identity", () => {
+  it("stamps V5 brain/revision/variant and frozen identity", () => {
     resetFrozenGhFastIdentityForTests();
-    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V4");
-    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B4-20260821-01");
-    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("M1_CANDLE_FLOW");
+    expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B5-20260821-01");
+    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_STRUCTURE_SCALPER");
     const id = getFrozenGhFastIdentity();
-    expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V4");
-    expect(id.soakLabel).toBe("BRAIN_V4_M1_CANDLE_FLOW_SMART_PM_V1_SMART_LOSS_V1_DEMO");
-  });
-
-  it("keeps anti-churn at 30 seconds", () => {
-    const cfg = defaultGhFastConfig();
-    expect(cfg.antiChurnLossMinMs).toBe(30_000);
-    expect(cfg.antiChurnOppositeFlipMinMs).toBe(30_000);
+    expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V5");
+    expect(id.soakLabel).toBe(
+      "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+    );
   });
 });
 
-describe("Gold Hunter Brain V4 BUY M1 candle flow", () => {
+describe("Gold Hunter Brain V5 pulse-structure entry", () => {
   const cfg = defaultGhFastConfig();
 
-  it("1) strong bullish closed candle + pullback + reacceleration => BUY eligible", () => {
-    const engine = primeEngineForSide("BUY");
+  it("1) bullish impulse -> retrace -> hold -> break => BUY", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
     const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 10_000, 104.8);
-    engine.evaluate(start + 10_000, features(104.8, "BUY"), cfg);
-    engine.onSpot(start + 20_000, 104.0);
-    engine.evaluate(start + 20_000, features(104.0, "BUY"), cfg);
-    engine.onSpot(start + 28_000, 104.35);
-    const out = engine.evaluate(start + 28_000, features(104.35, "BUY"), cfg);
+    engine.onSpot(start + 10_000, 105.35);
+    engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 104.75);
+    engine.evaluate(start + 20_000, features(104.75, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 104.8);
+    engine.evaluate(start + 22_000, features(104.8, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 104.81);
+    engine.evaluate(start + 23_300, features(104.81, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 104.82);
+    engine.evaluate(start + 24_700, features(104.82, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.08);
+    const out = engine.evaluate(start + 29_000, features(105.08, "BUY"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("BUY");
-    expect(out.finalQuality).toBeGreaterThanOrEqual(0.7);
+    expect(out.pulseId).toBeTruthy();
   });
 
-  it("2) bullish micro-burst but bearish M1 structure => no BUY", () => {
-    const engine = primeEngineForSide("SELL");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 18_000, 102.9);
-    const out = engine.evaluate(start + 18_000, features(102.9, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.side).not.toBe("BUY");
-  });
-
-  it("3) bullish candle but no pullback => no BUY", () => {
-    const engine = primeEngineForSide("BUY");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 18_000, 104.9);
-    const out = engine.evaluate(start + 18_000, features(104.9, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_PULLBACK_NOT_SEEN");
-  });
-
-  it("4) pullback still falling => no BUY", () => {
-    const engine = primeEngineForSide("BUY");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 14_000, 104.8);
-    engine.evaluate(start + 14_000, features(104.8, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 104.0);
-    const out = engine.evaluate(start + 22_000, features(104.0, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_PULLBACK_STILL_FALLING");
-  });
-
-  it("5) pullback + recovery + microstructure => BUY", () => {
-    const engine = primeEngineForSide("BUY");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 12_000, 104.85);
-    engine.evaluate(start + 12_000, features(104.85, "BUY"), cfg);
-    engine.onSpot(start + 22_000, 104.0);
-    engine.evaluate(start + 22_000, features(104.0, "BUY"), cfg);
-    engine.onSpot(start + 30_000, 104.4);
-    const out = engine.evaluate(start + 30_000, features(104.4, "BUY"), cfg);
-    expect(out.eligible).toBe(true);
-    expect(out.waitReason).toBeNull();
-  });
-
-  it("6) candle already >70% expected range => no BUY", () => {
-    const engine = primeEngineForSide("BUY");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 20_000, 105.75);
-    const out = engine.evaluate(start + 20_000, features(105.75, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_CANDLE_OVEREXTENDED");
-  });
-
-  it("7) insufficient reward space => no BUY", () => {
-    const engine = primeEngineForSide("BUY");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 12_000, 106.0);
-    engine.evaluate(start + 12_000, features(106.0, "BUY"), cfg);
-    engine.onSpot(start + 20_000, 104.95);
-    engine.evaluate(start + 20_000, features(104.95, "BUY"), cfg);
-    engine.onSpot(start + 28_000, 105.35);
-    const out = engine.evaluate(start + 28_000, features(105.35, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_INSUFFICIENT_REWARD_SPACE");
-  });
-
-  it("flat/doji signal candle => no trade", () => {
+  it("2) bearish mirror => SELL", () => {
     const engine = new M1CandleFlowEngine();
-    for (let i = 0; i < 5; i++) {
-      feedCandle(engine, i, [100 + i, 101 + i, 99 + i, 100.5 + i]);
-    }
-    feedCandle(engine, 5, [106, 106.4, 105.6, 106]); // doji
-    const now = BASE_MS + 6 * CANDLE_MS + 16_000;
-    engine.onSpot(now, 106.1);
-    const out = engine.evaluate(now, features(106.1, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_CANDLE_DIRECTION_UNCLEAR");
-  });
-
-  it("weak-body signal candle => no trade", () => {
-    const engine = new M1CandleFlowEngine();
-    for (let i = 0; i < 5; i++) {
-      feedCandle(engine, i, [100 + i, 101.4 + i, 99.4 + i, 100.4 + i]);
-    }
-    feedCandle(engine, 5, [106, 107.0, 105.0, 106.2]); // bodyRatio low
-    const now = BASE_MS + 6 * CANDLE_MS + 20_000;
-    engine.onSpot(now, 106.3);
-    const out = engine.evaluate(now, features(106.3, "BUY"), cfg);
-    expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_CANDLE_DIRECTION_UNCLEAR");
-  });
-
-  it("early (<8s) and late (>48s) windows are blocked", () => {
-    const early = primeEngineForSide("BUY");
+    primeTrend(engine, "SELL");
     const start = BASE_MS + 6 * CANDLE_MS;
-    early.onSpot(start + 4_000, 104.7);
-    expect(
-      early.evaluate(start + 4_000, features(104.7, "BUY"), cfg).waitReason
-    ).toBe("WAIT_CANDLE_TOO_EARLY");
-
-    const late = primeEngineForSide("BUY");
-    late.onSpot(start + 52_000, 104.6);
-    expect(
-      late.evaluate(start + 52_000, features(104.6, "BUY"), cfg).waitReason
-    ).toBe("WAIT_CANDLE_TOO_LATE");
-  });
-});
-
-describe("Gold Hunter Brain V4 SELL mirrors", () => {
-  const cfg = defaultGhFastConfig();
-
-  it("SELL pullback + reacceleration + microstructure => eligible SELL", () => {
-    const engine = primeEngineForSide("SELL");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 10_000, 101.6);
-    engine.evaluate(start + 10_000, features(101.6, "SELL"), cfg);
-    engine.onSpot(start + 22_000, 102.4);
-    engine.evaluate(start + 22_000, features(102.4, "SELL"), cfg);
-    engine.onSpot(start + 30_000, 102.05);
-    const out = engine.evaluate(start + 30_000, features(102.05, "SELL"), cfg);
+    engine.onSpot(start + 10_000, 101.1);
+    engine.evaluate(start + 10_000, features(101.1, "SELL"), cfg);
+    engine.onSpot(start + 20_000, 101.7);
+    engine.evaluate(start + 20_000, features(101.7, "SELL"), cfg);
+    engine.onSpot(start + 22_000, 101.66);
+    engine.evaluate(start + 22_000, features(101.66, "SELL"), cfg);
+    engine.onSpot(start + 23_300, 101.65);
+    engine.evaluate(start + 23_300, features(101.65, "SELL"), cfg);
+    engine.onSpot(start + 24_700, 101.64);
+    engine.evaluate(start + 24_700, features(101.64, "SELL"), cfg);
+    engine.onSpot(start + 29_000, 101.35);
+    const out = engine.evaluate(start + 29_000, features(101.35, "SELL"), cfg);
     expect(out.eligible).toBe(true);
     expect(out.side).toBe("SELL");
   });
 
-  it("SELL with no pullback => blocked", () => {
-    const engine = primeEngineForSide("SELL");
-    const start = BASE_MS + 6 * CANDLE_MS;
-    engine.onSpot(start + 14_000, 101.5);
-    const out = engine.evaluate(start + 14_000, features(101.5, "SELL"), cfg);
+  it("3) initial spike without retrace => WAIT", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
+    const now = BASE_MS + 6 * CANDLE_MS + 15_000;
+    engine.onSpot(now, 105.6);
+    const out = engine.evaluate(now, features(105.6, "BUY"), cfg);
     expect(out.eligible).toBe(false);
-    expect(out.waitReason).toBe("WAIT_PULLBACK_NOT_SEEN");
+    expect(out.waitReason).toBe("WAIT_PULLBACK_TOO_SHALLOW");
   });
 
-  it("SELL overextended and insufficient space are blocked", () => {
-    const over = primeEngineForSide("SELL");
+  it("4) pullback without hold => WAIT_BASE_NOT_CONFIRMED", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
     const start = BASE_MS + 6 * CANDLE_MS;
-    over.onSpot(start + 20_000, 100.75);
-    expect(
-      over.evaluate(start + 20_000, features(100.75, "SELL"), cfg).waitReason
-    ).toBe("WAIT_CANDLE_OVEREXTENDED");
+    engine.onSpot(start + 10_000, 105.35);
+    engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
+    engine.onSpot(start + 19_000, 104.72);
+    const out = engine.evaluate(start + 19_000, features(104.72, "BUY"), cfg);
+    expect(out.waitReason).toBe("WAIT_BASE_NOT_CONFIRMED");
+  });
 
-    const noSpace = primeEngineForSide("SELL");
-    noSpace.onSpot(start + 12_000, 100.9);
-    noSpace.evaluate(start + 12_000, features(100.9, "SELL"), cfg);
-    noSpace.onSpot(start + 20_000, 101.95);
-    noSpace.evaluate(start + 20_000, features(101.95, "SELL"), cfg);
-    noSpace.onSpot(start + 28_000, 101.15);
-    expect(
-      noSpace.evaluate(start + 28_000, features(101.15, "SELL"), cfg).waitReason
-    ).toBe("WAIT_INSUFFICIENT_REWARD_SPACE");
+  it("5) noisy/choppy movement => WAIT_CHOP", () => {
+    const engine = new M1CandleFlowEngine();
+    for (let i = 0; i < 6; i++) {
+      feedCandle(engine, i, [100, 101.2, 98.8, 100.1]);
+    }
+    const now = BASE_MS + 6 * CANDLE_MS + 25_000;
+    engine.onSpot(now, 100.05);
+    const out = engine.evaluate(
+      now,
+      features(100.05, "BUY", {
+        efficiency1s: 0.12,
+        efficiency3s: 0.15,
+        high5s: 101.4,
+        low5s: 98.7
+      }),
+      cfg
+    );
+    expect(out.eligible).toBe(false);
+    expect(out.waitReason).toBe("WAIT_CHOP");
+  });
+
+  it("6) exhausted pulse => WAIT_PULSE_EXHAUSTED", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
+    const start = BASE_MS + 6 * CANDLE_MS;
+    engine.onSpot(start + 10_000, 105.3);
+    engine.evaluate(start + 10_000, features(105.3, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 104.72);
+    engine.evaluate(start + 20_000, features(104.72, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 104.74);
+    engine.evaluate(start + 22_000, features(104.74, "BUY"), cfg);
+    engine.onSpot(start + 24_000, 104.75);
+    engine.evaluate(start + 24_000, features(104.75, "BUY"), cfg);
+    engine.onSpot(start + 30_000, 104.96);
+    const out = engine.evaluate(
+      start + 30_000,
+      features(104.96, "BUY", {
+        efficiency1s: 0.2,
+        midVel250: 0.00002,
+        midVel500: 0.00008
+      }),
+      cfg
+    );
+    expect(out.waitReason).toBe("WAIT_PULSE_EXHAUSTED");
+  });
+
+  it("7) insufficient movement budget => WAIT_NO_EDGE_LEFT", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
+    const start = BASE_MS + 6 * CANDLE_MS;
+    engine.onSpot(start + 10_000, 106.4);
+    engine.evaluate(start + 10_000, features(106.4, "BUY"), cfg);
+    engine.onSpot(start + 18_000, 105.9);
+    engine.evaluate(start + 18_000, features(105.9, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 105.92);
+    engine.evaluate(start + 22_000, features(105.92, "BUY"), cfg);
+    engine.onSpot(start + 24_500, 105.93);
+    engine.evaluate(start + 24_500, features(105.93, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 106.05);
+    const out = engine.evaluate(
+      start + 29_000,
+      features(106.05, "BUY", {
+        high5s: 106.1,
+        low5s: 105.9
+      }),
+      cfg
+    );
+    expect(out.waitReason).toBe("WAIT_NO_EDGE_LEFT");
+  });
+
+  it("8) microstructure veto => WAIT_MICROSTRUCTURE_VETO", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
+    const start = BASE_MS + 6 * CANDLE_MS;
+    engine.onSpot(start + 10_000, 105.35);
+    engine.evaluate(start + 10_000, features(105.35, "BUY"), cfg);
+    engine.onSpot(start + 20_000, 104.75);
+    engine.evaluate(start + 20_000, features(104.75, "BUY"), cfg);
+    engine.onSpot(start + 22_000, 104.8);
+    engine.evaluate(start + 22_000, features(104.8, "BUY"), cfg);
+    engine.onSpot(start + 23_300, 104.81);
+    engine.evaluate(start + 23_300, features(104.81, "BUY"), cfg);
+    engine.onSpot(start + 24_700, 104.82);
+    engine.evaluate(start + 24_700, features(104.82, "BUY"), cfg);
+    engine.onSpot(start + 29_000, 105.08);
+    const out = engine.evaluate(
+      start + 29_000,
+      features(105.08, "BUY", {
+        midVel250: -0.0002,
+        midVel500: -0.0002,
+        midVel1s: -0.0002,
+        signedImbalance1s: -0.2,
+        depth: depth({
+          depthImbalance: -0.4,
+          removeRateAsk: 0.5,
+          removeRateBid: 3.5
+        })
+      }),
+      cfg
+    );
+    expect(out.waitReason).toBe("WAIT_MICROSTRUCTURE_VETO");
+  });
+
+  it("9) genuine reversal can flip side", () => {
+    const engine = new M1CandleFlowEngine();
+    primeTrend(engine, "BUY");
+    feedCandle(engine, 6, [104.9, 105.0, 103.8, 104.0]);
+    feedCandle(engine, 7, [104.0, 104.1, 102.8, 103.1]);
+    feedCandle(engine, 8, [103.1, 103.2, 101.7, 102.0]);
+    engine.onSpot(BASE_MS + 9 * CANDLE_MS + 1_000, 102.0);
+    const start = BASE_MS + 9 * CANDLE_MS;
+    engine.onSpot(start + 10_000, 101.55);
+    engine.evaluate(start + 10_000, features(101.55, "SELL"), cfg);
+    engine.onSpot(start + 20_000, 102.1);
+    engine.evaluate(start + 20_000, features(102.1, "SELL"), cfg);
+    engine.onSpot(start + 22_000, 102.06);
+    engine.evaluate(start + 22_000, features(102.06, "SELL"), cfg);
+    engine.onSpot(start + 23_400, 102.05);
+    engine.evaluate(start + 23_400, features(102.05, "SELL"), cfg);
+    engine.onSpot(start + 24_800, 102.04);
+    engine.evaluate(start + 24_800, features(102.04, "SELL"), cfg);
+    engine.onSpot(start + 29_500, 101.72);
+    const out = engine.evaluate(start + 29_500, features(101.72, "SELL"), cfg);
+    expect(out.eligible).toBe(true);
+    expect(out.side).toBe("SELL");
   });
 });
 
-describe("Gold Hunter Brain V4 one-trade-per-M1 and post-loss gating", () => {
-  it("8/9) second trade in same M1 blocked; new minute resets", () => {
+describe("Gold Hunter Brain V5 selector and exit controls", () => {
+  it("10) noise cannot create BUY/SELL ping-pong", () => {
     const sel = new GoldHunterStrategySelector();
-    const minuteStart = 6_000_000;
-
+    const minuteStart = 8_400_000;
     const first = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.82 },
-      receivedAtMs: minuteStart + 10_000
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.8 },
+      receivedAtMs: minuteStart + 10_000,
+      bookGeneration: 200
     });
     expect(first.newOpportunity).toBe(true);
-    expect(first.opportunity?.strategyVariant).toBe("M1_CANDLE_FLOW");
     sel.markOpportunityConsumed(first.opportunity!.opportunityId);
 
     const second = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.85 },
-      receivedAtMs: minuteStart + 20_000
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.81 },
+      receivedAtMs: minuteStart + 20_000,
+      bookGeneration: 200
     });
-    expect(second.newOpportunity).toBe(false);
-    expect(second.candidate?.antiChurnState?.rejectionReason).toBe(
-      "WAIT_CANDLE_ALREADY_TRADED"
-    );
+    expect(second.newOpportunity).toBe(true);
+    sel.markOpportunityConsumed(second.opportunity!.opportunityId);
 
-    const nextMinute = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.83 },
-      receivedAtMs: minuteStart + 70_000
+    const third = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.82 },
+      receivedAtMs: minuteStart + 30_000,
+      bookGeneration: 200
     });
-    expect(nextMinute.newOpportunity).toBe(true);
+    expect(third.newOpportunity).toBe(false);
+    expect(third.candidate?.antiChurnState?.rejectionReason).toBe(
+      "WAIT_CANDLE_ENTRY_LIMIT_REACHED"
+    );
   });
 
-  it("10) trade after LOSS on same M1 candle is blocked", () => {
+  it("11) failed pulse after entry triggers early exit", () => {
+    const cfg = defaultGhFastConfig();
+    const t = openGhAbcTrade({
+      tradeId: "v5-pulse-fail",
+      side: "BUY",
+      setup: "A_MOMENTUM_IGNITION",
+      entryTs: Date.now() - 8_500,
+      bid: 2600,
+      ask: 2600.05,
+      trailDistance: 0.12
+    });
+    const bid = 2599.98;
+    updateGhAbcOpenTrade(t, bid, bid + 0.05, cfg);
+    t.timeInTradeMs = 8_500;
+    const reason = evaluateGhAbcOpenExit({
+      trade: t,
+      f: features(bid + 0.025, "BUY", {
+        midVel250: -cfg.momentumVelMin * 2,
+        midVel500: -cfg.momentumVelMin * 2,
+        signedImbalance1s: -0.3,
+        efficiency1s: 0.2
+      }),
+      cfg,
+      dataOk: true
+    });
+    expect(reason).toBe("FAILED_PULSE_EXIT");
+  });
+
+  it("12) healthy pulse is not exited prematurely", () => {
+    const cfg = defaultGhFastConfig();
+    const t = openGhAbcTrade({
+      tradeId: "v5-pulse-healthy",
+      side: "SELL",
+      setup: "A_MOMENTUM_IGNITION",
+      entryTs: Date.now() - 4_500,
+      bid: 2600,
+      ask: 2600.05,
+      trailDistance: 0.12
+    });
+    const ask = 2599.8;
+    updateGhAbcOpenTrade(t, ask - 0.05, ask, cfg);
+    t.timeInTradeMs = 4_500;
+    const reason = evaluateGhAbcOpenExit({
+      trade: t,
+      f: features(2599.82, "SELL", {
+        midVel250: -cfg.momentumVelMin * 2,
+        midVel500: -cfg.momentumVelMin * 2,
+        signedImbalance1s: -0.25,
+        efficiency1s: 0.58
+      }),
+      cfg,
+      dataOk: true
+    });
+    expect(reason).toBeNull();
+  });
+
+  it("13) two-loss sequence forces fresh-regime reset", () => {
     const sel = new GoldHunterStrategySelector();
-    const minuteStart = 7_200_000;
+    const minuteStart = 9_000_000;
     const first = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.82 },
-      receivedAtMs: minuteStart + 10_000
+      receivedAtMs: minuteStart + 10_000,
+      bookGeneration: 300
     });
     expect(first.newOpportunity).toBe(true);
-    const oppId = first.opportunity!.opportunityId;
-
     sel.notifyTradeClosed({
       side: "BUY",
       setup: "A",
-      entryPrice: null,
+      entryPrice: 2600,
       result: "LOSS",
-      opportunityId: oppId,
-      closedAtMs: minuteStart + 20_000,
-      tradeId: "GH-D-loss-v4"
-    });
-    sel.processInjectedSelectionForTests({
-      selected: null,
-      receivedAtMs: minuteStart + 25_000
+      opportunityId: first.opportunity!.opportunityId,
+      tradeId: "v5-loss-1",
+      closedAtMs: minuteStart + 20_000
     });
 
-    const sameMinute = sel.processInjectedSelectionForTests({
-      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.81 },
-      receivedAtMs: minuteStart + 35_000
+    const second = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.83 },
+      receivedAtMs: minuteStart + 30_000,
+      bookGeneration: 300
     });
-    expect(sameMinute.newOpportunity).toBe(false);
-    expect(sameMinute.candidate?.antiChurnState?.rejectionReason).toBe(
-      "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED"
+    expect(second.newOpportunity).toBe(true);
+    sel.notifyTradeClosed({
+      side: "SELL",
+      setup: "A",
+      entryPrice: 2600,
+      result: "LOSS",
+      opportunityId: second.opportunity!.opportunityId,
+      tradeId: "v5-loss-2",
+      closedAtMs: minuteStart + 40_000
+    });
+
+    const blocked = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
+      receivedAtMs: minuteStart + 45_000,
+      bookGeneration: 300
+    });
+    expect(blocked.newOpportunity).toBe(false);
+    expect(blocked.candidate?.antiChurnState?.rejectionReason).toBe(
+      "WAIT_REGIME_RESET_AFTER_LOSSES"
     );
 
-    const nextMinute = sel.processInjectedSelectionForTests({
+    const freshRegime = sel.processInjectedSelectionForTests({
       selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.84 },
-      receivedAtMs: minuteStart + 90_000
+      receivedAtMs: minuteStart + 75_000,
+      bookGeneration: 301
     });
-    expect(nextMinute.newOpportunity).toBe(true);
+    expect(freshRegime.newOpportunity).toBe(true);
+  });
+
+  it("14) maximum two entries per M1 candle", () => {
+    const sel = new GoldHunterStrategySelector();
+    const minuteStart = 10_200_000;
+    const first = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "BUY", quality: 0.82 },
+      receivedAtMs: minuteStart + 10_000,
+      bookGeneration: 400
+    });
+    expect(first.newOpportunity).toBe(true);
+    sel.markOpportunityConsumed(first.opportunity!.opportunityId);
+
+    const second = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.83 },
+      receivedAtMs: minuteStart + 20_000,
+      bookGeneration: 400
+    });
+    expect(second.newOpportunity).toBe(true);
+    sel.markOpportunityConsumed(second.opportunity!.opportunityId);
+
+    const third = sel.processInjectedSelectionForTests({
+      selected: { setup: "A_MOMENTUM_IGNITION", side: "SELL", quality: 0.84 },
+      receivedAtMs: minuteStart + 30_000,
+      bookGeneration: 400
+    });
+    expect(third.newOpportunity).toBe(false);
+    expect(third.candidate?.antiChurnState?.rejectionReason).toBe(
+      "WAIT_CANDLE_ENTRY_LIMIT_REACHED"
+    );
   });
 });
 
@@ -423,10 +547,10 @@ describe("M1 tracker rollover and no look-ahead", () => {
     t.onMidPrice(m0 + 20_000, 101);
     t.onMidPrice(m0 + 50_000, 99);
     let snap = t.snapshot();
-    expect(snap.closed).toHaveLength(0); // no look-ahead close before next minute tick
+    expect(snap.closed).toHaveLength(0);
     expect(snap.current?.close).toBe(99);
 
-    t.onMidPrice(m0 + 65_000, 100.5); // first tick of minute 1 closes minute 0
+    t.onMidPrice(m0 + 65_000, 100.5);
     snap = t.snapshot();
     expect(snap.closed).toHaveLength(1);
     expect(snap.closed[0]?.open).toBe(100);

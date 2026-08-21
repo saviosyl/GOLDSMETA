@@ -62,14 +62,35 @@ export type GoldHunterSelectedCandidate = {
   m1CandleFlow?: {
     stage: string | null;
     waitReason: string | null;
+    regime?: string | null;
+    regimeEpoch?: number | null;
+    pulseId?: string | null;
+    pulseDirection?: "BUY" | "SELL" | null;
+    pulseStart?: number | null;
+    pulseExtreme?: number | null;
+    pulseDistance?: number | null;
+    pulseDurationSec?: number | null;
+    pulseEfficiency?: number | null;
+    retracementPct?: number | null;
+    baseHoldTicks?: number | null;
+    baseHoldDurationMs?: number | null;
+    continuationBreakLevel?: number | null;
     currentCandleStartMs: number | null;
     currentCandleAgeSec: number | null;
+    currentM1Open?: number | null;
+    currentM1High?: number | null;
+    currentM1Low?: number | null;
+    currentM1Displacement?: number | null;
     medianRange5: number | null;
     signalRange: number | null;
     directionalDisplacement: number | null;
     remainingExpectedRange: number | null;
+    recentNoise?: number | null;
+    remainingMovementBudget?: number | null;
     pullbackRatio: number | null;
     reclaimDistance: number | null;
+    pulseHealthAtEntry?: number | null;
+    entryQuality?: number;
     candleTrendScore: number;
     pullbackScore: number;
     microstructureScore: number;
@@ -219,6 +240,8 @@ type ActiveOpportunity = {
   consumed: boolean;
   breakoutReference: number | null;
   candleStartMs: number | null;
+  pulseId: string | null;
+  regimeEpoch: number | null;
 };
 
 /** B-specific anti-churn / regime state (does not gate A or C alone). */
@@ -338,9 +361,13 @@ export class GoldHunterStrategySelector {
   };
   private lossControllerEntry: LossControllerEntryState =
     emptyLossControllerEntryState();
-  private tradedCandleStartMs: number | null = null;
-  private lastLossTradeCandleStartMs: number | null = null;
+  private readonly entryCountsByCandle = new Map<number, number>();
+  private readonly consumedPulseIds = new Set<string>();
+  private regimeResetAfterLossesActive = false;
+  private regimeResetRequiredEpoch: number | null = null;
   private readonly opportunityCandleStart = new Map<string, number>();
+  private readonly opportunityPulseId = new Map<string, string>();
+  private readonly opportunityRegimeEpoch = new Map<string, number>();
 
   constructor(opts?: { depthFreshnessMs?: number }) {
     try {
@@ -405,9 +432,13 @@ export class GoldHunterStrategySelector {
       closedAtMs: null,
       structuralResetComplete: true
     };
-    this.tradedCandleStartMs = null;
-    this.lastLossTradeCandleStartMs = null;
+    this.entryCountsByCandle.clear();
+    this.consumedPulseIds.clear();
+    this.regimeResetAfterLossesActive = false;
+    this.regimeResetRequiredEpoch = null;
     this.opportunityCandleStart.clear();
+    this.opportunityPulseId.clear();
+    this.opportunityRegimeEpoch.clear();
   }
 
   onSpot(args: {
@@ -577,12 +608,6 @@ export class GoldHunterStrategySelector {
     ) {
       // Still refresh anti-churn identity on duplicate LOSS without re-counting R.
       if (args.result === "LOSS") {
-        if (args.opportunityId) {
-          const candleStart = this.opportunityCandleStart.get(args.opportunityId);
-          if (candleStart != null) {
-            this.lastLossTradeCandleStartMs = candleStart;
-          }
-        }
         this.lossReentry = {
           ...this.lossReentry,
           lastSide: args.side,
@@ -664,13 +689,18 @@ export class GoldHunterStrategySelector {
     }
 
     if (args.result === "LOSS") {
-      if (args.opportunityId) {
-        const candleStart = this.opportunityCandleStart.get(args.opportunityId);
-        if (candleStart != null) {
-          this.lastLossTradeCandleStartMs = candleStart;
-        }
-      }
       this.lossControllerEntry.consecutiveLosses += 1;
+      if (this.lossControllerEntry.consecutiveLosses >= 2) {
+        this.regimeResetAfterLossesActive = true;
+        const regimeEpochFromOpp =
+          args.opportunityId != null
+            ? this.opportunityRegimeEpoch.get(args.opportunityId)
+            : null;
+        this.regimeResetRequiredEpoch =
+          regimeEpochFromOpp ??
+          this.lastCandidateForDisplay?.m1CandleFlow?.regimeEpoch ??
+          this.regimeResetRequiredEpoch;
+      }
       if (
         cfg.smartLossControllerEnabled &&
         this.lossControllerEntry.consecutiveLosses >= cfg.slcLossStreakCount
@@ -1109,14 +1139,35 @@ export class GoldHunterStrategySelector {
     return {
       stage: flow.stage,
       waitReason: flow.waitReason,
+      regime: flow.regime,
+      regimeEpoch: flow.regimeEpoch,
+      pulseId: flow.pulseId,
+      pulseDirection: flow.pulseDirection,
+      pulseStart: flow.pulseStart,
+      pulseExtreme: flow.pulseExtreme,
+      pulseDistance: flow.pulseDistance,
+      pulseDurationSec: flow.pulseDurationSec,
+      pulseEfficiency: flow.pulseEfficiency,
+      retracementPct: flow.retracementPct,
+      baseHoldTicks: flow.baseHoldTicks,
+      baseHoldDurationMs: flow.baseHoldDurationMs,
+      continuationBreakLevel: flow.continuationBreakLevel,
       currentCandleStartMs: flow.currentCandleStartMs,
       currentCandleAgeSec: flow.currentCandleAgeSec,
+      currentM1Open: flow.currentM1Open,
+      currentM1High: flow.currentM1High,
+      currentM1Low: flow.currentM1Low,
+      currentM1Displacement: flow.currentM1Displacement,
       medianRange5: flow.medianRange5,
       signalRange: flow.signalRange,
       directionalDisplacement: flow.directionalDisplacement,
       remainingExpectedRange: flow.remainingExpectedRange,
+      recentNoise: flow.recentNoise,
+      remainingMovementBudget: flow.remainingMovementBudget,
       pullbackRatio: flow.pullbackRatio,
       reclaimDistance: flow.reclaimDistance,
+      pulseHealthAtEntry: flow.pulseHealthAtEntry,
+      entryQuality: flow.entryQuality,
       candleTrendScore: flow.candleTrendScore,
       pullbackScore: flow.pullbackScore,
       microstructureScore: flow.microstructureScore,
@@ -1134,16 +1185,22 @@ export class GoldHunterStrategySelector {
     if (letter !== "A" || !flow) return null;
     if (flow.waitReason) return flow.waitReason;
     const candleStart = flow.currentCandleStartMs;
-    if (candleStart == null) return "WAIT_CANDLE_DIRECTION_UNCLEAR";
-    if (this.tradedCandleStartMs != null && this.tradedCandleStartMs === candleStart) {
-      return "WAIT_CANDLE_ALREADY_TRADED";
+    if (candleStart == null) return "WAIT_NO_VALID_PULSE";
+    const entries = this.entryCountsByCandle.get(candleStart) ?? 0;
+    if (entries >= 2) {
+      return "WAIT_CANDLE_ENTRY_LIMIT_REACHED";
     }
-    if (
-      this.lossReentry.lastResult === "LOSS" &&
-      this.lastLossTradeCandleStartMs != null &&
-      this.lastLossTradeCandleStartMs === candleStart
-    ) {
-      return "WAIT_POST_LOSS_NEW_CANDLE_REQUIRED";
+    if (flow.pulseId && this.consumedPulseIds.has(flow.pulseId)) {
+      return "WAIT_PULSE_ALREADY_TRADED";
+    }
+    if (this.regimeResetAfterLossesActive) {
+      const epoch = flow.regimeEpoch ?? null;
+      const required = this.regimeResetRequiredEpoch;
+      if (epoch == null || required == null || epoch <= required) {
+        return "WAIT_REGIME_RESET_AFTER_LOSSES";
+      }
+      this.regimeResetAfterLossesActive = false;
+      this.regimeResetRequiredEpoch = null;
     }
     return null;
   }
@@ -1464,7 +1521,9 @@ export class GoldHunterStrategySelector {
       resyncGeneration: this.resyncGeneration,
       consumed: false,
       breakoutReference: breakoutDiagnostics?.breakoutReference ?? null,
-      candleStartMs: m1CandleFlow?.currentCandleStartMs ?? null
+      candleStartMs: m1CandleFlow?.currentCandleStartMs ?? null,
+      pulseId: m1CandleFlow?.pulseId ?? null,
+      regimeEpoch: m1CandleFlow?.regimeEpoch ?? null
     };
     if (m1CandleFlow?.currentCandleStartMs != null) {
       this.opportunityCandleStart.set(
@@ -1474,6 +1533,20 @@ export class GoldHunterStrategySelector {
       if (this.opportunityCandleStart.size > 500) {
         const oldest = this.opportunityCandleStart.keys().next().value;
         if (oldest != null) this.opportunityCandleStart.delete(oldest);
+      }
+    }
+    if (m1CandleFlow?.pulseId) {
+      this.opportunityPulseId.set(opportunityId, m1CandleFlow.pulseId);
+      if (this.opportunityPulseId.size > 500) {
+        const oldest = this.opportunityPulseId.keys().next().value;
+        if (oldest != null) this.opportunityPulseId.delete(oldest);
+      }
+    }
+    if (m1CandleFlow?.regimeEpoch != null) {
+      this.opportunityRegimeEpoch.set(opportunityId, m1CandleFlow.regimeEpoch);
+      if (this.opportunityRegimeEpoch.size > 500) {
+        const oldest = this.opportunityRegimeEpoch.keys().next().value;
+        if (oldest != null) this.opportunityRegimeEpoch.delete(oldest);
       }
     }
 
@@ -1533,7 +1606,23 @@ export class GoldHunterStrategySelector {
       this.lastCandidateForDisplay?.m1CandleFlow?.currentCandleStartMs ??
       null;
     if (candleStart != null) {
-      this.tradedCandleStartMs = candleStart;
+      const next = (this.entryCountsByCandle.get(candleStart) ?? 0) + 1;
+      this.entryCountsByCandle.set(candleStart, next);
+      if (this.entryCountsByCandle.size > 500) {
+        const oldest = this.entryCountsByCandle.keys().next().value;
+        if (oldest != null) this.entryCountsByCandle.delete(oldest);
+      }
+    }
+    const pulseId =
+      this.opportunityPulseId.get(signalId) ??
+      this.lastCandidateForDisplay?.m1CandleFlow?.pulseId ??
+      null;
+    if (pulseId) {
+      this.consumedPulseIds.add(pulseId);
+      if (this.consumedPulseIds.size > 1000) {
+        const oldest = this.consumedPulseIds.values().next().value;
+        if (oldest != null) this.consumedPulseIds.delete(oldest);
+      }
     }
     if (this.activeOpportunity?.opportunityId === signalId) {
       this.activeOpportunity.consumed = true;
@@ -1727,17 +1816,38 @@ export class GoldHunterStrategySelector {
               side: args.selected.side,
               waitReason: null,
               stage: "TRIGGERED",
+              regime: args.selected.side === "BUY" ? "TREND_UP" : "TREND_DOWN",
+              regimeEpoch: args.bookGeneration ?? 1,
+              pulseId: `test-pulse-${args.bookGeneration ?? 1}-${args.selected.side}`,
+              pulseDirection: args.selected.side,
+              pulseStart: (bid + ask) / 2 - (args.selected.side === "BUY" ? 0.5 : -0.5),
+              pulseExtreme: (bid + ask) / 2 + (args.selected.side === "BUY" ? 0.5 : -0.5),
+              pulseDistance: 1,
+              pulseDurationSec: 6,
+              pulseEfficiency: 0.8,
+              retracementPct: 32,
+              baseHoldTicks: 3,
+              baseHoldDurationMs: 1_600,
+              continuationBreakLevel: (bid + ask) / 2,
               currentCandleStartMs:
                 args.bookGeneration != null
                   ? args.bookGeneration * 60_000
                   : Math.floor(args.receivedAtMs / 60_000) * 60_000,
               currentCandleAgeSec: 20,
+              currentM1Open: (bid + ask) / 2 - 0.2,
+              currentM1High: (bid + ask) / 2 + 0.3,
+              currentM1Low: (bid + ask) / 2 - 0.3,
+              currentM1Displacement: args.selected.side === "BUY" ? 0.2 : -0.2,
               signalRange: 1,
               medianRange5: 1,
               directionalDisplacement: 0.2,
               remainingExpectedRange: 0.8,
+              recentNoise: 0.2,
+              remainingMovementBudget: 0.8,
               pullbackRatio: 0.3,
               reclaimDistance: 0.2,
+              pulseHealthAtEntry: 76,
+              entryQuality: 0.85,
               candleTrendScore: 0.9,
               pullbackScore: 0.85,
               microstructureScore: 1,
