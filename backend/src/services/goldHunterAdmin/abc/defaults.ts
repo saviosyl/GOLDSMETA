@@ -25,6 +25,7 @@ export function defaultGhFastConfig(
     depthFreshnessMs: 2000,
     friction: 0.06,
     safetyBuffer: 0.04,
+    // Broker hard stop remains emergency protection; V6 normal exits are earlier.
     hardStop: 0.55,
     profitLockActivateMfe: 0.18,
     profitLockFraction: 0.45,
@@ -40,20 +41,21 @@ export function defaultGhFastConfig(
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
     pullbackRetraceMax: 0.45,
-    // SMART_POSITION_MANAGER_V1 — unchanged in Brain V6.
+    // SMART_POSITION_MANAGER_V1 — V6 protects modest winners earlier while
+    // still leaving room for a genuine pulse to run.
     smartPositionManagerEnabled: true,
     spmTickSize: 0.01,
     spmMinStopDistance: 0.05,
-    spmProtectMfeR: 1.0,
-    spmProtect15MfeR: 1.5,
+    spmProtectMfeR: 0.6,
+    spmProtect15MfeR: 0.9,
     spmProtect15FloorR: 0.4,
-    spmLockMfeR: 2.0,
-    spmLockFloorR: 0.9,
-    spmRunnerMfeR: 3.0,
-    spmRunnerMinFloorR: 1.6,
-    spmRunnerTrailR: 1.25,
-    spmHarvestMinMfeR: 2.5,
-    spmHarvestMinRetraceR: 0.75,
+    spmLockMfeR: 1.25,
+    spmLockFloorR: 0.7,
+    spmRunnerMfeR: 1.8,
+    spmRunnerMinFloorR: 1.0,
+    spmRunnerTrailR: 0.65,
+    spmHarvestMinMfeR: 1.4,
+    spmHarvestMinRetraceR: 0.4,
     antiChurnLossMinMs: 30_000,
     antiChurnOppositeFlipMinMs: 30_000,
     // SMART_LOSS_CONTROLLER_V1 — Brain V6 economics:
@@ -66,11 +68,15 @@ export function defaultGhFastConfig(
     slcEarlyFailureMinConfirms: 2,
     slcSmallHarvestMinMfeR: 0.3,
     slcSmallHarvestMinSurrenderR: 0.08,
-    slcLossStreakCount: 3,
-    slcLossStreakResetMs: 60_000,
-    slcRollingCircuitBreakerR: 4.0,
-    slcRollingWindowTrades: 12,
-    slcCircuitBreakerResetMs: 60_000
+    // Two consecutive losses trigger a mandatory recovery window plus the
+    // selector's fresh-regime requirement before another entry can pass.
+    slcLossStreakCount: 2,
+    slcLossStreakResetMs: 120_000,
+    // Stop a broader loss cluster earlier than V5; recovery still requires
+    // time + structural reset + renewed directional confirmation.
+    slcRollingCircuitBreakerR: 2.0,
+    slcRollingWindowTrades: 8,
+    slcCircuitBreakerResetMs: 180_000
   };
   return { ...base, ...over, rearmFloorMs: rearm };
 }
