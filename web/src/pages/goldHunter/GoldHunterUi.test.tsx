@@ -1,559 +1,387 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import type { GoldHunterStatusResponse, GoldHunterTrade } from "../../lib/api";
 import { GoldHunterShell } from "./GoldHunterShell";
-import { GoldHunterDashboardPage } from "./GoldHunterDashboardPage";
-import { GoldHunterControlPage } from "./GoldHunterControlPage";
-import { GoldHunterMonitorPage } from "./GoldHunterMonitorPage";
-import { GoldHunterPerformancePage } from "./GoldHunterPerformancePage";
 
-const goldHunterUpdateConfig = vi.fn();
+const apiMocks = vi.hoisted(() => ({
+  goldHunterStatus: vi.fn(),
+  goldHunterTrades: vi.fn(),
+  goldHunterUpdateConfig: vi.fn()
+}));
 
-const status = {
-  product: "GOLD_HUNTER" as const,
-  executionMode: "DEMO_ONLY" as const,
-  liveExecutionEnabled: false as const,
-  runtimeSha: "testsha",
-  config: {
-    allocatedCapitalEur: 5000,
-    riskPerTradePct: 1,
-    dailyLossLimitPct: 5,
-    maxOpenTrades: 1,
-    demoAutoTradeEnabled: false,
-    pauseNewEntries: false,
-    emergencyStopActive: false,
-    mode: "RESEARCH" as const,
-    updatedAt: "2026-08-15T00:00:00.000Z",
-    updatedBy: "owner-1"
-  },
-  modeLabel: {
-    primary: "RESEARCH",
-    secondary: "PAPER ONLY",
-    tertiary: "NO BROKER EXECUTION"
-  },
-  market: {
-    symbol: "XAUUSD" as const,
-    bid: 2390.1,
-    ask: 2390.4,
-    mid: 2390.25,
-    spread: 0.3,
-    marketStatus: "CLOSED",
-    freshness: "STALE",
-    ageMs: 90_000,
-    feedState: "STALE",
-    updatedAt: "2026-08-15T00:00:00.000Z"
-  },
-  broker: {
-    provider: "cTrader" as const,
-    connected: true,
-    environment: "DEMO" as const,
-    authState: "AUTHORISED",
-    authorised: true,
-    accountMasked: "****1234",
-    brokerName: "Pepperstone",
-    balance: 50000,
-    currency: "EUR",
-    equity: 49985.2,
-    marginUsed: 120,
-    freeMargin: 49865.2,
-    openPositionCount: 0,
-    snapshotAgeMs: 1200,
-    lastSyncAt: "2026-08-15T22:00:00.000Z",
-    snapshotSource: "AUTHORITATIVE_DEMO",
-    demoOrderSubmissionEnabled: true,
-    validForRisk: true
-  },
-  capital: {
-    allocatedEur: 5000,
-    committedEur: 0,
-    availableEur: 5000,
-    todayPnlEur: 0,
-    riskBudgetEur: 50,
-    dailyLossBudgetEur: 250,
-    committedKnown: true
-  },
-  health: {
-    marketFeed: "STALE",
-    transport: "CONNECTED",
-    depth: "UNAVAILABLE",
-    strategy: "WAITING_FOR_MARKET",
-    risk: "NORMAL",
-    autoTrade: "OFF"
-  },
-  strategyVersions: {
-    brainVersion: "GOLD_HUNTER_BRAIN_V6",
-    softwareRevision: "GH_BRAIN_V6_PULSE_GUARD_SCALPER_2026.08.21-01",
-    softwareRevisionAt: "2026-08-21T10:30:00Z",
-    positionManagerVersion: "SMART_POSITION_MANAGER_V1",
-    lossControllerVersion: "SMART_LOSS_CONTROLLER_V1",
-    rollingRealisedR: 0,
-    rollingSampleCount: 0,
-    lossCircuitBreakerActive: false,
-    circuitBreakerReason: null,
-    lossStreakGuardActive: false,
-    consecutiveLosses: 0,
-    unknownRealisedRLossCount: 0,
-    rollingUnknownRTradeCount: 0,
-    lastUnknownRTradeId: null,
-    lastUnknownRReason: null,
-    consecutiveUnknownRLosses: 0,
-    unknownRGuardActive: false,
-    entryIntegrityHealthy: true,
-    entryIntegrityRecoveredAtMs: null,
-    lastEntryIntegrityRecoveryReason: null,
-    lastClosedTradeId: null,
-    updatedAt: null,
-    workerRevision: null,
-    telemetrySource: "API_PROCESS_FALLBACK" as const,
-    telemetryAgeMs: null,
-    reentryState: null,
-    bReentryState: null
-  },
-  strategyPipeline: {
-    connected: false,
-    spot: "CLOSED",
-    depth: "UNAVAILABLE",
-    selector: "NOT_CONNECTED",
-    state: "SELECTOR_NOT_CONNECTED",
-    lastSelectedCandidate: null,
-    lastObservationAt: null,
-    normalizationVersion: "CTRADER_NORMALIZED_V1",
-    protectionGeometryConnected: true
-  },
-  arming: {
-    ready: false,
-    blockers: ["STRATEGY_SELECTOR_NOT_CONNECTED"],
-    strategySelectorConnected: false
-  },
-  gates: {
-    ok: false,
-    blockers: ["WAIT — AUTOTRADE OFF", "WAIT — MARKET CLOSED"],
-    executionMode: "DEMO_ONLY" as const,
-    liveExecutionEnabled: false as const
-  },
-  openTrades: [],
-  unmatchedDemoPositions: [],
-  performanceToday: {
-    netPnl: 0,
-    trades: 0,
-    wins: 0,
-    losses: 0,
-    winRate: null,
-    profitFactor: null,
-    avgWin: null,
-    avgLoss: null,
-    expectancy: null,
-    maxDrawdown: null
-  },
-  audit: [],
-  signal: {
-    present: false,
-    setup: null,
-    side: null,
-    signalId: null,
-    quality: null,
-    signalTimestamp: null,
-    depthValidity: null,
-    consumed: false,
-    ageMs: null,
-    note: "WAIT — NO SETUP SELECTED"
-  },
-  execution: {
-    autoTradeEnabled: false,
-    lastOpportunityId: null,
-    lastSignalId: null,
-    lastSetup: null,
-    lastSide: null,
-    lastOpportunityStartedAt: null,
-    lastAttemptAt: null,
-    lastAttemptCompletedAt: null,
-    state: "IDLE",
-    blocker: null,
-    detail: null,
-    outcome: null,
-    tradeId: null,
-    brokerOrderIdMaskedOrSafe: null,
-    brokerPositionIdMaskedOrSafe: null,
-    attemptCountForOpportunity: 0,
-    queue: {
-      pending: 0,
-      dropped: 0,
-      completed: 0,
-      maxPendingSeen: 0
-    }
-  }
-};
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({
     account: { role: "OWNER", uid: "owner-1" },
     user: { uid: "owner-1" },
-    api: {
-      goldHunterStatus: vi.fn(async () => status),
-      goldHunterConfig: vi.fn(async () => ({
-        config: status.config,
-        executionMode: "DEMO_ONLY",
-        liveExecutionEnabled: false
-      })),
-      goldHunterUpdateConfig,
-      goldHunterTrades: vi.fn(async () => ({
-        trades: [],
-        strategy: "GOLD_HUNTER",
-        environment: "DEMO"
-      })),
-      goldHunterPerformance: vi.fn(async () => ({
-        range: "today",
-        demo: status.performanceToday,
-        paper: null,
-        paperNote: "separate"
-      })),
-      goldHunterRefreshAccount: vi.fn(async () => status)
-    }
+    api: apiMocks
   })
 }));
 
-function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/gold-hunter" element={<GoldHunterShell />}>
-          <Route index element={<GoldHunterDashboardPage />} />
-          <Route path="control" element={<GoldHunterControlPage />} />
-          <Route path="monitor" element={<GoldHunterMonitorPage />} />
-          <Route path="performance" element={<GoldHunterPerformancePage />} />
-        </Route>
-      </Routes>
-    </MemoryRouter>
-  );
+function makeTrade(overrides: Partial<GoldHunterTrade> = {}): GoldHunterTrade {
+  return {
+    goldHunterTradeId: "GH-D-test-1",
+    strategy: "GOLD_HUNTER",
+    environment: "DEMO",
+    setup: "A",
+    side: "BUY",
+    signalTs: "2026-08-21T13:46:59.000Z",
+    orderTs: "2026-08-21T13:47:10.000Z",
+    fillTs: "2026-08-21T13:47:11.000Z",
+    closeTs: "2026-08-21T13:47:13.000Z",
+    entry: 4590.26,
+    exit: 4590.06,
+    stop: 4589.7,
+    entrySpread: 0.08,
+    durationMs: 2000,
+    mfe: 0.04,
+    mae: 0.2,
+    grossPnlEur: -1.54,
+    netPnlEur: -2.08,
+    result: "LOSS",
+    exitReason: "FAILED_PULSE_EXIT",
+    brokerOrderId: "order-1",
+    brokerPositionId: "position-1",
+    status: "CLOSED",
+    ...overrides
+  };
 }
 
-describe("Gold Hunter UI", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    status.config.demoAutoTradeEnabled = false;
-    status.arming = {
-      ready: false,
-      blockers: ["STRATEGY_SELECTOR_NOT_CONNECTED"],
-      strategySelectorConnected: false
-    };
-    status.gates = {
-      ok: false,
-      blockers: ["WAIT — AUTOTRADE OFF", "WAIT — MARKET CLOSED"],
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    };
-    status.openTrades = [];
-    status.market.marketStatus = "CLOSED";
-    goldHunterUpdateConfig.mockImplementation(async () => ({
-      config: status.config,
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    }));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-  });
-
-  it("renders dashboard with allocation and market-closed wait", async () => {
-    renderAt("/gold-hunter");
-    await waitFor(() => expect(screen.getByTestId("gh-dashboard")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-allocation")).toHaveTextContent("5,000");
-    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("DEMO OFF");
-    expect(screen.getByTestId("gh-demo-balance")).toHaveTextContent("50,000");
-    expect(screen.getByTestId("gh-demo-equity")).toHaveTextContent("49,985");
-    expect(screen.getByTestId("gh-account-refresh")).toBeInTheDocument();
-    expect(screen.getByTestId("gh-trading-brain-value")).toHaveTextContent(
-      "V6 · GH-B6-20260821-01"
-    );
-    expect(screen.getByTestId("gh-strategy-value")).toHaveTextContent(
-      "Pulse Guard Scalper"
-    );
-    expect(screen.getByTestId("gh-web-build-label")).toHaveTextContent("Web Build");
-    expect(screen.getByTestId("gh-web-build-value")).toHaveTextContent(/[a-z0-9]{7}|dev/i);
-  });
-
-  it("shows Demo AutoTrade card as NOT READY with LIVE LOCKED and exact blocker", async () => {
-    renderAt("/gold-hunter");
-    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-card")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("NOT READY");
-    expect(screen.getByText("LIVE LOCKED")).toBeInTheDocument();
-    expect(screen.getByTestId("gh-demo-autotrade-card")).toHaveTextContent(
-      "Cannot start yet: STRATEGY_SELECTOR_NOT_CONNECTED"
-    );
-    expect(screen.getByTestId("gh-dashboard-start-demo-auto")).toBeInTheDocument();
-  });
-
-  it("shows READY TO ARM and arms via confirmDemoAutoTrade=true only", async () => {
-    status.arming = {
+function makeStatus(): GoldHunterStatusResponse {
+  return {
+    product: "GOLD_HUNTER",
+    executionMode: "DEMO_ONLY",
+    liveExecutionEnabled: false,
+    runtimeSha: "api-00121-yoc",
+    config: {
+      allocatedCapitalEur: 500,
+      riskPerTradePct: 1,
+      dailyLossLimitPct: 5,
+      maxOpenTrades: 1,
+      demoAutoTradeEnabled: false,
+      pauseNewEntries: false,
+      emergencyStopActive: false,
+      mode: "RESEARCH",
+      updatedAt: "2026-08-21T13:47:37.000Z",
+      updatedBy: "owner-1"
+    },
+    modeLabel: {
+      primary: "DEMO AUTOTRADE",
+      secondary: "CTRADER DEMO",
+      tertiary: "CONNECTED"
+    },
+    market: {
+      symbol: "XAUUSD",
+      bid: 4589.14,
+      ask: 4589.26,
+      mid: 4589.2,
+      spread: 0.12,
+      marketStatus: "OPEN",
+      freshness: "LIVE",
+      ageMs: 609,
+      feedState: "LIVE",
+      updatedAt: "2026-08-21T13:39:40.280Z"
+    },
+    broker: {
+      provider: "cTrader",
+      connected: true,
+      environment: "DEMO",
+      authState: "AUTHORISED",
+      authorised: true,
+      accountMasked: "48…10",
+      brokerName: "Pepperstone",
+      balance: 49078.76,
+      currency: "EUR",
+      equity: 49078.76,
+      marginUsed: 0,
+      freeMargin: 49078.76,
+      openPositionCount: 0,
+      snapshotAgeMs: 10644,
+      lastSyncAt: "2026-08-21T13:39:29.796Z",
+      snapshotSource: "AUTHORITATIVE_DEMO",
+      demoOrderSubmissionEnabled: true,
+      validForRisk: true
+    },
+    capital: {
+      allocatedEur: 500,
+      committedEur: 0,
+      availableEur: 500,
+      todayPnlEur: -82.96,
+      riskBudgetEur: 5,
+      dailyLossBudgetEur: 25,
+      committedKnown: true
+    },
+    health: {
+      marketFeed: "LIVE",
+      transport: "CONNECTED",
+      depth: "VALID",
+      strategy: "WAITING",
+      risk: "NORMAL",
+      autoTrade: "ACTIVE"
+    },
+    strategyVersions: {
+      brainVersion: "GOLD_HUNTER_BRAIN_V3",
+      softwareRevision: "GH_OPEN_FILL_MONOTONIC_2026.08.20-02",
+      softwareRevisionAt: "2026-08-20T21:50:00Z",
+      positionManagerVersion: "SMART_POSITION_MANAGER_V1",
+      lossControllerVersion: "SMART_LOSS_CONTROLLER_V1",
+      rollingRealisedR: -0.4,
+      rollingSampleCount: 3,
+      lossCircuitBreakerActive: false,
+      circuitBreakerReason: null,
+      lossStreakGuardActive: false,
+      consecutiveLosses: 1,
+      unknownRealisedRLossCount: 0,
+      rollingUnknownRTradeCount: 0,
+      lastUnknownRTradeId: null,
+      lastUnknownRReason: null,
+      consecutiveUnknownRLosses: 0,
+      unknownRGuardActive: false,
+      entryIntegrityHealthy: true,
+      entryIntegrityRecoveredAtMs: null,
+      lastEntryIntegrityRecoveryReason: null,
+      lastClosedTradeId: "GH-D-test-1",
+      updatedAt: "2026-08-21T13:39:40.000Z",
+      workerRevision: "goldmeta-quote-worker-00057-98t",
+      telemetrySource: "QUOTE_WORKER",
+      telemetryAgeMs: 1000,
+      reentryState: null,
+      bReentryState: null
+    },
+    strategyPipeline: {
+      connected: true,
+      spot: "LIVE",
+      depth: "VALID",
+      selector: "CONNECTED",
+      state: "EVALUATING",
+      lastSelectedCandidate: null,
+      lastObservationAt: "2026-08-21T13:39:40.280Z",
+      normalizationVersion: "CTRADER_NORMALIZED_V1",
+      protectionGeometryConnected: true
+    },
+    arming: {
       ready: true,
       blockers: [],
       strategySelectorConnected: true
-    };
-    status.gates = {
+    },
+    gates: {
       ok: false,
-      blockers: ["WAIT — AUTOTRADE OFF"],
+      blockers: ["WAIT — NO SETUP SELECTED"],
       executionMode: "DEMO_ONLY",
       liveExecutionEnabled: false
-    };
-    status.market.marketStatus = "OPEN";
-    renderAt("/gold-hunter");
-    await waitFor(() => expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO ARM"));
-    fireEvent.click(screen.getByTestId("gh-dashboard-start-demo-auto"));
-    await waitFor(() => expect(goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
-    expect(goldHunterUpdateConfig).toHaveBeenCalledWith({
+    },
+    openTrades: [],
+    unmatchedDemoPositions: [],
+    performanceToday: {
+      netPnl: -82.96,
+      trades: 19,
+      wins: 1,
+      losses: 18,
+      winRate: 1 / 19,
+      profitFactor: 0.01,
+      avgWin: 1.23,
+      avgLoss: -4.68,
+      expectancy: -4.37,
+      maxDrawdown: 82.96
+    },
+    audit: [],
+    signal: {
+      present: false,
+      setup: null,
+      side: null,
+      signalId: null,
+      quality: null,
+      signalTimestamp: null,
+      depthValidity: "DEPTH_VALID",
+      consumed: false,
+      ageMs: null,
+      note: "WAIT — NO SETUP SELECTED"
+    },
+    execution: {
+      autoTradeEnabled: false,
+      lastOpportunityId: "GH-OPP-test",
+      lastSignalId: "GH-OPP-test",
+      lastSetup: "A",
+      lastSide: "SELL",
+      lastOpportunityStartedAt: "2026-08-20T22:15:03.341Z",
+      lastAttemptAt: "2026-08-20T22:15:03.367Z",
+      lastAttemptCompletedAt: "2026-08-20T22:15:03.367Z",
+      state: "AUTOTRADE_OFF",
+      blocker: "WAIT — AUTOTRADE OFF",
+      detail: "demo_auto_trade_disabled",
+      outcome: null,
+      tradeId: null,
+      brokerOrderIdMaskedOrSafe: null,
+      brokerPositionIdMaskedOrSafe: null,
+      attemptCountForOpportunity: 1,
+      queue: {
+        pending: 0,
+        dropped: 0,
+        completed: 31,
+        maxPendingSeen: 1
+      }
+    }
+  };
+}
+
+let currentStatus: GoldHunterStatusResponse;
+let currentTrades: GoldHunterTrade[];
+
+function renderConsole() {
+  return render(<GoldHunterShell />);
+}
+
+async function waitForConsole() {
+  await waitFor(() =>
+    expect(screen.getByTestId("gold-hunter-test-page")).toBeInTheDocument()
+  );
+}
+
+describe("Gold Hunter V6 single-page test console", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentStatus = makeStatus();
+    currentTrades = [makeTrade()];
+    apiMocks.goldHunterStatus.mockImplementation(async () => currentStatus);
+    apiMocks.goldHunterTrades.mockImplementation(async () => ({
+      trades: currentTrades,
+      strategy: "GOLD_HUNTER",
+      environment: "DEMO"
+    }));
+    apiMocks.goldHunterUpdateConfig.mockResolvedValue({
+      config: currentStatus.config,
+      executionMode: "DEMO_ONLY",
+      liveExecutionEnabled: false
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+  });
+
+  it("renders the one-page test console with live market, worker and WAIT reason", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText("XAUUSD Demo AutoTrade")).toBeInTheDocument();
+    expect(screen.getByText("4589.20")).toBeInTheDocument();
+    expect(screen.getByText("WAIT — NO SETUP SELECTED")).toBeInTheDocument();
+    expect(screen.getByText("goldmeta-quote-worker-00057-98t")).toBeInTheDocument();
+    expect(screen.getByText("Pulse Guard Scalper")).toBeInTheDocument();
+    expect(screen.getAllByText("CONNECTED").length).toBeGreaterThan(0);
+  });
+
+  it("flags the stale V3 API identity without presenting it as the active test brain", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText(/API identity display is stale/)).toHaveTextContent(
+      "GOLD_HUNTER_BRAIN_V3"
+    );
+    expect(screen.getByText(/API identity display is stale/)).toHaveTextContent(
+      "V6 · GH-B6-20260821-01 · Pulse Guard Scalper"
+    );
+  });
+
+  it("shows Demo-only safety state and no Live enable control", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText("DEMO OFF")).toBeInTheDocument();
+    expect(screen.getByText(/DEMO ONLY · LIVE LOCKED/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enable live/i })).not.toBeInTheDocument();
+  });
+
+  it("enables Demo only after confirmation and sends the required confirmation flag", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable Demo" }));
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
+    expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({
       demoAutoTradeEnabled: true,
       confirmDemoAutoTrade: true
     });
   });
 
-  it("treats NO SETUP SELECTED as ARMED — WAITING FOR VALID SIGNAL", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.arming = {
-      ready: true,
-      blockers: [],
-      strategySelectorConnected: true
+  it("turns Demo off directly when Demo AutoTrade is active", async () => {
+    currentStatus.config.demoAutoTradeEnabled = true;
+    currentStatus.execution = {
+      ...currentStatus.execution!,
+      autoTradeEnabled: true,
+      state: "WAITING_FOR_SIGNAL",
+      blocker: "WAIT — NO SETUP SELECTED",
+      detail: null
     };
-    status.gates = {
-      ok: false,
-      blockers: ["WAIT — NO SETUP SELECTED"],
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    };
-    status.market.marketStatus = "OPEN";
-    renderAt("/gold-hunter");
+
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText("DEMO ON")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Turn Demo OFF" }));
+
+    await waitFor(() => expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
+    expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ demoAutoTradeEnabled: false });
+  });
+
+  it("keeps pause and emergency-stop controls explicit and Demo-only", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause Entries" }));
     await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "ARMED — WAITING FOR VALID SIGNAL"
-      )
+      expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ pauseNewEntries: true })
     );
-    expect(screen.queryByText(/TEMPORARILY BLOCKED/)).not.toBeInTheDocument();
-  });
 
-  it("shows ARMED — WAITING FOR VALID SIGNAL and can stop Demo AutoTrade", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.arming = {
-      ready: true,
-      blockers: [],
-      strategySelectorConnected: true
-    };
-    status.gates = {
-      ok: true,
-      blockers: [],
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    };
-    status.market.marketStatus = "OPEN";
-    renderAt("/gold-hunter");
+    apiMocks.goldHunterUpdateConfig.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Emergency Stop" }));
+    expect(window.confirm).toHaveBeenCalled();
     await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "ARMED — WAITING FOR VALID SIGNAL"
-      )
-    );
-    fireEvent.click(screen.getByTestId("gh-dashboard-stop-demo-auto"));
-    await waitFor(() => expect(goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
-    expect(goldHunterUpdateConfig).toHaveBeenCalledWith({ demoAutoTradeEnabled: false });
-  });
-
-  it("shows ARMED — TEMPORARILY BLOCKED with exact gate blocker", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.gates = {
-      ok: false,
-      blockers: ["WAIT — SPREAD TOO WIDE"],
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    };
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "ARMED — TEMPORARILY BLOCKED"
-      )
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-card")).toHaveTextContent(
-      "No new order right now: WAIT — SPREAD TOO WIDE"
+      expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ emergencyStopActive: true })
     );
   });
 
-  it("surfaces DAILY LOSS LIMIT before arming even when arming.ready=true", async () => {
-    status.config.demoAutoTradeEnabled = false;
-    status.arming = {
-      ready: true,
-      blockers: [],
-      strategySelectorConnected: true
-    };
-    status.gates = {
-      ok: false,
-      blockers: [
-        "WAIT — AUTOTRADE OFF",
-        "WAIT — DAILY LOSS LIMIT",
-        "WAIT — NO SETUP SELECTED"
-      ],
-      executionMode: "DEMO_ONLY",
-      liveExecutionEnabled: false
-    };
-    status.market.marketStatus = "OPEN";
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("READY TO ARM")
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-hint")).toHaveTextContent(
-      "BLOCKED — DAILY LOSS LIMIT"
-    );
-    expect(screen.getByTestId("gh-primary-wait")).toHaveTextContent("DAILY LOSS LIMIT");
-    expect(screen.getByTestId("gh-demo-autotrade-hint")).not.toHaveTextContent("AUTOTRADE OFF");
+  it("shows the open trade separately from recent closed results", async () => {
+    const open = makeTrade({
+      goldHunterTradeId: "GH-D-open",
+      side: "SELL",
+      entry: 4577.97,
+      exit: null,
+      closeTs: null,
+      netPnlEur: null,
+      grossPnlEur: null,
+      result: "OPEN",
+      exitReason: null,
+      status: "FILLED"
+    });
+    currentStatus.openTrades = [open];
+    currentTrades = [open, makeTrade()];
+
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText("Trade in progress")).toBeInTheDocument();
+    expect(screen.getAllByText("GH-D-open").length).toBeGreaterThan(0);
+    expect(screen.getByText("GH-D-test-1 · Setup A")).toBeInTheDocument();
+    expect(screen.getByText("FAILED_PULSE_EXIT")).toBeInTheDocument();
   });
 
-  it("shows RECONCILING DEMO ENTRY for PENDING_RECONCILIATION without broker open", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.broker.openPositionCount = 0;
-    status.broker.marginUsed = 0;
-    status.openTrades = [
-      {
-        goldHunterTradeId: "GH-D-ac23097e",
-        setup: "A",
-        side: "SELL",
-        status: "PENDING_RECONCILIATION",
-        netPnlEur: null,
-        entry: null,
-        stop: null,
-        brokerPositionId: null
-      }
-    ] as typeof status.openTrades;
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "RECONCILING DEMO ENTRY"
-      )
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-hint")).toHaveTextContent(
-      "Order transmission outcome is being verified with cTrader"
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-state")).not.toHaveTextContent(
-      "IN DEMO TRADE"
-    );
+  it("shows compact performance metrics needed for V6 forward testing", async () => {
+    renderConsole();
+    await waitForConsole();
+
+    expect(screen.getByText("Today P/L").parentElement).toHaveTextContent("€-82.96");
+    expect(screen.getByText("Trades").parentElement).toHaveTextContent("19");
+    expect(screen.getByText("Wins / Losses").parentElement).toHaveTextContent("1 / 18");
+    expect(screen.getByText("Avg loss").parentElement).toHaveTextContent("€-4.68");
   });
 
-  it("keeps RECONCILING DEMO ENTRY when account has unrelated open positions", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.broker.openPositionCount = 1;
-    status.broker.marginUsed = 50;
-    status.openTrades = [
-      {
-        goldHunterTradeId: "GH-D-ac23097e",
-        setup: "A",
-        side: "SELL",
-        status: "PENDING_RECONCILIATION",
-        netPnlEur: null,
-        entry: null,
-        stop: null,
-        brokerPositionId: null
-      }
-    ] as typeof status.openTrades;
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "RECONCILING DEMO ENTRY"
-      )
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-state")).not.toHaveTextContent(
-      "IN DEMO TRADE"
-    );
-  });
+  it("uses selector depth for the health panel instead of the stale legacy health field", async () => {
+    currentStatus.strategyPipeline!.depth = "VALID";
+    currentStatus.health.depth = "CROSSED";
 
-  it("shows IN DEMO TRADE when an open Gold Hunter position exists", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.broker.openPositionCount = 1;
-    status.broker.marginUsed = 120;
-    status.openTrades = [
-      {
-        goldHunterTradeId: "GH-D-1",
-        setup: "A",
-        side: "BUY",
-        status: "FILLED",
-        netPnlEur: 0,
-        entry: 2400,
-        stop: 2399.45,
-        brokerPositionId: "pos-matched-1"
-      }
-    ] as typeof status.openTrades;
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent("IN DEMO TRADE")
-    );
-  });
+    renderConsole();
+    await waitForConsole();
 
-  it("shows RECONCILING DEMO CLOSE for CLOSE_REQUESTED without claiming active management", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.broker.openPositionCount = 0;
-    status.broker.marginUsed = 0;
-    status.openTrades = [
-      {
-        goldHunterTradeId: "GH-D-5194a263",
-        setup: "B",
-        side: "BUY",
-        status: "CLOSE_REQUESTED",
-        netPnlEur: null,
-        entry: 4415.27,
-        stop: 4415.93
-      }
-    ] as typeof status.openTrades;
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "RECONCILING DEMO CLOSE"
-      )
-    );
-    expect(screen.getByTestId("gh-demo-autotrade-hint")).not.toHaveTextContent(
-      "active cTrader DEMO position and is managing it"
-    );
-  });
-
-  it("shows CLOSE SETTLEMENT PENDING when broker is flat and local awaits deal P/L", async () => {
-    status.config.demoAutoTradeEnabled = true;
-    status.broker.openPositionCount = 0;
-    status.openTrades = [
-      {
-        goldHunterTradeId: "GH-D-settle",
-        setup: "A",
-        side: "BUY",
-        status: "CLOSE_ACCEPTED_PENDING_SETTLEMENT",
-        netPnlEur: null,
-        entry: 2400,
-        stop: 2399.45
-      }
-    ] as typeof status.openTrades;
-    renderAt("/gold-hunter");
-    await waitFor(() =>
-      expect(screen.getByTestId("gh-demo-autotrade-state")).toHaveTextContent(
-        "CLOSE SETTLEMENT PENDING"
-      )
-    );
-  });
-
-  it("does not call updateConfig when Start confirmation is cancelled", async () => {
-    status.arming = {
-      ready: true,
-      blockers: [],
-      strategySelectorConnected: true
-    };
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderAt("/gold-hunter");
-    await waitFor(() => expect(screen.getByTestId("gh-dashboard-start-demo-auto")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("gh-dashboard-start-demo-auto"));
-    expect(goldHunterUpdateConfig).not.toHaveBeenCalled();
-  });
-
-  it("renders control with arm confirmation flow", async () => {
-    renderAt("/gold-hunter/control");
-    await waitFor(() => expect(screen.getByTestId("gh-control")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-arm-open")).toBeInTheDocument();
-  });
-
-  it("renders monitor wait reasons", async () => {
-    renderAt("/gold-hunter/monitor");
-    await waitFor(() => expect(screen.getByTestId("gh-monitor")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-monitor-wait")).toHaveTextContent("DEMO OFF");
-  });
-
-  it("renders performance empty demo history", async () => {
-    renderAt("/gold-hunter/performance");
-    await waitFor(() => expect(screen.getByTestId("gh-performance")).toBeInTheDocument());
-    expect(screen.getByTestId("gh-no-trades")).toBeInTheDocument();
+    expect(screen.getByText("Depth").parentElement).toHaveTextContent("VALID");
+    expect(screen.getByText("Depth").parentElement).not.toHaveTextContent("CROSSED");
   });
 });
