@@ -1,6 +1,6 @@
 /**
  * Frozen GOLD_HUNTER FAST observation config.
- * DO NOT retune thresholds during live-shadow soak collection.
+ * DO NOT retune thresholds during a single Demo evaluation run.
  */
 import { createHash } from "node:crypto";
 import { defaultGhFastConfig } from "./defaults";
@@ -10,10 +10,8 @@ import {
   GOLD_HUNTER_FAST_STRATEGY_VERSION
 } from "./versions";
 
-/** Canonical frozen soak config — identical to current conservative defaults. */
+/** Canonical frozen config — identical to the current defaults for this brain. */
 export function frozenGhFastSoakConfig(): GhFastConfig {
-  // Explicit freeze: no overrides. Changing defaults.ts without bumping
-  // ENGINE_VERSION / SHA is a process violation during soak.
   return defaultGhFastConfig({});
 }
 
@@ -25,7 +23,7 @@ export function hashGhFastConfig(cfg: GhFastConfig): string {
 export type GhFastFrozenIdentity = {
   engineVersion: typeof GOLD_HUNTER_FAST_ENGINE_VERSION;
   strategyVersion: typeof GOLD_HUNTER_FAST_STRATEGY_VERSION;
-  soakLabel: "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO";
+  soakLabel: "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO";
   configSha256: string;
   config: GhFastConfig;
   shadowOnly: true;
@@ -43,7 +41,7 @@ export function getFrozenGhFastIdentity(): GhFastFrozenIdentity {
   cached = {
     engineVersion: GOLD_HUNTER_FAST_ENGINE_VERSION,
     strategyVersion: GOLD_HUNTER_FAST_STRATEGY_VERSION,
-    soakLabel: "BRAIN_V5_PULSE_STRUCTURE_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO",
+    soakLabel: "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO",
     configSha256: hashGhFastConfig(config),
     config,
     shadowOnly: true,
@@ -55,15 +53,14 @@ export function getFrozenGhFastIdentity(): GhFastFrozenIdentity {
   return cached;
 }
 
-/** Test helper — do not use in production soak path. */
+/** Test helper — do not use in production path. */
 export function resetFrozenGhFastIdentityForTests(): void {
   cached = null;
 }
 
 /**
- * Shadow qualification keeps the Brain V2/V3-independent legacy exit path frozen.
- * Demo forward uses SMART_POSITION_MANAGER_V1 + SMART_LOSS_CONTROLLER_V1
- * via default config.
+ * Shadow qualification keeps legacy exits disabled for comparison.
+ * Demo forward uses SMART_POSITION_MANAGER_V1 + SMART_LOSS_CONTROLLER_V1.
  */
 export function frozenGhFastShadowExitConfig(): GhFastConfig {
   return {
