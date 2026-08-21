@@ -31,19 +31,16 @@ export function defaultGhFastConfig(
     trailDistance: 0.12,
     depthTopN: 5,
     minSetupQuality: 0.55,
-    // Brain V2 B floor: mid of 0.68–0.72. Above A/C (0.55) so B must earn quality
-    // from displacement/velocity/efficiency/depth — not a large base contribution.
+    // Brain V2 B floor: retained for shadow/research diagnostics.
     minSetupQualityB: 0.7,
-    // Mid of 0.40–0.50: reject alternating noise while allowing directional paths.
     breakoutMinEfficiency1s: 0.45,
     breakoutImbalanceMin: 0.15,
     breakoutDepthImbalanceMin: 0.05,
-    // Mid of 5–15s secondary B re-arm guard (structural reset is primary).
     breakoutBRearmFloorMs: 8_000,
     momentumVelMin: 0.00008,
     breakoutTouchCount: 2,
     pullbackRetraceMax: 0.45,
-    // SMART_POSITION_MANAGER_V1 — Demo forward default ON; set false to roll back.
+    // SMART_POSITION_MANAGER_V1 — unchanged in Brain V6.
     smartPositionManagerEnabled: true,
     spmTickSize: 0.01,
     spmMinStopDistance: 0.05,
@@ -59,15 +56,16 @@ export function defaultGhFastConfig(
     spmHarvestMinRetraceR: 0.75,
     antiChurnLossMinMs: 30_000,
     antiChurnOppositeFlipMinMs: 30_000,
-    // SMART_LOSS_CONTROLLER_V1 — Demo forward default ON; set false to roll back.
+    // SMART_LOSS_CONTROLLER_V1 — Brain V6 economics:
+    // cut ordinary losers earlier and harvest modest profits sooner on deterioration.
     smartLossControllerEnabled: true,
-    slcSoftMaxLossR: 0.7,
+    slcSoftMaxLossR: 0.45,
     slcHandoffMfeR: 1.0,
-    slcEarlyFailureMaxMfeR: 0.5,
-    slcEarlyFailureMinMaeR: 0.2,
-    slcEarlyFailureMinConfirms: 3,
-    slcSmallHarvestMinMfeR: 0.25,
-    slcSmallHarvestMinSurrenderR: 0.12,
+    slcEarlyFailureMaxMfeR: 0.45,
+    slcEarlyFailureMinMaeR: 0.12,
+    slcEarlyFailureMinConfirms: 2,
+    slcSmallHarvestMinMfeR: 0.3,
+    slcSmallHarvestMinSurrenderR: 0.08,
     slcLossStreakCount: 3,
     slcLossStreakResetMs: 60_000,
     slcRollingCircuitBreakerR: 4.0,
