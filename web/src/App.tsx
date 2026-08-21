@@ -60,7 +60,7 @@ function LazyRoute({ label, children }: { label: string; children: ReactNode }) 
   const [retryKey, setRetryKey] = useState(0);
   return (
     <RouteErrorBoundary label={label} onRetry={() => setRetryKey((key) => key + 1)}>
-      <Suspense key={retryKey} fallback={<RouteFallback label={label}>{}</RouteFallback> as never}>{children}</Suspense>
+      <Suspense key={retryKey} fallback={<RouteFallback label={label} />}>{children}</Suspense>
     </RouteErrorBoundary>
   );
 }
