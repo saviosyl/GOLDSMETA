@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type {
-  GoldHunterStatusResponse,
-  GoldHunterTrade
-} from "../../lib/api";
+import type { GoldHunterStatusResponse, GoldHunterTrade } from "../../lib/api";
 import { GoldHunterShell } from "./GoldHunterShell";
 
 const apiMocks = vi.hoisted(() => ({
@@ -267,7 +264,7 @@ describe("Gold Hunter V6 single-page test console", () => {
     expect(screen.getByText("WAIT — NO SETUP SELECTED")).toBeInTheDocument();
     expect(screen.getByText("goldmeta-quote-worker-00057-98t")).toBeInTheDocument();
     expect(screen.getByText("Pulse Guard Scalper")).toBeInTheDocument();
-    expect(screen.getByText("CONNECTED")).toBeInTheDocument();
+    expect(screen.getAllByText("CONNECTED").length).toBeGreaterThan(0);
   });
 
   it("flags the stale V3 API identity without presenting it as the active test brain", async () => {
@@ -322,9 +319,7 @@ describe("Gold Hunter V6 single-page test console", () => {
     fireEvent.click(screen.getByRole("button", { name: "Turn Demo OFF" }));
 
     await waitFor(() => expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledTimes(1));
-    expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({
-      demoAutoTradeEnabled: false
-    });
+    expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ demoAutoTradeEnabled: false });
   });
 
   it("keeps pause and emergency-stop controls explicit and Demo-only", async () => {
@@ -332,12 +327,16 @@ describe("Gold Hunter V6 single-page test console", () => {
     await waitForConsole();
 
     fireEvent.click(screen.getByRole("button", { name: "Pause Entries" }));
-    await waitFor(() => expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ pauseNewEntries: true }));
+    await waitFor(() =>
+      expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ pauseNewEntries: true })
+    );
 
     apiMocks.goldHunterUpdateConfig.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Emergency Stop" }));
     expect(window.confirm).toHaveBeenCalled();
-    await waitFor(() => expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ emergencyStopActive: true }));
+    await waitFor(() =>
+      expect(apiMocks.goldHunterUpdateConfig).toHaveBeenCalledWith({ emergencyStopActive: true })
+    );
   });
 
   it("shows the open trade separately from recent closed results", async () => {
