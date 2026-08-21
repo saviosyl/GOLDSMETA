@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bell,
-  BookOpen,
   ChevronRight,
   Clock3,
   Crosshair,
