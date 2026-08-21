@@ -1,29 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState
-} from "react";
-import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
-import {
-  Activity,
-  Crosshair,
-  LayoutDashboard,
-  LineChart,
-  SlidersHorizontal
-} from "lucide-react";
-import { useAuth } from "../../lib/auth";
+import { createContext, useContext } from "react";
 import type { GoldHunterStatusResponse } from "../../lib/api";
-import {
-  GOLD_HUNTER_PRODUCT_LABEL,
-  goldHunterBuildShort,
-  goldHunterDisplayBrainVersion,
-  goldHunterDisplayStrategyVariant,
-  goldHunterRevisionFromSoftwareRevision,
-  goldHunterVariantFromSoftwareRevision
-} from "../../lib/goldHunterIdentity";
-import "../../styles/goldHunter.css";
+import { GoldHunterTestPage } from "./GoldHunterTestPage";
 
 type GhCtx = {
   status: GoldHunterStatusResponse | null;
@@ -34,148 +11,29 @@ type GhCtx = {
 
 const GoldHunterContext = createContext<GhCtx | null>(null);
 
+/**
+ * Legacy Gold Hunter child pages still import this hook. The new V6 test
+ * console intentionally replaces the old nested dashboard/control/monitor/
+ * performance UI, so those child pages are no longer rendered.
+ */
 export function useGoldHunter(): GhCtx {
   const ctx = useContext(GoldHunterContext);
-  if (!ctx) throw new Error("useGoldHunter outside provider");
+  if (!ctx) throw new Error("Legacy Gold Hunter context is not active in test-console mode");
   return ctx;
 }
 
-function formatEur(n: number | null | undefined, digits = 2): string {
+export function formatEur(n: number | null | undefined, digits = 2): string {
   if (n == null || !Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : "";
   return `${sign}€${n.toFixed(digits)}`;
 }
 
-export { formatEur };
-
-const TABS = [
-  { to: "/gold-hunter", end: true, label: "Dashboard", icon: LayoutDashboard },
-  { to: "/gold-hunter/control", label: "Control", icon: SlidersHorizontal },
-  { to: "/gold-hunter/monitor", label: "Monitor", icon: Activity },
-  { to: "/gold-hunter/performance", label: "Performance", icon: LineChart }
-] as const;
-
+/**
+ * Temporary single-page V6 testing experience.
+ * Trading strategy, risk, execution and broker code are untouched.
+ */
 export function GoldHunterShell() {
-  const { account, api } = useAuth();
-  const location = useLocation();
-  const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
-  const [status, setStatus] = useState<GoldHunterStatusResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const s = await api.goldHunterStatus();
-      setStatus(s);
-      setError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to load Gold Hunter";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
-
-  useEffect(() => {
-    if (!isStaff) return;
-    void refresh();
-    const id = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(id);
-  }, [isStaff, refresh]);
-
-  if (!isStaff) {
-    return (
-      <div className="gm-gold-hunter" data-testid="gold-hunter-unauthorized">
-        <div className="gh-unauthorized">
-          <Crosshair aria-hidden size={28} color="#d4af5f" />
-          <h1>Gold Hunter</h1>
-          <p>Admin access required. This tool is not available for your account.</p>
-          <NavLink to="/" className="gh-btn" style={{ display: "inline-grid", marginTop: 16 }}>
-            Back to GoldMeta
-          </NavLink>
-        </div>
-      </div>
-    );
-  }
-
-  if (location.pathname === "/gold-hunter/") {
-    return <Navigate to="/gold-hunter" replace />;
-  }
-
-  const brainVersion = goldHunterDisplayBrainVersion(
-    status?.strategyVersions?.brainVersion ?? null
-  );
-  const softwareRevision = status?.strategyVersions?.softwareRevision ?? null;
-  const brainRevision =
-    status?.strategyVersions?.brainRevision ??
-    goldHunterRevisionFromSoftwareRevision(softwareRevision) ??
-    "—";
-  const strategyVariant = goldHunterDisplayStrategyVariant(
-    status?.strategyVersions?.strategyVariant ??
-      goldHunterVariantFromSoftwareRevision(softwareRevision) ??
-      null
-  );
-
-  return (
-    <GoldHunterContext.Provider value={{ status, loading, error, refresh }}>
-      <div className="gm-gold-hunter" data-testid="gold-hunter-shell">
-        <div className="gh-brand-row">
-          <div className="gh-brand">
-            <strong>{GOLD_HUNTER_PRODUCT_LABEL}</strong>
-            <div className="gh-rev" data-testid="gh-revision">
-              <span data-testid="gh-trading-brain-label">Trading Brain</span>
-              <span data-testid="gh-trading-brain-value">
-                {brainVersion} · {brainRevision}
-              </span>
-              <span data-testid="gh-strategy-label">Strategy</span>
-              <span data-testid="gh-strategy-value">{strategyVariant}</span>
-              <span data-testid="gh-web-build-label">Web Build</span>
-              <span data-testid="gh-web-build-value">{goldHunterBuildShort()}</span>
-            </div>
-          </div>
-          <div className="gh-mode-stack" data-testid="gh-mode-stack">
-            <span className="primary">{status?.modeLabel.primary ?? "…"}</span>
-            <span className="secondary">{status?.modeLabel.secondary ?? ""}</span>
-            <span className="tertiary">{status?.modeLabel.tertiary ?? ""}</span>
-          </div>
-        </div>
-
-        <nav className="gh-desktop-tabs" aria-label="Gold Hunter sections">
-          {TABS.map((t) => (
-            <NavLink key={t.to} to={t.to} end={"end" in t ? t.end : false}>
-              {t.label}
-            </NavLink>
-          ))}
-        </nav>
-
-        {loading && !status ? (
-          <div className="gh-empty" role="status">
-            Loading Gold Hunter…
-          </div>
-        ) : error && !status ? (
-          <div className="gh-empty" role="alert">
-            {error.includes("403") || /forbidden/i.test(error)
-              ? "Unauthorized"
-              : "Server unavailable. Retrying…"}
-          </div>
-        ) : (
-          <Outlet />
-        )}
-
-        <nav className="gh-bottom-nav" aria-label="Gold Hunter" data-testid="gh-bottom-nav">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            return (
-              <NavLink key={t.to} to={t.to} end={"end" in t ? t.end : false}>
-                <Icon aria-hidden strokeWidth={2} />
-                <span>{t.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
-      </div>
-    </GoldHunterContext.Provider>
-  );
+  return <GoldHunterTestPage />;
 }
 
 export function GhStatusTone({ value }: { value: string }) {
