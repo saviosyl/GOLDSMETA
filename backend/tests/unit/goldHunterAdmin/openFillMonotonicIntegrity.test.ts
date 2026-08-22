@@ -379,9 +379,9 @@ describe("GH OPEN fill monotonicity (GH-D-6789089c)", () => {
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_FAST_STRATEGY_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_SOFTWARE_REVISION).toBe(
-      "GH_BRAIN_V6_PULSE_GUARD_SCALPER_2026.08.21-01"
+      "GH_BRAIN_V6_PULSE_GUARD_CONTINUATION_2026.08.21-02"
     );
-    expect(GOLD_HUNTER_SOFTWARE_REVISION_AT).toBe("2026-08-21T10:30:00Z");
+    expect(GOLD_HUNTER_SOFTWARE_REVISION_AT).toBe("2026-08-21T16:20:00Z");
     const id = getFrozenGhFastIdentity();
     expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(id.maxOpenPositions).toBe(1);
