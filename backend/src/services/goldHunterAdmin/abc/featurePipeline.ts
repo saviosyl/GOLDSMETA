@@ -9,10 +9,19 @@ import {
   isDerivedDataContaminated,
   type ResearchDepthValidity
 } from "./depthRecovery";
-import { FastFeatureEngine } from "./features";
-import { evaluateSetupsDetailed, type SetupHit } from "./setups";
+import { FastFeatureEngine, type GhFastFeatureSnapshot } from "./features";
+import {
+  evaluateSetupsDetailed,
+  scoreFastBreakout,
+  type SetupHit
+} from "./setups";
 import { frozenGhFastSoakConfig } from "./frozenConfig";
-import type { GhFastDepthEvent, GhFastSpotEvent, GhFastSpecialistRawEval } from "./types";
+import type {
+  GhFastConfig,
+  GhFastDepthEvent,
+  GhFastSpotEvent,
+  GhFastSpecialistRawEval
+} from "./types";
 import {
   M1CandleFlowEngine,
   type M1CandleFlowEvaluation
@@ -36,6 +45,84 @@ export type GoldHunterPipelineSnapshot = {
   lastSpotAsk: number | null;
   lastFeatureSpot: { bid: number; ask: number } | null;
 };
+
+const CONTINUATION_BLOCKED_WAITS = new Set<string>([
+  "WAIT_CHOP",
+  "WAIT_PULSE_INVALIDATED",
+  "WAIT_PULSE_EXHAUSTED",
+  "WAIT_NO_EDGE_LEFT"
+]);
+
+/**
+ * V6 revision 02 continuation fallback.
+ *
+ * The primary Pulse Guard / Setup A path remains unchanged. When A is waiting
+ * for a textbook pullback/base/break sequence, a strong prior-only Setup B
+ * breakout may be promoted to execution only when the forming M1 candle and
+ * broader regime agree. This is intentionally a fallback, never a replacement
+ * for A, and it keeps all selector-level rearm / anti-churn / loss gates.
+ */
+export function selectV6TrendContinuationFallback(
+  f: GhFastFeatureSnapshot,
+  cfg: GhFastConfig,
+  flow: M1CandleFlowEvaluation
+): SetupHit | null {
+  if (flow.waitReason && CONTINUATION_BLOCKED_WAITS.has(flow.waitReason)) {
+    return null;
+  }
+
+  const breakout = scoreFastBreakout(f, cfg);
+  if (!breakout) return null;
+
+  const ageSec = flow.currentCandleAgeSec;
+  if (ageSec == null || ageSec < 5 || ageSec > 55) return null;
+
+  const displacement = flow.currentM1Displacement;
+  if (displacement == null || !Number.isFinite(displacement)) return null;
+  const m1Aligned =
+    breakout.side === "BUY" ? displacement > 0 : displacement < 0;
+  if (!m1Aligned) return null;
+
+  if (flow.regime === "RANGE") return null;
+  const regimeAligned =
+    (breakout.side === "BUY" && flow.regime === "TREND_UP") ||
+    (breakout.side === "SELL" && flow.regime === "TREND_DOWN");
+  const transitionAllowed = flow.regime === "TRANSITION";
+  if (!regimeAligned && !transitionAllowed) return null;
+
+  // Setup B already earns >= cfg.minSetupQualityB. Transition entries require
+  // a materially stronger breakout because the M1 regime has not fully locked.
+  const qualityFloor = regimeAligned
+    ? Math.max(cfg.minSetupQualityB, 0.7)
+    : Math.max(cfg.minSetupQualityB, 0.8);
+  if (breakout.quality < qualityFloor) return null;
+
+  // Do not promote a breakout if the immediate price path is inefficient.
+  const efficiencyFloor = regimeAligned ? 0.45 : 0.55;
+  if (f.efficiency1s < efficiencyFloor) return null;
+
+  // Require the forming candle to have moved enough to be meaningful relative
+  // to spread/friction/noise; this avoids turning micro-jitter into entries.
+  const noiseFloor = Math.max(
+    flow.recentNoise ?? 0,
+    Math.max(0, f.spread) * 2,
+    cfg.friction
+  );
+  if (Math.abs(displacement) < Math.max(noiseFloor * 0.5, 0.04)) {
+    return null;
+  }
+
+  return {
+    ...breakout,
+    reasons: [
+      "v6_trend_continuation_fallback",
+      regimeAligned ? "m1_regime_aligned" : "strong_transition_breakout",
+      "forming_m1_aligned",
+      ...breakout.reasons
+    ],
+    m1CandleFlow: flow
+  };
+}
 
 export class GoldHunterFeaturePipeline {
   private readonly depth = new InMemoryDepthBook();
@@ -166,10 +253,21 @@ export class GoldHunterFeaturePipeline {
 
     const m1CandleFlow = this.m1CandleFlow.evaluate(nowMs, feat, this.cfg);
     const evaluated = evaluateSetupsDetailed(feat, this.cfg, { m1CandleFlow });
+    const continuationFallback = evaluated.selected
+      ? null
+      : selectV6TrendContinuationFallback(feat, this.cfg, m1CandleFlow);
+    const selected = evaluated.selected ?? continuationFallback;
+    const specialists = continuationFallback
+      ? evaluated.specialists.map((specialist) => ({
+          ...specialist,
+          selected: specialist.setup === "B_FAST_BREAKOUT"
+        }))
+      : evaluated.specialists;
+
     return {
       features: feat,
-      specialists: evaluated.specialists,
-      selected: evaluated.selected,
+      specialists,
+      selected,
       m1CandleFlow,
       bestBid,
       bestAsk,

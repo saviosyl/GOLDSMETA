@@ -165,8 +165,8 @@ describe("Gold Hunter Brain V6 identity", () => {
   it("stamps V6 brain/revision/variant and frozen identity", () => {
     resetFrozenGhFastIdentityForTests();
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
-    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B6-20260821-01");
-    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_GUARD_SCALPER");
+    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B6-20260821-02");
+    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_GUARD_CONTINUATION");
     const id = getFrozenGhFastIdentity();
     expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(id.soakLabel).toBe(
