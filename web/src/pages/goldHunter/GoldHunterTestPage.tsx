@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../lib/auth";
-import type {
-  GoldHunterPerformanceBucket,
-  GoldHunterStatusResponse,
-  GoldHunterTrade
-} from "../../lib/api";
-import { goldHunterBuildShort } from "../../lib/goldHunterIdentity";
+import type { GoldHunterPerformanceBucket, GoldHunterStatusResponse, GoldHunterTrade } from "../../lib/api";
+import {
+  goldHunterBuildShort,
+  goldHunterDisplayBrainVersion,
+  goldHunterDisplayStrategyVariant,
+  goldHunterRevisionFromSoftwareRevision,
+  goldHunterVariantFromSoftwareRevision
+} from "../../lib/goldHunterIdentity";
 import "../../styles/goldHunterTest.css";
-
-const EXPECTED_BRAIN = "V6";
-const EXPECTED_REVISION = "GH-B6-20260821-01";
-const EXPECTED_VARIANT = "Pulse Guard Scalper";
 
 function money(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -59,10 +57,7 @@ export function GoldHunterTestPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, tradeResponse] = await Promise.all([
-        api.goldHunterStatus(),
-        api.goldHunterTrades()
-      ]);
+      const [nextStatus, tradeResponse] = await Promise.all([api.goldHunterStatus(), api.goldHunterTrades()]);
       setStatus(nextStatus);
       setTrades(tradeResponse.trades ?? []);
       setError(null);
@@ -81,20 +76,17 @@ export function GoldHunterTestPage() {
     return () => window.clearInterval(id);
   }, [isStaff, refresh]);
 
-  const action = useCallback(
-    async (patch: Record<string, unknown>) => {
-      setBusy(true);
-      try {
-        await api.goldHunterUpdateConfig(patch);
-        await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Control action failed");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [api, refresh]
-  );
+  const action = useCallback(async (patch: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      await api.goldHunterUpdateConfig(patch);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Control action failed");
+    } finally {
+      setBusy(false);
+    }
+  }, [api, refresh]);
 
   const sortedTrades = useMemo(
     () => [...trades].sort((a, b) => (b.orderTs ?? b.fillTs ?? "").localeCompare(a.orderTs ?? a.fillTs ?? "")),
@@ -107,43 +99,31 @@ export function GoldHunterTestPage() {
   const paused = status?.config.pauseNewEntries ?? false;
   const stopped = status?.config.emergencyStopActive ?? false;
   const currentReason = status?.gates.blockers?.[0] ?? status?.signal.note ?? "READY";
-  const apiBrain = status?.strategyVersions.brainVersion ?? "—";
-  const apiStale = apiBrain !== "GOLD_HUNTER_BRAIN_V6";
+  const softwareRevision = status?.strategyVersions.softwareRevision ?? null;
+  const brain = goldHunterDisplayBrainVersion(status?.strategyVersions.brainVersion);
+  const revision = status?.strategyVersions.brainRevision ?? goldHunterRevisionFromSoftwareRevision(softwareRevision) ?? "—";
+  const variant = goldHunterDisplayStrategyVariant(
+    status?.strategyVersions.strategyVariant ?? goldHunterVariantFromSoftwareRevision(softwareRevision)
+  );
 
-  if (!isStaff) {
-    return <div className="ght-page"><div className="ght-panel"><h1>Gold Hunter Test</h1><p>Admin access required.</p></div></div>;
-  }
-
-  if (loading && !status) {
-    return <div className="ght-page"><div className="ght-panel"><h1>Gold Hunter Test</h1><p>Loading live test data…</p></div></div>;
-  }
+  if (!isStaff) return <div className="ght-page"><div className="ght-panel"><h1>Gold Hunter Test</h1><p>Admin access required.</p></div></div>;
+  if (loading && !status) return <div className="ght-page"><div className="ght-panel"><h1>Gold Hunter Test</h1><p>Loading live test data…</p></div></div>;
 
   return (
     <div className="ght-page" data-testid="gold-hunter-test-page">
       <header className="ght-hero">
         <div>
-          <div className="ght-eyebrow">GOLD HUNTER · V6 TEST CONSOLE</div>
+          <div className="ght-eyebrow">GOLD HUNTER · TEST CONSOLE</div>
           <h1>XAUUSD Demo AutoTrade</h1>
-          <p>One page. Only the information needed to test the current trading brain.</p>
+          <p>Runtime identity and Demo test information from the deployed Gold Hunter service.</p>
         </div>
-        <div className={`ght-live-pill ${demoOn ? "on" : "off"}`}>
-          <span className="ght-dot" />
-          {demoOn ? "DEMO ON" : "DEMO OFF"}
-        </div>
+        <div className={`ght-live-pill ${demoOn ? "on" : "off"}`}><span className="ght-dot" />{demoOn ? "DEMO ON" : "DEMO OFF"}</div>
       </header>
 
       {error ? <div className="ght-alert danger">{error}</div> : null}
-      {apiStale ? (
-        <div className="ght-alert warning">
-          API identity display is stale ({apiBrain}). Active test target remains {EXPECTED_BRAIN} · {EXPECTED_REVISION} · {EXPECTED_VARIANT}.
-        </div>
-      ) : null}
 
       <section className="ght-price-panel">
-        <div>
-          <span className="ght-label">XAUUSD</span>
-          <strong className="ght-price">{price(status?.market.mid)}</strong>
-        </div>
+        <div><span className="ght-label">XAUUSD</span><strong className="ght-price">{price(status?.market.mid)}</strong></div>
         <div className="ght-market-grid">
           <div><span>Bid</span><strong>{price(status?.market.bid)}</strong></div>
           <div><span>Ask</span><strong>{price(status?.market.ask)}</strong></div>
@@ -153,45 +133,29 @@ export function GoldHunterTestPage() {
       </section>
 
       <section className="ght-status-strip">
-        <div className="ght-status-main">
-          <span className="ght-label">CURRENT STATE</span>
-          <strong>{stopped ? "EMERGENCY STOP" : paused ? "PAUSED" : demoOn ? "ARMED" : "RESEARCH"}</strong>
-          <p>{currentReason}</p>
-        </div>
+        <div className="ght-status-main"><span className="ght-label">CURRENT STATE</span><strong>{stopped ? "EMERGENCY STOP" : paused ? "PAUSED" : demoOn ? "ARMED" : "RESEARCH"}</strong><p>{currentReason}</p></div>
         <div className="ght-actions">
           {demoOn ? (
             <button disabled={busy} className="ght-button secondary" onClick={() => void action({ demoAutoTradeEnabled: false })}>Turn Demo OFF</button>
           ) : (
-            <button
-              disabled={busy || stopped}
-              className="ght-button primary"
-              onClick={() => {
-                if (window.confirm("Enable Gold Hunter DEMO AutoTrade? Live trading remains locked.")) {
-                  void action({ demoAutoTradeEnabled: true, confirmDemoAutoTrade: true });
-                }
-              }}
-            >Enable Demo</button>
+            <button disabled={busy || stopped} className="ght-button primary" onClick={() => {
+              if (window.confirm("Enable Gold Hunter DEMO AutoTrade? Live trading remains locked.")) void action({ demoAutoTradeEnabled: true, confirmDemoAutoTrade: true });
+            }}>Enable Demo</button>
           )}
-          <button disabled={busy || stopped} className="ght-button secondary" onClick={() => void action({ pauseNewEntries: !paused })}>
-            {paused ? "Resume Entries" : "Pause Entries"}
-          </button>
-          <button
-            disabled={busy || stopped}
-            className="ght-button danger"
-            onClick={() => {
-              if (window.confirm("Emergency stop Gold Hunter Demo? Existing positions are not automatically closed.")) {
-                void action({ emergencyStopActive: true });
-              }
-            }}
-          >Emergency Stop</button>
+          <button disabled={busy || stopped} className="ght-button secondary" onClick={() => void action({ pauseNewEntries: !paused })}>{paused ? "Resume Entries" : "Pause Entries"}</button>
+          <button disabled={busy || stopped} className="ght-button danger" onClick={() => {
+            if (window.confirm("Emergency stop Gold Hunter Demo? Existing positions are not automatically closed.")) void action({ emergencyStopActive: true });
+          }}>Emergency Stop</button>
         </div>
       </section>
 
-      <section className="ght-grid four">
-        <div className="ght-card"><span>Trading worker</span><strong>{status?.strategyVersions.workerRevision ?? "—"}</strong><small>{EXPECTED_BRAIN} · {EXPECTED_REVISION}</small></div>
-        <div className="ght-card"><span>Strategy</span><strong>{EXPECTED_VARIANT}</strong><small>{status?.strategyPipeline?.state ?? "—"}</small></div>
+      <section className="ght-grid four" aria-label="Runtime identity">
+        <div className="ght-card"><span>Trading brain</span><strong>{brain}</strong><small>{revision}</small></div>
+        <div className="ght-card"><span>Strategy variant</span><strong>{variant}</strong><small>{softwareRevision ?? "—"}</small></div>
+        <div className="ght-card"><span>API revision</span><strong>{status?.runtimeSha ?? "—"}</strong><small>Runtime · not web build</small></div>
+        <div className="ght-card"><span>Trading worker</span><strong>{status?.strategyVersions.workerRevision ?? "—"}</strong><small>{status?.strategyVersions.telemetrySource ?? "—"}</small></div>
         <div className="ght-card"><span>Broker</span><strong>{status?.broker.connected ? "CONNECTED" : "DISCONNECTED"}</strong><small>{status?.broker.environment ?? "—"} · {status?.broker.accountMasked ?? "—"}</small></div>
-        <div className="ght-card"><span>Web build</span><strong>{goldHunterBuildShort()}</strong><small>Live execution {status?.liveExecutionEnabled ? "ON" : "LOCKED"}</small></div>
+        <div className="ght-card"><span>Web build</span><strong>{goldHunterBuildShort()}</strong><small>Presentation build only</small></div>
       </section>
 
       <section className="ght-section">
@@ -205,7 +169,7 @@ export function GoldHunterTestPage() {
             <div><span>Setup</span><strong>{trade.setup ?? "—"}</strong></div>
             <div className="ght-trade-id">{trade.goldHunterTradeId}</div>
           </div>
-        )) : <div className="ght-empty">Waiting for the next valid V6 setup.</div>}
+        )) : <div className="ght-empty">Waiting for the next valid runtime setup.</div>}
       </section>
 
       <section className="ght-grid four">
@@ -220,10 +184,7 @@ export function GoldHunterTestPage() {
         <div className="ght-trades">
           {latestTrades.map((trade) => (
             <article className={`ght-trade ${toneForTrade(trade)}`} key={trade.goldHunterTradeId}>
-              <div className="ght-trade-top">
-                <div><span className={`ght-side ${trade.side.toLowerCase()}`}>{trade.side}</span><strong>{trade.result ?? trade.status}</strong></div>
-                <strong className="ght-pnl">{money(trade.netPnlEur)}</strong>
-              </div>
+              <div className="ght-trade-top"><div><span className={`ght-side ${trade.side.toLowerCase()}`}>{trade.side}</span><strong>{trade.result ?? trade.status}</strong></div><strong className="ght-pnl">{money(trade.netPnlEur)}</strong></div>
               <div className="ght-trade-data">
                 <div><span>Entry</span><strong>{price(trade.entry)}</strong></div>
                 <div><span>Exit</span><strong>{price(trade.exit)}</strong></div>
@@ -247,19 +208,7 @@ export function GoldHunterTestPage() {
           <div><span>Signal</span><strong>{status?.signal.present ? `${status.signal.side ?? ""} ${status.signal.setup ?? ""}`.trim() : "NONE"}</strong></div>
           <div><span>Telemetry</span><strong>{status?.strategyVersions.telemetrySource ?? "—"}</strong></div>
         </div>
-        <details className="ght-details">
-          <summary>Diagnostics</summary>
-          <pre>{JSON.stringify({
-            runtimeSha: status?.runtimeSha,
-            apiBrain: status?.strategyVersions.brainVersion,
-            workerRevision: status?.strategyVersions.workerRevision,
-            telemetryAgeMs: status?.strategyVersions.telemetryAgeMs,
-            gates: status?.gates,
-            signal: status?.signal,
-            strategyPipeline: status?.strategyPipeline,
-            execution: status?.execution
-          }, null, 2)}</pre>
-        </details>
+        <details className="ght-details"><summary>Diagnostics</summary><pre>{JSON.stringify({ runtimeSha: status?.runtimeSha, brain: status?.strategyVersions.brainVersion, brainRevision: status?.strategyVersions.brainRevision, strategyVariant: status?.strategyVersions.strategyVariant, softwareRevision: status?.strategyVersions.softwareRevision, workerRevision: status?.strategyVersions.workerRevision, telemetryAgeMs: status?.strategyVersions.telemetryAgeMs, gates: status?.gates, signal: status?.signal, strategyPipeline: status?.strategyPipeline, execution: status?.execution }, null, 2)}</pre></details>
       </section>
 
       <footer className="ght-footer">Last refreshed {lastRefresh ? lastRefresh.toLocaleTimeString() : "—"} · DEMO ONLY · LIVE LOCKED</footer>
