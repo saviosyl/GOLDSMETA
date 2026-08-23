@@ -152,7 +152,7 @@ export function AppShell({ children }: { children?: ReactNode; linkPrefix?: stri
         <div className="gm26-main-inner">{children ?? <Outlet />}</div>
       </main>
 
-      <nav className="gm26-bottom-nav" aria-label="GoldMeta mobile navigation">
+      <nav className="gm26-bottom-nav" aria-label="GoldMeta mobile navigation" data-testid="mobile-bottom-nav">
         {PRIMARY_NAV.map((item) => {
           const Icon = item.icon;
           return (
