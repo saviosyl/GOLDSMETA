@@ -70,7 +70,7 @@ describe("AppShell GoldMeta 2026 redesign", () => {
   it("shows the live XAUUSD quote in the application chrome", () => {
     render(wrap(<AppShell><div>content</div></AppShell>));
 
-    expect(screen.getByText("2364.42")).toBeInTheDocument();
+    expect(screen.getByText("2,364.42")).toBeInTheDocument();
     expect(screen.getByText("LIVE")).toBeInTheDocument();
     expect(screen.getByText("London / New York")).toBeInTheDocument();
   });
