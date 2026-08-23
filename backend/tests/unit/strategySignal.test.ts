@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DecisionRecord } from "../../src/models/types";
+import { buildIntradayPlan } from "../../src/services/decision/intradayPlan";
 import {
   isCompleteStrategySignal,
   resolveMarketStructureView,
@@ -159,6 +160,7 @@ describe("strategySignal role alignment", () => {
     expect(view.confirmationDecision?.decisionId).toBe("confirm-5m");
     expect(view.structureDecision?.decisionId).toBe("plan-15m");
     expect(view.diagnostics.confirmationTimeframe).toBe("5");
+    expect(view.diagnostics.shortTermDataReady).toBe(true);
     expect(selectLatestConfirmationDecision([confirm5m], plan15m)?.decisionId).toBe("confirm-5m");
   });
 
@@ -230,6 +232,122 @@ describe("strategySignal role alignment", () => {
     const view = resolveMarketStructureView([quote1m, plan15m]);
     expect(view.marketStructureMode).toBe("MISMATCH");
     expect(view.structureDecision).toBeNull();
+  });
+
+
+  it("uses market-data time so a delayed old 15M bar cannot become a fresh plan", () => {
+    const now = Date.now();
+    const delayedPlan = decision({
+      decisionId: "delayed-plan",
+      timeframe: "15",
+      generatedAt: new Date(now).toISOString(),
+      marketDataTime: new Date(now - 21 * 60_000).toISOString(),
+      validUntil: new Date(now + 15 * 60_000).toISOString()
+    });
+    expect(selectLatestCompleteStrategySignal([delayedPlan], now)).toBeNull();
+  });
+
+  it("does not let a 5M event from before the active 15M bar confirm the newer plan", () => {
+    const now = Date.now();
+    const plan15m = decision({
+      decisionId: "new-plan",
+      timeframe: "15",
+      marketDataTime: new Date(now - 60_000).toISOString()
+    });
+    const older5m = decision({
+      decisionId: "old-confirm",
+      timeframe: "5",
+      marketDataTime: new Date(now - 2 * 60_000).toISOString(),
+      marketStructure: {
+        trend: "BULLISH",
+        trendStrength: 60,
+        poc: 4075,
+        vah: 4080,
+        val: 4070,
+        confirmationClassification: "BREAKOUT",
+        confirmationDirection: "BULLISH",
+        confirmationCandleType: "BULLISH"
+      }
+    });
+    expect(selectLatestConfirmationDecision([older5m], plan15m, now)).toBeNull();
+  });
+
+  it("activates a BUY only from a bullish 5M confirmation and blocks the bearish mirror", () => {
+    const quote1m = decision({ decisionId: "quote-buy", timeframe: "1" });
+    const buyPlan = decision({
+      decisionId: "buy-plan",
+      timeframe: "15",
+      decision: "BUY",
+      entry: { type: "ENTRY_ZONE", price: 4076, zoneLow: 4075.5, zoneHigh: 4076.5, condition: "Buy zone" },
+      stopLoss: { price: 4072, reason: "Below support" },
+      takeProfits: [
+        { label: "TP1", price: 4084, reason: "First resistance" },
+        { label: "TP2", price: 4088, reason: "Second resistance" }
+      ],
+      marketStructure: {
+        trend: "BULLISH",
+        trendStrength: 64,
+        poc: 4075,
+        vah: 4080,
+        val: 4070,
+        confirmationClassification: "BREAKOUT",
+        confirmationDirection: "BULLISH",
+        confirmationCandleType: "BULLISH"
+      }
+    });
+    const supported = buildIntradayPlan({ quote: quote1m, structure: buyPlan, mode: "COMPLETE" });
+    expect(supported.action).toBe("BUY_NOW");
+    expect(supported.tradePlan.actionable).toBe(true);
+
+    const opposed = buildIntradayPlan({
+      quote: quote1m,
+      structure: {
+        ...buyPlan,
+        marketStructure: { ...buyPlan.marketStructure!, confirmationDirection: "BEARISH" }
+      },
+      mode: "COMPLETE"
+    });
+    expect(opposed.action).not.toBe("BUY_NOW");
+    expect(opposed.tradePlan.actionable).toBe(false);
+  });
+
+  it("activates a SELL only from a bearish 5M confirmation and blocks the bullish mirror", () => {
+    const quote1m = decision({ decisionId: "quote-sell", timeframe: "1" });
+    const sellPlan = decision({
+      decisionId: "sell-plan",
+      timeframe: "15",
+      decision: "SELL",
+      entry: { type: "ENTRY_ZONE", price: 4076, zoneLow: 4075.5, zoneHigh: 4076.5, condition: "Sell zone" },
+      stopLoss: { price: 4080, reason: "Above resistance" },
+      takeProfits: [
+        { label: "TP1", price: 4068, reason: "First support" },
+        { label: "TP2", price: 4064, reason: "Second support" }
+      ],
+      marketStructure: {
+        trend: "BEARISH",
+        trendStrength: 64,
+        poc: 4075,
+        vah: 4080,
+        val: 4070,
+        confirmationClassification: "REJECTION",
+        confirmationDirection: "BEARISH",
+        confirmationCandleType: "BEARISH"
+      }
+    });
+    const supported = buildIntradayPlan({ quote: quote1m, structure: sellPlan, mode: "COMPLETE" });
+    expect(supported.action).toBe("SELL_ON_REJECTION");
+    expect(supported.tradePlan.actionable).toBe(true);
+
+    const opposed = buildIntradayPlan({
+      quote: quote1m,
+      structure: {
+        ...sellPlan,
+        marketStructure: { ...sellPlan.marketStructure!, confirmationDirection: "BULLISH" }
+      },
+      mode: "COMPLETE"
+    });
+    expect(opposed.action).not.toBe("SELL_ON_REJECTION");
+    expect(opposed.tradePlan.actionable).toBe(false);
   });
 
   it("ignores TEST fixture when selecting complete signal", () => {
