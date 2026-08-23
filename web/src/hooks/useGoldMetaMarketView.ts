@@ -6,12 +6,26 @@ import { resolveDisplayAction } from "../lib/planDisplay";
 import type { IntradayPlan } from "../types/intradayPlan";
 import type { Decision } from "../types/models";
 
+type MarketStructureDiagnostics = {
+  quoteSource?: string | null;
+  signalSource?: string | null;
+  quoteTimeframe?: string | null;
+  structureTimeframe?: string | null;
+  signalAgeSeconds?: number | null;
+  quoteAgeSeconds?: number | null;
+  validityStatus?: string | null;
+  rejectionReasons?: string[];
+};
+
 type LatestPack = {
   decision?: Decision | null;
+  latestQuote?: Decision | null;
+  latestCompleteStrategySignal?: Decision | null;
   intradayPlan?: IntradayPlan | null;
   stablePlan?: unknown;
   sessionPlan?: unknown;
   marketStructureMode?: string | null;
+  marketStructureDiagnostics?: MarketStructureDiagnostics | null;
 };
 
 function actionFromPlan(plan: IntradayPlan | null, decision: Decision | null): "BUY" | "SELL" | "WAIT" {
@@ -34,10 +48,18 @@ function biasLabel(plan: IntradayPlan | null, decision: Decision | null): string
     .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
 }
 
+function decisionPrice(decision: Decision | null): number | null {
+  const value = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 export function useGoldMetaMarketView() {
   const { api } = useAuth();
   const { quote } = useShellQuote();
   const [decision, setDecision] = useState<Decision | null>(null);
+  const [analysisQuote, setAnalysisQuote] = useState<Decision | null>(null);
+  const [structureDecision, setStructureDecision] = useState<Decision | null>(null);
+  const [diagnostics, setDiagnostics] = useState<MarketStructureDiagnostics | null>(null);
   const [plan, setPlan] = useState<IntradayPlan | null>(null);
   const [marketStructureMode, setMarketStructureMode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +72,9 @@ export function useGoldMetaMarketView() {
       const raw = (await api.latestDecisionPack()) as LatestPack;
       const stable = (raw.stablePlan ?? raw.sessionPlan ?? null) as Parameters<typeof applyStablePlanToIntraday>[1];
       setDecision(raw.decision ?? null);
+      setAnalysisQuote(raw.latestQuote ?? raw.decision ?? null);
+      setStructureDecision(raw.latestCompleteStrategySignal ?? null);
+      setDiagnostics(raw.marketStructureDiagnostics ?? null);
       setPlan(applyStablePlanToIntraday(raw.intradayPlan ?? null, stable));
       setMarketStructureMode(raw.marketStructureMode ?? null);
       setError(null);
@@ -67,27 +92,31 @@ export function useGoldMetaMarketView() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const livePrice = quote?.price ?? decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
-  const action = actionFromPlan(plan, decision);
-  const confidence = plan?.confidence ?? decision?.confidence ?? null;
-  const direction = biasLabel(plan, decision);
-  const structure = decision?.marketStructure ?? null;
-  const support = plan?.zones?.nearestSupport ?? null;
-  const resistance = plan?.zones?.nearestResistance ?? null;
+  // Analysis pages stay on the TradingView price basis that created the strategy structure.
+  // The shared cTrader quote is an execution/feed-health fallback only; it must not silently
+  // replace the TradingView price while POC/VAH/VAL still come from TradingView.
+  const livePrice = decisionPrice(analysisQuote) ?? decisionPrice(structureDecision) ?? quote?.price ?? null;
+  const canonicalDecision = structureDecision ?? decision;
+  const action = actionFromPlan(plan, canonicalDecision);
+  const confidence = plan?.confidence ?? canonicalDecision?.confidence ?? null;
+  const direction = biasLabel(plan, canonicalDecision);
+  const structure = marketStructureMode === "COMPLETE" ? structureDecision?.marketStructure ?? null : null;
+  const support = marketStructureMode === "COMPLETE" ? plan?.zones?.nearestSupport ?? null : null;
+  const resistance = marketStructureMode === "COMPLETE" ? plan?.zones?.nearestResistance ?? null : null;
   const marketClosed = quote?.freshness === "MARKET_CLOSED" || quote?.marketStatus === "CLOSED";
-  const session = quote?.sessionLabel ?? plan?.session ?? decision?.currentSession ?? "Session unavailable";
+  const session = plan?.session ?? canonicalDecision?.currentSession ?? quote?.sessionLabel ?? "Session unavailable";
   const explanation =
     plan?.oneSentence ??
-    decision?.explanation ??
+    canonicalDecision?.explanation ??
     (action === "WAIT"
       ? "GoldMeta is waiting for a verified setup before showing a directional trade."
       : `${action} conditions are currently leading the verified GoldMeta analysis.`);
 
-  const entry = decision?.entry?.price ?? null;
-  const stop = plan?.tradePlan?.stopLoss ?? decision?.stopLoss?.price ?? null;
-  const tp1 = plan?.tradePlan?.tp1 ?? decision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? null;
-  const tp2 = plan?.tradePlan?.tp2 ?? decision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? null;
-  const tp3 = plan?.tradePlan?.tp3 ?? decision?.takeProfits?.find((t) => t.label === "TP3")?.price ?? null;
+  const entry = plan?.tradePlan?.entry ?? canonicalDecision?.entry?.price ?? null;
+  const stop = plan?.tradePlan?.stopLoss ?? canonicalDecision?.stopLoss?.price ?? null;
+  const tp1 = plan?.tradePlan?.tp1 ?? canonicalDecision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? null;
+  const tp2 = plan?.tradePlan?.tp2 ?? canonicalDecision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? null;
+  const tp3 = plan?.tradePlan?.tp3 ?? canonicalDecision?.takeProfits?.find((t) => t.label === "TP3")?.price ?? null;
 
   const tradeGeometry = useMemo(
     () => ({
@@ -98,16 +127,23 @@ export function useGoldMetaMarketView() {
       tp2,
       tp3,
       riskReward: plan?.tradePlan?.riskReward ?? null,
-      invalidation: plan?.tradePlan?.invalidation ?? plan?.invalidation ?? decision?.invalidation ?? null,
-      management: plan?.tradePlan?.management ?? decision?.recommendedManagementAction ?? null,
-      actionable: Boolean(plan?.tradePlan?.actionable),
+      invalidation: plan?.tradePlan?.invalidation ?? plan?.invalidation ?? canonicalDecision?.invalidation ?? null,
+      management: plan?.tradePlan?.management ?? canonicalDecision?.recommendedManagementAction ?? null,
+      actionable: marketStructureMode === "COMPLETE" && Boolean(plan?.tradePlan?.actionable),
       direction: plan?.tradePlan?.direction ?? (action === "WAIT" ? "NONE" : action)
     }),
-    [entry, stop, tp1, tp2, tp3, plan, decision, action]
+    [entry, stop, tp1, tp2, tp3, plan, canonicalDecision, action, marketStructureMode]
   );
 
+  const analysisPriceSource = analysisQuote?.priceSources?.alertClose?.source ?? diagnostics?.quoteSource ?? "TRADINGVIEW_ANALYSIS";
+  const structureSource = structureDecision?.priceSources?.poc?.source ?? diagnostics?.signalSource ?? null;
+
   return {
-    decision,
+    decision: canonicalDecision,
+    latestDecision: decision,
+    analysisQuote,
+    structureDecision,
+    diagnostics,
     plan,
     marketStructureMode,
     loading,
@@ -115,6 +151,10 @@ export function useGoldMetaMarketView() {
     error,
     refresh: () => load(true),
     livePrice,
+    analysisPriceSource,
+    structureSource,
+    structureTimeframe: diagnostics?.structureTimeframe ?? structureDecision?.timeframe ?? null,
+    quoteTimeframe: diagnostics?.quoteTimeframe ?? analysisQuote?.timeframe ?? null,
     action,
     confidence,
     direction,
