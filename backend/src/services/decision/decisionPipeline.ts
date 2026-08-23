@@ -106,10 +106,20 @@ const marketStructureFor = (snapshot: MarketSnapshot): DecisionMarketStructure =
  * reliable replacement for the higher-timeframe bias.
  */
 const higherTimeframeBiasFor = (snapshot: MarketSnapshot): TrendDirection | null => {
-  const oneHour = snapshot.trend?.components?.find(
-    (component) => component.sourceTimeframe === "60" || component.name === "gm_direction_1h"
-  );
-  return oneHour?.direction ?? snapshot.trend?.direction ?? null;
+  const oneHour = snapshot.trend?.components?.find((component) => {
+    const sourceTimeframe = component.sourceTimeframe.trim().toUpperCase();
+    return (
+      sourceTimeframe === "60" ||
+      sourceTimeframe === "60M" ||
+      sourceTimeframe === "1H" ||
+      component.name.trim().toLowerCase() === "gm_direction_1h"
+    );
+  });
+  if (oneHour) return oneHour.direction;
+
+  // A native confirmed 1H payload may use its aggregate trend. Never relabel a
+  // 1M/5M/15M aggregate direction as the Day Trade 1H bias.
+  return snapshot.timeframe === "60" ? snapshot.trend?.direction ?? null : null;
 };
 
 const quoteAgeSeconds = (timestamp: string | null, receivedAt: string): number | null => {
