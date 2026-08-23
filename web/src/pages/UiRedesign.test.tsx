@@ -103,7 +103,7 @@ describe("plainLanguage helpers", () => {
 });
 
 describe("AppShell navigation", () => {
-  it("renders desktop sidebar links and mobile bottom nav", () => {
+  it("renders the approved desktop and mobile five-screen navigation", () => {
     render(
       <MemoryRouter>
         <AppShell>
@@ -111,19 +111,31 @@ describe("AppShell navigation", () => {
         </AppShell>
       </MemoryRouter>
     );
-    expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
-    expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
-    expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
-    expect(screen.queryByText("AutoTrade")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Markets").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Journal").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/More/i).length).toBeGreaterThan(0);
-    const mobileNav = screen.getByTestId("mobile-bottom-nav");
-    expect(mobileNav.textContent).not.toMatch(/AutoTrade/);
-    expect(mobileNav.textContent).not.toMatch(/Alerts/);
+
+    const sidebar = screen.getByLabelText("GoldMeta navigation");
+    const desktopPrimary = sidebar.querySelector(".gm26-sidebar-nav") as HTMLElement;
+    expect(desktopPrimary).toBeTruthy();
+    expect(within(desktopPrimary).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
+      "Home",
+      "Short-Term",
+      "Day Trade",
+      "Gold Hunter",
+      "History"
+    ]);
+
+    const mobileNav = screen.getByLabelText("GoldMeta mobile navigation");
+    expect(within(mobileNav).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
+      "Home",
+      "Short",
+      "Day",
+      "Hunter",
+      "History"
+    ]);
+    expect(mobileNav.querySelectorAll("a")).toHaveLength(5);
+    expect(mobileNav.textContent).not.toMatch(/AutoTrade|Alerts|More/);
   });
 
-  it("opens More sheet with secondary destinations", async () => {
+  it("opens the profile menu with secondary destinations", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -132,12 +144,14 @@ describe("AppShell navigation", () => {
         </AppShell>
       </MemoryRouter>
     );
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByTestId("mobile-more-sheet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /History/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Insights/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open profile menu" }));
+    const menu = screen.getByRole("dialog", { name: "Profile menu" });
+    expect(within(menu).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: /Help/i })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: /Connections/i })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: /Risk planner/i })).toBeInTheDocument();
+    expect(within(menu).queryByRole("link", { name: /Insights/i })).not.toBeInTheDocument();
   });
 });
 
@@ -198,7 +212,7 @@ describe("OverviewPage redesign", () => {
     expect(within(advanced).getByTestId("goldmeta-score")).toBeInTheDocument();
   });
 
-  it("includes Help in mobile navigation", async () => {
+  it("keeps Help available through the profile menu without adding a sixth mobile nav item", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -207,7 +221,10 @@ describe("OverviewPage redesign", () => {
         </AppShell>
       </MemoryRouter>
     );
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("link", { name: /Help/i })).toBeInTheDocument();
+
+    expect(screen.getByLabelText("GoldMeta mobile navigation").querySelectorAll("a")).toHaveLength(5);
+    await user.click(screen.getByRole("button", { name: "Open profile menu" }));
+    const menu = screen.getByRole("dialog", { name: "Profile menu" });
+    expect(within(menu).getByRole("link", { name: /Help/i })).toBeInTheDocument();
   });
 });
