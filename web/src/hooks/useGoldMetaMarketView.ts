@@ -15,6 +15,8 @@ type MarketStructureDiagnostics = {
   signalAgeSeconds?: number | null;
   quoteAgeSeconds?: number | null;
   confirmationAgeSeconds?: number | null;
+  shortTermDataReady?: boolean;
+  dayTradeDataReady?: boolean;
   validityStatus?: string | null;
   rejectionReasons?: string[];
 };
@@ -57,6 +59,26 @@ function biasLabel(plan: IntradayPlan | null, decision: Decision | null): string
 function decisionPrice(decision: Decision | null): number | null {
   const value = decision?.lastKnownPrice ?? decision?.ohlcv?.close ?? null;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function confirmationSupportsTrade(
+  confirmation: Decision | null,
+  direction: string | null | undefined
+): boolean {
+  const planDirection = String(direction ?? "").toUpperCase();
+  const classification = String(
+    confirmation?.marketStructure?.confirmationClassification ?? "NONE"
+  ).toUpperCase();
+  const confirmationDirection = String(
+    confirmation?.marketStructure?.confirmationDirection ?? "NEUTRAL"
+  ).toUpperCase();
+  const classificationIsActionable = ["BREAKOUT", "RETEST", "CONTINUATION", "REJECTION"].includes(
+    classification
+  );
+  if (!classificationIsActionable) return false;
+  if (planDirection === "BUY") return confirmationDirection === "BULLISH";
+  if (planDirection === "SELL") return confirmationDirection === "BEARISH";
+  return false;
 }
 
 function isConfirmedShortTermStatus(status: string | null | undefined): boolean {
@@ -115,7 +137,10 @@ export function useGoldMetaMarketView() {
   const confidence = plan?.confidence ?? canonicalDecision?.confidence ?? null;
   const direction = biasLabel(plan, canonicalDecision);
   // Day Trade uses the backend-published 1H bias. 4H remains context only in timeframeAlignment.
-  const dayTradeDirection = prettyDirection(stablePlan?.higherTimeframeBias ?? canonicalDecision?.higherTimeframeBias ?? null);
+  const dayTradeDirection =
+    diagnostics?.dayTradeDataReady === false
+      ? "Neutral"
+      : prettyDirection(stablePlan?.higherTimeframeBias ?? canonicalDecision?.higherTimeframeBias ?? null);
   const structure = marketStructureMode === "COMPLETE" ? structureDecision?.marketStructure ?? null : null;
   const support = marketStructureMode === "COMPLETE" ? plan?.zones?.nearestSupport ?? null : null;
   const resistance = marketStructureMode === "COMPLETE" ? plan?.zones?.nearestResistance ?? null : null;
@@ -151,7 +176,12 @@ export function useGoldMetaMarketView() {
     [entry, stop, tp1, tp2, tp3, plan, canonicalDecision, action, marketStructureMode]
   );
 
-  const shortTermActionable = tradeGeometry.actionable && isConfirmedShortTermStatus(plan?.planStatus);
+  const shortTermActionable =
+    tradeGeometry.actionable &&
+    diagnostics?.shortTermDataReady === true &&
+    confirmationDecision != null &&
+    confirmationSupportsTrade(confirmationDecision, tradeGeometry.direction) &&
+    isConfirmedShortTermStatus(plan?.planStatus);
   const shortTermAction: "BUY" | "SELL" | "WAIT" =
     shortTermActionable && (tradeGeometry.direction === "BUY" || tradeGeometry.direction === "SELL")
       ? tradeGeometry.direction
