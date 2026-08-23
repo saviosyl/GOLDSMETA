@@ -42,14 +42,45 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       });
       return;
     }
+
+    // buildIntradayPlan historically reads the quote's OHLC for nearby high/low and the
+    // structure's confirmation classification. Give it a non-persisted aligned view so:
+    // - current price remains the 1M TradingView quote;
+    // - structural OHLC/support-resistance geometry remains the confirmed 15M bar;
+    // - entry confirmation comes only from a fresh confirmed 5M event.
+    // This prevents 1M/5M diagnostic profile values from replacing the 15M plan.
+    const alignedQuote = view.quoteDecision
+      ? {
+          ...view.quoteDecision,
+          ohlcv:
+            view.marketStructureMode === "COMPLETE" && view.structureDecision?.ohlcv
+              ? view.structureDecision.ohlcv
+              : view.quoteDecision.ohlcv
+        }
+      : view.structureDecision;
+    const alignedStructure = view.structureDecision
+      ? {
+          ...view.structureDecision,
+          marketStructure: view.structureDecision.marketStructure
+            ? {
+                ...view.structureDecision.marketStructure,
+                confirmationClassification:
+                  view.confirmationDecision?.marketStructure?.confirmationClassification ?? null,
+                confirmationDirection:
+                  view.confirmationDecision?.marketStructure?.confirmationDirection ?? null,
+                confirmationCandleType:
+                  view.confirmationDecision?.marketStructure?.confirmationCandleType ?? null
+              }
+            : null
+        }
+      : null;
+
     const intradayPlan = buildIntradayPlan({
-      quote: view.quoteDecision,
-      structure: view.structureDecision,
-      confirmation: view.confirmationDecision,
+      quote: alignedQuote,
+      structure: alignedStructure,
       mode: view.marketStructureMode,
       quoteAgeSeconds: view.diagnostics.quoteAgeSeconds,
-      signalAgeSeconds: view.diagnostics.signalAgeSeconds,
-      confirmationAgeSeconds: view.diagnostics.confirmationAgeSeconds
+      signalAgeSeconds: view.diagnostics.signalAgeSeconds
     });
     const rawSessionPlan = await getOrEmptySessionPlan(store, feedUserId);
     // Central geometry gate — never return actionable levels that fail safety validation.
