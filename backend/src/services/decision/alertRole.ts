@@ -18,6 +18,69 @@ export const metadataString = (payload: TradingViewPayload, key: string): string
 export const metadataBool = (payload: TradingViewPayload, key: string): boolean | null =>
   asBool(payload.metadata?.[key]);
 
+/**
+ * Canonical key format:
+ *   EXCHANGE:SYMBOL|SESSION|PLAN_CLOSE_MS|PLAN_15M
+ * Normalization is strict but non-destructive: trim + uppercase + pipe-segment cleanup.
+ */
+export const normalizePlanSourceKey = (raw: string | null | undefined): string | null => {
+  if (!raw) return null;
+  const cleaned = raw
+    .split("|")
+    .map((segment) => segment.trim().replace(/\s+/g, ""))
+    .filter((segment) => segment.length > 0)
+    .join("|")
+    .toUpperCase();
+  return cleaned.length > 0 ? cleaned : null;
+};
+
+export type ParsedPlanSourceKey = {
+  normalized: string;
+  market: string | null;
+  exchange: string | null;
+  symbol: string | null;
+  session: string | null;
+  planCloseTimeMs: number | null;
+  role: string | null;
+};
+
+export const parsePlanSourceKey = (
+  raw: string | null | undefined
+): ParsedPlanSourceKey | null => {
+  const normalized = normalizePlanSourceKey(raw);
+  if (!normalized) return null;
+  const parts = normalized.split("|");
+  const market = parts[0] ?? null;
+  const session = parts[1] ?? null;
+  const closeRaw = parts[2] ?? null;
+  const role = parts[3] ?? null;
+
+  let exchange: string | null = null;
+  let symbol: string | null = null;
+  if (market) {
+    const [maybeExchange, maybeSymbol] = market.split(":");
+    if (maybeSymbol) {
+      exchange = maybeExchange || null;
+      symbol = maybeSymbol || null;
+    } else {
+      symbol = maybeExchange || null;
+    }
+  }
+
+  const planCloseTimeMs =
+    closeRaw && /^\d{10,16}$/.test(closeRaw) ? Number.parseInt(closeRaw, 10) : null;
+
+  return {
+    normalized,
+    market,
+    exchange,
+    symbol,
+    session,
+    planCloseTimeMs: Number.isFinite(planCloseTimeMs) ? planCloseTimeMs : null,
+    role
+  };
+};
+
 export const resolveAlertKind = (payload: TradingViewPayload): AlertKind | null => {
   const kind = metadataString(payload, "alertKind");
   if (kind === "STRATEGY" || kind === "QUOTE") return kind;
@@ -60,7 +123,7 @@ export const isQuoteAlert = (role: ResolvedAlertRole): boolean =>
   role === "QUOTE_1M" || role === "LEGACY_QUOTE";
 
 export const extractPlanSourceKey = (payload: TradingViewPayload): string | null =>
-  metadataString(payload, "planSourceKey");
+  normalizePlanSourceKey(metadataString(payload, "planSourceKey"));
 
 export const extractConfirmationState = (payload: TradingViewPayload): string | null =>
   metadataString(payload, "confirmationState");

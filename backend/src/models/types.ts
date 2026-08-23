@@ -319,6 +319,14 @@ export interface DecisionRecord {
   notificationSent: boolean;
   currentSession: string | null;
   higherTimeframeBias: TrendDirection | null;
+  /** Resolved Pine role for canonical routing (PLAN_15M / CONFIRM_5M / QUOTE_1M / legacy). */
+  alertRole?: string | null;
+  /** Normalized 15M plan-window key used to link PLAN_15M + CONFIRM_5M exactly. */
+  planSourceKey?: string | null;
+  /** Last fully closed 1H source timestamp that produced higherTimeframeBias (if known). */
+  oneHourBiasSourceTime?: string | null;
+  /** True only when the 1H bias source is confirmed/non-developing. */
+  oneHourBiasConfirmed?: boolean | null;
   lastKnownPrice: number | null;
   ohlcv: TradingViewPayload["ohlcv"];
   marketStructure: DecisionMarketStructure | null;

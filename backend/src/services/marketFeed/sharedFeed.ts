@@ -4,6 +4,7 @@ import {
   extractPlanSourceKey,
   metadataBool,
   metadataString,
+  normalizePlanSourceKey,
   resolveAlertRole
 } from "../decision/alertRole";
 import type {
@@ -127,7 +128,7 @@ const rejectedTraffic = (
   scriptVersion: payloadRecordString(payload, "scriptVersion"),
   timeframe: rawString(payload, "timeframe"),
   chartMatchesRole: payloadRecordBool(payload, "chartMatchesRole"),
-  planSourceKey: payloadRecordString(payload, "planSourceKey"),
+  planSourceKey: normalizePlanSourceKey(payloadRecordString(payload, "planSourceKey")),
   accepted: false,
   eventId
 });

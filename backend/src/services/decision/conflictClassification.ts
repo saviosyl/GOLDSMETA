@@ -36,6 +36,9 @@ const HARD_CODES = new Set([
   "SPREAD_TOO_HIGH",
   "OUT_OF_ORDER_DATA",
   "CONFIRM_PLAN_SOURCE_KEY_MISMATCH",
+  "PLAN_KEY_MISMATCH",
+  "PLAN_KEY_MISSING",
+  "CONFIRM_PRE_PLAN",
   "HARD_CONFLICT"
 ]);
 
@@ -74,13 +77,20 @@ export const classifyConflictCodes = (codes: string[]): ConflictClassification =
   if (hit(HARD_CODES)) {
     const code = hit(HARD_CODES)!;
     return {
-      class: code === "CONFIRM_PLAN_SOURCE_KEY_MISMATCH" || code === "OUT_OF_ORDER_DATA"
+      class:
+        code === "CONFIRM_PLAN_SOURCE_KEY_MISMATCH" ||
+        code === "OUT_OF_ORDER_DATA" ||
+        code === "PLAN_KEY_MISMATCH" ||
+        code === "PLAN_KEY_MISSING" ||
+        code === "CONFIRM_PRE_PLAN"
         ? "OUT_OF_ORDER_DATA"
         : "HARD_CONFLICT",
       hardBlock: true,
       formingAllowed: false,
       userFacing:
-        code === "CONFIRM_PLAN_SOURCE_KEY_MISMATCH"
+        code === "CONFIRM_PLAN_SOURCE_KEY_MISMATCH" ||
+        code === "PLAN_KEY_MISMATCH" ||
+        code === "PLAN_KEY_MISSING"
           ? "15M and 5M data did not belong to the same decision window."
           : "A hard data or safety conflict is blocking this plan.",
       diagnosticCode: code

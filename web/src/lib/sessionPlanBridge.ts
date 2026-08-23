@@ -37,6 +37,9 @@ export type StablePlanSummary = {
     strength?: number | null;
   } | null;
   higherTimeframeBias?: string | null;
+  oneHourBiasSourceTime?: string | null;
+  oneHourBiasConfirmed?: boolean | null;
+  oneHourBiasState?: string | null;
   quoteAgeSeconds?: number | null;
   signalAgeSeconds?: number | null;
   planQuality?: { grade?: string | null; reasons?: string[] } | null;
@@ -53,6 +56,9 @@ export type StablePlanSummary = {
 function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary, confLabel: string, confTone: string): TimeframeAlignment {
   const ctx = stable.fourHourContext;
   const bias = stable.higherTimeframeBias ?? ctx?.direction ?? plan.directionBias;
+  const oneHourState = String(stable.oneHourBiasState ?? "").toUpperCase();
+  const oneHourConfirmed = stable.oneHourBiasConfirmed === true && oneHourState === "CONFIRMED";
+  const oneHourDirection = oneHourConfirmed ? String(stable.higherTimeframeBias ?? bias) : "Neutral";
   const biasTone =
     String(bias).toUpperCase().includes("BULL")
       ? "buy"
@@ -71,9 +77,9 @@ function mapAlignment(plan: IntradayPlan, stable: StablePlanSummary, confLabel: 
       },
       {
         timeframe: "1H",
-        direction: String(bias),
-        label: "Main bias",
-        tone: biasTone
+        direction: oneHourDirection,
+        label: oneHourConfirmed ? "Main bias" : `Bias ${oneHourState.toLowerCase() || "pending"}`,
+        tone: oneHourConfirmed ? biasTone : "wait"
       },
       {
         timeframe: "15M",

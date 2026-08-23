@@ -17,6 +17,14 @@ type MarketStructureDiagnostics = {
   confirmationAgeSeconds?: number | null;
   shortTermDataReady?: boolean;
   dayTradeDataReady?: boolean;
+  planSourceKey?: string | null;
+  confirmationSourceKey?: string | null;
+  confirmationPlanKeyMatch?: boolean;
+  oneHourBiasSourceTime?: string | null;
+  oneHourBiasConfirmed?: boolean | null;
+  oneHourBiasState?: string | null;
+  oneHourBiasAgeSeconds?: number | null;
+  dayTradeBiasReason?: string | null;
   validityStatus?: string | null;
   rejectionReasons?: string[];
 };

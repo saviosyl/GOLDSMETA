@@ -117,6 +117,9 @@ export type SessionPlanRecord = {
   marketStructureMode: MarketStructureMode | null;
   session: string | null;
   higherTimeframeBias: TrendDirection | null;
+  oneHourBiasSourceTime: string | null;
+  oneHourBiasConfirmed: boolean | null;
+  oneHourBiasState: "CONFIRMED" | "DEVELOPING" | "MISSING" | "INVALID" | "STALE" | null;
   invalidation: string | null;
   /** Geometry safety — set by central validator before save / API return. */
   geometryValid?: boolean;

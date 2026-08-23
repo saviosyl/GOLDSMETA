@@ -11,6 +11,10 @@
 import { decisionConfig } from "../../config/decisionConfig";
 import type { DecisionRecord } from "../../models/types";
 import { pricesAreConsistent } from "../snapshot/priceConsistency";
+import {
+  normalizePlanSourceKey,
+  parsePlanSourceKey
+} from "./alertRole";
 
 export type MarketStructureMode = "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | "UNAVAILABLE";
 
@@ -35,6 +39,14 @@ export type MarketStructureDiagnostics = {
   signalAgeSeconds: number | null;
   quoteAgeSeconds: number | null;
   confirmationAgeSeconds: number | null;
+  planSourceKey: string | null;
+  confirmationSourceKey: string | null;
+  confirmationPlanKeyMatch: boolean;
+  oneHourBiasSourceTime: string | null;
+  oneHourBiasConfirmed: boolean | null;
+  oneHourBiasState: "CONFIRMED" | "DEVELOPING" | "MISSING" | "INVALID" | "STALE";
+  oneHourBiasAgeSeconds: number | null;
+  dayTradeBiasReason: string | null;
   /** All canonical short-term roles are present, fresh and source-aligned. */
   shortTermDataReady: boolean;
   /** Confirmed 15M structure has an explicit 1H bias for the Day Trade view. */
@@ -66,6 +78,101 @@ function sameInstrument(a: DecisionRecord | null | undefined, b: DecisionRecord 
   const exchangeA = exchangeOf(a);
   const exchangeB = exchangeOf(b);
   return !exchangeA || !exchangeB || exchangeA === exchangeB;
+}
+
+function canonicalSymbolOf(d: DecisionRecord | null | undefined): string | null {
+  if (!d) return null;
+  return d.symbolIdentity?.canonicalSymbol ?? d.symbol ?? null;
+}
+
+function parseTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+type OneHourBiasResolution = {
+  direction: DecisionRecord["higherTimeframeBias"] | null;
+  sourceTime: string | null;
+  confirmed: boolean | null;
+  state: "CONFIRMED" | "DEVELOPING" | "MISSING" | "INVALID" | "STALE";
+  ageSeconds: number | null;
+  valid: boolean;
+  reason: string | null;
+};
+
+function resolveOneHourBias(
+  structure: DecisionRecord | null,
+  nowMs: number
+): OneHourBiasResolution {
+  const direction = structure?.higherTimeframeBias ?? null;
+  if (!structure || !direction) {
+    return {
+      direction: null,
+      sourceTime: null,
+      confirmed: null,
+      state: "MISSING",
+      ageSeconds: null,
+      valid: false,
+      reason: "DAY_TRADE_1H_BIAS_MISSING"
+    };
+  }
+  if (direction !== "BULLISH" && direction !== "BEARISH" && direction !== "NEUTRAL") {
+    return {
+      direction,
+      sourceTime: structure.oneHourBiasSourceTime ?? null,
+      confirmed: structure.oneHourBiasConfirmed ?? null,
+      state: "INVALID",
+      ageSeconds: null,
+      valid: false,
+      reason: "DAY_TRADE_1H_BIAS_INVALID"
+    };
+  }
+  if (structure.oneHourBiasConfirmed !== true) {
+    return {
+      direction,
+      sourceTime: structure.oneHourBiasSourceTime ?? null,
+      confirmed: structure.oneHourBiasConfirmed ?? null,
+      state: "DEVELOPING",
+      ageSeconds: null,
+      valid: false,
+      reason: "DAY_TRADE_1H_BIAS_DEVELOPING"
+    };
+  }
+  const sourceMs = parseTimestampMs(structure.oneHourBiasSourceTime ?? null);
+  if (!sourceMs) {
+    return {
+      direction,
+      sourceTime: structure.oneHourBiasSourceTime ?? null,
+      confirmed: structure.oneHourBiasConfirmed ?? null,
+      state: "INVALID",
+      ageSeconds: null,
+      valid: false,
+      reason: "DAY_TRADE_1H_BIAS_INVALID"
+    };
+  }
+  const ageMs = Math.max(0, nowMs - sourceMs);
+  const ageSecondsValue = Math.round(ageMs / 1000);
+  if (ageMs > decisionConfig.freshness.oneHourBiasStaleMs) {
+    return {
+      direction,
+      sourceTime: structure.oneHourBiasSourceTime ?? null,
+      confirmed: structure.oneHourBiasConfirmed ?? null,
+      state: "STALE",
+      ageSeconds: ageSecondsValue,
+      valid: false,
+      reason: "DAY_TRADE_1H_BIAS_STALE"
+    };
+  }
+  return {
+    direction,
+    sourceTime: structure.oneHourBiasSourceTime ?? null,
+    confirmed: structure.oneHourBiasConfirmed ?? null,
+    state: "CONFIRMED",
+    ageSeconds: ageSecondsValue,
+    valid: true,
+    reason: null
+  };
 }
 
 /** Production / non-test decision usable on the LIVE dashboard. */
@@ -135,40 +242,117 @@ export function selectLatestCompleteStrategySignal(
   return recent.find((d) => isStrategySignalValid(d, nowMs)) ?? null;
 }
 
+type ConfirmationSelection = {
+  decision: DecisionRecord | null;
+  candidate: DecisionRecord | null;
+  rejectionReasons: string[];
+};
+
+function validateConfirmationCandidate(
+  candidate: DecisionRecord,
+  structure: DecisionRecord | null,
+  nowMs: number
+): string[] {
+  const reasons: string[] = [];
+  if (!isLiveDecision(candidate)) reasons.push("CONFIRM_NOT_LIVE");
+  if (candidate.timeframe !== "5") reasons.push("CONFIRM_WRONG_TIMEFRAME");
+  if (candidate.isProvisional) reasons.push("CONFIRM_PROVISIONAL");
+  if (candidate.dataQuality === "CONFLICTED" || candidate.dataQuality === "INVALID") {
+    reasons.push("CONFIRM_CONFLICTED");
+  }
+  if (
+    candidate.dataQuality === "STALE" ||
+    candidate.dataSourceLabel === "STALE" ||
+    candidate.dataSourceLabel === "OFFLINE" ||
+    candidate.dataSourceLabel === "MOCK"
+  ) {
+    reasons.push("CONFIRM_STALE");
+  }
+
+  const age = ageSeconds(candidate.marketDataTime ?? candidate.generatedAt, nowMs);
+  if (age == null || age * 1000 > decisionConfig.freshness.confirm5mStaleMs) {
+    reasons.push("CONFIRM_STALE");
+  }
+
+  const classification = candidate.marketStructure?.confirmationClassification;
+  const direction = candidate.marketStructure?.confirmationDirection;
+  if (!classification || classification === "NONE" || !direction || direction === "NEUTRAL") {
+    reasons.push("CONFIRM_INCOMPLETE");
+  }
+
+  if (structure) {
+    const structureSymbol = canonicalSymbolOf(structure);
+    const confirmSymbol = canonicalSymbolOf(candidate);
+    if (structureSymbol && confirmSymbol && structureSymbol !== confirmSymbol) {
+      reasons.push("CONFIRM_WRONG_SYMBOL");
+    }
+    const structureExchange = exchangeOf(structure);
+    const confirmExchange = exchangeOf(candidate);
+    if (
+      structureExchange &&
+      confirmExchange &&
+      structureExchange !== confirmExchange
+    ) {
+      reasons.push("CONFIRM_WRONG_EXCHANGE");
+    }
+    if (!sameInstrument(candidate, structure)) {
+      if (!reasons.includes("CONFIRM_WRONG_SYMBOL") && !reasons.includes("CONFIRM_WRONG_EXCHANGE")) {
+        reasons.push("CONFIRM_WRONG_SYMBOL");
+      }
+    }
+  }
+
+  const structureKey = normalizePlanSourceKey(structure?.planSourceKey ?? null);
+  const confirmKey = normalizePlanSourceKey(candidate.planSourceKey ?? null);
+  if (!structureKey || !confirmKey) {
+    reasons.push("PLAN_KEY_MISSING");
+  } else if (structureKey !== confirmKey) {
+    reasons.push("PLAN_KEY_MISMATCH");
+  }
+  const structureKeyParts = parsePlanSourceKey(structureKey);
+  const confirmKeyParts = parsePlanSourceKey(confirmKey);
+  if (
+    structureKeyParts?.planCloseTimeMs != null &&
+    confirmKeyParts?.planCloseTimeMs != null &&
+    confirmKeyParts.planCloseTimeMs < structureKeyParts.planCloseTimeMs
+  ) {
+    reasons.push("CONFIRM_PRE_PLAN");
+  }
+
+  const confirmationTime = parseTimestampMs(candidate.marketDataTime ?? candidate.generatedAt);
+  const structureTime = parseTimestampMs(structure?.marketDataTime ?? structure?.generatedAt);
+  if (confirmationTime == null) {
+    reasons.push("CONFIRM_INCOMPLETE");
+  } else if (structureTime != null && confirmationTime < structureTime) {
+    // A 5M event from before the active 15M plan cannot confirm the newer plan.
+    reasons.push("CONFIRM_PRE_PLAN");
+  }
+
+  return [...new Set(reasons)];
+}
+
+function selectLatestConfirmationDecisionDetailed(
+  recent: DecisionRecord[],
+  structure: DecisionRecord | null,
+  nowMs = Date.now()
+): ConfirmationSelection {
+  const latest5m = recent.find((d) => d.timeframe === "5") ?? null;
+  if (!latest5m) {
+    return { decision: null, candidate: null, rejectionReasons: ["CONFIRM_5M_MISSING_OR_STALE"] };
+  }
+  const rejectionReasons = validateConfirmationCandidate(latest5m, structure, nowMs);
+  if (rejectionReasons.length > 0) {
+    return { decision: null, candidate: latest5m, rejectionReasons };
+  }
+  return { decision: latest5m, candidate: latest5m, rejectionReasons: [] };
+}
+
 export function selectLatestConfirmationDecision(
   recent: DecisionRecord[],
   structure: DecisionRecord | null,
   nowMs = Date.now()
 ): DecisionRecord | null {
-  return (
-    recent.find((d) => {
-      if (!isLiveDecision(d) || d.timeframe !== "5" || d.isProvisional) return false;
-      if (d.dataQuality === "STALE" || d.dataQuality === "CONFLICTED" || d.dataQuality === "INVALID") {
-        return false;
-      }
-      if (d.dataSourceLabel === "STALE" || d.dataSourceLabel === "OFFLINE" || d.dataSourceLabel === "MOCK") {
-        return false;
-      }
-      if (!sameInstrument(d, structure)) return false;
-
-      const classification = d.marketStructure?.confirmationClassification;
-      const direction = d.marketStructure?.confirmationDirection;
-      if (!classification || classification === "NONE" || !direction || direction === "NEUTRAL") {
-        return false;
-      }
-
-      const confirmationTime = Date.parse(d.marketDataTime ?? d.generatedAt);
-      const structureTime = structure
-        ? Date.parse(structure.marketDataTime ?? structure.generatedAt)
-        : NaN;
-      if (!Number.isFinite(confirmationTime)) return false;
-      // A 5M event from before the active 15M plan cannot confirm the newer plan.
-      if (Number.isFinite(structureTime) && confirmationTime < structureTime) return false;
-
-      const age = ageSeconds(d.marketDataTime ?? d.generatedAt, nowMs);
-      return age != null && age * 1000 <= decisionConfig.freshness.confirm5mStaleMs;
-    }) ?? null
-  );
+  return selectLatestConfirmationDecisionDetailed(recent, structure, nowMs).decision;
 }
 
 export function listReceivedFields(d: DecisionRecord | null | undefined): string[] {
@@ -214,7 +398,13 @@ export function resolveMarketStructureView(
 } {
   const latestQuote = selectLatestQuoteDecision(recent);
   const latestComplete = selectLatestCompleteStrategySignal(recent, nowMs);
-  const latestConfirmation = selectLatestConfirmationDecision(recent, latestComplete, nowMs);
+  const confirmationSelection = selectLatestConfirmationDecisionDetailed(
+    recent,
+    latestComplete,
+    nowMs
+  );
+  const latestConfirmation = confirmationSelection.decision;
+  const confirmationCandidate = confirmationSelection.candidate;
 
   let marketStructureMode: MarketStructureMode = "UNAVAILABLE";
   let structureDecision: DecisionRecord | null = null;
@@ -243,7 +433,12 @@ export function resolveMarketStructureView(
         rejectionReasons.push("DEDICATED_QUOTE_1M_MISSING — using newest live TradingView event for price");
       }
       if (!latestConfirmation) {
-        rejectionReasons.push("CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing");
+        rejectionReasons.push(...confirmationSelection.rejectionReasons);
+        if (!confirmationSelection.rejectionReasons.includes("CONFIRM_5M_MISSING_OR_STALE")) {
+          rejectionReasons.push(
+            "CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing"
+          );
+        }
       }
     }
   } else if (latestComplete) {
@@ -251,7 +446,12 @@ export function resolveMarketStructureView(
     structureDecision = latestComplete;
     priceConsistencyOk = true;
     if (!latestConfirmation) {
-      rejectionReasons.push("CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing");
+      rejectionReasons.push(...confirmationSelection.rejectionReasons);
+      if (!confirmationSelection.rejectionReasons.includes("CONFIRM_5M_MISSING_OR_STALE")) {
+        rejectionReasons.push(
+          "CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing"
+        );
+      }
     }
   } else {
     marketStructureMode = "LIVE_RANGE_ONLY";
@@ -280,11 +480,21 @@ export function resolveMarketStructureView(
     quoteAge != null &&
     quoteAge * 1000 <= decisionConfig.freshness.quoteStaleMs &&
     latestConfirmation != null;
+  const oneHourBias = resolveOneHourBias(latestComplete, nowMs);
+  if (latestComplete && !oneHourBias.valid && oneHourBias.reason) {
+    rejectionReasons.push(oneHourBias.reason);
+  }
   const dayTradeDataReady =
     marketStructureMode === "COMPLETE" &&
     priceConsistencyOk !== false &&
-    latestComplete?.higherTimeframeBias != null &&
-    latestComplete.higherTimeframeBias !== "NEUTRAL";
+    oneHourBias.valid;
+  const structurePlanKey = normalizePlanSourceKey(latestComplete?.planSourceKey ?? null);
+  const confirmationPlanKey = normalizePlanSourceKey(
+    (latestConfirmation ?? confirmationCandidate)?.planSourceKey ?? null
+  );
+  const confirmationPlanKeyMatch = Boolean(
+    structurePlanKey && confirmationPlanKey && structurePlanKey === confirmationPlanKey
+  );
 
   const diagnostics: MarketStructureDiagnostics = {
     lastWebhookOrDecisionAt: latestQuote?.generatedAt ?? latestQuote?.marketDataTime ?? null,
@@ -299,11 +509,19 @@ export function resolveMarketStructureView(
     quoteTimeframe: latestQuote?.timeframe ?? null,
     structureTimeframe: latestComplete?.timeframe ?? null,
     confirmationTimeframe: latestConfirmation?.timeframe ?? null,
+    planSourceKey: structurePlanKey,
+    confirmationSourceKey: confirmationPlanKey,
+    confirmationPlanKeyMatch,
+    oneHourBiasSourceTime: oneHourBias.sourceTime,
+    oneHourBiasConfirmed: oneHourBias.confirmed,
+    oneHourBiasState: oneHourBias.state,
+    oneHourBiasAgeSeconds: oneHourBias.ageSeconds,
+    dayTradeBiasReason: oneHourBias.reason,
     fieldsReceived: listReceivedFields(latestComplete ?? latestQuote),
     fieldsMissing: listMissingStructureFields(latestComplete),
     fieldsRejected,
     rejectionReasons: [
-      ...rejectionReasons,
+      ...new Set(rejectionReasons),
       ...(latestQuote?.warnings ?? []).filter((w) => /PRICE_SOURCE|TEST_FIXTURE|MISMATCH/i.test(w))
     ],
     priceConsistencyOk,

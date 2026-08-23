@@ -23,6 +23,7 @@ import {
   extractPlanSourceKey,
   isConfirmAlert,
   isPlanSourceAlert,
+  parsePlanSourceKey,
   isQuoteAlert,
   metadataBool,
   metadataString,
@@ -219,6 +220,120 @@ const ageSeconds = (iso: string | null | undefined, nowMs: number): number | nul
   return Math.max(0, Math.round((nowMs - t) / 1000));
 };
 
+const hasDirectionalConfirmation = (decision: DecisionRecord): boolean => {
+  const classification = decision.marketStructure?.confirmationClassification;
+  const direction = decision.marketStructure?.confirmationDirection;
+  return Boolean(
+    classification &&
+      classification !== "NONE" &&
+      direction &&
+      direction !== "NEUTRAL"
+  );
+};
+
+const parseTimestampMs = (iso: string | null | undefined): number | null => {
+  if (!iso) return null;
+  const value = Date.parse(iso);
+  return Number.isFinite(value) ? value : null;
+};
+
+const resolveOneHourBiasState = (
+  decision: DecisionRecord,
+  nowMs: number
+): SessionPlanRecord["oneHourBiasState"] => {
+  const direction = decision.higherTimeframeBias;
+  if (!direction) return "MISSING";
+  if (direction !== "BULLISH" && direction !== "BEARISH" && direction !== "NEUTRAL") {
+    return "INVALID";
+  }
+  if (decision.oneHourBiasConfirmed !== true) return "DEVELOPING";
+  const sourceMs = parseTimestampMs(decision.oneHourBiasSourceTime ?? null);
+  if (!sourceMs) return "INVALID";
+  if (nowMs - sourceMs > decisionConfig.freshness.oneHourBiasStaleMs) {
+    return "STALE";
+  }
+  return "CONFIRMED";
+};
+
+const confirmationRejectionReasons = (args: {
+  payload: TradingViewPayload;
+  decision: DecisionRecord;
+  existing: SessionPlanRecord;
+  nowMs: number;
+}): string[] => {
+  const { payload, decision, existing, nowMs } = args;
+  const reasons: string[] = [];
+  const confirmKey = extractPlanSourceKey(payload);
+  const activeKey = existing.planSourceKey ?? null;
+  const confirmKeyParts = parsePlanSourceKey(confirmKey);
+  const activeKeyParts = parsePlanSourceKey(activeKey);
+
+  if (!confirmKey) reasons.push("PLAN_KEY_MISSING");
+  if (!activeKey) reasons.push("ACTIVE_PLAN_KEY_MISSING");
+  if (confirmKey && activeKey && confirmKey !== activeKey) reasons.push("PLAN_KEY_MISMATCH");
+
+  if (!payload.isConfirmedBar || decision.isProvisional) reasons.push("CONFIRM_PROVISIONAL");
+  if (!hasDirectionalConfirmation(decision)) reasons.push("CONFIRM_INCOMPLETE");
+
+  if (
+    decision.dataQuality === "CONFLICTED" ||
+    decision.dataQuality === "INVALID"
+  ) {
+    reasons.push("CONFIRM_CONFLICTED");
+  }
+  if (
+    decision.dataQuality === "STALE" ||
+    decision.dataSourceLabel === "STALE" ||
+    decision.dataSourceLabel === "OFFLINE" ||
+    decision.dataSourceLabel === "MOCK"
+  ) {
+    reasons.push("CONFIRM_STALE");
+  }
+
+  const confirmMs = parseTimestampMs(
+    decision.marketDataTime ?? payload.barTime ?? decision.generatedAt
+  );
+  if (confirmMs != null && nowMs - confirmMs > decisionConfig.freshness.confirm5mStaleMs) {
+    reasons.push("CONFIRM_STALE");
+  }
+
+  const planMs = parseTimestampMs(existing.lastPlanAt ?? existing.updatedAt);
+  if (confirmMs != null && planMs != null && confirmMs < planMs) {
+    reasons.push("CONFIRM_PRE_PLAN");
+  }
+  if (
+    confirmKeyParts?.planCloseTimeMs != null &&
+    activeKeyParts?.planCloseTimeMs != null &&
+    confirmKeyParts.planCloseTimeMs < activeKeyParts.planCloseTimeMs
+  ) {
+    reasons.push("CONFIRM_PRE_PLAN");
+  }
+
+  const canonicalSymbol = decision.symbolIdentity?.canonicalSymbol ?? decision.symbol;
+  if (canonicalSymbol !== existing.symbol) reasons.push("CONFIRM_WRONG_SYMBOL");
+  if (confirmKeyParts?.symbol && confirmKeyParts.symbol !== existing.symbol) {
+    reasons.push("CONFIRM_WRONG_SYMBOL");
+  }
+
+  const decisionExchange = decision.symbolIdentity?.exchange ?? null;
+  if (
+    activeKeyParts?.exchange &&
+    decisionExchange &&
+    activeKeyParts.exchange !== decisionExchange
+  ) {
+    reasons.push("CONFIRM_WRONG_EXCHANGE");
+  }
+  if (
+    activeKeyParts?.exchange &&
+    confirmKeyParts?.exchange &&
+    activeKeyParts.exchange !== confirmKeyParts.exchange
+  ) {
+    reasons.push("CONFIRM_WRONG_EXCHANGE");
+  }
+
+  return [...new Set(reasons)];
+};
+
 const parseFourHour = (raw: Record<string, unknown> | null): FourHourContext | null => {
   if (!raw) return null;
   const num = (k: string): number | null => {
@@ -292,6 +407,7 @@ const emptyNoValidPlan = (
   marketStructureMode: MarketStructureMode | null
 ): SessionPlanRecord => {
   const now = nowIso();
+  const oneHourBiasState = resolveOneHourBiasState(decision, Date.now());
   return {
     planId: planIdFor(userId, extractPlanSourceKey(payload), payload.barTime),
     planSourceKey: extractPlanSourceKey(payload),
@@ -326,7 +442,10 @@ const emptyNoValidPlan = (
     sourceDecisionId: decision.decisionId,
     marketStructureMode,
     session: decision.currentSession,
-    higherTimeframeBias: null,
+    higherTimeframeBias: decision.higherTimeframeBias ?? null,
+    oneHourBiasSourceTime: decision.oneHourBiasSourceTime ?? null,
+    oneHourBiasConfirmed: decision.oneHourBiasConfirmed ?? null,
+    oneHourBiasState,
     invalidation: reasons.join("; "),
     createdAt: now,
     updatedAt: now,
@@ -541,6 +660,7 @@ const buildPlanFromDecision = (args: {
     existing?.validUntil && lockStrategy
       ? existing.validUntil
       : addMsIso(now, decisionConfig.decisionTtlMs * 2);
+  const oneHourBiasState = resolveOneHourBiasState(decision, nowMs);
 
   const lifecycleState = deriveLifecycleFromPrice({
     previous: existing?.lifecycleState ?? "BUILDING",
@@ -613,6 +733,18 @@ const buildPlanFromDecision = (args: {
       lockStrategy
         ? existing?.higherTimeframeBias ?? decision.higherTimeframeBias
         : decision.higherTimeframeBias,
+    oneHourBiasSourceTime:
+      lockStrategy
+        ? existing?.oneHourBiasSourceTime ?? decision.oneHourBiasSourceTime ?? null
+        : decision.oneHourBiasSourceTime ?? existing?.oneHourBiasSourceTime ?? null,
+    oneHourBiasConfirmed:
+      lockStrategy
+        ? existing?.oneHourBiasConfirmed ?? decision.oneHourBiasConfirmed ?? null
+        : decision.oneHourBiasConfirmed ?? existing?.oneHourBiasConfirmed ?? null,
+    oneHourBiasState:
+      lockStrategy && existing?.oneHourBiasState
+        ? existing.oneHourBiasState
+        : oneHourBiasState,
     invalidation: decision.invalidation ?? existing?.invalidation ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -796,23 +928,47 @@ export const processSessionPlanLifecycle = async (
       await store.saveSessionPlan?.(plan);
       return plan;
     }
-    // Reject confirmations that belong to a different 15M plan window.
-    const confirmKey = extractPlanSourceKey(payload);
-    const activeKey = existing.planSourceKey ?? null;
-    if (confirmKey && activeKey && confirmKey !== activeKey) {
+    const rejectionCodes = confirmationRejectionReasons({
+      payload,
+      decision,
+      existing,
+      nowMs: Date.now()
+    });
+    if (rejectionCodes.length > 0) {
+      const compatibilityCodes = [
+        rejectionCodes.includes("PLAN_KEY_MISMATCH")
+          ? "CONFIRM_PLAN_SOURCE_KEY_MISMATCH"
+          : null,
+        rejectionCodes.includes("PLAN_KEY_MISSING")
+          ? "CONFIRM_PLAN_SOURCE_KEY_MISSING"
+          : null,
+        rejectionCodes.some((code) =>
+          code === "PLAN_KEY_MISMATCH" || code === "PLAN_KEY_MISSING" || code === "CONFIRM_PRE_PLAN"
+        )
+          ? "OUT_OF_ORDER_DATA"
+          : null
+      ].filter((code): code is string => Boolean(code));
+      const rejectedLifecycle: SessionPlanRecord["lifecycleState"] =
+        existing.lifecycleState === "CONFIRMED" || existing.lifecycleState === "ARMED"
+          ? "WAITING_FOR_ENTRY_ZONE"
+          : existing.lifecycleState;
       const rejected: SessionPlanRecord = {
         ...existing,
         planMutation: "STATUS_UPDATED",
         planStabilityLabel: "STATUS UPDATED",
         alertRole: "CONFIRM_5M",
+        confirmationState: "CONFIRMATION_FAILED",
+        lifecycleState: rejectedLifecycle,
+        lastConfirmAt: nowIso(),
         updatedAt: nowIso(),
+        invalidation: `5M confirmation rejected: ${rejectionCodes.join(", ")}`,
         planQuality: {
           ...existing.planQuality,
           reasons: [
             ...new Set([
               ...(existing.planQuality?.reasons ?? []),
-              "CONFIRM_PLAN_SOURCE_KEY_MISMATCH",
-              "OUT_OF_ORDER_DATA"
+              ...rejectionCodes,
+              ...compatibilityCodes
             ])
           ]
         }

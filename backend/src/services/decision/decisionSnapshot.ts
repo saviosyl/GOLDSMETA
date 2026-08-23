@@ -3,6 +3,8 @@
  * Inputs from different 15M planSourceKeys must not be mixed.
  */
 
+import { normalizePlanSourceKey } from "./alertRole";
+
 export type FeedRoleFreshness = "fresh" | "delayed" | "stale" | "missing";
 
 export type DecisionSnapshotFreshness = {
@@ -141,8 +143,8 @@ export const buildAuthoritativeSnapshot = (input: {
   const confirm5m = classifyBarFreshness(confirmAge, windows.confirmBarMs, windows.confirmGraceMs);
 
   const incompatibilityReasons: string[] = [];
-  const planKey = input.planSourceKey ?? null;
-  const confirmKey = input.confirmationSourceKey ?? null;
+  const planKey = normalizePlanSourceKey(input.planSourceKey ?? null);
+  const confirmKey = normalizePlanSourceKey(input.confirmationSourceKey ?? null);
   if (planKey && confirmKey && planKey !== confirmKey) {
     incompatibilityReasons.push("CONFIRM_PLAN_SOURCE_KEY_MISMATCH");
   }

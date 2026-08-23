@@ -229,6 +229,69 @@ describe("session plan stability", () => {
     }
   });
 
+  it("rejects CONFIRM_5M when planSourceKey is missing", async () => {
+    await processSessionPlanLifecycle({
+      userId: "default-user",
+      payload: tradingViewPayloadSchema.parse(plan15Fixture),
+      decision: baseDecision(),
+      store,
+      marketStructureMode: "COMPLETE"
+    });
+    const confirmMissingKey = tradingViewPayloadSchema.parse({
+      ...confirm5Fixture,
+      metadata: {
+        ...(confirm5Fixture.metadata as Record<string, unknown>),
+        planSourceKey: null
+      }
+    });
+    const rejected = await processSessionPlanLifecycle({
+      userId: "default-user",
+      payload: confirmMissingKey,
+      decision: baseDecision({
+        decisionId: "dec-confirm-missing-key",
+        timeframe: "5"
+      }),
+      store,
+      marketStructureMode: "COMPLETE"
+    });
+    expect(rejected.confirmationState).toBe("CONFIRMATION_FAILED");
+    expect(rejected.planQuality.reasons).toContain("PLAN_KEY_MISSING");
+    expect(rejected.planQuality.reasons).toContain("OUT_OF_ORDER_DATA");
+    expect(rejected.direction).toBe("BUY");
+  });
+
+  it("rejects CONFIRM_5M when planSourceKey mismatches active 15M plan", async () => {
+    const created = await processSessionPlanLifecycle({
+      userId: "default-user",
+      payload: tradingViewPayloadSchema.parse(plan15Fixture),
+      decision: baseDecision(),
+      store,
+      marketStructureMode: "COMPLETE"
+    });
+    const confirmWrongKey = tradingViewPayloadSchema.parse({
+      ...confirm5Fixture,
+      metadata: {
+        ...(confirm5Fixture.metadata as Record<string, unknown>),
+        planSourceKey: "OANDA:XAUUSD|OVERLAP|1794903600000|PLAN_15M"
+      }
+    });
+    const rejected = await processSessionPlanLifecycle({
+      userId: "default-user",
+      payload: confirmWrongKey,
+      decision: baseDecision({
+        decisionId: "dec-confirm-wrong-key",
+        timeframe: "5"
+      }),
+      store,
+      marketStructureMode: "COMPLETE"
+    });
+    expect(rejected.confirmationState).toBe("CONFIRMATION_FAILED");
+    expect(rejected.planQuality.reasons).toContain("PLAN_KEY_MISMATCH");
+    expect(rejected.planQuality.reasons).toContain("CONFIRM_PLAN_SOURCE_KEY_MISMATCH");
+    expect(rejected.planSourceKey).toBe(created.planSourceKey);
+    expect(rejected.direction).toBe("BUY");
+  });
+
   it("missing 15M plan → NO_VALID_PLAN for quote/confirm alone", async () => {
     const quoteOnly = await processSessionPlanLifecycle({
       userId: "default-user",

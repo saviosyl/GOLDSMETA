@@ -17,6 +17,7 @@ export const decisionConfig = {
     quoteStaleMs: 3 * 60 * 1000,
     confirm5mStaleMs: 12 * 60 * 1000,
     plan15mStaleMs: 20 * 60 * 1000,
+    oneHourBiasStaleMs: 2 * 60 * 60 * 1000,
     confirmBarMs: 5 * 60 * 1000,
     planBarMs: 15 * 60 * 1000,
     confirmGraceMs: 90 * 1000,

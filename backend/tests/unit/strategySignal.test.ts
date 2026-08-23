@@ -11,6 +11,7 @@ import {
 function decision(partial: Partial<DecisionRecord> & { decisionId: string }): DecisionRecord {
   const now = new Date().toISOString();
   const later = new Date(Date.now() + 15 * 60_000).toISOString();
+  const oneHourSource = new Date(Date.now() - 30 * 60_000).toISOString();
   return {
     schemaVersion: "1.0",
     userId: "u1",
@@ -52,6 +53,10 @@ function decision(partial: Partial<DecisionRecord> & { decisionId: string }): De
     notificationSent: false,
     currentSession: "NEWYORK",
     higherTimeframeBias: "BULLISH",
+    alertRole: "PLAN_15M",
+    planSourceKey: "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    oneHourBiasSourceTime: oneHourSource,
+    oneHourBiasConfirmed: true,
     lastKnownPrice: 4076.56,
     ohlcv: { open: 4075, high: 4078.78, low: 4073.97, close: 4076.56, volume: 1 },
     marketStructure: {
@@ -161,7 +166,39 @@ describe("strategySignal role alignment", () => {
     expect(view.structureDecision?.decisionId).toBe("plan-15m");
     expect(view.diagnostics.confirmationTimeframe).toBe("5");
     expect(view.diagnostics.shortTermDataReady).toBe(true);
+    expect(view.diagnostics.planSourceKey).toBe("OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M");
+    expect(view.diagnostics.confirmationPlanKeyMatch).toBe(true);
     expect(selectLatestConfirmationDecision([confirm5m], plan15m)?.decisionId).toBe("confirm-5m");
+  });
+
+  it("rejects 5M confirmation when planSourceKey is missing", () => {
+    const plan15m = decision({ decisionId: "plan-15m", timeframe: "15" });
+    const missingKey5m = decision({
+      decisionId: "confirm-missing-key",
+      timeframe: "5",
+      planSourceKey: null
+    });
+    const view = resolveMarketStructureView([missingKey5m, plan15m]);
+    expect(view.latestConfirmation).toBeNull();
+    expect(view.diagnostics.rejectionReasons).toContain("PLAN_KEY_MISSING");
+    expect(view.diagnostics.shortTermDataReady).toBe(false);
+  });
+
+  it("rejects 5M confirmation when planSourceKey differs from active 15M plan", () => {
+    const plan15m = decision({
+      decisionId: "plan-15m",
+      timeframe: "15",
+      planSourceKey: "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M"
+    });
+    const wrongKey5m = decision({
+      decisionId: "confirm-wrong-key",
+      timeframe: "5",
+      planSourceKey: "OANDA:XAUUSD|OVERLAP|1794903600000|PLAN_15M"
+    });
+    const view = resolveMarketStructureView([wrongKey5m, plan15m]);
+    expect(view.latestConfirmation).toBeNull();
+    expect(view.diagnostics.rejectionReasons).toContain("PLAN_KEY_MISMATCH");
+    expect(view.diagnostics.shortTermDataReady).toBe(false);
   });
 
   it("does not treat a complete-looking 5M event as the 15M strategy structure", () => {
@@ -232,6 +269,67 @@ describe("strategySignal role alignment", () => {
     const view = resolveMarketStructureView([quote1m, plan15m]);
     expect(view.marketStructureMode).toBe("MISMATCH");
     expect(view.structureDecision).toBeNull();
+  });
+
+  it("marks day trade bias ready only when confirmed 1H source is present and fresh", () => {
+    const now = Date.now();
+    const plan15m = decision({
+      decisionId: "plan-confirmed-1h",
+      timeframe: "15",
+      oneHourBiasConfirmed: true,
+      oneHourBiasSourceTime: new Date(now - 20 * 60_000).toISOString(),
+      higherTimeframeBias: "BULLISH"
+    });
+    const quote1m = decision({ decisionId: "quote-1m", timeframe: "1" });
+    const view = resolveMarketStructureView([quote1m, plan15m], now);
+    expect(view.diagnostics.dayTradeDataReady).toBe(true);
+    expect(view.diagnostics.oneHourBiasState).toBe("CONFIRMED");
+  });
+
+  it("rejects developing 1H bias and keeps day-trade view neutral", () => {
+    const plan15m = decision({
+      decisionId: "plan-developing-1h",
+      timeframe: "15",
+      oneHourBiasConfirmed: false,
+      oneHourBiasSourceTime: new Date().toISOString(),
+      higherTimeframeBias: "BULLISH"
+    });
+    const quote1m = decision({ decisionId: "quote-1m", timeframe: "1" });
+    const view = resolveMarketStructureView([quote1m, plan15m]);
+    expect(view.diagnostics.dayTradeDataReady).toBe(false);
+    expect(view.diagnostics.oneHourBiasState).toBe("DEVELOPING");
+    expect(view.diagnostics.rejectionReasons).toContain("DAY_TRADE_1H_BIAS_DEVELOPING");
+  });
+
+  it("rejects stale 1H bias and keeps day-trade view neutral", () => {
+    const now = Date.now();
+    const plan15m = decision({
+      decisionId: "plan-stale-1h",
+      timeframe: "15",
+      oneHourBiasConfirmed: true,
+      oneHourBiasSourceTime: new Date(now - 3 * 60 * 60_000).toISOString(),
+      higherTimeframeBias: "BULLISH"
+    });
+    const quote1m = decision({ decisionId: "quote-1m", timeframe: "1" });
+    const view = resolveMarketStructureView([quote1m, plan15m], now);
+    expect(view.diagnostics.dayTradeDataReady).toBe(false);
+    expect(view.diagnostics.oneHourBiasState).toBe("STALE");
+    expect(view.diagnostics.rejectionReasons).toContain("DAY_TRADE_1H_BIAS_STALE");
+  });
+
+  it("rejects missing 1H bias and keeps day-trade view neutral", () => {
+    const plan15m = decision({
+      decisionId: "plan-missing-1h",
+      timeframe: "15",
+      higherTimeframeBias: null,
+      oneHourBiasConfirmed: null,
+      oneHourBiasSourceTime: null
+    });
+    const quote1m = decision({ decisionId: "quote-1m", timeframe: "1" });
+    const view = resolveMarketStructureView([quote1m, plan15m]);
+    expect(view.diagnostics.dayTradeDataReady).toBe(false);
+    expect(view.diagnostics.oneHourBiasState).toBe("MISSING");
+    expect(view.diagnostics.rejectionReasons).toContain("DAY_TRADE_1H_BIAS_MISSING");
   });
 
 

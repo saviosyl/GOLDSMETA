@@ -28,7 +28,13 @@ import { createSetupFromDecision } from "../setup/createSetup";
 import { logger } from "../logging/logger";
 import { runV4ShadowLifecycle } from "../v4/shadowOrchestrator";
 import { processSessionPlanLifecycle } from "./sessionPlanLifecycle";
-import { resolveAlertRole, isQuoteAlert, isConfirmAlert } from "./alertRole";
+import {
+  extractPlanSourceKey,
+  isConfirmAlert,
+  isQuoteAlert,
+  metadataString as alertMetadataString,
+  resolveAlertRole
+} from "./alertRole";
 import { isSharedFeedSourceUser } from "../marketFeed/sharedFeed";
 
 const disclaimer =
@@ -120,6 +126,48 @@ const higherTimeframeBiasFor = (snapshot: MarketSnapshot): TrendDirection | null
   // A native confirmed 1H payload may use its aggregate trend. Never relabel a
   // 1M/5M/15M aggregate direction as the Day Trade 1H bias.
   return snapshot.timeframe === "60" ? snapshot.trend?.direction ?? null : null;
+};
+
+const oneHourBiasSourceCloseTimeFor = (
+  snapshot: MarketSnapshot,
+  payload: TradingViewPayload,
+  hasOneHourBias: boolean
+): string | null => {
+  if (!hasOneHourBias) return null;
+  const fromOptionalIndicators =
+    (payload.optionalIndicators?.oneHourBias as { sourceCloseTime?: unknown } | undefined)
+      ?.sourceCloseTime ??
+    (payload.optionalIndicators?.directionContext as { sourceCloseTime?: unknown } | undefined)
+      ?.sourceCloseTime;
+  if (typeof fromOptionalIndicators === "string" && fromOptionalIndicators.trim().length > 0) {
+    return fromOptionalIndicators.trim();
+  }
+
+  const fromMetadata =
+    alertMetadataString(payload, "oneHourBiasSourceTime") ??
+    alertMetadataString(payload, "oneHourSourceCloseTime") ??
+    alertMetadataString(payload, "directionSourceCloseTime");
+  if (fromMetadata) return fromMetadata;
+
+  // Pine 3 request.security(direction TF, lookahead_off) on confirmed 15M bars returns
+  // the latest *closed* 1H value. Derive that close timestamp when explicit metadata
+  // is unavailable so day-trade freshness still behaves deterministically.
+  const barMs = Date.parse(snapshot.marketDataTime);
+  if (!Number.isFinite(barMs)) return null;
+  const oneHourMs = 60 * 60 * 1000;
+  return new Date(Math.floor(barMs / oneHourMs) * oneHourMs).toISOString();
+};
+
+const oneHourBiasConfirmedFor = (
+  snapshot: MarketSnapshot,
+  payload: TradingViewPayload,
+  hasOneHourBias: boolean
+): boolean | null => {
+  if (!hasOneHourBias) return null;
+  const explicit = payload.metadata?.oneHourBiasConfirmed;
+  if (typeof explicit === "boolean") return explicit;
+  // Confirmed bar mode + confirmed webhook event means non-developing 1H projection.
+  return snapshot.isConfirmedBar === true;
 };
 
 const quoteAgeSeconds = (timestamp: string | null, receivedAt: string): number | null => {
@@ -234,7 +282,15 @@ export const processDecisionPipeline = async (
   const generatedAt = nowIso();
   const reasonCodes = unique([...score.reasonCodes, ...hardGuards.reasonCodes, ...aiDecision.reasonCodes]);
   const allWarnings = unique([...dataQuality.warnings, ...hardGuards.warnings, ...ai.warnings]);
+  const role = resolveAlertRole(payload);
+  const normalizedPlanSourceKey = extractPlanSourceKey(payload);
   const htfBias = higherTimeframeBiasFor(snapshot);
+  const oneHourBiasSourceTime = oneHourBiasSourceCloseTimeFor(
+    snapshot,
+    payload,
+    htfBias != null
+  );
+  const oneHourBiasConfirmed = oneHourBiasConfirmedFor(snapshot, payload, htfBias != null);
 
   const decision: DecisionRecord = {
     schemaVersion: "1.0",
@@ -288,6 +344,10 @@ export const processDecisionPipeline = async (
     notificationSent: false,
     currentSession: snapshot.sessionVolumeProfile?.session ?? null,
     higherTimeframeBias: htfBias,
+    alertRole: role,
+    planSourceKey: normalizedPlanSourceKey,
+    oneHourBiasSourceTime,
+    oneHourBiasConfirmed,
     lastKnownPrice: snapshot.price,
     ohlcv: snapshot.ohlcv ?? null,
     marketStructure: marketStructureFor(snapshot),
@@ -327,7 +387,6 @@ export const processDecisionPipeline = async (
 
   // Stable session plan (Pine 3.0 / 2.1 compat). Quotes/confirms never place orders.
   try {
-    const role = resolveAlertRole(payload);
     // Skip setup creation for quote/confirm-only — analysis plan only.
     if (!isQuoteAlert(role) && !isConfirmAlert(role)) {
       try {
