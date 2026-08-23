@@ -70,9 +70,11 @@ describe("AppShell GoldMeta 2026 redesign", () => {
   it("shows the live XAUUSD quote in the application chrome", () => {
     render(wrap(<AppShell><div>content</div></AppShell>));
 
-    expect(screen.getByText("2,364.42")).toBeInTheDocument();
-    expect(screen.getByText("LIVE")).toBeInTheDocument();
-    expect(screen.getByText("London / New York")).toBeInTheDocument();
+    const topbar = document.querySelector(".gm26-topbar");
+    expect(topbar).toBeTruthy();
+    expect(within(topbar as HTMLElement).getByText("2,364.42")).toBeInTheDocument();
+    expect(within(topbar as HTMLElement).getByText("LIVE")).toBeInTheDocument();
+    expect(within(topbar as HTMLElement).getByText("London / New York")).toBeInTheDocument();
   });
 
   it("moves secondary account tools into the profile menu instead of primary navigation", () => {
