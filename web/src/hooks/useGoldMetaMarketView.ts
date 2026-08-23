@@ -108,7 +108,7 @@ export function useGoldMetaMarketView() {
       ? "GoldMeta is waiting for a verified setup before showing a directional trade."
       : `${action} conditions are currently leading the verified GoldMeta analysis.`);
 
-  const entry = plan?.tradePlan?.entryPrice ?? structureDecision?.entry?.price ?? decision?.entry?.price ?? null;
+  const entry = structureDecision?.entry?.price ?? decision?.entry?.price ?? null;
   const stop = plan?.tradePlan?.stopLoss ?? structureDecision?.stopLoss?.price ?? decision?.stopLoss?.price ?? null;
   const tp1 = plan?.tradePlan?.tp1 ?? structureDecision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? decision?.takeProfits?.find((t) => t.label === "TP1")?.price ?? null;
   const tp2 = plan?.tradePlan?.tp2 ?? structureDecision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? decision?.takeProfits?.find((t) => t.label === "TP2")?.price ?? null;
