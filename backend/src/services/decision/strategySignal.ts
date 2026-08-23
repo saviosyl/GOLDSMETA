@@ -35,6 +35,10 @@ export type MarketStructureDiagnostics = {
   signalAgeSeconds: number | null;
   quoteAgeSeconds: number | null;
   confirmationAgeSeconds: number | null;
+  /** All canonical short-term roles are present, fresh and source-aligned. */
+  shortTermDataReady: boolean;
+  /** Confirmed 15M structure has an explicit 1H bias for the Day Trade view. */
+  dayTradeDataReady: boolean;
   validityStatus: "VALID" | "EXPIRED" | "TEST" | "INCOMPLETE" | "MISMATCH" | "NONE";
   marketStructureMode: MarketStructureMode;
 };
@@ -103,8 +107,11 @@ export function isStrategySignalValid(
   if (!isCompleteStrategySignal(d) || !d) return false;
   const until = d.validUntil ? Date.parse(d.validUntil) : NaN;
   if (Number.isFinite(until) && until < nowMs) return false;
-  const generated = Date.parse(d.generatedAt);
-  if (Number.isFinite(generated) && nowMs - generated > decisionConfig.freshness.plan15mStaleMs) {
+  // Freshness is based on the market bar clock, not processing time. A delayed old
+  // webhook received now must not revive an expired 15M plan.
+  const marketTime = Date.parse(d.marketDataTime ?? d.generatedAt);
+  if (!Number.isFinite(marketTime)) return false;
+  if (nowMs - marketTime > decisionConfig.freshness.plan15mStaleMs) {
     return false;
   }
   return true;
@@ -136,7 +143,28 @@ export function selectLatestConfirmationDecision(
   return (
     recent.find((d) => {
       if (!isLiveDecision(d) || d.timeframe !== "5" || d.isProvisional) return false;
+      if (d.dataQuality === "STALE" || d.dataQuality === "CONFLICTED" || d.dataQuality === "INVALID") {
+        return false;
+      }
+      if (d.dataSourceLabel === "STALE" || d.dataSourceLabel === "OFFLINE" || d.dataSourceLabel === "MOCK") {
+        return false;
+      }
       if (!sameInstrument(d, structure)) return false;
+
+      const classification = d.marketStructure?.confirmationClassification;
+      const direction = d.marketStructure?.confirmationDirection;
+      if (!classification || classification === "NONE" || !direction || direction === "NEUTRAL") {
+        return false;
+      }
+
+      const confirmationTime = Date.parse(d.marketDataTime ?? d.generatedAt);
+      const structureTime = structure
+        ? Date.parse(structure.marketDataTime ?? structure.generatedAt)
+        : NaN;
+      if (!Number.isFinite(confirmationTime)) return false;
+      // A 5M event from before the active 15M plan cannot confirm the newer plan.
+      if (Number.isFinite(structureTime) && confirmationTime < structureTime) return false;
+
       const age = ageSeconds(d.marketDataTime ?? d.generatedAt, nowMs);
       return age != null && age * 1000 <= decisionConfig.freshness.confirm5mStaleMs;
     }) ?? null
@@ -230,6 +258,34 @@ export function resolveMarketStructureView(
     rejectionReasons.push("NO_VALID_CONFIRMED_15M_PLAN_SIGNAL");
   }
 
+  const quoteAge = ageSeconds(latestQuote?.marketDataTime ?? latestQuote?.generatedAt, nowMs);
+  const signalAge = ageSeconds(latestComplete?.marketDataTime ?? latestComplete?.generatedAt, nowMs);
+  const confirmationAge = ageSeconds(
+    latestConfirmation?.marketDataTime ?? latestConfirmation?.generatedAt,
+    nowMs
+  );
+  const quoteQualityOk =
+    latestQuote != null &&
+    latestQuote.dataQuality !== "STALE" &&
+    latestQuote.dataQuality !== "CONFLICTED" &&
+    latestQuote.dataQuality !== "INVALID" &&
+    latestQuote.dataSourceLabel !== "STALE" &&
+    latestQuote.dataSourceLabel !== "OFFLINE" &&
+    latestQuote.dataSourceLabel !== "MOCK";
+  const shortTermDataReady =
+    marketStructureMode === "COMPLETE" &&
+    priceConsistencyOk !== false &&
+    latestQuote?.timeframe === "1" &&
+    quoteQualityOk &&
+    quoteAge != null &&
+    quoteAge * 1000 <= decisionConfig.freshness.quoteStaleMs &&
+    latestConfirmation != null;
+  const dayTradeDataReady =
+    marketStructureMode === "COMPLETE" &&
+    priceConsistencyOk !== false &&
+    latestComplete?.higherTimeframeBias != null &&
+    latestComplete.higherTimeframeBias !== "NEUTRAL";
+
   const diagnostics: MarketStructureDiagnostics = {
     lastWebhookOrDecisionAt: latestQuote?.generatedAt ?? latestQuote?.marketDataTime ?? null,
     lastCompleteSignalAt: latestComplete?.generatedAt ?? latestComplete?.marketDataTime ?? null,
@@ -251,9 +307,11 @@ export function resolveMarketStructureView(
       ...(latestQuote?.warnings ?? []).filter((w) => /PRICE_SOURCE|TEST_FIXTURE|MISMATCH/i.test(w))
     ],
     priceConsistencyOk,
-    signalAgeSeconds: ageSeconds(latestComplete?.marketDataTime ?? latestComplete?.generatedAt, nowMs),
-    quoteAgeSeconds: ageSeconds(latestQuote?.marketDataTime ?? latestQuote?.generatedAt, nowMs),
-    confirmationAgeSeconds: ageSeconds(latestConfirmation?.marketDataTime ?? latestConfirmation?.generatedAt, nowMs),
+    signalAgeSeconds: signalAge,
+    quoteAgeSeconds: quoteAge,
+    confirmationAgeSeconds: confirmationAge,
+    shortTermDataReady,
+    dayTradeDataReady,
     validityStatus: latestComplete
       ? isStrategySignalValid(latestComplete, nowMs)
         ? priceConsistencyOk === false
