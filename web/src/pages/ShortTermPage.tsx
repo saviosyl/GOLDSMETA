@@ -36,12 +36,14 @@ export function ShortTermPage() {
   }, [api]);
 
   const geometry = market.tradeGeometry;
-  const setupDirection = geometry.direction === "BUY" || geometry.direction === "SELL" ? geometry.direction : market.action;
+  // Short-Term is an entry-timing view. A valid 15M plan alone is not a BUY/SELL signal:
+  // the backend session-plan lifecycle must also be in a confirmed/in-progress state from 5M.
+  const setupDirection = market.shortTermAction;
   const tone = setupDirection === "BUY" ? "buy" : setupDirection === "SELL" ? "sell" : "wait";
 
   const chartLevels: TradeChartLevel[] = [
     { id: "sl", label: "SL", price: geometry.stop, tone: "sell", emphasis: "primary" },
-    { id: "entry", label: "ENTRY", price: geometry.entry, tone: setupDirection === "SELL" ? "sell" : "buy", emphasis: "primary" },
+    { id: "entry", label: market.shortTermActionable ? "ENTRY" : "PLAN", price: geometry.entry, tone: setupDirection === "SELL" ? "sell" : "buy", emphasis: "primary" },
     { id: "tp1", label: "TP1", price: geometry.tp1, tone: "buy", emphasis: "primary" },
     { id: "tp2", label: "TP2", price: geometry.tp2, tone: "buy" },
     { id: "tp3", label: "TP3", price: geometry.tp3, tone: "buy" },
@@ -49,7 +51,7 @@ export function ShortTermPage() {
     { id: "resistance", label: "RES", price: market.resistance, tone: "muted" }
   ];
 
-  const status = activeSetup?.status ?? market.plan?.planStatus ?? (geometry.actionable ? "READY" : "WATCHING");
+  const status = activeSetup?.status ?? market.plan?.planStatus ?? (market.shortTermActionable ? "READY" : "WAITING_FOR_5M_CONFIRMATION");
   const reasons = [
     market.plan?.oneSentence,
     market.plan?.confirmation5m?.detail,
@@ -70,24 +72,24 @@ export function ShortTermPage() {
         <div className="gm26-alert gm26-alert--warning"><AlertTriangle size={17} aria-hidden />{market.error}</div>
       ) : null}
 
-      <section className={`gm26-trade-hero gm26-tone-${tone === "wait" ? "wait" : setupDirection.toLowerCase()}`}>
+      <section className={`gm26-trade-hero gm26-tone-${tone}`}>
         <div className="gm26-trade-hero__top">
           <div>
             <span className="gm26-eyebrow">SHORT-TERM SIGNAL</span>
             <div className="gm26-trade-hero__signal">{setupDirection}</div>
-            <p>{market.explanation}</p>
+            <p>{market.shortTermActionable ? market.explanation : market.plan?.confirmation5m?.detail ?? "Waiting for a fresh 5-minute confirmation of the verified 15-minute plan."}</p>
           </div>
           <div className="gm26-trade-hero__price">
-            <span>Gold now</span>
+            <span>Gold now · TradingView analysis</span>
             <strong>{fmtPrice(market.livePrice)}</strong>
             <small><Clock3 size={13} aria-hidden /> {market.session}</small>
           </div>
         </div>
 
-        <ConfidenceMeter action={setupDirection === "BUY" || setupDirection === "SELL" ? setupDirection : "WAIT"} confidence={market.confidence} />
+        <ConfidenceMeter action={setupDirection} confidence={market.confidence} />
 
         <div className="gm26-trade-levels">
-          <div className="is-entry"><span>Entry</span><strong>{geometry.entryLabel ?? "—"}</strong></div>
+          <div className="is-entry"><span>{market.shortTermActionable ? "Entry" : "Planned entry"}</span><strong>{geometry.entryLabel ?? "—"}</strong></div>
           <div className="is-stop"><span>Stop loss</span><strong>{fmtPrice(geometry.stop)}</strong></div>
           <div className="is-target"><span>TP1</span><strong>{fmtPrice(geometry.tp1)}</strong></div>
           <div className="is-target"><span>TP2</span><strong>{fmtPrice(geometry.tp2)}</strong></div>
@@ -99,21 +101,22 @@ export function ShortTermPage() {
 
       <LiveTradeChart
         title="Short-Term live trade chart"
-        subtitle="The setup stays on this chart from entry through targets or invalidation."
+        subtitle="5M timing with the confirmed 15M plan structure. Entry remains WAIT until backend 5M confirmation is valid."
         levels={chartLevels}
         defaultTimeframe="M5"
         currentPrice={market.livePrice}
         marketClosed={market.marketClosed}
+        analysisSourceLabel="TradingView · 15M structure / 5M confirmation / 1M price"
       />
 
       <section className="gm26-trade-progress gm26-card">
         <div className="gm26-section-title">
           <div><span className="gm26-eyebrow">LIVE TRADE PROGRESS</span><h2>{friendly(status)}</h2></div>
-          <span className={`gm26-small-signal gm26-tone-${tone === "wait" ? "wait" : setupDirection.toLowerCase()}`}>{setupDirection}</span>
+          <span className={`gm26-small-signal gm26-tone-${tone}`}>{setupDirection}</span>
         </div>
         <div className="gm26-progress-rail" aria-label="Short-term setup lifecycle">
           {[
-            ["Watching", ["WATCHING", "BUILDING", "WAITING_FOR_ENTRY_ZONE"]],
+            ["Watching", ["WATCHING", "BUILDING", "WAITING_FOR_ENTRY_ZONE", "WAITING_FOR_5M_CONFIRMATION"]],
             ["Entry zone", ["ENTRY_TRIGGERED", "ARMED"]],
             ["Confirmed", ["CONFIRMED"]],
             ["In trade", ["IN_PROGRESS"]],
@@ -154,10 +157,10 @@ export function ShortTermPage() {
         </article>
       </section>
 
-      {!geometry.actionable ? (
+      {!market.shortTermActionable ? (
         <div className="gm26-alert gm26-alert--info">
           <ShieldAlert size={17} aria-hidden />
-          <span>No verified actionable Short-Term trade is published right now. GoldMeta is showing market context without inventing trade geometry.</span>
+          <span>No confirmed Short-Term entry is published right now. GoldMeta keeps the 15M plan visible, but BUY/SELL requires the backend 5M confirmation lifecycle.</span>
         </div>
       ) : null}
     </div>
