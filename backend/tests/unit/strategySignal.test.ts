@@ -147,7 +147,7 @@ describe("strategySignal role alignment", () => {
         poc: 4619,
         vah: 4624,
         val: 4614,
-        confirmationClassification: "BULLISH_BREAKOUT",
+        confirmationClassification: "BREAKOUT",
         confirmationDirection: "BULLISH",
         confirmationCandleType: "BULLISH"
       }
