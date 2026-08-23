@@ -105,6 +105,9 @@ f_session_name(int utcHour) =>
       utcHour >= 13 and utcHour < 17 ? "OVERLAP" :
       utcHour >= 17 and utcHour < 22 ? "NEWYORK" : "UNKNOWN"
 
+f_session_name_from_ts(int timestampMs) =>
+    na(timestampMs) ? "UNKNOWN" : f_session_name(hour(timestampMs, "UTC"))
+
 // Horizontal level helpers use line.new (not plot) so Create Alert is not filled with plot series.
 f_upsert_level_line(line existing, float price, color col, int width) =>
     line result = existing
@@ -434,9 +437,11 @@ ctxDir = f_trend_dir(ctxClose, ctxEmaFast, ctxEmaSlow)
 ctxStrength = f_trend_strength(ctxClose, ctxEmaFast, ctxEmaSlow, ctxAtr, ctxDir)
 ctxStructure = ctxClose > ctxEmaFast and ctxEmaFast > ctxEmaSlow ? "BULLISH" : ctxClose < ctxEmaFast and ctxEmaFast < ctxEmaSlow ? "BEARISH" : "RANGE"
 
-[dirClose, dirEmaFast, dirEmaSlow, dirAtr] = request.security(syminfo.tickerid, directionTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dirClose, dirEmaFast, dirEmaSlow, dirEma200, dirAtr, dirSourceCloseTs] = request.security(syminfo.tickerid, directionTfInput, [close[1], ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], ta.ema(close, ema200Len)[1], ta.atr(atrLength)[1], time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [entryClose, entryEmaFast, entryEmaSlow, entryAtr] = request.security(syminfo.tickerid, entryTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
+dirBiasReady = not na(dirClose) and not na(dirEmaFast) and not na(dirEmaSlow) and not na(dirEma200) and not na(dirAtr) and not na(dirSourceCloseTs)
+dirBiasConfirmed = dirBiasReady
 dirDir = f_trend_dir(dirClose, dirEmaFast, dirEmaSlow)
 dirStrength = f_trend_strength(dirClose, dirEmaFast, dirEmaSlow, dirAtr, dirDir)
 entryDir = f_trend_dir(entryClose, entryEmaFast, entryEmaSlow)
@@ -487,9 +492,14 @@ dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 // --- 1m quote series (lookahead_off) for optional freshness alerts ---
 [m1Open, m1High, m1Low, m1Close, m1Vol, m1TimeClose, m1Confirmed] = request.security(syminfo.tickerid, quoteTfInput, [open, high, low, close, volume, time_close, barstate.isconfirmed], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-// Confirmed 15M close used as plan-source key even when this alert runs on 5M/1M.
-[plan15CloseTs] = request.security(syminfo.tickerid, structureTfInput, [time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-planSourceKey = str.upper(syminfo.tickerid) + "|" + sessionName + "|" + str.tostring(plan15CloseTs) + "|" + ROLE_PLAN_15M
+// planSourceKey must be anchored to the same confirmed 15M plan bar across roles:
+// - PLAN_15M uses the current confirmed 15m close.
+// - CONFIRM_5M / QUOTE_1M use the previous confirmed 15m close (never developing next 15m).
+[plan15CloseTsCurrent] = request.security(syminfo.tickerid, structureTfInput, [time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[plan15CloseTsPrevious] = request.security(syminfo.tickerid, structureTfInput, [time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+planSourceCloseTs = alertRoleInput == ROLE_PLAN_15M ? plan15CloseTsCurrent : plan15CloseTsPrevious
+planSourceSession = f_session_name_from_ts(planSourceCloseTs)
+planSourceKey = str.upper(syminfo.tickerid) + "|" + planSourceSession + "|" + str.tostring(planSourceCloseTs) + "|" + ROLE_PLAN_15M
 
 // Meaningful 5M confirmation state (state-change emit only).
 confirmState =
@@ -563,6 +573,14 @@ confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(
 
 optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) +
   ",\"value\":" + f_json_number(atrValue) + "}" +
+  ",\"oneHourBias\":{\"timeframe\":" + f_json_string(directionTfInput) +
+  ",\"direction\":" + f_json_string(dirDir) +
+  ",\"ema21\":" + f_json_number(dirEmaFast) +
+  ",\"ema50\":" + f_json_number(dirEmaSlow) +
+  ",\"ema200\":" + f_json_number(dirEma200) +
+  ",\"atr\":" + f_json_number(dirAtr) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") + "}" +
   ",\"vwap\":{\"session\":" + f_json_string(sessionName) + ",\"value\":" + f_json_number(vwapValue) + "}" +
   ",\"ema21\":" + f_json_number(emaFast) +
   ",\"ema50\":" + f_json_number(emaSlow) +
@@ -629,6 +647,8 @@ metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION
   ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
   ",\"alertRole\":" + f_json_string(alertRoleInput) +
   ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
   ",\"confirmationState\":" + f_json_string(confirmState) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
@@ -675,6 +695,8 @@ quoteMetadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VE
   ",\"alertKind\":" + f_json_string(ALERT_KIND_QUOTE) +
   ",\"alertRole\":" + f_json_string(ROLE_QUOTE_1M) +
   ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"partial\":true" +
   ",\"dataQualityHint\":\"QUOTE_ONLY\"" +
@@ -715,6 +737,14 @@ confirmAlertMessage = "{" +
   ohlcvJson + "," +
   confirmationCandleJson + "," +
   "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) + ",\"value\":" + f_json_number(atrValue) + "}," +
+  "\"oneHourBias\":{\"timeframe\":" + f_json_string(directionTfInput) +
+  ",\"direction\":" + f_json_string(dirDir) +
+  ",\"ema21\":" + f_json_number(dirEmaFast) +
+  ",\"ema50\":" + f_json_number(dirEmaSlow) +
+  ",\"ema200\":" + f_json_number(dirEma200) +
+  ",\"atr\":" + f_json_number(dirAtr) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") + "}," +
   "\"structure\":{\"breakoutState\":" + f_json_string(breakoutState) +
   ",\"rejectionState\":" + f_json_string(rejectionState) +
   ",\"retestState\":" + f_json_string(retestState) + "}}," +
@@ -722,6 +752,8 @@ confirmAlertMessage = "{" +
   ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
   ",\"alertRole\":" + f_json_string(ROLE_CONFIRM_5M) +
   ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
   ",\"confirmationState\":" + f_json_string(confirmState) +
   ",\"neverCreatesPlan\":true" +
   ",\"neverReplacesEntryStopTargets\":true" +

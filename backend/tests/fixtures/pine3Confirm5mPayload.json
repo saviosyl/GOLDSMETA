@@ -36,6 +36,16 @@
   },
   "optionalIndicators": {
     "atr": { "length": 14, "value": 4.2 },
+    "oneHourBias": {
+      "timeframe": "60",
+      "direction": "BULLISH",
+      "ema21": 2418.4,
+      "ema50": 2412.7,
+      "ema200": 2389.3,
+      "atr": 9.1,
+      "oneHourBiasConfirmed": true,
+      "oneHourBiasSourceTime": "2026-07-20T14:00:00Z"
+    },
     "structure": {
       "breakoutState": "NONE",
       "rejectionState": "HELD",
@@ -47,6 +57,8 @@
     "alertKind": "STRATEGY",
     "alertRole": "CONFIRM_5M",
     "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "oneHourBiasConfirmed": true,
+    "oneHourBiasSourceTime": "2026-07-20T14:00:00Z",
     "confirmationState": "REJECTION_CONFIRMED",
     "neverCreatesPlan": true,
     "neverReplacesEntryStopTargets": true,

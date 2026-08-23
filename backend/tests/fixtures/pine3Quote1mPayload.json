@@ -23,6 +23,8 @@
     "alertKind": "QUOTE",
     "alertRole": "QUOTE_1M",
     "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "oneHourBiasConfirmed": true,
+    "oneHourBiasSourceTime": "2026-07-20T14:00:00Z",
     "confirmedBarMode": true,
     "partial": true,
     "dataQualityHint": "QUOTE_ONLY",

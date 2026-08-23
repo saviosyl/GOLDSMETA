@@ -84,6 +84,16 @@
   },
   "optionalIndicators": {
     "atr": { "length": 14, "value": 5.84 },
+    "oneHourBias": {
+      "timeframe": "60",
+      "direction": "BULLISH",
+      "ema21": 2418.4,
+      "ema50": 2412.7,
+      "ema200": 2389.3,
+      "atr": 9.1,
+      "oneHourBiasConfirmed": true,
+      "oneHourBiasSourceTime": "2026-07-20T14:00:00Z"
+    },
     "dayLevels": {
       "previousDayHigh": 2435.0,
       "previousDayLow": 2398.0,
@@ -129,6 +139,8 @@
     "alertKind": "STRATEGY",
     "alertRole": "PLAN_15M",
     "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "oneHourBiasConfirmed": true,
+    "oneHourBiasSourceTime": "2026-07-20T14:00:00Z",
     "confirmationState": "OUTSIDE_ZONE",
     "confirmedBarMode": true,
     "diagnosticMode": false,

@@ -129,45 +129,34 @@ const higherTimeframeBiasFor = (snapshot: MarketSnapshot): TrendDirection | null
 };
 
 const oneHourBiasSourceCloseTimeFor = (
-  snapshot: MarketSnapshot,
   payload: TradingViewPayload,
   hasOneHourBias: boolean
 ): string | null => {
   if (!hasOneHourBias) return null;
-  const fromOptionalIndicators =
-    (payload.optionalIndicators?.oneHourBias as { sourceCloseTime?: unknown } | undefined)
-      ?.sourceCloseTime ??
-    (payload.optionalIndicators?.directionContext as { sourceCloseTime?: unknown } | undefined)
-      ?.sourceCloseTime;
+  const fromMetadata = alertMetadataString(payload, "oneHourBiasSourceTime");
+  if (fromMetadata) return fromMetadata;
+
+  const fromOptionalIndicators = (
+    payload.optionalIndicators?.oneHourBias as { oneHourBiasSourceTime?: unknown } | undefined
+  )?.oneHourBiasSourceTime;
   if (typeof fromOptionalIndicators === "string" && fromOptionalIndicators.trim().length > 0) {
     return fromOptionalIndicators.trim();
   }
-
-  const fromMetadata =
-    alertMetadataString(payload, "oneHourBiasSourceTime") ??
-    alertMetadataString(payload, "oneHourSourceCloseTime") ??
-    alertMetadataString(payload, "directionSourceCloseTime");
-  if (fromMetadata) return fromMetadata;
-
-  // Pine 3 request.security(direction TF, lookahead_off) on confirmed 15M bars returns
-  // the latest *closed* 1H value. Derive that close timestamp when explicit metadata
-  // is unavailable so day-trade freshness still behaves deterministically.
-  const barMs = Date.parse(snapshot.marketDataTime);
-  if (!Number.isFinite(barMs)) return null;
-  const oneHourMs = 60 * 60 * 1000;
-  return new Date(Math.floor(barMs / oneHourMs) * oneHourMs).toISOString();
+  return null;
 };
 
 const oneHourBiasConfirmedFor = (
-  snapshot: MarketSnapshot,
   payload: TradingViewPayload,
   hasOneHourBias: boolean
 ): boolean | null => {
   if (!hasOneHourBias) return null;
   const explicit = payload.metadata?.oneHourBiasConfirmed;
   if (typeof explicit === "boolean") return explicit;
-  // Confirmed bar mode + confirmed webhook event means non-developing 1H projection.
-  return snapshot.isConfirmedBar === true;
+  const fromOptionalIndicators = (
+    payload.optionalIndicators?.oneHourBias as { oneHourBiasConfirmed?: unknown } | undefined
+  )?.oneHourBiasConfirmed;
+  if (typeof fromOptionalIndicators === "boolean") return fromOptionalIndicators;
+  return null;
 };
 
 const quoteAgeSeconds = (timestamp: string | null, receivedAt: string): number | null => {
@@ -285,12 +274,8 @@ export const processDecisionPipeline = async (
   const role = resolveAlertRole(payload);
   const normalizedPlanSourceKey = extractPlanSourceKey(payload);
   const htfBias = higherTimeframeBiasFor(snapshot);
-  const oneHourBiasSourceTime = oneHourBiasSourceCloseTimeFor(
-    snapshot,
-    payload,
-    htfBias != null
-  );
-  const oneHourBiasConfirmed = oneHourBiasConfirmedFor(snapshot, payload, htfBias != null);
+  const oneHourBiasSourceTime = oneHourBiasSourceCloseTimeFor(payload, htfBias != null);
+  const oneHourBiasConfirmed = oneHourBiasConfirmedFor(payload, htfBias != null);
 
   const decision: DecisionRecord = {
     schemaVersion: "1.0",
