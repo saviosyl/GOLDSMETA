@@ -20,7 +20,11 @@ export function DayTradePage() {
   const market = useGoldMetaMarketView();
   const plan = market.plan;
   const geometry = market.tradeGeometry;
-  const biasAction = dailyBias(market.direction);
+  // Day Trade bias is the backend-published 1H direction. 4H remains context only and
+  // 15M provides the working structure; this prevents the short-term 5M/15M state from
+  // being relabelled as a daily bias.
+  const dayDirection = market.dayTradeDirection;
+  const biasAction = dailyBias(dayDirection);
   const primaryScenario = plan?.primaryScenarioSide === "bearish" ? plan?.bearishScenario : plan?.bullishScenario;
   const alternativeScenario = plan?.primaryScenarioSide === "bearish" ? plan?.bullishScenario : plan?.bearishScenario;
 
@@ -30,7 +34,7 @@ export function DayTradePage() {
     { id: "poc", label: "POC", price: market.poc, tone: "gold", emphasis: "primary" },
     { id: "val", label: "VAL", price: market.val, tone: "gold" },
     { id: "sup", label: "SUP", price: market.support, tone: "buy", emphasis: "primary" },
-    { id: "entry", label: "ENTRY", price: geometry.entry, tone: biasAction === "SELL" ? "sell" : "buy", emphasis: "primary" },
+    { id: "entry", label: "15M PLAN", price: geometry.entry, tone: geometry.direction === "SELL" ? "sell" : "buy", emphasis: "primary" },
     { id: "sl", label: "INVALID", price: geometry.stop, tone: "sell" },
     { id: "tp1", label: "T1", price: geometry.tp1, tone: "buy" },
     { id: "tp2", label: "T2", price: geometry.tp2, tone: "buy" },
@@ -47,20 +51,20 @@ export function DayTradePage() {
           <span className="gm26-eyebrow">SAME-DAY XAUUSD PLAN</span>
           <h1>Day Trade</h1>
         </div>
-        <div className={`gm26-status-chip gm26-tone-${biasAction.toLowerCase()}`}>{market.direction}</div>
+        <div className={`gm26-status-chip gm26-tone-${biasAction.toLowerCase()}`}>{dayDirection}</div>
       </div>
 
       {market.error ? <div className="gm26-alert gm26-alert--warning"><AlertTriangle size={17} aria-hidden />{market.error}</div> : null}
 
       <section className={`gm26-day-hero gm26-tone-${biasAction.toLowerCase()}`}>
         <div className="gm26-day-hero__lead">
-          <span className="gm26-eyebrow">DAILY BIAS</span>
-          <strong>{market.direction.toUpperCase()}</strong>
-          <p>{plan?.oneSentence ?? market.explanation}</p>
+          <span className="gm26-eyebrow">1H DAY-TRADE BIAS</span>
+          <strong>{dayDirection.toUpperCase()}</strong>
+          <p>{plan?.timeframeAlignment?.conclusion ?? plan?.oneSentence ?? market.explanation}</p>
         </div>
         <div className="gm26-day-hero__signal">
-          <span>Preferred setup</span>
-          <strong>{geometry.actionable ? `${geometry.direction} SETUP` : market.action === "WAIT" ? "WAIT" : market.action}</strong>
+          <span>15M working setup</span>
+          <strong>{geometry.actionable ? `${geometry.direction} PLAN` : market.action === "WAIT" ? "WAIT" : market.action}</strong>
         </div>
         <ConfidenceMeter action={biasAction} confidence={market.confidence} />
 
@@ -76,11 +80,12 @@ export function DayTradePage() {
 
       <LiveTradeChart
         title="Day Trade structure"
-        subtitle="15M / 1H context with value levels, entry, invalidation and verified targets."
+        subtitle="1H bias + 4H context, with the canonical confirmed 15M value structure and plan levels."
         levels={chartLevels}
         defaultTimeframe="H1"
         currentPrice={market.livePrice}
         marketClosed={market.marketClosed}
+        analysisSourceLabel="TradingView · 1H bias / 4H context / 15M structure"
       />
 
       <section className="gm26-content-grid">
