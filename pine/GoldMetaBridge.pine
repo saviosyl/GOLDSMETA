@@ -437,7 +437,7 @@ ctxDir = f_trend_dir(ctxClose, ctxEmaFast, ctxEmaSlow)
 ctxStrength = f_trend_strength(ctxClose, ctxEmaFast, ctxEmaSlow, ctxAtr, ctxDir)
 ctxStructure = ctxClose > ctxEmaFast and ctxEmaFast > ctxEmaSlow ? "BULLISH" : ctxClose < ctxEmaFast and ctxEmaFast < ctxEmaSlow ? "BEARISH" : "RANGE"
 
-[dirClose, dirEmaFast, dirEmaSlow, dirEma200, dirAtr, dirSourceCloseTs] = request.security(syminfo.tickerid, directionTfInput, [close[1], ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], ta.ema(close, ema200Len)[1], ta.atr(atrLength)[1], time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dirClose, dirEmaFast, dirEmaSlow, dirEma200, dirAtr, dirSourceCloseTs] = request.security(syminfo.tickerid, directionTfInput, [close[1], ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], ta.ema(close, ema200Len)[1], ta.atr(atrLength)[1], time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
 [entryClose, entryEmaFast, entryEmaSlow, entryAtr] = request.security(syminfo.tickerid, entryTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 dirBiasReady = not na(dirClose) and not na(dirEmaFast) and not na(dirEmaSlow) and not na(dirEma200) and not na(dirAtr) and not na(dirSourceCloseTs)
@@ -496,7 +496,7 @@ dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 // - PLAN_15M uses the current confirmed 15m close.
 // - CONFIRM_5M / QUOTE_1M use the previous confirmed 15m close (never developing next 15m).
 [plan15CloseTsCurrent] = request.security(syminfo.tickerid, structureTfInput, [time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[plan15CloseTsPrevious] = request.security(syminfo.tickerid, structureTfInput, [time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[plan15CloseTsPrevious] = request.security(syminfo.tickerid, structureTfInput, [time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
 planSourceCloseTs = alertRoleInput == ROLE_PLAN_15M ? plan15CloseTsCurrent : plan15CloseTsPrevious
 planSourceSession = f_session_name_from_ts(planSourceCloseTs)
 planSourceKey = str.upper(syminfo.tickerid) + "|" + planSourceSession + "|" + str.tostring(planSourceCloseTs) + "|" + ROLE_PLAN_15M
