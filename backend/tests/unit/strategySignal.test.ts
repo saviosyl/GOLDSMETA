@@ -3,7 +3,8 @@ import type { DecisionRecord } from "../../src/models/types";
 import {
   isCompleteStrategySignal,
   resolveMarketStructureView,
-  selectLatestCompleteStrategySignal
+  selectLatestCompleteStrategySignal,
+  selectLatestConfirmationDecision
 } from "../../src/services/decision/strategySignal";
 
 function decision(partial: Partial<DecisionRecord> & { decisionId: string }): DecisionRecord {
@@ -13,7 +14,7 @@ function decision(partial: Partial<DecisionRecord> & { decisionId: string }): De
     schemaVersion: "1.0",
     userId: "u1",
     symbol: "XAUUSD",
-    timeframe: "5",
+    timeframe: "15",
     barTime: now,
     generatedAt: now,
     marketDataTime: now,
@@ -22,7 +23,7 @@ function decision(partial: Partial<DecisionRecord> & { decisionId: string }): De
     confidence: 50,
     confidenceLabel: "MODERATE",
     marketRegime: "RANGING",
-    dataQuality: "PARTIAL",
+    dataQuality: "GOOD",
     isProvisional: false,
     setupScore: 40,
     entry: { type: "NONE", price: null, zoneLow: null, zoneHigh: null, condition: null },
@@ -69,8 +70,8 @@ function decision(partial: Partial<DecisionRecord> & { decisionId: string }): De
   } as DecisionRecord;
 }
 
-describe("strategySignal selection", () => {
-  it("treats OHLC-only decision as incomplete", () => {
+describe("strategySignal role alignment", () => {
+  it("treats a 15M OHLC-only decision as incomplete", () => {
     const ohlcOnly = decision({
       decisionId: "ohlc",
       marketStructure: {
@@ -83,47 +84,108 @@ describe("strategySignal selection", () => {
         confirmationDirection: null,
         confirmationCandleType: null
       },
-      missingInputs: ["volumeProfile", "trend.direction", "confirmationCandle"]
+      missingInputs: ["volumeProfile", "trend.direction"]
     });
     expect(isCompleteStrategySignal(ohlcOnly)).toBe(false);
   });
 
-  it("keeps prior complete signal when a newer OHLC-only event arrives", () => {
-    const olderComplete = decision({
-      decisionId: "complete",
+  it("never promotes a newer 1M diagnostic profile over the confirmed 15M structure", () => {
+    const plan15m = decision({
+      decisionId: "plan-15m",
+      timeframe: "15",
       generatedAt: new Date(Date.now() - 60_000).toISOString(),
       marketDataTime: new Date(Date.now() - 60_000).toISOString(),
-      dataQuality: "GOOD",
-      lifecycleState: "ACTIVE"
-    });
-    const newerOhlc = decision({
-      decisionId: "ohlc",
-      generatedAt: new Date().toISOString(),
-      lastKnownPrice: 4076.56,
-      ohlcv: { open: 4075, high: 4078.78, low: 4073.97, close: 4076.56, volume: 1 },
+      lastKnownPrice: 4606,
       marketStructure: {
-        trend: null,
-        trendStrength: null,
-        poc: null,
-        vah: null,
-        val: null,
-        confirmationClassification: null,
-        confirmationDirection: null,
-        confirmationCandleType: null
-      },
-      missingInputs: ["volumeProfile"]
+        trend: "BULLISH",
+        trendStrength: 64,
+        poc: 4582,
+        vah: 4632,
+        val: 4564,
+        confirmationClassification: "CONTINUATION",
+        confirmationDirection: "BULLISH",
+        confirmationCandleType: "BULLISH"
+      }
     });
-    const view = resolveMarketStructureView([newerOhlc, olderComplete]);
-    expect(view.latestQuote?.decisionId).toBe("ohlc");
-    expect(view.latestCompleteStrategySignal?.decisionId).toBe("complete");
+    const quote1m = decision({
+      decisionId: "quote-1m",
+      timeframe: "1",
+      generatedAt: new Date().toISOString(),
+      marketDataTime: new Date().toISOString(),
+      lastKnownPrice: 4608.07,
+      marketStructure: {
+        trend: "BEARISH",
+        trendStrength: 40,
+        poc: 4621.63,
+        vah: 4625.85,
+        val: 4616.85,
+        confirmationClassification: "REJECTION",
+        confirmationDirection: "BEARISH",
+        confirmationCandleType: "BEARISH"
+      }
+    });
+
+    const view = resolveMarketStructureView([quote1m, plan15m]);
+    expect(view.latestQuote?.decisionId).toBe("quote-1m");
+    expect(view.latestCompleteStrategySignal?.decisionId).toBe("plan-15m");
+    expect(view.structureDecision?.decisionId).toBe("plan-15m");
+    expect(view.structureDecision?.marketStructure?.poc).toBe(4582);
     expect(view.marketStructureMode).toBe("COMPLETE");
-    expect(view.structureDecision?.decisionId).toBe("complete");
-    expect(view.diagnostics.fieldsMissing).toContain("poc");
+    expect(view.diagnostics.quoteTimeframe).toBe("1");
+    expect(view.diagnostics.structureTimeframe).toBe("15");
+    expect(view.diagnostics.fieldsMissing).not.toContain("poc");
   });
 
-  it("returns LIVE_RANGE_ONLY when no complete signal exists", () => {
-    const ohlcOnly = decision({
-      decisionId: "ohlc",
+  it("selects a fresh confirmed 5M event only as confirmation", () => {
+    const plan15m = decision({ decisionId: "plan-15m", timeframe: "15" });
+    const confirm5m = decision({
+      decisionId: "confirm-5m",
+      timeframe: "5",
+      marketStructure: {
+        trend: "BULLISH",
+        trendStrength: 62,
+        poc: 4619,
+        vah: 4624,
+        val: 4614,
+        confirmationClassification: "BULLISH_BREAKOUT",
+        confirmationDirection: "BULLISH",
+        confirmationCandleType: "BULLISH"
+      }
+    });
+    const quote1m = decision({ decisionId: "quote-1m", timeframe: "1", lastKnownPrice: 4076.7 });
+
+    const view = resolveMarketStructureView([quote1m, confirm5m, plan15m]);
+    expect(view.latestConfirmation?.decisionId).toBe("confirm-5m");
+    expect(view.confirmationDecision?.decisionId).toBe("confirm-5m");
+    expect(view.structureDecision?.decisionId).toBe("plan-15m");
+    expect(view.diagnostics.confirmationTimeframe).toBe("5");
+    expect(selectLatestConfirmationDecision([confirm5m], plan15m)?.decisionId).toBe("confirm-5m");
+  });
+
+  it("does not treat a complete-looking 5M event as the 15M strategy structure", () => {
+    const only5m = decision({ decisionId: "five", timeframe: "5" });
+    expect(isCompleteStrategySignal(only5m)).toBe(false);
+    expect(selectLatestCompleteStrategySignal([only5m])).toBeNull();
+  });
+
+  it("ignores stale 5M confirmation", () => {
+    const now = Date.now();
+    const plan15m = decision({ decisionId: "plan", timeframe: "15" });
+    const stale5m = decision({
+      decisionId: "stale-confirm",
+      timeframe: "5",
+      generatedAt: new Date(now - 13 * 60_000).toISOString(),
+      marketDataTime: new Date(now - 13 * 60_000).toISOString()
+    });
+    const view = resolveMarketStructureView([stale5m, plan15m], now);
+    expect(view.latestConfirmation).toBeNull();
+    expect(view.diagnostics.rejectionReasons.join(" ")).toContain("CONFIRM_5M_MISSING_OR_STALE");
+  });
+
+  it("returns LIVE_RANGE_ONLY when no confirmed 15M structure exists", () => {
+    const quote1m = decision({
+      decisionId: "quote",
+      timeframe: "1",
       marketStructure: {
         trend: null,
         trendStrength: null,
@@ -135,15 +197,17 @@ describe("strategySignal selection", () => {
         confirmationCandleType: null
       }
     });
-    const view = resolveMarketStructureView([ohlcOnly]);
+    const view = resolveMarketStructureView([quote1m]);
     expect(view.marketStructureMode).toBe("LIVE_RANGE_ONLY");
     expect(view.structureDecision).toBeNull();
   });
 
-  it("flags MISMATCH when quote and complete signal disagree", () => {
-    const complete = decision({
-      decisionId: "complete",
+  it("flags MISMATCH when the 1M quote and 15M signal are in different price regimes", () => {
+    const plan15m = decision({
+      decisionId: "plan",
+      timeframe: "15",
       generatedAt: new Date(Date.now() - 30_000).toISOString(),
+      marketDataTime: new Date(Date.now() - 30_000).toISOString(),
       lastKnownPrice: 4050,
       ohlcv: { open: 4048, high: 4052, low: 4045, close: 4050, volume: 1 },
       marketStructure: {
@@ -157,22 +221,13 @@ describe("strategySignal selection", () => {
         confirmationCandleType: "BULLISH"
       }
     });
-    const quote = decision({
+    const quote1m = decision({
       decisionId: "quote",
+      timeframe: "1",
       lastKnownPrice: 2408,
-      ohlcv: { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 },
-      marketStructure: {
-        trend: null,
-        trendStrength: null,
-        poc: null,
-        vah: null,
-        val: null,
-        confirmationClassification: null,
-        confirmationDirection: null,
-        confirmationCandleType: null
-      }
+      ohlcv: { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 }
     });
-    const view = resolveMarketStructureView([quote, complete]);
+    const view = resolveMarketStructureView([quote1m, plan15m]);
     expect(view.marketStructureMode).toBe("MISMATCH");
     expect(view.structureDecision).toBeNull();
   });
@@ -180,21 +235,12 @@ describe("strategySignal selection", () => {
   it("ignores TEST fixture when selecting complete signal", () => {
     const testDec = decision({
       decisionId: "test",
+      timeframe: "15",
       isTestDecision: true,
       environment: "TEST",
       dataSourceLabel: "TEST",
       lastKnownPrice: 2408,
-      ohlcv: { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 },
-      marketStructure: {
-        trend: "NEUTRAL",
-        trendStrength: 50,
-        poc: 2408,
-        vah: 2415,
-        val: 2400,
-        confirmationClassification: "NONE",
-        confirmationDirection: "NEUTRAL",
-        confirmationCandleType: null
-      }
+      ohlcv: { open: 2400, high: 2412, low: 2396, close: 2408, volume: 1 }
     });
     expect(selectLatestCompleteStrategySignal([testDec])).toBeNull();
   });
