@@ -5,7 +5,7 @@
  * Market-data alignment rule:
  * - QUOTE_1M (or the newest live event as a legacy fallback) owns the analysis price.
  * - Confirmed PLAN_15M owns POC / VAH / VAL and structural plan levels.
- * - CONFIRM_5M may confirm a plan but must never replace 15M structure.
+ * - Confirmed CONFIRM_5M owns entry confirmation only and never replaces 15M structure.
  */
 
 import { decisionConfig } from "../../config/decisionConfig";
@@ -17,6 +17,7 @@ export type MarketStructureMode = "COMPLETE" | "LIVE_RANGE_ONLY" | "MISMATCH" | 
 export type MarketStructureDiagnostics = {
   lastWebhookOrDecisionAt: string | null;
   lastCompleteSignalAt: string | null;
+  lastConfirmationAt: string | null;
   schemaVersion: string | null;
   signalSource: string | null;
   quoteSource: string | null;
@@ -25,6 +26,7 @@ export type MarketStructureDiagnostics = {
   timeframe: string | null;
   quoteTimeframe: string | null;
   structureTimeframe: string | null;
+  confirmationTimeframe: string | null;
   fieldsReceived: string[];
   fieldsMissing: string[];
   fieldsRejected: string[];
@@ -32,6 +34,7 @@ export type MarketStructureDiagnostics = {
   priceConsistencyOk: boolean | null;
   signalAgeSeconds: number | null;
   quoteAgeSeconds: number | null;
+  confirmationAgeSeconds: number | null;
   validityStatus: "VALID" | "EXPIRED" | "TEST" | "INCOMPLETE" | "MISMATCH" | "NONE";
   marketStructureMode: MarketStructureMode;
 };
@@ -82,15 +85,12 @@ export function isCompleteStrategySignal(d: DecisionRecord | null | undefined): 
   const close = positive(d.lastKnownPrice) ?? positive(d.ohlcv?.close);
   if (poc == null || vah == null || val == null || close == null) return false;
 
-  // POC/VAH/VAL are allowed to be meaningfully distant from current price. The 2% regime
-  // gate still protects fixture/price-scale mistakes without pretending a structural level
-  // should sit close to the latest quote.
+  // This remains a broad regime guard only. A valid structural level can be far from price.
   if (!pricesAreConsistent(close, poc) || !pricesAreConsistent(close, vah) || !pricesAreConsistent(close, val)) {
     return false;
   }
   const trend = d.marketStructure?.trend ?? d.higherTimeframeBias;
   if (!trend || trend === "NEUTRAL") {
-    // Allow NEUTRAL trend if confirmation classification exists (structure-first WAIT).
     if (!d.marketStructure?.confirmationClassification) return false;
   }
   return true;
@@ -110,9 +110,7 @@ export function isStrategySignalValid(
   return true;
 }
 
-export function selectLatestQuoteDecision(
-  recent: DecisionRecord[]
-): DecisionRecord | null {
+export function selectLatestQuoteDecision(recent: DecisionRecord[]): DecisionRecord | null {
   // Prefer the dedicated TradingView 1M quote role. 5M confirmation and 15M plan
   // decisions must not become the live quote merely because they were received later.
   return (
@@ -128,6 +126,21 @@ export function selectLatestCompleteStrategySignal(
   nowMs = Date.now()
 ): DecisionRecord | null {
   return recent.find((d) => isStrategySignalValid(d, nowMs)) ?? null;
+}
+
+export function selectLatestConfirmationDecision(
+  recent: DecisionRecord[],
+  structure: DecisionRecord | null,
+  nowMs = Date.now()
+): DecisionRecord | null {
+  return (
+    recent.find((d) => {
+      if (!isLiveDecision(d) || d.timeframe !== "5" || d.isProvisional) return false;
+      if (!sameInstrument(d, structure)) return false;
+      const age = ageSeconds(d.marketDataTime ?? d.generatedAt, nowMs);
+      return age != null && age * 1000 <= decisionConfig.freshness.confirm5mStaleMs;
+    }) ?? null
+  );
 }
 
 export function listReceivedFields(d: DecisionRecord | null | undefined): string[] {
@@ -147,7 +160,7 @@ export function listReceivedFields(d: DecisionRecord | null | undefined): string
 }
 
 export function listMissingStructureFields(d: DecisionRecord | null | undefined): string[] {
-  if (!d) return ["price", "ohlcv", "poc", "vah", "val", "trend", "confirmation"];
+  if (!d) return ["price", "ohlcv", "poc", "vah", "val", "trend"];
   const missing: string[] = [];
   if (positive(d.lastKnownPrice) == null && positive(d.ohlcv?.close) == null) missing.push("price");
   if (!d.ohlcv) missing.push("ohlcv");
@@ -155,7 +168,6 @@ export function listMissingStructureFields(d: DecisionRecord | null | undefined)
   if (positive(d.marketStructure?.vah) == null) missing.push("vah");
   if (positive(d.marketStructure?.val) == null) missing.push("val");
   if (!d.marketStructure?.trend && !d.higherTimeframeBias) missing.push("trend");
-  if (!d.marketStructure?.confirmationClassification) missing.push("confirmation");
   return missing;
 }
 
@@ -165,15 +177,16 @@ export function resolveMarketStructureView(
 ): {
   latestQuote: DecisionRecord | null;
   latestCompleteStrategySignal: DecisionRecord | null;
+  latestConfirmation: DecisionRecord | null;
   marketStructureMode: MarketStructureMode;
   diagnostics: MarketStructureDiagnostics;
-  /** Decision used for live/bar prices */
   quoteDecision: DecisionRecord | null;
-  /** Confirmed 15M decision used for POC/VAH/VAL / plan structure when compatible */
   structureDecision: DecisionRecord | null;
+  confirmationDecision: DecisionRecord | null;
 } {
   const latestQuote = selectLatestQuoteDecision(recent);
   const latestComplete = selectLatestCompleteStrategySignal(recent, nowMs);
+  const latestConfirmation = selectLatestConfirmationDecision(recent, latestComplete, nowMs);
 
   let marketStructureMode: MarketStructureMode = "UNAVAILABLE";
   let structureDecision: DecisionRecord | null = null;
@@ -187,8 +200,8 @@ export function resolveMarketStructureView(
     const quoteClose = positive(latestQuote.lastKnownPrice) ?? positive(latestQuote.ohlcv?.close);
     const signalClose = positive(latestComplete.lastKnownPrice) ?? positive(latestComplete.ohlcv?.close);
 
-    // Only compare quote vs plan close for catastrophic price-regime mistakes. Do not compare
-    // the live quote with POC: a valid POC is expected to be away from current price.
+    // Compare quote vs 15M close only as a broad price-regime/source-identity guard.
+    // Do not compare current price to POC/VAH/VAL: valid structure can be far away.
     priceConsistencyOk = pricesAreConsistent(quoteClose, signalClose) && sameInstrument(latestQuote, latestComplete);
     if (!priceConsistencyOk) {
       marketStructureMode = "MISMATCH";
@@ -201,11 +214,17 @@ export function resolveMarketStructureView(
       if (latestQuote.timeframe !== "1") {
         rejectionReasons.push("DEDICATED_QUOTE_1M_MISSING — using newest live TradingView event for price");
       }
+      if (!latestConfirmation) {
+        rejectionReasons.push("CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing");
+      }
     }
   } else if (latestComplete) {
     marketStructureMode = "COMPLETE";
     structureDecision = latestComplete;
     priceConsistencyOk = true;
+    if (!latestConfirmation) {
+      rejectionReasons.push("CONFIRM_5M_MISSING_OR_STALE — plan remains unconfirmed for short-term entry timing");
+    }
   } else {
     marketStructureMode = "LIVE_RANGE_ONLY";
     rejectionReasons.push("NO_VALID_CONFIRMED_15M_PLAN_SIGNAL");
@@ -214,6 +233,7 @@ export function resolveMarketStructureView(
   const diagnostics: MarketStructureDiagnostics = {
     lastWebhookOrDecisionAt: latestQuote?.generatedAt ?? latestQuote?.marketDataTime ?? null,
     lastCompleteSignalAt: latestComplete?.generatedAt ?? latestComplete?.marketDataTime ?? null,
+    lastConfirmationAt: latestConfirmation?.generatedAt ?? latestConfirmation?.marketDataTime ?? null,
     schemaVersion: latestQuote?.schemaVersion ?? latestComplete?.schemaVersion ?? null,
     signalSource: latestComplete?.priceSources?.poc?.source ?? latestComplete?.dataSourceLabel ?? null,
     quoteSource: latestQuote?.priceSources?.alertClose?.source ?? latestQuote?.dataSourceLabel ?? null,
@@ -222,6 +242,7 @@ export function resolveMarketStructureView(
     timeframe: latestComplete?.timeframe ?? latestQuote?.timeframe ?? null,
     quoteTimeframe: latestQuote?.timeframe ?? null,
     structureTimeframe: latestComplete?.timeframe ?? null,
+    confirmationTimeframe: latestConfirmation?.timeframe ?? null,
     fieldsReceived: listReceivedFields(latestComplete ?? latestQuote),
     fieldsMissing: listMissingStructureFields(latestComplete),
     fieldsRejected,
@@ -232,6 +253,7 @@ export function resolveMarketStructureView(
     priceConsistencyOk,
     signalAgeSeconds: ageSeconds(latestComplete?.marketDataTime ?? latestComplete?.generatedAt, nowMs),
     quoteAgeSeconds: ageSeconds(latestQuote?.marketDataTime ?? latestQuote?.generatedAt, nowMs),
+    confirmationAgeSeconds: ageSeconds(latestConfirmation?.marketDataTime ?? latestConfirmation?.generatedAt, nowMs),
     validityStatus: latestComplete
       ? isStrategySignalValid(latestComplete, nowMs)
         ? priceConsistencyOk === false
@@ -249,9 +271,11 @@ export function resolveMarketStructureView(
   return {
     latestQuote,
     latestCompleteStrategySignal: latestComplete,
+    latestConfirmation,
     marketStructureMode,
     diagnostics,
     quoteDecision: latestQuote,
-    structureDecision
+    structureDecision,
+    confirmationDecision: latestConfirmation
   };
 }
