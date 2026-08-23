@@ -1,147 +1,41 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Activity,
-  BarChart3,
   Bell,
-  BookOpen,
   ChevronRight,
+  Clock3,
   Crosshair,
-  Gauge,
-  Globe2,
   GraduationCap,
   HelpCircle,
   History,
   Home,
-  Layers3,
-  LineChart,
-  MoreHorizontal,
-  Radio,
+  LogOut,
+  Plug,
   Settings,
-  Shield,
+  SlidersHorizontal,
   Target,
-  Zap
+  UserRound,
+  Wrench
 } from "lucide-react";
 import { useAuth } from "../../lib/auth";
 import { useShellQuote } from "../../lib/quoteContext";
+import { fmtPrice } from "../../lib/intradayFormat";
 import { NotificationCentre } from "../decision/NotificationCentre";
-import { QuoteHeader } from "../gm/QuoteHeader";
 
 type NavItem = {
   to: string;
   label: string;
+  shortLabel?: string;
   end?: boolean;
-  staffOnly?: boolean;
   icon: typeof Home;
 };
 
-const DESKTOP_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
-  {
-    heading: "Trade",
-    items: [
-      { to: "/", label: "Plan", end: true, icon: Home },
-      { to: "/micro-edge", label: "Micro Edge", icon: Zap },
-      { to: "/intelligence", label: "Markets", icon: Globe2 },
-      { to: "/journal", label: "Journal", icon: BookOpen },
-      { to: "/insights", label: "Insights", icon: LineChart }
-    ]
-  },
-  {
-    heading: "More / Tools",
-    items: [
-      { to: "/levels", label: "Levels", icon: Layers3 },
-      { to: "/history-replay", label: "History & Replay", icon: History },
-      { to: "/planner", label: "Risk Planner", icon: Target },
-      { to: "/brokers", label: "Broker", icon: Radio }
-    ]
-  },
-  {
-    heading: "Account",
-    items: [
-      { to: "/settings", label: "Settings", icon: Settings },
-      { to: "/learn", label: "Learn", icon: GraduationCap },
-      { to: "/help", label: "Help", icon: HelpCircle },
-      { to: "/alerts", label: "Alerts", icon: Bell }
-    ]
-  },
-  {
-    heading: "Advanced",
-    items: [
-      { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
-      { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
-    ]
-  },
-  {
-    heading: "Admin",
-    items: [
-      { to: "/gold-hunter", label: "Gold Hunter", staffOnly: true, icon: Crosshair },
-      { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
-      {
-        to: "/admin/tradingview-template",
-        label: "TV Template",
-        staffOnly: true,
-        icon: Gauge
-      }
-    ]
-  }
-];
-
-const MOBILE_PRIMARY: NavItem[] = [
-  { to: "/", label: "Plan", end: true, icon: Home },
-  { to: "/intelligence", label: "Markets", icon: Globe2 },
-  { to: "/journal", label: "Journal", icon: BookOpen }
-];
-
-type MoreGroup = { heading: string; items: NavItem[] };
-
-const MOBILE_MORE_GROUPS: MoreGroup[] = [
-  {
-    heading: "Trading tools",
-    items: [
-      { to: "/micro-edge", label: "Micro Edge", icon: Zap },
-      { to: "/levels", label: "Levels", icon: Layers3 },
-      { to: "/planner", label: "Risk Planner", icon: Target },
-      { to: "/brokers", label: "Broker", icon: Radio }
-    ]
-  },
-  {
-    heading: "Review",
-    items: [
-      { to: "/history-replay", label: "History & Replay", icon: History },
-      { to: "/insights", label: "Insights", icon: LineChart }
-    ]
-  },
-  {
-    heading: "Account",
-    items: [
-      { to: "/alerts", label: "Alerts", icon: Bell },
-      { to: "/settings", label: "Settings", icon: Settings },
-      { to: "/learn", label: "Learn", icon: GraduationCap },
-      { to: "/help", label: "Help", icon: HelpCircle }
-    ]
-  },
-  {
-    heading: "Advanced",
-    items: [
-      { to: "/tradingview", label: "TradingView setup", staffOnly: true, icon: Gauge },
-      { to: "/v4", label: "Research Lab", staffOnly: true, icon: BarChart3 },
-      { to: "/diagnostics", label: "Diagnostics", staffOnly: true, icon: Activity }
-    ]
-  },
-  {
-    heading: "Admin",
-    items: [
-      { to: "/gold-hunter", label: "Gold Hunter", staffOnly: true, icon: Crosshair },
-      { to: "/admin/users", label: "Users", staffOnly: true, icon: Shield },
-      {
-        to: "/admin/tradingview-template",
-        label: "TV Template",
-        staffOnly: true,
-        icon: Gauge
-      }
-    ]
-  }
+const PRIMARY_NAV: NavItem[] = [
+  { to: "/", label: "Home", end: true, icon: Home },
+  { to: "/short-term", label: "Short-Term", shortLabel: "Short", icon: Clock3 },
+  { to: "/day-trade", label: "Day Trade", shortLabel: "Day", icon: Target },
+  { to: "/gold-hunter", label: "Gold Hunter", shortLabel: "Hunter", icon: Crosshair },
+  { to: "/history", label: "History", icon: History }
 ];
 
 function initials(email: string | null | undefined): string {
@@ -152,306 +46,123 @@ function initials(email: string | null | undefined): string {
   return local.slice(0, 2).toUpperCase();
 }
 
-function filterStaff<T extends { staffOnly?: boolean }>(items: T[], isStaff: boolean): T[] {
-  return items.filter((l) => !l.staffOnly || isStaff);
-}
-
-export function AppShell({
-  children,
-  linkPrefix = ""
-}: {
-  children?: ReactNode;
-  linkPrefix?: string;
-}) {
-  const { user, account } = useAuth();
+export function AppShell({ children }: { children?: ReactNode; linkPrefix?: string }) {
+  const { user, account, signOut } = useAuth();
   const { quote } = useShellQuote();
   const location = useLocation();
-  const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement | null>(null);
-  const email = user?.email ?? "Account";
-  const prefix = linkPrefix.replace(/\/$/, "");
   const isStaff = account?.role === "OWNER" || account?.role === "ADMIN";
+  const isGoldHunter = location.pathname.startsWith("/gold-hunter");
 
-  const withPrefix = (to: string) => {
-    if (!prefix) return to;
-    if (to === "/") return prefix || "/";
-    return `${prefix}${to}`;
-  };
-
-  const desktopGroups = useMemo(
-    () =>
-      DESKTOP_GROUPS.map((g) => ({
-        ...g,
-        items: filterStaff(g.items, isStaff)
-      })).filter((g) => g.items.length > 0),
-    [isStaff]
-  );
-
-  const mobileMoreGroups = useMemo(
-    () =>
-      MOBILE_MORE_GROUPS.map((g) => ({
-        ...g,
-        items: filterStaff(g.items, isStaff)
-      })).filter((g) => g.items.length > 0),
-    [isStaff]
-  );
-
-  const moreActive = useMemo(() => {
-    const paths = mobileMoreGroups.flatMap((g) => g.items.map((i) => withPrefix(i.to)));
-    return paths.some(
-      (target) => location.pathname === target || location.pathname.startsWith(`${target}/`)
-    );
-  }, [location.pathname, prefix, mobileMoreGroups]);
-
-  const isAdminSurface =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith(withPrefix("/admin"));
-
-  const isGoldHunterSurface =
-    location.pathname.startsWith("/gold-hunter") ||
-    location.pathname.startsWith(withPrefix("/gold-hunter"));
-
-  /** Plan page owns the single premium market strip — hide duplicate mobile quote. */
-  const hideMobileQuote =
-    location.pathname === withPrefix("/") ||
-    location.pathname === "/" ||
-    isGoldHunterSurface;
+  useEffect(() => {
+    setProfileOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!profileOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false);
+    const close = (event: MouseEvent) => {
+      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setProfileOpen(false);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
     };
-    document.addEventListener("mousedown", onDoc);
-    window.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", close);
+    window.addEventListener("keydown", key);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
-      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", key);
     };
   }, [profileOpen]);
 
-  useEffect(() => {
-    setMoreOpen(false);
-  }, [location.pathname]);
+  if (isGoldHunter) {
+    return <div className="gm26-standalone">{children ?? <Outlet />}</div>;
+  }
+
+  const marketState = quote?.freshness === "MARKET_CLOSED" || quote?.marketStatus === "CLOSED" ? "CLOSED" : quote?.fresh ? "LIVE" : "CONNECTED";
 
   return (
-    <div className="gm-shell gm-premium-v2" data-testid="app-shell-redesign">
-      <aside className="gm-sidebar" aria-label="Desktop navigation" data-testid="desktop-sidebar">
-        <div className="gm-sidebar-brand">
-          <img src="/brand/mark-official.png" alt="" width={36} height={36} />
-          <div>
-            <strong>GOLDMETA</strong>
-            <span className="gm-meta">XAUUSD trading assistant</span>
-          </div>
-        </div>
-        <nav className="gm-sidebar-nav">
-          {desktopGroups.map((group) => (
-            <div
-              key={group.heading}
-              className="gm-nav-group"
-              data-testid={`nav-group-${group.heading.toLowerCase().replace(/\s+|\/+/g, "-")}`}
-            >
-              <p className="gm-nav-heading">{group.heading}</p>
-              {group.items.map((link) => {
-                const Icon = link.icon;
-                return (
-                  <NavLink
-                    key={link.to}
-                    to={withPrefix(link.to)}
-                    end={link.end}
-                    className={({ isActive }) => (isActive ? "active" : undefined)}
-                  >
-                    <Icon aria-hidden strokeWidth={2} />
-                    <span>{link.label}</span>
-                  </NavLink>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-        <div className="gm-sidebar-foot">
-          <div className="gm-sidebar-premium">
-            <p data-testid="sidebar-live-locked">Live execution locked</p>
-            <p className="gm-meta">Gold Hunter is the automated trading engine</p>
-          </div>
-        </div>
-      </aside>
+    <div className="gm26-shell" data-testid="gm26-app-shell">
+      <aside className="gm26-sidebar" aria-label="GoldMeta navigation">
+        <NavLink to="/" className="gm26-brand" aria-label="GoldMeta home">
+          <img src="/brand/mark-official.png" alt="" width={38} height={38} />
+          <div><strong>GOLDMETA</strong><span>XAUUSD intelligence</span></div>
+        </NavLink>
 
-      <div className="gm-main">
-        <div className="gm-main-inner">
-          <header className="gm-topbar" data-testid="topbar">
-            <div className="gm-topbar-market" data-testid="topbar-market">
-              <strong className="gm-topbar-symbol">XAUUSD</strong>
-              <QuoteHeader
-                className="gm-topbar-quote"
-                price={quote?.price ?? null}
-                updatedLabel={quote?.updatedLabel ?? "—"}
-                sessionLabel={quote?.sessionLabel}
-                fresh={quote?.fresh}
-                freshness={quote?.freshness}
-                unavailable={quote?.unavailable}
-                bid={quote?.bid}
-                ask={quote?.ask}
-                desktopOnly
-              />
-            </div>
-
-            <div className="gm-topbar-actions">
-              <span
-                className="gm-badge gm-autotrade-pill gm-autotrade-pill--neutral"
-                data-testid="topbar-live-locked"
-              >
-                Live locked
-              </span>
-              <NotificationCentre />
-              <div className="gm-profile-menu" ref={profileRef}>
-                <button
-                  type="button"
-                  className="gm-avatar-btn"
-                  aria-expanded={profileOpen}
-                  aria-controls="gm-profile-popover"
-                  data-testid="profile-menu-btn"
-                  onClick={() => setProfileOpen((v) => !v)}
-                  aria-label="Account profile"
-                >
-                  <span className="gm-avatar" aria-hidden>
-                    {initials(email)}
-                  </span>
-                </button>
-                {profileOpen && (
-                  <div
-                    id="gm-profile-popover"
-                    className="gm-profile-popover"
-                    role="dialog"
-                    aria-label="Account email"
-                    data-testid="profile-popover"
-                  >
-                    <p className="gm-meta">Signed in as</p>
-                    <strong data-testid="profile-email">{email}</strong>
-                    <p className="gm-meta" style={{ marginTop: 8 }} data-testid="profile-live-locked">
-                      Live execution locked
-                    </p>
-                    <NavLink
-                      to={withPrefix("/settings")}
-                      className="gm-linkish"
-                      onClick={() => setProfileOpen(false)}
-                    >
-                      Settings <ChevronRight size={14} aria-hidden />
-                    </NavLink>
-                  </div>
-                )}
-              </div>
-            </div>
-          </header>
-
-          {!hideMobileQuote ? (
-            <QuoteHeader
-              className="gm-mobile-quote"
-              price={quote?.price ?? null}
-              updatedLabel={quote?.updatedLabel ?? "—"}
-              sessionLabel={quote?.sessionLabel}
-              fresh={quote?.fresh}
-              freshness={quote?.freshness}
-              unavailable={quote?.unavailable}
-              bid={quote?.bid}
-              ask={quote?.ask}
-            />
-          ) : null}
-
-          {children ?? <Outlet />}
-        </div>
-      </div>
-
-      {isGoldHunterSurface ? null : isAdminSurface ? (
-        <nav
-          className="gm-mobile-nav gm-mobile-nav--admin"
-          aria-label="Admin"
-          data-testid="admin-mobile-nav"
-        >
-          <NavLink to={withPrefix("/")} end>
-            <Home aria-hidden strokeWidth={2} />
-            <span>Back to app</span>
-          </NavLink>
-          <NavLink to={withPrefix("/admin/users")}>
-            <Shield aria-hidden strokeWidth={2} />
-            <span>Users</span>
-          </NavLink>
-        </nav>
-      ) : (
-        <nav
-          className="gm-mobile-nav"
-          aria-label="Mobile primary"
-          data-testid="mobile-bottom-nav"
-        >
-          {MOBILE_PRIMARY.map((link) => {
-            const Icon = link.icon;
+        <nav className="gm26-sidebar-nav">
+          {PRIMARY_NAV.map((item) => {
+            const Icon = item.icon;
             return (
-              <NavLink
-                key={link.to}
-                to={withPrefix(link.to)}
-                end={link.end}
-                className={({ isActive }) => (isActive ? "active" : undefined)}
-                onClick={() => setMoreOpen(false)}
-              >
-                <Icon aria-hidden strokeWidth={2} />
-                <span>{link.label}</span>
+              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? "active" : undefined}>
+                <Icon aria-hidden />
+                <span>{item.label}</span>
               </NavLink>
             );
           })}
-          <button
-            type="button"
-            className={moreOpen || moreActive ? "active" : undefined}
-            aria-expanded={moreOpen}
-            aria-controls="gm-more-sheet"
-            data-testid="mobile-more-btn"
-            onClick={() => setMoreOpen((v) => !v)}
-          >
-            <MoreHorizontal aria-hidden strokeWidth={2} />
-            <span>More</span>
-          </button>
         </nav>
-      )}
 
-      {!isAdminSurface && !isGoldHunterSurface && moreOpen && (
-        <div className="gm-more-sheet" id="gm-more-sheet" data-testid="mobile-more-sheet">
-          <div className="gm-more-sheet-card">
-            <div className="gm-section-head" style={{ display: "flex", justifyContent: "space-between" }}>
-              <h2 className="gm-section-title">More</h2>
-              <button type="button" className="gm-linkish" onClick={() => setMoreOpen(false)}>
-                Close
-              </button>
-            </div>
-            {mobileMoreGroups.map((group) => (
-              <div
-                key={group.heading}
-                className="gm-more-group"
-                data-testid={`more-group-${group.heading.toLowerCase().replace(/\s+/g, "-")}`}
-              >
-                <p className="gm-nav-heading">{group.heading}</p>
-                <div className="gm-more-links">
-                  {group.items.map((link) => {
-                    const Icon = link.icon;
-                    return (
-                      <NavLink
-                        key={link.to}
-                        to={withPrefix(link.to)}
-                        onClick={() => setMoreOpen(false)}
-                      >
-                        <Icon size={18} aria-hidden />
-                        {link.label}
-                      </NavLink>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+        <div className="gm26-sidebar-foot">
+          <div className="gm26-sidebar-status">
+            <span className={marketState === "LIVE" ? "is-live" : ""} />
+            <div><strong>XAUUSD feed</strong><small>{marketState}</small></div>
           </div>
+          <button type="button" className="gm26-profile-row" onClick={() => setProfileOpen((value) => !value)}>
+            <span className="gm26-avatar">{initials(user?.email)}</span>
+            <div><strong>{user?.email?.split("@")[0] ?? "Account"}</strong><small>{account?.role ?? "USER"}</small></div>
+            <ChevronRight aria-hidden />
+          </button>
         </div>
-      )}
+      </aside>
+
+      <main className="gm26-main">
+        <header className="gm26-topbar">
+          <div className="gm26-topbar-market">
+            <span>XAUUSD</span>
+            <strong>{quote?.price != null ? fmtPrice(quote.price) : "—"}</strong>
+            <span className={`gm26-feed-state ${marketState === "LIVE" ? "is-live" : ""}`}>{marketState}</span>
+            {quote?.sessionLabel ? <small>{quote.sessionLabel}</small> : null}
+          </div>
+          <div className="gm26-topbar-actions" ref={profileRef}>
+            <NotificationCentre />
+            <button type="button" className="gm26-avatar-button" aria-label="Open profile menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>
+              <span className="gm26-avatar">{initials(user?.email)}</span>
+            </button>
+            {profileOpen ? (
+              <div className="gm26-profile-menu" role="dialog" aria-label="Profile menu">
+                <div className="gm26-profile-menu__head">
+                  <span className="gm26-avatar gm26-avatar--large">{initials(user?.email)}</span>
+                  <div><strong>{user?.email ?? "Account"}</strong><span>{account?.role ?? "USER"}</span></div>
+                </div>
+                <nav>
+                  <NavLink to="/settings"><UserRound aria-hidden /> Account</NavLink>
+                  <NavLink to="/alerts"><Bell aria-hidden /> Notifications</NavLink>
+                  <NavLink to="/brokers"><Plug aria-hidden /> Connections</NavLink>
+                  <NavLink to="/planner"><SlidersHorizontal aria-hidden /> Risk planner</NavLink>
+                  <NavLink to="/learn"><GraduationCap aria-hidden /> Learn</NavLink>
+                  <NavLink to="/help"><HelpCircle aria-hidden /> Help</NavLink>
+                  {isStaff ? <NavLink to="/advanced"><Wrench aria-hidden /> Advanced</NavLink> : null}
+                  <NavLink to="/settings"><Settings aria-hidden /> Settings</NavLink>
+                </nav>
+                <button type="button" className="gm26-signout" onClick={() => void signOut()}><LogOut aria-hidden /> Sign out</button>
+              </div>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="gm26-main-inner">{children ?? <Outlet />}</div>
+      </main>
+
+      <nav className="gm26-bottom-nav" aria-label="GoldMeta mobile navigation" data-testid="mobile-bottom-nav">
+        {PRIMARY_NAV.map((item) => {
+          const Icon = item.icon;
+          return (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? "active" : undefined}>
+              <Icon aria-hidden />
+              <span>{item.shortLabel ?? item.label}</span>
+            </NavLink>
+          );
+        })}
+      </nav>
     </div>
   );
 }

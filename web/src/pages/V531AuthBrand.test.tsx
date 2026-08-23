@@ -114,7 +114,7 @@ describe("V5.3.1 desktop shell vs mobile nav", () => {
         </AppShell>
       </MemoryRouter>
     );
-    expect(screen.getByTestId("desktop-sidebar")).toBeInTheDocument();
-    expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
+    expect(screen.getByLabelText("GoldMeta navigation")).toBeInTheDocument();
+    expect(screen.getByLabelText("GoldMeta mobile navigation")).toBeInTheDocument();
   });
 });
