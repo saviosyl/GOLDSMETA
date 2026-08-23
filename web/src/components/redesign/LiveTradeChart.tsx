@@ -29,13 +29,20 @@ const LINE_COLOR: Record<NonNullable<TradeChartLevel["tone"]>, string> = {
   muted: "#94a3b8"
 };
 
+function candleSourceLabel(source: string | null): string {
+  if (!source) return "cTrader market history";
+  if (/CTRADER/i.test(source)) return "cTrader market history";
+  return source.replace(/_/g, " ").toLowerCase();
+}
+
 export function LiveTradeChart({
   title = "Live Gold chart",
   subtitle,
   levels,
   defaultTimeframe = "M5",
   currentPrice,
-  marketClosed = false
+  marketClosed = false,
+  analysisSourceLabel
 }: {
   title?: string;
   subtitle?: string | null;
@@ -43,10 +50,11 @@ export function LiveTradeChart({
   defaultTimeframe?: ChartTimeframe;
   currentPrice?: number | null;
   marketClosed?: boolean;
+  analysisSourceLabel?: string | null;
 }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>(defaultTimeframe);
   const [fullscreen, setFullscreen] = useState(false);
-  const { bars, loading, error } = useXauusdCandles(timeframe, true);
+  const { bars, loading, error, source } = useXauusdCandles(timeframe, true);
   const { quote } = useShellQuote();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -196,6 +204,9 @@ export function LiveTradeChart({
           <span className="gm26-eyebrow">XAUUSD · {timeframeLabel(timeframe)}</span>
           <h2>{title}</h2>
           {subtitle ? <p>{subtitle}</p> : null}
+          <small className="gm26-live-chart__source">
+            Candles: {candleSourceLabel(source)}{analysisSourceLabel ? ` · Analysis: ${analysisSourceLabel}` : ""}
+          </small>
         </div>
         <div className="gm26-live-chart__quote">
           <strong>{live != null ? fmtPrice(live) : "—"}</strong>
