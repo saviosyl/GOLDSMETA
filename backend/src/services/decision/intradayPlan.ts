@@ -1511,14 +1511,36 @@ function buildScenarios(args: {
   };
 }
 
+const ACTIONABLE_CONFIRMATION_CLASSES = new Set(["BREAKOUT", "RETEST", "CONTINUATION", "REJECTION"]);
+
+function confirmationSupportsDecision(args: {
+  decision: string;
+  classification: string | null;
+  direction: string | null;
+}): boolean {
+  const decision = args.decision.toUpperCase();
+  const classification = (args.classification ?? "NONE").toUpperCase();
+  const direction = (args.direction ?? "NEUTRAL").toUpperCase();
+  if (!ACTIONABLE_CONFIRMATION_CLASSES.has(classification)) return false;
+  if (decision === "BUY") return direction === "BULLISH";
+  if (decision === "SELL") return direction === "BEARISH";
+  return false;
+}
+
 function buildChecklist(args: {
   mode: MarketStructureMode;
   decision: string;
   confirmation: string | null;
+  confirmationDirection: string | null;
   hasPlan: boolean;
   poc: number | null;
   live: number | null;
 }): { items: SetupChecklistItem[]; complete: number; total: number } {
+  const confirmationSupportsPlan = confirmationSupportsDecision({
+    decision: args.decision,
+    classification: args.confirmation,
+    direction: args.confirmationDirection
+  });
   const items: SetupChecklistItem[] = [
     {
       id: "structure",
@@ -1544,8 +1566,12 @@ function buildChecklist(args: {
     {
       id: "confirmation",
       label: "Entry confirmation candle",
-      complete: Boolean(args.confirmation && args.confirmation !== "NONE"),
-      detail: args.confirmation ? `Classification ${args.confirmation}` : "No confirmation yet"
+      complete: confirmationSupportsPlan,
+      detail: confirmationSupportsPlan
+        ? `${args.confirmationDirection} ${args.confirmation} confirms ${args.decision}`
+        : args.confirmation
+          ? `${args.confirmationDirection ?? "UNKNOWN"} ${args.confirmation} does not confirm ${args.decision}`
+          : "No confirmation yet"
     },
     {
       id: "plan",
@@ -1568,6 +1594,7 @@ function resolveAction(args: {
   mode: MarketStructureMode;
   decision: string;
   confirmation: string | null;
+  confirmationDirection: string | null;
   hasValidPlan: boolean;
   live: number | null;
   entry: number | null;
@@ -1627,6 +1654,11 @@ function resolveAction(args: {
 
   const conf = (args.confirmation ?? "NONE").toUpperCase();
   const decision = args.decision.toUpperCase();
+  const confirmationSupportsPlan = confirmationSupportsDecision({
+    decision,
+    classification: conf,
+    direction: args.confirmationDirection
+  });
 
   if (args.location === "BELOW_VALUE" && args.val != null) {
     return {
@@ -1661,7 +1693,7 @@ function resolveAction(args: {
     };
   }
 
-  if (decision === "BUY" && args.hasValidPlan && (conf === "BREAKOUT" || conf === "RETEST" || conf === "CONTINUATION")) {
+  if (decision === "BUY" && args.hasValidPlan && confirmationSupportsPlan) {
     return {
       action: "BUY_NOW",
       trigger: args.entry != null ? `Buy zone near ${args.entry}` : "Buy per verified plan entry",
@@ -1677,7 +1709,7 @@ function resolveAction(args: {
   if (
     decision === "SELL" &&
     args.hasValidPlan &&
-    (conf === "BREAKOUT" || conf === "RETEST" || conf === "CONTINUATION" || conf === "REJECTION")
+    confirmationSupportsPlan
   ) {
     return {
       action: conf === "REJECTION" ? "SELL_ON_REJECTION" : "SELL_NOW",
@@ -1949,6 +1981,10 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
     structure?.marketStructure?.confirmationClassification ??
     quote?.marketStructure?.confirmationClassification ??
     null;
+  const confirmationDirection =
+    structure?.marketStructure?.confirmationDirection ??
+    quote?.marketStructure?.confirmationDirection ??
+    null;
   const trend =
     structure?.marketStructure?.trend ??
     structure?.higherTimeframeBias ??
@@ -1973,6 +2009,7 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
     mode: args.mode,
     decision,
     confirmation,
+    confirmationDirection,
     hasValidPlan,
     live,
     entry,
@@ -1987,6 +2024,7 @@ export function buildIntradayPlan(args: BuildIntradayPlanArgs): IntradayPlan {
     mode: args.mode,
     decision,
     confirmation,
+    confirmationDirection,
     hasPlan: hasValidPlan,
     poc,
     live
