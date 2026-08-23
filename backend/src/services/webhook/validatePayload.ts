@@ -2,13 +2,16 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import { tradingViewPayloadSchema, type TradingViewPayload } from "../../models/types";
 import { isWithinSkew } from "../../utils/time";
+import { logger } from "../logging/logger";
+import type { GoldMetaStore, WebhookConnection } from "../storage/types";
 import { buildStableEventId } from "./eventId";
 
 export class WebhookValidationError extends Error {
   constructor(
     message: string,
     public readonly statusCode: number,
-    public readonly code: string
+    public readonly code: string,
+    public readonly details?: string[]
   ) {
     super(message);
   }
@@ -17,36 +20,80 @@ export class WebhookValidationError extends Error {
 export interface ValidatedWebhookPayload {
   payload: TradingViewPayload;
   stableEventId: string;
+  userId: string;
+  webhookId: string;
+  connection: WebhookConnection;
 }
 
-export const validateWebhookPayload = (
+const normalizeWebhookBody = (body: unknown): unknown => {
+  // express.json(type: text/plain) may yield a raw JSON string instead of an object.
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    if (!trimmed) {
+      return body;
+    }
+    try {
+      return JSON.parse(trimmed) as unknown;
+    } catch {
+      return body;
+    }
+  }
+  return body;
+};
+
+export const validateWebhookPayload = async (
+  store: GoldMetaStore,
   webhookId: string,
   body: unknown,
   now = Date.now()
-): ValidatedWebhookPayload => {
-  if (webhookId !== env.WEBHOOK_ID) {
-    throw new WebhookValidationError("Webhook not found", 404, "WEBHOOK_NOT_FOUND");
-  }
-
-  const parsed = tradingViewPayloadSchema.safeParse(body);
+): Promise<ValidatedWebhookPayload> => {
+  const normalized = normalizeWebhookBody(body);
+  const parsed = tradingViewPayloadSchema.safeParse(normalized);
   if (!parsed.success) {
-    throw new WebhookValidationError("Invalid webhook payload", 400, "INVALID_PAYLOAD");
+    const details = zodErrorToMessages(parsed.error).slice(0, 12);
+    logger.warn("Webhook payload failed schema validation", {
+      webhookId,
+      bodyType: typeof body,
+      normalizedType: typeof normalized,
+      details
+    });
+    throw new WebhookValidationError("Invalid webhook payload", 400, "INVALID_PAYLOAD", details);
   }
 
   const payload = parsed.data;
-  if (env.WEBHOOK_SECRET && payload.webhookSecret !== env.WEBHOOK_SECRET) {
-    throw new WebhookValidationError("Invalid webhook credentials", 401, "INVALID_SECRET");
+  if (!isWithinSkew(payload.sentAt, env.WEBHOOK_MAX_SKEW_MS, now)) {
+    logger.warn("Webhook payload failed timestamp skew check", {
+      webhookId,
+      sentAt: payload.sentAt,
+      maxSkewMs: env.WEBHOOK_MAX_SKEW_MS
+    });
+    throw new WebhookValidationError("Webhook timestamp outside allowed skew", 400, "STALE_TIMESTAMP");
   }
 
-  if (!isWithinSkew(payload.sentAt, env.WEBHOOK_MAX_SKEW_MS, now)) {
-    throw new WebhookValidationError("Webhook timestamp outside allowed skew", 400, "STALE_TIMESTAMP");
+  const connection = await store.getWebhookConnectionById(webhookId);
+  if (!connection) {
+    throw new WebhookValidationError("Webhook not found", 404, "WEBHOOK_NOT_FOUND");
+  }
+
+  // Path webhookId is the primary credential (unguessable URL). Body webhookSecret is optional
+  // defense-in-depth: only enforce when the payload actually provides a non-null secret.
+  // Pine default sends webhookSecret:null — requiring a match would 401 every live TV alert.
+  if (
+    connection.secret &&
+    payload.webhookSecret != null &&
+    payload.webhookSecret !== connection.secret
+  ) {
+    throw new WebhookValidationError("Invalid webhook credentials", 401, "INVALID_SECRET");
   }
 
   return {
     payload,
-    stableEventId: buildStableEventId(payload)
+    stableEventId: buildStableEventId(payload),
+    userId: connection.userId,
+    webhookId: connection.webhookId,
+    connection
   };
 };
 
 export const zodErrorToMessages = (error: z.ZodError): string[] =>
-  error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+  error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);

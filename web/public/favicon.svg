@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GoldMeta">
+  <rect width="64" height="64" rx="14" fill="#0A0B0D"/>
+  <rect x="3" y="3" width="58" height="58" rx="12" fill="#11141A" stroke="#C9A227" stroke-opacity="0.4" stroke-width="1"/>
+  <polyline points="14,44 22,38 28,40 38,26 46,30 52,20" fill="none" stroke="#C9A227" stroke-opacity="0.4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="32" y="40" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-weight="700" fill="#E8D48A">GM</text>
+</svg>

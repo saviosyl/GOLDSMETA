@@ -1,0 +1,44 @@
+{
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "currentPrice": 2398,
+  "candle": {
+    "open": 2408,
+    "high": 2403,
+    "low": 2397,
+    "close": 2398
+  },
+  "poc": 2408,
+  "vah": 2415,
+  "val": 2402,
+  "hvnLevels": [
+    2388,
+    2375,
+    2360
+  ],
+  "trendMeter": {
+    "state": "BEARISH",
+    "strength": 86
+  },
+  "confirmationCandle": {
+    "state": "BEARISH_BREAKOUT",
+    "confirmed": true
+  },
+  "volume": 1200,
+  "relativeVolume": 1.7,
+  "vwap": 2409,
+  "ema21": 2406,
+  "ema50": 2410,
+  "ema200": 2420,
+  "rsi": 38,
+  "atr": 5,
+  "spread": 0.25,
+  "session": "London",
+  "nearbySupport": 2402,
+  "nearbyResistance": 2416,
+  "highImpactNewsActive": false,
+  "marketDataTime": "2026-07-20T10:00:00.000Z",
+  "evaluatedAt": "2026-07-20T10:01:00.000Z",
+  "missingFields": [],
+  "isStale": false
+}

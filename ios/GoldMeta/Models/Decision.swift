@@ -13,6 +13,8 @@ struct Decision: Codable, Identifiable, Equatable {
     let marketRegime: MarketRegime
     let dataQuality: DataQuality
     let isProvisional: Bool
+    let isTestDecision: Bool?
+    let environment: String?
     let setupScore: Double
     let entry: EntryPlan
     let stopLoss: StopLossPlan
@@ -41,11 +43,47 @@ struct Decision: Codable, Identifiable, Equatable {
     let higherTimeframeBias: HigherTimeframeBias?
     let lastKnownPrice: Double?
     let dataSourceLabel: DataSourceLabel
+    /// Optional volume-profile / structure levels for the dashboard.
+    let marketStructure: MarketStructure?
+    /// Optional explicit workflow actions; falls back to defaults when absent.
+    let recommendedActions: [RecommendedTradeAction]?
+    /// Optional short label for mock scenario pickers.
+    let scenarioName: String?
+    /// Decision-engine trade score (0–100). Falls back to setupScore when absent.
+    let tradeScore: Double?
+    /// Setup grade from the decision engine (A+/A/B/C/No Trade).
+    let setupGrade: String?
+    /// True when this payload is analysis-only and not an executed broker order.
+    let analysisOnly: Bool?
+    /// Engine management recommendation (ENTER, WAIT_FOR_CLOSE, HOLD, …).
+    let recommendedManagementAction: String?
+    /// Human-readable engine explanation.
+    let explanation: String?
+    /// Per-factor score breakdown from the decision engine.
+    let scoreBreakdown: [ScoreBreakdownFactor]?
+    /// Safety / hard-guard flags when action is WAIT.
+    let safetyFlags: [String]?
 
     var id: String { decisionId }
 
     var isExpired: Bool { validUntil < Date() }
     var isStale: Bool { dataQuality == .stale || dataSourceLabel == .stale || dataSourceLabel == .offline }
+    var shouldShowTestBadge: Bool { isTestDecision == true || environment == "TEST" }
+    var isAnalysisOnly: Bool { analysisOnly ?? true }
+    var effectiveTradeScore: Double { tradeScore ?? setupScore }
+
+    var display: DecisionDisplay { DecisionDisplay(decision: self) }
+
+    var actionsForDisplay: [RecommendedTradeAction] {
+        if let recommendedActions, !recommendedActions.isEmpty {
+            return recommendedActions
+        }
+        return RecommendedTradeAction.defaults(
+            for: decision,
+            breakeven: breakeven.state,
+            earlyExit: earlyExit.exitNow
+        )
+    }
 
     static let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -59,6 +97,16 @@ struct Decision: Codable, Identifiable, Equatable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
+}
+
+struct ScoreBreakdownFactor: Codable, Equatable, Identifiable {
+    let factor: String
+    let weight: Double
+    let awarded: Double
+    let side: String
+    let note: String
+
+    var id: String { "\(factor)-\(side)-\(note)" }
 }
 
 struct EntryPlan: Codable, Equatable {
@@ -106,6 +154,88 @@ struct BreakevenPlan: Codable, Equatable {
 struct EarlyExitPlan: Codable, Equatable {
     let exitNow: Bool
     let conditions: [String]
+}
+
+struct MarketStructure: Codable, Equatable {
+    let trend: String
+    let poc: Double?
+    let vah: Double?
+    let val: Double?
+
+    var trendDisplay: String {
+        trend.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+/// Formatted values for the XAUUSD dashboard and unit tests.
+struct DecisionDisplay: Equatable {
+    let decisionLabel: String
+    let confidenceText: String
+    let confidenceDetail: String
+    let currentPriceText: String
+    let trendText: String
+    let pocText: String
+    let vahText: String
+    let valText: String
+    let entryText: String
+    let stopLossText: String
+    let tp1Text: String
+    let tp2Text: String
+    let tp3Text: String
+    let riskRewardText: String
+    let supportingReasons: [String]
+    let opposingReasons: [String]
+    let actionTitles: [String]
+    let scenarioTitle: String
+    let setupGradeText: String
+    let tradeScoreText: String
+    let managementText: String
+    let analysisOnlyText: String
+    let explanationText: String
+    let scoreBreakdownLines: [String]
+    let safetyFlagTexts: [String]
+
+    init(decision: Decision) {
+        decisionLabel = decision.decision.rawValue
+        confidenceText = decision.confidence.percentText
+        confidenceDetail = decision.confidenceLabel.displayName
+        currentPriceText = decision.lastKnownPrice?.xauPrice ?? "—"
+        trendText = decision.marketStructure?.trendDisplay
+            ?? decision.higherTimeframeBias?.rawValue.capitalized
+            ?? decision.marketRegime.displayName
+        pocText = decision.marketStructure?.poc?.xauPrice ?? "—"
+        vahText = decision.marketStructure?.vah?.xauPrice ?? "—"
+        valText = decision.marketStructure?.val?.xauPrice ?? "—"
+        entryText = decision.entry.displayPrice
+        stopLossText = decision.stopLoss.price?.xauPrice ?? "—"
+        let tpMap = Dictionary(uniqueKeysWithValues: decision.takeProfits.map { ($0.label.uppercased(), $0.price.xauPrice) })
+        tp1Text = tpMap["TP1"] ?? "—"
+        tp2Text = tpMap["TP2"] ?? "—"
+        tp3Text = tpMap["TP3"] ?? "—"
+        riskRewardText = decision.riskReward.bestAvailable?.ratioText ?? "—"
+        supportingReasons = decision.decision == .sell ? decision.bearishEvidence : decision.bullishEvidence
+        opposingReasons = decision.decision == .sell ? decision.bullishEvidence : decision.bearishEvidence
+        actionTitles = decision.actionsForDisplay.map(\.title)
+        scenarioTitle = decision.scenarioName
+            ?? "\(decision.decision.rawValue) · \(decision.confidenceLabel.displayName)"
+        setupGradeText = decision.setupGrade ?? "—"
+        tradeScoreText = String(format: "%.0f", decision.effectiveTradeScore)
+        managementText = (decision.recommendedManagementAction ?? "—")
+            .replacingOccurrences(of: "_", with: " ")
+        analysisOnlyText = decision.isAnalysisOnly
+            ? "Analysis only — not an executed trade"
+            : "Executed trade status available"
+        explanationText = decision.explanation
+            ?? decision.reasonSummary.first
+            ?? decision.invalidation
+        scoreBreakdownLines = (decision.scoreBreakdown ?? [])
+            .sorted { $0.awarded > $1.awarded }
+            .prefix(8)
+            .map { factor in
+                String(format: "%@ · %.1f/%.0f · %@", factor.factor, factor.awarded, factor.weight, factor.side)
+            }
+        safetyFlagTexts = decision.safetyFlags ?? []
+    }
 }
 
 extension Double {

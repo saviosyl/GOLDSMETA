@@ -6,15 +6,19 @@
 # Secrets
 .env
 .env.local
+.env.*.local
 *.pem
 GoogleService-Info.plist
+ios/GoldMeta/App/GoogleService-Info.plist
 **/serviceAccount*.json
 **/firebase-adminsdk*.json
 Secrets.xcconfig
+ios/GoldMeta/Config/Secrets.xcconfig
 
 # Node
 node_modules/
 dist/
+dev-dist/
 coverage/
 *.tsbuildinfo
 .firebase/
@@ -49,6 +53,5 @@ Thumbs.db
 *.log
 tmp/
 .temp/
-
-.env
-.env.local
+web/test-results/
+web/playwright-report/

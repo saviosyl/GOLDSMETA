@@ -1,0 +1,62 @@
+{
+  "version": "decision-engine-1.0.0",
+  "schemaVersion": "1.0",
+  "thresholds": {
+    "minConfidenceToTrade": 65,
+    "minTradeScoreToBuy": 60,
+    "minTradeScoreToSell": 60,
+    "minIndependentFactors": 3,
+    "minRiskRewardTp1": 1.0,
+    "minRiskRewardTp2": 1.5,
+    "maxSpread": 0.8,
+    "staleAfterMs": 300000,
+    "conflictScoreGapMax": 18,
+    "structureProximityAtrMult": 0.15,
+    "maxRiskPercentPerTrade": 1.0,
+    "stopAtrBufferMult": 0.25,
+    "tp1AtrMult": 1.0,
+    "tp2AtrMult": 2.0,
+    "tp3AtrMult": 3.2,
+    "rsiOverbought": 70,
+    "rsiOversold": 30,
+    "volumeConfirmMult": 1.2
+  },
+  "weights": {
+    "trendMeter": { "bullish": 18, "bearish": 18 },
+    "marketStructure": { "bullish": 12, "bearish": 12 },
+    "pocPosition": { "bullish": 8, "bearish": 8 },
+    "valueArea": { "bullish": 8, "bearish": 8 },
+    "vwapAlignment": { "bullish": 7, "bearish": 7 },
+    "emaAlignment": { "bullish": 10, "bearish": 10 },
+    "confirmationCandle": { "bullish": 12, "bearish": 12 },
+    "volumeConfirmation": { "bullish": 8, "bearish": 8 },
+    "rsiCondition": { "bullish": 5, "bearish": 5 },
+    "supportResistance": { "bullish": 6, "bearish": 6 },
+    "atrVolatility": { "bullish": 3, "bearish": 3 },
+    "spread": { "bullish": 3, "bearish": 3 },
+    "newsRisk": { "bullish": 0, "bearish": 0 },
+    "dataCompleteness": { "bullish": 5, "bearish": 5 }
+  },
+  "penalties": {
+    "missingIndicator": 4,
+    "indicatorDisagreement": 12,
+    "insideConflictZone": 20,
+    "staleData": 25,
+    "excessiveSpread": 20,
+    "highImpactNews": 30,
+    "poorRiskReward": 18,
+    "invalidGeometry": 25
+  },
+  "gradeBands": {
+    "aPlus": 88,
+    "a": 78,
+    "b": 68,
+    "c": 55
+  },
+  "management": {
+    "partialProfitR": 1.0,
+    "breakevenAfterR": 0.8,
+    "earlyExitAdverseR": -0.6,
+    "trendDeteriorationStrength": 55
+  }
+}

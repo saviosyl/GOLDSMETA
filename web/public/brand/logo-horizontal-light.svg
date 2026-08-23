@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 128" role="img" aria-label="GoldMeta">
+  <defs>
+    <linearGradient id="g" x1="20" y1="20" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8D48A"/>
+      <stop offset="1" stop-color="#C9A227"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0,0)">
+    <rect width="128" height="128" rx="28" fill="#F7F4EA"/>
+    <rect x="6" y="6" width="116" height="116" rx="24" fill="#FFFDF6" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="1.5"/>
+    <polyline points="28,86 46,74 58,78 78,52 94,58 104,42" fill="none" stroke="#8A6B12" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="104" cy="42" r="3.5" fill="#8A6B12"/>
+    <text x="64" y="78" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700" fill="#8A6B12">GM</text>
+  </g>
+  <text x="152" y="78" font-family="Georgia, 'Times New Roman', serif" font-size="52" font-weight="700" fill="#1A170F">GoldMeta</text>
+  <text x="154" y="104" font-family="Segoe UI, system-ui, sans-serif" font-size="16" fill="#6B6558">Gold Market Intelligence</text>
+</svg>

@@ -1,0 +1,11 @@
+export { v4Config, V4_STRATEGY_VERSION, V4_ENGINE_VERSION, v4FlagSnapshot } from "./config";
+export { evaluateV4 } from "./engine";
+export { runV4Backtest, buildSyntheticSeries, experimentId } from "./backtester";
+export { runV4ShadowSafe, buildV4InputFromV3 } from "./shadowRunner";
+export { runV4ShadowLifecycle } from "./shadowOrchestrator";
+export { computeV4ShadowAnalytics } from "./shadowAnalytics";
+export { applyBarToShadowPlan, assertShadowPlanImmutable } from "./shadowLifecycle";
+export { fetchComexGcProfile, GC_DATA_SOURCE_OPTIONS } from "./gcProvider";
+export { computeStructuralStop } from "./stopEngine";
+export type * from "./types";
+export type * from "./shadowTypes";
