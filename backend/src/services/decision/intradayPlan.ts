@@ -1659,6 +1659,25 @@ function resolveAction(args: {
     classification: conf,
     direction: args.confirmationDirection
   });
+  const hasDirectionalConfirmation =
+    ACTIONABLE_CONFIRMATION_CLASSES.has(conf) &&
+    (decision === "BUY" || decision === "SELL");
+
+  // Fail closed when a meaningful 5M event points against the 15M trade side.
+  // Do not downgrade it into a directional conditional label that can look active.
+  if (args.hasValidPlan && hasDirectionalConfirmation && !confirmationSupportsPlan) {
+    const observedDirection = (args.confirmationDirection ?? "UNKNOWN").toUpperCase();
+    return {
+      action: "PREPARE",
+      trigger: "Wait for a fresh 5M confirmation aligned with the 15M plan",
+      triggerPrice: args.entry,
+      oneSentence: `The 5M ${observedDirection.toLowerCase()} ${conf.toLowerCase()} does not confirm the ${decision} plan.`,
+      whyNotReady: `Opposite or missing 5M direction: ${observedDirection} cannot confirm ${decision}.`,
+      entryConfirmation: [`Require ${decision === "BUY" ? "bullish" : "bearish"} 5M confirmation`],
+      invalidation: "The 15M plan remains analysis-only until direction-matched 5M confirmation arrives.",
+      nextTarget: null
+    };
+  }
 
   if (args.location === "BELOW_VALUE" && args.val != null) {
     return {
