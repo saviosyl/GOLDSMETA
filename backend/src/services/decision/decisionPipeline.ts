@@ -100,6 +100,18 @@ const marketStructureFor = (snapshot: MarketSnapshot): DecisionMarketStructure =
   };
 };
 
+/**
+ * Pine Bridge 3.0 publishes explicit MTF components. Day-trade direction is the 1H
+ * component; the aggregate trend may also include 15M/5M and is therefore not a
+ * reliable replacement for the higher-timeframe bias.
+ */
+const higherTimeframeBiasFor = (snapshot: MarketSnapshot): TrendDirection | null => {
+  const oneHour = snapshot.trend?.components?.find(
+    (component) => component.sourceTimeframe === "60" || component.name === "gm_direction_1h"
+  );
+  return oneHour?.direction ?? snapshot.trend?.direction ?? null;
+};
+
 const quoteAgeSeconds = (timestamp: string | null, receivedAt: string): number | null => {
   if (!timestamp) return null;
   const ageMs = Date.parse(receivedAt) - Date.parse(timestamp);
@@ -212,7 +224,7 @@ export const processDecisionPipeline = async (
   const generatedAt = nowIso();
   const reasonCodes = unique([...score.reasonCodes, ...hardGuards.reasonCodes, ...aiDecision.reasonCodes]);
   const allWarnings = unique([...dataQuality.warnings, ...hardGuards.warnings, ...ai.warnings]);
-  const htfBias: TrendDirection | null = snapshot.trend?.direction ?? null;
+  const htfBias = higherTimeframeBiasFor(snapshot);
 
   const decision: DecisionRecord = {
     schemaVersion: "1.0",
