@@ -31,8 +31,8 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
         feedUserId = requestUserId;
       }
     }
-    // Prefer non-test decisions so TradingView TEST fixture OHLC (~2408) cannot
-    // become the LIVE dashboard "live price" next to a real ~4050 alert profile.
+
+    // Canonical analysis roles: 1M quote, 15M structure, 5M confirmation.
     const view = resolveMarketStructureView(recent);
     const latest = view.quoteDecision ?? recent[0];
     if (!latest) {
@@ -45,9 +45,11 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
     const intradayPlan = buildIntradayPlan({
       quote: view.quoteDecision,
       structure: view.structureDecision,
+      confirmation: view.confirmationDecision,
       mode: view.marketStructureMode,
       quoteAgeSeconds: view.diagnostics.quoteAgeSeconds,
-      signalAgeSeconds: view.diagnostics.signalAgeSeconds
+      signalAgeSeconds: view.diagnostics.signalAgeSeconds,
+      confirmationAgeSeconds: view.diagnostics.confirmationAgeSeconds
     });
     const rawSessionPlan = await getOrEmptySessionPlan(store, feedUserId);
     // Central geometry gate — never return actionable levels that fail safety validation.
@@ -62,9 +64,11 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
       decision: latest,
       latestQuote: view.latestQuote,
       latestCompleteStrategySignal: view.latestCompleteStrategySignal,
+      latestConfirmation: view.latestConfirmation,
       marketStructureMode: view.marketStructureMode,
       marketStructureDiagnostics: view.diagnostics,
       structureDecisionId: view.structureDecision?.decisionId ?? null,
+      confirmationDecisionId: view.confirmationDecision?.decisionId ?? null,
       intradayPlan,
       sessionPlan,
       marketFeedHealth,
@@ -103,6 +107,7 @@ export const buildDecisionsRouter = (store: GoldMetaStore): Router => {
                   structuralLevelUsed: null
                 },
             fourHourContext: sessionPlan.fourHourContext,
+            higherTimeframeBias: sessionPlan.higherTimeframeBias,
             quoteAgeSeconds: sessionPlan.quoteAgeSeconds,
             signalAgeSeconds: sessionPlan.signalAgeSeconds,
             geometryValid: sessionPlan.geometryValid ?? actionable,
