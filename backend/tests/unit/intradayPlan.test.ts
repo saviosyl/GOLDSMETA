@@ -123,13 +123,13 @@ describe("value location + expected range", () => {
         lastKnownPrice: 4055,
         ohlcv: { open: 4052, high: 4058, low: 4048, close: 4055, volume: 1 },
         atr: 10,
-        marketStructure: { trend: "BULL", poc: 4045, vah: 4050, val: 4038, confirmationClassification: "BREAKOUT" }
+        marketStructure: { trend: "BULL", poc: 4045, vah: 4050, val: 4038, confirmationClassification: "BREAKOUT", confirmationDirection: "BULLISH" }
       }),
       structure: baseDecision({
         lastKnownPrice: 4055,
         ohlcv: { open: 4052, high: 4058, low: 4048, close: 4055, volume: 1 },
         atr: 10,
-        marketStructure: { trend: "BULL", poc: 4045, vah: 4050, val: 4038, confirmationClassification: "BREAKOUT" }
+        marketStructure: { trend: "BULL", poc: 4045, vah: 4050, val: 4038, confirmationClassification: "BREAKOUT", confirmationDirection: "BULLISH" }
       })
     });
     expect(plan.valueLocation).toBe("ABOVE_VALUE");
@@ -218,7 +218,8 @@ describe("plan ordering", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "BREAKOUT"
+          confirmationClassification: "BREAKOUT",
+          confirmationDirection: "BULLISH"
         }
       }),
       structure: baseDecision({
@@ -229,7 +230,8 @@ describe("plan ordering", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "BREAKOUT"
+          confirmationClassification: "BREAKOUT",
+          confirmationDirection: "BULLISH"
         },
         entry: { price: 4040 },
         stopLoss: { price: 4055 },
@@ -340,7 +342,8 @@ describe("scenarios + zones + trade plan", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "BREAKOUT"
+          confirmationClassification: "BREAKOUT",
+          confirmationDirection: "BULLISH"
         }
       }),
       structure: baseDecision({
@@ -352,7 +355,8 @@ describe("scenarios + zones + trade plan", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "BREAKOUT"
+          confirmationClassification: "BREAKOUT",
+          confirmationDirection: "BULLISH"
         },
         entry: { price: 4040 },
         stopLoss: { price: 4030 },
@@ -383,7 +387,8 @@ describe("scenarios + zones + trade plan", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "REJECTION"
+          confirmationClassification: "REJECTION",
+          confirmationDirection: "BEARISH"
         }
       }),
       structure: baseDecision({
@@ -395,7 +400,8 @@ describe("scenarios + zones + trade plan", () => {
           poc: 4045,
           vah: 4050,
           val: 4038,
-          confirmationClassification: "REJECTION"
+          confirmationClassification: "REJECTION",
+          confirmationDirection: "BEARISH"
         },
         entry: { price: 4042 },
         stopLoss: { price: 4052 },
