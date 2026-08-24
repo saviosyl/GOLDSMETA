@@ -160,7 +160,8 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
       lastResult: "LOSS",
       lastSide: "BUY",
       lastEntryPrice: 2600,
-      structuralResetComplete: false
+      // The authoritative settled exit is already below the BUY entry.
+      structuralResetComplete: true
     });
 
     selector.clearForResync();
@@ -170,6 +171,52 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
       lastClosedTradeId: "loss-2"
     });
     expect(selector.getAntiChurnStateForTests().lastResult).toBe("LOSS");
+  });
+
+  it("does not latch the loss guard to an obsolete entry after settled hydration", async () => {
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      closedLoss({
+        id: "loss-recovery-a",
+        side: "BUY",
+        orderTs: "2026-08-24T08:00:00.000Z",
+        closeTs: "2026-08-24T08:00:10.000Z"
+      })
+    );
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      closedLoss({
+        id: "loss-recovery-b",
+        side: "BUY",
+        orderTs: "2026-08-24T08:01:00.000Z",
+        closeTs: "2026-08-24T08:01:10.000Z"
+      })
+    );
+
+    resetGoldHunterStrategySelectorsForTests();
+    await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
+    const selector = getGoldHunterStrategySelector(OWNER);
+    expect(selector.getAntiChurnStateForTests().structuralResetComplete).toBe(true);
+
+    const recovered = selector.evaluateAntiChurnGateForTests({
+      side: "BUY",
+      atMs:
+        Date.parse("2026-08-24T08:01:10.000Z") +
+        120_000 +
+        1,
+      // Price has continued above the obsolete losing entry; no artificial
+      // revisit to 2600 is required because the settled exit proved the cross.
+      mid: 2601,
+      signedImbalance1s: 0.2,
+      midVel250: 0.001
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      structuralResetOk: true,
+      timeFloorOk: true,
+      rejectionReason: null
+    });
+    expect(selector.getLossControllerEntryState().lossStreakGuardActive).toBe(false);
   });
 
   it("requires a second post-resync regime before a new Setup A opportunity", async () => {
