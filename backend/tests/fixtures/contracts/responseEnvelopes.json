@@ -1,0 +1,19 @@
+{
+  "successWrappers": {
+    "latestDecision": "decision",
+    "decisionList": "decisions",
+    "deviceRegistration": "device",
+    "settings": "settings",
+    "journalCreate": "entry",
+    "journalList": "entries",
+    "journalStatistics": "statistics",
+    "connectionCreate": "connection",
+    "connectionRotate": "connection",
+    "connectionRevoke": "connection",
+    "tradingViewTest": null,
+    "health": null
+  },
+  "errorWrapper": "error",
+  "errorFields": ["code", "message"],
+  "tradingViewTestFields": ["accepted", "duplicate", "eventId", "status", "jobId"]
+}

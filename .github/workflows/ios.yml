@@ -1,0 +1,103 @@
+name: iOS
+
+on:
+  push:
+    branches:
+      - cursor/production-connection
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test GoldMeta
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Prepare non-secret CI configuration
+        run: |
+          cp ios/GoldMeta/Config/Secrets.xcconfig.example ios/GoldMeta/Config/Secrets.xcconfig
+          if [ ! -f ios/GoldMeta/App/GoogleService-Info.plist ]; then
+            cp ios/GoldMeta/App/GoogleService-Info.plist.example ios/GoldMeta/App/GoogleService-Info.plist
+          fi
+
+      - name: Verify Xcode project package
+        run: |
+          test -f ios/GoldMeta.xcodeproj/project.pbxproj
+          test -f ios/GoldMeta.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+          test -f ios/GoldMeta.xcodeproj/xcshareddata/xcschemes/GoldMeta.xcscheme
+          xcodebuild -list -project ios/GoldMeta.xcodeproj
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta
+
+      - name: Show available simulators
+        run: xcrun simctl list devices available
+
+      - name: Build for iPhone Simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build | tee ios-build.log
+
+      - name: Run iOS unit tests
+        run: |
+          set -o pipefail
+          DEST=""
+          for name in "iPhone 16" "iPhone 16 Pro" "iPhone 15" "iPhone 15 Pro" "iPhone 14"; do
+            if xcrun simctl list devices available | grep -F "$name (" >/dev/null; then
+              DEST="platform=iOS Simulator,name=${name}"
+              break
+            fi
+          done
+          if [ -z "$DEST" ]; then
+            echo "No preferred iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using destination: ${DEST}"
+          xcodebuild \
+            -project ios/GoldMeta.xcodeproj \
+            -scheme GoldMeta \
+            -configuration Debug \
+            -destination "${DEST}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test | tee ios-tests.log
+
+      - name: Upload Xcode logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ci-logs
+          path: |
+            ios-build.log
+            ios-tests.log
+          if-no-files-found: ignore
+          retention-days: 7

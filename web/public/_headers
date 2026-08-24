@@ -1,0 +1,22 @@
+# Security / caching headers for Cloudflare Pages
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+
+# HTML entry must revalidate so clients pick up new hashed asset references quickly.
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+# Content-hashed assets are immutable once uploaded with the deployment.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

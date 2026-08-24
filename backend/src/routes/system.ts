@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { env } from "../config/env";
 import { BACKEND_VERSION, RULE_CONFIG_VERSION } from "../config/decisionConfig";
 import { requireAuth } from "../middleware/auth";
 import { getFirebaseApp } from "../services/firebaseAdmin";
@@ -11,6 +12,8 @@ export const buildSystemRouter = (): Router => {
       status: "ok",
       backendVersion: BACKEND_VERSION,
       ruleConfigVersion: RULE_CONFIG_VERSION,
+      appEnv: env.APP_ENV,
+      storageBackend: env.STORAGE_BACKEND,
       firebaseAdminAvailable: getFirebaseApp() !== null
     });
   });
@@ -20,13 +23,6 @@ export const buildSystemRouter = (): Router => {
       status: "not_implemented",
       mode: "manual",
       message: "Manual screenshot analysis is labelled manual and will be implemented after MVP."
-    });
-  });
-
-  router.post("/v1/tradingview/test", requireAuth, (_req, res) => {
-    res.json({
-      ok: true,
-      message: "TradingView test route reachable. Use the webhook endpoint for full validation."
     });
   });
 
