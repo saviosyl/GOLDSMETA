@@ -152,12 +152,14 @@ function primeTrend(engine: M1CandleFlowEngine, side: "BUY" | "SELL") {
     engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 104.9);
     return;
   }
-  feedCandle(engine, 0, [105.0, 105.2, 104.3, 104.6]);
-  feedCandle(engine, 1, [104.6, 104.8, 103.9, 104.1]);
-  feedCandle(engine, 2, [104.1, 104.2, 103.2, 103.5]);
-  feedCandle(engine, 3, [103.5, 103.7, 102.6, 102.9]);
-  feedCandle(engine, 4, [102.9, 103.0, 101.9, 102.3]);
-  feedCandle(engine, 5, [102.3, 102.5, 101.2, 101.5]);
+  // Keep the SELL fixture symmetric in directional quality and with enough
+  // remaining movement budget to satisfy Revision 03's cost-aware 1.05R gate.
+  feedCandle(engine, 0, [105.0, 105.3, 104.0, 104.6]);
+  feedCandle(engine, 1, [104.6, 104.9, 103.5, 104.1]);
+  feedCandle(engine, 2, [104.1, 104.4, 102.9, 103.5]);
+  feedCandle(engine, 3, [103.5, 103.9, 102.3, 102.9]);
+  feedCandle(engine, 4, [102.9, 103.2, 101.6, 102.3]);
+  feedCandle(engine, 5, [102.3, 102.7, 100.9, 101.5]);
   engine.onSpot(BASE_MS + 6 * CANDLE_MS + 1_000, 101.5);
 }
 
@@ -165,12 +167,12 @@ describe("Gold Hunter Brain V6 identity", () => {
   it("stamps V6 brain/revision/variant and frozen identity", () => {
     resetFrozenGhFastIdentityForTests();
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
-    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B6-20260821-02");
-    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_GUARD_CONTINUATION");
+    expect(GOLD_HUNTER_BRAIN_REVISION).toBe("GH-B6-20260824-03");
+    expect(GOLD_HUNTER_STRATEGY_VARIANT).toBe("PULSE_GUARD_RELIABILITY");
     const id = getFrozenGhFastIdentity();
     expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(id.soakLabel).toBe(
-      "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+      "BRAIN_V6_R03_PULSE_GUARD_RELIABILITY_SMART_PM_V1_SMART_LOSS_V1_DEMO"
     );
   });
 });
@@ -194,7 +196,7 @@ describe("Gold Hunter Brain V6 pulse-structure entry", () => {
     engine.evaluate(start + 24_700, features(105.23, "BUY"), cfg);
     engine.onSpot(start + 29_000, 105.43);
     const out = engine.evaluate(start + 29_000, features(105.43, "BUY"), cfg);
-    expect(out.eligible).toBe(true);
+    expect(out.eligible, JSON.stringify(out)).toBe(true);
     expect(out.side).toBe("BUY");
     expect(out.pulseId).toBeTruthy();
   });
@@ -215,7 +217,7 @@ describe("Gold Hunter Brain V6 pulse-structure entry", () => {
     engine.evaluate(start + 24_700, features(101.22, "SELL"), cfg);
     engine.onSpot(start + 29_000, 101.04);
     const out = engine.evaluate(start + 29_000, features(101.04, "SELL"), cfg);
-    expect(out.eligible).toBe(true);
+    expect(out.eligible, JSON.stringify(out)).toBe(true);
     expect(out.side).toBe("SELL");
   });
 
@@ -347,9 +349,9 @@ describe("Gold Hunter Brain V6 pulse-structure entry", () => {
   it("9) genuine reversal can flip side", () => {
     const engine = new M1CandleFlowEngine();
     primeTrend(engine, "BUY");
-    feedCandle(engine, 6, [104.9, 105.0, 103.8, 104.0]);
-    feedCandle(engine, 7, [104.0, 104.1, 102.8, 103.1]);
-    feedCandle(engine, 8, [103.1, 103.2, 101.7, 102.0]);
+    feedCandle(engine, 6, [104.9, 105.2, 103.6, 104.0]);
+    feedCandle(engine, 7, [104.0, 104.3, 102.5, 103.1]);
+    feedCandle(engine, 8, [103.1, 103.4, 101.4, 102.0]);
     engine.onSpot(BASE_MS + 9 * CANDLE_MS + 1_000, 102.0);
     const start = BASE_MS + 9 * CANDLE_MS;
     engine.onSpot(start + 10_000, 101.55);

@@ -27,6 +27,12 @@ export function defaultGhFastConfig(
     safetyBuffer: 0.04,
     // Broker hard stop remains emergency protection; V6 normal exits are earlier.
     hardStop: 0.55,
+    // Size as if initial risk were 0.60 so ordinary adverse market-fill slippage
+    // does not silently push the configured euro risk above its budget.
+    entrySlippageRiskBuffer: 0.05,
+    // Revision 03: do not enter unless the remaining M1 movement budget can
+    // support a runner beyond the initial risk after estimated trading costs.
+    entryMinRewardRisk: 1.05,
     profitLockActivateMfe: 0.18,
     profitLockFraction: 0.45,
     trailDistance: 0.12,
@@ -58,8 +64,9 @@ export function defaultGhFastConfig(
     spmHarvestMinRetraceR: 0.75,
     antiChurnLossMinMs: 30_000,
     antiChurnOppositeFlipMinMs: 30_000,
-    // SMART_LOSS_CONTROLLER_V1 — Brain V6 economics:
-    // cut ordinary losers earlier and harvest modest profits sooner on deterioration.
+    // SMART_LOSS_CONTROLLER_V1 — Brain V6 Revision 03 economics:
+    // cut ordinary losers early; do not force tiny winners below the Smart PM
+    // handoff until clean replay proves that early harvesting adds expectancy.
     smartLossControllerEnabled: true,
     slcSoftMaxLossR: 0.45,
     slcHandoffMfeR: 1.0,
@@ -68,6 +75,7 @@ export function defaultGhFastConfig(
     slcEarlyFailureMinConfirms: 2,
     slcSmallHarvestMinMfeR: 0.3,
     slcSmallHarvestMinSurrenderR: 0.08,
+    slcSmallProfitHarvestEnabled: false,
     // Two consecutive losses trigger a mandatory recovery window plus the
     // selector's fresh-regime requirement before another entry can pass.
     slcLossStreakCount: 2,

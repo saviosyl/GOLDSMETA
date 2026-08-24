@@ -423,19 +423,15 @@ export class GoldHunterStrategySelector {
       endedAtMs: null,
       structuralResetComplete: true
     };
-    this.lossReentry = {
-      lastSide: null,
-      lastSetup: null,
-      lastEntryPrice: null,
-      lastResult: null,
-      lastOpportunityId: null,
-      closedAtMs: null,
-      structuralResetComplete: true
-    };
+    // Revision 03: market-data reconnects must never erase settled-loss memory.
+    // Keep anti-churn identity/structure and the loss-controller state. The M1
+    // regime engine restarts from epoch zero, so an active fresh-regime guard
+    // must establish a new post-resync baseline before it can clear.
     this.entryCountsByCandle.clear();
     this.consumedPulseIds.clear();
-    this.regimeResetAfterLossesActive = false;
-    this.regimeResetRequiredEpoch = null;
+    if (this.regimeResetAfterLossesActive) {
+      this.regimeResetRequiredEpoch = null;
+    }
     this.opportunityCandleStart.clear();
     this.opportunityPulseId.clear();
     this.opportunityRegimeEpoch.clear();
@@ -1195,8 +1191,16 @@ export class GoldHunterStrategySelector {
     }
     if (this.regimeResetAfterLossesActive) {
       const epoch = flow.regimeEpoch ?? null;
-      const required = this.regimeResetRequiredEpoch;
-      if (epoch == null || required == null || epoch <= required) {
+      if (epoch == null) {
+        return "WAIT_REGIME_RESET_AFTER_LOSSES";
+      }
+      if (this.regimeResetRequiredEpoch == null) {
+        // First valid post-start/post-resync regime is the baseline, not proof
+        // of recovery. A subsequent regime transition is required.
+        this.regimeResetRequiredEpoch = epoch;
+        return "WAIT_REGIME_RESET_AFTER_LOSSES";
+      }
+      if (epoch <= this.regimeResetRequiredEpoch) {
         return "WAIT_REGIME_RESET_AFTER_LOSSES";
       }
       this.regimeResetAfterLossesActive = false;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultGhFastConfig } from "../../../src/services/goldHunterAdmin/abc/defaults";
 import {
+  selectV6R03ExecutableSetup,
   selectV6TrendContinuationFallback
 } from "../../../src/services/goldHunterAdmin/abc/featurePipeline";
 import type { GhFastFeatureSnapshot } from "../../../src/services/goldHunterAdmin/abc/features";
@@ -50,8 +51,8 @@ function waitingFlow(
   } as unknown as M1CandleFlowEvaluation;
 }
 
-describe("Brain V6 revision 02 guarded trend continuation", () => {
-  it("promotes a strong BUY breakout when Pulse Guard is waiting for a pullback", () => {
+describe("Brain V6 Revision 03 diagnostic trend continuation", () => {
+  it("detects a strong BUY breakout for diagnostics", () => {
     const hit = selectV6TrendContinuationFallback(
       strongBreakout("BUY"),
       defaultGhFastConfig(),
@@ -62,7 +63,7 @@ describe("Brain V6 revision 02 guarded trend continuation", () => {
     expect(hit?.reasons).toContain("v6_trend_continuation_fallback");
   });
 
-  it("promotes the symmetric strong SELL continuation", () => {
+  it("detects the symmetric strong SELL continuation for diagnostics", () => {
     const hit = selectV6TrendContinuationFallback(
       strongBreakout("SELL"),
       defaultGhFastConfig(),
@@ -114,5 +115,31 @@ describe("Brain V6 revision 02 guarded trend continuation", () => {
         waitingFlow("BUY", { currentCandleAgeSec: 58 })
       )
     ).toBeNull();
+  });
+
+  it("never promotes a diagnostic continuation to executable selection", () => {
+    const diagnostic = selectV6TrendContinuationFallback(
+      strongBreakout("BUY"),
+      defaultGhFastConfig(),
+      waitingFlow("BUY")
+    );
+    expect(diagnostic?.setup).toBe("B_FAST_BREAKOUT");
+    expect(selectV6R03ExecutableSetup(null, diagnostic)).toBeNull();
+    expect(selectV6R03ExecutableSetup(diagnostic, null)).toBeNull();
+  });
+
+  it("preserves a qualified Setup A when a diagnostic candidate is present", () => {
+    const setupA = {
+      setup: "A_MOMENTUM_IGNITION" as const,
+      side: "BUY" as const,
+      quality: 0.8,
+      reasons: ["pulse_guard_buy"]
+    };
+    const diagnostic = selectV6TrendContinuationFallback(
+      strongBreakout("BUY"),
+      defaultGhFastConfig(),
+      waitingFlow("BUY")
+    );
+    expect(selectV6R03ExecutableSetup(setupA, diagnostic)).toBe(setupA);
   });
 });

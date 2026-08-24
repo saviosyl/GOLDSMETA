@@ -215,6 +215,9 @@ describe("Brain V6 loss and profit economics", () => {
     expect(cfg.spmProtectMfeR).toBe(0.6);
     expect(cfg.slcLossStreakCount).toBe(2);
     expect(cfg.slcLossStreakResetMs).toBe(120_000);
+    expect(cfg.entrySlippageRiskBuffer).toBe(0.05);
+    expect(cfg.entryMinRewardRisk).toBe(1.05);
+    expect(cfg.slcSmallProfitHarvestEnabled).toBe(false);
   });
 
   it("cuts an ordinary loser at roughly -0.45R instead of waiting for -0.70R", () => {

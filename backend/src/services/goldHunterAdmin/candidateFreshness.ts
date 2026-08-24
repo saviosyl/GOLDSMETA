@@ -145,15 +145,11 @@ export function refreshGoldHunterCandidateAgainstLive(args: {
   if (live.resyncGeneration !== args.candidate.resyncGeneration) return null;
   return {
     ...args.candidate,
-    bid: live.bid,
-    ask: live.ask,
-    mid: live.mid,
-    spread: live.spread,
-    bookGeneration: live.bookGeneration,
-    depthValidity: live.depthValidity,
-    depthExecutable: live.depthExecutable,
-    receiveSeq: live.receiveSeq,
-    latestReceiveSeq: live.latestReceiveSeq,
-    consumed: live.consumed
+    // Copy the full live candidate, not only price fields. Final pretransport
+    // safety must use current M1 quality and microstructure rather than the
+    // original queued observation.
+    ...live,
+    signalId: args.candidate.signalId,
+    opportunityId
   };
 }

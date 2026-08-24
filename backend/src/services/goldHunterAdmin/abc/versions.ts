@@ -1,16 +1,16 @@
 /**
  * GOLD_HUNTER FAST — event-driven live microstructure scalper identity.
  * V1/V2 research baselines preserved in git history.
- * Brain V6: Pulse Guard Scalper + guarded trend continuation fallback.
+ * Brain V6 Revision 03: Pulse Guard execution with reliability hardening.
  */
 /** Brain identity for Demo A/B/C selection — distinguishable from prior brains. */
 export const GOLD_HUNTER_BRAIN_VERSION = "GOLD_HUNTER_BRAIN_V6" as const;
-export const GOLD_HUNTER_BRAIN_REVISION = "GH-B6-20260821-02" as const;
-export const GOLD_HUNTER_STRATEGY_VARIANT = "PULSE_GUARD_CONTINUATION" as const;
+export const GOLD_HUNTER_BRAIN_REVISION = "GH-B6-20260824-03" as const;
+export const GOLD_HUNTER_STRATEGY_VARIANT = "PULSE_GUARD_RELIABILITY" as const;
 /** Production software revision for this strategy release. */
 export const GOLD_HUNTER_SOFTWARE_REVISION =
-  "GH_BRAIN_V6_PULSE_GUARD_CONTINUATION_2026.08.21-02" as const;
-export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-21T16:20:00Z" as const;
+  "GH_BRAIN_V6_PULSE_GUARD_RELIABILITY_2026.08.24-03" as const;
+export const GOLD_HUNTER_SOFTWARE_REVISION_AT = "2026-08-24T08:00:00Z" as const;
 /**
  * Smart position-management layer on top of the current brain.
  * Kept separate so position-manager telemetry stays stable.
@@ -25,9 +25,9 @@ export const GOLD_HUNTER_SMART_LOSS_CONTROLLER_VERSION =
   "SMART_LOSS_CONTROLLER_V1" as const;
 /**
  * Strategy version stamped on selector candidates / frozen identity.
- * Brain V6: Setup A remains Pulse Guard; strong Setup B breakouts may execute
- * as a guarded continuation fallback when A has no valid entry.
- * Setup C remains shadow/research only.
+ * Brain V6 Revision 03: Setup A / Pulse Guard is the only execution path.
+ * Setup B continuation and Setup C remain diagnostics/shadow research only
+ * until separately qualified on clean replay and forward-shadow evidence.
  */
 export const GOLD_HUNTER_FAST_STRATEGY_VERSION =
   GOLD_HUNTER_BRAIN_VERSION;

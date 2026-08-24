@@ -8,7 +8,10 @@ import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
 import type { BrokerOpenPosition } from "../broker/ctrader/openApiClient";
 import type { SubmitDemoMarketOrderArgs } from "../broker/ctrader/demoOrderExecution";
 import { fetchGoldHunterAccountSnapshot } from "./accountSnapshot";
-import { assertGoldHunterCandidateFresh } from "./candidateFreshness";
+import {
+  assertGoldHunterCandidateFresh,
+  refreshGoldHunterCandidateAgainstLive
+} from "./candidateFreshness";
 import { computeGoldHunterCommittedCapital } from "./committedCapital";
 import { submitGoldHunterDemoOrder } from "./demoExecutionAdapter";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
@@ -95,6 +98,8 @@ export type OrchestratorDeps = {
   beforeBrokerSubmit?: () => Promise<void>;
   /** Override freshness gate (production uses assertGoldHunterCandidateFresh). */
   assertFresh?: typeof assertGoldHunterCandidateFresh;
+  /** Override live-candidate refresh in tests; production uses selector state. */
+  refreshCandidate?: typeof refreshGoldHunterCandidateAgainstLive;
   /** Optional execution telemetry (Gold Hunter Admin diagnostics). */
   onTelemetry?: OrchestratorTelemetryHook;
   /** Optional stage lifecycle hooks (hang diagnosis). */
@@ -194,6 +199,7 @@ export async function attemptGoldHunterDemoExecution(
       cfgOk.detail ?? "risk_config_invalid"
     );
   }
+  const cfg = frozenGhFastSoakConfig();
 
   const meta: GoldHunterInstrumentMetadata = metadataFromBrokerSymbol(deps.symbol);
   if (!meta.complete) {
@@ -312,7 +318,8 @@ export async function attemptGoldHunterDemoExecution(
     minLots: meta.minLots,
     maxLots: meta.maxLots,
     lotStep: meta.lotStep,
-    availableAllocationEur: committed.availableEur
+    availableAllocationEur: committed.availableEur,
+    riskDistanceBuffer: cfg.entrySlippageRiskBuffer
   });
   if (!sized.ok) {
     const blocker = sized.blocker.startsWith("WAIT")
@@ -405,7 +412,6 @@ export async function attemptGoldHunterDemoExecution(
     return block("WAIT — CAPITAL LIMIT", "free_margin_non_positive");
   }
 
-  const cfg = frozenGhFastSoakConfig();
   const spreadOk = candidate.spread <= cfg.maxSpread;
 
   const goldHunterTradeId = `GH-D-${randomBytes(4).toString("hex")}`;
@@ -653,6 +659,45 @@ export async function attemptGoldHunterDemoExecution(
           claimed: true,
           tradeId: goldHunterTradeId
         });
+      },
+      resolveFinalProtection: () => {
+        const refreshCandidate =
+          deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
+        const live = refreshCandidate({
+          ownerUid,
+          candidate
+        });
+        if (!live) {
+          return { ok: false as const, blocker: "WAIT — SIGNAL STALE" };
+        }
+        const finalFresh = checkFresh({
+          ownerUid,
+          candidate: live
+        });
+        if (!finalFresh.ok) {
+          return { ok: false as const, blocker: finalFresh.blocker };
+        }
+        if (live.spread > cfg.maxSpread) {
+          return { ok: false as const, blocker: "WAIT — SPREAD TOO WIDE" };
+        }
+        const finalProtection = deriveGoldHunterInitialProtection({
+          side: live.side,
+          entryPrice: live.side === "BUY" ? live.ask : live.bid
+        });
+        if (!finalProtection.ok) {
+          return {
+            ok: false as const,
+            blocker: "WAIT — PROTECTION GEOMETRY NOT CONNECTED"
+          };
+        }
+        return {
+          ok: true as const,
+          entryHint: finalProtection.entryPrice,
+          stopLoss: finalProtection.stopPrice,
+          lossSafetyMid: (live.bid + live.ask) / 2,
+          signedImbalance1s: live.signedImbalance1s ?? null,
+          midVel250: live.midVel250 ?? null
+        };
       }
     });
 
@@ -682,7 +727,7 @@ export async function attemptGoldHunterDemoExecution(
           : "BROKER_SUBMIT_ERROR",
         blocker: result.blockers[0] ?? "GATES_BLOCKED",
         detail: pretransportBlocked
-          ? "final_pretransport_loss_safety_after_async_prep"
+          ? "final_pretransport_reprice_or_loss_safety_after_async_prep"
           : "local_gate_before_transport",
         tradeId: goldHunterTradeId
       });
@@ -702,11 +747,17 @@ export async function attemptGoldHunterDemoExecution(
         goldHunterTradeId
       });
       if (result.trade) {
+        const refreshCandidate =
+          deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
+        const fillMarket = refreshCandidate({
+          ownerUid,
+          candidate
+        });
         registerGoldHunterOpenPositionForOwner({
           ownerUid,
           trade: result.trade,
-          bid: candidate.bid,
-          ask: candidate.ask
+          bid: fillMarket?.bid ?? candidate.bid,
+          ask: fillMarket?.ask ?? candidate.ask
         });
       }
       tel?.({

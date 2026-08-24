@@ -176,6 +176,7 @@ function orchBase(
     feedFresh: true,
     symbol: symbol(),
     assertFresh: () => ({ ok: true as const }),
+    refreshCandidate: ({ candidate }) => candidate,
     ...over
   };
 }

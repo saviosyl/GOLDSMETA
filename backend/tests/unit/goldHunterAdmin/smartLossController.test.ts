@@ -276,11 +276,33 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
   });
 
   it("small profitable deterioration harvests after 2 consecutive snapshots", () => {
+    const harvestCfg = cfgLc({ slcSmallProfitHarvestEnabled: true });
     const t = buyTrade();
     // MFE ~0.4R
     const peak = ENTRY + HARD * 0.4;
-    updateOpenTrade(t, peak, peak + 0.05, cfg);
+    updateOpenTrade(t, peak, peak + 0.05, harvestCfg);
     // Retrace to ~0.22R — still net profitable after friction+spread costs
+    const bid = ENTRY + HARD * 0.22;
+    updateOpenTrade(t, bid, bid + 0.05, harvestCfg);
+    t.timeInTradeMs = 2_000;
+    const fade = feat(bid, bid + 0.05, {
+      acceleration: -harvestCfg.momentumVelMin,
+      signedImbalance1s: -0.25,
+      midVel250: -harvestCfg.momentumVelMin * 0.5,
+      depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: -0.3 }
+    });
+    expect(
+      evaluateOpenExit({ trade: t, f: fade, cfg: harvestCfg, dataOk: true })
+    ).toBeNull();
+    expect(
+      evaluateOpenExit({ trade: t, f: fade, cfg: harvestCfg, dataOk: true })
+    ).toBe("SMART_SMALL_PROFIT_HARVEST");
+  });
+
+  it("Revision 03 default does not force a tiny-profit harvest", () => {
+    const t = buyTrade();
+    const peak = ENTRY + HARD * 0.4;
+    updateOpenTrade(t, peak, peak + 0.05, cfg);
     const bid = ENTRY + HARD * 0.22;
     updateOpenTrade(t, bid, bid + 0.05, cfg);
     t.timeInTradeMs = 2_000;
@@ -291,9 +313,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — BUY exits", () => {
       depth: { ...feat(bid, bid + 0.05).depth, depthImbalance: -0.3 }
     });
     expect(evaluateOpenExit({ trade: t, f: fade, cfg, dataOk: true })).toBeNull();
-    expect(
-      evaluateOpenExit({ trade: t, f: fade, cfg, dataOk: true })
-    ).toBe("SMART_SMALL_PROFIT_HARVEST");
+    expect(evaluateOpenExit({ trade: t, f: fade, cfg, dataOk: true })).toBeNull();
   });
 
   it("healthy small-profit trade stays open", () => {
@@ -390,21 +410,29 @@ describe("SMART_LOSS_CONTROLLER_V1 — SELL mirror", () => {
       evaluateOpenExit({ trade: early, f: hostile, cfg, dataOk: true })
     ).toBe("SMART_EARLY_THESIS_FAILURE");
 
+    const harvestCfg = cfgLc({ slcSmallProfitHarvestEnabled: true });
     const harvest = sellTrade();
     const peak = ENTRY - HARD * 0.4;
-    updateOpenTrade(harvest, peak - 0.05, peak, cfg);
+    updateOpenTrade(harvest, peak - 0.05, peak, harvestCfg);
     const askH = ENTRY - HARD * 0.22;
-    updateOpenTrade(harvest, askH - 0.05, askH, cfg);
+    updateOpenTrade(harvest, askH - 0.05, askH, harvestCfg);
     harvest.timeInTradeMs = 2_000;
     const fade = feat(askH - 0.05, askH, {
-      acceleration: cfg.momentumVelMin,
+      acceleration: harvestCfg.momentumVelMin,
       signedImbalance1s: 0.25,
-      midVel250: cfg.momentumVelMin * 0.5,
+      midVel250: harvestCfg.momentumVelMin * 0.5,
       depth: { ...feat(askH - 0.05, askH).depth, depthImbalance: 0.3 }
     });
-    expect(evaluateOpenExit({ trade: harvest, f: fade, cfg, dataOk: true })).toBeNull();
     expect(
-      evaluateOpenExit({ trade: harvest, f: fade, cfg, dataOk: true })
+      evaluateOpenExit({ trade: harvest, f: fade, cfg: harvestCfg, dataOk: true })
+    ).toBeNull();
+    expect(
+      evaluateOpenExit({
+        trade: harvest,
+        f: fade,
+        cfg: harvestCfg,
+        dataOk: true
+      })
     ).toBe("SMART_SMALL_PROFIT_HARVEST");
   });
 
@@ -562,7 +590,7 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
     resetFrozenGhFastIdentityForTests();
     const id = getFrozenGhFastIdentity();
     expect(id.soakLabel).toBe(
-      "BRAIN_V6_PULSE_GUARD_SCALPER_SMART_PM_V1_SMART_LOSS_V1_DEMO"
+      "BRAIN_V6_R03_PULSE_GUARD_RELIABILITY_SMART_PM_V1_SMART_LOSS_V1_DEMO"
     );
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_SMART_POSITION_MANAGER_VERSION).toBe(
@@ -575,6 +603,9 @@ describe("SMART_LOSS_CONTROLLER_V1 — safety invariants", () => {
     expect(cfg.smartLossControllerEnabled).toBe(true);
     expect(cfg.slcSoftMaxLossR).toBe(0.45);
     expect(cfg.hardStop).toBe(0.55);
+    expect(cfg.entrySlippageRiskBuffer).toBe(0.05);
+    expect(cfg.entryMinRewardRisk).toBe(1.05);
+    expect(cfg.slcSmallProfitHarvestEnabled).toBe(false);
     expect(GH_FAST_MAX_OPEN_POSITIONS).toBe(1);
     expect(GH_DEMO_MAX_OPEN_TRADES_REQUIRED).toBe(1);
     expect(GH_ADMIN_DEFAULT_CONFIG.maxOpenTrades).toBe(1);

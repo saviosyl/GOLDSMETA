@@ -130,6 +130,7 @@ function orchDeps(
     feedFresh: true,
     symbol: symbolMeta(),
     assertFresh: freshOk,
+    refreshCandidate: ({ candidate }) => candidate,
     ...over
   };
 }

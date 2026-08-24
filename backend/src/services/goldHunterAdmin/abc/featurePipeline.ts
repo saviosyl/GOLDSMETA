@@ -1,7 +1,7 @@
 /**
  * Gold Hunter feature + A/B/C observation pipeline (production).
  * Selective adaptation of research ResearchFeaturePipeline from PR #126.
- * No trading engine. No Fast AutoTrade. Thresholds unchanged via frozen config.
+ * No Fast AutoTrade. Revision 03 keeps Setup B continuation diagnostic-only.
  */
 import { InMemoryDepthBook, type DepthBookStats } from "./depthBook";
 import {
@@ -54,13 +54,12 @@ const CONTINUATION_BLOCKED_WAITS = new Set<string>([
 ]);
 
 /**
- * V6 revision 02 continuation fallback.
+ * V6 revision 02 continuation candidate retained for diagnostics/shadow research.
  *
  * The primary Pulse Guard / Setup A path remains unchanged. When A is waiting
  * for a textbook pullback/base/break sequence, a strong prior-only Setup B
- * breakout may be promoted to execution only when the forming M1 candle and
- * broader regime agree. This is intentionally a fallback, never a replacement
- * for A, and it keeps all selector-level rearm / anti-churn / loss gates.
+ * breakout can still be identified for counterfactual analysis. Revision 03 does
+ * not promote this candidate to execution; only Setup A / Pulse Guard may trade.
  */
 export function selectV6TrendContinuationFallback(
   f: GhFastFeatureSnapshot,
@@ -122,6 +121,18 @@ export function selectV6TrendContinuationFallback(
     ],
     m1CandleFlow: flow
   };
+}
+
+/**
+ * Revision 03 executable policy. The continuation candidate is intentionally
+ * accepted only for diagnostics so future research cannot accidentally widen
+ * the live selector by changing a null-coalescing expression.
+ */
+export function selectV6R03ExecutableSetup(
+  primary: SetupHit | null,
+  _continuationDiagnostic: SetupHit | null
+): SetupHit | null {
+  return primary?.setup === "A_MOMENTUM_IGNITION" ? primary : null;
 }
 
 export class GoldHunterFeaturePipeline {
@@ -256,13 +267,31 @@ export class GoldHunterFeaturePipeline {
     const continuationFallback = evaluated.selected
       ? null
       : selectV6TrendContinuationFallback(feat, this.cfg, m1CandleFlow);
-    const selected = evaluated.selected ?? continuationFallback;
-    const specialists = continuationFallback
-      ? evaluated.specialists.map((specialist) => ({
-          ...specialist,
-          selected: specialist.setup === "B_FAST_BREAKOUT"
-        }))
-      : evaluated.specialists;
+    // Revision 03 reliability gate: Setup B remains visible in diagnostics but
+    // cannot become the executable selector candidate until separately qualified.
+    const selected = selectV6R03ExecutableSetup(
+      evaluated.selected,
+      continuationFallback
+    );
+    const specialists = evaluated.specialists.map((specialist) => {
+      const executionSelected = selected?.setup === specialist.setup;
+      const diagnosticOnly = specialist.setup !== "A_MOMENTUM_IGNITION";
+      const continuationDiagnostic =
+        continuationFallback?.setup === specialist.setup;
+      return {
+        ...specialist,
+        selected: executionSelected,
+        reasons:
+          diagnosticOnly && (specialist.eligible || continuationDiagnostic)
+            ? [
+                ...specialist.reasons,
+                continuationDiagnostic
+                  ? "v6_r03_continuation_shadow_only"
+                  : "v6_r03_non_a_shadow_only"
+              ]
+            : specialist.reasons
+      };
+    });
 
     return {
       features: feat,

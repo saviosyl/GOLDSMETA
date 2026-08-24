@@ -532,7 +532,7 @@ export class M1CandleFlowEngine {
       0
     );
     const requiredBudget = Math.max(
-      0.75 * cfg.hardStop +
+      cfg.entryMinRewardRisk * cfg.hardStop +
         cfg.friction * 0.6 +
         Math.max(0, f.spread) * 0.5 +
         recentNoise * 0.2,

@@ -48,6 +48,8 @@ import {
   maybeEnqueueStaleCloseRequestedWatchdog,
   runGoldHunterReconcilePass
 } from "../../goldHunterAdmin/reconciliationRuntime";
+import { hydrateGoldHunterLossStateFromClosedTrades } from "../../goldHunterAdmin/lossStateHydration";
+import { getGoldHunterStrategySelector } from "../../goldHunterAdmin/strategySelector";
 import {
   DEFAULT_QUOTE_STALL_MS,
   DEFAULT_QUOTE_STALL_MS_MARKET_CLOSED,
@@ -278,6 +280,25 @@ export class PersistentXauUsdQuoteWorker {
           }
         });
     }, LOCK_RENEW_MS);
+
+    // Revision 03: authoritative settled-trade replay must finish before any
+    // market-data session can produce an executable opportunity. Fail closed if
+    // loss state cannot be rebuilt; the quote stream may continue for diagnosis.
+    try {
+      const hydrated = await hydrateGoldHunterLossStateFromClosedTrades(ownerUid);
+      const selector = getGoldHunterStrategySelector(ownerUid);
+      if (selector.readiness().fatalBlocker === "LOSS_STATE_HYDRATION_FAILED") {
+        selector.setFatalBlocker(null);
+      }
+      logWorker("gold_hunter_loss_state_hydrated", hydrated);
+    } catch (error) {
+      getGoldHunterStrategySelector(ownerUid).setFatalBlocker(
+        "LOSS_STATE_HYDRATION_FAILED"
+      );
+      logWorker("gold_hunter_loss_state_hydration_failed", {
+        error: error instanceof Error ? error.message : "HYDRATION_FAILED"
+      });
+    }
 
     // Gold Hunter lifecycle reconcile on worker startup (force once).
     void runGoldHunterReconcilePass({ ownerUid, force: true }).catch(() => {

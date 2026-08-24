@@ -375,13 +375,13 @@ describe("GH OPEN fill monotonicity (GH-D-6789089c)", () => {
     ).toHaveLength(1);
   });
 
-  it("Brain V6 and safety defaults are unchanged; software revision is recorded", () => {
+  it("Brain V6 Revision 03 and safety defaults are recorded", () => {
     expect(GOLD_HUNTER_BRAIN_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_FAST_STRATEGY_VERSION).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(GOLD_HUNTER_SOFTWARE_REVISION).toBe(
-      "GH_BRAIN_V6_PULSE_GUARD_CONTINUATION_2026.08.21-02"
+      "GH_BRAIN_V6_PULSE_GUARD_RELIABILITY_2026.08.24-03"
     );
-    expect(GOLD_HUNTER_SOFTWARE_REVISION_AT).toBe("2026-08-21T16:20:00Z");
+    expect(GOLD_HUNTER_SOFTWARE_REVISION_AT).toBe("2026-08-24T08:00:00Z");
     const id = getFrozenGhFastIdentity();
     expect(id.strategyVersion).toBe("GOLD_HUNTER_BRAIN_V6");
     expect(id.maxOpenPositions).toBe(1);

@@ -5,7 +5,8 @@
  * Brain V6 policy:
  * - ordinary losers should normally be cut before the emergency hard stop;
  * - a pulse that does not progress and loses health is exited quickly;
- * - modest profitable moves may be harvested when deterioration is confirmed.
+ * - Revision 03 leaves modest profitable moves to Smart PM; the former tiny
+ *   harvest path is retained behind an explicit disabled-by-default flag.
  *
  * At/above the configured handoff MFE, Smart PM owns the trade.
  */
@@ -300,6 +301,7 @@ export function evaluateSmartLossController(args: {
     Number(velSoft) +
     Number(pulseHealthWeak);
   const harvestQualified =
+    cfg.slcSmallProfitHarvestEnabled &&
     !earlyQualified &&
     timeInTradeMs >= 1_500 &&
     smallProfitEligible &&

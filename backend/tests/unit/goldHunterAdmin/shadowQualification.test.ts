@@ -9,6 +9,7 @@ import {
   estimateXauUsdGrossPnlDeposit
 } from "../../../src/services/broker/ctrader/brokerUnitMappings";
 import { sizeGoldHunterDemoLots } from "../../../src/services/goldHunterAdmin/riskSizing";
+import { defaultGhFastConfig } from "../../../src/services/goldHunterAdmin/abc/defaults";
 import {
   computeGhShadowEconomicExposure,
   simulateGhShadowCashPnl,
@@ -370,7 +371,7 @@ function epochStub(
 
 
 describe("A — production economics", () => {
-  it("1. production sizing parity: €1000 / 1% / 0.55 → 18 lots (Pepperstone step=1)", () => {
+  it("1. production sizing parity: €1000 / 1% / 0.60 buffered risk → 16 lots", () => {
     const entry = 2650.12;
     const stop = entry - 0.55;
     const prod = sizeGoldHunterDemoLots({
@@ -380,11 +381,12 @@ describe("A — production economics", () => {
       valuePerPointPerLot: PEPPERSTONE_CTRADER_XAUUSD_DEMO.ozPerLot,
       minLots: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.minLots,
       maxLots: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.maxLots,
-      lotStep: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.lotStep
+      lotStep: GH_SHADOW_PEPPERSTONE_VOLUME_DEFAULTS.lotStep,
+      riskDistanceBuffer: defaultGhFastConfig().entrySlippageRiskBuffer
     });
     expect(prod.ok).toBe(true);
     if (!prod.ok) return;
-    expect(prod.lots).toBe(18);
+    expect(prod.lots).toBe(16);
     expect(prod.riskBudgetEur).toBe(10);
 
     const shadow = computeGhShadowEconomicExposure({
@@ -396,8 +398,8 @@ describe("A — production economics", () => {
     if (!shadow.ok) return;
     expect(shadow.economic.displayedLots).toBe(prod.lots);
     expect(shadow.economic.ozPerLot).toBe(1);
-    expect(shadow.economic.economicXauOz).toBe(18);
-    expect(shadow.economic.rawProtocolVolumeEquivalent).toBe(1800);
+    expect(shadow.economic.economicXauOz).toBe(16);
+    expect(shadow.economic.rawProtocolVolumeEquivalent).toBe(1600);
     expect(shadow.economic.mappingKey).toBe("pepperstone_ctrader_xauusd_demo");
   });
 
@@ -448,14 +450,14 @@ describe("A — production economics", () => {
       exitPrice: 2650.32,
       economic: shadow.economic
     });
-    expect(pnl.grossQuote).toBeCloseTo(0.2 * 18 * 1, 8);
+    expect(pnl.grossQuote).toBeCloseTo(0.2 * 16 * 1, 8);
     expect(pnl.simulatedGrossPnlEur).toBeNull();
     expect(pnl.simulatedNetPnlEur).toBeNull();
     expect(pnl.eurPnlAvailable).toBe(false);
     expect(pnl.plannedRiskR).toBeNull();
     expect(pnl.netR).toBeNull();
     expect(pnl.geometryR).not.toBeNull();
-    expect(pnl.geometryRiskQuote).toBeCloseTo(0.55 * 18 * 1, 8);
+    expect(pnl.geometryRiskQuote).toBeCloseTo(0.6 * 16 * 1, 8);
   });
 });
 

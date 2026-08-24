@@ -313,6 +313,10 @@ export type GhFastConfig = {
   friction: number;
   safetyBuffer: number;
   hardStop: number;
+  /** Conservative price allowance included in lot sizing for market-fill slippage. */
+  entrySlippageRiskBuffer: number;
+  /** Minimum expected movement budget in initial-risk units before Setup A entry. */
+  entryMinRewardRisk: number;
   profitLockActivateMfe: number;
   profitLockFraction: number;
   trailDistance: number;
@@ -395,6 +399,11 @@ export type GhFastConfig = {
   slcSmallHarvestMinMfeR: number;
   /** Min surrender from MFE (R) with deteriorating flow to harvest. */
   slcSmallHarvestMinSurrenderR: number;
+  /**
+   * Revision 03: disabled until replay proves that early harvesting improves
+   * after-cost expectancy rather than creating tiny winners versus larger losses.
+   */
+  slcSmallProfitHarvestEnabled: boolean;
   /** Consecutive realised losses to activate LOSS_STREAK_GUARD. */
   slcLossStreakCount: number;
   /** Minimum ms reset while LOSS_STREAK_GUARD is active. */

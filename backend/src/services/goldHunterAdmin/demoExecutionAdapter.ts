@@ -61,6 +61,20 @@ export type GoldHunterDemoSubmitArgs = {
   midVel250?: number | null;
   /** Called only after local gates pass, immediately before ProtoOANewOrder transport. */
   onEnterBrokerTransport?: () => Promise<void>;
+  /**
+   * Revision 03 synchronous final reprice. Runs after all awaited preparation
+   * and immediately before the final loss gate / ProtoOANewOrder call.
+   */
+  resolveFinalProtection?: () =>
+    | {
+        ok: true;
+        entryHint: number;
+        stopLoss: number;
+        lossSafetyMid: number;
+        signedImbalance1s: number | null;
+        midVel250: number | null;
+      }
+    | { ok: false; blocker: string };
   /** Injected for tests. */
   placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
 };
@@ -174,21 +188,45 @@ export async function submitGoldHunterDemoOrder(
     await args.onEnterBrokerTransport();
   }
 
+  let effectiveEntryHint = args.entryHint ?? null;
+  let effectiveStopLoss = args.stopLoss ?? null;
+  let effectiveLossSafetyMid = args.lossSafetyMid ?? null;
+  let effectiveSignedImbalance1s = args.signedImbalance1s ?? null;
+  let effectiveMidVel250 = args.midVel250 ?? null;
+
+  if (args.resolveFinalProtection) {
+    const repriced = args.resolveFinalProtection();
+    if (!repriced.ok) {
+      return {
+        ok: false,
+        blockers: [repriced.blocker],
+        executionMode: GH_ADMIN_EXECUTION_MODE,
+        liveExecutionEnabled: false,
+        pretransportBlocked: true
+      };
+    }
+    effectiveEntryHint = repriced.entryHint;
+    effectiveStopLoss = repriced.stopLoss;
+    effectiveLossSafetyMid = repriced.lossSafetyMid;
+    effectiveSignedImbalance1s = repriced.signedImbalance1s;
+    effectiveMidVel250 = repriced.midVel250;
+  }
+
   // LAST MEANINGFUL LOCAL OPERATION before ProtoOANewOrder:
   // CURRENT loss-safety revalidation. No awaited prep may follow this check.
   const mid =
-    args.lossSafetyMid != null && Number.isFinite(args.lossSafetyMid)
-      ? args.lossSafetyMid
-      : args.entryHint != null && Number.isFinite(args.entryHint)
-        ? args.entryHint
+    effectiveLossSafetyMid != null && Number.isFinite(effectiveLossSafetyMid)
+      ? effectiveLossSafetyMid
+      : effectiveEntryHint != null && Number.isFinite(effectiveEntryHint)
+        ? effectiveEntryHint
         : null;
   if (mid != null) {
     const lossGate = evaluateGoldHunterFinalLossSafetyGate({
       ownerUid: args.ownerUid,
       side: args.side,
       mid,
-      signedImbalance1s: args.signedImbalance1s ?? null,
-      midVel250: args.midVel250 ?? null,
+      signedImbalance1s: effectiveSignedImbalance1s,
+      midVel250: effectiveMidVel250,
       opportunityId: args.signalId ?? null
     });
     if (!lossGate.ok) {
@@ -236,9 +274,9 @@ export async function submitGoldHunterDemoOrder(
       ownerUid: args.ownerUid,
       side: args.side,
       lots: args.lots,
-      stopLoss: args.stopLoss,
+      stopLoss: effectiveStopLoss,
       takeProfit: args.takeProfit,
-      entryHint: args.entryHint,
+      entryHint: effectiveEntryHint,
       symbolId: args.symbolId,
       comment: GH_ADMIN_STRATEGY_ID,
       label: args.goldHunterTradeId,
@@ -262,7 +300,7 @@ export async function submitGoldHunterDemoOrder(
       closeTs: null,
       entry: null,
       exit: null,
-      stop: args.stopLoss ?? null,
+      stop: effectiveStopLoss,
       initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
@@ -335,7 +373,7 @@ export async function submitGoldHunterDemoOrder(
       closeTs: null,
       entry: null,
       exit: null,
-      stop: args.stopLoss ?? null,
+      stop: effectiveStopLoss,
       initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
@@ -390,7 +428,7 @@ export async function submitGoldHunterDemoOrder(
       closeTs: null,
       entry: null,
       exit: null,
-      stop: args.stopLoss ?? null,
+      stop: effectiveStopLoss,
       initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
@@ -454,7 +492,7 @@ export async function submitGoldHunterDemoOrder(
       closeTs: null,
       entry: fillPrice != null && fillPrice > 0 ? fillPrice : null,
       exit: null,
-      stop: broker.stopLoss ?? args.stopLoss ?? null,
+      stop: broker.stopLoss ?? effectiveStopLoss,
       initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
       entrySpread: null,
       durationMs: null,
@@ -528,8 +566,18 @@ export async function submitGoldHunterDemoOrder(
     closeTs: null,
     entry: fillPrice,
     exit: null,
-    stop: broker.stopLoss ?? args.stopLoss ?? null,
-    initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+    stop: broker.stopLoss ?? effectiveStopLoss,
+    initialRiskPrice: (() => {
+      const stop = broker.stopLoss ?? effectiveStopLoss;
+      if (stop == null || !Number.isFinite(stop)) {
+        return goldHunterFrozenInitialRiskPrice();
+      }
+      const actualRisk =
+        args.side === "BUY" ? fillPrice - stop : stop - fillPrice;
+      return actualRisk > 0 && Number.isFinite(actualRisk)
+        ? actualRisk
+        : goldHunterFrozenInitialRiskPrice();
+    })(),
     entrySpread: null,
     durationMs: null,
     mfe: null,

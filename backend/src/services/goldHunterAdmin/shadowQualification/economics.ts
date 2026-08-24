@@ -116,7 +116,8 @@ export function computeGhShadowEconomicExposure(
     valuePerPointPerLot,
     minLots,
     maxLots,
-    lotStep
+    lotStep,
+    riskDistanceBuffer: cfg.entrySlippageRiskBuffer
   });
   if (!sized.ok) {
     return { ok: false, blocker: sized.blocker };

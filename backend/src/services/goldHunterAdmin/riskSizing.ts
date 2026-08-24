@@ -17,6 +17,8 @@ export type RiskSizeInput = {
   lotStep: number;
   /** Remaining GH allocation available for new risk. */
   availableAllocationEur?: number | null;
+  /** Added to protection distance for conservative market-fill risk sizing. */
+  riskDistanceBuffer?: number;
 };
 
 export type RiskSizeResult =
@@ -51,10 +53,15 @@ export function sizeGoldHunterDemoLots(input: RiskSizeInput): RiskSizeResult {
   if (!Number.isFinite(input.entry) || !Number.isFinite(input.stop)) {
     return { ok: false, blocker: "entry_or_stop_invalid" };
   }
-  const stopDistance = Math.abs(input.entry - input.stop);
-  if (!(stopDistance > 0)) {
+  const protectionDistance = Math.abs(input.entry - input.stop);
+  if (!(protectionDistance > 0)) {
     return { ok: false, blocker: "stop_distance_zero" };
   }
+  const riskDistanceBuffer = input.riskDistanceBuffer ?? 0;
+  if (!Number.isFinite(riskDistanceBuffer) || riskDistanceBuffer < 0) {
+    return { ok: false, blocker: "risk_distance_buffer_invalid" };
+  }
+  const stopDistance = protectionDistance + riskDistanceBuffer;
 
   const vpp = input.valuePerPointPerLot;
   if (!Number.isFinite(vpp) || vpp <= 0) {
