@@ -109,6 +109,7 @@ export function notifySelectorOfSettledGoldHunterClose(args: {
       side: trade.side,
       setup: trade.setup,
       entryPrice: trade.entry,
+      exitPrice: trade.exit,
       result: trade.result === "OPEN" ? null : trade.result,
       opportunityId: trade.signalId ?? null,
       closedAtMs: Date.parse(trade.closeTs ?? "") || Date.now(),
