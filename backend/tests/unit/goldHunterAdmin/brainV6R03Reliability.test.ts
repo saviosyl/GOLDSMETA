@@ -26,6 +26,10 @@ import { submitGoldHunterDemoOrder } from "../../../src/services/goldHunterAdmin
 import { saveGoldHunterConfig } from "../../../src/services/goldHunterAdmin/configStore";
 import { hydrateGoldHunterLossStateFromClosedTrades } from "../../../src/services/goldHunterAdmin/lossStateHydration";
 import {
+  GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS,
+  resolveFreshLossTelemetryWaitReason
+} from "../../../src/services/goldHunterAdmin/statusAssembler";
+import {
   getGoldHunterStrategySelector,
   resetGoldHunterStrategySelectorsForTests
 } from "../../../src/services/goldHunterAdmin/strategySelector";
@@ -219,6 +223,91 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
     expect(selector.getLossControllerEntryState().lossStreakGuardActive).toBe(false);
   });
 
+  it("recovers SELL loss hydration without requiring an obsolete entry revisit", async () => {
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      closedLoss({
+        id: "sell-loss-a",
+        side: "SELL",
+        orderTs: "2026-08-24T08:00:00.000Z",
+        closeTs: "2026-08-24T08:00:10.000Z"
+      })
+    );
+    await upsertGoldHunterDemoTrade(
+      OWNER,
+      closedLoss({
+        id: "sell-loss-b",
+        side: "SELL",
+        orderTs: "2026-08-24T08:01:00.000Z",
+        closeTs: "2026-08-24T08:01:10.000Z"
+      })
+    );
+
+    resetGoldHunterStrategySelectorsForTests();
+    await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
+    const selector = getGoldHunterStrategySelector(OWNER);
+    expect(selector.getAntiChurnStateForTests()).toMatchObject({
+      lastSide: "SELL",
+      structuralResetComplete: true
+    });
+
+    const recovered = selector.evaluateAntiChurnGateForTests({
+      side: "SELL",
+      atMs:
+        Date.parse("2026-08-24T08:01:10.000Z") +
+        120_000 +
+        1,
+      mid: 2599,
+      signedImbalance1s: -0.2,
+      midVel250: -0.001
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      structuralResetOk: true,
+      timeFloorOk: true,
+      rejectionReason: null
+    });
+  });
+
+  it("keeps missing settled exits fail-closed during hydration", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, {
+      ...closedLoss({
+        id: "missing-exit",
+        side: "BUY",
+        orderTs: "2026-08-24T08:00:00.000Z",
+        closeTs: "2026-08-24T08:00:10.000Z"
+      }),
+      exit: null
+    });
+
+    resetGoldHunterStrategySelectorsForTests();
+    await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
+    expect(
+      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests()
+        .structuralResetComplete
+    ).toBe(false);
+  });
+
+  it("keeps contradictory settled exit geometry fail-closed during hydration", async () => {
+    await upsertGoldHunterDemoTrade(OWNER, {
+      ...closedLoss({
+        id: "invalid-exit-geometry",
+        side: "BUY",
+        orderTs: "2026-08-24T08:00:00.000Z",
+        closeTs: "2026-08-24T08:00:10.000Z"
+      }),
+      // A BUY loss cannot prove recovery with an exit above entry.
+      exit: 2600.25
+    });
+
+    resetGoldHunterStrategySelectorsForTests();
+    await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
+    expect(
+      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests()
+        .structuralResetComplete
+    ).toBe(false);
+  });
+
   it("requires a second post-resync regime before a new Setup A opportunity", async () => {
     await upsertGoldHunterDemoTrade(
       OWNER,
@@ -272,6 +361,88 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
     });
     expect(freshRegime.newOpportunity).toBe(true);
     expect(freshRegime.opportunity?.setup).toBe("A");
+  });
+});
+
+describe("Brain V6 R03 status telemetry freshness", () => {
+  const nowMs = Date.parse("2026-08-24T14:00:00.000Z");
+  const telemetry = {
+    updatedAt: new Date(nowMs - 1_000).toISOString(),
+    workerRevision: "goldmeta-quote-worker-test",
+    consecutiveLosses: 2,
+    rollingRealisedR: -1,
+    rollingSampleCount: 2,
+    lossStreakGuardActive: true,
+    lossCircuitBreakerActive: false,
+    circuitBreakerReason: null,
+    unknownRealisedRLossCount: 0,
+    rollingUnknownRTradeCount: 0,
+    consecutiveUnknownRLosses: 0,
+    unknownRGuardActive: false,
+    entryIntegrityHealthy: true,
+    entryIntegrityRecoveredAtMs: null,
+    lastEntryIntegrityRecoveryReason: null,
+    lastClosedTradeId: "loss-2",
+    lastUnknownRTradeId: null,
+    lastUnknownRReason: null,
+    telemetrySource: "QUOTE_WORKER" as const
+  };
+
+  it("uses a fresh authoritative worker loss reason", () => {
+    expect(resolveFreshLossTelemetryWaitReason(telemetry, nowMs)).toBe(
+      "WAIT_LOSS_STREAK_GUARD"
+    );
+  });
+
+  it("rejects stale, future, invalid-time, and API fallback telemetry", () => {
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        {
+          ...telemetry,
+          updatedAt: new Date(
+            nowMs - GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS - 1
+          ).toISOString()
+        },
+        nowMs
+      )
+    ).toBeNull();
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        { ...telemetry, updatedAt: new Date(nowMs + 1).toISOString() },
+        nowMs
+      )
+    ).toBeNull();
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        { ...telemetry, updatedAt: "invalid" },
+        nowMs
+      )
+    ).toBeNull();
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        { ...telemetry, telemetrySource: "API_PROCESS_FALLBACK" },
+        nowMs
+      )
+    ).toBeNull();
+  });
+
+  it("preserves integrity, circuit-breaker, then streak priority", () => {
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        {
+          ...telemetry,
+          unknownRGuardActive: true,
+          lossCircuitBreakerActive: true
+        },
+        nowMs
+      )
+    ).toBe("WAIT_REALISED_R_INCOMPLETE");
+    expect(
+      resolveFreshLossTelemetryWaitReason(
+        { ...telemetry, lossCircuitBreakerActive: true },
+        nowMs
+      )
+    ).toBe("WAIT_LOSS_CIRCUIT_BREAKER");
   });
 });
 
