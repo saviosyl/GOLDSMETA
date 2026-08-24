@@ -80,6 +80,7 @@ export async function hydrateGoldHunterLossStateFromClosedTrades(
       side: trade.side,
       setup: trade.setup,
       entryPrice: trade.entry,
+      exitPrice: trade.exit,
       result: trade.result,
       opportunityId: trade.signalId ?? null,
       closedAtMs: closedAtMs(trade),
