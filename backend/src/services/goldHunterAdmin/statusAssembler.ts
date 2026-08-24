@@ -19,6 +19,7 @@ import {
   plannedRiskBudgetEur
 } from "./riskSizing";
 import { loadGoldHunterSelectorRuntime } from "./selectorRuntimeStore";
+import type { GoldHunterLossControllerTelemetry } from "./lossControllerTelemetry";
 import {
   getGoldHunterStrategySelector,
   type GoldHunterSelectedCandidate
@@ -46,6 +47,24 @@ import {
 
 const FEED_STALE_MS = 45_000;
 const FEED_HARD_STALE_MS = 120_000;
+export const GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS = 120_000;
+
+export function resolveFreshLossTelemetryWaitReason(
+  telemetry: GoldHunterLossControllerTelemetry | null | undefined,
+  nowMs = Date.now()
+): string | null {
+  if (!telemetry || telemetry.telemetrySource !== "QUOTE_WORKER") return null;
+  const updatedMs = Date.parse(telemetry.updatedAt);
+  if (!Number.isFinite(updatedMs)) return null;
+  const ageMs = nowMs - updatedMs;
+  if (ageMs < 0 || ageMs > GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS) {
+    return null;
+  }
+  if (telemetry.unknownRGuardActive) return "WAIT_REALISED_R_INCOMPLETE";
+  if (telemetry.lossCircuitBreakerActive) return "WAIT_LOSS_CIRCUIT_BREAKER";
+  if (telemetry.lossStreakGuardActive) return "WAIT_LOSS_STREAK_GUARD";
+  return null;
+}
 
 export type GoldHunterStatusPayload = {
   product: "GOLD_HUNTER";
@@ -432,19 +451,17 @@ export async function assembleGoldHunterStatus(
     lastCandidate?.antiChurnState?.rejectionReason ??
     lastCandidate?.m1CandleFlow?.waitReason ??
     null;
-  const lossTelemetry = runtime.lossControllerTelemetry;
+  const freshLossWaitReason = resolveFreshLossTelemetryWaitReason(
+    runtime.lossControllerTelemetry
+  );
   let signalNote = "WAIT — NO SETUP SELECTED";
   if (!selectorConnected) {
     signalNote =
       "WAIT — NO SETUP SELECTED (Gold Hunter A/B/C selector not connected — Demo AutoTrade remains fail-closed for natural entries)";
   } else if (!marketOpen) {
     signalNote = "WAIT — MARKET CLOSED";
-  } else if (lossTelemetry?.unknownRGuardActive) {
-    signalNote = "WAIT — WAIT_REALISED_R_INCOMPLETE";
-  } else if (lossTelemetry?.lossCircuitBreakerActive) {
-    signalNote = "WAIT — WAIT_LOSS_CIRCUIT_BREAKER";
-  } else if (lossTelemetry?.lossStreakGuardActive) {
-    signalNote = "WAIT — WAIT_LOSS_STREAK_GUARD";
+  } else if (freshLossWaitReason) {
+    signalNote = `WAIT — ${freshLossWaitReason}`;
   } else if (selectorWaitReason) {
     signalNote = `WAIT — ${selectorWaitReason}`;
   } else if (lastCandidate && !lastCandidate.depthExecutable) {
