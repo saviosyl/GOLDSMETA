@@ -5,6 +5,7 @@ import iosDecisionFields from "../fixtures/contracts/iosDecisionFields.json";
 import responseEnvelopes from "../fixtures/contracts/responseEnvelopes.json";
 import { createTestWebhookConnection, freshPayload } from "../helpers";
 import { createApp } from "../../src";
+import { API_ARTIFACT_REVISION } from "../../src/config/apiArtifactRevision";
 import { AiExplainer } from "../../src/services/ai/explainer";
 import { InMemoryStore } from "../../src/services/storage/inMemoryStore";
 import { resetRateLimits } from "../../src/middleware/rateLimit";
@@ -70,12 +71,24 @@ describe("API contract envelopes", () => {
 
   it("returns health without auth wrapper nesting secrets", async () => {
     const response = await request(app).get("/health").expect(200);
+    expect(response.body.ok).toBe(true);
     expect(response.body).toEqual(
       expect.objectContaining({
         ok: true,
         appEnv: expect.any(String),
         storageBackend: expect.any(String),
-        backendVersion: expect.any(String)
+        backendVersion: expect.any(String),
+        ruleConfigVersion: expect.any(String),
+        apiArtifactRevision: API_ARTIFACT_REVISION
+      })
+    );
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        backendVersion: expect.any(String),
+        ruleConfigVersion: expect.any(String),
+        appEnv: expect.any(String),
+        storageBackend: expect.any(String)
       })
     );
     expect(JSON.stringify(response.body)).not.toMatch(/secret|api[_-]?key|token/i);
