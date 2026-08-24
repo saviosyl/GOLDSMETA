@@ -1,0 +1,3 @@
+# SPA fallback for client routes.
+# Existing static files under /assets, /icons, etc. are served by Pages before redirects.
+/*    /index.html   200

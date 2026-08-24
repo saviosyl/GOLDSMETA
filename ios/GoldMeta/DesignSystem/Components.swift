@@ -26,18 +26,26 @@ struct GoldCard<Content: View>: View {
 struct DecisionBadge: View {
     let decision: DecisionType
     let isProvisional: Bool
+    var isTestDecision = false
 
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(decision.color).frame(width: 8, height: 8)
-            Text(isProvisional ? "\(decision.rawValue) PROVISIONAL" : decision.rawValue)
+            Text(label)
                 .font(GoldMetaFont.rounded(.headline, weight: .bold))
         }
         .foregroundStyle(decision.color)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Capsule().fill(decision.color.opacity(0.14)))
-        .accessibilityLabel("Decision \(decision.accessibilityLabel)\(isProvisional ? ", provisional" : "")")
+        .accessibilityLabel("Decision \(decision.accessibilityLabel)\(isProvisional ? ", provisional" : "")\(isTestDecision ? ", test" : "")")
+    }
+
+    private var label: String {
+        var parts = [decision.rawValue]
+        if isProvisional { parts.append("PROVISIONAL") }
+        if isTestDecision { parts.append("TEST") }
+        return parts.joined(separator: " ")
     }
 }
 

@@ -1,8 +1,10 @@
 import Foundation
+import Combine
 import UserNotifications
 
-final class NotificationRouter {
+final class NotificationRouter: ObservableObject {
     private let localStore: LocalStore
+    @Published private(set) var routedDecisionId: String?
 
     init(localStore: LocalStore = LocalStore()) {
         self.localStore = localStore
@@ -22,5 +24,10 @@ final class NotificationRouter {
 
     func explainPurpose() -> String {
         "Notifications are used only to tell you when GoldMeta has a new XAUUSD decision-support update. They do not place trades."
+    }
+
+    func route(userInfo: [AnyHashable: Any]) {
+        routedDecisionId = userInfo["decisionId"] as? String
+            ?? userInfo["decision_id"] as? String
     }
 }

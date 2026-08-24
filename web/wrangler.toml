@@ -1,0 +1,4 @@
+# Optional local Pages config (CLI deploys). Production also uses the Cloudflare dashboard.
+name = "goldmeta-web"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "dist"

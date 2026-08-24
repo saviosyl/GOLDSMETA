@@ -1,0 +1,44 @@
+{
+  "symbol": "XAUUSD",
+  "timeframe": "15",
+  "currentPrice": 2410,
+  "candle": {
+    "open": 2408,
+    "high": 2414,
+    "low": 2406,
+    "close": 2412
+  },
+  "poc": 2409,
+  "vah": 2418,
+  "val": 2404,
+  "hvnLevels": [
+    2416,
+    2422,
+    2430
+  ],
+  "trendMeter": {
+    "state": "NEUTRAL",
+    "strength": 35
+  },
+  "confirmationCandle": {
+    "state": "NONE",
+    "confirmed": false
+  },
+  "volume": 1200,
+  "relativeVolume": 0.8,
+  "vwap": 2407,
+  "ema21": 2408,
+  "ema50": 2402,
+  "ema200": 2388,
+  "rsi": 50,
+  "atr": 4.2,
+  "spread": 0.25,
+  "session": "London",
+  "nearbySupport": 2406,
+  "nearbyResistance": 2414,
+  "highImpactNewsActive": false,
+  "marketDataTime": "2026-07-20T10:00:00.000Z",
+  "evaluatedAt": "2026-07-20T10:01:00.000Z",
+  "missingFields": [],
+  "isStale": false
+}

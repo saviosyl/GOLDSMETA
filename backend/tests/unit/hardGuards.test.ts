@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import staleFixture from "../fixtures/stale.json";
+import partialFixture from "../fixtures/partial.json";
 import weakBuyPoorRrFixture from "../fixtures/weakBuyPoorRR.json";
 import { freshPayload, stalePayload } from "../helpers";
 import { evaluateHardGuards } from "../../src/services/decision/hardGuards";
@@ -22,8 +23,17 @@ describe("hard guards", () => {
   it("rejects setups below minimum RR to TP2", () => {
     const snapshot = mergeSnapshot(freshPayload(weakBuyPoorRrFixture));
     const quality = evaluateDataQuality(snapshot);
-    const guards = evaluateHardGuards(snapshot, "BUY", buildTradePlan(snapshot, "BUY"), quality);
+    const guards = evaluateHardGuards(snapshot, "BUY", buildTradePlan(snapshot, "BUY"), quality, 80);
     expect(guards.passed).toBe(false);
     expect(guards.reasonCodes).toContain("MIN_RR_TO_TP2_NOT_MET");
+    expect(guards.reasonCodes).toContain("POOR_RISK_REWARD");
+  });
+
+  it("fails incomplete volume profile with MISSING_VOLUME_PROFILE", () => {
+    const snapshot = mergeSnapshot(freshPayload(partialFixture));
+    const quality = evaluateDataQuality(snapshot);
+    const guards = evaluateHardGuards(snapshot, "BUY", buildTradePlan(snapshot, "BUY"), quality, 80);
+    expect(guards.passed).toBe(false);
+    expect(guards.reasonCodes).toContain("MISSING_VOLUME_PROFILE");
   });
 });

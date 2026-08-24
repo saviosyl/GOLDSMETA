@@ -1,22 +1,34 @@
 import express, { type ErrorRequestHandler } from "express";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { env } from "./config/env";
+import { buildCorsMiddleware } from "./middleware/cors";
 import { buildDecisionsRouter } from "./routes/decisions";
 import { buildDevicesRouter } from "./routes/devices";
 import { buildHealthRouter } from "./routes/health";
 import { buildJournalRouter } from "./routes/journal";
+import { buildPushRouter } from "./routes/push";
 import { buildSettingsRouter } from "./routes/settings";
 import { buildSystemRouter } from "./routes/system";
+import { buildTradingRouter } from "./routes/trading";
+import { buildTradingViewRouter } from "./routes/tradingview";
 import { buildWebhooksRouter } from "./routes/webhooks";
+import { buildSetupsRouter } from "./routes/setups";
 import { AiExplainer } from "./services/ai/explainer";
-import { globalStore, InMemoryStore } from "./services/storage/inMemoryStore";
-import { DedupeStore } from "./services/webhook/dedupe";
+import { processJob } from "./services/jobs/processJob";
+import { createStore } from "./services/storage/createStore";
+import type { GoldMetaStore } from "./services/storage/types";
+import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
+import { TradingModeService } from "./services/trading/tradingModeService";
 
 export interface AppDependencies {
-  store: InMemoryStore;
-  dedupe: DedupeStore;
+  store: GoldMetaStore;
   aiExplainer: AiExplainer;
+  tradingService?: TradingModeService;
 }
+
+const defaultStore = createStore();
+const defaultTradingService = new TradingModeService(new InMemoryTradingStore());
 
 const isPayloadTooLarge = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) {
@@ -51,21 +63,32 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 
 export const createApp = (
   dependencies: AppDependencies = {
-    store: globalStore,
-    dedupe: new DedupeStore(env.WEBHOOK_MAX_SKEW_MS * 2),
-    aiExplainer: new AiExplainer()
+    store: defaultStore,
+    aiExplainer: new AiExplainer(),
+    tradingService: defaultTradingService
   }
 ): express.Express => {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT }));
+  // Cloud Functions / load balancers terminate TLS; needed for correct webhook HTTPS URLs.
+  app.set("trust proxy", 1);
+  app.use(buildCorsMiddleware());
+  // TradingView sends application/json when the alert message is valid JSON, otherwise
+  // text/plain. Accept both so webhook delivery is not dropped before validation.
+  app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
+
+  const tradingService = dependencies.tradingService ?? defaultTradingService;
 
   app.use(buildHealthRouter());
-  app.use(buildWebhooksRouter(dependencies.store, dependencies.dedupe, dependencies.aiExplainer));
+  app.use(buildWebhooksRouter(dependencies.store, dependencies.aiExplainer));
+  app.use(buildTradingViewRouter(dependencies.store, dependencies.aiExplainer));
   app.use(buildDevicesRouter(dependencies.store));
+  app.use(buildPushRouter(dependencies.store));
   app.use(buildDecisionsRouter(dependencies.store));
+  app.use(buildSetupsRouter(dependencies.store));
   app.use(buildJournalRouter(dependencies.store));
   app.use(buildSettingsRouter(dependencies.store));
+  app.use(buildTradingRouter(tradingService));
   app.use(buildSystemRouter());
   app.use(errorHandler);
 
@@ -73,7 +96,25 @@ export const createApp = (
 };
 
 export const app = createApp();
-export const api = onRequest(app);
+export const api = onRequest(
+  {
+    region: env.FIREBASE_REGION,
+    // Mirror Express CORS allowlist for Cloud Functions OPTIONS handling.
+    cors: [
+      "https://goldmeta.metamechsolutions.com",
+      "https://goldmeta-web.pages.dev",
+      "http://127.0.0.1:5173",
+      "http://localhost:5173"
+    ]
+  },
+  app
+);
+export const processProcessingJob = onDocumentCreated(
+  { document: "processingJobs/{jobId}", region: env.FIREBASE_REGION },
+  async (event) => {
+    await processJob(event.params.jobId);
+  }
+);
 
 if (require.main === module) {
   app.listen(env.PORT, () => {

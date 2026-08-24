@@ -1,0 +1,13 @@
+eating alerts
+
+Each alertcondition() call in an indicator script defines one distinct trigger and one corresponding option in the “Condition” dropdown menu of the “Create Alert” dialog box. If the user wants multiple alerts, they must create each one separately.
+
+By contrast, if a script includes one or more alert() function calls, only one option appears in the “Condition” dropdown menu, titled “Any alert() function call”. Selecting this option creates a single alert that activates based on the occurrences of any executed alert() call.
+
+Similarly, for strategy scripts, the “Order fills and and alert() function calls” or “Order fills only” option in the “Condition” dropdown menu creates an alert that fires when any order fill event occurs.
+
+How alerts activate
+
+The alertcondition() function operates exclusively in an indicator’s global scope. Scripts cannot include calls to this function within any local block, such as the indented code within an if structure. The function triggers an alert when its specified condition is true. Users can set the allowed frequency of the alert trigger using the “Frequency” field in the “Create Alert” dialog box.
+
+The alert() function has no conditio
