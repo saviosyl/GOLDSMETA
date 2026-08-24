@@ -579,6 +579,8 @@ export class GoldHunterStrategySelector {
     side: "BUY" | "SELL";
     setup: GoldHunterSetupLetter | null;
     entryPrice: number | null;
+    /** Broker-confirmed settled exit; proves the losing move already crossed entry. */
+    exitPrice?: number | null;
     result: "WIN" | "LOSS" | "BREAKEVEN" | null;
     opportunityId?: string | null;
     closedAtMs?: number;
@@ -705,17 +707,31 @@ export class GoldHunterStrategySelector {
         this.lossControllerEntry.lossStreakActivatedAtMs =
           this.lossControllerEntry.lossStreakActivatedAtMs ?? atMs;
       }
+      const settledEntry =
+        args.entryPrice != null && Number.isFinite(args.entryPrice)
+          ? args.entryPrice
+          : null;
+      const settledExit =
+        args.exitPrice != null && Number.isFinite(args.exitPrice)
+          ? args.exitPrice
+          : null;
+      // A broker-confirmed losing exit already proves price crossed the losing
+      // entry. Preserve that evidence during restart hydration instead of
+      // requiring a future revisit to an obsolete entry level.
+      const settledExitProvesStructuralReset =
+        settledEntry != null &&
+        settledExit != null &&
+        (args.side === "BUY"
+          ? settledExit <= settledEntry
+          : settledExit >= settledEntry);
       this.lossReentry = {
         lastSide: args.side,
         lastSetup: args.setup,
-        lastEntryPrice:
-          args.entryPrice != null && Number.isFinite(args.entryPrice)
-            ? args.entryPrice
-            : null,
+        lastEntryPrice: settledEntry,
         lastResult: "LOSS",
         lastOpportunityId: args.opportunityId ?? null,
         closedAtMs: atMs,
-        structuralResetComplete: false
+        structuralResetComplete: settledExitProvesStructuralReset
       };
       // Canonical opportunity must not stay executable after a LOSS close.
       if (
