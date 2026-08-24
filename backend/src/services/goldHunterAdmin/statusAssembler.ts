@@ -428,12 +428,25 @@ export async function assembleGoldHunterStatus(
       ? Date.now() - Date.parse(lastCandidate.signalTimestamp)
       : null;
 
+  const selectorWaitReason =
+    lastCandidate?.antiChurnState?.rejectionReason ??
+    lastCandidate?.m1CandleFlow?.waitReason ??
+    null;
+  const lossTelemetry = runtime.lossControllerTelemetry;
   let signalNote = "WAIT — NO SETUP SELECTED";
   if (!selectorConnected) {
     signalNote =
       "WAIT — NO SETUP SELECTED (Gold Hunter A/B/C selector not connected — Demo AutoTrade remains fail-closed for natural entries)";
   } else if (!marketOpen) {
     signalNote = "WAIT — MARKET CLOSED";
+  } else if (lossTelemetry?.unknownRGuardActive) {
+    signalNote = "WAIT — WAIT_REALISED_R_INCOMPLETE";
+  } else if (lossTelemetry?.lossCircuitBreakerActive) {
+    signalNote = "WAIT — WAIT_LOSS_CIRCUIT_BREAKER";
+  } else if (lossTelemetry?.lossStreakGuardActive) {
+    signalNote = "WAIT — WAIT_LOSS_STREAK_GUARD";
+  } else if (selectorWaitReason) {
+    signalNote = `WAIT — ${selectorWaitReason}`;
   } else if (lastCandidate && !lastCandidate.depthExecutable) {
     signalNote = `WAIT — DEPTH INVALID (${lastCandidate.depthValidity})`;
   } else if (signalPresent) {
