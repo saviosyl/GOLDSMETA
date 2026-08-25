@@ -252,6 +252,37 @@ function fromConnectionFallback(
   });
 }
 
+function snapshotAgeFromCapturedAt(capturedAt: string | null, nowMs: number): number | null {
+  if (!capturedAt) return null;
+  const capturedMs = Date.parse(capturedAt);
+  if (!Number.isFinite(capturedMs)) return null;
+  return nowMs - capturedMs;
+}
+
+function materializeCachedSnapshotAtNow(
+  snapshot: GoldHunterAccountSnapshot,
+  nowMs: number
+): GoldHunterAccountSnapshot {
+  const ageMs = snapshotAgeFromCapturedAt(snapshot.capturedAt, nowMs);
+  const ageValid = ageMs != null && Number.isFinite(ageMs) && ageMs >= 0;
+  const ageWithinRiskWindow = ageValid && ageMs <= GH_ACCOUNT_SNAPSHOT_STALE_MS;
+  const wasAuthoritative =
+    snapshot.source === "AUTHORITATIVE_DEMO" &&
+    (snapshot.authState === "AUTHORISED" || snapshot.authState === "STALE");
+
+  let authState = snapshot.authState;
+  if (wasAuthoritative) {
+    authState = !ageValid ? "UNKNOWN" : ageWithinRiskWindow ? "AUTHORISED" : "STALE";
+  }
+
+  return {
+    ...snapshot,
+    authState,
+    validForRisk: snapshot.validForRisk && ageWithinRiskWindow,
+    ageMs: ageValid ? ageMs : null
+  };
+}
+
 /**
  * Fetch (or soft-cache) Gold Hunter Demo account money fields.
  */
@@ -271,12 +302,16 @@ export async function fetchGoldHunterAccountSnapshot(
       Math.max(SNAPSHOT_CACHE_TTL_MS, requestedCacheAgeMs)
     );
     if (hit && nowMs - hit.atMs < maxCacheAgeMs) {
-      return {
-        ...hit.snapshot,
-        ageMs: hit.snapshot.capturedAt
-          ? Math.max(0, nowMs - Date.parse(hit.snapshot.capturedAt))
-          : hit.snapshot.ageMs
-      };
+      const cachedNow = materializeCachedSnapshotAtNow(hit.snapshot, nowMs);
+      const authoritativeSnapshotInvalid =
+        hit.snapshot.source === "AUTHORITATIVE_DEMO" &&
+        (cachedNow.capturedAt == null ||
+          cachedNow.ageMs == null ||
+          cachedNow.authState !== "AUTHORISED" ||
+          !cachedNow.validForRisk);
+      if (!authoritativeSnapshotInvalid) {
+        return cachedNow;
+      }
     }
   }
 

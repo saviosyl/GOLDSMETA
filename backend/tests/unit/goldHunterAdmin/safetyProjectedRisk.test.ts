@@ -894,4 +894,13 @@ describe("Isolation + Live refuse", () => {
     expect(text).toContain("readGoldHunterBrokerOpenPositions(ownerUid)");
     expect(text).not.toContain("runGoldHunterReconcilePass");
   });
+
+  it("background reconcile runtime remains independently available", () => {
+    const text = readFileSync(
+      resolve(process.cwd(), "src/services/goldHunterAdmin/reconciliationRuntime.ts"),
+      "utf8"
+    );
+    expect(text).toContain("export async function runGoldHunterReconcilePass");
+    expect(text).toContain("Never places orders.");
+  });
 });
