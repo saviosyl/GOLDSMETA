@@ -43,41 +43,73 @@ The script is non-repainting for its multi-timeframe diagnostics by using `reque
 
 ## Create the alert
 
-1. Click **Alert**.
-2. In **Condition**, choose `GoldMeta Bridge`.
-3. Select **Any alert() function call**.
-4. Enable **Webhook URL** and paste your GoldMeta webhook URL.
-5. If TradingView shows a message field, enter:
+> Full root-cause write-up: `docs/TRADINGVIEW_ALERT_INVESTIGATION.md` (verified against TradingView Web + official Help/Pine docs).
+
+Use **desktop Supercharts**. Do **not** create the alert from a legend series or by right-clicking a level.
+
+1. Confirm the status table shows script version **2.1.0+** and `Webhook = STRATEGY` (or `STRAT+QUOTE`).
+2. Click the toolbar **Alert** clock → **Create alert**.
+3. In **Condition**, first field: choose **`GoldMeta Bridge`** (the indicator), not Session High / POC / VAH / VAL.
+4. Second field: choose **`Any alert() function call`** (first option when `alert()` is present).
+5. Enable **Webhook URL** and paste your GoldMeta webhook URL.
+6. Message field:
 
    ```text
    {{alert_message}}
    ```
 
-6. Choose a frequency compatible with bar-close alerts.
-7. Name the alert, for example `GoldMeta XAUUSD 5m`.
+7. Name the alert, for example `GoldMeta XAUUSD 15m`.
 8. Create the alert.
 
-The script builds the JSON itself. Do not replace it with a manual JSON template unless you also maintain every dynamic field.
+The script builds the JSON itself. Frequency is controlled by `alert()` in Pine (`alert.freq_once_per_bar_close` when Confirmed-bar mode is ON).
 
-## Recommended chart setup
+**If you only see level / plot names:** you are on TradingView’s technical-alert path. Those cannot send webhook JSON. Go back and select the indicator, then **Any alert() function call**.
+
+## Recommended chart setup (intraday day-trade)
 
 - Symbol: `XAUUSD`
-- Timeframes: start with `5`, then add `15`, `60`, and `240` only when the backend is configured to merge them.
-- Alerts: one alert per timeframe.
+- Chart timeframe: **`15`** (structure and setup)
+- Intraday MTF roles (via `request.security`, `lookahead_off`):
+  - **1 hour** — main direction
+  - **15 minutes** — structure / setup (chart)
+  - **5 minutes** — entry confirmation
+  - **1 minute** — optional quote-only freshness (setting default OFF; never reverses plan)
 - Confirmed-bar mode: ON for production.
 - Test-alert mode: use only to verify connectivity, then turn it OFF.
 
+### STRATEGY vs QUOTE alerts
+
+| Kind | `metadata.alertKind` | When | Backend use |
+| --- | --- | --- | --- |
+| STRATEGY | `STRATEGY` | 15m bar close | Full structure signal |
+| QUOTE | `QUOTE` | 1m bar close (optional) | Live price freshness only — does not replace complete strategy |
+
+Sample payloads: `docs/examples/tradingview-intraday-strategy-payload.json`, `docs/examples/tradingview-intraday-quote-payload.json`.
+
+## Indicator methods (2.1.0 intraday)
+
+GoldMetaBridge calculates deterministic **GoldMeta-derived** values:
+
+- `gm_svp_v1` — session POC / VAH / VAL (developing; equivalent internal; not proprietary VP)
+- `gm_trend_v1` — EMA stack: 1h direction + 15m structure + 5m entry (`lookahead_off`)
+- `gm_candle_v1` — confirmation candle classification on 15m
+- Plus: VWAP, EMA 21/50/200, RSI, ADX, relative volume, day levels, opening range, swing/structure states
+
+Full formulas, session boundaries, bin size, and value-area rules: `docs/INDICATOR_METHODOLOGY.md`.
+
+TPO / proprietary Trend Meter values remain **unavailable** in the bridge and must not be invented. Missing required fields produce backend **WAIT**.
+
 ## Proprietary indicator alerts
 
-The bridge does not calculate proprietary volume profile, TPO, market profile, or paid Trend Meter values. Those values must come from separate licensed scripts or alert sources.
+Optional licensed alerts may still supply proprietary fields the bridge cannot compute (for example TPO). Missing proprietary values remain missing; they are not guessed.
 
 Recommended merge pattern:
 
-1. GoldMeta bridge alert sends OHLCV, session heuristic, ATR, and structural placeholders.
-2. Proprietary indicator alert sends only the fields it owns.
+1. GoldMeta bridge alert sends OHLCV, `gm_svp_v1` levels, `gm_trend_v1`, and confirmation.
+2. Optional proprietary alert sends only the fields it owns.
 3. Backend validates source, symbol, timeframe, and bar time.
 4. Backend merges compatible events into one market snapshot.
-5. Missing proprietary values remain missing; they are not guessed.
+5. Incomplete or stale snapshots default to WAIT.
 
 ## Troubleshooting
 
@@ -87,6 +119,8 @@ Recommended merge pattern:
 | Backend rejects payload | Confirm chart is XAUUSD, timeframe is supported, and JSON matches `shared/schemas/tradingview-webhook-payload.schema.json`. |
 | Duplicate events | Backend should deduplicate by `eventId` and bar time. |
 | Provisional/incomplete decisions | Confirm proprietary inputs are connected if your rule configuration requires them. |
-| Alert fires before close | Confirm `Confirmed-bar mode` is ON and alert condition uses the script's `alert()` call. |
+| Alert fires before close | Confirm `Confirmed-bar mode` is ON and alert condition uses **Any alert() function call**. |
+| Only see Session High / POC / VAH / VAL | Wrong alert path (technical/plot). Recreate from toolbar → indicator → **Any alert() function call**. See `docs/TRADINGVIEW_ALERT_INVESTIGATION.md`. |
+| “Any alert() function call” missing | Confirm v2.0.4+ on chart, `Call alert() from script` = ON, desktop Supercharts, Condition source = indicator not a series. |
 
 Confidence in a GoldMeta decision means setup quality and input completeness. Confidence is not a win probability.

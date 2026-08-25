@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.git/
+*.log
+.gold-hunter-data/
+coverage/
+tests/
+**/*.test.ts
+**/__tests__/

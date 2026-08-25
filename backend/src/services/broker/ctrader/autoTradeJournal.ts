@@ -1,0 +1,185 @@
+/**
+ * Automatic Journal records for controlled Demo / Demo Auto trades.
+ * Uses existing journal store path when available; never blocks trade flow.
+ */
+
+import { getFirestore } from "firebase-admin/firestore";
+import { randomBytes } from "crypto";
+
+export type AutoTradeJournalInput = {
+  uid: string;
+  environment: "DEMO" | "LIVE";
+  source: "qualification_controlled" | "demo_auto" | "manual";
+  direction: "BUY" | "SELL";
+  symbol?: string;
+  entry: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  lots: number | null;
+  cashRisk: number | null;
+  /** Saved risk before session mult / overnight overlay (optional audit). */
+  requestedRiskAmountDeposit?: number | null;
+  /** Risk actually used for sizing after caps/mult (optional audit). */
+  effectiveRiskAmountDeposit?: number | null;
+  riskCapReason?: string | null;
+  overnightRunId?: string | null;
+  confidence: number | null;
+  riskReward: number | null;
+  session: string | null;
+  spread: number | null;
+  pnl: number | null;
+  reasonForTrade: string;
+  reasonForExit: string | null;
+  qualificationStage: string | null;
+  accountMasked: string | null;
+  broker: string;
+  correlationId: string;
+  openedAt: string;
+  closedAt: string | null;
+  brokerPnlConfirmed?: boolean;
+  brokerDealId?: string | null;
+};
+
+function journalCol(uid: string) {
+  return getFirestore().collection(`users/${uid}/journalEntries`);
+}
+
+export async function createAutoTradeJournalEntry(
+  input: AutoTradeJournalInput
+): Promise<{ id: string; created: boolean }> {
+  const id = `atj_${input.correlationId}`;
+  const ref = journalCol(input.uid).doc(id);
+  const existing = await ref.get();
+  if (existing.exists) return { id, created: false };
+
+  const risk =
+    input.entry != null && input.stopLoss != null
+      ? Math.abs(input.entry - input.stopLoss)
+      : null;
+  const reward =
+    input.entry != null && input.takeProfit != null
+      ? Math.abs(input.takeProfit - input.entry)
+      : null;
+  const rr =
+    risk && reward && risk > 0 ? Number((reward / risk).toFixed(2)) : input.riskReward;
+
+  await ref.set({
+    id,
+    uid: input.uid,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: "autotrade",
+    autoTrade: true,
+    environment: input.environment,
+    tradeSource: input.source,
+    symbol: input.symbol ?? "XAUUSD",
+    side: input.direction,
+    entry: input.entry,
+    stopLoss: input.stopLoss,
+    takeProfit: input.takeProfit,
+    lots: input.lots,
+    cashRisk: input.cashRisk,
+    requestedRiskAmountDeposit: input.requestedRiskAmountDeposit ?? null,
+    effectiveRiskAmountDeposit:
+      input.effectiveRiskAmountDeposit ?? input.cashRisk ?? null,
+    riskCapReason: input.riskCapReason ?? null,
+    overnightRunId: input.overnightRunId ?? null,
+    confidence: input.confidence,
+    riskReward: rr,
+    session: input.session,
+    spread: input.spread,
+    pnl: input.pnl,
+    outcome:
+      input.pnl == null ? "OPEN" : input.pnl > 0 ? "WIN" : input.pnl < 0 ? "LOSS" : "BREAKEVEN",
+    reasonForTrade: input.reasonForTrade,
+    reasonForExit: input.reasonForExit,
+    qualificationStage: input.qualificationStage,
+    accountMasked: input.accountMasked,
+    broker: input.broker,
+    correlationId: input.correlationId,
+    openedAt: input.openedAt,
+    closedAt: input.closedAt,
+    brokerPnlConfirmed: input.brokerPnlConfirmed === true,
+    brokerDealId: input.brokerDealId ?? null,
+    tags: ["autotrade", input.environment.toLowerCase(), input.source]
+  });
+  return { id, created: true };
+}
+
+export type AutoTradeJournalClosePatch = {
+  uid: string;
+  correlationId: string;
+  pnl: number | null;
+  closedAt: string;
+  reasonForExit: string | null;
+  exitPrice?: number | null;
+  managementActions?: string[];
+  durationSeconds?: number | null;
+  slTpOutcome?: string | null;
+  brokerPnlConfirmed?: boolean;
+  brokerDealId?: string | null;
+  grossPnl?: number | null;
+  commission?: number | null;
+  swap?: number | null;
+};
+
+/**
+ * Update an existing OPEN journal row on close. Never creates a duplicate.
+ * Idempotent when already closed with the same correlationId.
+ */
+export async function updateAutoTradeJournalOnClose(
+  patch: AutoTradeJournalClosePatch
+): Promise<{ id: string; updated: boolean }> {
+  const id = `atj_${patch.correlationId}`;
+  const ref = journalCol(patch.uid).doc(id);
+  const existing = await ref.get();
+  if (!existing.exists) {
+    return { id, updated: false };
+  }
+  const data = existing.data() as Record<string, unknown>;
+  if (data.closedAt && data.pnl != null) {
+    return { id, updated: false };
+  }
+  const pnl = patch.pnl;
+  // Never persist fabricated P/L — require broker confirmation for closed stats.
+  if (pnl == null || patch.brokerPnlConfirmed !== true) {
+    return { id, updated: false };
+  }
+  await ref.set(
+    {
+      pnl,
+      closedAt: patch.closedAt,
+      reasonForExit: patch.reasonForExit,
+      exitPrice: patch.exitPrice ?? null,
+      managementActions: patch.managementActions ?? [],
+      durationSeconds: patch.durationSeconds ?? null,
+      slTpOutcome: patch.slTpOutcome ?? null,
+      brokerPnlConfirmed: true,
+      brokerDealId: patch.brokerDealId ?? null,
+      grossPnl: patch.grossPnl ?? null,
+      commission: patch.commission ?? null,
+      swap: patch.swap ?? null,
+      outcome: pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN",
+      updatedAt: new Date().toISOString()
+    },
+    { merge: true }
+  );
+  return { id, updated: true };
+}
+
+export async function listAutoTradeJournal(
+  uid: string,
+  opts?: { environment?: "DEMO" | "LIVE"; limit?: number }
+): Promise<Array<Record<string, unknown>>> {
+  let q = journalCol(uid).where("autoTrade", "==", true).orderBy("createdAt", "desc");
+  const snap = await q.limit(opts?.limit ?? 100).get();
+  let rows = snap.docs.map((d) => d.data() as Record<string, unknown>);
+  if (opts?.environment) {
+    rows = rows.filter((r) => r.environment === opts.environment);
+  }
+  return rows;
+}
+
+export function newCorrelationHint(): string {
+  return randomBytes(4).toString("hex");
+}

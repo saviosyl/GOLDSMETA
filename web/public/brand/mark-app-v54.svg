@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GoldMeta">
+  <!-- App icon: navy rounded square + official mark -->
+  <rect width="256" height="256" rx="56" fill="#11284A"/>
+  <g transform="translate(28,20) scale(0.78)">
+    <path
+      d="M158.90 32.89 A86 86 0 1 0 223.11 97.10"
+      fill="none"
+      stroke="#FFFFFF"
+      stroke-width="28"
+      stroke-linecap="butt"
+      opacity="0.96"
+    />
+    <path
+      d="M76 178 V88 h23 l19 54 19-54 h23 v52 l26-40 v66 h-21 v-38 L142 178 h-16 L104 132 v46 H76 Z"
+      fill="#D8A33D"
+    />
+    <path d="M168 114 L214 52 L230 66 L192 108 H234 V124 H168 Z" fill="#D8A33D"/>
+    <rect x="106" y="68" width="9" height="22" rx="2" fill="#D8A33D"/>
+    <rect x="120" y="54" width="9" height="36" rx="2" fill="#D8A33D"/>
+    <rect x="134" y="38" width="9" height="52" rx="2" fill="#D8A33D"/>
+    <path d="M108 178 v22 M128 178 v28 M148 178 v22" fill="none" stroke="#D8A33D" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="108" cy="204" r="5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="128" cy="210" r="5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+    <circle cx="148" cy="204" r="5" fill="none" stroke="#D8A33D" stroke-width="3.5"/>
+  </g>
+</svg>

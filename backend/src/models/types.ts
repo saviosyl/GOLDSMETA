@@ -103,15 +103,21 @@ const confirmationCandleSchema = z
   })
   .strict();
 
+/**
+ * Pine Bridge payload contract:
+ * - schemaVersion "1.0" — Pine 2.1.0 and earlier (alertKind STRATEGY/QUOTE)
+ * - schemaVersion "1.1" — Pine 3.0.0+ (alertRole PLAN_15M / CONFIRM_5M / QUOTE_1M)
+ * Both remain accepted. Extra metadata fields are ignored by consumers that don't need them.
+ */
 export const tradingViewPayloadSchema = z
   .object({
-    schemaVersion: z.literal("1.0"),
+    schemaVersion: z.enum(["1.0", "1.1"]),
     source: z.enum(["tradingview", "proprietary_alert", "manual"]),
     eventId: z.string().min(8),
     webhookSecret: z.string().nullable().optional(),
     symbol: z.literal("XAUUSD"),
     exchange: z.string().nullable().optional(),
-    timeframe: z.enum(["1", "5", "15", "60", "240"]),
+    timeframe: z.enum(["1", "5", "15", "30", "60", "240"]),
     eventType: z.enum(["BAR_CLOSE", "BAR_UPDATE", "INDICATOR_UPDATE", "TEST"]),
     barTime: z.string().datetime(),
     sentAt: z.string().datetime(),
@@ -124,11 +130,20 @@ export const tradingViewPayloadSchema = z
     trend: trendSchema.nullable().optional(),
     confirmationCandle: confirmationCandleSchema.nullable().optional(),
     optionalIndicators: z.record(z.string(), z.unknown()).nullable().optional(),
+    /** Open record — Pine 3.0 adds alertRole, planSourceKey, confirmationState, etc. */
     metadata: z.record(z.string(), z.unknown()).nullable().optional()
   })
   .strict();
 
 export type TradingViewPayload = z.infer<typeof tradingViewPayloadSchema>;
+export type PayloadSchemaVersion = TradingViewPayload["schemaVersion"];
+
+/** Known Pine 3.0.0 alert roles (absent on 2.1.0). */
+export const alertRoleSchema = z.enum(["PLAN_15M", "CONFIRM_5M", "QUOTE_1M"]);
+export type AlertRole = z.infer<typeof alertRoleSchema>;
+
+export const alertKindSchema = z.enum(["STRATEGY", "QUOTE"]);
+export type AlertKind = z.infer<typeof alertKindSchema>;
 export type DecisionDirection = z.infer<typeof decisionDirectionSchema>;
 export type DataQuality = z.infer<typeof dataQualitySchema>;
 export type TrendDirection = z.infer<typeof directionSchema>;
@@ -137,6 +152,7 @@ export interface MarketSnapshot {
   id: string;
   sourceEventId: string;
   symbol: "XAUUSD";
+  exchange: string | null;
   timeframe: TradingViewPayload["timeframe"];
   marketDataTime: string;
   receivedAt: string;
@@ -221,11 +237,53 @@ export interface AiExplanation {
   safetyDowngraded: boolean;
 }
 
+/** Display-oriented market structure stored on every new decision. */
+export interface DecisionMarketStructure {
+  trend: TrendDirection | null;
+  trendStrength: number | null;
+  poc: number | null;
+  vah: number | null;
+  val: number | null;
+  confirmationClassification:
+    | "REJECTION"
+    | "BREAKOUT"
+    | "RETEST"
+    | "CONTINUATION"
+    | "NONE"
+    | null;
+  confirmationDirection: TrendDirection | null;
+  confirmationCandleType: string | null;
+}
+
+/** Provenance for a single numeric market value. */
+export interface PricePointMeta {
+  source: string;
+  symbol: string;
+  exchangeOrBroker: string | null;
+  timeframe: string | null;
+  timestamp: string | null;
+  receivedAt: string;
+  quoteAgeSeconds: number | null;
+  value: number | null;
+}
+
+/** One canonical gold identity across TradingView / cTrader / GoldMeta. */
+export interface CanonicalSymbolIdentity {
+  tradingViewSymbol: string;
+  exchange: string | null;
+  ctraderSymbolId: string | null;
+  canonicalSymbol: "XAUUSD";
+}
+
 export interface DecisionRecord {
   schemaVersion: "1.0";
   decisionId: string;
   userId: string;
   symbol: "XAUUSD";
+  /** Chart timeframe from the webhook payload. Null only on legacy records. */
+  timeframe: TradingViewPayload["timeframe"] | null;
+  /** Closed-bar time (ISO). Mirrors marketDataTime for explicit completeness. */
+  barTime: string;
   generatedAt: string;
   marketDataTime: string;
   validUntil: string;
@@ -261,15 +319,38 @@ export interface DecisionRecord {
   notificationSent: boolean;
   currentSession: string | null;
   higherTimeframeBias: TrendDirection | null;
+  /** Resolved Pine role for canonical routing (PLAN_15M / CONFIRM_5M / QUOTE_1M / legacy). */
+  alertRole?: string | null;
+  /** Normalized 15M plan-window key used to link PLAN_15M + CONFIRM_5M exactly. */
+  planSourceKey?: string | null;
+  /** Last fully closed 1H source timestamp that produced higherTimeframeBias (if known). */
+  oneHourBiasSourceTime?: string | null;
+  /** True only when the 1H bias source is confirmed/non-developing. */
+  oneHourBiasConfirmed?: boolean | null;
   lastKnownPrice: number | null;
-  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE";
+  ohlcv: TradingViewPayload["ohlcv"];
+  marketStructure: DecisionMarketStructure | null;
+  dataSourceLabel: "LIVE" | "DELAYED" | "STALE" | "MOCK" | "OFFLINE" | "TEST";
+  environment: "LIVE" | "TEST";
+  isTestDecision: boolean;
+  /** Canonical XAUUSD identity for this decision's price sources. */
+  symbolIdentity?: CanonicalSymbolIdentity;
+  /** Provenance for key prices — never mix incompatible regimes without checking these. */
+  priceSources?: {
+    alertClose?: PricePointMeta;
+    barHigh?: PricePointMeta;
+    barLow?: PricePointMeta;
+    poc?: PricePointMeta;
+    vah?: PricePointMeta;
+    val?: PricePointMeta;
+  };
 }
 
 export const deviceRegistrationSchema = z
   .object({
     deviceId: z.string().min(3),
     fcmToken: z.string().min(10),
-    platform: z.literal("ios"),
+    platform: z.enum(["ios", "web"]),
     appVersion: z.string().min(1).optional()
   })
   .strict();
@@ -281,15 +362,53 @@ export interface DeviceRecord extends DeviceRegistration {
   registeredAt: string;
 }
 
+export const webPushSubscriptionSchema = z
+  .object({
+    endpoint: z.string().url(),
+    expirationTime: z.number().nullable().optional(),
+    keys: z
+      .object({
+        p256dh: z.string().min(8),
+        auth: z.string().min(8)
+      })
+      .strict(),
+    userAgent: z.string().max(500).optional()
+  })
+  .strict();
+
+export type WebPushSubscriptionInput = z.infer<typeof webPushSubscriptionSchema>;
+
+export interface WebPushSubscriptionRecord extends WebPushSubscriptionInput {
+  userId: string;
+  subscriptionId: string;
+  registeredAt: string;
+  updatedAt: string;
+}
+
 export const journalCreateSchema = z
   .object({
     decisionId: z.string().optional(),
+    setupId: z.string().optional(),
     symbol: z.literal("XAUUSD").default("XAUUSD"),
     direction: z.enum(["BUY", "SELL", "WAIT"]),
     outcome: z.enum(["WIN", "LOSS", "BREAKEVEN", "OPEN"]).default("OPEN"),
     riskReward: z.number().nullable().optional(),
     pnl: z.number().nullable().optional(),
-    notes: z.string().max(2000).optional()
+    notes: z.string().max(2000).optional(),
+    tags: z
+      .array(
+        z.enum([
+          "followed",
+          "ignored",
+          "entered_manually",
+          "avoided",
+          "news_risk",
+          "poor_spread",
+          "discretionary_override"
+        ])
+      )
+      .max(12)
+      .optional()
   })
   .strict();
 
@@ -309,8 +428,32 @@ export const settingsPatchSchema = z
   .object({
     aiEnabled: z.boolean().optional(),
     notificationsEnabled: z.boolean().optional(),
+    notificationPreferences: z
+      .object({
+        VALID_PLAN_CREATED: z.boolean().optional(),
+        ENTRY_ZONE_APPROACHING: z.boolean().optional(),
+        ENTRY_ZONE_REACHED: z.boolean().optional(),
+        CONFIRM_5M: z.boolean().optional(),
+        PLAN_INVALIDATED: z.boolean().optional(),
+        TARGETS_REACHED: z.boolean().optional()
+      })
+      .strict()
+      .optional(),
     provisionalSignalsEnabled: z.boolean().optional(),
-    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional()
+    riskProfile: z.enum(["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]).optional(),
+    liveForwardAckAt: z.string().datetime().nullable().optional(),
+    manualRisk: z
+      .object({
+        currency: z.enum(["EUR", "USD", "GBP"]).optional(),
+        maxCashRiskPerTrade: z.number().positive().max(10_000).optional(),
+        maxSimultaneousManualTrades: z.number().int().min(1).max(5).optional(),
+        maxDailyRealisedLoss: z.number().positive().max(50_000).optional(),
+        stopAfterConsecutiveLosses: z.number().int().min(1).max(20).optional(),
+        valuePerPoint: z.number().positive().nullable().optional(),
+        estimatedSpreadPoints: z.number().nonnegative().nullable().optional()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 
@@ -318,7 +461,50 @@ export interface UserSettings {
   userId: string;
   aiEnabled: boolean;
   notificationsEnabled: boolean;
+  notificationPreferences?: NotificationPreferences;
   provisionalSignalsEnabled: boolean;
   riskProfile: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE";
+  /** ISO timestamp when user acknowledged LIVE forward-testing banner; null = not yet. */
+  liveForwardAckAt: string | null;
+  manualRisk: {
+    currency: "EUR" | "USD" | "GBP";
+    maxCashRiskPerTrade: number;
+    maxSimultaneousManualTrades: number;
+    maxDailyRealisedLoss: number;
+    stopAfterConsecutiveLosses: number;
+    valuePerPoint: number | null;
+    estimatedSpreadPoints: number | null;
+    noAveragingDown: true;
+    noMartingale: true;
+    noAutomaticRecovery: true;
+  };
+  manualRiskLimitChangeLog: Array<{
+    at: string;
+    field: string;
+    from: string | number | boolean | null;
+    to: string | number | boolean | null;
+  }>;
   updatedAt: string;
 }
+
+export const notificationPreferenceSchema = z
+  .object({
+    VALID_PLAN_CREATED: z.boolean(),
+    ENTRY_ZONE_APPROACHING: z.boolean(),
+    ENTRY_ZONE_REACHED: z.boolean(),
+    CONFIRM_5M: z.boolean(),
+    PLAN_INVALIDATED: z.boolean(),
+    TARGETS_REACHED: z.boolean()
+  })
+  .strict();
+
+export type NotificationPreferences = z.infer<typeof notificationPreferenceSchema>;
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  VALID_PLAN_CREATED: false,
+  ENTRY_ZONE_APPROACHING: false,
+  ENTRY_ZONE_REACHED: false,
+  CONFIRM_5M: false,
+  PLAN_INVALIDATED: false,
+  TARGETS_REACHED: false
+};

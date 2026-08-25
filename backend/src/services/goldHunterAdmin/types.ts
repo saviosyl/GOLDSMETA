@@ -1,0 +1,219 @@
+/**
+ * GOLD HUNTER Admin Tool — shared types.
+ * DEMO_ONLY execution. Independent of Core Fast AutoTrade.
+ */
+
+export const GH_ADMIN_STRATEGY_ID = "GOLD_HUNTER" as const;
+export const GH_ADMIN_EXECUTION_MODE = "DEMO_ONLY" as const;
+
+export type GoldHunterMode = "RESEARCH" | "DEMO_AUTO" | "LIVE_LOCKED";
+
+export type GoldHunterWaitReason =
+  | "WAIT — MARKET CLOSED"
+  | "WAIT — AUTOTRADE OFF"
+  | "WAIT — FEED STALE"
+  | "WAIT — DEPTH INVALID"
+  | "WAIT — SPREAD TOO WIDE"
+  | "WAIT — CAPITAL LIMIT"
+  | "WAIT — DAILY LOSS LIMIT"
+  | "WAIT — PROJECTED DAILY LOSS LIMIT"
+  | "WAIT — DAILY RISK UNKNOWN"
+  | "WAIT — MAX OPEN TRADES"
+  | "WAIT — RUNTIME TIMEOUT"
+  | "WAIT — DUPLICATE SIGNAL"
+  | "WAIT — BROKER DISCONNECTED"
+  | "WAIT — LIVE ENVIRONMENT REFUSED"
+  | "WAIT — EMERGENCY STOP"
+  | "WAIT — PAUSED"
+  | "WAIT — NO SETUP SELECTED"
+  | "WAIT — SIGNAL STALE"
+  | "WAIT — UNAUTHORIZED"
+  | "WAIT — CONFIG INVALID"
+  | "WAIT — ACCOUNT SNAPSHOT INVALID"
+  | "WAIT — ACCOUNT ENVIRONMENT UNKNOWN"
+  | "WAIT — SIZING METADATA UNAVAILABLE"
+  | "WAIT — PROTECTION GEOMETRY NOT CONNECTED"
+  | "WAIT — COMMITTED CAPITAL UNKNOWN";
+
+export type GoldHunterAdminConfig = {
+  allocatedCapitalEur: number;
+  riskPerTradePct: number;
+  dailyLossLimitPct: number;
+  maxOpenTrades: number;
+  demoAutoTradeEnabled: boolean;
+  pauseNewEntries: boolean;
+  emergencyStopActive: boolean;
+  mode: GoldHunterMode;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export const GH_ADMIN_DEFAULT_CONFIG: Omit<
+  GoldHunterAdminConfig,
+  "updatedAt" | "updatedBy"
+> = {
+  allocatedCapitalEur: 5000,
+  riskPerTradePct: 1,
+  dailyLossLimitPct: 5,
+  maxOpenTrades: 1,
+  demoAutoTradeEnabled: false,
+  pauseNewEntries: false,
+  emergencyStopActive: false,
+  mode: "RESEARCH"
+};
+
+export const GH_ADMIN_ALLOCATION_PRESETS_EUR = [
+  500, 1000, 2500, 5000, 10_000
+] as const;
+
+export type GoldHunterAuditEntry = {
+  id: string;
+  at: string;
+  byUid: string;
+  action: string;
+  detail: string;
+};
+
+export type GoldHunterDemoTrade = {
+  goldHunterTradeId: string;
+  strategy: typeof GH_ADMIN_STRATEGY_ID;
+  environment: "DEMO";
+  setup: "A" | "B" | "C" | null;
+  side: "BUY" | "SELL";
+  signalTs: string | null;
+  orderTs: string | null;
+  fillTs: string | null;
+  closeTs: string | null;
+  entry: number | null;
+  exit: number | null;
+  stop: number | null;
+  entrySpread: number | null;
+  durationMs: number | null;
+  mfe: number | null;
+  mae: number | null;
+  grossPnlEur: number | null;
+  netPnlEur: number | null;
+  /** Broker commission from closing deal aggregation (when settled). */
+  commissionEur?: number | null;
+  /** Broker swap from closing deal aggregation (when settled). */
+  swapEur?: number | null;
+  /** Broker closing deal id(s) when settled. */
+  brokerDealId?: string | null;
+  result: "WIN" | "LOSS" | "BREAKEVEN" | "OPEN" | null;
+  exitReason: string | null;
+  brokerOrderId: string | null;
+  brokerPositionId: string | null;
+  status:
+    | "SIGNAL"
+    | "ORDER_CREATED"
+    | "SENT"
+    | "FILLED"
+    | "PROTECTED"
+    | "CLOSE_REQUESTED"
+    | "CLOSE_ACCEPTED_PENDING_SETTLEMENT"
+    | "CLOSED"
+    | "BROKER_REJECTED"
+    | "BROKER_SUBMIT_ERROR"
+    | "ACCEPTED_PENDING_FILL"
+    | "PENDING_RECONCILIATION";
+  signalId?: string | null;
+  clientOrderId?: string | null;
+  errorCode?: string | null;
+  filledVolumeLots?: number | null;
+  takeProfit?: number | null;
+  /** Exit decision time (local strategy). */
+  exitSignalTs?: string | null;
+  /** Local close mutation request time. */
+  closeRequestTs?: string | null;
+  /** Broker accepted close / position proven absent. */
+  closeAcceptedTs?: string | null;
+  /** Authoritative closing-deal settlement time. */
+  brokerSettlementTs?: string | null;
+  /**
+   * Additive diagnostic only — never invents P/L or fill prices.
+   * Historical corrupt rows may be tagged without rewriting economics.
+   */
+  dataQuality?: "ENTRY_INVALID" | "MFE_MAE_CORRUPT" | null;
+  /**
+   * When entry was repaired from authoritative broker evidence.
+   */
+  entryRecoverySource?:
+    | "BROKER_POSITION_RECONCILIATION"
+    | "BROKER_DEAL_SETTLEMENT"
+    | "BROKER_ORDER_EXECUTION"
+    | "BROKER_ORDER_EXECUTION_RECONCILIATION"
+    | "BROKER_OPENING_DEAL_RECONCILIATION"
+    | null;
+  /**
+   * Dedicated OPEN-entry recovery forensics (immediate + supervisor).
+   * Exact reasons — next Demo test must not require log guessing.
+   */
+  openEntryRecoveryStartedAt?: string | null;
+  openEntryRecoveryLastAt?: string | null;
+  openEntryRecoveryAttempts?: number | null;
+  openEntryRecoveryLastReason?:
+    | "RECOVERED_OPEN"
+    | "POSITION_NOT_FOUND_WITHIN_WINDOW"
+    | "ENTRY_INVALID_WITHIN_WINDOW"
+    | "POSITIONS_READ_FAILED"
+    | "TIMEOUT"
+    | "POSITION_CLOSED_BEFORE_RECOVERY"
+    | "NO_POSITION_ID"
+    | "SKIPPED_STATUS"
+    | "ALREADY_VALID"
+    | null;
+  openEntryRecoverySource?:
+    | "BROKER_POSITION_RECONCILIATION"
+    | "BROKER_ORDER_EXECUTION_RECONCILIATION"
+    | "BROKER_OPENING_DEAL_RECONCILIATION"
+    | null;
+  openEntryRecoveredAt?: string | null;
+  openEntryPmRegisteredAt?: string | null;
+  /**
+   * Forensic counters for ENTRY PENDING_RECONCILIATION watchdog.
+   * Terminal never-found uses successfulEmptyProofCycles only.
+   */
+  entryReconcileEvidence?: {
+    reconciliationAttempts: number;
+    lastReconcileAt: string;
+    lastBrokerReadOk: boolean;
+    /** Complete empty-proof cycles in the SAME attempt (open+order+deal). */
+    successfulEmptyProofCycles: number;
+    firstSuccessfulEmptyProofAt: string | null;
+    lastSuccessfulEmptyProofAt: string | null;
+    /** Last history walk was exhaustive (hasMore fully resolved). */
+    lastHistoryComplete?: boolean;
+    terminalReason?: string | null;
+    /** Legacy diagnostic counters (not used for terminal gating). */
+    openPositionChecks?: number;
+    orderHistoryChecks?: number;
+    dealHistoryChecks?: number;
+    firstReconcileAt?: string;
+  } | null;
+  /** SMART_POSITION_MANAGER_V1 closed/open diagnostics (additive). */
+  brainVersion?: string | null;
+  positionManagerVersion?: string | null;
+  lossControllerVersion?: string | null;
+  /** Frozen original risk (price units) stamped at entry — for settled realised R. */
+  initialRiskPrice?: number | null;
+  smartPmState?: string | null;
+  highestProtectionStage?: string | null;
+  mfeR?: number | null;
+  maeR?: number | null;
+  mfeEur?: number | null;
+  maeEur?: number | null;
+  protectedProfitR?: number | null;
+  /** R locked by executable stop; may lag protectedProfitR under min-distance. */
+  executableProtectedProfitR?: number | null;
+  protectedStopPrice?: number | null;
+  lastStopAdjustReason?: string | null;
+  profitSurrenderEur?: number | null;
+  profitRetentionRatio?: number | null;
+};
+
+export type GoldHunterOrderGateResult = {
+  ok: boolean;
+  blockers: GoldHunterWaitReason[];
+  executionMode: typeof GH_ADMIN_EXECUTION_MODE;
+  liveExecutionEnabled: false;
+};

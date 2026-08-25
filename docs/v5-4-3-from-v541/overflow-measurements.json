@@ -1,0 +1,38 @@
+{
+  "plan-320x568": {
+    "sw": 320,
+    "cw": 320,
+    "delta": 0,
+    "ok": true
+  },
+  "plan-360x800": {
+    "sw": 360,
+    "cw": 360,
+    "delta": 0,
+    "ok": true
+  },
+  "plan-375x812": {
+    "sw": 375,
+    "cw": 375,
+    "delta": 0,
+    "ok": true
+  },
+  "plan-390x844": {
+    "sw": 390,
+    "cw": 390,
+    "delta": 0,
+    "ok": true
+  },
+  "plan-393x852": {
+    "sw": 393,
+    "cw": 393,
+    "delta": 0,
+    "ok": true
+  },
+  "plan-430x932": {
+    "sw": 430,
+    "cw": 430,
+    "delta": 0,
+    "ok": true
+  }
+}

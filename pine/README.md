@@ -1,98 +1,77 @@
 # GoldMeta Pine Script Bridge
 
-`GoldMetaBridge.pine` is the TradingView-side bridge for GoldMeta. It emits structured JSON alerts for XAUUSD bars and includes only data the script can calculate directly.
+`GoldMetaBridge.pine` (script version **3.0.0**, payload `schemaVersion` **1.1**) is the single canonical TradingView → GoldMeta webhook bridge for **XAUUSD** intraday planning.
 
-> GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals are not guaranteed, and you remain responsible for every trading decision.
+> Analysis only. Manual trading only. AutoTrade remains OFF. Not a profit guarantee. Not designed or marketed for minors.
 
-## What the script sends
+The backend remains backward-compatible with Bridge **2.1.0** / schema **1.0** during rollout. Do not put email, password, UID, or account tokens in this script. Per-user setup is limited to webhook URL / optional payload secret / Alert Role / symbol when supported.
 
-- `schemaVersion: "1.0"`
-- `source: "tradingview"`
-- Dynamic OHLCV from the chart bar
-- Confirmed-bar status
-- UTC-hour session heuristic: `ASIA`, `LONDON`, `OVERLAP`, `NEWYORK`, or `UNKNOWN`
-- Basic confirmed swing high/low placeholders
-- ATR and optional ATR bands
-- Higher-timeframe diagnostic close/SMA bias using `request.security(..., lookahead=barmerge.lookahead_off)`
-- `metadata.scriptVersion: "1.0.0"`
+## Timeframe hierarchy
 
-The script does **not** calculate proprietary volume profile, TPO/market profile, or paid Trend Meter values. Those fields are emitted as `null` or empty arrays and must be populated by separate licensed alerts or backend adapters.
+| Timeframe | Role | Who uses it |
+| --- | --- | --- |
+| **4H** (`240`) | Wider market context | Embedded in `PLAN_15M` via `request.security` — never triggers entry |
+| **1H** (`60`) | Session direction | Embedded in `PLAN_15M` |
+| **15M** (`15`) | Primary intraday plan | `Alert Role = PLAN_15M` on a 15m chart |
+| **5M** (`5`) | Entry confirmation / plan status | `Alert Role = CONFIRM_5M` on a 5m chart |
+| **1M** (`1`) | Price + freshness only | Optional `Alert Role = QUOTE_1M` on a 1m chart |
 
-## Add the script to TradingView
+All HTF values use `request.security(..., lookahead=barmerge.lookahead_off)`. Confirmed bars only for plan/confirm alerts.
 
-1. Open TradingView and select an XAUUSD chart.
-2. Open **Pine Editor**.
-3. Paste the contents of `pine/GoldMetaBridge.pine`.
-4. Click **Save**.
-5. Click **Add to chart**.
-6. Confirm the status table shows `Symbol OK = YES`.
+## Alert roles (one script)
 
-If you use a broker symbol such as `OANDA:XAUUSD`, the script should pass the XAUUSD check. If the current chart is not XAUUSD, the script shows a red warning label and sends the actual chart symbol so the backend can reject it safely.
+| Alert Role | Chart | Emits when | Backend effect |
+| --- | --- | --- | --- |
+| **PLAN_15M** | 15m | Confirmed 15m close | Create / replace stable session plan |
+| **CONFIRM_5M** | 5m | Meaningful confirmation **state change** only | Update matching plan status — never direction/entry/stop/TP |
+| **QUOTE_1M** | 1m | Confirmed 1m close | Price, distances, freshness only — `PLAN UNCHANGED` |
 
-## Create the TradingView alert
+Deterministic IDs include symbol, timeframe, confirmed close timestamp, and alert role. `planSourceKey` ties confirm/quote events to the latest confirmed 15m plan source.
 
-1. Click **Alerts**.
-2. Choose the GoldMeta Bridge indicator.
-3. Select **Any alert() function call**.
-4. Set the webhook URL:
+## Payload highlights (schema 1.1)
 
-   ```text
-   https://<region>-<firebase-project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-   ```
+- `schemaVersion: "1.1"`, `metadata.scriptVersion: "3.0.0"`
+- `metadata.alertRole`, `metadata.planSourceKey`, `metadata.confirmationState`
+- `metadata.fourHourContext` on plan payloads
+- Explicit nulls / availability flags — never fabricate POC/VAH/VAL/volume/spread/TPO
+- Legacy 2.1.0 `STRATEGY` / `QUOTE` payloads with `schemaVersion: "1.0"` remain accepted
 
-5. If TradingView shows a message box, use:
+See `docs/GOLD_META_PINE3_STABLE_PLAN.md` for the full contract and plan lifecycle.
 
-   ```text
-   {{alert_message}}
-   ```
+## Recommended setup (three alerts)
 
-6. Set alert frequency to match the script behavior. Confirmed-bar mode is ON by default, so once per bar close is expected.
-7. Save the alert.
+### 1) PLAN_15M (required)
 
-The script calls `alert(alertMessage, ...)` directly. The webhook body should therefore be the generated JSON payload, not a manually typed JSON template.
+1. XAUUSD **15-minute** chart → paste / update `pine/GoldMetaBridge.pine` → Add to chart.
+2. Inputs → **Alert Role = PLAN_15M**. Status table should show version **3.0.0**, Role `PLAN_15M`, Chart TF OK.
+3. Create alert → Condition **GoldMeta Bridge** → **Any alert() function call**.
+4. Message: `{{alert_message}}`. Webhook URL = your GoldMeta webhook. Once Per Bar Close / confirmed-bar ON.
 
-## Settings
+### 2) CONFIRM_5M (required for entry confirmation UI)
 
-### Symbol
+1. Separate XAUUSD **5-minute** chart with the **same** script.
+2. Inputs → **Alert Role = CONFIRM_5M**.
+3. Create alert the same way (Any alert() function call + `{{alert_message}}` + same webhook URL).
 
-- **Expected symbol** defaults to `XAUUSD`.
-- GoldMeta MVP is XAUUSD-only.
+### 3) QUOTE_1M (optional)
 
-### Timeframes
+1. XAUUSD **1-minute** chart, **Alert Role = QUOTE_1M**.
+2. Same alert pattern. Quote never replaces plan levels.
 
-- **Diagnostic HTF** defaults to `60`.
-- HTF values use `lookahead_off` to avoid future leakage.
+## Safe replacement of an old 2.1.0 alert
 
-### Alerts
+1. Deploy backend that accepts schema **1.0** and **1.1** (this release).
+2. Add the new 3.0.0 script + create the new PLAN_15M (and CONFIRM_5M) alerts.
+3. Confirm GoldMeta receives `scriptVersion 3.0.0` / `alertRole PLAN_15M`.
+4. Only then pause or delete the old 2.1.0 STRATEGY alert.
+5. Do **not** auto-modify live TradingView alerts from the app.
 
-- **Call alert() from script** enables or disables live `alert()` calls.
-- **Confirmed-bar mode** defaults to ON and gates alerts with `barstate.isconfirmed`.
-- **Test-alert mode** sends one `TEST` event on a realtime bar while enabled.
-- **Optional payload secret** is only for deployments that validate a payload-level secret. Prefer a secure opaque webhook URL plus backend-side secret handling.
+## Proprietary / unavailable
 
-### Levels (diagnostic)
+| Field family | Status |
+| --- | --- |
+| Session POC/VAH/VAL (`gm_svp_v1`) | GoldMeta-derived equivalent; null if incomplete |
+| Trend Meter style meter | Unavailable — replaced by `gm_trend_v1` |
+| TPO / market profile | Unavailable (`null` / `UNKNOWN`) |
 
-- Session high/low, swing placeholders, and optional ATR bands can be plotted.
-- These are diagnostics, not trade recommendations.
-
-### Status
-
-- The status table shows symbol status, confirmed mode, last close, and current heuristic session.
-- Diagnostic mode adds pivot markers.
-
-## Proprietary indicator merge notes
-
-GoldMeta is designed to merge multiple alert sources on the backend:
-
-1. This Pine bridge sends public chart-derived OHLCV and diagnostics.
-2. Proprietary volume profile/TPO/Trend Meter scripts send their own licensed alert payloads.
-3. The backend validates each source, deduplicates events, and merges compatible events by symbol/timeframe/bar time.
-4. If proprietary inputs are missing, the decision engine must treat them as missing data and lower data quality or return `WAIT` according to hard guards.
-
-Do not copy protected Pine code into this bridge unless your license allows it. Do not estimate proprietary values just to fill a field.
-
-## Example payload
-
-See `pine/alert-payload-example.json`.
-
-Confidence shown later by the GoldMeta backend means setup quality and input completeness. Confidence is **not** a win probability.
+Full methodology: `docs/INDICATOR_METHODOLOGY.md`. Alert investigation: `docs/TRADINGVIEW_ALERT_INVESTIGATION.md`.

@@ -113,15 +113,20 @@ export const scoreSnapshot = (snapshot: MarketSnapshot): ScoreResult => {
   const candle = snapshot.confirmationCandle;
   const candleDirection = candle?.direction;
   const candleSign = directionSign(candleDirection);
-  if (candle?.confirmed) {
+  if (!candle?.confirmed || !candleDirection || candle.classification === "NONE" || !candle.classification) {
+    reasonCodes.push("MISSING_CONFIRMATION");
+  } else if (candle.confirmed) {
     score += candleSign * weights.confirmationCandle;
-    const classification = candle.classification ?? "NONE";
+    const classification = candle.classification;
     if (classification === "REJECTION") {
       score += candleSign * weights.rejectionConfirmation;
       reasonCodes.push("REJECTION_CONFIRMATION");
     } else if (classification === "BREAKOUT" || classification === "RETEST") {
       score += candleSign * weights.breakoutRetest;
       reasonCodes.push("BREAKOUT_OR_RETEST");
+    } else if (classification === "CONTINUATION") {
+      score += candleSign * weights.confirmationCandle * 0.5;
+      reasonCodes.push("CONTINUATION_CONFIRMATION");
     }
     if (candleDirection === "BULLISH") {
       bullishEvidence.push(`Confirmed ${classification.toLowerCase()} candle`);
@@ -131,6 +136,9 @@ export const scoreSnapshot = (snapshot: MarketSnapshot): ScoreResult => {
       reasonCodes.push("CANDLE_BEARISH");
     }
   }
+
+  // Soft optional gaps (missing trend / volume profile) no longer emit hard
+  // reason codes that force WAIT — session-plan quality surfaces them softly.
 
   // TPO value migration
   const valueMigration = snapshot.marketProfile?.valueMigration;

@@ -1,0 +1,155 @@
+/* GoldMeta Premium UI V2 — design tokens */
+:root {
+  color-scheme: light;
+
+  /* Navy */
+  --navy-950: #06172f;
+  --navy-900: #0a2345;
+  --navy-850: #102e57;
+  --navy-800: #163862;
+  --navy: var(--navy-900);
+  --navy-2: var(--navy-800);
+
+  /* Surfaces */
+  --surface-page: #f4f6fa;
+  --surface-card: #ffffff;
+  --surface-soft: #f8f9fc;
+  --border-soft: #dfe5ee;
+  --bg: var(--surface-page);
+  --surface: var(--surface-card);
+  --surface-alt: var(--surface-soft);
+  --elevated: var(--surface-card);
+  --input-bg: #ffffff;
+  --border: var(--border-soft);
+  --border-strong: #cfd8e6;
+
+  /* Gold */
+  --gold-600: #c98700;
+  --gold-500: #e2a400;
+  --gold-200: #f8e6b7;
+  --gold-100: #fff7e6;
+  --gold: var(--gold-500);
+  --gold-hover: var(--gold-600);
+  --gold-dark: var(--gold-600);
+  --gold-soft: var(--gold-100);
+  --navy-soft: rgba(10, 35, 69, 0.06);
+
+  /* Status */
+  --success: #20a85b;
+  --success-soft: #e8f7ee;
+  --warning: #d89a00;
+  --warning-soft: #fff6df;
+  --danger: #e43d3d;
+  --danger-soft: #fdecec;
+  --info: #3678d4;
+  --positive: var(--success);
+  --positive-soft: var(--success-soft);
+  --negative: var(--danger);
+  --negative-soft: var(--danger-soft);
+  --wait: var(--warning);
+  --buy: var(--success);
+  --sell: var(--danger);
+  --notrade: #7f1d1d;
+  --notrade-soft: var(--danger-soft);
+  --research: var(--navy-800);
+  --research-soft: #eef2f7;
+  --liquidity: #0891b2;
+  --liquidity-soft: #ecfeff;
+  --neutral: #667085;
+  --neutral-soft: #f2f4f7;
+  --muted: #98a2b3;
+  --text: #12233f;
+  --text-secondary: #5b6b82;
+  --stale: var(--muted);
+  --unavailable: var(--neutral);
+  --shadow-tone: var(--navy-900);
+
+  /* Spacing (4/8 system) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space: var(--space-4);
+  --space-lg: var(--space-5);
+
+  /* Radii */
+  --radius-hero: 24px;
+  --radius-card: 18px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
+  --radius: var(--radius-card);
+  --radius-sm: var(--radius-control);
+
+  /* Shadows */
+  --shadow: 0 8px 24px rgba(9, 35, 69, 0.08);
+  --shadow-sm: 0 2px 8px rgba(9, 35, 69, 0.05);
+  --shadow-hero: 0 16px 40px rgba(6, 23, 47, 0.28);
+
+  /* Type */
+  --font-sans: "Plus Jakarta Sans", "Segoe UI", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  /* Compact premium hierarchy — bold but not oversized */
+  --text-hero: clamp(1.45rem, 3.8vw, 1.85rem);
+  --text-page: 1.35rem;
+  --text-page-mobile: 1.25rem;
+  --text-section: 1.05rem;
+  --text-card: 1rem;
+  --text-body: 0.9rem;
+  --text-label: 0.75rem;
+  --text-meta: 0.72rem;
+  --text-decision: var(--text-hero);
+  --text-auth: 1.875rem;
+  --price-size: 1.5rem;
+  --price-weight: 700;
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --header-h: 76px;
+  --mobile-header-h: 80px;
+  --mobile-nav-h: 72px;
+  --content-max: 1280px;
+  --touch-min: 44px;
+  --control-h: 48px;
+  --focus-ring: 0 0 0 3px rgba(226, 164, 0, 0.4);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Ladder */
+  --ladder-resistance: #e11d48;
+  --ladder-dev-resistance: #f97316;
+  --ladder-poc: var(--gold-500);
+  --ladder-dev-poc: var(--liquidity);
+  --ladder-vah-val: var(--research);
+  --ladder-support: var(--success);
+  --ladder-key-support: #047857;
+  --ladder-live: var(--navy-900);
+
+  --auth-card-w: 480px;
+  --dash-summary-max: 180px;
+  --scroll-hotfix: 1;
+  --ui-redesign: 1;
+  --ui-redesign-patch: 6.0.0-premium-v2;
+  --premium-v2: 1;
+
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-weight: 450;
+  background: var(--bg);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

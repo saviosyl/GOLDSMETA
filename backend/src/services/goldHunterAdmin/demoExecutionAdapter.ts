@@ -1,0 +1,607 @@
+/**
+ * GOLD HUNTER DEMO_ONLY execution adapter.
+ * Truthful broker results — never mark FILLED without accepted evidence.
+ * Never Fast AutoTrade engine.
+ */
+
+import {
+  submitDemoMarketOrder,
+  type SubmitDemoMarketOrderArgs
+} from "../broker/ctrader/demoOrderExecution";
+import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "../broker/ctrader/flags";
+import { getConnection } from "../broker/ctrader/connectionStore";
+import { assertGoldHunterDemoOnlyEnvironment, evaluateGoldHunterOrderGates } from "./orderGates";
+import { evaluateGoldHunterFinalLossSafetyGate } from "./lossSafetyGate";
+import { loadGoldHunterConfig } from "./configStore";
+import { upsertGoldHunterDemoTrade } from "./tradeStore";
+import {
+  GH_ADMIN_EXECUTION_MODE,
+  GH_ADMIN_STRATEGY_ID,
+  type GoldHunterAdminConfig,
+  type GoldHunterDemoTrade
+} from "./types";
+import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
+import { signalGoldHunterOpenEntryIntegrityDefect } from "./entryIntegrity";
+
+export type GoldHunterDemoSubmitArgs = {
+  ownerUid: string;
+  isAdmin: boolean;
+  side: "BUY" | "SELL";
+  lots: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  entryHint?: number | null;
+  setup?: "A" | "B" | "C" | null;
+  signalId?: string | null;
+  goldHunterTradeId: string;
+  clientOrderId: string;
+  symbolId?: string | null;
+  marketOpen: boolean;
+  feedFresh: boolean;
+  depthValid: boolean;
+  spreadOk: boolean;
+  capitalOk: boolean;
+  dailyLossOk: boolean;
+  openTradeCount: number;
+  signalPresent: boolean;
+  signalConsumed: boolean;
+  accountSnapshotValid: boolean;
+  /**
+   * Internal orchestrator hand-off after it has already loaded and validated
+   * the same DEMO config/account context. Avoids duplicate async reads after
+   * durable claim and keeps the final market check adjacent to transport.
+   */
+  prevalidatedContext?: {
+    brokerEnvironment: "DEMO";
+    config: GoldHunterAdminConfig;
+  };
+  /**
+   * Mid used for CURRENT loss-safety revalidation immediately before transport.
+   * Falls back to entryHint when omitted.
+   */
+  lossSafetyMid?: number | null;
+  signedImbalance1s?: number | null;
+  midVel250?: number | null;
+  /** Called only after local gates pass, immediately before ProtoOANewOrder transport. */
+  onEnterBrokerTransport?: () => Promise<void>;
+  /** Synchronous notification after final gates, immediately before transport. */
+  onBrokerTransportReady?: () => void;
+  /**
+   * Revision 03 synchronous final reprice. Runs after all awaited preparation
+   * and immediately before the final loss gate / ProtoOANewOrder call.
+   */
+  resolveFinalProtection?: () =>
+    | {
+        ok: true;
+        entryHint: number;
+        stopLoss: number;
+        lossSafetyMid: number;
+        signedImbalance1s: number | null;
+        midVel250: number | null;
+      }
+    | { ok: false; blocker: string; detail?: string };
+  /** Injected for tests. */
+  placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
+};
+
+export type GoldHunterDemoSubmitOk = {
+  ok: true;
+  outcome:
+    | "FILLED"
+    | "ACCEPTED_PENDING_FILL"
+    | "BROKER_REJECTED"
+    | "BROKER_SUBMIT_ERROR"
+    | "PENDING_RECONCILIATION";
+  trade: GoldHunterDemoTrade | null;
+  broker: DemoMarketOrderResult | null;
+  errorCode: string | null;
+};
+
+export type GoldHunterDemoSubmitFail = {
+  ok: false;
+  blockers: string[];
+  executionMode: typeof GH_ADMIN_EXECUTION_MODE;
+  liveExecutionEnabled: false;
+  /**
+   * True when CURRENT loss-safety blocked after async pretransport prep
+   * (e.g. SUBMITTING claim write) and ProtoOANewOrder was never invoked.
+   */
+  pretransportBlocked?: boolean;
+  /** Exact final local rejection detail; safe for diagnostics, never a retry token. */
+  pretransportDetail?: string;
+};
+
+/**
+ * Place a Gold Hunter Demo order only when ALL gates pass.
+ * Persists truthful status from DemoMarketOrderResult.
+ */
+export async function submitGoldHunterDemoOrder(
+  args: GoldHunterDemoSubmitArgs
+): Promise<GoldHunterDemoSubmitOk | GoldHunterDemoSubmitFail> {
+  if (isCTraderLiveEnabled()) {
+    return {
+      ok: false,
+      blockers: ["WAIT — LIVE ENVIRONMENT REFUSED"],
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    };
+  }
+  if (!isCTraderDemoOrderSubmissionEnabled()) {
+    return {
+      ok: false,
+      blockers: ["WAIT — BROKER DISCONNECTED"],
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    };
+  }
+
+  const connection = args.prevalidatedContext ? null : await getConnection(args.ownerUid);
+  const brokerEnvironment = args.prevalidatedContext
+    ? args.prevalidatedContext.brokerEnvironment
+    : connection?.selectedAccountIsLive === true
+      ? "LIVE"
+      : connection
+        ? "DEMO"
+        : null;
+
+  try {
+    assertGoldHunterDemoOnlyEnvironment(brokerEnvironment);
+  } catch {
+    return {
+      ok: false,
+      blockers: ["WAIT — LIVE ENVIRONMENT REFUSED"],
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    };
+  }
+
+  const config = args.prevalidatedContext?.config ?? (await loadGoldHunterConfig(args.ownerUid));
+  const gates = evaluateGoldHunterOrderGates({
+    config,
+    brokerEnvironment,
+    brokerConnected: args.prevalidatedContext ? true : Boolean(connection),
+    accountSnapshotValid: args.accountSnapshotValid,
+    marketOpen: args.marketOpen,
+    feedFresh: args.feedFresh,
+    depthValid: args.depthValid,
+    spreadOk: args.spreadOk,
+    capitalOk: args.capitalOk,
+    dailyLossOk: args.dailyLossOk,
+    openTradeCount: args.openTradeCount,
+    signalPresent: args.signalPresent,
+    signalConsumed: args.signalConsumed,
+    isAdmin: args.isAdmin
+  });
+
+  if (!gates.ok) {
+    return {
+      ok: false,
+      blockers: gates.blockers,
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    };
+  }
+
+  if (!(args.lots > 0) || !Number.isFinite(args.lots)) {
+    return {
+      ok: false,
+      blockers: ["WAIT — CONFIG INVALID"],
+      executionMode: GH_ADMIN_EXECUTION_MODE,
+      liveExecutionEnabled: false
+    };
+  }
+
+  // Complete ALL async pretransport preparation first (claim → SUBMITTING, etc.).
+  if (args.onEnterBrokerTransport) {
+    await args.onEnterBrokerTransport();
+  }
+
+  let effectiveEntryHint = args.entryHint ?? null;
+  let effectiveStopLoss = args.stopLoss ?? null;
+  let effectiveLossSafetyMid = args.lossSafetyMid ?? null;
+  let effectiveSignedImbalance1s = args.signedImbalance1s ?? null;
+  let effectiveMidVel250 = args.midVel250 ?? null;
+
+  if (args.resolveFinalProtection) {
+    const repriced = args.resolveFinalProtection();
+    if (!repriced.ok) {
+      return {
+        ok: false,
+        blockers: [repriced.blocker],
+        executionMode: GH_ADMIN_EXECUTION_MODE,
+        liveExecutionEnabled: false,
+        pretransportBlocked: true,
+        pretransportDetail: repriced.detail ?? "final_live_protection_unavailable"
+      };
+    }
+    effectiveEntryHint = repriced.entryHint;
+    effectiveStopLoss = repriced.stopLoss;
+    effectiveLossSafetyMid = repriced.lossSafetyMid;
+    effectiveSignedImbalance1s = repriced.signedImbalance1s;
+    effectiveMidVel250 = repriced.midVel250;
+  }
+
+  // LAST MEANINGFUL LOCAL OPERATION before ProtoOANewOrder:
+  // CURRENT loss-safety revalidation. No awaited prep may follow this check.
+  const mid =
+    effectiveLossSafetyMid != null && Number.isFinite(effectiveLossSafetyMid)
+      ? effectiveLossSafetyMid
+      : effectiveEntryHint != null && Number.isFinite(effectiveEntryHint)
+        ? effectiveEntryHint
+        : null;
+  if (mid != null) {
+    const lossGate = evaluateGoldHunterFinalLossSafetyGate({
+      ownerUid: args.ownerUid,
+      side: args.side,
+      mid,
+      signedImbalance1s: effectiveSignedImbalance1s,
+      midVel250: effectiveMidVel250,
+      opportunityId: args.signalId ?? null
+    });
+    if (!lossGate.ok) {
+      console.info(
+        JSON.stringify({
+          msg: "gold_hunter_final_loss_safety_blocked",
+          product: "GOLD_HUNTER",
+          stage: "FINAL_PRETRANSPORT_AFTER_ASYNC_PREP",
+          signalId: args.signalId ?? null,
+          goldHunterTradeId: args.goldHunterTradeId,
+          rejectionReason: lossGate.rejectionReason,
+          detail: lossGate.detail,
+          ts: new Date().toISOString()
+        })
+      );
+      return {
+        ok: false,
+        blockers: [lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"],
+        executionMode: GH_ADMIN_EXECUTION_MODE,
+        liveExecutionEnabled: false,
+        pretransportBlocked: true,
+        pretransportDetail: lossGate.detail ?? "final_pretransport_loss_safety"
+      };
+    }
+  }
+
+  // Immediate broker transport — only sync locals between final gate and place().
+  const now = new Date().toISOString();
+  const place = args.placeOrder ?? submitDemoMarketOrder;
+  args.onBrokerTransportReady?.();
+
+  console.info(
+    JSON.stringify({
+      msg: "gold_hunter_broker_transport_enter",
+      product: "GOLD_HUNTER",
+      stage: "ENTERED_SUBMIT",
+      signalId: args.signalId ?? null,
+      goldHunterTradeId: args.goldHunterTradeId,
+      clientOrderId: args.clientOrderId,
+      ts: new Date().toISOString()
+    })
+  );
+
+  let broker: DemoMarketOrderResult;
+  try {
+    broker = await place({
+      ownerUid: args.ownerUid,
+      side: args.side,
+      lots: args.lots,
+      stopLoss: effectiveStopLoss,
+      takeProfit: args.takeProfit,
+      entryHint: effectiveEntryHint,
+      symbolId: args.symbolId,
+      comment: GH_ADMIN_STRATEGY_ID,
+      label: args.goldHunterTradeId,
+      clientOrderId: args.clientOrderId,
+      // Do NOT pass Fast AutoTrade strategy id — GH ownership is separate.
+      strategyId: null
+    });
+  } catch (e) {
+    const errorCode = e instanceof Error ? e.message.slice(0, 120) : "BROKER_SUBMIT_THREW";
+    // Thrown after transport entry — outcome uncertain; never blind-resubmit.
+    const trade: GoldHunterDemoTrade = {
+      goldHunterTradeId: args.goldHunterTradeId,
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      setup: args.setup ?? null,
+      side: args.side,
+      signalTs: now,
+      orderTs: now,
+      fillTs: null,
+      closeTs: null,
+      entry: null,
+      exit: null,
+      stop: effectiveStopLoss,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: null,
+      exitReason: null,
+      brokerOrderId: null,
+      brokerPositionId: null,
+      status: "PENDING_RECONCILIATION",
+      signalId: args.signalId ?? null,
+      clientOrderId: args.clientOrderId,
+      errorCode
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      createdAt: now,
+      ownership: {
+        strategy: GH_ADMIN_STRATEGY_ID,
+        environment: "DEMO",
+        ownerUid: args.ownerUid,
+        signalId: args.signalId ?? null
+      }
+    });
+    return {
+      ok: true,
+      outcome: "PENDING_RECONCILIATION",
+      trade,
+      broker: null,
+      errorCode
+    };
+  }
+
+  console.info(
+    JSON.stringify({
+      msg: "gold_hunter_broker_transport_result",
+      product: "GOLD_HUNTER",
+      stage: "FINAL_OUTCOME",
+      signalId: args.signalId ?? null,
+      goldHunterTradeId: args.goldHunterTradeId,
+      clientOrderId: args.clientOrderId,
+      outcome: broker.outcome ?? null,
+      requestSent: broker.requestSent ?? null,
+      newOrderReqCount: broker.newOrderReqCount ?? null,
+      errorCode: broker.errorCode ?? null,
+      orderId: broker.orderId ?? null,
+      positionId: broker.positionId ?? null,
+      ts: new Date().toISOString()
+    })
+  );
+
+  const uncertain =
+    broker.outcome === "BROKER_OUTCOME_UNKNOWN" ||
+    broker.outcome === "BROKER_TIMEOUT_RECONCILED_NOT_FOUND" ||
+    broker.errorCode === "NEWORDER_SEND_TIMEOUT" ||
+    broker.errorCode === "CTRADER_ORDER_TIMEOUT";
+
+  if (uncertain) {
+    const trade: GoldHunterDemoTrade = {
+      goldHunterTradeId: args.goldHunterTradeId,
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      setup: args.setup ?? null,
+      side: args.side,
+      signalTs: now,
+      orderTs: now,
+      fillTs: null,
+      closeTs: null,
+      entry: null,
+      exit: null,
+      stop: effectiveStopLoss,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: null,
+      exitReason: null,
+      brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
+      status: "PENDING_RECONCILIATION",
+      signalId: args.signalId ?? null,
+      clientOrderId: broker.clientOrderId ?? args.clientOrderId,
+      errorCode: String(broker.errorCode ?? "BROKER_OUTCOME_UNKNOWN").slice(0, 120),
+      filledVolumeLots: broker.filledVolumeLots ?? null
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      createdAt: now,
+      ownership: {
+        strategy: GH_ADMIN_STRATEGY_ID,
+        environment: "DEMO",
+        ownerUid: args.ownerUid,
+        signalId: args.signalId ?? null
+      }
+    });
+    return {
+      ok: true,
+      outcome: "PENDING_RECONCILIATION",
+      trade,
+      broker,
+      errorCode: trade.errorCode ?? null
+    };
+  }
+
+  if (!broker.accepted) {
+    const errorCode = broker.errorCode ?? "BROKER_REJECTED";
+    const isSubmitError = broker.outcome === "BROKER_SUBMIT_ERROR" || broker.requestSent === false;
+    const trade: GoldHunterDemoTrade = {
+      goldHunterTradeId: args.goldHunterTradeId,
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      setup: args.setup ?? null,
+      side: args.side,
+      signalTs: now,
+      orderTs: now,
+      fillTs: null,
+      closeTs: null,
+      entry: null,
+      exit: null,
+      stop: effectiveStopLoss,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: null,
+      exitReason: null,
+      brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
+      status: isSubmitError ? "BROKER_SUBMIT_ERROR" : "BROKER_REJECTED",
+      signalId: args.signalId ?? null,
+      clientOrderId: broker.clientOrderId ?? args.clientOrderId,
+      errorCode: String(errorCode).slice(0, 120),
+      filledVolumeLots: broker.filledVolumeLots ?? null
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      createdAt: now,
+      ownership: {
+        strategy: GH_ADMIN_STRATEGY_ID,
+        environment: "DEMO",
+        ownerUid: args.ownerUid,
+        signalId: args.signalId ?? null
+      }
+    });
+    return {
+      ok: true,
+      outcome: isSubmitError ? "BROKER_SUBMIT_ERROR" : "BROKER_REJECTED",
+      trade,
+      broker,
+      errorCode: trade.errorCode ?? null
+    };
+  }
+
+  const fillPrice =
+    broker.fillPrice != null && Number.isFinite(broker.fillPrice) ? broker.fillPrice : null;
+  const hasPosition = broker.positionId != null && String(broker.positionId).length > 0;
+  // Zero / non-positive fill prices must NEVER become FILLED.
+  const filled =
+    fillPrice != null &&
+    fillPrice > 0 &&
+    hasPosition &&
+    (broker.filledVolumeLots == null || broker.filledVolumeLots > 0);
+
+  if (!filled) {
+    const trade: GoldHunterDemoTrade = {
+      goldHunterTradeId: args.goldHunterTradeId,
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      setup: args.setup ?? null,
+      side: args.side,
+      signalTs: now,
+      orderTs: now,
+      fillTs: null,
+      closeTs: null,
+      entry: fillPrice != null && fillPrice > 0 ? fillPrice : null,
+      exit: null,
+      stop: broker.stopLoss ?? effectiveStopLoss,
+      initialRiskPrice: goldHunterFrozenInitialRiskPrice(),
+      entrySpread: null,
+      durationMs: null,
+      mfe: null,
+      mae: null,
+      grossPnlEur: null,
+      netPnlEur: null,
+      result: null,
+      exitReason: null,
+      brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
+      status:
+        hasPosition && (fillPrice == null || fillPrice <= 0)
+          ? "PENDING_RECONCILIATION"
+          : "ACCEPTED_PENDING_FILL",
+      signalId: args.signalId ?? null,
+      clientOrderId: broker.clientOrderId ?? args.clientOrderId,
+      filledVolumeLots: broker.filledVolumeLots ?? null,
+      takeProfit: broker.takeProfit ?? args.takeProfit ?? null,
+      errorCode:
+        hasPosition && (fillPrice == null || fillPrice <= 0) ? "ENTRY_PRICE_INVALID" : null,
+      dataQuality: hasPosition && (fillPrice == null || fillPrice <= 0) ? "ENTRY_INVALID" : null
+    };
+    await upsertGoldHunterDemoTrade(args.ownerUid, {
+      ...trade,
+      createdAt: now,
+      ownership: {
+        strategy: GH_ADMIN_STRATEGY_ID,
+        environment: "DEMO",
+        ownerUid: args.ownerUid,
+        signalId: args.signalId ?? null
+      }
+    });
+    if (
+      trade.status === "PENDING_RECONCILIATION" &&
+      trade.errorCode === "ENTRY_PRICE_INVALID" &&
+      trade.brokerPositionId
+    ) {
+      signalGoldHunterOpenEntryIntegrityDefect({
+        ownerUid: args.ownerUid,
+        tradeId: trade.goldHunterTradeId
+      });
+    }
+    return {
+      ok: true,
+      outcome:
+        trade.status === "PENDING_RECONCILIATION"
+          ? "PENDING_RECONCILIATION"
+          : "ACCEPTED_PENDING_FILL",
+      trade,
+      broker,
+      errorCode: trade.errorCode ?? null
+    };
+  }
+
+  const trade: GoldHunterDemoTrade = {
+    goldHunterTradeId: args.goldHunterTradeId,
+    strategy: GH_ADMIN_STRATEGY_ID,
+    environment: "DEMO",
+    setup: args.setup ?? null,
+    side: args.side,
+    signalTs: now,
+    orderTs: now,
+    fillTs: now,
+    closeTs: null,
+    entry: fillPrice,
+    exit: null,
+    stop: broker.stopLoss ?? effectiveStopLoss,
+    initialRiskPrice: (() => {
+      const stop = broker.stopLoss ?? effectiveStopLoss;
+      if (stop == null || !Number.isFinite(stop)) {
+        return goldHunterFrozenInitialRiskPrice();
+      }
+      const actualRisk = args.side === "BUY" ? fillPrice - stop : stop - fillPrice;
+      return actualRisk > 0 && Number.isFinite(actualRisk)
+        ? actualRisk
+        : goldHunterFrozenInitialRiskPrice();
+    })(),
+    entrySpread: null,
+    durationMs: null,
+    mfe: null,
+    mae: null,
+    grossPnlEur: null,
+    netPnlEur: null,
+    result: "OPEN",
+    exitReason: null,
+    brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
+    brokerPositionId: String(broker.positionId),
+    status: "FILLED",
+    signalId: args.signalId ?? null,
+    clientOrderId: broker.clientOrderId ?? args.clientOrderId,
+    filledVolumeLots: broker.filledVolumeLots ?? args.lots,
+    takeProfit: broker.takeProfit ?? args.takeProfit ?? null
+  };
+
+  await upsertGoldHunterDemoTrade(args.ownerUid, {
+    ...trade,
+    createdAt: now,
+    ownership: {
+      strategy: GH_ADMIN_STRATEGY_ID,
+      environment: "DEMO",
+      ownerUid: args.ownerUid,
+      signalId: args.signalId ?? null
+    }
+  });
+
+  return { ok: true, outcome: "FILLED", trade, broker, errorCode: null };
+}

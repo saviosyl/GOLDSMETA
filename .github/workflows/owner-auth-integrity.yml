@@ -1,0 +1,58 @@
+name: Owner Auth Integrity Guard
+
+# Read-only. Never deletes/creates Auth users.
+# Requires repository secret GOLDMETA_PINNED_OWNER_UID (never print full value).
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail_on_mismatch:
+        description: "Fail the workflow when status is not HEALTHY"
+        required: true
+        default: "true"
+        type: boolean
+  schedule:
+    # Twice daily integrity probe (UTC).
+    - cron: "17 6,18 * * *"
+
+jobs:
+  owner-auth-integrity:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+        continue-on-error: true
+
+      - name: Verify owner Auth integrity (read-only)
+        env:
+          GOLDMETA_OWNER_EMAIL: saviosyl@gmail.com
+          GOLDMETA_PINNED_OWNER_UID: ${{ secrets.GOLDMETA_PINNED_OWNER_UID }}
+          GCLOUD_PROJECT: goldmeta-web
+          GOOGLE_CLOUD_PROJECT: goldmeta-web
+        run: |
+          if [ -z "${GOLDMETA_PINNED_OWNER_UID}" ]; then
+            echo "STATUS=CONFIGURATION_MISSING"
+            echo "Pinned owner UID secret is not configured in GitHub Actions."
+            exit 2
+          fi
+          # Redact accidental full UID echoes from tooling.
+          npx tsx scripts/verifyOwnerAuthIntegrity.ts | sed -E 's/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{12,}([A-Za-z0-9_-]{4})/\1…\2/g'
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_mismatch != true }}

@@ -1,0 +1,5 @@
+# SPA client routes → app shell.
+# Missing hashed assets under /gm/*, /gmv7/*, and /assets/* use the nearest
+# public/<dir>/404.html so Cloudflare Pages returns a real 404 instead of
+# SPA-falling-back to index.html (which poisons MIME types and CDN cache).
+/*    /index.html   200

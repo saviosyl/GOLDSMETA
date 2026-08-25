@@ -23,6 +23,43 @@ final class DashboardStateTests: XCTestCase {
         XCTAssertEqual(DashboardViewModel.state(for: stale), .loaded(stale))
     }
 
+    func testMVPScenariosExposeRequiredDashboardFields() throws {
+        for name in MockDecisionService.mvpFixtureNames {
+            let decision = try fixture(name)
+            let display = decision.display
+
+            XCTAssertTrue(["BUY", "SELL", "WAIT"].contains(display.decisionLabel))
+            XCTAssertFalse(display.confidenceText.isEmpty)
+            XCTAssertFalse(display.currentPriceText.isEmpty)
+            XCTAssertFalse(display.trendText.isEmpty)
+            XCTAssertFalse(display.pocText.isEmpty)
+            XCTAssertFalse(display.vahText.isEmpty)
+            XCTAssertFalse(display.valText.isEmpty)
+            XCTAssertFalse(display.actionTitles.isEmpty)
+
+            let requiredActionOptions: Set<String> = [
+                "Wait for candle close",
+                "Enter trade",
+                "Hold",
+                "Take partial profit",
+                "Move stop to breakeven",
+                "Exit early"
+            ]
+            XCTAssertTrue(Set(display.actionTitles).isSubset(of: requiredActionOptions))
+        }
+    }
+
+    func testRecommendedActionDefaultsCoverWorkflow() {
+        let waitDefaults = RecommendedTradeAction.defaults(for: .wait, breakeven: .notApplicable, earlyExit: false)
+        XCTAssertEqual(waitDefaults, [.waitForCandleClose, .hold])
+
+        let buyDefaults = RecommendedTradeAction.defaults(for: .buy, breakeven: .moveToBreakeven, earlyExit: false)
+        XCTAssertTrue(buyDefaults.contains(.enterTrade))
+        XCTAssertTrue(buyDefaults.contains(.moveStopToBreakeven))
+        XCTAssertTrue(buyDefaults.contains(.takePartialProfit))
+        XCTAssertTrue(buyDefaults.contains(.exitEarly))
+    }
+
     private func fixture(_ name: String) throws -> Decision {
         let bundle = Bundle(for: Self.self)
         let url = try XCTUnwrap(

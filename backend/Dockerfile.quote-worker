@@ -1,0 +1,15 @@
+# Always-on Pepperstone XAUUSD quote worker (Cloud Run / any container host).
+# Holds a persistent Spotware WebSocket — do not run this as a request-scoped Cloud Function.
+FROM node:20-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY scripts/applyCTraderLayerProtoExtensions.mjs ./scripts/applyCTraderLayerProtoExtensions.mjs
+RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts/runPersistentQuoteWorker.ts ./scripts/runPersistentQuoteWorker.ts
+RUN npm install tsx@latest --no-save
+ENV PORT=8080
+ENV NODE_ENV=production
+EXPOSE 8080
+CMD ["npx", "tsx", "scripts/runPersistentQuoteWorker.ts"]

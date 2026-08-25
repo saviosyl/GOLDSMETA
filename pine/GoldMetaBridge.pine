@@ -1,48 +1,79 @@
 //@version=6
-indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50)
+indicator("GoldMeta Bridge", shorttitle="GoldMeta Bridge", overlay=true, max_labels_count=50, max_lines_count=50, max_bars_back=5000)
 
-// GoldMeta Pine Script bridge.
+// GoldMeta Bridge 3.0.0 — canonical TradingView → GoldMeta webhook (schemaVersion 1.1).
+// Backend remains backward-compatible with Bridge 2.1.0 / schema 1.0 during rollout.
 //
-// TradingView alert setup:
-// 1. Add this script to an XAUUSD chart.
-// 2. Open Alerts, choose this indicator, and select "Any alert() function call".
-// 3. Set your GoldMeta backend webhook URL, for example:
-//    https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
-// 4. If TradingView asks for a Message, use {{alert_message}} so the alert() payload below is forwarded unchanged.
+// Timeframe hierarchy: 4H context | 1H direction | 15M primary plan | 5M confirmation | 1M quote-only.
+// Alert Role input (same script for all users): PLAN_15M | CONFIRM_5M | QUOTE_1M.
+// Never put email, password, UID, or account tokens in this script.
 //
-// Proprietary volume profile, TPO/market profile, and paid Trend Meter values are not calculated here.
-// They must arrive from separate proprietary TradingView alerts or another licensed adapter. This script
-// sends null/empty adapter fields instead of inventing unavailable values.
+// TradingView alert setup (desktop Supercharts):
+// 1. Add this script to the chart timeframe matching Alert Role (15 / 5 / 1).
+// 2. Toolbar clock → Create alert (do NOT use legend/plot "Add alert").
+// 3. Condition: "GoldMeta Bridge" → "Any alert() function call".
+// 4. Webhook URL: https://<region>-<project-id>.cloudfunctions.net/api/webhooks/tradingview/<webhookId>
+// 5. Message: {{alert_message}}
+// 6. Confirmed-bar mode ON for production. Frequency is controlled by alert() here.
 //
-// GoldMeta provides market analysis and decision support only. Trading involves substantial risk. Signals
-// are not guaranteed, and you remain responsible for every trading decision.
+// Why plot names appear: every plot()/plotshape() is a technical-alert series. Those cannot
+// send this script's dynamic JSON. See docs/TRADINGVIEW_ALERT_INVESTIGATION.md.
+//
+// gm_* values are GoldMeta-derived equivalents — not proprietary VP/Trend Meter products.
+// TPO / unavailable fields stay null. Non-repainting: confirmed bars; lookahead_off.
+// Analysis only — trading involves substantial risk. AutoTrade remains OFF.
 
-const string SCRIPT_VERSION = "1.0.0"
+const string SCRIPT_VERSION = "3.0.0"
+const string SCHEMA_VERSION = "1.1"
+const string ALERT_KIND_STRATEGY = "STRATEGY"
+const string ALERT_KIND_QUOTE = "QUOTE"
+const string ROLE_PLAN_15M = "PLAN_15M"
+const string ROLE_CONFIRM_5M = "CONFIRM_5M"
+const string ROLE_QUOTE_1M = "QUOTE_1M"
+const string METHOD_VP = "gm_svp_v1"
+const string METHOD_TREND = "gm_trend_v1"
+const string METHOD_CANDLE = "gm_candle_v1"
+const float VA_PCT = 70.0
+const int MAX_BINS = 300
 
 groupSymbol = "Symbol"
 expectedSymbol = input.string("XAUUSD", "Expected symbol", group=groupSymbol)
 
+groupRole = "Alert Role"
+alertRoleInput = input.string(ROLE_PLAN_15M, "Alert Role", options=[ROLE_PLAN_15M, ROLE_CONFIRM_5M, ROLE_QUOTE_1M], group=groupRole, tooltip="Same canonical script for all users. PLAN_15M on 15m chart, CONFIRM_5M on 5m chart, QUOTE_1M on 1m chart.")
+
 groupTimeframes = "Timeframes"
-higherTimeframe = input.timeframe("60", "Diagnostic HTF", group=groupTimeframes)
+contextTfInput = input.timeframe("240", "Context TF (4H wider market)", group=groupTimeframes, tooltip="4 hour — wider context only. Never triggers entry. lookahead_off.")
+directionTfInput = input.timeframe("60", "Direction TF (main bias)", group=groupTimeframes, tooltip="1 hour — main intraday direction. lookahead_off security.")
+structureTfInput = input.timeframe("15", "Structure TF (setup)", group=groupTimeframes, tooltip="15 minutes — primary plan structure.")
+entryTfInput = input.timeframe("5", "Entry confirm TF", group=groupTimeframes, tooltip="5 minutes — entry confirmation.")
+quoteTfInput = input.timeframe("1", "Quote TF (freshness)", group=groupTimeframes, tooltip="1 minute — price/freshness only; never reverses the day-trade plan.")
 
 groupAlerts = "Alerts"
 enableAlertCalls = input.bool(true, "Call alert() from script", group=groupAlerts)
+enableQuoteUpdates = input.bool(false, "Legacy dual-emit quotes (PLAN chart only)", group=groupAlerts, tooltip="Deprecated when using dedicated QUOTE_1M role alert. Prefer a separate 1m alert with Alert Role = QUOTE_1M.")
 confirmedBarMode = input.bool(true, "Confirmed-bar mode", group=groupAlerts)
-testAlertMode = input.bool(false, "Test-alert mode", group=groupAlerts)
-payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret. Do not commit or publish secrets.")
+testAlertMode = input.bool(false, "Test-alert / production state", group=groupAlerts, tooltip="When ON, marks payload as test. Does not place orders.")
+payloadSecret = input.string("", "Optional payload secret", group=groupAlerts, tooltip="Leave blank unless your backend validates a payload-level shared secret. Never put email/password/UID here.")
 
-groupLevels = "Levels (diagnostic)"
-showDiagnosticLevels = input.bool(true, "Plot diagnostic levels", group=groupLevels)
-swingLength = input.int(5, "Swing pivot length", minval=1, maxval=50, group=groupLevels)
+groupLevels = "Levels"
+showDiagnosticLevels = input.bool(true, "Draw POC / VAH / VAL / session lines", group=groupLevels, tooltip="Drawn with line.new (not plot) so Create Alert is not filled with plot-series names. Webhooks still require Any alert() function call.")
+swingLength = input.int(5, "Swing pivot length (diagnostic)", minval=1, maxval=50, group=groupLevels)
 atrLength = input.int(14, "ATR length", minval=1, maxval=200, group=groupLevels)
-atrBandMultiplier = input.float(1.0, "ATR band multiplier", minval=0.1, step=0.1, group=groupLevels)
-showAtrBands = input.bool(false, "Plot ATR bands", group=groupLevels)
+emaFastLen = input.int(21, "Trend EMA fast", minval=2, maxval=200, group=groupLevels)
+emaSlowLen = input.int(50, "Trend EMA slow", minval=3, maxval=400, group=groupLevels)
+ema200Len = input.int(200, "Trend EMA 200", minval=10, maxval=400, group=groupLevels)
+rsiLength = input.int(14, "RSI length", minval=2, maxval=100, group=groupLevels)
+adxLength = input.int(14, "ADX length", minval=2, maxval=100, group=groupLevels)
+relVolLength = input.int(20, "Relative volume SMA", minval=5, maxval=200, group=groupLevels)
+openingRangeMinutes = input.int(30, "Opening range minutes (London)", minval=15, maxval=120, group=groupLevels, tooltip="First N minutes of LONDON session UTC for opening-range high/low.")
 
 groupStatus = "Status"
 showStatusTable = input.bool(true, "Show status table", group=groupStatus)
 showWarnings = input.bool(true, "Show symbol warning", group=groupStatus)
 diagnosticMode = input.bool(false, "Diagnostic mode", group=groupStatus)
 
+// --- Pure helpers (no global scalar mutation) ---
 f_json_string(string value) =>
     string escaped = str.replace_all(value, "\\", "\\\\")
     escaped := str.replace_all(escaped, "\"", "\\\"")
@@ -55,11 +86,18 @@ f_json_string_or_null(string value) =>
 f_json_number(float value) =>
     na(value) ? "null" : str.tostring(value, format.mintick)
 
+f_json_number_raw(float value) =>
+    na(value) ? "null" : str.tostring(value)
+
 f_json_bool(bool value) =>
     value ? "true" : "false"
 
 f_json_time(int timestamp) =>
     f_json_string(str.format_time(timestamp, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC"))
+
+// Deterministic event id: symbol|timeframe|barCloseMs|alertKind (stable for dedup).
+f_deterministic_event_id(string alertKind, string tf, int barCloseMs) =>
+    str.upper(syminfo.tickerid) + "|" + tf + "|" + str.tostring(barCloseMs) + "|" + alertKind
 
 f_session_name(int utcHour) =>
     utcHour >= 0 and utcHour < 7 ? "ASIA" :
@@ -67,11 +105,194 @@ f_session_name(int utcHour) =>
       utcHour >= 13 and utcHour < 17 ? "OVERLAP" :
       utcHour >= 17 and utcHour < 22 ? "NEWYORK" : "UNKNOWN"
 
+f_session_name_from_ts(int timestampMs) =>
+    na(timestampMs) ? "UNKNOWN" : f_session_name(hour(timestampMs, "UTC"))
+
+// Horizontal level helpers use line.new (not plot) so Create Alert is not filled with plot series.
+f_upsert_level_line(line existing, float price, color col, int width) =>
+    line result = existing
+    if na(price)
+        if not na(result)
+            line.delete(result)
+            result := na
+    else
+        int x1 = math.max(0, bar_index - 80)
+        if na(result)
+            result := line.new(x1, price, bar_index, price, xloc=xloc.bar_index, extend=extend.right, color=col, width=width, style=line.style_solid)
+        else
+            line.set_xy1(result, x1, price)
+            line.set_xy2(result, bar_index, price)
+            line.set_color(result, col)
+            line.set_width(result, width)
+    result
+
 f_candle_direction(float candleOpen, float candleClose) =>
     candleClose > candleOpen ? "BULLISH" : candleClose < candleOpen ? "BEARISH" : "NEUTRAL"
 
 f_percent(float numerator, float denominator) =>
     denominator == 0.0 or na(denominator) ? na : numerator / denominator * 100.0
+
+f_clamp100(float value) =>
+    math.max(0.0, math.min(100.0, value))
+
+f_trend_dir(float c, float eFast, float eSlow) =>
+    not na(c) and not na(eFast) and not na(eSlow) ? c > eFast and eFast > eSlow ? "BULLISH" : c < eFast and eFast < eSlow ? "BEARISH" : "NEUTRAL" : "NEUTRAL"
+
+f_trend_strength(float c, float eFast, float eSlow, float atrv, string dir) =>
+    float sep = math.abs(nz(eFast) - nz(eSlow))
+    float atrSafe = na(atrv) or atrv <= 0 ? syminfo.mintick * 10.0 : atrv
+    float base = f_clamp100(sep / atrSafe * 40.0)
+    float align = dir == "NEUTRAL" ? 0.0 : 35.0
+    float stretch = na(c) or na(eFast) ? 0.0 : f_clamp100(math.abs(c - eFast) / atrSafe * 25.0)
+    f_clamp100(base + align + stretch * 0.4)
+
+f_signed(string dir, float strength) =>
+    dir == "BULLISH" ? strength : dir == "BEARISH" ? -strength : 0.0
+
+f_bin_size(float atrv) =>
+    math.max(syminfo.mintick * 10.0, nz(atrv, syminfo.mintick * 10.0) / 20.0)
+
+// Returns a fresh session histogram. Caller assigns returned scalars/array at global scope.
+f_init_profile(float barLow, float atrv) =>
+    float bSize = f_bin_size(atrv)
+    float anchor = math.floor(barLow / bSize) * bSize
+    float[] vols = array.new_float()
+    array.push(vols, 0.0)
+    [vols, anchor, bSize]
+
+// Mutates vols in place; returns updated [anchor, overflow, ok].
+// After success, idx is guaranteed to satisfy 0 <= idx < array.size(vols) for the
+// index that was requested *before* any left expansion of other indices.
+f_ensure_index(float[] vols, float anchor, float bSize, bool overflow, int idx) =>
+    float a = anchor
+    bool ov = overflow
+    bool ok = true
+    int sz = array.size(vols)
+    if na(bSize) or bSize <= 0.0 or na(a)
+        ov := true
+        ok := false
+    else if idx < 0
+        int need = -idx
+        if need <= 0 or sz + need > MAX_BINS
+            ov := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.unshift(vols, 0.0)
+            a := a - need * bSize
+    else if idx >= sz
+        int need = idx - sz + 1
+        if need <= 0 or sz + need > MAX_BINS
+            ov := true
+            ok := false
+        else
+            for i = 0 to need - 1
+                array.push(vols, 0.0)
+    [a, ov, ok]
+
+// Floor price into a bin index relative to anchor/binSize.
+f_bin_index(float price, float anchor, float bSize) =>
+    int(math.floor((price - anchor) / bSize))
+
+// True when [startIdx, endIdx] is fully inside vols (no silent clamp).
+f_range_in_bounds(float[] vols, int startIdx, int endIdx) =>
+    int sz = array.size(vols)
+    sz > 0 and startIdx >= 0 and endIdx >= 0 and startIdx <= endIdx and endIdx < sz
+
+// Mutates vols in place; returns [anchor, overflow, added].
+// Critical: after any left-side expansion, BOTH startIdx and endIdx are recomputed
+// before expanding the high side. Never write outside [0, size).
+// If the range cannot be accommodated safely: overflow=true, added=false (no silent clamp).
+f_add_bar_to_profile(float[] vols, float anchor, float bSize, bool overflow, float barLow, float barHigh, float barVol) =>
+    float a = anchor
+    bool ov = overflow
+    bool added = false
+    bool skip = ov or na(bSize) or bSize <= 0.0 or na(barVol) or barVol <= 0.0 or na(a) or array.size(vols) <= 0
+    if skip
+        ov := true
+    else
+        float loPrice = math.min(barLow, barHigh)
+        float hiPrice = math.max(barLow, barHigh)
+        int startIdx = f_bin_index(loPrice, a, bSize)
+        int endIdx = f_bin_index(hiPrice, a, bSize)
+
+        // 1) Expand for the low side (may unshift and move the anchor left).
+        [a1, ov1, ok1] = f_ensure_index(vols, a, bSize, ov, startIdx)
+        a := a1
+        ov := ov1
+        if not ok1 or ov
+            ov := true
+        else
+            // 2) Recompute BOTH indices after a possible left expansion.
+            startIdx := f_bin_index(loPrice, a, bSize)
+            endIdx := f_bin_index(hiPrice, a, bSize)
+
+            // 3) Expand for the high side using the recomputed endIdx.
+            [a2, ov2, ok2] = f_ensure_index(vols, a, bSize, ov, endIdx)
+            a := a2
+            ov := ov2
+            if not ok2 or ov
+                ov := true
+            else
+                // 4) Final recompute after high-side expansion.
+                startIdx := f_bin_index(loPrice, a, bSize)
+                endIdx := f_bin_index(hiPrice, a, bSize)
+
+                // 5) Hard bounds check — overflow instead of clamping/distorting VP.
+                if not f_range_in_bounds(vols, startIdx, endIdx)
+                    ov := true
+                else
+                    int bins = endIdx - startIdx + 1
+                    float share = barVol / bins
+                    bool writeOk = true
+                    for i = startIdx to endIdx
+                        // Runtime-safe guard on every get/set (no silent clamp).
+                        if writeOk
+                            if i < 0 or i >= array.size(vols)
+                                writeOk := false
+                            else
+                                array.set(vols, i, array.get(vols, i) + share)
+                    if writeOk
+                        added := true
+                    else
+                        ov := true
+    [a, ov, added]
+// Pure computation from histogram state; returns [poc, vah, val, total].
+f_compute_value_area(float[] vols, float anchor, float bSize, bool overflow) =>
+    float poc = na
+    float vah = na
+    float val = na
+    float total = na
+    int size = array.size(vols)
+    if size > 0 and not overflow and not na(anchor) and not na(bSize) and bSize > 0.0
+        float sum = 0.0
+        int pocIdx = 0
+        float pocVol = array.get(vols, 0)
+        for i = 0 to size - 1
+            float v = array.get(vols, i)
+            sum += v
+            if v > pocVol
+                pocVol := v
+                pocIdx := i
+        total := sum
+        if sum > 0.0
+            float target = sum * (VA_PCT / 100.0)
+            int lo = pocIdx
+            int hi = pocIdx
+            float covered = pocVol
+            while covered < target and (lo > 0 or hi < size - 1)
+                float below = lo > 0 ? array.get(vols, lo - 1) : -1.0
+                float above = hi < size - 1 ? array.get(vols, hi + 1) : -1.0
+                if above >= below
+                    hi += 1
+                    covered += array.get(vols, hi)
+                else
+                    lo -= 1
+                    covered += array.get(vols, lo)
+            poc := anchor + (pocIdx + 0.5) * bSize
+            val := anchor + lo * bSize
+            vah := anchor + (hi + 1) * bSize
+    [poc, vah, val, total]
 
 symbolUpper = str.upper(syminfo.ticker)
 expectedUpper = str.upper(expectedSymbol)
@@ -85,38 +306,222 @@ eventType = testAlertMode ? "TEST" : confirmedNow ? "BAR_CLOSE" : "BAR_UPDATE"
 utcHour = hour(time, "UTC")
 sessionName = f_session_name(utcHour)
 sessionChanged = bar_index == 0 ? true : sessionName != sessionName[1]
+sessionKnown = sessionName != "UNKNOWN"
 
 var float sessionHigh = na
 var float sessionLow = na
+var int sessionStartTs = na
 if sessionChanged or na(sessionHigh) or na(sessionLow)
     sessionHigh := high
     sessionLow := low
+    sessionStartTs := time
 else
     sessionHigh := math.max(sessionHigh, high)
     sessionLow := math.min(sessionLow, low)
 
-// Pivots are structural placeholders only. They become known after swingLength bars and are not a
-// substitute for proprietary market-structure or volume-profile tooling.
+atrValue = ta.atr(atrLength)
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+ema200 = ta.ema(close, ema200Len)
+rsiValue = ta.rsi(close, rsiLength)
+[diPlus, diMinus, adxValue] = ta.dmi(adxLength, adxLength)
+volSma = ta.sma(volume, relVolLength)
+relVolume = na(volSma) or volSma <= 0.0 ? na : volume / volSma
+
+// Session VWAP (resets on session name change).
+var float vwapCumVol = 0.0
+var float vwapCumVolPrice = 0.0
+if sessionChanged or na(vwapCumVol)
+    vwapCumVol := volume
+    vwapCumVolPrice := volume * hl2
+else
+    vwapCumVol += volume
+    vwapCumVolPrice += volume * hl2
+vwapValue = vwapCumVol > 0.0 ? vwapCumVolPrice / vwapCumVol : na
+
+// Opening range — first N minutes of LONDON session (UTC).
+utcMinute = minute(time, "UTC")
+inLondonOpenWindow = sessionName == "LONDON" and utcHour == 7 and utcMinute < openingRangeMinutes
+var float openingRangeHigh = na
+var float openingRangeLow = na
+var bool openingRangeLocked = false
+if sessionName != "LONDON"
+    openingRangeHigh := na
+    openingRangeLow := na
+    openingRangeLocked := false
+else if not openingRangeLocked
+    if na(openingRangeHigh)
+        openingRangeHigh := high
+        openingRangeLow := low
+    else if inLondonOpenWindow
+        openingRangeHigh := math.max(openingRangeHigh, high)
+        openingRangeLow := math.min(openingRangeLow, low)
+    else
+        openingRangeLocked := true
+
+// Daily / previous-day levels (lookahead_off).
+[prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dayHigh, dayLow] = request.security(syminfo.tickerid, "D", [high, low], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+chartTfSeconds = timeframe.in_seconds(timeframe.period)
+structureTfSeconds = timeframe.in_seconds(structureTfInput)
+entryTfSeconds = timeframe.in_seconds(entryTfInput)
+quoteTfSeconds = timeframe.in_seconds(quoteTfInput)
+contextTfSeconds = timeframe.in_seconds(contextTfInput)
+chartMatchesStructure = chartTfSeconds == structureTfSeconds
+chartMatchesRole =
+     alertRoleInput == ROLE_PLAN_15M ? chartMatchesStructure :
+     alertRoleInput == ROLE_CONFIRM_5M ? chartTfSeconds == entryTfSeconds :
+     alertRoleInput == ROLE_QUOTE_1M ? chartTfSeconds == quoteTfSeconds :
+     false
+expectedRoleTf =
+     alertRoleInput == ROLE_PLAN_15M ? structureTfInput :
+     alertRoleInput == ROLE_CONFIRM_5M ? entryTfInput :
+     quoteTfInput
+
+// --- gm_svp_v1: session volume profile (GoldMeta-derived, not proprietary VP) ---
+var float[] binVolumes = array.new_float()
+var float profileAnchor = na
+var float binSizeUsed = na
+var bool profileOverflow = false
+var float pocPrice = na
+var float vahPrice = na
+var float valPrice = na
+var float profileTotalVolume = na
+
+if sessionChanged
+    if sessionKnown
+        [initVols, initAnchor, initSize] = f_init_profile(low, atrValue)
+        binVolumes := initVols
+        profileAnchor := initAnchor
+        binSizeUsed := initSize
+        profileOverflow := false
+        pocPrice := na
+        vahPrice := na
+        valPrice := na
+        profileTotalVolume := na
+    else
+        array.clear(binVolumes)
+        profileAnchor := na
+        binSizeUsed := na
+        profileOverflow := false
+        pocPrice := na
+        vahPrice := na
+        valPrice := na
+        profileTotalVolume := na
+
+// Accumulate only on confirmed bars (historical bars are confirmed; live bar waits for close).
+bool profileReady = false
+if sessionKnown and confirmedNow and not na(binSizeUsed)
+    [nextAnchor, nextOverflow, added] = f_add_bar_to_profile(binVolumes, profileAnchor, binSizeUsed, profileOverflow, low, high, volume)
+    profileAnchor := nextAnchor
+    profileOverflow := nextOverflow
+    if added
+        [nextPoc, nextVah, nextVal, nextTotal] = f_compute_value_area(binVolumes, profileAnchor, binSizeUsed, profileOverflow)
+        pocPrice := nextPoc
+        vahPrice := nextVah
+        valPrice := nextVal
+        profileTotalVolume := nextTotal
+    profileReady := not profileOverflow and not na(pocPrice) and not na(vahPrice) and not na(valPrice)
+else if sessionKnown and not na(pocPrice) and not profileOverflow
+    profileReady := true
+
+acceptanceState = not profileReady ? "UNKNOWN" : close >= valPrice and close <= vahPrice ? "ACCEPTANCE" : close > vahPrice or close < valPrice ? "REJECTION" : "UNKNOWN"
+
+// --- gm_trend_v1 (intraday MTF roles) ---
+chartDir = f_trend_dir(close, emaFast, emaSlow)
+chartStrength = f_trend_strength(close, emaFast, emaSlow, atrValue, chartDir)
+
+[ctxClose, ctxEmaFast, ctxEmaSlow, ctxEma200, ctxAtr, ctxSwingHigh, ctxSwingLow, ctxTimeClose] = request.security(syminfo.tickerid, contextTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.ema(close, ema200Len), ta.atr(atrLength), ta.highest(high, swingLength), ta.lowest(low, swingLength), time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+ctxDir = f_trend_dir(ctxClose, ctxEmaFast, ctxEmaSlow)
+ctxStrength = f_trend_strength(ctxClose, ctxEmaFast, ctxEmaSlow, ctxAtr, ctxDir)
+ctxStructure = ctxClose > ctxEmaFast and ctxEmaFast > ctxEmaSlow ? "BULLISH" : ctxClose < ctxEmaFast and ctxEmaFast < ctxEmaSlow ? "BEARISH" : "RANGE"
+
+[dirClose, dirEmaFast, dirEmaSlow, dirEma200, dirAtr, dirSourceCloseTs] = request.security(syminfo.tickerid, directionTfInput, [close[1], ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], ta.ema(close, ema200Len)[1], ta.atr(atrLength)[1], time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[entryClose, entryEmaFast, entryEmaSlow, entryAtr] = request.security(syminfo.tickerid, entryTfInput, [close, ta.ema(close, emaFastLen), ta.ema(close, emaSlowLen), ta.atr(atrLength)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+dirBiasReady = not na(dirClose) and not na(dirEmaFast) and not na(dirEmaSlow) and not na(dirEma200) and not na(dirAtr) and not na(dirSourceCloseTs)
+dirBiasConfirmed = dirBiasReady
+dirDir = f_trend_dir(dirClose, dirEmaFast, dirEmaSlow)
+dirStrength = f_trend_strength(dirClose, dirEmaFast, dirEmaSlow, dirAtr, dirDir)
+entryDir = f_trend_dir(entryClose, entryEmaFast, entryEmaSlow)
+entryStrength = f_trend_strength(entryClose, entryEmaFast, entryEmaSlow, entryAtr, entryDir)
+
+aggSigned = (f_signed(dirDir, dirStrength) + f_signed(chartDir, chartStrength) + f_signed(entryDir, entryStrength)) / 3.0
+trendDirection = aggSigned >= 15.0 ? "BULLISH" : aggSigned <= -15.0 ? "BEARISH" : "NEUTRAL"
+trendStrength = f_clamp100(math.abs(aggSigned))
+
+// --- gm_candle_v1 ---
+barRange = high - low
+body = math.abs(close - open)
+bodyPercent = f_percent(body, barRange)
+upperWickPercent = f_percent(high - math.max(open, close), barRange)
+lowerWickPercent = f_percent(math.min(open, close) - low, barRange)
+candleDirection = f_candle_direction(open, close)
+
+bullEngulf = close > open and close[1] < open[1] and open <= close[1] and close >= open[1]
+bearEngulf = close < open and close[1] > open[1] and open >= close[1] and close <= open[1]
+candleType = bullEngulf or bearEngulf ? "ENGULFING" : ""
+
+prevClose = close[1]
+brokeAboveVah = profileReady and not na(vahPrice) and prevClose <= vahPrice and close > vahPrice
+brokeBelowVal = profileReady and not na(valPrice) and prevClose >= valPrice and close < valPrice
+retestVah = profileReady and not na(vahPrice) and close > open and low <= vahPrice and close >= vahPrice and prevClose > vahPrice
+retestVal = profileReady and not na(valPrice) and close < open and high >= valPrice and close <= valPrice and prevClose < valPrice
+rejectLong = profileReady and candleDirection == "BULLISH" and nz(lowerWickPercent) >= 55.0 and nz(bodyPercent) <= 35.0 and not na(valPrice) and low <= valPrice + nz(atrValue) * 0.25
+rejectShort = profileReady and candleDirection == "BEARISH" and nz(upperWickPercent) >= 55.0 and nz(bodyPercent) <= 35.0 and not na(vahPrice) and high >= vahPrice - nz(atrValue) * 0.25
+continuation = nz(bodyPercent) >= 60.0 and candleDirection != "NEUTRAL" and candleDirection == trendDirection
+
+classification = rejectLong or rejectShort ? "REJECTION" : brokeAboveVah or brokeBelowVal ? "BREAKOUT" : retestVah or retestVal ? "RETEST" : continuation or bullEngulf or bearEngulf ? "CONTINUATION" : "NONE"
+
+relatedLevel = brokeAboveVah or retestVah or rejectShort ? "VAH" : brokeBelowVal or retestVal or rejectLong ? "VAL" : profileReady and not na(pocPrice) and math.abs(close - pocPrice) <= nz(atrValue) * 0.25 ? "POC" : ""
+
+breakoutState = brokeAboveVah ? "ABOVE_VAH" : brokeBelowVal ? "BELOW_VAL" : "NONE"
+rejectionState = rejectLong ? "BULLISH_REJECTION_AT_VAL" : rejectShort ? "BEARISH_REJECTION_AT_VAH" : "NONE"
+retestState = retestVah ? "VAH_RETEST" : retestVal ? "VAL_RETEST" : "NONE"
+orBreakoutState = not na(openingRangeHigh) and close > openingRangeHigh ? "ABOVE_OPENING_RANGE" : not na(openingRangeLow) and close < openingRangeLow ? "BELOW_OPENING_RANGE" : "NONE"
+
 pivotHigh = ta.pivothigh(high, swingLength, swingLength)
 pivotLow = ta.pivotlow(low, swingLength, swingLength)
 lastSwingHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
 lastSwingLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
 
-atrValue = ta.atr(atrLength)
-atrUpper = close + atrValue * atrBandMultiplier
-atrLower = close - atrValue * atrBandMultiplier
+payloadPartial = not profileReady or profileOverflow or sessionName == "UNKNOWN" or not chartMatchesRole
+dataQualityHint = payloadPartial ? "PARTIAL" : "GOOD"
 
-htfClose = request.security(syminfo.tickerid, higherTimeframe, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-htfSma = request.security(syminfo.tickerid, higherTimeframe, ta.sma(close, 20), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-htfBias = na(htfClose) or na(htfSma) ? "NEUTRAL" : htfClose > htfSma ? "BULLISH" : htfClose < htfSma ? "BEARISH" : "NEUTRAL"
+// --- 1m quote series (lookahead_off) for optional freshness alerts ---
+[m1Open, m1High, m1Low, m1Close, m1Vol, m1TimeClose, m1Confirmed] = request.security(syminfo.tickerid, quoteTfInput, [open, high, low, close, volume, time_close, barstate.isconfirmed], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-barRange = high - low
-bodyPercent = f_percent(math.abs(close - open), barRange)
-upperWickPercent = f_percent(high - math.max(open, close), barRange)
-lowerWickPercent = f_percent(math.min(open, close) - low, barRange)
-candleDirection = f_candle_direction(open, close)
+// planSourceKey must be anchored to the same confirmed 15M plan bar across roles:
+// - PLAN_15M uses the current confirmed 15m close.
+// - CONFIRM_5M / QUOTE_1M use the previous confirmed 15m close (never developing next 15m).
+[plan15CloseTsCurrent] = request.security(syminfo.tickerid, structureTfInput, [time_close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[plan15CloseTsPrevious] = request.security(syminfo.tickerid, structureTfInput, [time_close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+planSourceCloseTs = alertRoleInput == ROLE_PLAN_15M ? plan15CloseTsCurrent : plan15CloseTsPrevious
+planSourceSession = f_session_name_from_ts(planSourceCloseTs)
+planSourceKey = str.upper(syminfo.tickerid) + "|" + planSourceSession + "|" + str.tostring(planSourceCloseTs) + "|" + ROLE_PLAN_15M
 
-eventId = syminfo.tickerid + "-" + timeframe.period + "-" + str.tostring(time_close)
+// Meaningful 5M confirmation state (state-change emit only).
+confirmState =
+     classification == "BREAKOUT" ? "BREAKOUT_CONFIRMED" :
+     classification == "REJECTION" ? "REJECTION_CONFIRMED" :
+     retestState == "HELD" ? "RETEST_HELD" :
+     retestState == "FAILED" ? "RETEST_FAILED" :
+     retestState == "PENDING" ? "RETEST_PENDING" :
+     breakoutState == "FAILED" or rejectionState == "FAILED" ? "CONFIRMATION_FAILED" :
+     profileReady and not na(valPrice) and close >= valPrice and close <= vahPrice ? "INSIDE_ZONE" :
+     profileReady and not na(valPrice) and math.abs(close - valPrice) <= atrValue * 0.25 ? "APPROACHING_ZONE" :
+     profileReady and not na(vahPrice) and math.abs(close - vahPrice) <= atrValue * 0.25 ? "APPROACHING_ZONE" :
+     "OUTSIDE_ZONE"
+
+var string lastConfirmState = ""
+confirmStateChanged = confirmState != lastConfirmState
+
+var int lastQuoteEmitMs = na
+quoteBarReady = (alertRoleInput == ROLE_QUOTE_1M or enableQuoteUpdates) and m1Confirmed and (na(lastQuoteEmitMs) or m1TimeClose != lastQuoteEmitMs)
+
+strategyEventId = f_deterministic_event_id(alertRoleInput, timeframe.period, time_close)
+quoteEventId = f_deterministic_event_id(ROLE_QUOTE_1M, quoteTfInput, m1TimeClose)
 
 ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
   ",\"high\":" + f_json_number(high) +
@@ -124,15 +529,37 @@ ohlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(open) +
   ",\"close\":" + f_json_number(close) +
   ",\"volume\":" + f_json_number(volume) + "}"
 
-// Proprietary adapter stubs: values are intentionally null/empty unless supplied by separate licensed alerts.
-levelsJson = "\"levels\":{\"pocAll\":null,\"vahAll\":null,\"valAll\":null,\"pocNonBroken\":[],\"vahNonBroken\":[],\"valNonBroken\":[]}"
+levelsJson = "\"levels\":{\"pocAll\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vahAll\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"valAll\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"pocNonBroken\":[],\"vahNonBroken\":[],\"valNonBroken\":[]}"
+
+sessionStartJson = na(sessionStartTs) ? "null" : f_json_time(sessionStartTs)
+sessionEndJson = f_json_time(time_close)
+
 sessionVolumeProfileJson = "\"sessionVolumeProfile\":{\"session\":" + f_json_string(sessionName) +
-  ",\"sessionStart\":null,\"sessionEnd\":null,\"poc\":null,\"vah\":null,\"val\":null,\"hvn\":[],\"lvn\":[],\"acceptanceState\":\"UNKNOWN\"}"
+  ",\"sessionStart\":" + sessionStartJson +
+  ",\"sessionEnd\":" + sessionEndJson +
+  ",\"poc\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vah\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"val\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"hvn\":[],\"lvn\":[],\"acceptanceState\":" + f_json_string(acceptanceState) + "}"
+
+// TPO / market profile remains unavailable in this bridge (proprietary / not implemented).
 marketProfileJson = "\"marketProfile\":{\"tpoPoc\":null,\"initialBalanceHigh\":null,\"initialBalanceLow\":null,\"poorHigh\":null,\"poorLow\":null,\"singlePrints\":[],\"valueMigration\":\"UNKNOWN\",\"profileState\":\"UNKNOWN\",\"acceptanceState\":\"UNKNOWN\"}"
+
+trendJson = "\"trend\":{\"direction\":" + f_json_string(trendDirection) +
+  ",\"strength\":" + f_json_number_raw(trendStrength) +
+  ",\"components\":[" +
+  "{\"name\":\"gm_direction_1h\",\"direction\":" + f_json_string(dirDir) + ",\"strength\":" + f_json_number_raw(dirStrength) + ",\"sourceTimeframe\":" + f_json_string(directionTfInput) + "}," +
+  "{\"name\":\"gm_structure_15m\",\"direction\":" + f_json_string(chartDir) + ",\"strength\":" + f_json_number_raw(chartStrength) + ",\"sourceTimeframe\":" + f_json_string(structureTfInput) + "}," +
+  "{\"name\":\"gm_entry_5m\",\"direction\":" + f_json_string(entryDir) + ",\"strength\":" + f_json_number_raw(entryStrength) + ",\"sourceTimeframe\":" + f_json_string(entryTfInput) + "}" +
+  "]}"
 
 confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(confirmedNow) +
   ",\"direction\":" + f_json_string(candleDirection) +
-  ",\"candleType\":null,\"classification\":\"NONE\"" +
+  ",\"candleType\":" + f_json_string_or_null(candleType) +
+  ",\"classification\":" + f_json_string(classification) +
   ",\"open\":" + f_json_number(open) +
   ",\"high\":" + f_json_number(high) +
   ",\"low\":" + f_json_number(low) +
@@ -142,33 +569,103 @@ confirmationCandleJson = "\"confirmationCandle\":{\"confirmed\":" + f_json_bool(
   ",\"lowerWickPercent\":" + f_json_number(lowerWickPercent) +
   ",\"volume\":" + f_json_number(volume) +
   ",\"isClosed\":" + f_json_bool(confirmedNow) +
-  ",\"relatedLevel\":null}"
+  ",\"relatedLevel\":" + f_json_string_or_null(relatedLevel) + "}"
 
-optionalIndicatorsJson = "\"optionalIndicators\":{\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
+optionalIndicatorsJson = "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) +
+  ",\"value\":" + f_json_number(atrValue) + "}" +
+  ",\"oneHourBias\":{\"timeframe\":" + f_json_string(directionTfInput) +
+  ",\"direction\":" + f_json_string(dirDir) +
+  ",\"ema21\":" + f_json_number(dirEmaFast) +
+  ",\"ema50\":" + f_json_number(dirEmaSlow) +
+  ",\"ema200\":" + f_json_number(dirEma200) +
+  ",\"atr\":" + f_json_number(dirAtr) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") + "}" +
+  ",\"vwap\":{\"session\":" + f_json_string(sessionName) + ",\"value\":" + f_json_number(vwapValue) + "}" +
+  ",\"ema21\":" + f_json_number(emaFast) +
+  ",\"ema50\":" + f_json_number(emaSlow) +
+  ",\"ema200\":" + f_json_number(ema200) +
+  ",\"rsi\":{\"length\":" + str.tostring(rsiLength) + ",\"value\":" + f_json_number(rsiValue) + "}" +
+  ",\"adx\":{\"length\":" + str.tostring(adxLength) + ",\"value\":" + f_json_number(adxValue) + ",\"diPlus\":" + f_json_number(diPlus) + ",\"diMinus\":" + f_json_number(diMinus) + "}" +
+  ",\"volume\":{\"value\":" + f_json_number(volume) + ",\"relative\":" + f_json_number(relVolume) + ",\"smaLength\":" + str.tostring(relVolLength) + "}" +
+  ",\"developingVolumeProfile\":{\"poc\":" + f_json_number(profileReady ? pocPrice : na) +
+  ",\"vah\":" + f_json_number(profileReady ? vahPrice : na) +
+  ",\"val\":" + f_json_number(profileReady ? valPrice : na) +
+  ",\"developing\":true,\"overflow\":" + f_json_bool(profileOverflow) + "}" +
+  ",\"session\":{\"heuristic\":\"UTC_HOUR\",\"name\":" + f_json_string(sessionName) +
   ",\"high\":" + f_json_number(sessionHigh) +
   ",\"low\":" + f_json_number(sessionLow) + "}" +
-  ",\"structure\":{\"placeholder\":true,\"swingLength\":" + str.tostring(swingLength) +
+  ",\"dayLevels\":{\"previousDayHigh\":" + f_json_number(prevDayHigh) +
+  ",\"previousDayLow\":" + f_json_number(prevDayLow) +
+  ",\"currentDayHigh\":" + f_json_number(dayHigh) +
+  ",\"currentDayLow\":" + f_json_number(dayLow) + "}" +
+  ",\"openingRange\":{\"high\":" + f_json_number(openingRangeLocked or not na(openingRangeHigh) ? openingRangeHigh : na) +
+  ",\"low\":" + f_json_number(openingRangeLocked or not na(openingRangeLow) ? openingRangeLow : na) +
+  ",\"locked\":" + f_json_bool(openingRangeLocked) +
+  ",\"minutes\":" + str.tostring(openingRangeMinutes) + "}" +
+  ",\"structure\":{\"swingLength\":" + str.tostring(swingLength) +
   ",\"lastSwingHigh\":" + f_json_number(lastSwingHigh) +
-  ",\"lastSwingLow\":" + f_json_number(lastSwingLow) + "}" +
-  ",\"atr\":{\"length\":" + str.tostring(atrLength) +
-  ",\"value\":" + f_json_number(atrValue) +
-  ",\"upperBand\":" + f_json_number(atrUpper) +
-  ",\"lowerBand\":" + f_json_number(atrLower) + "}" +
-  ",\"higherTimeframe\":{\"timeframe\":" + f_json_string(higherTimeframe) +
-  ",\"close\":" + f_json_number(htfClose) +
-  ",\"sma20\":" + f_json_number(htfSma) +
-  ",\"bias\":" + f_json_string(htfBias) + "}" +
-  ",\"proprietaryAdapters\":{\"volumeProfile\":\"unavailable_null_stub\",\"marketProfileTpo\":\"unavailable_null_stub\",\"trendMeter\":\"unavailable_null_stub\"}}"
+  ",\"lastSwingLow\":" + f_json_number(lastSwingLow) +
+  ",\"breakoutState\":" + f_json_string(breakoutState) +
+  ",\"rejectionState\":" + f_json_string(rejectionState) +
+  ",\"retestState\":" + f_json_string(retestState) +
+  ",\"openingRangeBreakout\":" + f_json_string(orBreakoutState) + "}" +
+  ",\"supportResistance\":{\"support\":[" +
+  f_json_number(valPrice) + "," + f_json_number(lastSwingLow) + "," + f_json_number(openingRangeLow) + "," + f_json_number(sessionLow) + "," + f_json_number(prevDayLow) + "," + f_json_number(dayLow) +
+  "],\"resistance\":[" +
+  f_json_number(vahPrice) + "," + f_json_number(lastSwingHigh) + "," + f_json_number(openingRangeHigh) + "," + f_json_number(sessionHigh) + "," + f_json_number(prevDayHigh) + "," + f_json_number(dayHigh) +
+  "]}" +
+  ",\"methodology\":{\"volumeProfile\":" + f_json_string(METHOD_VP) +
+  ",\"trend\":" + f_json_string(METHOD_TREND) +
+  ",\"candle\":" + f_json_string(METHOD_CANDLE) +
+  ",\"volumeProfileKind\":\"equivalent_internal\"" +
+  ",\"proprietaryTrendMeter\":\"unavailable\"" +
+  ",\"proprietaryVolumeProfile\":\"unavailable\"" +
+  ",\"proprietaryTpo\":\"unavailable\"}" +
+  ",\"profileDiagnostics\":{\"binSize\":" + f_json_number(binSizeUsed) +
+  ",\"valueAreaPct\":" + str.tostring(VA_PCT) +
+  ",\"overflow\":" + f_json_bool(profileOverflow) +
+  ",\"ready\":" + f_json_bool(profileReady) + "}" +
+  ",\"timeframeRoles\":{\"context\":" + f_json_string(contextTfInput) +
+  ",\"direction\":" + f_json_string(directionTfInput) +
+  ",\"structure\":" + f_json_string(structureTfInput) +
+  ",\"entryConfirm\":" + f_json_string(entryTfInput) +
+  ",\"quoteFreshness\":" + f_json_string(quoteTfInput) + "}" +
+  ",\"fourHourContext\":{\"direction\":" + f_json_string(ctxDir) +
+  ",\"strength\":" + f_json_number_raw(ctxStrength) +
+  ",\"structureState\":" + f_json_string(ctxStructure) +
+  ",\"ema21\":" + f_json_number(ctxEmaFast) +
+  ",\"ema50\":" + f_json_number(ctxEmaSlow) +
+  ",\"ema200\":" + f_json_number(ctxEma200) +
+  ",\"atr\":" + f_json_number(ctxAtr) +
+  ",\"swingHigh\":" + f_json_number(ctxSwingHigh) +
+  ",\"swingLow\":" + f_json_number(ctxSwingLow) +
+  ",\"sourceCloseTime\":" + f_json_time(ctxTimeClose) +
+  ",\"neverTriggersEntry\":true}}"
 
 metadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
+  ",\"alertRole\":" + f_json_string(alertRoleInput) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
+  ",\"confirmationState\":" + f_json_string(confirmState) +
   ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
   ",\"diagnosticMode\":" + f_json_bool(diagnosticMode) +
-  ",\"symbolOk\":" + f_json_bool(symbolOk) + "}"
+  ",\"testMode\":" + f_json_bool(testAlertMode) +
+  ",\"symbolOk\":" + f_json_bool(symbolOk) +
+  ",\"chartMatchesStructure\":" + f_json_bool(chartMatchesStructure) +
+  ",\"chartMatchesRole\":" + f_json_bool(chartMatchesRole) +
+  ",\"partial\":" + f_json_bool(payloadPartial) +
+  ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
+  ",\"volumeProfileMethod\":" + f_json_string(METHOD_VP) +
+  ",\"trendMethod\":" + f_json_string(METHOD_TREND) +
+  ",\"candleMethod\":" + f_json_string(METHOD_CANDLE) + "}"
 
-alertMessage = "{" +
-  "\"schemaVersion\":\"1.0\"," +
+strategyAlertMessage = "{" +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
   "\"source\":\"tradingview\"," +
-  "\"eventId\":" + f_json_string(eventId) + "," +
+  "\"eventId\":" + f_json_string(strategyEventId) + "," +
   "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
   "\"symbol\":" + f_json_string(payloadSymbol) + "," +
   "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
@@ -182,31 +679,155 @@ alertMessage = "{" +
   levelsJson + "," +
   sessionVolumeProfileJson + "," +
   marketProfileJson + "," +
-  "\"trend\":null," +
+  trendJson + "," +
   confirmationCandleJson + "," +
   optionalIndicatorsJson + "," +
   metadataJson +
   "}"
 
+quoteOhlcvJson = "\"ohlcv\":{\"open\":" + f_json_number(m1Open) +
+  ",\"high\":" + f_json_number(m1High) +
+  ",\"low\":" + f_json_number(m1Low) +
+  ",\"close\":" + f_json_number(m1Close) +
+  ",\"volume\":" + f_json_number(m1Vol) + "}"
+
+quoteMetadataJson = "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_QUOTE) +
+  ",\"alertRole\":" + f_json_string(ROLE_QUOTE_1M) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
+  ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
+  ",\"partial\":true" +
+  ",\"dataQualityHint\":\"QUOTE_ONLY\"" +
+  ",\"quoteOnly\":true" +
+  ",\"neverReversesStrategy\":true" +
+  ",\"structureTimeframe\":" + f_json_string(structureTfInput) + "}"
+
+quoteAlertMessage = "{" +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
+  "\"source\":\"tradingview\"," +
+  "\"eventId\":" + f_json_string(quoteEventId) + "," +
+  "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
+  "\"symbol\":" + f_json_string(payloadSymbol) + "," +
+  "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
+  "\"timeframe\":" + f_json_string(quoteTfInput) + "," +
+  "\"eventType\":\"BAR_UPDATE\"," +
+  "\"barTime\":" + f_json_time(m1TimeClose) + "," +
+  "\"sentAt\":" + f_json_time(timenow) + "," +
+  "\"isConfirmedBar\":true," +
+  "\"indicatorName\":\"GoldMetaBridge\"," +
+  quoteOhlcvJson + "," +
+  quoteMetadataJson +
+  "}"
+
+confirmAlertMessage = "{" +
+  "\"schemaVersion\":" + f_json_string(SCHEMA_VERSION) + "," +
+  "\"source\":\"tradingview\"," +
+  "\"eventId\":" + f_json_string(strategyEventId) + "," +
+  "\"webhookSecret\":" + f_json_string_or_null(payloadSecret) + "," +
+  "\"symbol\":" + f_json_string(payloadSymbol) + "," +
+  "\"exchange\":" + f_json_string_or_null(syminfo.prefix) + "," +
+  "\"timeframe\":" + f_json_string(timeframe.period) + "," +
+  "\"eventType\":" + f_json_string(eventType) + "," +
+  "\"barTime\":" + f_json_time(time_close) + "," +
+  "\"sentAt\":" + f_json_time(timenow) + "," +
+  "\"isConfirmedBar\":" + f_json_bool(confirmedNow) + "," +
+  "\"indicatorName\":\"GoldMetaBridge\"," +
+  ohlcvJson + "," +
+  confirmationCandleJson + "," +
+  "\"optionalIndicators\":{\"atr\":{\"length\":" + str.tostring(atrLength) + ",\"value\":" + f_json_number(atrValue) + "}," +
+  "\"oneHourBias\":{\"timeframe\":" + f_json_string(directionTfInput) +
+  ",\"direction\":" + f_json_string(dirDir) +
+  ",\"ema21\":" + f_json_number(dirEmaFast) +
+  ",\"ema50\":" + f_json_number(dirEmaSlow) +
+  ",\"ema200\":" + f_json_number(dirEma200) +
+  ",\"atr\":" + f_json_number(dirAtr) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") + "}," +
+  "\"structure\":{\"breakoutState\":" + f_json_string(breakoutState) +
+  ",\"rejectionState\":" + f_json_string(rejectionState) +
+  ",\"retestState\":" + f_json_string(retestState) + "}}," +
+  "\"metadata\":{\"scriptVersion\":" + f_json_string(SCRIPT_VERSION) +
+  ",\"alertKind\":" + f_json_string(ALERT_KIND_STRATEGY) +
+  ",\"alertRole\":" + f_json_string(ROLE_CONFIRM_5M) +
+  ",\"planSourceKey\":" + f_json_string(planSourceKey) +
+  ",\"oneHourBiasConfirmed\":" + f_json_bool(dirBiasConfirmed) +
+  ",\"oneHourBiasSourceTime\":" + (dirBiasReady ? f_json_time(dirSourceCloseTs) : "null") +
+  ",\"confirmationState\":" + f_json_string(confirmState) +
+  ",\"neverCreatesPlan\":true" +
+  ",\"neverReplacesEntryStopTargets\":true" +
+  ",\"confirmedBarMode\":" + f_json_bool(confirmedBarMode) +
+  ",\"partial\":false" +
+  ",\"dataQualityHint\":" + f_json_string(dataQualityHint) +
+  ",\"testMode\":" + f_json_bool(testAlertMode) + "}" +
+  "}"
+
+// ---------------------------------------------------------------------------
+// Script alerts — Create Alert → Any alert() function call + {{alert_message}}.
+// Role-based: PLAN_15M (full), CONFIRM_5M (state change), QUOTE_1M (OHLC only).
+// Quote / confirm never replace complete plan structure on the backend.
+// ---------------------------------------------------------------------------
 var bool testAlertSent = false
-if enableAlertCalls and barstate.isrealtime and canEmitBar
-    if testAlertMode
-        if not testAlertSent
-            alert(alertMessage, alert.freq_once_per_bar)
-            testAlertSent := true
+bool emitPlanAlert = enableAlertCalls and alertRoleInput == ROLE_PLAN_15M and canEmitBar and chartMatchesRole
+bool emitConfirmAlert = enableAlertCalls and alertRoleInput == ROLE_CONFIRM_5M and canEmitBar and chartMatchesRole and confirmStateChanged and not testAlertMode
+bool emitQuoteAlert = enableAlertCalls and (alertRoleInput == ROLE_QUOTE_1M or (alertRoleInput == ROLE_PLAN_15M and enableQuoteUpdates)) and quoteBarReady and not testAlertMode and (alertRoleInput == ROLE_QUOTE_1M ? chartMatchesRole : chartMatchesStructure)
+
+if emitPlanAlert and testAlertMode and not testAlertSent
+    alert(strategyAlertMessage, alert.freq_once_per_bar)
+    testAlertSent := true
+else if emitPlanAlert and not testAlertMode
+    alert(strategyAlertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+    testAlertSent := false
+else if not testAlertMode
+    testAlertSent := false
+
+if emitConfirmAlert
+    alert(confirmAlertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
+    lastConfirmState := confirmState
+
+if emitQuoteAlert
+    alert(quoteAlertMessage, alert.freq_once_per_bar_close)
+    lastQuoteEmitMs := m1TimeClose
+
+// Diagnostic levels use line.new (not plot/plotshape) so TradingView Create Alert
+// does not list "GoldMeta Session High / POC / …" as technical-alert series.
+// Those plot titles are what users were selecting instead of Any alert() function call.
+var line sessionHighLine = na
+var line sessionLowLine = na
+var line pocLine = na
+var line vahLine = na
+var line valLine = na
+if barstate.islast
+    if showDiagnosticLevels
+        sessionHighLine := f_upsert_level_line(sessionHighLine, sessionHigh, color.new(color.yellow, 0), 1)
+        sessionLowLine := f_upsert_level_line(sessionLowLine, sessionLow, color.new(color.yellow, 0), 1)
+        pocLine := f_upsert_level_line(pocLine, profileReady ? pocPrice : na, color.new(color.orange, 0), 2)
+        vahLine := f_upsert_level_line(vahLine, profileReady ? vahPrice : na, color.new(color.teal, 0), 1)
+        valLine := f_upsert_level_line(valLine, profileReady ? valPrice : na, color.new(color.teal, 0), 1)
     else
-        alert(alertMessage, confirmedBarMode ? alert.freq_once_per_bar_close : alert.freq_once_per_bar)
-        testAlertSent := false
+        if not na(sessionHighLine)
+            line.delete(sessionHighLine)
+            sessionHighLine := na
+        if not na(sessionLowLine)
+            line.delete(sessionLowLine)
+            sessionLowLine := na
+        if not na(pocLine)
+            line.delete(pocLine)
+            pocLine := na
+        if not na(vahLine)
+            line.delete(vahLine)
+            vahLine := na
+        if not na(valLine)
+            line.delete(valLine)
+            valLine := na
 
-plot(showDiagnosticLevels ? sessionHigh : na, title="GoldMeta Session High", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? sessionLow : na, title="GoldMeta Session Low", color=color.new(color.yellow, 0), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? lastSwingHigh : na, title="GoldMeta Last Swing High", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
-plot(showDiagnosticLevels ? lastSwingLow : na, title="GoldMeta Last Swing Low", color=color.new(color.green, 20), linewidth=1, style=plot.style_linebr)
-plot(showAtrBands and showDiagnosticLevels ? atrUpper : na, title="GoldMeta ATR Upper", color=color.new(color.orange, 35), linewidth=1)
-plot(showAtrBands and showDiagnosticLevels ? atrLower : na, title="GoldMeta ATR Lower", color=color.new(color.orange, 35), linewidth=1)
-
-plotshape(diagnosticMode and not na(pivotHigh), title="GoldMeta Pivot High", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, offset=-swingLength)
-plotshape(diagnosticMode and not na(pivotLow), title="GoldMeta Pivot Low", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, offset=-swingLength)
+// Diagnostic pivots as labels (not plotshape) to avoid extra Create Alert series.
+if diagnosticMode and barstate.isconfirmed
+    if not na(pivotHigh)
+        label.new(bar_index - swingLength, pivotHigh, "PH", style=label.style_label_down, color=color.new(color.red, 30), textcolor=color.white, size=size.tiny)
+    if not na(pivotLow)
+        label.new(bar_index - swingLength, pivotLow, "PL", style=label.style_label_up, color=color.new(color.green, 30), textcolor=color.white, size=size.tiny)
 
 var label warningLabel = na
 if showWarnings and barstate.islast
@@ -217,19 +838,35 @@ if showWarnings and barstate.islast
         else
             label.set_xy(warningLabel, bar_index, high)
             label.set_text(warningLabel, warningText)
+    else if not chartMatchesRole
+        tfWarn = "Alert Role " + alertRoleInput + " expects " + expectedRoleTf + " chart. Current: " + timeframe.period
+        if na(warningLabel)
+            warningLabel := label.new(bar_index, high, tfWarn, style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white)
+        else
+            label.set_xy(warningLabel, bar_index, high)
+            label.set_text(warningLabel, tfWarn)
     else if not na(warningLabel)
         label.delete(warningLabel)
         warningLabel := na
 
-var table statusTable = table.new(position.top_right, 2, 5, border_width=1)
+var table statusTable = table.new(position.top_right, 2, 9, border_width=1)
 if showStatusTable and barstate.islast
     table.cell(statusTable, 0, 0, "GoldMeta", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 1, 0, SCRIPT_VERSION, text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(statusTable, 0, 1, "Symbol OK", text_color=color.white)
     table.cell(statusTable, 1, 1, symbolOk ? "YES" : "NO", text_color=color.white, bgcolor=symbolOk ? color.new(color.green, 35) : color.new(color.red, 20))
-    table.cell(statusTable, 0, 2, "Confirmed", text_color=color.white)
-    table.cell(statusTable, 1, 2, confirmedBarMode ? "ON" : "OFF", text_color=color.white)
-    table.cell(statusTable, 0, 3, "Last close", text_color=color.white)
-    table.cell(statusTable, 1, 3, f_json_number(close), text_color=color.white)
-    table.cell(statusTable, 0, 4, "Session", text_color=color.white)
-    table.cell(statusTable, 1, 4, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 2, "Role", text_color=color.white)
+    table.cell(statusTable, 1, 2, alertRoleInput, text_color=color.white, bgcolor=color.new(color.blue, 35))
+    table.cell(statusTable, 0, 3, "Chart TF", text_color=color.white)
+    table.cell(statusTable, 1, 3, chartMatchesRole ? "OK" : "USE " + expectedRoleTf, text_color=color.white, bgcolor=chartMatchesRole ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 4, "4H ctx", text_color=color.white)
+    table.cell(statusTable, 1, 4, ctxDir, text_color=color.white)
+    table.cell(statusTable, 0, 5, "Session", text_color=color.white)
+    table.cell(statusTable, 1, 5, sessionName, text_color=color.white)
+    table.cell(statusTable, 0, 6, "Confirm", text_color=color.white)
+    table.cell(statusTable, 1, 6, confirmState, text_color=color.white)
+    table.cell(statusTable, 0, 7, "VP ready", text_color=color.white)
+    table.cell(statusTable, 1, 7, profileReady ? "YES" : "NO", text_color=color.white, bgcolor=profileReady ? color.new(color.green, 35) : color.new(color.orange, 35))
+    table.cell(statusTable, 0, 8, "Webhook", text_color=color.white)
+    roleWebhookLabel = alertRoleInput == ROLE_PLAN_15M ? (enableQuoteUpdates ? "PLAN+QUOTE" : "PLAN_15M") : alertRoleInput
+    table.cell(statusTable, 1, 8, enableAlertCalls ? roleWebhookLabel : "OFF", text_color=color.white, bgcolor=enableAlertCalls ? color.new(color.blue, 35) : color.new(color.gray, 35))

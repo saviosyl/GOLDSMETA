@@ -1,0 +1,141 @@
+/**
+ * Shared Express app factory — used by production `api` and preview `apiV6Preview`.
+ * Keeps createApp logic off the Cloud Function entry so preview can lazy-init
+ * after Firebase secrets are injected (no circular import with index.ts).
+ */
+import express, { type ErrorRequestHandler } from "express";
+import { env } from "./config/env";
+import { buildCorsMiddleware } from "./middleware/cors";
+import { buildDecisionsRouter } from "./routes/decisions";
+import { buildDevicesRouter } from "./routes/devices";
+import { buildHealthRouter } from "./routes/health";
+import { buildJournalRouter } from "./routes/journal";
+import { buildMarketFeedRouter } from "./routes/marketFeed";
+import { buildMarketDataRouter } from "./routes/marketData";
+import { buildNotificationsRouter } from "./routes/notifications";
+import { buildPushRouter } from "./routes/push";
+import { buildSettingsRouter } from "./routes/settings";
+import { buildSystemRouter } from "./routes/system";
+import { buildTradingRouter } from "./routes/trading";
+import { buildTradingViewRouter } from "./routes/tradingview";
+import { buildWebhooksRouter } from "./routes/webhooks";
+import { buildSetupsRouter } from "./routes/setups";
+import { buildV4Router } from "./routes/v4";
+import { buildV5Router } from "./routes/v5";
+import { buildMicroEdgeRouter } from "./routes/microEdge";
+import { buildSignalOutcomesRouter } from "./routes/signalOutcomes";
+import { buildAuthIntegrityRouter } from "./routes/authIntegrity";
+import { buildCTraderRouter } from "./routes/ctrader";
+import { buildRegistrationRouter } from "./routes/registration";
+import { buildAuthSessionRouter } from "./routes/authSession";
+import { buildAdminUsersRouter } from "./routes/adminUsers";
+import { buildGoldHunterAdminRouter } from "./routes/goldHunterAdmin";
+import { AiExplainer } from "./services/ai/explainer";
+import { createStore } from "./services/storage/createStore";
+import type { GoldMetaStore } from "./services/storage/types";
+import { InMemoryTradingStore } from "./services/trading/inMemoryTradingStore";
+import { TradingModeService } from "./services/trading/tradingModeService";
+export interface AppDependencies {
+  store: GoldMetaStore;
+  aiExplainer: AiExplainer;
+  tradingService?: TradingModeService;
+}
+
+const isPayloadTooLarge = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const maybeError = error as { type?: unknown; status?: unknown };
+  return maybeError.type === "entity.too.large" || maybeError.status === 413;
+};
+
+const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+  if (res.headersSent) {
+    return;
+  }
+
+  if (isPayloadTooLarge(error)) {
+    res.status(413).json({
+      error: {
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Payload exceeds configured limit"
+      }
+    });
+    return;
+  }
+
+  res.status(400).json({
+    error: {
+      code: "BAD_REQUEST",
+      message: "Request could not be parsed"
+    }
+  });
+};
+
+export const createApiApp = (
+  dependencies: Partial<AppDependencies> = {}
+): express.Express => {
+  const store = dependencies.store ?? createStore();
+  const aiExplainer = dependencies.aiExplainer ?? new AiExplainer();
+  const tradingService =
+    dependencies.tradingService ?? new TradingModeService(new InMemoryTradingStore());
+
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+  app.use(buildCorsMiddleware());
+  // Registration / password-reset must reject non-JSON before body parsing.
+  app.use((req, res, next) => {
+    const path = req.path || "";
+    const strictJson =
+      req.method === "POST" &&
+      (path === "/v1/auth/register" ||
+        path === "/v1/auth/register/preflight" ||
+        path === "/v1/auth/register/finalize" ||
+        path === "/v1/auth/password-reset");
+    if (!strictJson) {
+      next();
+      return;
+    }
+    const raw = (req.header("content-type") ?? "").toLowerCase();
+    if (!raw.includes("application/json")) {
+      res.status(415).json({
+        error: {
+          code: "UNSUPPORTED_MEDIA_TYPE",
+          message: "Content-Type must be application/json."
+        }
+      });
+      return;
+    }
+    next();
+  });
+  app.use(express.json({ limit: env.PAYLOAD_SIZE_LIMIT, type: ["application/json", "text/plain"] }));
+
+  app.use(buildHealthRouter());
+  app.use(buildRegistrationRouter());
+  app.use(buildAuthSessionRouter());
+  app.use(buildAdminUsersRouter());
+  app.use(buildGoldHunterAdminRouter());
+  app.use(buildWebhooksRouter(store, aiExplainer));
+  app.use(buildTradingViewRouter(store, aiExplainer));
+  app.use(buildDevicesRouter(store));
+  app.use(buildPushRouter(store));
+  app.use(buildNotificationsRouter(store));
+  app.use(buildMarketFeedRouter(store));
+  app.use(buildMarketDataRouter());
+  app.use(buildDecisionsRouter(store));
+  app.use(buildSetupsRouter(store));
+  app.use(buildV4Router(store));
+  app.use(buildV5Router(store));
+  app.use(buildSignalOutcomesRouter());
+  app.use(buildJournalRouter(store));
+  app.use(buildSettingsRouter(store));
+  app.use(buildTradingRouter(tradingService));
+  app.use(buildMicroEdgeRouter());
+  app.use(buildCTraderRouter(store));
+  app.use(buildAuthIntegrityRouter(store));
+  app.use(buildSystemRouter());
+  app.use(errorHandler);
+
+  return app;
+};

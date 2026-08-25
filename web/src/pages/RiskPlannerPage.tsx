@@ -1,0 +1,73 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ShieldAlert } from "lucide-react";
+import { useAuth } from "../lib/auth";
+import { ManualRiskPlanner } from "../components/ManualRiskPlanner";
+import type { ManualRiskSettings, SetupRecord } from "../types/models";
+import { PageHeader, SectionCard } from "../components/ui/primitives";
+import { formatClientError } from "../lib/errors";
+
+const DEFAULT_RISK: ManualRiskSettings = {
+  currency: "EUR",
+  maxCashRiskPerTrade: 20,
+  maxDailyRealisedLoss: 40,
+  stopAfterConsecutiveLosses: 3,
+  maxSimultaneousManualTrades: 1,
+  valuePerPoint: null,
+  estimatedSpreadPoints: null,
+  noAveragingDown: true,
+  noMartingale: true,
+  noAutomaticRecovery: true
+};
+
+/** Dedicated manual trade / risk planner — never places broker orders. */
+export function RiskPlannerPage() {
+  const { api } = useAuth();
+  const [risk, setRisk] = useState<ManualRiskSettings>(DEFAULT_RISK);
+  const [setup, setSetup] = useState<SetupRecord | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [settings, active] = await Promise.all([
+          api.getSettings(),
+          api.listActiveSetups().catch(() => [] as SetupRecord[])
+        ]);
+        if (settings.manualRisk) setRisk(settings.manualRisk);
+        setSetup(active[0] ?? null);
+      } catch (err) {
+        setError(formatClientError(err, "Unable to load risk preferences"));
+      }
+    })();
+  }, [api]);
+
+  return (
+    <div data-testid="risk-planner-page" className="gm-risk-planner-page gm-premium-v2">
+      <PageHeader title="Risk Planner" environment="DEMO" freshness="Manual calculator" />
+      <p className="gm-meta" style={{ marginTop: -8, marginBottom: 16 }} data-testid="risk-planner-disclaimer">
+        <strong>Manual calculator</strong> — does not place orders. Size the trade from balance,
+        risk, entry and stop.{" "}
+        <Link className="gm-linkish" to="/gold-hunter" data-testid="manage-autotrade-risk-link">
+          Manage Gold Hunter risk →
+        </Link>
+      </p>
+      <ul className="gm-help-list" data-testid="risk-planner-warnings">
+        <li>
+          <ShieldAlert size={16} aria-hidden /> Warns when entry equals stop or stop is on the wrong
+          side.
+        </li>
+        <li>Warns when the target is invalid or risk is above your limit.</li>
+        <li>No averaging down · no martingale · never connected to broker execution.</li>
+      </ul>
+      {error && (
+        <div className="banner error" role="alert">
+          {error}
+        </div>
+      )}
+      <SectionCard className="gm-risk-planner-shell">
+        <ManualRiskPlanner risk={risk} setup={setup} />
+      </SectionCard>
+    </div>
+  );
+}

@@ -30,13 +30,17 @@ Use separate webhook IDs, secrets, Firestore data, and Apple app identifiers for
 
 ## Authentication
 
-Recommended MVP providers:
+Current iOS source is wired for:
 
-1. Sign in with Apple for production iOS.
-2. Email link or email/password only if it matches your release plan.
-3. DEBUG-only mock authentication for local development.
+1. Firebase email/password sign-in and account creation.
+2. Firebase ID tokens on every authenticated backend request.
+3. DEBUG-only `MockAuthService` for local UI and previews when `GOLDMETA_USE_MOCK_AUTH = YES`.
 
-Backend user APIs should require Firebase ID tokens. Webhook endpoints should not require a user token because TradingView cannot send one; protect them with opaque webhook IDs, replay controls, schema validation, and rate limits.
+Sign in with Apple can be added later, but the production-connection source path currently uses email/password.
+
+Backend user APIs require Firebase ID tokens in `Authorization: Bearer <idToken>`. The iOS `APIClient` refreshes once on HTTP 401 and retries the request.
+
+Webhook endpoints do not require a user token because TradingView cannot send one; protect them with backend-created opaque webhook IDs, payload secrets, timestamp checks, replay controls, schema validation, and rate limits.
 
 ## Firestore layout
 
@@ -45,19 +49,22 @@ Expected high-level structure:
 ```text
 users/{userId}
   devices/{deviceId}
-  settings/{settingsDoc}
-  webhookConnections/{connectionId}
-  rawEvents/{eventId}
-  marketSnapshots/{snapshotId}
-  decisions/{decisionId}
+  settings/main
   journalEntries/{entryId}
-  notificationEvents/{notificationId}
-  auditEvents/{auditId}
+webhookConnections/{webhookId}
+rawEvents/{eventId}
+marketSnapshots/{snapshotId}
+decisions/{decisionId}
+processingJobs/{jobId}
+notificationEvents/{notificationId}
+auditEvents/{auditId}
 system/configurations/{version}
 system/health/{service}
 ```
 
 Store raw TradingView payloads for auditability, but redact or avoid storing payload-level secrets.
+
+See `docs/FIRESTORE_DATA_MODEL.md` for field-level examples.
 
 ## Cloud Functions configuration
 
@@ -68,9 +75,9 @@ Typical values:
 | Name | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | Server-side AI explanation only, if enabled. |
-| `WEBHOOK_SIGNING_SECRET` | Optional payload/HMAC validation if implemented. |
-| `APP_ENV` | `dev`, `staging`, or `prod`. |
-| `ALLOWED_ORIGINS` | HTTPS origins for user-facing APIs. |
+| `WEBHOOK_PUBLIC_BASE_URL` | Public base URL used when the backend creates TradingView webhook URLs. |
+| `APP_ENV` | `development`, `test`, or `production`. |
+| `STORAGE_BACKEND` | `memory` for local tests; `firestore` for production. |
 | `DECISION_CONFIG_VERSION` | Active deterministic rule configuration. |
 
 Never place these values in the iOS app bundle or Pine Script.
@@ -125,3 +132,15 @@ firebase emulators:start
 Use sample payloads from `pine/alert-payload-example.json`. Validate against `shared/schemas/tradingview-webhook-payload.schema.json`.
 
 Confidence in GoldMeta is a measure of setup quality and input completeness. It is not a win probability or guarantee of outcome.
+
+## iOS Firebase files
+
+The real iOS Firebase plist belongs at:
+
+```text
+ios/GoldMeta/App/GoogleService-Info.plist
+```
+
+That file is ignored by Git. Use `ios/GoldMeta/App/GoogleService-Info.plist.example` only as a placeholder showing the expected keys.
+
+If the plist is missing, the app logs a clear message and DEBUG mock auth can still run local UI. Real Firebase Auth and FCM require the plist on the Mac.

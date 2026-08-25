@@ -1,0 +1,208 @@
+/**
+ * Pepperstone cTrader Demo market order submission.
+ * Live accounts are always rejected. Requires trading OAuth scope + Demo flag.
+ */
+
+import { randomBytes } from "crypto";
+import { loadCTraderConfig } from "./config";
+import {
+  getConnection,
+  loadTokenEncryptionSecret,
+  persistRotatedTokensAtomic
+} from "./connectionStore";
+import { refreshAccessToken } from "./oauth";
+import {
+  createOpenApiClient,
+  type DemoMarketOrderRequest,
+  type DemoMarketOrderResult
+} from "./openApiClient";
+import { decryptTokenPayload, encryptTokenPayload } from "./tokenCrypto";
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "./flags";
+import { lotsToOrderVolumeUnits } from "./volumeUnits";
+import { denyCTraderMutation } from "./mutationGuard";
+import { relativeProtectionFromGeometry } from "./demoTransport/newOrderPayload";
+import { FAST_CLIENT_ORDER_ID_MAX_LEN } from "./demoTransport/clientOrderId";
+
+export type SubmitDemoMarketOrderArgs = {
+  ownerUid: string;
+  side: "BUY" | "SELL";
+  lots: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  entryHint?: number | null;
+  symbolId?: string | null;
+  comment?: string;
+  label?: string;
+  /** Optional durable client order id (e.g. Gold Hunter). */
+  clientOrderId?: string | null;
+  /** Optional strategy attribution. Never used to enable a second auto engine. */
+  strategyId?: string | null;
+};
+
+function relativeProtection(args: {
+  side: "BUY" | "SELL";
+  entry: number | null | undefined;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}): { relativeStopLoss?: number; relativeTakeProfit?: number } {
+  const out = relativeProtectionFromGeometry(args);
+  return {
+    relativeStopLoss: out.relativeStopLoss,
+    relativeTakeProfit: out.relativeTakeProfit
+  };
+}
+
+async function decryptAccessToken(ownerUid: string): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  accessExpiresAt: string;
+  tokenVersion: number;
+  connection: NonNullable<Awaited<ReturnType<typeof getConnection>>>;
+}> {
+  const connection = await getConnection(ownerUid);
+  if (!connection) throw new Error("CTRADER_NOT_CONNECTED");
+  const secret = loadTokenEncryptionSecret();
+  if (!secret) throw new Error("CTRADER_TOKEN_ENCRYPTION_KEY");
+  const payload = JSON.parse(
+    decryptTokenPayload(connection.tokens.ciphertext, secret)
+  ) as { accessToken?: string; refreshToken?: string };
+  if (!payload.accessToken || !payload.refreshToken) {
+    throw new Error("CTRADER_TOKENS_MISSING");
+  }
+  return {
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    accessExpiresAt: connection.tokens.accessExpiresAt,
+    tokenVersion: connection.tokens.tokenVersion ?? 0,
+    connection
+  };
+}
+
+async function ensureFreshAccessToken(ownerUid: string): Promise<{
+  accessToken: string;
+  connection: NonNullable<Awaited<ReturnType<typeof getConnection>>>;
+}> {
+  const cfg = loadCTraderConfig();
+  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+  if (!cfg.configured || !clientId || !clientSecret) {
+    throw new Error("CONFIGURATION_REQUIRED");
+  }
+  let { accessToken, refreshToken, accessExpiresAt, tokenVersion, connection } =
+    await decryptAccessToken(ownerUid);
+
+  const expiresAt = Date.parse(accessExpiresAt);
+  const stale =
+    !Number.isFinite(expiresAt) || expiresAt < Date.now() + 60_000;
+  if (stale) {
+    const rotated = await refreshAccessToken({
+      clientId,
+      clientSecret,
+      refreshToken
+    });
+    const secret = loadTokenEncryptionSecret();
+    if (!secret) throw new Error("CTRADER_TOKEN_ENCRYPTION_KEY");
+    const ciphertext = encryptTokenPayload(
+      JSON.stringify({
+        accessToken: rotated.accessToken,
+        refreshToken: rotated.refreshToken ?? refreshToken
+      }),
+      secret
+    );
+    await persistRotatedTokensAtomic({
+      ownerUid,
+      expectedCiphertext: connection.tokens.ciphertext,
+      expectedTokenVersion: tokenVersion,
+      newTokens: {
+        ciphertext,
+        accessExpiresAt: new Date(
+          Date.now() + (rotated.expiresIn ?? 3600) * 1000
+        ).toISOString(),
+        refreshedAt: new Date().toISOString(),
+        tokenVersion: tokenVersion + 1
+      }
+    });
+    accessToken = rotated.accessToken;
+    connection = (await getConnection(ownerUid))!;
+  }
+
+  return { accessToken, connection };
+}
+
+/**
+ * Place a Pepperstone Demo market order for the authenticated user.
+ * Never accepts Live accounts.
+ */
+export async function submitDemoMarketOrder(
+  args: SubmitDemoMarketOrderArgs
+): Promise<DemoMarketOrderResult> {
+  if (isCTraderLiveEnabled()) {
+    denyCTraderMutation("liveOrder");
+  }
+  if (!isCTraderDemoOrderSubmissionEnabled()) {
+    denyCTraderMutation("placeMarketOrder");
+  }
+
+  const cfg = loadCTraderConfig();
+  const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
+  const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
+  if (!cfg.configured || !clientId || !clientSecret) {
+    throw new Error("CONFIGURATION_REQUIRED");
+  }
+
+  const { accessToken, connection } = await ensureFreshAccessToken(args.ownerUid);
+
+  if (connection.selectedAccountIsLive || connection.environment === "LIVE") {
+    throw new Error("CTRADER_DEMO_ONLY_LIVE_ACCOUNT_FORBIDDEN");
+  }
+  if (!connection.selectedAccountId) {
+    throw new Error("CTRADER_ACCOUNT_NOT_SELECTED");
+  }
+  if (connection.oauthScope !== "trading") {
+    throw new Error("CTRADER_TRADING_SCOPE_REQUIRED");
+  }
+  if (!connection.brokerConfirmedPepperstone) {
+    throw new Error("CTRADER_PEPPERSTONE_NOT_CONFIRMED");
+  }
+
+  const symbolId = args.symbolId ?? connection.symbolId;
+  if (!symbolId) {
+    throw new Error("CTRADER_SYMBOL_NOT_RESOLVED");
+  }
+
+  const volume = lotsToOrderVolumeUnits(args.lots);
+  if (!(volume > 0)) {
+    throw new Error("CTRADER_VOLUME_LOTS_INVALID");
+  }
+
+  const protection = relativeProtection({
+    side: args.side,
+    entry: args.entryHint,
+    stopLoss: args.stopLoss,
+    takeProfit: args.takeProfit
+  });
+
+  const request: DemoMarketOrderRequest = {
+    accessToken,
+    clientId,
+    clientSecret,
+    ctidTraderAccountId: connection.selectedAccountId,
+    symbolId,
+    side: args.side,
+    volume,
+    relativeStopLoss: protection.relativeStopLoss,
+    relativeTakeProfit: protection.relativeTakeProfit,
+    clientOrderId: (
+      args.clientOrderId?.trim() ||
+      `gm_${randomBytes(8).toString("hex")}`
+    ).slice(0, FAST_CLIENT_ORDER_ID_MAX_LEN),
+    label: (args.label ?? "GoldMeta Demo").slice(0, 100),
+    comment: (args.comment ?? "GoldMeta Demo").slice(0, 512)
+  };
+
+  const client = createOpenApiClient();
+  if (!client.placeDemoMarketOrder) {
+    throw new Error("CTRADER_DEMO_ORDER_TRANSPORT_UNAVAILABLE");
+  }
+  return client.placeDemoMarketOrder(request);
+}

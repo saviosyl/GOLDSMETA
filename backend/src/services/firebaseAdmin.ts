@@ -1,5 +1,6 @@
 import { applicationDefault, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getMessaging, type Message } from "firebase-admin/messaging";
 import { env } from "../config/env";
 import { logger } from "./logging/logger";
@@ -14,6 +15,13 @@ export const getFirebaseApp = (): App | null => {
   const existingApp = getApps()[0];
   if (existingApp) {
     cachedApp = existingApp;
+    return cachedApp;
+  }
+
+  // Explicit memory backend must not initialize Admin SDK — shells often set
+  // GCLOUD_PROJECT, which would otherwise trigger ADC/metadata hangs in tests.
+  if (env.STORAGE_BACKEND === "memory") {
+    cachedApp = null;
     return cachedApp;
   }
 
@@ -52,4 +60,9 @@ export const sendFirebaseMessages = async (messages: Message[]): Promise<number>
   }
   const response = await getMessaging(app).sendEach(messages);
   return response.successCount;
+};
+
+export const getFirestoreDb = (): Firestore | null => {
+  const app = getFirebaseApp();
+  return app ? getFirestore(app) : null;
 };

@@ -10,9 +10,33 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function claimRole() {
+      return isSignedIn() && request.auth.token.role is string
+        ? request.auth.token.role
+        : "";
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        claimRole() == "OWNER" ||
+        claimRole() == "ADMIN"
+      );
+    }
+
+    function isPending() {
+      return claimRole() == "USER_PENDING";
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create, update, delete: if false;
+
+      // Registration profile — owner may read; role/approval fields never client-writable.
+      match /profile/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
 
       match /settings/{document=**} {
         allow read: if isOwner(userId);
@@ -30,7 +54,12 @@ service cloud.firestore {
       }
 
       match /decisions/{document=**} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) && !isPending();
+        allow write: if false;
+      }
+
+      match /setups/{document=**} {
+        allow read: if isOwner(userId) && !isPending();
         allow write: if false;
       }
 
@@ -39,13 +68,139 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /eventDedupes/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      match /notificationEvents/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
       match /marketSnapshots/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      // V6 AutoTrade — owner read; client write forbidden (Admin SDK only).
+      // Clients must never mark trade intents APPROVED/ACCEPTED/OPEN/CLOSED.
+      // Pending users cannot read broker data.
+      match /brokerSettings/{document=**} {
+        allow read: if isOwner(userId) && !isPending();
+        allow write: if false;
+      }
+      match /autoTradeRiskState/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /tradeIntents/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerExecutions/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerPositions/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerEvents/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeAudit/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /autoTradeLocks/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /brokerConnections/{document=**} {
+        allow read: if isOwner(userId) && !isPending();
+        allow write: if false;
+      }
+      match /brokerSelection/{document=**} {
+        allow read: if isOwner(userId) && !isPending();
+        allow write: if false;
+      }
+      match /t212SelectedInstrument/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212Proposals/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /t212ProposalIdempotency/{document=**} {
+        allow read: if false;
+        allow write: if false;
+      }
+      match /autoTradeActivity/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Isolated V6 preview AutoTrade namespace (server Admin SDK only).
+      match /autoTradePreview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Isolated Trading 212 Practice preview namespace (server Admin SDK only).
+      match /autoTradeT212Preview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Isolated Pepperstone cTrader Demo preview namespace (server Admin SDK only).
+      match /autoTradeCTraderPreview/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /tradeIntentDealRefs/{document=**} {
         allow read: if false;
         allow write: if false;
       }
     }
 
+    match /webhookConnections/{webhookId} {
+      // Webhook ownership cannot be changed by registered users (write false).
+      // Pending users cannot read webhook docs.
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && !isPending();
+      allow write: if false;
+    }
+
+    // Admin directory / audit — Admin SDK only (never client-writable).
+    match /userDirectory/{userId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    match /adminAudit/{eventId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    // Rate-limit + registration reservation docs — Admin SDK only.
+    match /rateLimits/{docId} {
+      allow read, write: if false;
+    }
+    match /registrationReservations/{docId} {
+      allow read, write: if false;
+    }
+
+    match /processingJobs/{jobId} {
+      allow read, write: if false;
+    }
+
     match /system/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Micro Edge — Admin/backend only. Client must never read OAuth material.
+    match /microEdge/{document=**} {
       allow read, write: if false;
     }
 

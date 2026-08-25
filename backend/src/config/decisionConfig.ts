@@ -1,5 +1,5 @@
-export const BACKEND_VERSION = "1.0.0-mvp";
-export const RULE_CONFIG_VERSION = "rules-1.0.0";
+export const BACKEND_VERSION = "1.4.0-v5-intelligence";
+export const RULE_CONFIG_VERSION = "rules-1.1.0";
 
 export const decisionConfig = {
   version: RULE_CONFIG_VERSION,
@@ -7,7 +7,30 @@ export const decisionConfig = {
     buy: 70,
     sell: -70,
     minRiskRewardToTp2: 1.5,
+    minConfidenceForTrade: 45,
     staleAfterMs: 5 * 60 * 1000
+  },
+  /** Per-role freshness (configurable; used by snapshot + feed health). */
+  freshness: {
+    quoteFreshMs: 90 * 1000,
+    quoteDelayedMs: 3 * 60 * 1000,
+    quoteStaleMs: 3 * 60 * 1000,
+    confirm5mStaleMs: 12 * 60 * 1000,
+    plan15mStaleMs: 20 * 60 * 1000,
+    oneHourBiasStaleMs: 2 * 60 * 60 * 1000,
+    confirmBarMs: 5 * 60 * 1000,
+    planBarMs: 15 * 60 * 1000,
+    confirmGraceMs: 90 * 1000,
+    planGraceMs: 120 * 1000
+  },
+  stopDistance: {
+    minStopPoints: 1.5,
+    minAtrMultiple: 0.35,
+    wideAtrMultiple: 2.5,
+    spreadBufferPoints: 0.3
+  },
+  setupQuality: {
+    readyThreshold: 80
   },
   scoringWeights: {
     trendDirection: 28,
@@ -27,5 +50,10 @@ export const decisionConfig = {
     provisionalAllowed: false,
     safetyLock: false
   },
+  /**
+   * Max relative divergence between alert close, OHLC, POC/VAH/VAL, and optional broker mid.
+   * 0.02 = 2%. Blocks BUY/SELL when exceeded (e.g. 2408 fixture vs 4045 live).
+   */
+  priceConsistencyTolerance: 0.02,
   decisionTtlMs: 15 * 60 * 1000
 } as const;

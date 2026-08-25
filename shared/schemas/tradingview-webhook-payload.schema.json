@@ -22,7 +22,7 @@
     "webhookSecret": { "type": ["string", "null"] },
     "symbol": { "type": "string", "enum": ["XAUUSD"] },
     "exchange": { "type": ["string", "null"] },
-    "timeframe": { "type": "string", "enum": ["1", "5", "15", "60", "240"] },
+    "timeframe": { "type": "string", "enum": ["1", "5", "15", "30", "60", "240"] },
     "eventType": {
       "type": "string",
       "enum": ["BAR_CLOSE", "BAR_UPDATE", "INDICATOR_UPDATE", "TEST"]

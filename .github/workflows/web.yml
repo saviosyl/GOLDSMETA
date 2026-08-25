@@ -1,0 +1,122 @@
+name: Web PWA
+
+on:
+  pull_request:
+    branches:
+      - main
+      - cursor/production-connection
+      - cursor/micro-edge-v1
+      - cursor/micro-edge-market-data-v1
+      - cursor/webhook-delivery-400-c2c2
+      - cursor/phase3-stage3-live-forward-c2c2
+      - cursor/goldmeta-v4-stage-b-c2c2
+      - cursor/v5-4-3-approved-base-c2c2
+  push:
+    branches:
+      - main
+      - cursor/production-connection
+      - cursor/live-xauusd-price-e1a2
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_API_BASE_URL: http://127.0.0.1:8080
+      VITE_FIREBASE_API_KEY: test-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: example.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: example-project
+      VITE_FIREBASE_APP_ID: 1:000000000000:web:test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        env:
+          # Single worker + raised heap — premium suite OOMs on multi-fork GHA runners.
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run test:ci
+
+      - name: Production Firebase env gate
+        run: npm run gate:production-config:env
+
+      - name: Build (production)
+        run: npm run build
+
+      - name: Production Firebase bundle gate
+        run: npm run gate:production-config:dist
+
+      - name: Production bundle fixture-leak check
+        run: npm run test:production-bundle
+
+      - name: Build (ui-review for Playwright)
+        run: npm run build:ui-review
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Signal History Playwright
+        run: npx playwright test e2e/signalHistory.spec.ts --project=desktop-chromium
+
+      - name: UI-review host isolation Playwright
+        run: npx playwright test e2e/uiReviewHostRestriction.spec.ts --project=desktop-chromium
+
+      - name: SPA deep-link safety Playwright
+        run: npx playwright test e2e/spaDeepLinkSafety.spec.ts --project=desktop-chromium
+
+  # Market Structure + mobileFit matrix (must stay green with current premium UI selectors).
+  web-mobile-e2e:
+    name: web-mobile-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: web
+    env:
+      VITE_API_BASE_URL: http://127.0.0.1:8080
+      VITE_FIREBASE_API_KEY: test-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: example.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: example-project
+      VITE_FIREBASE_APP_ID: 1:000000000000:web:test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (ui-review for Playwright)
+        run: npm run build:ui-review
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Market Structure + mobileFit Playwright
+        run: npx playwright test e2e/marketStructureMismatch.spec.ts e2e/mobileFit.spec.ts --project=desktop-chromium --project=mobile-chromium

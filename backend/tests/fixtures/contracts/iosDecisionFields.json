@@ -1,0 +1,47 @@
+{
+  "stringFields": [
+    "schemaVersion",
+    "decisionId",
+    "symbol",
+    "generatedAt",
+    "marketDataTime",
+    "validUntil",
+    "decision",
+    "confidenceLabel",
+    "marketRegime",
+    "dataQuality",
+    "invalidation",
+    "disclaimer",
+    "lifecycleState",
+    "ruleConfigVersion",
+    "backendVersion",
+    "dataSourceLabel",
+    "environment"
+  ],
+  "numberFields": ["confidence", "setupScore"],
+  "booleanFields": [
+    "isProvisional",
+    "aiSafetyDowngraded",
+    "notificationSent",
+    "isTestDecision"
+  ],
+  "arrayFields": [
+    "takeProfits",
+    "bullishEvidence",
+    "bearishEvidence",
+    "reasonCodes",
+    "reasonSummary",
+    "warnings",
+    "missingInputs"
+  ],
+  "objectFields": ["entry", "stopLoss", "riskReward", "breakeven", "earlyExit"],
+  "nullableFields": [
+    "snapshotId",
+    "pineScriptVersion",
+    "aiModelId",
+    "aiPromptVersion",
+    "currentSession",
+    "higherTimeframeBias",
+    "lastKnownPrice"
+  ]
+}

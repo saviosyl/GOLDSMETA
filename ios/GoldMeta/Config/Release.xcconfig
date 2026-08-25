@@ -1,0 +1,4 @@
+GOLDMETA_API_BASE_URL = https:/$()/YOUR_CLOUD_FUNCTIONS_URL
+GOLDMETA_USE_MOCK_AUTH = NO
+
+#include? "Secrets.xcconfig"

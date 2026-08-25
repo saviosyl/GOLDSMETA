@@ -1,0 +1,51 @@
+# Security / caching headers for Cloudflare Pages
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+
+# HTML entry must revalidate so clients pick up new hashed asset references quickly.
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+# Service worker must never stick on the custom-domain edge (max-age here
+# previously left phones on an old shell that still said "Blocked").
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/manifest.webmanifest
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/sw-cache-migrate.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/push-handler.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+# Hashed assets are content-addressed — browsers may cache 200s immutably.
+# Do NOT set CDN-Cache-Control: immutable on these prefixes: Cloudflare Pages
+# applies path headers to 404 responses too, which can permanently cache a
+# missing-chunk 404/HTML during deploy cutover. Edge should revalidate.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/gm/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/gmv7/*
+  Cache-Control: public, max-age=31536000, immutable

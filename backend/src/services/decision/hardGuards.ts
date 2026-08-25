@@ -5,6 +5,19 @@ import { isPositivePrice } from "../../utils/money";
 const decisionToTrend = (decision: Exclude<DecisionDirection, "WAIT">): "BULLISH" | "BEARISH" =>
   decision === "BUY" ? "BULLISH" : "BEARISH";
 
+const resolveVolumeProfile = (
+  snapshot: MarketSnapshot
+): { poc: number | null; vah: number | null; val: number | null } => {
+  const poc = snapshot.levels?.pocAll ?? snapshot.sessionVolumeProfile?.poc ?? null;
+  const vah = snapshot.levels?.vahAll ?? snapshot.sessionVolumeProfile?.vah ?? null;
+  const val = snapshot.levels?.valAll ?? snapshot.sessionVolumeProfile?.val ?? null;
+  return {
+    poc: isPositivePrice(poc) ? poc : null,
+    vah: isPositivePrice(vah) ? vah : null,
+    val: isPositivePrice(val) ? val : null
+  };
+};
+
 const hasHigherTimeframeContradiction = (
   snapshot: MarketSnapshot,
   decision: Exclude<DecisionDirection, "WAIT">
@@ -21,11 +34,76 @@ const hasHigherTimeframeContradiction = (
   });
 };
 
+const valueAreaRelation = (
+  price: number,
+  vah: number,
+  val: number
+): "ABOVE_VAH" | "INSIDE_VA" | "BELOW_VAL" => {
+  if (price > vah) {
+    return "ABOVE_VAH";
+  }
+  if (price < val) {
+    return "BELOW_VAL";
+  }
+  return "INSIDE_VA";
+};
+
+const hasTrendStructureConflict = (snapshot: MarketSnapshot): boolean => {
+  const trend = snapshot.trend?.direction;
+  const profile = resolveVolumeProfile(snapshot);
+  if (!trend || trend === "NEUTRAL" || !isPositivePrice(snapshot.price) || !profile.vah || !profile.val) {
+    return false;
+  }
+  const relation = valueAreaRelation(snapshot.price, profile.vah, profile.val);
+  if (trend === "BULLISH" && relation === "BELOW_VAL") {
+    return true;
+  }
+  if (trend === "BEARISH" && relation === "ABOVE_VAH") {
+    return true;
+  }
+  return false;
+};
+
+const evidenceFamilies = (snapshot: MarketSnapshot, decision: Exclude<DecisionDirection, "WAIT">): number => {
+  const desired = decisionToTrend(decision);
+  let count = 0;
+
+  const trend = snapshot.trend?.direction;
+  const trendStrength = snapshot.trend?.strength ?? 0;
+  if (trend === desired && trendStrength > 0) {
+    count += 1;
+  }
+
+  const profile = resolveVolumeProfile(snapshot);
+  if (profile.poc !== null && profile.vah !== null && profile.val !== null && isPositivePrice(snapshot.price)) {
+    const relation = valueAreaRelation(snapshot.price, profile.vah, profile.val);
+    const pocSide = snapshot.price >= profile.poc ? "BULLISH" : "BEARISH";
+    if (decision === "BUY" && (relation === "ABOVE_VAH" || pocSide === "BULLISH")) {
+      count += 1;
+    } else if (decision === "SELL" && (relation === "BELOW_VAL" || pocSide === "BEARISH")) {
+      count += 1;
+    }
+  }
+
+  const candle = snapshot.confirmationCandle;
+  if (
+    candle?.confirmed &&
+    candle.direction === desired &&
+    candle.classification &&
+    candle.classification !== "NONE"
+  ) {
+    count += 1;
+  }
+
+  return count;
+};
+
 export const evaluateHardGuards = (
   snapshot: MarketSnapshot,
   decision: DecisionDirection,
   plan: TradePlan,
-  dataQuality: DataQualityResult
+  dataQuality: DataQualityResult,
+  confidence?: number
 ): GuardResult => {
   const reasonCodes: string[] = [];
   const warnings: string[] = [];
@@ -42,7 +120,34 @@ export const evaluateHardGuards = (
     reasonCodes.push("INVALID_DATA");
   }
   if (dataQuality.quality === "CONFLICTED") {
-    reasonCodes.push("CONFLICTED_DATA");
+    // Only hard-conflict when price-source / fixture leak is present.
+    if (dataQuality.warnings.some((w) => /PRICE_SOURCE_MISMATCH|TEST_FIXTURE_LEAK/i.test(w))) {
+      reasonCodes.push("HARD_CONFLICT");
+      reasonCodes.push("PRICE_SOURCE_MISMATCH");
+    } else {
+      warnings.push("SOFT_DISAGREEMENT");
+    }
+  }
+  if (dataQuality.warnings.some((w) => /SOFT_DISAGREEMENT/i.test(w))) {
+    warnings.push("SOFT_DISAGREEMENT");
+  }
+  if (dataQuality.quality === "PARTIAL") {
+    // Soft: partial optional inputs (profile/TPO) must not alone erase a valid plan.
+    warnings.push("INCOMPLETE_DATA");
+    warnings.push("MISSING_OPTIONAL_DATA");
+  }
+
+  if (dataQuality.missingInputs.includes("volumeProfile")) {
+    warnings.push("MISSING_VOLUME_PROFILE");
+  }
+  if (
+    dataQuality.missingInputs.includes("trend.direction") ||
+    dataQuality.missingInputs.includes("trend.strength")
+  ) {
+    warnings.push("MISSING_TREND");
+  }
+  if (dataQuality.missingInputs.includes("confirmationCandle")) {
+    warnings.push("MISSING_CONFIRMATION");
   }
 
   if (!isPositivePrice(snapshot.price)) {
@@ -53,9 +158,42 @@ export const evaluateHardGuards = (
     reasonCodes.push("PROVISIONAL_DISABLED");
   }
 
+  if (hasTrendStructureConflict(snapshot)) {
+    reasonCodes.push("CONFLICTING_TREND");
+  }
+
   if (decision !== "WAIT") {
     const entry = plan.entry.price;
     const stopLoss = plan.stopLoss.price;
+    const profile = resolveVolumeProfile(snapshot);
+    const candle = snapshot.confirmationCandle;
+
+    if (reasonCodes.includes("PRICE_SOURCE_MISMATCH")) {
+      // Already conflicted — keep BUY/SELL blocked via failed guards.
+    }
+
+    // Soft: optional volume profile / confirmation gaps do not hard-block when
+    // Entry/Stop/TP1 geometry can still be validated by the session-plan gate.
+    if (profile.poc === null || profile.vah === null || profile.val === null) {
+      warnings.push("MISSING_VOLUME_PROFILE");
+    }
+
+    if (!snapshot.trend?.direction || snapshot.trend.direction === "NEUTRAL") {
+      warnings.push("MISSING_TREND");
+    }
+
+    if (
+      !candle?.confirmed ||
+      !candle.direction ||
+      !candle.classification ||
+      candle.classification === "NONE"
+    ) {
+      warnings.push("MISSING_CONFIRMATION");
+    }
+
+    if (evidenceFamilies(snapshot, decision) < 2) {
+      warnings.push("INSUFFICIENT_EVIDENCE");
+    }
 
     if (!isPositivePrice(stopLoss)) {
       reasonCodes.push("CANNOT_DETERMINE_SL");
@@ -81,19 +219,34 @@ export const evaluateHardGuards = (
       }
     }
 
+    // TP2 is optional. Enforce min RR to TP2 only when TP2 exists; otherwise TP1 RR.
+    const tp1RiskReward = plan.riskReward.tp1;
     const tp2RiskReward = plan.riskReward.tp2;
-    if (tp2RiskReward === null || tp2RiskReward < decisionConfig.thresholds.minRiskRewardToTp2) {
-      reasonCodes.push("MIN_RR_TO_TP2_NOT_MET");
+    const hasTp2 = plan.takeProfits.some((t) => t.label === "TP2" && isPositivePrice(t.price));
+    if (hasTp2) {
+      if (tp2RiskReward === null || tp2RiskReward < decisionConfig.thresholds.minRiskRewardToTp2) {
+        reasonCodes.push("MIN_RR_TO_TP2_NOT_MET");
+        reasonCodes.push("POOR_RISK_REWARD");
+      }
+    } else if (tp1RiskReward === null || tp1RiskReward < 1.0) {
+      reasonCodes.push("POOR_RISK_REWARD");
     }
 
     if (hasHigherTimeframeContradiction(snapshot, decision)) {
       reasonCodes.push("HTF_CONTRADICTION");
     }
+
+    if (
+      typeof confidence === "number" &&
+      confidence < decisionConfig.thresholds.minConfidenceForTrade
+    ) {
+      reasonCodes.push("LOW_CONFIDENCE");
+    }
   }
 
   return {
     passed: reasonCodes.length === 0,
-    reasonCodes,
+    reasonCodes: [...new Set(reasonCodes)],
     warnings
   };
 };

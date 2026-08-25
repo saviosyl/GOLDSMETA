@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "1.1",
+  "source": "tradingview",
+  "eventId": "OANDA:XAUUSD|15|1794902700000|PLAN_15M",
+  "webhookSecret": null,
+  "symbol": "XAUUSD",
+  "exchange": "OANDA",
+  "timeframe": "15",
+  "eventType": "BAR_CLOSE",
+  "barTime": "2026-07-20T14:45:00Z",
+  "sentAt": "2026-07-20T14:45:02Z",
+  "isConfirmedBar": true,
+  "indicatorName": "GoldMetaBridge",
+  "ohlcv": {
+    "open": 2417.32,
+    "high": 2421.86,
+    "low": 2415.74,
+    "close": 2420.48,
+    "volume": 18472
+  },
+  "levels": {
+    "pocAll": 2416.5,
+    "vahAll": 2420.0,
+    "valAll": 2412.0,
+    "pocNonBroken": [],
+    "vahNonBroken": [],
+    "valNonBroken": []
+  },
+  "sessionVolumeProfile": {
+    "session": "OVERLAP",
+    "sessionStart": "2026-07-20T13:00:00Z",
+    "sessionEnd": "2026-07-20T14:45:00Z",
+    "poc": 2416.5,
+    "vah": 2420.0,
+    "val": 2412.0,
+    "hvn": [2418.0],
+    "lvn": [2414.0],
+    "acceptanceState": "ACCEPTANCE"
+  },
+  "marketProfile": {
+    "tpoPoc": null,
+    "initialBalanceHigh": null,
+    "initialBalanceLow": null,
+    "poorHigh": null,
+    "poorLow": null,
+    "singlePrints": [],
+    "valueMigration": "UNKNOWN",
+    "profileState": "UNKNOWN",
+    "acceptanceState": "UNKNOWN"
+  },
+  "trend": {
+    "direction": "BULLISH",
+    "strength": 72,
+    "components": [
+      {
+        "name": "gm_direction_1h",
+        "direction": "BULLISH",
+        "strength": 70,
+        "sourceTimeframe": "60"
+      },
+      {
+        "name": "gm_structure_15m",
+        "direction": "BULLISH",
+        "strength": 78,
+        "sourceTimeframe": "15"
+      }
+    ]
+  },
+  "confirmationCandle": {
+    "confirmed": true,
+    "direction": "BULLISH",
+    "candleType": null,
+    "classification": "CONTINUATION",
+    "open": 2417.32,
+    "high": 2421.86,
+    "low": 2415.74,
+    "close": 2420.48,
+    "bodyPercent": 51.63,
+    "upperWickPercent": 22.55,
+    "lowerWickPercent": 25.82,
+    "volume": 18472,
+    "isClosed": true,
+    "relatedLevel": null
+  },
+  "optionalIndicators": {
+    "atr": { "length": 14, "value": 5.84 },
+    "oneHourBias": {
+      "timeframe": "60",
+      "direction": "BULLISH",
+      "ema21": 2418.4,
+      "ema50": 2412.7,
+      "ema200": 2389.3,
+      "atr": 9.1,
+      "oneHourBiasConfirmed": true,
+      "oneHourBiasSourceTime": "2026-07-20T14:00:00Z"
+    },
+    "dayLevels": {
+      "previousDayHigh": 2435.0,
+      "previousDayLow": 2398.0,
+      "currentDayHigh": 2422.1,
+      "currentDayLow": 2410.5
+    },
+    "openingRange": { "high": 2414.2, "low": 2408.6, "locked": true, "minutes": 30 },
+    "structure": {
+      "swingLength": 5,
+      "lastSwingHigh": 2421.5,
+      "lastSwingLow": 2411.2,
+      "breakoutState": "NONE",
+      "rejectionState": "NONE",
+      "retestState": "NONE"
+    },
+    "supportResistance": {
+      "support": [2412.0, 2411.2, 2408.6],
+      "resistance": [2422.1, 2435.0]
+    },
+    "timeframeRoles": {
+      "context": "240",
+      "direction": "60",
+      "structure": "15",
+      "entryConfirm": "5",
+      "quoteFreshness": "1"
+    },
+    "fourHourContext": {
+      "direction": "BULLISH",
+      "strength": 65,
+      "structureState": "TRENDING",
+      "ema21": 2410.0,
+      "ema50": 2400.0,
+      "ema200": 2380.0,
+      "atr": 12.5,
+      "swingHigh": 2430.0,
+      "swingLow": 2390.0,
+      "sourceCloseTime": "2026-07-20T12:00:00Z",
+      "neverTriggersEntry": true
+    }
+  },
+  "metadata": {
+    "scriptVersion": "3.0.0",
+    "alertKind": "STRATEGY",
+    "alertRole": "PLAN_15M",
+    "planSourceKey": "OANDA:XAUUSD|OVERLAP|1794902700000|PLAN_15M",
+    "oneHourBiasConfirmed": true,
+    "oneHourBiasSourceTime": "2026-07-20T14:00:00Z",
+    "confirmationState": "OUTSIDE_ZONE",
+    "confirmedBarMode": true,
+    "diagnosticMode": false,
+    "testMode": false,
+    "symbolOk": true,
+    "chartMatchesStructure": true,
+    "chartMatchesRole": true,
+    "partial": false,
+    "dataQualityHint": "GOOD"
+  }
+}

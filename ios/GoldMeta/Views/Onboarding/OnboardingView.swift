@@ -35,6 +35,7 @@ struct OnboardingView: View {
                         viewModel.next()
                     }
                     .frame(maxWidth: 220)
+                    .disabled(viewModel.isWorking)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 20)
@@ -61,16 +62,38 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Sign in")
                         .font(GoldMetaFont.title)
-                    Text("Phase 1 mock mode works without Firebase or live credentials.")
+                    Text("Use the Firebase email/password account that owns your GoldMeta backend data.")
                         .foregroundStyle(GoldMetaColor.textSecondary)
-                    #if DEBUG
-                    Button("Use DEBUG mock sign-in") { viewModel.enableMockSignIn() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(GoldMetaColor.gold)
-                    Text(viewModel.signInState)
+                    TextField("Email", text: $viewModel.email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.username)
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $viewModel.password)
+                        .textContentType(.password)
+                    Text("Account registration is currently closed.")
                         .font(.caption)
                         .foregroundStyle(GoldMetaColor.textSecondary)
+                        .accessibilityIdentifier("auth-registration-closed")
+                    Button {
+                        Task { await viewModel.submitAuth() }
+                    } label: {
+                        Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(GoldMetaColor.gold)
+                    #if DEBUG
+                    if viewModel.canUseDebugMockSignIn {
+                        Button("Use DEBUG mock sign-in") {
+                            Task { await viewModel.enableMockSignIn() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(GoldMetaColor.gold)
+                    }
                     #endif
+                    Text(viewModel.authStatus)
+                        .font(.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
                 }
             }
         case 3:
@@ -80,11 +103,17 @@ struct OnboardingView: View {
                         .font(GoldMetaFont.title)
                     Text("GoldMeta can notify you when a new decision-support update is available. Notifications never execute trades.")
                         .foregroundStyle(GoldMetaColor.textSecondary)
+                    Text(viewModel.environmentNotificationExplanation)
+                        .font(.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
                     Button("Request notification permission") {
                         Task { await viewModel.requestNotifications() }
                     }
                     .buttonStyle(.bordered)
                     .tint(GoldMetaColor.gold)
+                    Text(viewModel.notificationStatus)
+                        .font(.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
                 }
             }
         case 4:
@@ -92,19 +121,50 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("TradingView webhook")
                         .font(GoldMetaFont.title)
-                    Text("Use this URL when live backend setup is available. Keep it private.")
+                    Text("Create this in the backend, then paste the URL into your TradingView alert. Keep the URL and secret private.")
                         .foregroundStyle(GoldMetaColor.textSecondary)
-                    Text(viewModel.settings.webhookURL)
+                    Text(viewModel.webhookURL)
                         .font(.footnote.monospaced())
                         .textSelection(.enabled)
                         .foregroundStyle(GoldMetaColor.gold)
                     Button {
-                        UIPasteboard.general.string = viewModel.settings.webhookURL
+                        Task { await viewModel.createConnection() }
+                    } label: {
+                        Label("Create backend connection", systemImage: "link.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(GoldMetaColor.gold)
+                    Button {
+                        UIPasteboard.general.string = viewModel.webhookURL
                     } label: {
                         Label("Copy webhook URL", systemImage: "doc.on.doc")
                     }
-                    ShareLink(item: viewModel.settings.webhookURL) {
-                        Label("Share URL", systemImage: "square.and.arrow.up")
+                    if !viewModel.payloadSecret.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = viewModel.payloadSecret
+                        } label: {
+                            Label("Copy payload secret", systemImage: "lock.doc")
+                        }
+                    }
+                    Button {
+                        UIPasteboard.general.string = viewModel.exampleJSON
+                    } label: {
+                        Label("Copy example JSON", systemImage: "curlybraces")
+                    }
+                    Button {
+                        Task { await viewModel.sendTestAlert() }
+                    } label: {
+                        Label("Send test alert", systemImage: "paperplane")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(GoldMetaColor.gold)
+                    Text(viewModel.connectionStatus)
+                        .font(.caption)
+                        .foregroundStyle(GoldMetaColor.textSecondary)
+                    if let testAlertStatus = viewModel.testAlertStatus {
+                        Text(testAlertStatus)
+                            .font(.caption)
+                            .foregroundStyle(GoldMetaColor.textSecondary)
                     }
                 }
             }

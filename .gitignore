@@ -1,54 +1,55 @@
-# GoldMeta
-.DS_Store
-*.swp
+
 *~
-
-# Secrets
-.env
-.env.local
-*.pem
-GoogleService-Info.plist
-**/serviceAccount*.json
-**/firebase-adminsdk*.json
-Secrets.xcconfig
-
-# Node
-node_modules/
-dist/
+build/
+*.code-workspace
 coverage/
-*.tsbuildinfo
+DerivedData/
+dev-dist/
+dist/
+.DS_Store
+*.dSYM
+*.dSYM.zip
+.env
+.env.*.local
+.env.local
+.env.goldmeta-web
+backend/.env.goldmeta-web
 .firebase/
+**/firebase-adminsdk*.json
 firebase-debug.log
 firestore-debug.log
-ui-debug.log
-
-# Xcode / Swift
-DerivedData/
-build/
-*.xcuserstate
-xcuserdata/
-*.xccheckout
-*.moved-aside
+# GoldMeta
+GoogleService-Info.plist
 *.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
-.swiftpm/
-Packages/
-Package.resolved
-
 # IDE
 .idea/
-.vscode/
-*.code-workspace
-
-# OS
-Thumbs.db
-
-# Test / temp
+ios/GoldMeta/App/GoogleService-Info.plist
+ios/GoldMeta/Config/Secrets.xcconfig
+*.ipa
 *.log
-tmp/
+*.moved-aside
+# Node
+node_modules/
+# OS
+Package.resolved
+Packages/
+*.pem
+# Secrets
+Secrets.xcconfig
+**/serviceAccount*.json
+.swiftpm/
+*.swp
 .temp/
-
-.env
-.env.local
+# Test / temp
+Thumbs.db
+tmp/
+*.tsbuildinfo
+ui-debug.log
+.vscode/
+web/playwright-report/
+web/test-results/
+.wrangler/
+*.xccheckout
+# Xcode / Swift
+xcuserdata/
+*.xcuserstate

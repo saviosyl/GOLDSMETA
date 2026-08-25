@@ -31,8 +31,16 @@ export default [
       "@typescript-eslint/no-unsafe-assignment": "error",
       "@typescript-eslint/no-unsafe-member-access": "error",
       "@typescript-eslint/no-unsafe-argument": "error",
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-      "@typescript-eslint/no-namespace": "off"
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+      ],
+      "@typescript-eslint/no-namespace": "off",
+      // Adapter/store ports are async by contract; many Fake/in-memory impls are sync.
+      "@typescript-eslint/require-await": "off",
+      // IG JSON bodies arrive as Record<string, unknown> — String() is intentional.
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off"
     }
   }
 ];
