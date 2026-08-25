@@ -20,6 +20,22 @@ vi.mock("../../../src/services/broker/ctrader/flags", () => ({
   isCTraderLiveEnabled: () => false,
   isCTraderDemoOrderSubmissionEnabled: () => true
 }));
+vi.mock(
+  "../../../src/services/goldHunterAdmin/accountSnapshot",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("../../../src/services/goldHunterAdmin/accountSnapshot")
+    >();
+    return {
+      ...actual,
+      fetchGoldHunterAccountSnapshot: vi.fn(async () => ({
+        environment: "DEMO",
+        validForRisk: true,
+        freeMargin: 9_000
+      }))
+    };
+  }
+);
 import {
   buildGoldHunterSignalId,
   getGoldHunterStrategySelector,
