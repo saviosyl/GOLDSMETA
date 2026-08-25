@@ -230,9 +230,7 @@ describe("Fail-closed config validation", () => {
     });
     expect(snap.allowed).toBe(false);
     expect(snap.blocker).toBe("WAIT — CONFIG INVALID");
-    expect(validateGoldHunterRiskConfig(cfg({ dailyLossLimitPct: Number.NaN })).ok).toBe(
-      false
-    );
+    expect(validateGoldHunterRiskConfig(cfg({ dailyLossLimitPct: Number.NaN })).ok).toBe(false);
   });
 
   it("dailyLossLimitPct=Infinity → BLOCK", () => {
@@ -293,9 +291,9 @@ describe("Fail-closed config validation", () => {
     });
     expect(snap.allowed).toBe(false);
     expect(snap.blocker).toBe("WAIT — CONFIG INVALID");
-    await expect(
-      saveGoldHunterConfig(OWNER, { maxOpenTrades: 2 }, OWNER)
-    ).rejects.toMatchObject({ code: expect.stringContaining("maxOpenTrades") });
+    await expect(saveGoldHunterConfig(OWNER, { maxOpenTrades: 2 }, OWNER)).rejects.toMatchObject({
+      code: expect.stringContaining("maxOpenTrades")
+    });
   });
 });
 
@@ -555,9 +553,7 @@ describe("Max-open lease crash recovery (exact claim lookup)", () => {
     });
     expect(result.released).toEqual([]);
     expect(result.retained[0]?.reason).toBe("claim_authority_unknown");
-    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual([
-      "GH-D-throw"
-    ]);
+    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual(["GH-D-throw"]);
   });
 
   it("2: exact claim lookup TIMES OUT → lease retained", async () => {
@@ -772,9 +768,7 @@ describe("Max-open lease crash recovery (exact claim lookup)", () => {
       trades: []
     });
     expect(result.released).toEqual([]);
-    expect(result.retained[0]?.reason).toBe(
-      "claim_uncertain_BROKER_SUBMIT_ERROR"
-    );
+    expect(result.retained[0]?.reason).toBe("claim_uncertain_BROKER_SUBMIT_ERROR");
   });
 
   it("broker position exists → lease MUST remain", async () => {
@@ -805,9 +799,7 @@ describe("Max-open lease crash recovery (exact claim lookup)", () => {
     });
     expect(result.released).toEqual([]);
     expect(result.brokerReadOk).toBe(false);
-    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual([
-      "GH-D-readfail"
-    ]);
+    expect(await listGoldHunterMaxOpenLeaseHolders(OWNER)).toEqual(["GH-D-readfail"]);
   });
 });
 
@@ -848,9 +840,7 @@ describe("Volume unit-contract (Pepperstone raw — no speculative retune)", () 
     // Production helper used by GH close path: lotsToOrderVolumeUnits on the
     // *trading-unit* quantity (historically named lots) → raw 18.
     expect(lotsToOrderVolumeUnits(open.tradingUnits)).toBe(18);
-    expect(lotsToOrderVolumeUnits(open.tradingUnits)).toBe(
-      raw.rawClosePositionVolume
-    );
+    expect(lotsToOrderVolumeUnits(open.tradingUnits)).toBe(raw.rawClosePositionVolume);
 
     // Naming note: do NOT treat "protocol 18 = 0.18 conventional lots".
     // 0.18 is trading units / XAU oz; conventional lots are 0.0018.
@@ -882,21 +872,26 @@ describe("Isolation + Live refuse", () => {
 
   it("orchestrator runs projected risk before claim", () => {
     const text = readFileSync(
-      resolve(
-        process.cwd(),
-        "src/services/goldHunterAdmin/executionOrchestrator.ts"
-      ),
+      resolve(process.cwd(), "src/services/goldHunterAdmin/executionOrchestrator.ts"),
       "utf8"
     );
-    const fnStart = text.indexOf(
-      "export async function attemptGoldHunterDemoExecution"
-    );
+    const fnStart = text.indexOf("export async function attemptGoldHunterDemoExecution");
     const body = text.slice(fnStart);
     const riskIdx = body.indexOf("evaluateGoldHunterPreClaimProjectedDailyRisk");
-    const claimCallIdx = body.indexOf(
-      "acquireGoldHunterSignalClaim({\n          ownerUid"
-    );
+    const finalRefreshIdx = body.indexOf("const executionCandidate = refreshCandidate");
+    const claimCallIdx = body.indexOf("acquireGoldHunterSignalClaim({\n          ownerUid");
     expect(riskIdx).toBeGreaterThan(0);
+    expect(finalRefreshIdx).toBeGreaterThan(riskIdx);
     expect(claimCallIdx).toBeGreaterThan(riskIdx);
+    expect(claimCallIdx).toBeGreaterThan(finalRefreshIdx);
+  });
+
+  it("preclaim risk uses one authoritative position read, not full reconcile", () => {
+    const text = readFileSync(
+      resolve(process.cwd(), "src/services/goldHunterAdmin/projectedDailyRisk.ts"),
+      "utf8"
+    );
+    expect(text).toContain("readGoldHunterBrokerOpenPositions(ownerUid)");
+    expect(text).not.toContain("runGoldHunterReconcilePass");
   });
 });
