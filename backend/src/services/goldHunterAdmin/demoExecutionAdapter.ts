@@ -9,21 +9,16 @@ import {
   type SubmitDemoMarketOrderArgs
 } from "../broker/ctrader/demoOrderExecution";
 import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
-import {
-  isCTraderDemoOrderSubmissionEnabled,
-  isCTraderLiveEnabled
-} from "../broker/ctrader/flags";
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "../broker/ctrader/flags";
 import { getConnection } from "../broker/ctrader/connectionStore";
-import {
-  assertGoldHunterDemoOnlyEnvironment,
-  evaluateGoldHunterOrderGates
-} from "./orderGates";
+import { assertGoldHunterDemoOnlyEnvironment, evaluateGoldHunterOrderGates } from "./orderGates";
 import { evaluateGoldHunterFinalLossSafetyGate } from "./lossSafetyGate";
 import { loadGoldHunterConfig } from "./configStore";
 import { upsertGoldHunterDemoTrade } from "./tradeStore";
 import {
   GH_ADMIN_EXECUTION_MODE,
   GH_ADMIN_STRATEGY_ID,
+  type GoldHunterAdminConfig,
   type GoldHunterDemoTrade
 } from "./types";
 import { goldHunterFrozenInitialRiskPrice } from "./entryRepair";
@@ -53,6 +48,15 @@ export type GoldHunterDemoSubmitArgs = {
   signalConsumed: boolean;
   accountSnapshotValid: boolean;
   /**
+   * Internal orchestrator hand-off after it has already loaded and validated
+   * the same DEMO config/account context. Avoids duplicate async reads after
+   * durable claim and keeps the final market check adjacent to transport.
+   */
+  prevalidatedContext?: {
+    brokerEnvironment: "DEMO";
+    config: GoldHunterAdminConfig;
+  };
+  /**
    * Mid used for CURRENT loss-safety revalidation immediately before transport.
    * Falls back to entryHint when omitted.
    */
@@ -61,6 +65,8 @@ export type GoldHunterDemoSubmitArgs = {
   midVel250?: number | null;
   /** Called only after local gates pass, immediately before ProtoOANewOrder transport. */
   onEnterBrokerTransport?: () => Promise<void>;
+  /** Synchronous notification after final gates, immediately before transport. */
+  onBrokerTransportReady?: () => void;
   /**
    * Revision 03 synchronous final reprice. Runs after all awaited preparation
    * and immediately before the final loss gate / ProtoOANewOrder call.
@@ -74,7 +80,7 @@ export type GoldHunterDemoSubmitArgs = {
         signedImbalance1s: number | null;
         midVel250: number | null;
       }
-    | { ok: false; blocker: string };
+    | { ok: false; blocker: string; detail?: string };
   /** Injected for tests. */
   placeOrder?: (args: SubmitDemoMarketOrderArgs) => Promise<DemoMarketOrderResult>;
 };
@@ -102,6 +108,8 @@ export type GoldHunterDemoSubmitFail = {
    * (e.g. SUBMITTING claim write) and ProtoOANewOrder was never invoked.
    */
   pretransportBlocked?: boolean;
+  /** Exact final local rejection detail; safe for diagnostics, never a retry token. */
+  pretransportDetail?: string;
 };
 
 /**
@@ -128,9 +136,10 @@ export async function submitGoldHunterDemoOrder(
     };
   }
 
-  const connection = await getConnection(args.ownerUid);
-  const brokerEnvironment =
-    connection?.selectedAccountIsLive === true
+  const connection = args.prevalidatedContext ? null : await getConnection(args.ownerUid);
+  const brokerEnvironment = args.prevalidatedContext
+    ? args.prevalidatedContext.brokerEnvironment
+    : connection?.selectedAccountIsLive === true
       ? "LIVE"
       : connection
         ? "DEMO"
@@ -147,11 +156,11 @@ export async function submitGoldHunterDemoOrder(
     };
   }
 
-  const config = await loadGoldHunterConfig(args.ownerUid);
+  const config = args.prevalidatedContext?.config ?? (await loadGoldHunterConfig(args.ownerUid));
   const gates = evaluateGoldHunterOrderGates({
     config,
     brokerEnvironment,
-    brokerConnected: Boolean(connection),
+    brokerConnected: args.prevalidatedContext ? true : Boolean(connection),
     accountSnapshotValid: args.accountSnapshotValid,
     marketOpen: args.marketOpen,
     feedFresh: args.feedFresh,
@@ -202,7 +211,8 @@ export async function submitGoldHunterDemoOrder(
         blockers: [repriced.blocker],
         executionMode: GH_ADMIN_EXECUTION_MODE,
         liveExecutionEnabled: false,
-        pretransportBlocked: true
+        pretransportBlocked: true,
+        pretransportDetail: repriced.detail ?? "final_live_protection_unavailable"
       };
     }
     effectiveEntryHint = repriced.entryHint;
@@ -247,7 +257,8 @@ export async function submitGoldHunterDemoOrder(
         blockers: [lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"],
         executionMode: GH_ADMIN_EXECUTION_MODE,
         liveExecutionEnabled: false,
-        pretransportBlocked: true
+        pretransportBlocked: true,
+        pretransportDetail: lossGate.detail ?? "final_pretransport_loss_safety"
       };
     }
   }
@@ -255,6 +266,7 @@ export async function submitGoldHunterDemoOrder(
   // Immediate broker transport — only sync locals between final gate and place().
   const now = new Date().toISOString();
   const place = args.placeOrder ?? submitDemoMarketOrder;
+  args.onBrokerTransportReady?.();
 
   console.info(
     JSON.stringify({
@@ -285,8 +297,7 @@ export async function submitGoldHunterDemoOrder(
       strategyId: null
     });
   } catch (e) {
-    const errorCode =
-      e instanceof Error ? e.message.slice(0, 120) : "BROKER_SUBMIT_THREW";
+    const errorCode = e instanceof Error ? e.message.slice(0, 120) : "BROKER_SUBMIT_THREW";
     // Thrown after transport entry — outcome uncertain; never blind-resubmit.
     const trade: GoldHunterDemoTrade = {
       goldHunterTradeId: args.goldHunterTradeId,
@@ -384,8 +395,7 @@ export async function submitGoldHunterDemoOrder(
       result: null,
       exitReason: null,
       brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
-      brokerPositionId:
-        broker.positionId != null ? String(broker.positionId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
       status: "PENDING_RECONCILIATION",
       signalId: args.signalId ?? null,
       clientOrderId: broker.clientOrderId ?? args.clientOrderId,
@@ -413,9 +423,7 @@ export async function submitGoldHunterDemoOrder(
 
   if (!broker.accepted) {
     const errorCode = broker.errorCode ?? "BROKER_REJECTED";
-    const isSubmitError =
-      broker.outcome === "BROKER_SUBMIT_ERROR" ||
-      broker.requestSent === false;
+    const isSubmitError = broker.outcome === "BROKER_SUBMIT_ERROR" || broker.requestSent === false;
     const trade: GoldHunterDemoTrade = {
       goldHunterTradeId: args.goldHunterTradeId,
       strategy: GH_ADMIN_STRATEGY_ID,
@@ -439,8 +447,7 @@ export async function submitGoldHunterDemoOrder(
       result: null,
       exitReason: null,
       brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
-      brokerPositionId:
-        broker.positionId != null ? String(broker.positionId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
       status: isSubmitError ? "BROKER_SUBMIT_ERROR" : "BROKER_REJECTED",
       signalId: args.signalId ?? null,
       clientOrderId: broker.clientOrderId ?? args.clientOrderId,
@@ -467,11 +474,8 @@ export async function submitGoldHunterDemoOrder(
   }
 
   const fillPrice =
-    broker.fillPrice != null && Number.isFinite(broker.fillPrice)
-      ? broker.fillPrice
-      : null;
-  const hasPosition =
-    broker.positionId != null && String(broker.positionId).length > 0;
+    broker.fillPrice != null && Number.isFinite(broker.fillPrice) ? broker.fillPrice : null;
+  const hasPosition = broker.positionId != null && String(broker.positionId).length > 0;
   // Zero / non-positive fill prices must NEVER become FILLED.
   const filled =
     fillPrice != null &&
@@ -503,8 +507,7 @@ export async function submitGoldHunterDemoOrder(
       result: null,
       exitReason: null,
       brokerOrderId: broker.orderId != null ? String(broker.orderId) : null,
-      brokerPositionId:
-        broker.positionId != null ? String(broker.positionId) : null,
+      brokerPositionId: broker.positionId != null ? String(broker.positionId) : null,
       status:
         hasPosition && (fillPrice == null || fillPrice <= 0)
           ? "PENDING_RECONCILIATION"
@@ -514,13 +517,8 @@ export async function submitGoldHunterDemoOrder(
       filledVolumeLots: broker.filledVolumeLots ?? null,
       takeProfit: broker.takeProfit ?? args.takeProfit ?? null,
       errorCode:
-        hasPosition && (fillPrice == null || fillPrice <= 0)
-          ? "ENTRY_PRICE_INVALID"
-          : null,
-      dataQuality:
-        hasPosition && (fillPrice == null || fillPrice <= 0)
-          ? "ENTRY_INVALID"
-          : null
+        hasPosition && (fillPrice == null || fillPrice <= 0) ? "ENTRY_PRICE_INVALID" : null,
+      dataQuality: hasPosition && (fillPrice == null || fillPrice <= 0) ? "ENTRY_INVALID" : null
     };
     await upsertGoldHunterDemoTrade(args.ownerUid, {
       ...trade,
@@ -572,8 +570,7 @@ export async function submitGoldHunterDemoOrder(
       if (stop == null || !Number.isFinite(stop)) {
         return goldHunterFrozenInitialRiskPrice();
       }
-      const actualRisk =
-        args.side === "BUY" ? fillPrice - stop : stop - fillPrice;
+      const actualRisk = args.side === "BUY" ? fillPrice - stop : stop - fillPrice;
       return actualRisk > 0 && Number.isFinite(actualRisk)
         ? actualRisk
         : goldHunterFrozenInitialRiskPrice();
