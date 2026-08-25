@@ -55,16 +55,20 @@ import {
   resetGoldHunterTradeMemory,
   upsertGoldHunterDemoTrade
 } from "../../../src/services/goldHunterAdmin/tradeStore";
+import { attemptGoldHunterDemoExecution } from "../../../src/services/goldHunterAdmin/executionOrchestrator";
 import {
-  attemptGoldHunterDemoExecution
-} from "../../../src/services/goldHunterAdmin/executionOrchestrator";
-import {
+  acquireGoldHunterSignalClaim,
   getGoldHunterSignalClaim,
   resetGoldHunterSignalClaimsForTests
 } from "../../../src/services/goldHunterAdmin/signalClaimStore";
 import { resetGoldHunterStrategySelectorsForTests } from "../../../src/services/goldHunterAdmin/strategySelector";
 import { saveGoldHunterConfig } from "../../../src/services/goldHunterAdmin/configStore";
 import { submitGoldHunterDemoOrder } from "../../../src/services/goldHunterAdmin/demoExecutionAdapter";
+import { fetchGoldHunterAccountSnapshot } from "../../../src/services/goldHunterAdmin/accountSnapshot";
+import {
+  resetGoldHunterPreClaimRiskHooksForTests,
+  setGoldHunterPreClaimRiskHooksForTests
+} from "../../../src/services/goldHunterAdmin/projectedDailyRisk";
 import {
   isCTraderLiveEnabled,
   isBrokerExecutionEnabled
@@ -167,9 +171,7 @@ function candidate(over: Partial<{ opportunityId: string }> = {}) {
   };
 }
 
-function orchBase(
-  over: Partial<Parameters<typeof attemptGoldHunterDemoExecution>[2]> = {}
-) {
+function orchBase(over: Partial<Parameters<typeof attemptGoldHunterDemoExecution>[2]> = {}) {
   return {
     isAdmin: true,
     marketOpen: true,
@@ -185,6 +187,7 @@ beforeEach(async () => {
   resetGoldHunterTradeMemory();
   resetGoldHunterSignalClaimsForTests();
   resetGoldHunterStrategySelectorsForTests();
+  resetGoldHunterPreClaimRiskHooksForTests();
   await saveGoldHunterConfig(OWNER, {
     ...GH_ADMIN_DEFAULT_CONFIG,
     demoAutoTradeEnabled: true,
@@ -221,6 +224,17 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
   });
 
   it("max open blocks BEFORE durable claim (retryable, no NewOrder)", async () => {
+    let projectedRiskReads = 0;
+    setGoldHunterPreClaimRiskHooksForTests({
+      reconcile: async () => {
+        projectedRiskReads += 1;
+        return {
+          positionsReadOk: true,
+          brokerOpenGoldHunterPositions: []
+        };
+      }
+    });
+
     await upsertGoldHunterDemoTrade(
       OWNER,
       baseTrade({
@@ -235,13 +249,16 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
 
     let placeCalls = 0;
     const phases: string[] = [];
-    const result = await attemptGoldHunterDemoExecution(OWNER, candidate(), {
+    const stages: string[] = [];
+    const blockedOpportunity = "GH-OPP-max-open-no-reconcile";
+    const result = await attemptGoldHunterDemoExecution(OWNER, candidate({ opportunityId: blockedOpportunity }), {
       ...orchBase({
         placeOrder: async () => {
           placeCalls += 1;
           throw new Error("should_not_place");
         },
-        onTelemetry: (ev) => phases.push(ev.phase)
+        onTelemetry: (ev) => phases.push(ev.phase),
+        onStage: (stage, kind) => stages.push(`${stage}:${kind}`)
       })
     });
 
@@ -253,16 +270,44 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
     expect(phases).not.toContain("CLAIMED");
     expect(phases).not.toContain("SUBMITTING");
     expect(phases).toContain("PRECLAIM_BLOCKED");
+    expect(phases).not.toContain("CLAIMING");
+    expect(stages.some((s) => s.startsWith("PRE_MAXOPEN_RECONCILE_START"))).toBe(false);
+    expect(projectedRiskReads).toBe(0);
+    expect(await getGoldHunterSignalClaim(OWNER, blockedOpportunity)).toBeNull();
   });
 
   it("SUBMITTING / submit_started only after local gates; fill path works", async () => {
     const phases: string[] = [];
+    const timeline: string[] = [];
+    let freshnessChecks = 0;
+    let liveRefreshes = 0;
+    let projectedRiskReads = 0;
     let enteredTransport = false;
+    setGoldHunterPreClaimRiskHooksForTests({
+      reconcile: async () => {
+        projectedRiskReads += 1;
+        return {
+          positionsReadOk: true,
+          brokerOpenGoldHunterPositions: []
+        };
+      }
+    });
     const cand = candidate({ opportunityId: "GH-OPP-AS-e-fill-test" });
     const result = await attemptGoldHunterDemoExecution(OWNER, cand, {
       ...orchBase({
+        assertFresh: () => {
+          freshnessChecks += 1;
+          timeline.push(`fresh_${freshnessChecks}`);
+          return { ok: true as const };
+        },
+        refreshCandidate: ({ candidate: live }) => {
+          liveRefreshes += 1;
+          timeline.push(`refresh_${liveRefreshes}`);
+          return live;
+        },
         placeOrder: async (args) => {
           enteredTransport = true;
+          timeline.push("place_order");
           expect(args.clientOrderId).toBeTruthy();
           return {
             accepted: true,
@@ -281,7 +326,10 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
             newOrderReqCount: 1
           };
         },
-        onTelemetry: (ev) => phases.push(ev.phase)
+        onTelemetry: (ev) => {
+          phases.push(ev.phase);
+          timeline.push(ev.phase);
+        }
       })
     });
 
@@ -292,9 +340,93 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
     const submitIdx = phases.indexOf("SUBMITTING");
     expect(claimIdx).toBeGreaterThanOrEqual(0);
     expect(submitIdx).toBeGreaterThan(claimIdx);
+    expect(freshnessChecks).toBe(3);
+    expect(liveRefreshes).toBe(3); // pre-claim, final pretransport, post-fill
+    expect(projectedRiskReads).toBe(1);
+    expect(timeline.indexOf("fresh_2")).toBeLessThan(timeline.indexOf("CLAIMING"));
+    expect(timeline.indexOf("refresh_2")).toBeLessThan(timeline.indexOf("SUBMITTING"));
+    expect(timeline.indexOf("SUBMITTING")).toBeLessThan(timeline.indexOf("place_order"));
     const claim = await getGoldHunterSignalClaim(OWNER, cand.opportunityId);
     expect(claim?.state).toBe("OPEN");
     expect(claim?.brokerOrderId).toBe("ord-1");
+  });
+
+  it("can create the durable claim atomically as SUBMITTING", async () => {
+    const claim = await acquireGoldHunterSignalClaim({
+      ownerUid: OWNER,
+      signalId: "GH-OPP-atomic-submitting",
+      goldHunterTradeId: "GH-D-atomic-submitting",
+      clientOrderId: "gh_atomic_submitting",
+      setup: "A",
+      side: "BUY",
+      initialState: "SUBMITTING"
+    });
+    expect(claim.ok).toBe(true);
+    expect(claim.claim.state).toBe("SUBMITTING");
+  });
+
+  it("AutoTrade switched OFF during preclaim blocks before claim and transport", async () => {
+    let placeCalls = 0;
+    const phases: string[] = [];
+    vi.mocked(fetchGoldHunterAccountSnapshot).mockImplementationOnce(async () => {
+      await saveGoldHunterConfig(OWNER, {
+        demoAutoTradeEnabled: false,
+        mode: "RESEARCH",
+        updatedAt: new Date().toISOString(),
+        updatedBy: OWNER
+      });
+      return {
+        environment: "DEMO",
+        validForRisk: true,
+        freeMargin: 9_000
+      } as never;
+    });
+
+    const cand = candidate({ opportunityId: "GH-OPP-off-during-preclaim" });
+    const result = await attemptGoldHunterDemoExecution(OWNER, cand, {
+      ...orchBase({
+        placeOrder: async () => {
+          placeCalls += 1;
+          throw new Error("must_not_transport");
+        },
+        onTelemetry: (ev) => phases.push(ev.phase)
+      })
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.blockers).toEqual(["WAIT — AUTOTRADE OFF"]);
+    }
+    expect(placeCalls).toBe(0);
+    expect(phases).not.toContain("CLAIMING");
+    expect(phases).not.toContain("CLAIMED");
+    expect(await getGoldHunterSignalClaim(OWNER, cand.opportunityId)).toBeNull();
+  });
+
+  it("invalid account freshness blocks before claim and transport", async () => {
+    let placeCalls = 0;
+    vi.mocked(fetchGoldHunterAccountSnapshot).mockResolvedValueOnce({
+      environment: "DEMO",
+      validForRisk: false,
+      freeMargin: 9_000
+    } as never);
+
+    const cand = candidate({ opportunityId: "GH-OPP-stale-account-fail-closed" });
+    const result = await attemptGoldHunterDemoExecution(OWNER, cand, {
+      ...orchBase({
+        placeOrder: async () => {
+          placeCalls += 1;
+          throw new Error("must_not_transport");
+        }
+      })
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.blockers).toEqual(["WAIT — ACCOUNT SNAPSHOT INVALID"]);
+    }
+    expect(placeCalls).toBe(0);
+    expect(await getGoldHunterSignalClaim(OWNER, cand.opportunityId)).toBeNull();
   });
 
   it("local gate failure after claim does not enter transport", async () => {
@@ -487,9 +619,7 @@ describe("Gold Hunter broker-submit outcome forensics", () => {
   it("Live remains impossible", () => {
     expect(isCTraderLiveEnabled()).toBe(false);
     expect(isBrokerExecutionEnabled()).toBe(false);
-    expect(
-      isCTraderLiveEnabled({ CTRADER_LIVE_ENABLED: "true" } as NodeJS.ProcessEnv)
-    ).toBe(false);
+    expect(isCTraderLiveEnabled({ CTRADER_LIVE_ENABLED: "true" } as NodeJS.ProcessEnv)).toBe(false);
   });
 
   it("BoundedOpTimeoutError identity retained for nested timeout analysis", () => {

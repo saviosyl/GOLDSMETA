@@ -7,6 +7,7 @@ import { randomBytes } from "crypto";
 import type { DemoMarketOrderResult } from "../broker/ctrader/openApiClient";
 import type { BrokerOpenPosition } from "../broker/ctrader/openApiClient";
 import type { SubmitDemoMarketOrderArgs } from "../broker/ctrader/demoOrderExecution";
+import { getConnection } from "../broker/ctrader/connectionStore";
 import { fetchGoldHunterAccountSnapshot } from "./accountSnapshot";
 import {
   assertGoldHunterCandidateFresh,
@@ -17,14 +18,9 @@ import { submitGoldHunterDemoOrder } from "./demoExecutionAdapter";
 import { registerGoldHunterOpenPositionForOwner } from "./demoPositionManager";
 import { recoverGoldHunterOpenEntryImmediate } from "./immediateOpenEntryRecovery";
 import { ensureGoldHunterKnownPositionEntrySupervisor } from "./knownBrokerPositionEntrySupervisor";
-import {
-  evaluateGoldHunterFinalLossSafetyForCandidate
-} from "./lossSafetyGate";
+import { evaluateGoldHunterFinalLossSafetyForCandidate } from "./lossSafetyGate";
 import { loadGoldHunterConfig } from "./configStore";
-import {
-  metadataFromBrokerSymbol,
-  type GoldHunterInstrumentMetadata
-} from "./instrumentMetadata";
+import { metadataFromBrokerSymbol, type GoldHunterInstrumentMetadata } from "./instrumentMetadata";
 import { deriveGoldHunterInitialProtection } from "./protectionGeometry";
 import { sizeGoldHunterDemoLots } from "./riskSizing";
 import {
@@ -41,13 +37,9 @@ import type { BrokerSymbol } from "../broker/domain";
 import { GH_ADMIN_STRATEGY_ID } from "./types";
 import { frozenGhFastSoakConfig } from "./abc";
 import { evaluateGoldHunterPreClaimProjectedDailyRisk } from "./projectedDailyRisk";
-import {
-  releaseGoldHunterMaxOpenSlot,
-  reserveGoldHunterMaxOpenSlot
-} from "./maxOpenLease";
+import { releaseGoldHunterMaxOpenSlot, reserveGoldHunterMaxOpenSlot } from "./maxOpenLease";
 import { countsTowardGoldHunterMaxOpen } from "./tradeStore";
 import { validateGoldHunterRiskConfig } from "./configValidation";
-import { runGoldHunterReconcilePass } from "./reconciliationRuntime";
 
 import type { GoldHunterExecutionStage } from "./executionStages";
 import {
@@ -122,6 +114,16 @@ export type OrchestratorResult =
       signalId: string | null;
     };
 
+type SettledPreclaimTask<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function settlePreclaimTask<T>(task: Promise<T>): Promise<SettledPreclaimTask<T>> {
+  try {
+    return { ok: true, value: await task };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
 /**
  * Attempt one Demo submission for an executable selected candidate.
  * Durable claim uses opportunity identity (signalId === opportunityId).
@@ -134,15 +136,10 @@ export async function attemptGoldHunterDemoExecution(
   const opportunityId = candidate.opportunityId || candidate.signalId;
   const tel = deps.onTelemetry;
 
-  const block = (
-    blocker: string,
-    detail?: string
-  ): OrchestratorResult => {
+  const block = (blocker: string, detail?: string): OrchestratorResult => {
     tel?.({
       phase:
-        blocker === "WAIT — DUPLICATE SIGNAL"
-          ? "DUPLICATE_ALREADY_CLAIMED"
-          : "PRECLAIM_BLOCKED",
+        blocker === "WAIT — DUPLICATE SIGNAL" ? "DUPLICATE_ALREADY_CLAIMED" : "PRECLAIM_BLOCKED",
       blocker,
       detail: detail ?? null,
       claimed: false
@@ -194,10 +191,7 @@ export async function attemptGoldHunterDemoExecution(
 
   const cfgOk = validateGoldHunterRiskConfig(config);
   if (!cfgOk.ok) {
-    return block(
-      "WAIT — CONFIG INVALID",
-      cfgOk.detail ?? "risk_config_invalid"
-    );
+    return block("WAIT — CONFIG INVALID", cfgOk.detail ?? "risk_config_invalid");
   }
   const cfg = frozenGhFastSoakConfig();
 
@@ -211,10 +205,7 @@ export async function attemptGoldHunterDemoExecution(
     entryPrice: candidate.side === "BUY" ? candidate.ask : candidate.bid
   });
   if (!protection.ok) {
-    return block(
-      "WAIT — PROTECTION GEOMETRY NOT CONNECTED",
-      "protection_derive_failed"
-    );
+    return block("WAIT — PROTECTION GEOMETRY NOT CONNECTED", "protection_derive_failed");
   }
 
   deps.onStage?.("OPEN_TRADES_LOAD_START", "start");
@@ -239,67 +230,14 @@ export async function attemptGoldHunterDemoExecution(
   }
   deps.onStage?.("OPEN_TRADES_LOAD_DONE", "done");
 
-  // Local occupancy can include stale CLOSE_REQUESTED ghosts. Repair from
-  // authoritative broker state BEFORE a permanent local-only max-open deadlock.
-  // Do not delete this gate — fail closed when broker open state is unknown.
-  if (openTrades.length >= config.maxOpenTrades) {
-    deps.onStage?.("PRE_MAXOPEN_RECONCILE_START", "start");
-    let preMaxReconcile: Awaited<ReturnType<typeof runGoldHunterReconcilePass>>;
-    try {
-      preMaxReconcile = await withGoldHunterPreclaimTimeout(
-        "runGoldHunterReconcilePass_preMaxOpen",
-        "PRE_MAXOPEN_RECONCILE_START",
-        GH_PRECLAIM_ACCOUNT_TIMEOUT_MS + GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
-        () =>
-          runGoldHunterReconcilePass({
-            ownerUid,
-            force: true
-          })
-      );
-    } catch (e) {
-      if (isGoldHunterPreclaimTimeout(e)) {
-        deps.onStage?.("PRE_MAXOPEN_RECONCILE_START", "timeout");
-        return block(
-          "WAIT — MAX OPEN TRADES",
-          "pre_maxopen_reconcile_timeout_fail_closed"
-        );
-      }
-      throw e;
-    }
-    deps.onStage?.("PRE_MAXOPEN_RECONCILE_DONE", "done");
-
-    if (!preMaxReconcile.positionsReadOk) {
-      return block(
-        "WAIT — MAX OPEN TRADES",
-        "broker_positions_read_failed_fail_closed"
-      );
-    }
-
-    try {
-      openTrades = await withGoldHunterPreclaimTimeout(
-        "listGoldHunterDemoTrades_after_pre_maxopen_reconcile",
-        "OPEN_TRADES_LOAD_START",
-        GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
-        () =>
-          listGoldHunterDemoTrades(ownerUid, {
-            limit: 50,
-            openOnly: true
-          })
-      );
-    } catch (e) {
-      if (isGoldHunterPreclaimTimeout(e)) {
-        return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
-      }
-      throw e;
-    }
-
-    const localOpen = openTrades.filter(countsTowardGoldHunterMaxOpen).length;
-    if (localOpen >= config.maxOpenTrades) {
-      return block(
-        "WAIT — MAX OPEN TRADES",
-        `open_count_${localOpen}_max_${config.maxOpenTrades}_after_reconcile`
-      );
-    }
+  // Entry attempts must stay latency-bounded and never run full reconciliation.
+  // If local open occupancy is already at/over max, fail closed immediately.
+  const localOpenBeforeClaim = openTrades.filter(countsTowardGoldHunterMaxOpen).length;
+  if (localOpenBeforeClaim >= config.maxOpenTrades) {
+    return block(
+      "WAIT — MAX OPEN TRADES",
+      `open_count_${localOpenBeforeClaim}_max_${config.maxOpenTrades}_local_preclaim`
+    );
   }
 
   const committed = computeGoldHunterCommittedCapital({
@@ -322,34 +260,76 @@ export async function attemptGoldHunterDemoExecution(
     riskDistanceBuffer: cfg.entrySlippageRiskBuffer
   });
   if (!sized.ok) {
-    const blocker = sized.blocker.startsWith("WAIT")
-      ? sized.blocker
-      : `WAIT — ${sized.blocker}`;
+    const blocker = sized.blocker.startsWith("WAIT") ? sized.blocker : `WAIT — ${sized.blocker}`;
     return block(blocker, "sizing_refused");
   }
 
+  // These independent authoritative reads used to run serially (up to 13s),
+  // which made otherwise-valid micro opportunities expire before claim.
+  // Run them concurrently, retain their individual fail-closed timeouts, and
+  // revalidate the live opportunity after both have completed.
   deps.onStage?.("PROJECTED_DAILY_RISK_START", "start");
-  let projectedRisk;
-  try {
-    projectedRisk = await withGoldHunterPreclaimTimeout(
-      "evaluateGoldHunterPreClaimProjectedDailyRisk",
-      "PROJECTED_DAILY_RISK_START",
-      GH_PRECLAIM_ACCOUNT_TIMEOUT_MS + GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
-      () =>
-        evaluateGoldHunterPreClaimProjectedDailyRisk({
-          ownerUid,
-          config,
-          proposedTradeRiskEur: sized.riskBudgetEur
-        })
-    );
-  } catch (e) {
+  deps.onStage?.("ACCOUNT_SNAPSHOT_START", "start");
+  const [projectedRiskTask, accountTask] = await Promise.all([
+    settlePreclaimTask(
+      withGoldHunterPreclaimTimeout(
+        "evaluateGoldHunterPreClaimProjectedDailyRisk",
+        "PROJECTED_DAILY_RISK_START",
+        GH_PRECLAIM_ACCOUNT_TIMEOUT_MS + GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+        () =>
+          evaluateGoldHunterPreClaimProjectedDailyRisk({
+            ownerUid,
+            config,
+            proposedTradeRiskEur: sized.riskBudgetEur
+          })
+      )
+    ),
+    settlePreclaimTask(
+      withGoldHunterPreclaimTimeout(
+        "fetchGoldHunterAccountSnapshotAndConnection",
+        "ACCOUNT_SNAPSHOT_START",
+        GH_PRECLAIM_ACCOUNT_TIMEOUT_MS,
+        async () => {
+          const [account, connection] = await Promise.all([
+            fetchGoldHunterAccountSnapshot({
+              ownerUid,
+              allowRiskValidCache: true
+            }),
+            getConnection(ownerUid)
+          ]);
+          return { account, connection };
+        }
+      )
+    )
+  ]);
+
+  if (projectedRiskTask.ok) {
+    deps.onStage?.("PROJECTED_DAILY_RISK_DONE", "done");
+  } else if (isGoldHunterPreclaimTimeout(projectedRiskTask.error)) {
+    deps.onStage?.("PROJECTED_DAILY_RISK_START", "timeout");
+  }
+  if (accountTask.ok) {
+    deps.onStage?.("ACCOUNT_SNAPSHOT_DONE", "done");
+  } else if (isGoldHunterPreclaimTimeout(accountTask.error)) {
+    deps.onStage?.("ACCOUNT_SNAPSHOT_START", "timeout");
+  }
+
+  if (!projectedRiskTask.ok) {
+    const e = projectedRiskTask.error;
     if (isGoldHunterPreclaimTimeout(e)) {
-      deps.onStage?.("PROJECTED_DAILY_RISK_START", "timeout");
       return block("WAIT — DAILY RISK UNKNOWN", `${e.op}_timeout`);
     }
     throw e;
   }
-  deps.onStage?.("PROJECTED_DAILY_RISK_DONE", "done");
+  if (!accountTask.ok) {
+    const e = accountTask.error;
+    if (isGoldHunterPreclaimTimeout(e)) {
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+
+  const projectedRisk = projectedRiskTask.value;
   if (!projectedRisk.allowed || !projectedRisk.authoritative) {
     return block(
       projectedRisk.blocker ?? "WAIT — DAILY RISK UNKNOWN",
@@ -357,27 +337,13 @@ export async function attemptGoldHunterDemoExecution(
         `projected_${projectedRisk.projectedWorstCaseLossEur}_budget_${projectedRisk.dailyLossBudgetEur}`
     );
   }
+  const { account, connection } = accountTask.value;
 
-  // Re-read open occupancy after reconcile inside projected-risk eval.
-  try {
-    openTrades = await withGoldHunterPreclaimTimeout(
-      "listGoldHunterDemoTrades_after_risk",
-      "OPEN_TRADES_LOAD_START",
-      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
-      () =>
-        listGoldHunterDemoTrades(ownerUid, {
-          limit: 50,
-          openOnly: true
-        })
-    );
-  } catch (e) {
-    if (isGoldHunterPreclaimTimeout(e)) {
-      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
-    }
-    throw e;
-  }
+  // The projected-risk snapshot already used a fresh local trade list and one
+  // authoritative broker-position read. The durable max-open lease below
+  // serializes the remaining race without another Firestore query.
   const brokerOpen = projectedRisk.brokerOpenGoldHunterCount;
-  const localOpen = openTrades.filter(countsTowardGoldHunterMaxOpen).length;
+  const localOpen = projectedRisk.localRiskOccupyingCount;
   const knownOccupancy = Math.max(localOpen, brokerOpen);
   if (knownOccupancy >= config.maxOpenTrades) {
     return block(
@@ -385,24 +351,6 @@ export async function attemptGoldHunterDemoExecution(
       `open_count_${knownOccupancy}_max_${config.maxOpenTrades}_broker_${brokerOpen}_local_${localOpen}`
     );
   }
-
-  deps.onStage?.("ACCOUNT_SNAPSHOT_START", "start");
-  let account;
-  try {
-    account = await withGoldHunterPreclaimTimeout(
-      "fetchGoldHunterAccountSnapshot",
-      "ACCOUNT_SNAPSHOT_START",
-      GH_PRECLAIM_ACCOUNT_TIMEOUT_MS,
-      () => fetchGoldHunterAccountSnapshot({ ownerUid })
-    );
-  } catch (e) {
-    if (isGoldHunterPreclaimTimeout(e)) {
-      deps.onStage?.("ACCOUNT_SNAPSHOT_START", "timeout");
-      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
-    }
-    throw e;
-  }
-  deps.onStage?.("ACCOUNT_SNAPSHOT_DONE", "done");
 
   if (
     account.freeMargin != null &&
@@ -412,16 +360,103 @@ export async function attemptGoldHunterDemoExecution(
     return block("WAIT — CAPITAL LIMIT", "free_margin_non_positive");
   }
 
-  const spreadOk = candidate.spread <= cfg.maxSpread;
+  if (!account.validForRisk || account.environment !== "DEMO") {
+    return block("WAIT — ACCOUNT SNAPSHOT INVALID", "authoritative_demo_account_snapshot_required");
+  }
+  if (!connection?.selectedAccountId) {
+    return block(
+      "WAIT — BROKER DISCONNECTED",
+      "fresh_selected_demo_account_required_before_claim"
+    );
+  }
+  if (
+    connection.selectedAccountIsLive === true ||
+    connection.environment === "LIVE"
+  ) {
+    return block(
+      "WAIT — LIVE ENVIRONMENT REFUSED",
+      "fresh_selected_account_must_be_demo_before_claim"
+    );
+  }
+
+  // Re-read the control plane after slow risk/account work. This preserves the
+  // immediate OFF / pause / emergency-stop behavior that the adapter used to
+  // provide with a post-claim config read, without putting async I/O between
+  // the final market check and broker transport.
+  deps.onStage?.("CONFIG_RELOAD_START", "start");
+  let finalConfig;
+  try {
+    finalConfig = await withGoldHunterPreclaimTimeout(
+      "loadGoldHunterConfig_final_preclaim",
+      "CONFIG_RELOAD_START",
+      GH_PRECLAIM_FIRESTORE_TIMEOUT_MS,
+      () => loadGoldHunterConfig(ownerUid)
+    );
+  } catch (e) {
+    if (isGoldHunterPreclaimTimeout(e)) {
+      deps.onStage?.("CONFIG_RELOAD_START", "timeout");
+      return block("WAIT — RUNTIME TIMEOUT", `${e.op}_timeout`);
+    }
+    throw e;
+  }
+  deps.onStage?.("CONFIG_RELOAD_DONE", "done");
+  if (finalConfig.emergencyStopActive) {
+    return block("WAIT — EMERGENCY STOP", "emergency_stop_before_claim");
+  }
+  if (finalConfig.pauseNewEntries) {
+    return block("WAIT — PAUSED", "pause_new_entries_before_claim");
+  }
+  if (!finalConfig.demoAutoTradeEnabled) {
+    return block("WAIT — AUTOTRADE OFF", "demo_auto_trade_disabled_before_claim");
+  }
+  if (finalConfig.updatedAt !== config.updatedAt) {
+    return block("WAIT — CONFIG INVALID", "config_changed_during_preclaim");
+  }
+
+  // Critical sequencing fix: all slow pre-claim work is now complete. Refresh
+  // and revalidate the SAME live opportunity immediately before durable lease
+  // and claim. A setup that genuinely ended still fails closed.
+  const refreshCandidate = deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
+  const executionCandidate = refreshCandidate({ ownerUid, candidate });
+  if (!executionCandidate) {
+    const stale = checkFresh({ ownerUid, candidate });
+    return block(
+      "WAIT — SIGNAL STALE",
+      stale.ok ? "live_candidate_unavailable_before_claim" : stale.detail
+    );
+  }
+  if (executionCandidate.consumed || !executionCandidate.depthExecutable) {
+    return block("WAIT — SIGNAL STALE", "opportunity_consumed_or_not_executable_before_claim");
+  }
+  const finalPreclaimFresh = checkFresh({
+    ownerUid,
+    candidate: executionCandidate
+  });
+  if (!finalPreclaimFresh.ok) {
+    return block(finalPreclaimFresh.blocker, finalPreclaimFresh.detail);
+  }
+
+  const spreadOk = executionCandidate.spread <= cfg.maxSpread;
+  if (!spreadOk) {
+    return block("WAIT — SPREAD TOO WIDE", "spread_widened_before_claim");
+  }
+  const executionProtection = deriveGoldHunterInitialProtection({
+    side: executionCandidate.side,
+    entryPrice: executionCandidate.side === "BUY" ? executionCandidate.ask : executionCandidate.bid
+  });
+  if (!executionProtection.ok) {
+    return block(
+      "WAIT — PROTECTION GEOMETRY NOT CONNECTED",
+      "protection_derive_failed_before_claim"
+    );
+  }
 
   const goldHunterTradeId = `GH-D-${randomBytes(4).toString("hex")}`;
-  const clientOrderId = `gh_${opportunityId}`
-    .replace(/[^a-zA-Z0-9_]/g, "")
-    .slice(0, 50);
+  const clientOrderId = `gh_${opportunityId}`.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 50);
 
   const lease = await reserveGoldHunterMaxOpenSlot({
     ownerUid,
-    maxOpenTrades: config.maxOpenTrades,
+    maxOpenTrades: finalConfig.maxOpenTrades,
     reservationId: goldHunterTradeId,
     signalId: opportunityId,
     clientOrderId,
@@ -446,8 +481,9 @@ export async function attemptGoldHunterDemoExecution(
           signalId: opportunityId,
           goldHunterTradeId,
           clientOrderId,
-          setup: candidate.setup,
-          side: candidate.side
+          setup: executionCandidate.setup,
+          side: executionCandidate.side,
+          initialState: "SUBMITTING"
         })
     );
   } catch (e) {
@@ -470,9 +506,7 @@ export async function attemptGoldHunterDemoExecution(
         existing = null;
       }
       if (existing) {
-        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
-          opportunityId
-        );
+        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
         tel?.({
           phase: "PENDING_RECONCILIATION",
           claimed: true,
@@ -520,8 +554,7 @@ export async function attemptGoldHunterDemoExecution(
   getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
   tel?.({ phase: "CLAIMED", claimed: true, tradeId: goldHunterTradeId });
 
-  // Post-claim PnL / local gates run BEFORE claim state=SUBMITTING so
-  // gold_hunter_broker_submit_started means transport is about to start.
+  // Optional test hook for post-claim transmission-uncertainty scenarios.
   if (deps.beforeBrokerSubmit) {
     try {
       await deps.beforeBrokerSubmit();
@@ -562,8 +595,7 @@ export async function attemptGoldHunterDemoExecution(
     }).catch(() => undefined);
     await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
       state: "BROKER_SUBMIT_ERROR",
-      errorCode:
-        projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"
+      errorCode: projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"
     });
     tel?.({
       phase: "BROKER_SUBMIT_ERROR",
@@ -576,9 +608,7 @@ export async function attemptGoldHunterDemoExecution(
     return {
       ok: false,
       submitted: false,
-      blockers: [
-        projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"
-      ],
+      blockers: [projectedRisk.blocker ?? "WAIT — PROJECTED DAILY LOSS LIMIT"],
       signalId: opportunityId
     };
   }
@@ -587,16 +617,14 @@ export async function attemptGoldHunterDemoExecution(
     // FINAL CURRENT loss-safety after all preclaim I/O, before transport.
     const lossGate = evaluateGoldHunterFinalLossSafetyForCandidate({
       ownerUid,
-      candidate
+      candidate: executionCandidate
     });
     if (!lossGate.ok) {
       await releaseGoldHunterMaxOpenSlot({
         ownerUid,
         reservationId: goldHunterTradeId
       }).catch(() => undefined);
-      getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
-        opportunityId
-      );
+      getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
         state: "PRETRANSPORT_BLOCKED",
         errorCode: lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"
@@ -612,9 +640,7 @@ export async function attemptGoldHunterDemoExecution(
       return {
         ok: false,
         submitted: false,
-        blockers: [
-          lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"
-        ],
+        blockers: [lossGate.rejectionReason ?? "WAIT — LOSS ANTI-CHURN"],
         signalId: opportunityId
       };
     }
@@ -622,18 +648,20 @@ export async function attemptGoldHunterDemoExecution(
     const result = await submitGoldHunterDemoOrder({
       ownerUid,
       isAdmin: deps.isAdmin,
-      side: candidate.side,
+      side: executionCandidate.side,
       lots: sized.lots,
-      stopLoss: protection.stopPrice,
+      stopLoss: executionProtection.stopPrice,
       takeProfit: null,
-      entryHint: protection.entryPrice,
-      lossSafetyMid: (candidate.bid + candidate.ask) / 2,
+      entryHint: executionProtection.entryPrice,
+      lossSafetyMid: (executionCandidate.bid + executionCandidate.ask) / 2,
       signedImbalance1s:
-        (candidate as { signedImbalance1s?: number | null }).signedImbalance1s ??
-        null,
-      midVel250:
-        (candidate as { midVel250?: number | null }).midVel250 ?? null,
-      setup: candidate.setup,
+        (
+          executionCandidate as {
+            signedImbalance1s?: number | null;
+          }
+        ).signedImbalance1s ?? null,
+      midVel250: (executionCandidate as { midVel250?: number | null }).midVel250 ?? null,
+      setup: executionCandidate.setup,
       signalId: opportunityId,
       goldHunterTradeId,
       clientOrderId,
@@ -644,15 +672,16 @@ export async function attemptGoldHunterDemoExecution(
       spreadOk,
       capitalOk: committed.availableEur > 0,
       dailyLossOk,
-      openTradeCount: openTrades.length,
+      openTradeCount: knownOccupancy,
       signalPresent: true,
       signalConsumed: false,
       accountSnapshotValid: account.validForRisk,
+      prevalidatedContext: {
+        brokerEnvironment: "DEMO",
+        config: finalConfig
+      },
       placeOrder: deps.placeOrder,
-      onEnterBrokerTransport: async () => {
-        await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-          state: "SUBMITTING"
-        });
+      onBrokerTransportReady: () => {
         deps.onStage?.("SUBMITTING", "start");
         tel?.({
           phase: "SUBMITTING",
@@ -661,24 +690,40 @@ export async function attemptGoldHunterDemoExecution(
         });
       },
       resolveFinalProtection: () => {
-        const refreshCandidate =
+        const finalRefreshCandidate =
           deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
-        const live = refreshCandidate({
+        const live = finalRefreshCandidate({
           ownerUid,
-          candidate
+          candidate: executionCandidate
         });
         if (!live) {
-          return { ok: false as const, blocker: "WAIT — SIGNAL STALE" };
+          const stale = checkFresh({
+            ownerUid,
+            candidate: executionCandidate
+          });
+          return {
+            ok: false as const,
+            blocker: "WAIT — SIGNAL STALE",
+            detail: stale.ok ? "live_candidate_unavailable_final_pretransport" : stale.detail
+          };
         }
         const finalFresh = checkFresh({
           ownerUid,
           candidate: live
         });
         if (!finalFresh.ok) {
-          return { ok: false as const, blocker: finalFresh.blocker };
+          return {
+            ok: false as const,
+            blocker: finalFresh.blocker,
+            detail: finalFresh.detail
+          };
         }
         if (live.spread > cfg.maxSpread) {
-          return { ok: false as const, blocker: "WAIT — SPREAD TOO WIDE" };
+          return {
+            ok: false as const,
+            blocker: "WAIT — SPREAD TOO WIDE",
+            detail: "spread_widened_final_pretransport"
+          };
         }
         const finalProtection = deriveGoldHunterInitialProtection({
           side: live.side,
@@ -687,7 +732,8 @@ export async function attemptGoldHunterDemoExecution(
         if (!finalProtection.ok) {
           return {
             ok: false as const,
-            blocker: "WAIT — PROTECTION GEOMETRY NOT CONNECTED"
+            blocker: "WAIT — PROTECTION GEOMETRY NOT CONNECTED",
+            detail: "protection_derive_failed_final_pretransport"
           };
         }
         return {
@@ -709,25 +755,20 @@ export async function attemptGoldHunterDemoExecution(
       }).catch(() => undefined);
       const pretransportBlocked = result.pretransportBlocked === true;
       if (pretransportBlocked) {
-        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(
-          opportunityId
-        );
+        getGoldHunterStrategySelector(ownerUid).markOpportunityConsumed(opportunityId);
       }
       await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
-        state: pretransportBlocked
-          ? "PRETRANSPORT_BLOCKED"
-          : "BROKER_SUBMIT_ERROR",
+        state: pretransportBlocked ? "PRETRANSPORT_BLOCKED" : "BROKER_SUBMIT_ERROR",
         errorCode: result.blockers[0] ?? "GATES_BLOCKED"
       });
       tel?.({
         phase: pretransportBlocked ? "PRECLAIM_BLOCKED" : "BROKER_SUBMIT_ERROR",
         claimed: true,
-        outcome: pretransportBlocked
-          ? "PRETRANSPORT_BLOCKED"
-          : "BROKER_SUBMIT_ERROR",
+        outcome: pretransportBlocked ? "PRETRANSPORT_BLOCKED" : "BROKER_SUBMIT_ERROR",
         blocker: result.blockers[0] ?? "GATES_BLOCKED",
         detail: pretransportBlocked
-          ? "final_pretransport_reprice_or_loss_safety_after_async_prep"
+          ? (result.pretransportDetail ??
+            "final_pretransport_reprice_or_loss_safety_after_async_prep")
           : "local_gate_before_transport",
         tradeId: goldHunterTradeId
       });
@@ -747,17 +788,16 @@ export async function attemptGoldHunterDemoExecution(
         goldHunterTradeId
       });
       if (result.trade) {
-        const refreshCandidate =
-          deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
+        const refreshCandidate = deps.refreshCandidate ?? refreshGoldHunterCandidateAgainstLive;
         const fillMarket = refreshCandidate({
           ownerUid,
-          candidate
+          candidate: executionCandidate
         });
         registerGoldHunterOpenPositionForOwner({
           ownerUid,
           trade: result.trade,
-          bid: fillMarket?.bid ?? candidate.bid,
-          ask: fillMarket?.ask ?? candidate.ask
+          bid: fillMarket?.bid ?? executionCandidate.bid,
+          ask: fillMarket?.ask ?? executionCandidate.ask
         });
       }
       tel?.({
@@ -810,8 +850,8 @@ export async function attemptGoldHunterDemoExecution(
         const recovery = await recoverGoldHunterOpenEntryImmediate({
           ownerUid,
           trade: result.trade,
-          bid: candidate.bid,
-          ask: candidate.ask,
+          bid: executionCandidate.bid,
+          ask: executionCandidate.ask,
           listPositions: deps.listOpenPositions
         });
         if (recovery.recovered) {
@@ -834,8 +874,8 @@ export async function attemptGoldHunterDemoExecution(
           void ensureGoldHunterKnownPositionEntrySupervisor({
             ownerUid,
             trade: recovery.trade,
-            bid: candidate.bid,
-            ask: candidate.ask,
+            bid: executionCandidate.bid,
+            ask: executionCandidate.ask,
             listPositions: deps.listOpenPositions
           });
           tel?.({
@@ -871,8 +911,8 @@ export async function attemptGoldHunterDemoExecution(
         const recovery = await recoverGoldHunterOpenEntryImmediate({
           ownerUid,
           trade: result.trade,
-          bid: candidate.bid,
-          ask: candidate.ask,
+          bid: executionCandidate.bid,
+          ask: executionCandidate.ask,
           listPositions: deps.listOpenPositions
         });
         if (recovery.recovered) {
@@ -896,8 +936,8 @@ export async function attemptGoldHunterDemoExecution(
           void ensureGoldHunterKnownPositionEntrySupervisor({
             ownerUid,
             trade: recovery.trade,
-            bid: candidate.bid,
-            ask: candidate.ask,
+            bid: executionCandidate.bid,
+            ask: executionCandidate.ask,
             listPositions: deps.listOpenPositions
           });
         }
@@ -933,8 +973,7 @@ export async function attemptGoldHunterDemoExecution(
   } catch (e) {
     await updateGoldHunterSignalClaim(ownerUid, opportunityId, {
       state: "PENDING_RECONCILIATION",
-      errorCode:
-        e instanceof Error ? e.message.slice(0, 120) : "UNKNOWN_BROKER_OUTCOME"
+      errorCode: e instanceof Error ? e.message.slice(0, 120) : "UNKNOWN_BROKER_OUTCOME"
     });
     tel?.({
       phase: "PENDING_RECONCILIATION",

@@ -12,16 +12,10 @@ import {
   type CTraderConnectionRecord
 } from "../broker/ctrader/connectionStore";
 import { refreshAccessToken } from "../broker/ctrader/oauth";
-import {
-  createOpenApiClient,
-  type CTraderOpenApiClient
-} from "../broker/ctrader/openApiClient";
+import { createOpenApiClient, type CTraderOpenApiClient } from "../broker/ctrader/openApiClient";
 import { decryptTokenPayload, encryptTokenPayload } from "../broker/ctrader/tokenCrypto";
 import type { AuthoritativeMarginSnapshot } from "../broker/ctrader/authoritativeMargin";
-import {
-  isCTraderDemoOrderSubmissionEnabled,
-  isCTraderLiveEnabled
-} from "../broker/ctrader/flags";
+import { isCTraderDemoOrderSubmissionEnabled, isCTraderLiveEnabled } from "../broker/ctrader/flags";
 
 /** Soft cache — status polls every ~5s; avoid hammering Open API. */
 const SNAPSHOT_CACHE_TTL_MS = 20_000;
@@ -74,6 +68,13 @@ export type FetchGoldHunterAccountSnapshotArgs = {
   ownerUid: string;
   /** Bypass soft cache (manual refresh / post-fill). */
   forceRefresh?: boolean;
+  /**
+   * Execution may reuse an authoritative cached snapshot up to this age.
+   * Clamped to GH_ACCOUNT_SNAPSHOT_STALE_MS so risk can never arm on stale data.
+   */
+  maxCacheAgeMs?: number;
+  /** Use the full, still-valid risk freshness window for execution. */
+  allowRiskValidCache?: boolean;
   nowMs?: number;
   openApiClient?: CTraderOpenApiClient;
 };
@@ -103,9 +104,10 @@ async function ensureFreshAccessToken(ownerUid: string): Promise<{
       code: "TOKEN_ENCRYPTION_UNAVAILABLE"
     });
   }
-  const payload = JSON.parse(
-    decryptTokenPayload(connection.tokens.ciphertext, secret)
-  ) as { accessToken?: string; refreshToken?: string };
+  const payload = JSON.parse(decryptTokenPayload(connection.tokens.ciphertext, secret)) as {
+    accessToken?: string;
+    refreshToken?: string;
+  };
   if (!payload.accessToken || !payload.refreshToken) {
     throw Object.assign(new Error("CTRADER_TOKENS_MISSING"), {
       code: "REAUTH_REQUIRED"
@@ -118,8 +120,7 @@ async function ensureFreshAccessToken(ownerUid: string): Promise<{
   let freshConn = connection;
 
   const expiresAt = Date.parse(connection.tokens.accessExpiresAt);
-  const stale =
-    !Number.isFinite(expiresAt) || expiresAt < Date.now() + 60_000;
+  const stale = !Number.isFinite(expiresAt) || expiresAt < Date.now() + 60_000;
   if (stale) {
     const rotated = await refreshAccessToken({
       clientId,
@@ -139,9 +140,7 @@ async function ensureFreshAccessToken(ownerUid: string): Promise<{
       expectedTokenVersion: tokenVersion,
       newTokens: {
         ciphertext,
-        accessExpiresAt: new Date(
-          Date.now() + (rotated.expiresIn ?? 3600) * 1000
-        ).toISOString(),
+        accessExpiresAt: new Date(Date.now() + (rotated.expiresIn ?? 3600) * 1000).toISOString(),
         refreshedAt: new Date().toISOString(),
         tokenVersion: tokenVersion + 1
       }
@@ -153,9 +152,7 @@ async function ensureFreshAccessToken(ownerUid: string): Promise<{
   return { accessToken, connection: freshConn };
 }
 
-function emptySnapshot(
-  partial: Partial<GoldHunterAccountSnapshot>
-): GoldHunterAccountSnapshot {
+function emptySnapshot(partial: Partial<GoldHunterAccountSnapshot>): GoldHunterAccountSnapshot {
   return {
     provider: "cTrader",
     environment: null,
@@ -184,9 +181,7 @@ function fromAuthoritative(
   snap: AuthoritativeMarginSnapshot,
   nowMs: number
 ): GoldHunterAccountSnapshot {
-  const environment: "DEMO" | "LIVE" = connection.selectedAccountIsLive
-    ? "LIVE"
-    : "DEMO";
+  const environment: "DEMO" | "LIVE" = connection.selectedAccountIsLive ? "LIVE" : "DEMO";
   const ageMs = Math.max(0, nowMs - Date.parse(snap.capturedAt));
   const stale = ageMs > GH_ACCOUNT_SNAPSHOT_STALE_MS;
   const liveRefused = environment === "LIVE" || isCTraderLiveEnabled();
@@ -196,10 +191,7 @@ function fromAuthoritative(
       ? "STALE"
       : "AUTHORISED";
   const validForRisk =
-    !liveRefused &&
-    environment === "DEMO" &&
-    Number.isFinite(snap.balance) &&
-    !stale;
+    !liveRefused && environment === "DEMO" && Number.isFinite(snap.balance) && !stale;
 
   return {
     provider: "cTrader",
@@ -260,6 +252,37 @@ function fromConnectionFallback(
   });
 }
 
+function snapshotAgeFromCapturedAt(capturedAt: string | null, nowMs: number): number | null {
+  if (!capturedAt) return null;
+  const capturedMs = Date.parse(capturedAt);
+  if (!Number.isFinite(capturedMs)) return null;
+  return nowMs - capturedMs;
+}
+
+function materializeCachedSnapshotAtNow(
+  snapshot: GoldHunterAccountSnapshot,
+  nowMs: number
+): GoldHunterAccountSnapshot {
+  const ageMs = snapshotAgeFromCapturedAt(snapshot.capturedAt, nowMs);
+  const ageValid = ageMs != null && Number.isFinite(ageMs) && ageMs >= 0;
+  const ageWithinRiskWindow = ageValid && ageMs <= GH_ACCOUNT_SNAPSHOT_STALE_MS;
+  const wasAuthoritative =
+    snapshot.source === "AUTHORITATIVE_DEMO" &&
+    (snapshot.authState === "AUTHORISED" || snapshot.authState === "STALE");
+
+  let authState = snapshot.authState;
+  if (wasAuthoritative) {
+    authState = !ageValid ? "UNKNOWN" : ageWithinRiskWindow ? "AUTHORISED" : "STALE";
+  }
+
+  return {
+    ...snapshot,
+    authState,
+    validForRisk: snapshot.validForRisk && ageWithinRiskWindow,
+    ageMs: ageValid ? ageMs : null
+  };
+}
+
 /**
  * Fetch (or soft-cache) Gold Hunter Demo account money fields.
  */
@@ -269,13 +292,26 @@ export async function fetchGoldHunterAccountSnapshot(
   const nowMs = args.nowMs ?? Date.now();
   if (!args.forceRefresh) {
     const hit = cache.get(args.ownerUid);
-    if (hit && nowMs - hit.atMs < SNAPSHOT_CACHE_TTL_MS) {
-      return {
-        ...hit.snapshot,
-        ageMs: hit.snapshot.capturedAt
-          ? Math.max(0, nowMs - Date.parse(hit.snapshot.capturedAt))
-          : hit.snapshot.ageMs
-      };
+    const requestedCacheAgeMs = args.allowRiskValidCache
+      ? GH_ACCOUNT_SNAPSHOT_STALE_MS
+      : Number.isFinite(args.maxCacheAgeMs)
+        ? Math.max(0, args.maxCacheAgeMs ?? 0)
+        : SNAPSHOT_CACHE_TTL_MS;
+    const maxCacheAgeMs = Math.min(
+      GH_ACCOUNT_SNAPSHOT_STALE_MS,
+      Math.max(SNAPSHOT_CACHE_TTL_MS, requestedCacheAgeMs)
+    );
+    if (hit && nowMs - hit.atMs < maxCacheAgeMs) {
+      const cachedNow = materializeCachedSnapshotAtNow(hit.snapshot, nowMs);
+      const authoritativeSnapshotInvalid =
+        hit.snapshot.source === "AUTHORITATIVE_DEMO" &&
+        (cachedNow.capturedAt == null ||
+          cachedNow.ageMs == null ||
+          cachedNow.authState !== "AUTHORISED" ||
+          !cachedNow.validForRisk);
+      if (!authoritativeSnapshotInvalid) {
+        return cachedNow;
+      }
     }
   }
 
@@ -315,9 +351,7 @@ export async function fetchGoldHunterAccountSnapshot(
   }
 
   try {
-    const { accessToken, connection: fresh } = await ensureFreshAccessToken(
-      args.ownerUid
-    );
+    const { accessToken, connection: fresh } = await ensureFreshAccessToken(args.ownerUid);
     const cfg = loadCTraderConfig();
     const clientId = (process.env.CTRADER_CLIENT_ID ?? "").trim();
     const clientSecret = (process.env.CTRADER_CLIENT_SECRET ?? "").trim();
@@ -395,18 +429,13 @@ export function evaluateGoldHunterArmingReadiness(args: {
   if (isCTraderLiveEnabled()) blockers.push("LIVE_EXECUTION_DISABLED");
   if (args.snapshot.environment !== "DEMO") {
     blockers.push(
-      args.snapshot.environment == null
-        ? "ACCOUNT_ENVIRONMENT_UNKNOWN"
-        : "LIVE_OR_NON_DEMO_ACCOUNT"
+      args.snapshot.environment == null ? "ACCOUNT_ENVIRONMENT_UNKNOWN" : "LIVE_OR_NON_DEMO_ACCOUNT"
     );
   }
   if (args.snapshot.authState === "LIVE_REFUSED") {
     blockers.push("LIVE_ACCOUNT_REFUSED");
   }
-  if (
-    args.snapshot.authState === "DISCONNECTED" ||
-    args.snapshot.authState === "REAUTH_REQUIRED"
-  ) {
+  if (args.snapshot.authState === "DISCONNECTED" || args.snapshot.authState === "REAUTH_REQUIRED") {
     blockers.push(`ACCOUNT_${args.snapshot.authState}`);
   }
   if (!args.snapshot.validForRisk || args.snapshot.balance == null) {

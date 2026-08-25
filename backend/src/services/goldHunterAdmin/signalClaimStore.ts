@@ -74,6 +74,11 @@ export async function acquireGoldHunterSignalClaim(args: {
   clientOrderId: string;
   setup: "A" | "B" | "C" | null;
   side: "BUY" | "SELL" | null;
+  /**
+   * The execution orchestrator may atomically create the claim as SUBMITTING
+   * after all slow pre-claim work is complete. Other callers retain CLAIMED.
+   */
+  initialState?: "CLAIMED" | "SUBMITTING";
 }): Promise<ClaimAcquireResult> {
   const now = new Date().toISOString();
   const fresh: GoldHunterSignalClaim = {
@@ -81,7 +86,7 @@ export async function acquireGoldHunterSignalClaim(args: {
     strategy: GH_ADMIN_STRATEGY_ID,
     environment: "DEMO",
     ownerUid: args.ownerUid,
-    state: "CLAIMED",
+    state: args.initialState ?? "CLAIMED",
     goldHunterTradeId: args.goldHunterTradeId,
     clientOrderId: args.clientOrderId,
     brokerOrderId: null,
@@ -177,7 +182,13 @@ function applyMonotonicClaimPatch(
     };
   }
   return {
-    claim: { ...existing, ...patch, updatedAt: now, signalId: existing.signalId, ownerUid: existing.ownerUid },
+    claim: {
+      ...existing,
+      ...patch,
+      updatedAt: now,
+      signalId: existing.signalId,
+      ownerUid: existing.ownerUid
+    },
     rejectedRegression: false
   };
 }
@@ -242,9 +253,7 @@ export async function getGoldHunterSignalClaimByGoldHunterTradeId(
 
   const col = claimCol(ownerUid);
   if (!col) {
-    const matches = [...memMap(ownerUid).values()].filter(
-      (c) => c.goldHunterTradeId === tradeId
-    );
+    const matches = [...memMap(ownerUid).values()].filter((c) => c.goldHunterTradeId === tradeId);
     if (matches.length > 1) {
       throw Object.assign(new Error("CLAIM_TRADE_ID_AMBIGUOUS"), {
         code: "claim_authority_unknown"
@@ -253,10 +262,7 @@ export async function getGoldHunterSignalClaimByGoldHunterTradeId(
     return matches[0] ?? null;
   }
 
-  const snap = await col
-    .where("goldHunterTradeId", "==", tradeId)
-    .limit(2)
-    .get();
+  const snap = await col.where("goldHunterTradeId", "==", tradeId).limit(2).get();
   if (snap.size > 1) {
     throw Object.assign(new Error("CLAIM_TRADE_ID_AMBIGUOUS"), {
       code: "claim_authority_unknown"
