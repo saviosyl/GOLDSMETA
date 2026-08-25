@@ -9,20 +9,11 @@ import {
   listGoldHunterDemoTrades,
   todayNetPnlEur
 } from "./tradeStore";
-import {
-  plannedDailyLossBudgetEur,
-  plannedRiskBudgetEur
-} from "./riskSizing";
+import { plannedDailyLossBudgetEur, plannedRiskBudgetEur } from "./riskSizing";
 import { isGoldHunterCloseSettlementPending } from "./closeSettlement";
-import {
-  isCorruptGoldHunterMfeMae,
-  isValidGoldHunterEntryPrice
-} from "./entryValidity";
+import { isCorruptGoldHunterMfeMae, isValidGoldHunterEntryPrice } from "./entryValidity";
 import { frozenGhFastSoakConfig } from "./abc";
-import {
-  readGoldHunterBrokerOpenPositions,
-  runGoldHunterReconcilePass
-} from "./reconciliationRuntime";
+import { readGoldHunterBrokerOpenPositions } from "./reconciliationRuntime";
 import { validateGoldHunterRiskConfig } from "./configValidation";
 import { reconcileGoldHunterMaxOpenLeaseOrphans } from "./maxOpenLease";
 import {
@@ -77,25 +68,17 @@ function isGhDemo(t: GoldHunterDemoTrade): boolean {
   return t.strategy === GH_ADMIN_STRATEGY_ID && t.environment === "DEMO";
 }
 
-function isGoldHunterBrokerPosition(
-  p: GoldHunterBrokerOpenPositionLite
-): boolean {
+function isGoldHunterBrokerPosition(p: GoldHunterBrokerOpenPositionLite): boolean {
   const label = String(p.label ?? "");
   const comment = String(p.comment ?? "");
-  return (
-    label.startsWith("GH-D-") ||
-    comment.includes(GH_ADMIN_STRATEGY_ID) ||
-    /gh_/i.test(label)
-  );
+  return label.startsWith("GH-D-") || comment.includes(GH_ADMIN_STRATEGY_ID) || /gh_/i.test(label);
 }
 
 /**
  * Unresolved exposure: close pending without net P/L, pending reconciliation,
  * invalid-entry opens, ACCEPTED_PENDING_FILL, etc. Each reserves one risk budget.
  */
-export function isGoldHunterUnresolvedDailyRisk(
-  t: GoldHunterDemoTrade
-): boolean {
+export function isGoldHunterUnresolvedDailyRisk(t: GoldHunterDemoTrade): boolean {
   if (!isGhDemo(t)) return false;
   if (t.status === "CLOSED") return false;
   if (t.status === "BROKER_REJECTED" || t.status === "BROKER_SUBMIT_ERROR") {
@@ -107,9 +90,7 @@ export function isGoldHunterUnresolvedDailyRisk(
   if (t.status === "PENDING_RECONCILIATION") return true;
   if (t.status === "ACCEPTED_PENDING_FILL") return true;
   if (
-    (t.status === "FILLED" ||
-      t.status === "PROTECTED" ||
-      t.result === "OPEN") &&
+    (t.status === "FILLED" || t.status === "PROTECTED" || t.result === "OPEN") &&
     !isValidGoldHunterEntryPrice(t.entry)
   ) {
     return true;
@@ -143,10 +124,7 @@ function localMatchesBrokerPosition(
   trade: GoldHunterDemoTrade,
   pos: GoldHunterBrokerOpenPositionLite
 ): boolean {
-  if (
-    trade.brokerPositionId &&
-    String(trade.brokerPositionId) === String(pos.positionId)
-  ) {
+  if (trade.brokerPositionId && String(trade.brokerPositionId) === String(pos.positionId)) {
     return true;
   }
   const label = String(pos.label ?? "");
@@ -185,9 +163,7 @@ export function matchGoldHunterBrokerOpenPositions(args: {
   let matched = 0;
   const unmatchedPositionIds: string[] = [];
   for (const pos of ghPositions) {
-    const candidates = args.trades.filter((t) =>
-      localMatchesBrokerPosition(t, pos)
-    );
+    const candidates = args.trades.filter((t) => localMatchesBrokerPosition(t, pos));
     const authoritative = candidates.find(isAuthoritativeLocalMatch);
     const entryOk =
       isValidGoldHunterEntryPrice(pos.entryPrice) ||
@@ -226,8 +202,7 @@ function blockedSnapshot(args: {
 }): GoldHunterProjectedDailyRiskSnapshot {
   return {
     dailyLossBudgetEur: args.dailyLossBudgetEur,
-    brokerConfirmedRealizedNetPnlEur:
-      args.brokerConfirmedRealizedNetPnlEur ?? null,
+    brokerConfirmedRealizedNetPnlEur: args.brokerConfirmedRealizedNetPnlEur ?? null,
     realizedLossConsumedEur: args.realizedLossConsumedEur ?? 0,
     openRiskEur: args.openRiskEur ?? 0,
     unresolvedRiskEur: args.unresolvedRiskEur ?? 0,
@@ -280,9 +255,7 @@ export function buildGoldHunterProjectedDailyRiskSnapshot(
     unitRisk <= 0
   ) {
     return blockedSnapshot({
-      dailyLossBudgetEur: Number.isFinite(dailyLossBudgetEur)
-        ? dailyLossBudgetEur
-        : null,
+      dailyLossBudgetEur: Number.isFinite(dailyLossBudgetEur) ? dailyLossBudgetEur : null,
       proposed,
       blocker: "WAIT — CONFIG INVALID",
       detail: "risk_budget_non_finite"
@@ -300,10 +273,7 @@ export function buildGoldHunterProjectedDailyRiskSnapshot(
   }
 
   // Count-only without position identity cannot prove matching → fail closed.
-  if (
-    args.brokerOpenGoldHunterPositions == null &&
-    (args.brokerOpenGoldHunterCount ?? 0) > 0
-  ) {
+  if (args.brokerOpenGoldHunterPositions == null && (args.brokerOpenGoldHunterCount ?? 0) > 0) {
     const n = args.brokerOpenGoldHunterCount ?? 0;
     return blockedSnapshot({
       dailyLossBudgetEur,
@@ -342,10 +312,7 @@ export function buildGoldHunterProjectedDailyRiskSnapshot(
   }
 
   // maxOpen=1: any open broker GH position blocks a new entry.
-  if (
-    match.brokerOpenGoldHunterCount >= args.config.maxOpenTrades &&
-    proposed > 0
-  ) {
+  if (match.brokerOpenGoldHunterCount >= args.config.maxOpenTrades && proposed > 0) {
     // Still compute projected numbers for diagnostics, then block via unknown/limit path below
     // by treating open broker exposure as open risk — also explicit max-open style block
     // via daily-risk unknown when local occupancy cannot absorb it.
@@ -483,9 +450,7 @@ export type PreClaimProjectedRiskHooks = {
 
 let preClaimHooks: PreClaimProjectedRiskHooks = {};
 
-export function setGoldHunterPreClaimRiskHooksForTests(
-  h: PreClaimProjectedRiskHooks
-): void {
+export function setGoldHunterPreClaimRiskHooksForTests(h: PreClaimProjectedRiskHooks): void {
   preClaimHooks = h;
 }
 
@@ -494,7 +459,10 @@ export function resetGoldHunterPreClaimRiskHooksForTests(): void {
 }
 
 /**
- * Reconcile → require broker open truth → settle what we can → rebuild snapshot.
+ * Build the pre-claim risk snapshot from one authoritative broker-position read
+ * plus local trade truth. Full reconciliation is intentionally kept out of the
+ * latency-critical entry path: unresolved/stale local records still fail closed,
+ * while the quote-worker reconciliation loop repairs them independently.
  */
 export async function evaluateGoldHunterPreClaimProjectedDailyRisk(args: {
   ownerUid: string;
@@ -524,39 +492,30 @@ export async function evaluateGoldHunterPreClaimProjectedDailyRisk(args: {
           brokerOpenGoldHunterPositions: [] as GoldHunterBrokerOpenPositionLite[]
         };
       }
-      const pass = await runGoldHunterReconcilePass({
-        ownerUid,
-        force: true
-      });
-      let brokerOpenGoldHunterPositions: GoldHunterBrokerOpenPositionLite[] =
-        [];
-      if (pass.positionsReadOk) {
-        const read = await readGoldHunterBrokerOpenPositions(ownerUid);
-        if (read.ok) {
-          brokerOpenGoldHunterPositions = read.positions
-            .filter((p) =>
-              isGoldHunterBrokerPosition({
-                positionId: String(p.positionId),
-                label: (p as { label?: string | null }).label,
-                comment: (p as { comment?: string | null }).comment
-              })
-            )
-            .map((p) => ({
-              positionId: String(p.positionId),
-              entryPrice: p.entryPrice ?? null,
-              label: (p as { label?: string | null }).label ?? null,
-              comment: (p as { comment?: string | null }).comment ?? null,
-              volumeLots: p.volumeLots ?? null
-            }));
-        } else {
-          return {
-            positionsReadOk: false,
-            brokerOpenGoldHunterPositions: []
-          };
-        }
+      const read = await readGoldHunterBrokerOpenPositions(ownerUid);
+      if (!read.ok) {
+        return {
+          positionsReadOk: false,
+          brokerOpenGoldHunterPositions: []
+        };
       }
+      const brokerOpenGoldHunterPositions = read.positions
+        .filter((p) =>
+          isGoldHunterBrokerPosition({
+            positionId: String(p.positionId),
+            label: (p as { label?: string | null }).label,
+            comment: (p as { comment?: string | null }).comment
+          })
+        )
+        .map((p) => ({
+          positionId: String(p.positionId),
+          entryPrice: p.entryPrice ?? null,
+          label: (p as { label?: string | null }).label ?? null,
+          comment: (p as { comment?: string | null }).comment ?? null,
+          volumeLots: p.volumeLots ?? null
+        }));
       return {
-        positionsReadOk: pass.positionsReadOk,
+        positionsReadOk: true,
         brokerOpenGoldHunterPositions
       };
     });
@@ -589,9 +548,7 @@ export async function evaluateGoldHunterPreClaimProjectedDailyRisk(args: {
   await reconcileGoldHunterMaxOpenLeaseOrphans({
     ownerUid: args.ownerUid,
     positionsReadOk,
-    brokerGhPositionIds: brokerOpenGoldHunterPositions.map((p) =>
-      String(p.positionId)
-    ),
+    brokerGhPositionIds: brokerOpenGoldHunterPositions.map((p) => String(p.positionId)),
     trades
   }).catch(() => undefined);
 
