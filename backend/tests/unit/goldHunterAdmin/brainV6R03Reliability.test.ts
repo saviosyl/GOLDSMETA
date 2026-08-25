@@ -204,10 +204,7 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
 
     const recovered = selector.evaluateAntiChurnGateForTests({
       side: "BUY",
-      atMs:
-        Date.parse("2026-08-24T08:01:10.000Z") +
-        120_000 +
-        1,
+      atMs: Date.parse("2026-08-24T08:01:10.000Z") + 120_000 + 1,
       // Price has continued above the obsolete losing entry; no artificial
       // revisit to 2600 is required because the settled exit proved the cross.
       mid: 2601,
@@ -253,10 +250,7 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
 
     const recovered = selector.evaluateAntiChurnGateForTests({
       side: "SELL",
-      atMs:
-        Date.parse("2026-08-24T08:01:10.000Z") +
-        120_000 +
-        1,
+      atMs: Date.parse("2026-08-24T08:01:10.000Z") + 120_000 + 1,
       mid: 2599,
       signedImbalance1s: -0.2,
       midVel250: -0.001
@@ -283,8 +277,7 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
     resetGoldHunterStrategySelectorsForTests();
     await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
     expect(
-      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests()
-        .structuralResetComplete
+      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests().structuralResetComplete
     ).toBe(false);
   });
 
@@ -303,8 +296,7 @@ describe("Brain V6 R03 restart/resync loss protection", () => {
     resetGoldHunterStrategySelectorsForTests();
     await hydrateGoldHunterLossStateFromClosedTrades(OWNER);
     expect(
-      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests()
-        .structuralResetComplete
+      getGoldHunterStrategySelector(OWNER).getAntiChurnStateForTests().structuralResetComplete
     ).toBe(false);
   });
 
@@ -389,9 +381,7 @@ describe("Brain V6 R03 status telemetry freshness", () => {
   };
 
   it("uses a fresh authoritative worker loss reason", () => {
-    expect(resolveFreshLossTelemetryWaitReason(telemetry, nowMs)).toBe(
-      "WAIT_LOSS_STREAK_GUARD"
-    );
+    expect(resolveFreshLossTelemetryWaitReason(telemetry, nowMs)).toBe("WAIT_LOSS_STREAK_GUARD");
   });
 
   it("rejects stale, future, invalid-time, and API fallback telemetry", () => {
@@ -399,9 +389,7 @@ describe("Brain V6 R03 status telemetry freshness", () => {
       resolveFreshLossTelemetryWaitReason(
         {
           ...telemetry,
-          updatedAt: new Date(
-            nowMs - GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS - 1
-          ).toISOString()
+          updatedAt: new Date(nowMs - GOLD_HUNTER_LOSS_TELEMETRY_MAX_AGE_MS - 1).toISOString()
         },
         nowMs
       )
@@ -413,10 +401,7 @@ describe("Brain V6 R03 status telemetry freshness", () => {
       )
     ).toBeNull();
     expect(
-      resolveFreshLossTelemetryWaitReason(
-        { ...telemetry, updatedAt: "invalid" },
-        nowMs
-      )
+      resolveFreshLossTelemetryWaitReason({ ...telemetry, updatedAt: "invalid" }, nowMs)
     ).toBeNull();
     expect(
       resolveFreshLossTelemetryWaitReason(
@@ -438,10 +423,7 @@ describe("Brain V6 R03 status telemetry freshness", () => {
       )
     ).toBe("WAIT_REALISED_R_INCOMPLETE");
     expect(
-      resolveFreshLossTelemetryWaitReason(
-        { ...telemetry, lossCircuitBreakerActive: true },
-        nowMs
-      )
+      resolveFreshLossTelemetryWaitReason({ ...telemetry, lossCircuitBreakerActive: true }, nowMs)
     ).toBe("WAIT_LOSS_CIRCUIT_BREAKER");
   });
 });
@@ -481,6 +463,9 @@ describe("Brain V6 R03 final pretransport pricing", () => {
           midVel250: 0.0004
         };
       },
+      onBrokerTransportReady: () => {
+        stages.push("ready");
+      },
       placeOrder: async (args) => {
         stages.push("sent");
         sent = args;
@@ -500,7 +485,7 @@ describe("Brain V6 R03 final pretransport pricing", () => {
       }
     });
 
-    expect(stages).toEqual(["prepared", "repriced", "sent"]);
+    expect(stages).toEqual(["prepared", "repriced", "ready", "sent"]);
     expect(sent).toMatchObject({ entryHint: 2601, stopLoss: 2600.45 });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -552,6 +537,7 @@ describe("Brain V6 R03 final pretransport pricing", () => {
 
   it("fails closed when the final live candidate cannot be repriced", async () => {
     let placeCalls = 0;
+    let transportReadyCalls = 0;
     const result = await submitGoldHunterDemoOrder({
       ...baseSubmitArgs(),
       side: "BUY",
@@ -562,8 +548,12 @@ describe("Brain V6 R03 final pretransport pricing", () => {
       clientOrderId: "r03_stale",
       resolveFinalProtection: () => ({
         ok: false,
-        blocker: "WAIT — SIGNAL STALE"
+        blocker: "WAIT — SIGNAL STALE",
+        detail: "opportunity_no_longer_active_final_pretransport"
       }),
+      onBrokerTransportReady: () => {
+        transportReadyCalls += 1;
+      },
       placeOrder: async () => {
         placeCalls += 1;
         throw new Error("must not send");
@@ -574,7 +564,9 @@ describe("Brain V6 R03 final pretransport pricing", () => {
     if (!result.ok) {
       expect(result.blockers).toEqual(["WAIT — SIGNAL STALE"]);
       expect(result.pretransportBlocked).toBe(true);
+      expect(result.pretransportDetail).toBe("opportunity_no_longer_active_final_pretransport");
     }
     expect(placeCalls).toBe(0);
+    expect(transportReadyCalls).toBe(0);
   });
 });
